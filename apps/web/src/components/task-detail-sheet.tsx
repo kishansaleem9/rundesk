@@ -65,6 +65,7 @@ import {
   CornerDownRight,
   Mail,
   Merge as MergeIcon,
+  Bookmark,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { FavoriteStar, useFavorites, useToggleFavorite } from '../lib/use-favorites'
@@ -339,6 +340,8 @@ type TaskComment = {
   resolver?: UserLite | null
   reactions?: Array<{ emoji: string; userId: string }>
   attachments?: Array<{ id: string; fileName: string; fileSize?: number | null; mimeType?: string | null; url?: string | null }>
+  /** §V2-S06 frame `05:55` — whether *I* saved it. Per person, never shared. */
+  savedByMe?: boolean
 }
 
 type ActivityEntry = {
@@ -520,11 +523,20 @@ export function TaskDetailSheet({
   open,
   onOpenChange,
   workspaceId,
+  focusCommentId,
 }: {
   taskId: string | null
   open: boolean
   onOpenChange: (next: boolean) => void
   workspaceId?: string
+  /**
+   * §V2-S06 — arrive on one comment rather than on the task.
+   *
+   * A saved comment in the Inbox links to `?task=…&comment=…`; without this the
+   * link would open the sheet on Overview and leave you to find the sentence
+   * you saved, which is most of the way back to not having saved it.
+   */
+  focusCommentId?: string | null
 }) {
   // Which task the sheet is currently showing. Starts at whatever the host
   // opened, then follows a subtask or a dependency the user clicks into.
@@ -536,6 +548,14 @@ export function TaskDetailSheet({
   const { t } = useTranslation()
   const { formatDate } = useDateFormat()
   const [activeTab, setActiveTab] = useState<TabKey>('overview')
+  /*
+   * §V2-S06 — a `?comment=` in the URL means Comments, not Overview. Keyed on
+   * the comment id so following a second saved comment re-opens the tab even if
+   * the reader had since wandered off to Fields.
+   */
+  useEffect(() => {
+    if (focusCommentId) setActiveTab('comments')
+  }, [focusCommentId])
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -1302,7 +1322,11 @@ export function TaskDetailSheet({
                 <AttachmentsPanel taskId={detailQuery.data.id} inline={detailQuery.data.attachments ?? []} />
               )}
               {activeTab === 'comments' && (
-                <CommentsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
+                <CommentsPanel
+                  taskId={detailQuery.data.id}
+                  workspaceId={fallbackWorkspaceId}
+                  focusCommentId={focusCommentId}
+                />
               )}
               {activeTab === 'activity' && (
                 <ActivityPanel taskId={detailQuery.data.id} listId={detailQuery.data.listId} />
@@ -4816,7 +4840,16 @@ function CommentAttachments({
   )
 }
 
-function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: string }) {
+function CommentsPanel({
+  taskId,
+  workspaceId,
+  focusCommentId,
+}: {
+  taskId: string
+  workspaceId?: string
+  /** §V2-S06 — the one comment to scroll to and mark, arriving from a link. */
+  focusCommentId?: string | null
+}) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
@@ -5047,6 +5080,66 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
     },
   })
 
+  /*
+   * §V2-S06 frame `05:55` — "reply/thread, assign, save — same like messages".
+   *
+   * The toast names WHERE it went, because a bookmark you cannot find again is
+   * the same as no bookmark: saved comments land in the Inbox's Later tab,
+   * beside the saved messages §2.2 put there. `chat-saved-comments` is
+   * invalidated too so that tab is right the moment you switch to it rather
+   * than after a reload.
+   */
+  const saveComment = useMutation({
+    mutationFn: ({ commentId, saved }: { commentId: string; saved: boolean }) =>
+      api(`/tasks/${taskId}/comments/${commentId}/save`, { method: saved ? 'POST' : 'DELETE' }),
+    onSuccess: async (_data, vars) => {
+      toast.success(t(vars.saved ? 'taskDetail.commentSavedToast' : 'taskDetail.commentUnsavedToast'))
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+      await qc.invalidateQueries({ queryKey: ['saved-comments'] })
+    },
+    onError: (err) =>
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotSaveComment')),
+  })
+
+  /**
+   * One button, two call sites — the root row and the reply row. The comment
+   * action row is already duplicated between those two, and a second copy of
+   * the save would be the ninth instance of this codebase's duplicated-logic
+   * defect.
+   */
+  const SaveCommentButton = ({ comment }: { comment: TaskComment }) => (
+    <button
+      type="button"
+      className={
+        comment.savedByMe
+          ? 'text-xs text-accent hover:text-accent/80 inline-flex items-center gap-1'
+          : 'text-xs text-muted-foreground hover:text-foreground inline-flex items-center gap-1'
+      }
+      title={t(comment.savedByMe ? 'taskDetail.unsaveComment' : 'taskDetail.saveComment')}
+      aria-pressed={comment.savedByMe ? 'true' : 'false'}
+      data-testid={`comment-save-${comment.id}`}
+      onClick={() => saveComment.mutate({ commentId: comment.id, saved: !comment.savedByMe })}
+    >
+      <Bookmark className={comment.savedByMe ? 'h-3 w-3 fill-current' : 'h-3 w-3'} />
+      {t(comment.savedByMe ? 'taskDetail.unsaveComment' : 'taskDetail.saveComment')}
+    </button>
+  )
+
+  /*
+   * §V2-S06 — scroll the linked comment into view once the list has arrived.
+   *
+   * Keyed on the loaded length as well as the id: the effect fires while the
+   * query is still pending, when the row it is looking for does not exist yet.
+   * A DOM query rather than a ref map because the target may be a REPLY, which
+   * is rendered by a different branch — one lookup covers both.
+   */
+  const commentListRef = useRef<HTMLDivElement | null>(null)
+  useEffect(() => {
+    if (!focusCommentId) return
+    const el = commentListRef.current?.querySelector(`[data-comment-id="${focusCommentId}"]`)
+    el?.scrollIntoView({ block: 'center' })
+  }, [focusCommentId, commentsQuery.data?.length])
+
   if (commentsQuery.data === null) {
     return <NotWiredNote>{t('taskDetail.commentsUnavailable')}</NotWiredNote>
   }
@@ -5091,15 +5184,30 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
         : docMentionCandidates
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3" ref={commentListRef}>
       {comments.length === 0 ? (
         <EmptyState title={t('taskDetail.noComments')} hint={t('taskDetail.noCommentsHint')} />
       ) : (
         <ul className="space-y-2">
           {roots.map((c) => {
             const replies = repliesByParent.get(c.id) ?? []
+            const focused = c.id === focusCommentId
             return (
-              <li key={c.id} className="rounded-md border border-border p-3 hover:bg-muted/30 transition-colors space-y-2">
+              <li
+                key={c.id}
+                data-comment-id={c.id}
+                data-testid={focused ? 'comment-focused' : undefined}
+                className={
+                  focused
+                    ? 'rounded-md border border-accent ring-2 ring-accent/40 bg-accent/5 p-3 transition-colors space-y-2'
+                    : 'rounded-md border border-border p-3 hover:bg-muted/30 transition-colors space-y-2'
+                }
+              >
+                {focused && (
+                  <p className="text-[11px] text-accent" data-testid="comment-focused-note">
+                    {t('taskDetail.savedCommentHighlight')}
+                  </p>
+                )}
                 <div className="flex items-center justify-between">
                   <span className="text-xs font-medium">
                     {c.author?.displayName ?? c.author?.email ?? t('taskDetail.userFallback')}
@@ -5162,6 +5270,7 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                   >
                     {c.resolvedAt ? t('taskDetail.reopen') : t('taskDetail.resolve')}
                   </button>
+                  <SaveCommentButton comment={c} />
                   {workspaceId && (
                     <select
                       className="h-6 rounded border border-border bg-background px-1 text-[10px]"
@@ -5215,7 +5324,16 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                 {replies.length > 0 && (
                   <ul className="mt-2 space-y-1.5 border-l border-border pl-3">
                     {replies.map((reply) => (
-                      <li key={reply.id} className="rounded border border-border/70 p-2 bg-card/50">
+                      <li
+                        key={reply.id}
+                        data-comment-id={reply.id}
+                        data-testid={reply.id === focusCommentId ? 'comment-focused' : undefined}
+                        className={
+                          reply.id === focusCommentId
+                            ? 'rounded border border-accent ring-2 ring-accent/40 p-2 bg-accent/5'
+                            : 'rounded border border-border/70 p-2 bg-card/50'
+                        }
+                      >
                         <div className="flex items-center justify-between">
                           <span className="text-xs font-medium">
                             {reply.author?.displayName ?? reply.author?.email ?? t('taskDetail.userFallback')}
@@ -5255,6 +5373,8 @@ function CommentsPanel({ taskId, workspaceId }: { taskId: string; workspaceId?: 
                               {t('common.delete')}
                             </button>
                           )}
+                          {/* A reply is a comment: it saves the same way. */}
+                          <SaveCommentButton comment={reply} />
                         </div>
                         {editingCommentId === reply.id && (
                           <div className="mt-2 space-y-2">

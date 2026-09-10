@@ -1,4 +1,13 @@
-import { pgTable, text, timestamp, uuid, jsonb, type AnyPgColumn } from 'drizzle-orm/pg-core'
+import {
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  jsonb,
+  index,
+  uniqueIndex,
+  type AnyPgColumn,
+} from 'drizzle-orm/pg-core'
 import { relations } from 'drizzle-orm'
 import { tasks } from './tasks'
 import { users } from './users'
@@ -26,6 +35,42 @@ export const taskCommentReactions = pgTable('task_comment_reactions', {
   emoji:     text('emoji').notNull(),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 })
+
+/**
+ * §V2-S06 frame `05:55` — "reply/thread, assign, save — same like messages".
+ *
+ * The save on a comment is the same gesture as the save on a chat message, so
+ * it is the same shape: one private row per person per comment, no shared
+ * state. `chat_message_saves` is the sibling, and the reason this is a table
+ * rather than a flag on the comment is the same reason it is there — two people
+ * saving the same comment must not see each other's bookmark.
+ *
+ * NO TAGS COLUMN, deliberately. `chat_message_saves.tags` exists because chat's
+ * Saved panel filters by tag; nothing in the frames tags a saved comment, and a
+ * column no reader honours is this codebase's named defect.
+ *
+ * Where they surface: the Inbox's **Later** tab, beside the saved messages
+ * §2.2 put there — which is also where ClickUp puts them ("hover over the
+ * comment … it will be added to the Later tab in your Inbox").
+ */
+export const taskCommentSaves = pgTable(
+  'task_comment_saves',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    commentId: uuid('comment_id').notNull().references(() => taskComments.id, { onDelete: 'cascade' }),
+    userId:    uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    uniqSave: uniqueIndex('task_comment_saves_unique').on(t.commentId, t.userId),
+    byUser:   index('idx_task_comment_saves_user').on(t.userId),
+  }),
+)
+
+export const taskCommentSavesRelations = relations(taskCommentSaves, ({ one }) => ({
+  comment: one(taskComments, { fields: [taskCommentSaves.commentId], references: [taskComments.id] }),
+  user:    one(users,        { fields: [taskCommentSaves.userId], references: [users.id] }),
+}))
 
 export const taskCommentsRelations = relations(taskComments, ({ one, many }) => ({
   task:      one(tasks,        { fields: [taskComments.taskId], references: [tasks.id] }),

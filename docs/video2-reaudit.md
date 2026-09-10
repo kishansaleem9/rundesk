@@ -278,8 +278,37 @@ went missing entirely. A list that is only written once stops being true.
   The composer hint carries the `/` half only: there is no space-for-AI hook on
   this composer, and half a hint that works beats a whole one that lies.
 
+- **"Save" a comment, frame `05:55`.** The narration says what kind of thing it
+  is: *"reply/thread, assign, save — same like messages"*. So it is the same
+  shape as chat's save — `task_comment_saves`, one private row per person per
+  comment, the sibling of `chat_message_saves` (`0148`). No `tags` column: chat
+  has one because chat's Saved panel filters by tag, nothing in the frames tags
+  a comment, and a column no reader honours is the defect above.
+  **Where it goes was researched, not guessed.** ClickUp: *"hover over the
+  comment or message and click the bookmark icon … it will be added to the Later
+  tab in your Inbox"* — and §2.2 had already put saved MESSAGES in that same
+  tab for the same reason. So Later gained a second section rather than the
+  product gaining a fifth panel.
+  The link is comment-anchored (`?task=…&comment=…`, new on the list route): a
+  saved comment that opens a busy thread at the top is most of the way back to
+  not having saved it. On arrival the sheet opens Comments, scrolls to that
+  comment and marks it, and the anchor is dropped on the next task change so it
+  describes an arrival rather than sticking.
+  One `SaveCommentButton`, two call sites — the root row and the reply row are
+  duplicated in the sheet, and a second copy of the save would have been the
+  ninth instance of the duplicated-logic bug. Access is re-checked on read via
+  the existing `assertTaskReadAccess`, so losing access to a private Space drops
+  its comments out of your Later tab; and the comment is verified against the
+  task in the path, because a comment id is not a capability. 13 checks.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
+
+**Known and left alone:** the Later chip's count comes from
+`/notifications/counts`, which counts snoozed notifications only — so Later can
+read "0" while listing saved things. That predates this item (saved messages
+have always been uncounted there) and fixing it means teaching a server count
+about two other tables; noted rather than half-done.
 
 ---
 
@@ -388,7 +417,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
 | P | Threads — replies nest inline; no "Thread by `<name>`" panel with own composer |
 | B | Reactions, react/reply/assign hover actions, resolve/reopen |
-| M | "Save" a comment |
+| B | **"Save" a comment** — per-person bookmark → Inbox › Later, comment-anchored link |
 
 ### S07–S12 · relationships, space wizard, views, export, filters
 

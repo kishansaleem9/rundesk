@@ -19,6 +19,7 @@ import {
   sprintTasks,
   customFieldValues,
   taskCommentReactions,
+  taskCommentSaves,
   taskAttachments,
   timeEntries,
   taskDocLinks,
@@ -3747,7 +3748,13 @@ export class TasksService {
     return this.updateTask(taskId, actorId, { description: revision.description })
   }
 
-  async listComments(taskId: string) {
+  /**
+   * `viewerId` is only for the per-person bits of a comment — right now that is
+   * §V2-S06's `savedByMe`. It is optional so the handful of internal callers
+   * that just want the bodies keep working; a missing viewer means "nobody has
+   * saved anything", never "everything is saved".
+   */
+  async listComments(taskId: string, viewerId?: string) {
     const rows = await this.db.query.taskComments.findMany({
       where: eq(taskComments.taskId, taskId),
       orderBy: asc(taskComments.createdAt),
@@ -3773,7 +3780,128 @@ export class TasksService {
       })
       byComment.set(f.commentId as string, list)
     }
-    return rows.map((r: { id: string }) => ({ ...r, attachments: byComment.get(r.id) ?? [] }))
+    /*
+     * §V2-S06 frame `05:55` — which of these I have saved, so the bookmark
+     * renders filled on arrival rather than only after I press it. Without this
+     * the button would forget every reload, which is the same as not storing it.
+     */
+    const savedIds = new Set<string>()
+    if (viewerId) {
+      const saves = await this.db
+        .select({ commentId: taskCommentSaves.commentId })
+        .from(taskCommentSaves)
+        .where(and(
+          eq(taskCommentSaves.userId, viewerId),
+          inArray(taskCommentSaves.commentId, commentIds),
+        ))
+      for (const s of saves) savedIds.add(s.commentId)
+    }
+    return rows.map((r: { id: string }) => ({
+      ...r,
+      attachments: byComment.get(r.id) ?? [],
+      savedByMe: savedIds.has(r.id),
+    }))
+  }
+
+  /**
+   * §V2-S06 frame `05:55` — "reply/thread, assign, save — same like messages".
+   *
+   * A private bookmark on somebody else's sentence. Deliberately NOT gated on
+   * `assertTaskWriteAccess` the way resolve and assign are: saving is a reading
+   * act, and a viewer who can open the task can put one of its comments aside.
+   * `assertTaskReadAccess` is the gate, and it is the same one the task itself
+   * uses — one implementation, not a second copy of the visibility rules.
+   *
+   * THE COMMENT IS CHECKED AGAINST THE TASK IN THE PATH. A comment id is not a
+   * capability: without this, `/tasks/<a task I can read>/comments/<a comment
+   * on a task I cannot>/save` would sail past the route guard.
+   */
+  async setCommentSaved(taskId: string, commentId: string, userId: string, saved: boolean) {
+    await this.assertTaskReadAccess(taskId, userId)
+    const [comment] = await this.db
+      .select({ id: taskComments.id, taskId: taskComments.taskId })
+      .from(taskComments)
+      .where(eq(taskComments.id, commentId))
+      .limit(1)
+    if (!comment || comment.taskId !== taskId) throw new NotFoundException('Comment not found')
+
+    if (saved) {
+      // The unique index makes this the toggle: saving twice is one bookmark.
+      await this.db
+        .insert(taskCommentSaves)
+        .values({ commentId, userId })
+        .onConflictDoNothing({ target: [taskCommentSaves.commentId, taskCommentSaves.userId] })
+      return { commentId, saved: true }
+    }
+    await this.db
+      .delete(taskCommentSaves)
+      .where(and(eq(taskCommentSaves.commentId, commentId), eq(taskCommentSaves.userId, userId)))
+    return { commentId, saved: false }
+  }
+
+  /**
+   * The saved comments the Inbox's Later tab lists, newest save first.
+   *
+   * Where they surface is not a free choice: §2.2 already put saved chat
+   * messages in Later ("Later mein SAVED messages show hote hain"), and
+   * ClickUp's own answer for a saved comment is the same tab. So this is the
+   * second section of a bucket that already exists rather than a new panel.
+   *
+   * ACCESS IS RE-CHECKED, not assumed from the save. You saved a comment you
+   * could read; being removed from a private Space afterwards must drop it out
+   * of your Later tab, not keep serving you its body. `assertTaskReadAccess` is
+   * reused per distinct task — a handful of queries for a list of this size,
+   * and no second copy of the rules to drift.
+   *
+   * Archived tasks are left out: a row that opens the bin is a dead end.
+   */
+  async listSavedComments(workspaceId: string, userId: string) {
+    const rows = await this.db
+      .select({
+        id: taskComments.id,
+        body: taskComments.body,
+        mentions: taskComments.mentions,
+        createdAt: taskComments.createdAt,
+        savedAt: taskCommentSaves.createdAt,
+        taskId: tasks.id,
+        taskTitle: tasks.title,
+        listId: tasks.listId,
+        projectId: lists.projectId,
+        spaceId: spaces.id,
+        authorId: taskComments.authorId,
+        authorName: users.displayName,
+        authorAvatarUrl: users.avatarUrl,
+      })
+      .from(taskCommentSaves)
+      .innerJoin(taskComments, eq(taskComments.id, taskCommentSaves.commentId))
+      .innerJoin(tasks, eq(tasks.id, taskComments.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .leftJoin(users, eq(users.id, taskComments.authorId))
+      .where(and(
+        eq(taskCommentSaves.userId, userId),
+        eq(spaces.workspaceId, workspaceId),
+        eq(tasks.isArchived, false),
+      ))
+      .orderBy(desc(taskCommentSaves.createdAt))
+    if (rows.length === 0) return []
+
+    const taskIds = [...new Set(rows.map((r) => r.taskId))]
+    const readable = new Set<string>()
+    await Promise.all(taskIds.map(async (id) => {
+      const ok = await this.assertTaskReadAccess(id, userId).then(() => true, () => false)
+      if (ok) readable.add(id)
+    }))
+    return rows
+      .filter((r) => readable.has(r.taskId))
+      .map((r) => ({
+        ...r,
+        // `&comment=` is what makes the row land on the sentence rather than on
+        // the task and good luck. The list route reads it, opens the Comments
+        // tab and highlights that one.
+        url: `${this.buildTaskUrl(workspaceId, r.spaceId, r.projectId, r.listId, r.taskId)}&comment=${r.id}`,
+      }))
   }
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {

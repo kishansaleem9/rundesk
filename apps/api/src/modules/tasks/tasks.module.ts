@@ -1,7 +1,7 @@
 import { Module } from '@nestjs/common'
 import { TasksService } from './tasks.service'
 import { TasksController } from './tasks.controller'
-import { TaskCommentsController } from './comments.controller'
+import { TaskCommentsController, SavedCommentsController } from './comments.controller'
 import { TaskChecklistsController } from './checklists.controller'
 import { ChecklistTemplatesController } from './checklist-templates.controller'
 import { ChecklistTemplatesService } from './checklist-templates.service'
@@ -39,6 +39,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
   controllers: [
     TasksController,
     TaskCommentsController,
+    SavedCommentsController,
     TaskChecklistsController,
     ChecklistTemplatesController,
     TaskTypesController,

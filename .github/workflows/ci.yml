@@ -851,6 +851,24 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S06, frame `05:55` — save a comment, "same like messages".
+      #
+      # The three ways this is normally a facade are each checked: the button
+      # that stores nothing (asserted against the table), the save nobody reads
+      # back (the page is reloaded and the control must still read Saved), and
+      # the bookmark you cannot find again (the Inbox's Later tab is opened, the
+      # row clicked, and the comment must be the one marked on arrival). Plus
+      # the one thing it must not be — shared: two accounts save two different
+      # comments and neither may see the other's.
+      - name: Save a comment
+        if: '!cancelled()'
+        run: node test/e2e/save-comment.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          E2E_PEER_EMAIL: org-admin@rundesk.internal
+          E2E_PEER_PASSWORD: OrgAdmin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

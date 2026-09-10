@@ -78,6 +78,25 @@ type SavedMessage = {
   savedAt: string
 }
 
+/**
+ * §V2-S06 frame `05:55` — a task comment saved for later.
+ *
+ * `url` is built by the API, comment anchor included, because the path a task
+ * lives at needs the space and project ids the Inbox has no other reason to
+ * know. Sending the resolved link is one fact in one place; sending five ids
+ * and reassembling them here would be a second copy of the URL shape.
+ */
+type SavedComment = {
+  id: string
+  body: string
+  taskId: string
+  taskTitle: string
+  authorName: string | null
+  createdAt: string
+  savedAt: string
+  url: string
+}
+
 /** The three buckets the API partitions on (§A2.6a). */
 const VIEWS = ['inbox', 'later', 'cleared'] as const
 export type InboxView = (typeof VIEWS)[number]
@@ -606,6 +625,22 @@ export function InboxPage() {
   })
   const savedMessages = view === 'later' ? (savedQuery.data ?? []) : []
 
+  /*
+   * §V2-S06 frame `05:55` — "reply/thread, assign, save — same like messages".
+   *
+   * The same tab, for the same reason §2.2 put saved messages here: Later is
+   * where a person goes looking for what they put aside, and a saved comment is
+   * exactly that. It is also where ClickUp puts them — "hover over the comment
+   * … it will be added to the Later tab in your Inbox" — so this is one bucket
+   * with two kinds of saved thing in it, not a new panel to remember.
+   */
+  const savedCommentsQuery = useQuery({
+    enabled: view === 'later' && !!workspaceId,
+    queryKey: ['saved-comments', workspaceId],
+    queryFn: () => api<SavedComment[]>(`/workspaces/${workspaceId}/comments/saved`),
+  })
+  const savedComments = view === 'later' ? (savedCommentsQuery.data ?? []) : []
+
   const { namesById } = useMentionNames(workspaceId)
   const counts = countsQuery.data ?? { inbox: 0, later: 0, cleared: 0, unread: 0 }
   const all = notifsQuery.data ?? []
@@ -906,12 +941,54 @@ export function InboxPage() {
               </div>
             </section>
           )}
+          {/* §V2-S06 frame `05:55` — the comments she saved, in the same tab
+              and for the same reason as the messages above them. */}
+          {view === 'later' && savedComments.length > 0 && (
+            <section data-testid="later-saved-comments">
+              <h2 className="text-sm font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+                {t('inbox.savedComments')}
+              </h2>
+              <div className="space-y-1">
+                {savedComments.map((c) => (
+                  <Card
+                    key={c.id}
+                    variant="glass"
+                    // `go` resolves the query string the API built, comment
+                    // anchor included — the same helper a notification row uses.
+                    onClick={() => go(c.url)}
+                    className="group p-3 cursor-pointer hover:bg-accent/5 flex items-start gap-2.5"
+                    data-testid={`saved-comment-${c.id}`}
+                  >
+                    <MessageSquare className="h-4 w-4 shrink-0 text-accent mt-0.5" />
+                    <div className="min-w-0 flex-1">
+                      <div className="text-[13px] truncate">
+                        <MentionText text={c.body} namesById={namesById} />
+                      </div>
+                      <div className="text-[11px] text-muted-foreground mt-0.5 truncate">
+                        {[c.authorName, c.taskTitle].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums shrink-0">
+                      {formatDistanceToNowStrict(new Date(c.savedAt), { addSuffix: true })}
+                    </span>
+                    <span
+                      className="shrink-0 inline-flex items-center gap-1 rounded-md border border-border/70 px-1.5 py-0.5 text-[11px] text-muted-foreground group-hover:text-foreground"
+                      data-testid={`saved-comment-open-${c.id}`}
+                    >
+                      <ArrowUpRight className="h-3 w-3" />
+                      {t('inbox.openComment')}
+                    </span>
+                  </Card>
+                ))}
+              </div>
+            </section>
+          )}
           {notifsQuery.isPending ? (
             // Until the request lands, `notifs` is [] — and rendering the empty
             // state here would assert there is nothing in your inbox before we
             // know that. Skeleton rows say "still looking" instead.
             <ListSkeleton rows={7} rowClassName="h-14" />
-          ) : notifs.length === 0 && savedMessages.length === 0 ? (
+          ) : notifs.length === 0 && savedMessages.length === 0 && savedComments.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
               title={

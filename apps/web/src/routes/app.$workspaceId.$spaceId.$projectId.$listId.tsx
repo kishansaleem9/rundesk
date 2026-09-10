@@ -214,7 +214,9 @@ export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$lis
    * only read: the parent route now has a search schema, and an undeclared key
    * on a child is one a router is entitled to drop.
    */
-  validateSearch: (search: Record<string, unknown>): { task?: string; view?: string } => ({
+  validateSearch: (
+    search: Record<string, unknown>,
+  ): { task?: string; view?: string; comment?: string } => ({
     ...(typeof search.task === 'string' && search.task ? { task: search.task } : {}),
     /*
      * §V2-07 "Copy link to view" (frames 10:36 / 11:14) — a view has to be
@@ -222,6 +224,15 @@ export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$lis
      * an undeclared key is one the router is entitled to drop.
      */
     ...(typeof search.view === 'string' && search.view ? { view: search.view } : {}),
+    /*
+     * §V2-S06 frame `05:55` — a SAVED COMMENT is addressable.
+     *
+     * The Inbox's Later tab links to `?task=…&comment=…`; the sheet reads this
+     * one, opens the Comments tab and marks that comment. Without it a saved
+     * comment could only ever link to the task, which for a busy thread is
+     * barely better than not having saved it.
+     */
+    ...(typeof search.comment === 'string' && search.comment ? { comment: search.comment } : {}),
   }),
   component: ListDetail,
 })
@@ -1275,13 +1286,16 @@ function ListDetail() {
    * today — leaving the list — instead of making the user walk back out
    * through every task they happened to glance at.
    */
-  const { task: taskParam, view: viewParam } = Route.useSearch()
+  const { task: taskParam, view: viewParam, comment: commentParam } = Route.useSearch()
   const selectedTaskId = taskParam ?? null
   const setSelectedTaskId = (id: string | null) =>
     navigate({
       to: '/app/$workspaceId/$spaceId/$projectId/$listId',
       params: { workspaceId, spaceId, projectId, listId },
-      search: (prev: Record<string, unknown>) => ({ ...prev, task: id ?? undefined }),
+      // §V2-S06 — `comment` is dropped on every task change, closing included.
+      // It describes an arrival, so keeping it would re-highlight a comment
+      // every time the reader came back to that task from somewhere else.
+      search: (prev: Record<string, unknown>) => ({ ...prev, task: id ?? undefined, comment: undefined }),
       replace: true,
     })
   const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(() => new Set())
@@ -2683,7 +2697,13 @@ function ListDetail() {
           await refetch()
         }}
       />
-      <TaskDetailSheet taskId={selectedTaskId} open={Boolean(selectedTaskId)} onOpenChange={(next) => !next && setSelectedTaskId(null)} workspaceId={workspaceId} />
+      <TaskDetailSheet
+        taskId={selectedTaskId}
+        open={Boolean(selectedTaskId)}
+        onOpenChange={(next) => !next && setSelectedTaskId(null)}
+        workspaceId={workspaceId}
+        focusCommentId={commentParam ?? null}
+      />
       <ListStatusesManager listId={listId} open={statusManagerOpen} onOpenChange={setStatusManagerOpen} />
       <ListEmailAliasPanel listId={listId} open={emailAliasOpen} onOpenChange={setEmailAliasOpen} />
       <SharePanel
