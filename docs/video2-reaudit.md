@@ -183,6 +183,31 @@ went missing entirely. A list that is only written once stops being true.
   picker element. Same cause as the first: asserting on `body` instead of on the
   thing that is supposed to have changed.
 
+- **The Planner's span selector, frame `13:50`.** It drew a seven-day week and
+  nothing else, with the arrows hardcoded to ±7. Day, 4 days and Week are the
+  same hour gutter at a different column count, so they fall out of the range
+  maths; **Month gets its own layout**, because thirty columns of hour gutter is
+  a week view pretending to be a month. The date arithmetic lives in
+  `apps/web/src/lib/planner-view.ts` with 10 unit tests, because off-by-one
+  lives in date arithmetic and a browser is a poor place to look for it.
+  **Three bugs found in the building, all the same shape** — two places deciding
+  one thing:
+  · the FETCH range came from `weekStart` while the grid came from the view, so
+    Month would have drawn thirty days and asked the server about seven;
+  · the header's month label was formatted from `weekStart`, so in Day view on
+    the 1st it named the previous month;
+  · `planner-show-weekends` was already the settings dialog's testid, and reusing
+    it made two elements answer one id — planner-settings.mjs caught that in one
+    run.
+  11 browser checks, five break-tests.
+- **A third vacuous check, and it took two attempts to fix.** "Typing does not
+  change the span" first sampled the column count before React re-rendered.
+  Given time, it STILL passed — because the word I typed, "week ahead", contains
+  both shortcut letters and `d` comes last, so the span bounced to Week and back
+  to Day and ended where it started. My own fixture defeated my own check. It
+  now asserts the TEXT THAT ARRIVED: the handler calls `preventDefault`, so an
+  unguarded shortcut eats the character and the field reads "eek ahea".
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -348,7 +373,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | Calendar settings — 4 of 7 pages |
 | M | **Conferencing / Zoom** connect row |
 | M | Settings footer: What's new · Report a problem · Feature requests |
-| M | **View selector Day / 4 days / Week / Month** + shortcuts `d x w m` |
+| B | **View selector Day / 4 days / Week / Month** + shortcuts `d x w m` |
 | B | Show weekends; event style; default duration; colour tasks by; start week on |
 | M | Appearance: Grid size |
 | B | Timezone — the control the validated server support was missing |

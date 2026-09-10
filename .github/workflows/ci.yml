@@ -809,6 +809,19 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S14c, frame `13:50` — Day (d) / 4 days (x) / Week (w) / Month (m).
+      #
+      # A span selector fails in ways that photograph fine: the label moves and
+      # the grid does not; the grid moves and the ARROWS still step a week; the
+      # grid moves and the FETCH still asks for a week, so most of a month looks
+      # empty. There is a check for each, and the last one was a real bug.
+      - name: Planner views
+        if: '!cancelled()'
+        run: node test/e2e/planner-views.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist

@@ -8,6 +8,15 @@ import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { PlannerSettingsDialog, RAIL_SECTIONS } from '../components/planner-settings-dialog'
 import { usePriorities, usePriorityActions } from '../lib/use-priorities'
+import {
+  plannerRange,
+  plannerStep,
+  readPlannerView,
+  writePlannerView,
+  PLANNER_VIEWS,
+  PLANNER_VIEW_KEYS,
+  type PlannerView,
+} from '../lib/planner-view'
 
 /**
  * §V2-02 — the Planner, frame `13:08`.
@@ -151,6 +160,31 @@ export function PlannerPage() {
     return () => clearInterval(id)
   }, [])
 
+  /*
+   * Frame `13:50` prints the shortcut beside each label — `d x w m` — so they
+   * are part of the feature rather than a nicety.
+   *
+   * IGNORED WHILE TYPING. The Planner has a person search and a priority box
+   * on it; a bare `d` that jumped the calendar to Day view mid-word would make
+   * both unusable. Modifier chords are left alone too, so the browser's own
+   * shortcuts still work.
+   */
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.metaKey || e.ctrlKey || e.altKey) return
+      const el = e.target as HTMLElement | null
+      const tag = el?.tagName
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || el?.isContentEditable) return
+      const next = PLANNER_VIEW_KEYS[e.key.toLowerCase()]
+      if (!next) return
+      e.preventDefault()
+      chooseViewRef.current?.(next)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
+  const qc = useQueryClient()
   const [anchor, setAnchor] = useState(() => new Date())
   const [settingsOpen, setSettingsOpen] = useState(false)
   /*
@@ -177,15 +211,52 @@ export function PlannerPage() {
    */
   const weekStartsOn = { sunday: 0, monday: 1, saturday: 6 }[settings?.weekStart ?? 'sunday'] ?? 0
   const weekStart = useMemo(() => startOfWeek(anchor, weekStartsOn), [anchor, weekStartsOn])
-  const days = useMemo(() => {
-    const all = Array.from({ length: 7 }, (_, i) => addDays(weekStart, i))
-    // Frame `13:08` shows Sat and Sun dimmed rather than absent; hiding them is
-    // the setting, dimming them is the default.
-    return showWeekends ? all : all.filter((d) => d.getDay() !== 0 && d.getDay() !== 6)
-  }, [weekStart, showWeekends])
 
-  const rangeFrom = weekStart
-  const rangeTo = addDays(weekStart, 7)
+  /*
+   * §V2-S14c frame `13:50` — Day (d) · 4 days (x) · Week (w) · Month (m).
+   *
+   * The grid was a hardcoded seven days and the arrows a hardcoded ±7. The days
+   * drawn, how far an arrow moves and which layout is used all come from
+   * `lib/planner-view` so they cannot disagree — an arrow that moved a week
+   * while the grid showed a month would show the same fortnight twice.
+   */
+  const [view, setView] = useState<PlannerView>(() => readPlannerView())
+  /*
+   * "Show weekends" is a stored planner setting, not a local one — the
+   * Appearance page edits the same field, so this writes through the same
+   * endpoint rather than keeping a second opinion about it.
+   */
+  const saveSettings = useMutation({
+    mutationFn: (patch: PlannerSettings) =>
+      api(`/planner/${workspaceId}/settings`, { method: 'PATCH', body: patch }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('plannerSettings.saveFailed')),
+  })
+  const chooseView = (next: PlannerView) => {
+    setView(next)
+    writePlannerView(next)
+  }
+  // The key listener is bound once; this keeps it calling the current closure
+  // rather than the one from first render.
+  const chooseViewRef = useRef(chooseView)
+  chooseViewRef.current = chooseView
+  const days = useMemo(
+    () => plannerRange(view, anchor, weekStartsOn, showWeekends),
+    [view, anchor, weekStartsOn, showWeekends],
+  )
+  /*
+   * THE FETCH RANGE COMES FROM THE DAYS DRAWN, not from the week.
+   *
+   * This read `weekStart` to `weekStart + 7` while the grid drew whatever the
+   * view asked for — so Month would have drawn thirty days and fetched seven of
+   * them, and the other twenty-three would have looked genuinely empty. Same
+   * shape as every other bug in this file's history: two places deciding one
+   * thing.
+   */
+  const rangeFrom = days[0] ?? weekStart
+  const rangeTo = addDays(days[days.length - 1] ?? weekStart, 1)
 
   const { data: blocks = [] } = useQuery({
     queryKey: ['planner-blocks', workspaceId, rangeFrom.toISOString()],
@@ -372,8 +443,6 @@ export function PlannerPage() {
       .slice(0, 25)
   }, [openAssigned])
 
-  const qc = useQueryClient()
-
   /*
    * §V2-02 frame `14:45` — dragging task `dbgdh` on makes a block called
    * "Work on dbgdh". The prefix is applied at RENDER, not stored: the label
@@ -489,7 +558,19 @@ export function PlannerPage() {
     ? Math.max(0, Math.round((new Date(current.endsAt).getTime() - now.getTime()) / 60_000))
     : null
 
-  const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(weekStart)
+  /*
+   * THE LABEL NAMES WHAT IS ON SCREEN, not the week containing the anchor.
+   *
+   * This formatted `weekStart`, which is the Monday (or Sunday) of the anchor's
+   * week — fine for a week view and wrong for every other span. In Day view on
+   * the 1st of a month, `weekStart` falls in the PREVIOUS month and the header
+   * named it; in Month view, stepping to the 1st of the next month could leave
+   * the label unchanged, because that 1st's week began in the month just left.
+   * Caught by a check on the arrows, which is not where I expected to find it.
+   */
+  const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(
+    days[0] ?? weekStart,
+  )
   const dayName = (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d)
 
   const hours = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, i) => FIRST_HOUR + i)
@@ -817,7 +898,7 @@ export function PlannerPage() {
             type="button"
             aria-label={t('planner.previousWeek')}
             data-testid="planner-prev"
-            onClick={() => setAnchor((d) => addDays(d, -7))}
+            onClick={() => setAnchor((d) => plannerStep(view, d, -1))}
             className="rounded p-1 hover:bg-muted/60"
           >
             <ChevronLeft className="h-4 w-4" />
@@ -826,7 +907,7 @@ export function PlannerPage() {
             type="button"
             aria-label={t('planner.nextWeek')}
             data-testid="planner-next"
-            onClick={() => setAnchor((d) => addDays(d, 7))}
+            onClick={() => setAnchor((d) => plannerStep(view, d, 1))}
             className="rounded p-1 hover:bg-muted/60"
           >
             <ChevronRight className="h-4 w-4" />
@@ -841,6 +922,54 @@ export function PlannerPage() {
           >
             {t('planner.today')}
           </Button>
+          {/*
+            Frame `13:50` — the span selector, with the frame's own single-key
+            shortcuts under each label.
+          */}
+          <div className="ml-2 flex items-center gap-0.5" data-testid="planner-view-selector">
+            {PLANNER_VIEWS.map((v) => {
+              const key = Object.keys(PLANNER_VIEW_KEYS).find((k) => PLANNER_VIEW_KEYS[k] === v)
+              return (
+                <button
+                  key={v}
+                  type="button"
+                  data-testid={`planner-view-${v}`}
+                  aria-pressed={view === v}
+                  title={`${t(`planner.view.${v}` as never)} (${key})`}
+                  onClick={() => chooseView(v)}
+                  className={cn(
+                    'rounded px-2 py-1 text-[12px]',
+                    view === v
+                      ? 'bg-accent/15 font-medium text-accent'
+                      : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+                  )}
+                >
+                  {t(`planner.view.${v}` as never)}
+                </button>
+              )
+            })}
+            {/* "Show weekends" sits with the span in the frame, and writes the
+                same setting the Appearance page does — one preference, two
+                places to reach it. */}
+            <button
+              type="button"
+              // `planner-weekends-toggle`, not `planner-show-weekends`: the
+              // settings dialog already owns that id, and two elements under
+              // one testid is a strict-mode failure in every suite that
+              // touches either. planner-settings.mjs found it immediately.
+              data-testid="planner-weekends-toggle"
+              aria-pressed={showWeekends}
+              onClick={() => saveSettings.mutate({ showWeekends: !showWeekends })}
+              className={cn(
+                'ml-1 rounded px-2 py-1 text-[12px]',
+                showWeekends
+                  ? 'bg-accent/15 font-medium text-accent'
+                  : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground',
+              )}
+            >
+              {t('planner.showWeekends')}
+            </button>
+          </div>
           {/*
             `[16:09]` "is task ka itna time bach gaya" — frame 14:45's header
             reads "Work on dbgdh · 2h 55m left". Only while something is
@@ -870,6 +999,28 @@ export function PlannerPage() {
           </Button>
         </header>
 
+        {/*
+          MONTH GETS ITS OWN LAYOUT. Day, 4 days and Week are the same hour
+          gutter with a different column count, so they fall out of the range on
+          their own. Thirty columns of hour gutter is not a month view, it is a
+          week view nobody can read — a month is a grid of day cells with what is
+          on each one.
+        */}
+        {view === 'month' ? (
+          <MonthGrid
+            days={days}
+            blocks={blocks}
+            now={now}
+            weekStartsOn={weekStartsOn}
+            label={blockLabel}
+            emptyLabel={t('planner.monthNoBlocks')}
+            locale={locale}
+            onPickDay={(d) => {
+              setAnchor(d)
+              chooseView('day')
+            }}
+          />
+        ) : (
         <div ref={gridScrollRef} className="min-h-0 flex-1 overflow-auto">
           {/* Day header. Today's number sits in a filled pill, as in the frame. */}
           <div
@@ -1056,6 +1207,110 @@ export function PlannerPage() {
             })}
           </div>
         </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+/**
+ * §V2-S14c frame `13:50` — the Month span.
+ *
+ * A calendar month, one cell per day, with what is scheduled on it. Not the
+ * hour gutter with thirty columns: at that width every block is a sliver and
+ * the labels are unreadable, which is a week view pretending to be a month.
+ *
+ * Clicking a day jumps to Day view on it. A month is for finding the day; the
+ * day is for reading the hours.
+ */
+function MonthGrid({
+  days,
+  blocks,
+  now,
+  weekStartsOn,
+  label,
+  emptyLabel,
+  locale,
+  onPickDay,
+}: {
+  days: Date[]
+  blocks: Block[]
+  now: Date
+  weekStartsOn: number
+  label: (b: Block) => string
+  emptyLabel: string
+  locale: string
+  onPickDay: (d: Date) => void
+}) {
+  /*
+   * Leading blanks so the 1st lands under its own weekday. Without them a month
+   * beginning on a Thursday would draw every date under the wrong column name —
+   * the one thing a month grid exists to get right.
+   */
+  const lead = days.length > 0 ? (days[0].getDay() - weekStartsOn + 7) % 7 : 0
+  const weekdayNames = Array.from({ length: 7 }, (_, i) =>
+    new Date(2026, 1, 1 + ((i + weekStartsOn) % 7 || 7)).toLocaleDateString(locale, {
+      weekday: 'short',
+    }),
+  )
+
+  return (
+    <div className="min-h-0 flex-1 overflow-auto p-2" data-testid="planner-month-grid">
+      <div className="grid grid-cols-7 gap-1">
+        {weekdayNames.map((name) => (
+          <div key={name} className="px-1 pb-1 text-[10px] uppercase text-muted-foreground">
+            {name}
+          </div>
+        ))}
+        {Array.from({ length: lead }, (_, i) => (
+          <div key={`lead-${i}`} aria-hidden />
+        ))}
+        {days.map((d) => {
+          const onThisDay = blocks.filter((b) => sameDay(new Date(b.startsAt), d))
+          const isToday = sameDay(d, now)
+          return (
+            <button
+              key={d.toISOString()}
+              type="button"
+              data-testid="planner-month-cell"
+              data-today={isToday ? 'true' : 'false'}
+              onClick={() => onPickDay(d)}
+              className={cn(
+                'min-h-[72px] rounded border border-border/50 p-1 text-left align-top hover:border-accent/60',
+                isToday && 'border-accent/70 bg-accent/5',
+              )}
+            >
+              <div
+                className={cn(
+                  'mb-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-[11px]',
+                  isToday && 'bg-accent font-medium text-accent-foreground',
+                )}
+              >
+                {d.getDate()}
+              </div>
+              {onThisDay.length === 0 ? (
+                <div className="px-0.5 text-[10px] text-muted-foreground/70">{emptyLabel}</div>
+              ) : (
+                <ul className="space-y-0.5">
+                  {onThisDay.slice(0, 3).map((b) => (
+                    <li
+                      key={b.id}
+                      data-testid="planner-month-block"
+                      className="truncate rounded bg-accent/15 px-1 py-0.5 text-[10px] text-accent"
+                    >
+                      {label(b)}
+                    </li>
+                  ))}
+                  {onThisDay.length > 3 && (
+                    <li className="px-1 text-[10px] text-muted-foreground">
+                      +{onThisDay.length - 3}
+                    </li>
+                  )}
+                </ul>
+              )}
+            </button>
+          )
+        })}
       </div>
     </div>
   )
