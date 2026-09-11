@@ -80,8 +80,35 @@ const TAG = `e2e-savecmt-${Date.now()}`
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
-  const workspaces = (await A('/workspaces')).data ?? []
-  const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
+
+  /*
+   * THE WORKSPACE HAS TO BE ONE BOTH ACCOUNTS ARE IN, and it has to be chosen
+   * rather than assumed.
+   *
+   * This used to take `workspaces[0]`. The private-bookmark check needs the
+   * PEER to be able to read the seeded task, and the peer is only in the
+   * original workspace — while the admin accumulates a `WS e2e-*` for every
+   * suite that makes one. So element zero is a shared workspace only by luck of
+   * ordering: it held on CI run 531 and broke the moment a sweep ran the
+   * workspace-creating suites first, giving `peer save 403` and a failure
+   * message about privacy that had nothing to do with privacy.
+   *
+   * Intersecting the two accounts' workspaces states the precondition instead
+   * of hoping for it — and if there is no shared one, this says so rather than
+   * failing later in a way that reads as a product bug.
+   */
+  const peerAuth = await signInApi(API, PEER.email, PEER.password)
+  const B0 = apiAs(peerAuth.accessToken)
+  const idsOf = (rows) => (rows ?? []).map((r) => r?.workspace?.id ?? r?.id).filter(Boolean)
+  const mine = idsOf((await A('/workspaces')).data)
+  const theirs = new Set(idsOf((await B0('/workspaces')).data))
+  const workspaceId = mine.find((id) => theirs.has(id))
+  if (!workspaceId) {
+    throw new Error(
+      `no workspace is shared by ${ME.email} and ${PEER.email} — the private-bookmark ` +
+        'check needs one, and picking any workspace would 403 instead of saying this',
+    )
+  }
 
   sql = await openDb()
   if (!sql) throw new Error('no DATABASE_URL — this suite checks the save against the table')
@@ -292,8 +319,8 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ a bookmark is PRIVATE, in both directions')
 
-  const peer = await signInApi(API, PEER.email, PEER.password)
-  const B = apiAs(peer.accessToken)
+  // Already signed in above, to work out which workspace the two accounts share.
+  const B = B0
   const peerBefore = (await B(`/workspaces/${workspaceId}/comments/saved`)).data ?? []
   const peerSave = await B(`/tasks/${task.id}/comments/${replyId}/save`, { method: 'POST' })
   const peerAfter = (await B(`/workspaces/${workspaceId}/comments/saved`)).data ?? []
