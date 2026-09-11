@@ -71,6 +71,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
+import { parseEstimate, formatEstimate } from '../lib/estimate'
 import { FavoriteStar, useFavorites, useToggleFavorite } from '../lib/use-favorites'
 import { TaskReminderButton } from './task-reminders'
 import { RequestAccessCard } from './request-access-card'
@@ -2519,20 +2520,12 @@ function OverviewPanel({
           />
         </Field>
         <Field label={t('taskDetail.fieldEstimate')} empty={emptyFields.timeEstimate}>
-          <input
-            type="number"
-            min={0}
-            step={0.25}
-            defaultValue={detail.timeEstimate != null ? Math.round((detail.timeEstimate / 3600) * 100) / 100 : ''}
-            onBlur={(e) => {
-              const v = e.target.value.trim()
-              const hrs = v === '' ? null : Number(v)
-              const secs = hrs == null || !Number.isFinite(hrs) ? null : Math.round(hrs * 3600)
+          <EstimateInput
+            seconds={detail.timeEstimate ?? null}
+            pending={patchTask.isPending}
+            onCommit={(secs) => {
               if (secs !== (detail.timeEstimate ?? null)) patchTask.mutate({ timeEstimate: secs })
             }}
-            disabled={patchTask.isPending}
-            placeholder="—"
-            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
       </div>
@@ -4883,6 +4876,102 @@ function AttachmentsPanel({
  * to an audio file somebody uploaded from their phone exactly as it does to one
  * recorded in the composer — the same rule, not a flag set at record time.
  */
+/**
+ * §V2-S02 frame `01:35` — the estimate box, and the row that says what it heard.
+ *
+ * It was `<input type="number">` in hours, so ninety minutes had to be entered
+ * as `1.5` and `2h 30m` could not be said at all. Now it takes text and shows
+ * the interpretation BEFORE committing it: typing `12` offers "12 hours", which
+ * is the frame's own example, and typing nonsense offers nothing rather than
+ * recording a number nobody meant.
+ *
+ * The parsing lives in `lib/estimate.ts` because the quick-create modal needs
+ * the same answer — two places that disagreed about what `90m` means would be
+ * worse than neither understanding it.
+ */
+function EstimateInput({
+  seconds,
+  pending,
+  onCommit,
+}: {
+  seconds: number | null
+  pending: boolean
+  onCommit: (seconds: number | null) => void
+}) {
+  const { t, tCount } = useTranslation()
+  const [text, setText] = useState(() => formatEstimate(seconds))
+  const [focused, setFocused] = useState(false)
+  // Follow the server when it changes underneath — but never while somebody is
+  // mid-edit, which would rewrite what they are typing.
+  useEffect(() => {
+    if (!focused) setText(formatEstimate(seconds))
+  }, [seconds, focused])
+
+  const parsed = parseEstimate(text)
+  const commit = () => {
+    const next = text.trim() === '' ? null : parsed?.seconds ?? null
+    // Unparseable text is not a reason to wipe an estimate that exists: put
+    // back what is actually stored and leave it alone.
+    if (text.trim() !== '' && !parsed) {
+      setText(formatEstimate(seconds))
+      return
+    }
+    onCommit(next)
+  }
+
+  return (
+    <div className="relative">
+      <input
+        type="text"
+        inputMode="text"
+        value={text}
+        onChange={(e) => setText(e.target.value)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => {
+          setFocused(false)
+          commit()
+        }}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault()
+            e.currentTarget.blur()
+          }
+        }}
+        disabled={pending}
+        placeholder={t('taskDetail.estimatePlaceholder')}
+        data-testid="task-estimate-input"
+        className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+      />
+      {/*
+        The frame's suggestion row. It appears only while the box has focus and
+        only when the text means something — a row that said "12 hours" under an
+        unparseable box would be the field agreeing with something it did not
+        understand.
+      */}
+      {focused && parsed && formatEstimate(parsed.seconds) !== text.trim() && (
+        <button
+          type="button"
+          data-testid="task-estimate-suggestion"
+          // `onMouseDown` rather than `onClick`: blur fires first otherwise and
+          // the row is gone before the click lands on it.
+          onMouseDown={(e) => {
+            e.preventDefault()
+            setText(formatEstimate(parsed.seconds))
+            onCommit(parsed.seconds)
+          }}
+          className="absolute left-0 right-0 top-9 z-10 rounded-md border border-border bg-popover px-2 py-1 text-left text-xs shadow-md hover:bg-muted"
+        >
+          {parsed.hours && parsed.minutes
+            ? t('taskDetail.estimateHoursMinutes', { hours: parsed.hours, minutes: parsed.minutes })
+            : parsed.hours
+              ? tCount('taskDetail.estimateHours', parsed.hours)
+              : tCount('taskDetail.estimateMinutes', parsed.minutes)}
+        </button>
+      )}
+    </div>
+  )
+}
+
 function CommentAttachments({
   files,
 }: {

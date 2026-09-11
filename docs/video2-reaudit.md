@@ -432,6 +432,35 @@ went missing entirely. A list that is only written once stops being true.
   produce one, because with R2 off `url` comes back as the raw storage key and
   is truthy. Both now seed the state they are about.
 
+- **The time-estimate box, frames `01:35`/`01:45`.** It was
+  `<input type="number">` in hours: ninety minutes had to be entered as `1.5`,
+  `2h 30m` could not be said at all, and the unit lived only in the field's
+  label — so the box showed `12` and you had to know what that meant.
+  Now it takes text, offers the frame's own suggestion row ("12 hours") before
+  committing, and reads back `12h` / `1h 30m`. **Nonsense is refused rather than
+  rounded**: typing a word puts back what is really stored, because reading
+  "soon" as zero would destroy a real estimate over a typo.
+  **DAYS ARE DELIBERATELY NOT UNDERSTOOD.** "2d" means two WORKING days, and a
+  working day is a business decision — ClickUp calls it eight hours — that this
+  product has never made anywhere. Accepting `2d` and quietly choosing eight
+  would turn it into sixteen hours for somebody who meant forty-eight. Better
+  to not understand it than to misunderstand it.
+  **The tenth duplicate, avoided.** Two places turned typing into an estimate —
+  this field and the quick-create modal — each with its own
+  `Number(hours) * 3600`. Teaching one of them what `90m` means would have made
+  them DISAGREE about the same words, which is worse than neither understanding
+  it. Both read `lib/estimate.ts` now, and the suite's last check types the same
+  thing into the other box and reads the seconds out of the database.
+  11 checks, five break-tests, 15 unit tests. Three testids were added on the
+  way (`quick-create-submit`, `quick-create-task-title`, and the cookie
+  banner's) because the task tab's own submit had none — a suite could fill the
+  whole form and have nothing to press by name.
+  **Two of my own mistakes, both caught locally:** the parser's first version
+  guarded input with a character allowlist that omitted `s`, so "2 hours" and
+  "90 mins" were rejected as nonsense; and the suite's first version ended with
+  `chk(true, …)` — a check that cannot fail — which is the exact thing this
+  audit exists to remove. It drives the real modal now.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -520,8 +549,8 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
 | M | "Comment ▾" split button; "Create Task ▾" split button |
-| M | Toast "Task created — `<title>` › `<list>`" with Copy / View |
-| P | Time-estimate popover with a unit-suggestion row |
+| — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
+| B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — the panel exists, **no drop handler** |
 | B | "Add checklist" — several named checklists, each with its own "Add item" |
 | B | Checklist header open-item count ("Checklists 2 open") |

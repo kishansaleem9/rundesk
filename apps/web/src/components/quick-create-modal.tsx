@@ -8,6 +8,7 @@ import { api } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { parseEstimate } from '../lib/estimate'
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
@@ -552,10 +553,15 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
               // pinning a Z and shifting everybody's 7pm.
               ...(startDate ? { startDate: new Date(startDate).toISOString() } : {}),
               ...(dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
-              // The column is seconds; the field asks for hours because that
-              // is the unit she says out loud ("12 hours").
-              ...(Number(estimateHours) > 0
-                ? { timeEstimate: Math.round(Number(estimateHours) * 3600) }
+              /*
+               * §V2-S02 — through the SAME parser the task-detail field uses.
+               * This used to be its own `Number(hours) * 3600`, so the two
+               * boxes would have disagreed the moment one of them learned what
+               * `90m` means. The column is seconds; what somebody may type is
+               * `12`, `90m` or `1h 30m`.
+               */
+              ...(parseEstimate(estimateHours)
+                ? { timeEstimate: parseEstimate(estimateHours)!.seconds }
                 : {}),
               ...(labelIds.length ? { labelIds } : {}),
             },
@@ -617,7 +623,13 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         if (title.trim() && listId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder={t('quickCreate.taskTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input
+        autoFocus
+        data-testid="quick-create-task-title"
+        placeholder={t('quickCreate.taskTitlePlaceholder')}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
       <div className="grid grid-cols-3 gap-2">
         <Select data-testid="quick-create-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={(v) => { setSpaceId(v); setProjectId(''); setListId('') }} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
         <Select data-testid="quick-create-project" labelKey="quickCreate.selectProject" value={projectId} onChange={(v) => { setProjectId(v); setListId('') }} options={projects.map((p) => ({ value: p.id, label: p.name }))} disabled={!spaceId} />
@@ -994,13 +1006,11 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
         <label className="flex flex-col gap-1 text-[11px] text-muted-foreground">
           {t('quickCreate.timeEstimate')}
           <input
-            type="number"
-            min="0"
-            step="0.5"
+            type="text"
             value={estimateHours}
             onChange={(e) => setEstimateHours(e.target.value)}
             data-testid="quick-create-estimate"
-            placeholder={t('quickCreate.hours')}
+            placeholder={t('taskDetail.estimatePlaceholder')}
             className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
           />
         </label>
@@ -1143,7 +1153,17 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
 
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-        <Button type="submit" size="sm" disabled={!title.trim() || !listId || create.isPending}>
+        {/*
+          The list tab's submit has had a test id since §V2-S11; the TASK tab's
+          — the one people use most — did not, so a suite could fill the whole
+          form and then have nothing to press by name.
+        */}
+        <Button
+          type="submit"
+          size="sm"
+          data-testid="quick-create-submit"
+          disabled={!title.trim() || !listId || create.isPending}
+        >
           {create.isPending ? t('quickCreate.creating') : t('quickCreate.createTask')}
         </Button>
       </div>

@@ -916,6 +916,20 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S02, frames `01:35`/`01:45` — the estimate box and its suggestion row.
+      #
+      # The last check is the load-bearing one: the SAME words are typed into
+      # the quick-create modal's estimate box and the seconds read back from the
+      # database. Both boxes used to do their own `Number(hours) * 3600`, so
+      # teaching one of them what `90m` means would have made them disagree
+      # about the same input — worse than neither understanding it.
+      - name: Time estimate
+        if: '!cancelled()'
+        run: node test/e2e/time-estimate.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       - name: Space features
         if: '!cancelled()'
         run: node test/e2e/space-features.mjs --dist apps/web/dist
