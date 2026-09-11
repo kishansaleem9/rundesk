@@ -67,6 +67,7 @@ import {
   Merge as MergeIcon,
   Bookmark,
   PanelRight,
+  Loader2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
@@ -4903,15 +4904,44 @@ function CommentAttachments({
           )
         }
         if (kind === 'video') {
+          /*
+           * §V2-S05 frames `05:35`–`05:40` — a clip in a comment is a CARD with
+           * its name on it, not a bare player with a caption underneath.
+           *
+           * WHAT IS DELIBERATELY NOT HERE, because the frame's other card
+           * actions already exist by a different route or cannot be honest:
+           *
+           *  · `00:00 / 00:16`, download and expand are the NATIVE player's own
+           *    controls, which this `<video controls>` already carries. ClickUp
+           *    draws a custom player and has to rebuild them; rebuilding ours to
+           *    match a screenshot would replace working controls with a worse
+           *    copy.
+           *
+           *  · COPY LINK is absent on purpose, and this is the interesting one.
+           *    An attachment's URL is signed by `r2.getObjectUrl` for 900
+           *    seconds. A "Copy link" here would hand somebody a link that dies
+           *    in fifteen minutes — it pastes, it looks right, and it stops
+           *    working over lunch. That is a worse failure than not offering it.
+           *    The "Clip created!" card CAN offer one because it goes through
+           *    `POST /clips/share`, which takes an explicit expiry.
+           *
+           *  · "More" would be a menu with nothing in it.
+           */
           return (
             <div key={f.id} data-testid="comment-video" className="w-full max-w-sm">
+              <div
+                className="truncate rounded-t-md border border-b-0 border-border bg-muted/40 px-2 py-1 text-[11px] font-medium"
+                data-testid="comment-clip-title"
+                title={f.fileName}
+              >
+                {f.fileName}
+              </div>
               <video
                 src={f.url ?? undefined}
                 controls
                 preload="metadata"
-                className="w-full max-h-64 rounded-md border border-border bg-black"
+                className="w-full max-h-64 rounded-b-md border border-border bg-black"
               />
-              <div className="mt-0.5 text-[10px] text-muted-foreground truncate">{f.fileName}</div>
             </div>
           )
         }
@@ -4927,10 +4957,36 @@ function CommentAttachments({
             </a>
           )
         }
+        /*
+         * §V2-S05 frame `05:35` — the processing state, and a REAL DEAD LINK
+         * found on the way to it.
+         *
+         * `kind` is computed as `f.url ? presentationFor(...) : 'file'`, so a
+         * RECORDING whose URL has not resolved yet did not just miss its
+         * player — it fell through to here and rendered `<a href="#">`: a
+         * paperclip link that goes nowhere, on a file that is still arriving.
+         * Clicking it did nothing at all.
+         *
+         * Now it says what is actually happening. Anything else without a URL
+         * gets the same treatment, because a link to `#` is never the truth.
+         */
+        if (!f.url) {
+          const stillArriving = presentationFor(f.mimeType) !== 'file'
+          return (
+            <div
+              key={f.id}
+              data-testid={stillArriving ? 'comment-clip-processing' : 'comment-file-pending'}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs text-muted-foreground"
+            >
+              <Loader2 className="h-3 w-3 animate-spin" />
+              <span className="max-w-[160px] truncate">{f.fileName}</span>
+            </div>
+          )
+        }
         return (
           <a
             key={f.id}
-            href={f.url ?? '#'}
+            href={f.url}
             target="_blank"
             rel="noreferrer"
             className="inline-flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-2 py-1 text-xs hover:bg-muted/60"

@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 21
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -462,6 +462,77 @@ try {
     'a link was copied for a clip that never finished uploading — the worst of both',
   )
   failPut = false
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ frames `05:35`–`05:40` — the clip in the comment')
+
+  /*
+   * THE ATTACHMENT IS SEEDED, not uploaded, and that is the point of this
+   * section. Posting a comment with a file goes through R2, which is off here —
+   * the first version of this check drove the composer, the post failed on the
+   * upload, and it reported "the clip has no title" about a comment that was
+   * never created. Frames `05:35`–`05:40` are about how a clip RENDERS once it
+   * is on a comment; the upload path is the other half of this item and is
+   * covered above.
+   */
+  const CLIP_NAME = `Stop Recording Guide ${TAG}.webm`
+  const me = (await A('/users/me')).data
+  const [posted] = await sql`
+    insert into task_comments (task_id, author_id, body)
+    values (${task.id}, ${me.id}, ${`clip comment ${TAG}`}) returning id`
+  await sql`
+    insert into task_attachments (task_id, comment_id, file_name, content_type, size_bytes, storage_key, uploaded_by_id)
+    values (${task.id}, ${posted.id}, ${CLIP_NAME}, 'video/webm', 16384,
+            ${`workspaces/${workspaceId}/clips/${TAG}.webm`}, ${me.id})`
+
+  await openComposer()
+  const cardUp = await waitUntil(
+    async () => (await readText(page.getByTestId('comment-clip-title'))).includes('Stop Recording Guide'),
+    { timeoutMs: 25_000 },
+  )
+  chk(
+    cardUp,
+    'a clip on a comment is a card with its name on it',
+    `the clip card's title reads "${await readText(page.getByTestId('comment-clip-title'))}" — the ` +
+      'frame heads the card with the clip name rather than captioning it underneath',
+  )
+
+  /*
+   * AND THE DEAD LINK, WHICH HAD TO BE MADE OBSERVABLE FIRST.
+   *
+   * `kind` was `f.url ? presentationFor(...) : 'file'`, so a recording whose URL
+   * had not resolved did not merely miss its player — it rendered
+   * `<a href="#">`: a paperclip pointing nowhere, on a file still arriving.
+   *
+   * The first version of this check just counted `href="#"` anchors on the
+   * page. It passed with the defect deliberately restored, because with R2 off
+   * `url` comes back as the raw storage key — truthy — so nothing ever reached
+   * that branch. It was asserting an absence in a scenario that could not
+   * produce the thing. So a SECOND attachment is seeded with an empty storage
+   * key, which is what a file still arriving looks like, and the check is a
+   * positive one about what the person sees instead.
+   */
+  const PENDING_NAME = `Still arriving ${TAG}.webm`
+  await sql`
+    insert into task_attachments (task_id, comment_id, file_name, content_type, size_bytes, storage_key, uploaded_by_id)
+    values (${task.id}, ${posted.id}, ${PENDING_NAME}, 'video/webm', 16384, '', ${me.id})`
+  await openComposer()
+  chk(
+    await waitUntil(
+      async () => (await readText(page.getByTestId('comment-clip-processing'))).includes('Still arriving'),
+      { timeoutMs: 25_000 },
+    ),
+    'a clip still arriving says so, instead of being a paperclip to nowhere',
+    `the pending clip renders as "${await readText(page.getByTestId('comment-clip-processing'))}"`,
+  )
+  const deadLinks = await page.evaluate(() =>
+    Array.from(document.querySelectorAll('a')).filter((a) => (a.getAttribute('href') ?? '') === '#').length,
+  )
+  chk(
+    deadLinks === 0,
+    'and nothing on the page is a link to "#"',
+    `${deadLinks} anchors point at "#" — a control that does nothing when clicked`,
+  )
 
   // -------------------------------------------------------------------------
   console.log('\n▶ and a voice note gets none of it')

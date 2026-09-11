@@ -403,6 +403,35 @@ went missing entirely. A list that is only written once stops being true.
   passed while the product did the exact thing it was written to catch. Both
   now assert what arrived rather than that something did.
 
+- **The clip card in a comment, frames `05:35`–`05:40`.** Reading the code
+  shrank this one honestly and turned up a real defect on the way.
+  Most of the frame's card actions ALREADY EXIST: `00:00 / 00:16`, download and
+  fullscreen are the native `<video controls>`'s own, which this player carries.
+  ClickUp draws a custom player and has to rebuild them; rebuilding ours to
+  match a screenshot would replace working controls with a worse copy. So the
+  real delta was the card's NAME, which is now a heading rather than a caption
+  underneath.
+  **Copy link is deliberately absent here**, and that is the interesting part.
+  `r2.getObjectUrl` signs an attachment URL for **900 seconds**. A "Copy link"
+  on a comment clip would hand somebody a link that pastes, looks right, and
+  stops working over lunch — a worse failure than not offering it. The "Clip
+  created!" card can offer one because it goes through `POST /clips/share`,
+  which takes an explicit expiry. Durable attachment links need either a public
+  CDN URL or a share endpoint of their own; recorded rather than faked.
+  **THE DEFECT:** `kind` was computed as `f.url ? presentationFor(...) : 'file'`,
+  so a recording whose URL had not resolved did not merely miss its player — it
+  rendered `<a href="#">`, a paperclip pointing nowhere on a file still
+  arriving. Clicking it did nothing at all. It now says what is happening, and
+  no attachment renders as a link to `#`.
+  21 checks, twelve break-tests. **Two checks had to be repaired before they
+  meant anything**, and break-testing is the only reason that is known:
+  the card check drove the composer and posted — which goes through R2, which
+  is off here — so it reported "the clip has no title" about a comment that was
+  never created, sending the reader to the wrong file entirely; and the
+  dead-link check counted `href="#"` anchors in a scenario that could not
+  produce one, because with R2 off `url` comes back as the raw storage key and
+  is truthy. Both now seed the state they are about.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -516,7 +545,8 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Record a Video Clip; real `getDisplayMedia` |
 | B | **Screen-record setup panel** — source hint / quality / mic, one module for both recorders |
 | B | **"Clip created!" card** — Create a task · New tab · Copy link, and "Link copied" |
-| P | Clip in a comment renders, but no title, spinner, or card actions |
+| B | Clip in a comment is a card with its name; a clip still arriving says so |
+| — | …its download / expand / `00:16` are the NATIVE player's, already there; Copy link deliberately absent (15-min signed URL) |
 | P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
 | P | Threads — replies nest inline; no "Thread by `<name>`" panel with own composer |
 | B | Reactions, react/reply/assign hover actions, resolve/reopen |
