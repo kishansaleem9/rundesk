@@ -1,0 +1,390 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum ChannelType {
+  CHANNEL
+  DIRECT
+}
+
+enum TaskStatus {
+  TODO
+  IN_PROGRESS
+  COMPLETE
+}
+
+enum TaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+model User {
+  id                  String @id @default(cuid())
+  name                String
+  email               String @unique
+  avatar              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+  workspaceMemberships WorkspaceMember[]
+  createdChannels     Channel[] @relation("ChannelCreator")
+  channelMemberships  ChannelMember[]
+  messages            Message[]
+  reactions           MessageReaction[]
+  createdTasks        Task[] @relation("TaskCreator")
+  taskAssignments     TaskAssignee[]
+  conversationMemberships ConversationMember[]
+  createdConversations Conversation[] @relation("ConversationCreator")
+  mentions            MessageMention[]
+  assignedMessages    MessageAssignment[] @relation("MessageAssignee")
+  messageAssignmentsMade MessageAssignment[] @relation("MessageAssigner")
+  followedThreads     ThreadFollower[]
+}
+
+model Workspace {
+  id        String @id @default(cuid())
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  members   WorkspaceMember[]
+  channels  Channel[]
+  tasks     Task[]
+  conversations Conversation[]
+  whiteboards Whiteboard[]
+}
+
+model WorkspaceMember {
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  joinedAt    DateTime @default(now())
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([workspaceId, userId])
+  @@index([userId])
+}
+
+model Channel {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  description String? @db.Text
+  topic       String? @db.VarChar(191)
+  isPrivate   Boolean @default(false)
+  type        ChannelType @default(CHANNEL)
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdBy   User @relation("ChannelCreator", fields: [createdById], references: [id])
+  members     ChannelMember[]
+  messages    Message[]
+  tasks       Task[]
+  conversation Conversation?
+  messageAssignments MessageAssignment[]
+  @@unique([workspaceId, name])
+  @@index([workspaceId, updatedAt])
+}
+
+model ChannelMember {
+  channelId String
+  userId    String
+  joinedAt  DateTime @default(now())
+  lastReadAt DateTime @default(now())
+  notificationsMuted Boolean @default(false)
+  channel   Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([channelId, userId])
+  @@index([userId])
+}
+
+model Message {
+  id              String @id @default(cuid())
+  channelId       String
+  authorId        String
+  content         String @db.Text
+  parentMessageId String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  editedAt        DateTime?
+  scheduledFor    DateTime?
+  sentAt          DateTime?
+  channel         Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  author          User @relation(fields: [authorId], references: [id])
+  parent          Message? @relation("MessageReplies", fields: [parentMessageId], references: [id], onDelete: Cascade)
+  replies         Message[] @relation("MessageReplies")
+  reactions       MessageReaction[]
+  attachments     MessageAttachment[]
+  sourceTasks     Task[] @relation("SourceMessage")
+  mentions        MessageMention[]
+  assignments     MessageAssignment[]
+  followers       ThreadFollower[]
+  taskLinks       MessageTaskLink[]
+  @@index([channelId, createdAt])
+  @@index([parentMessageId, createdAt])
+}
+
+model MessageReaction {
+  messageId String
+  userId    String
+  emoji     String @db.VarChar(32)
+  createdAt DateTime @default(now())
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([messageId, userId, emoji])
+  @@index([userId])
+}
+
+model MessageAttachment {
+  id           String @id @default(cuid())
+  messageId    String
+  originalName String
+  storageKey   String @unique
+  mimeType     String
+  size         Int
+  url          String
+  createdAt    DateTime @default(now())
+  message      Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  @@index([messageId])
+}
+
+model Task {
+  id              String @id @default(cuid())
+  workspaceId     String
+  channelId       String?
+  sourceMessageId String?
+  title           String
+  description     String? @db.Text
+  status          TaskStatus @default(TODO)
+  priority        TaskPriority @default(NORMAL)
+  createdById     String
+  dueDate         DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel         Channel? @relation(fields: [channelId], references: [id], onDelete: SetNull)
+  sourceMessage   Message? @relation("SourceMessage", fields: [sourceMessageId], references: [id], onDelete: SetNull)
+  createdBy       User @relation("TaskCreator", fields: [createdById], references: [id])
+  assignees       TaskAssignee[]
+  messageLinks    MessageTaskLink[]
+  @@index([workspaceId, status])
+  @@index([channelId])
+  @@index([sourceMessageId])
+  @@index([dueDate])
+}
+
+model TaskAssignee {
+  taskId     String
+  userId     String
+  assignedAt DateTime @default(now())
+  task       Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  user       User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([taskId, userId])
+  @@index([userId])
+}
+
+model Conversation {
+  id          String @id @default(cuid())
+  workspaceId String
+  channelId   String @unique
+  createdById String
+  createdAt   DateTime @default(now())
+  title       String?
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  channel     Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  createdBy   User @relation("ConversationCreator", fields: [createdById], references: [id])
+  members     ConversationMember[]
+}
+
+model MessageMention {
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([messageId, userId])
+  @@index([userId, createdAt])
+}
+
+model MessageAssignment {
+  id           String @id @default(cuid())
+  messageId    String
+  channelId    String
+  assigneeId   String
+  assignedById String
+  resolvedAt   DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+  message      Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  channel      Channel @relation(fields: [channelId], references: [id], onDelete: Cascade)
+  assignee     User @relation("MessageAssignee", fields: [assigneeId], references: [id], onDelete: Cascade)
+  assignedBy   User @relation("MessageAssigner", fields: [assignedById], references: [id], onDelete: Cascade)
+  @@unique([messageId, assigneeId])
+  @@index([assigneeId, resolvedAt])
+}
+
+model ThreadFollower {
+  messageId String
+  userId    String
+  createdAt DateTime @default(now())
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([messageId, userId])
+  @@index([userId])
+}
+
+model MessageTaskLink {
+  messageId String
+  taskId    String
+  createdAt DateTime @default(now())
+  message   Message @relation(fields: [messageId], references: [id], onDelete: Cascade)
+  task      Task @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  @@id([messageId, taskId])
+  @@index([taskId])
+}
+
+model ConversationMember {
+  conversationId String
+  userId         String
+  joinedAt       DateTime @default(now())
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  user           User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  @@id([conversationId, userId])
+  @@index([userId])
+}
+
+model Whiteboard {
+  id          String @id @default(cuid())
+  workspaceId String
+  name        String
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  @@index([workspaceId])
+}
+
+// ---------------------------------------------------------------------------
+// Automation engine (Workflow 1—1 Trigger, 1—N Condition ≤15, 1—N Action ≤6).
+// Dynamic config lives in JSON columns so new trigger/action types need no migration.
+// The 15/6 limits are enforced in application code (zod + engine).
+// ---------------------------------------------------------------------------
+enum ConditionLogic {
+  ALL // every condition must pass (AND)
+  ANY // at least one must pass (OR)
+}
+
+enum RunStatus {
+  SUCCESS
+  SKIPPED // trigger matched but conditions failed
+  FAILED
+}
+
+model Workflow {
+  id             String         @id @default(cuid())
+  workspaceId    String         @map("workspace_id") @db.VarChar(64)
+  name           String         @db.VarChar(120)
+  description    String?        @db.VarChar(500)
+  isActive       Boolean        @default(true) @map("is_active")
+  conditionLogic ConditionLogic @default(ALL) @map("condition_logic")
+  /// Preset key when created from the automation panel (e.g. "auto_assign")
+  templateKey    String?        @map("template_key") @db.VarChar(64)
+  /// Restrict to one list/project; NULL = whole workspace
+  listId         String?        @map("list_id") @db.VarChar(64)
+  createdAt      DateTime       @default(now()) @map("created_at")
+  updatedAt      DateTime       @updatedAt @map("updated_at")
+
+  trigger    Trigger?
+  conditions Condition[]
+  actions    Action[]
+  runs       AutomationRun[]
+
+  // Hot path: engine looks up active workflows per workspace.
+  @@index([workspaceId, isActive])
+  // Preset toggles look up "is this template on for this list?"
+  @@index([workspaceId, templateKey, listId])
+  @@map("workflows")
+}
+
+model Trigger {
+  id         String @id @default(cuid())
+  workflowId String @unique @map("workflow_id") // exactly one trigger per workflow
+  /// e.g. "status_changed", "task_created"
+  type       String @db.VarChar(64)
+  /// Optional scoping, e.g. {"to":"done"} or {"listId":"list_eng"}
+  config     Json
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([type])
+  @@map("triggers")
+}
+
+model Condition {
+  id         String @id @default(cuid())
+  workflowId String @map("workflow_id")
+  /// Evaluation order (0-based)
+  position   Int
+  /// Task field, e.g. "priority"
+  field      String @db.VarChar(64)
+  /// e.g. "eq", "in", "contains", "is_empty"
+  operator   String @db.VarChar(32)
+  /// Expected value: string, number, array or null
+  value      Json
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId, position])
+  @@map("conditions")
+}
+
+model Action {
+  id         String @id @default(cuid())
+  workflowId String @map("workflow_id")
+  /// Execution order (0-based)
+  position   Int
+  /// e.g. "change_assignee", "send_notification"
+  type       String @db.VarChar(64)
+  /// Type-specific payload, e.g. {"assigneeId":"u_qa"}
+  payload    Json
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workflowId, position])
+  @@map("actions")
+}
+
+/// Audit log: one row per (event, workflow) evaluation.
+model AutomationRun {
+  id               String    @id @default(cuid())
+  workflowId       String    @map("workflow_id")
+  workspaceId      String    @map("workspace_id") @db.VarChar(64)
+  eventType        String    @map("event_type") @db.VarChar(64)
+  taskId           String    @map("task_id") @db.VarChar(64)
+  depth            Int       @default(0)
+  status           RunStatus
+  conditionsPassed Boolean   @map("conditions_passed")
+  eventPayload     Json      @map("event_payload")
+  conditionResults Json      @map("condition_results")
+  actionResults    Json      @map("action_results")
+  error            String?   @db.Text
+  createdAt        DateTime  @default(now()) @map("created_at")
+
+  workflow Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, createdAt])
+  @@index([workflowId, createdAt])
+  @@map("automation_runs")
+}

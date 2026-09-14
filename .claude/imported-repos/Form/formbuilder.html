@@ -1,0 +1,739 @@
+<title>TAKSAM Form Builder</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.3.1/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.3.1/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.26.4/babel.min.js"></script>
+<style>
+  :root { color-scheme: dark; }
+  html, body, #root { height: 100%; }
+  body {
+    margin: 0; background: #0d0d10; color: #e6e6ea;
+    font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  .mono { font-family: 'IBM Plex Mono', ui-monospace, monospace; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #2a2a33; border-radius: 6px; border: 2px solid transparent; background-clip: padding-box; }
+  ::-webkit-scrollbar-thumb:hover { background: #3a3a44; background-clip: padding-box; }
+  ::selection { background: rgba(123,104,238,.35); }
+  *:focus-visible { outline: 2px solid #7B68EE; outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+
+<div id="root"></div>
+
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useRef, useEffect } = React;
+
+/* ============================ Icons ============================ */
+const ICONS = {
+  plus:'<path d="M12 5v14M5 12h14"/>',
+  x:'<path d="M6 6l12 12M18 6L6 18"/>',
+  trash:'<path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13"/>',
+  copy:'<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h8"/>',
+  grip:'<circle cx="9" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="6" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.4" fill="currentColor" stroke="none"/><circle cx="9" cy="18" r="1.4" fill="currentColor" stroke="none"/><circle cx="15" cy="18" r="1.4" fill="currentColor" stroke="none"/>',
+  star:'<path d="M12 3.5l2.6 5.7 6.2.6-4.7 4.1 1.4 6L12 16.9 6.5 19.9l1.4-6-4.7-4.1 6.2-.6z"/>',
+  check:'<path d="M20 6L9 17l-5-5"/>',
+  back:'<path d="M19 12H5M12 19l-7-7 7-7"/>',
+  fwd:'<path d="M5 12h14M12 5l7 7-7 7"/>',
+  eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7z"/><circle cx="12" cy="12" r="3"/>',
+  settings:'<path d="M4 8h16M4 16h16"/><circle cx="9" cy="8" r="2.2" fill="#141417"/><circle cx="15" cy="16" r="2.2" fill="#141417"/>',
+  blocks:'<rect x="4" y="4" width="7" height="7" rx="1.2"/><rect x="13" y="4" width="7" height="7" rx="1.2"/><rect x="13" y="13" width="7" height="7" rx="1.2"/>',
+  board:'<rect x="4" y="4" width="4.5" height="16" rx="1"/><rect x="10" y="4" width="4.5" height="10" rx="1"/><rect x="15.5" y="4" width="4.5" height="13" rx="1"/>',
+  send:'<path d="M22 2L11 13M22 2l-7 20-4-9-9-4z"/>',
+  link:'<path d="M10 14a4 4 0 0 0 6 .5l2-2a4 4 0 0 0-6-6l-1 1"/><path d="M14 10a4 4 0 0 0-6-.5l-2 2a4 4 0 0 0 6 6l1-1"/>',
+  pin:'<path d="M12 21s-7-6-7-11a7 7 0 0 1 14 0c0 5-7 11-7 11z"/><circle cx="12" cy="10" r="2.4"/>',
+  upload:'<path d="M12 15V3M7 8l5-5 5 5"/><path d="M5 15v4a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-4"/>',
+  pen:'<path d="M4 20l4-1L18 9l-3-3L5 16z"/><path d="M14 6l3 3"/>',
+  sun:'<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.5 1.5M17.5 17.5L19 19M19 5l-1.5 1.5M6.5 17.5L5 19"/>',
+  moon:'<path d="M21 12.8A8 8 0 1 1 11.2 3 6 6 0 0 0 21 12.8z"/>',
+  external:'<path d="M14 4h6v6M20 4L10 14"/><path d="M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6"/>',
+  flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+  user:'<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 4-6.5 8-6.5s8 2.1 8 6.5"/>',
+  cal:'<rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 9h18M8 3v4M16 3v4"/>',
+  tag:'<path d="M20 12l-8 8-8-8V4h8z"/><circle cx="8.5" cy="8.5" r="1.3" fill="currentColor" stroke="none"/>',
+  spark:'<path d="M12 3l1.6 4.9L18 9.5l-4.4 1.6L12 16l-1.6-4.9L6 9.5l4.4-1.6z"/>',
+  list:'<path d="M4 6h16M4 12h16M4 18h10"/>',
+  type:'<path d="M4 7V5h16v2M9 19h6M12 5v14"/>',
+  align:'<path d="M4 6h16M4 12h12M4 18h16"/>',
+  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M4 7l8 6 8-6"/>',
+  phone:'<path d="M5 3h4l2 5-3 2a12 12 0 0 0 5 5l2-3 5 2v4a2 2 0 0 1-2 2A16 16 0 0 1 3 5a2 2 0 0 1 2-2z"/>',
+  hash:'<path d="M9 4L7 20M17 4l-2 16M4 9h16M3 15h16"/>',
+  chevSquare:'<rect x="3" y="3" width="18" height="18" rx="3"/><path d="M8 11l4 4 4-4"/>',
+  checks:'<path d="M4 7l2 2 3-3M4 15l2 2 3-3M13 8h7M13 16h7"/>',
+  checkbox:'<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M8 12l3 3 5-5"/>',
+  clip:'<path d="M21 11l-9 9a5 5 0 0 1-7-7l9-9a3.5 3.5 0 0 1 5 5l-9 9a2 2 0 0 1-3-3l8-8"/>',
+  clock:'<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  circle:'<circle cx="12" cy="12" r="8"/>',
+  braces:'<path d="M8 4a3 3 0 0 0-3 3v2a2 2 0 0 1-2 2 2 2 0 0 1 2 2v2a3 3 0 0 0 3 3M16 4a3 3 0 0 1 3 3v2a2 2 0 0 0 2 2 2 2 0 0 0-2 2v2a3 3 0 0 1-3 3"/>',
+  layers:'<path d="M12 3l9 5-9 5-9-5z"/><path d="M3 13l9 5 9-5"/>',
+  cart:'<circle cx="9" cy="20" r="1.5" fill="currentColor" stroke="none"/><circle cx="17" cy="20" r="1.5" fill="currentColor" stroke="none"/><path d="M3 4h2l2.4 11h10l2-8H6.2"/>',
+  home:'<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+  inbox:'<path d="M3 12h5l2 3h4l2-3h5"/><path d="M5 5h14l2 7v5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-5z"/>',
+  goal:'<circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/>',
+  grid:'<rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/>',
+  bell:'<path d="M6 9a6 6 0 1 1 12 0c0 5 2 6 2 6H4s2-1 2-6"/><path d="M10 20a2 2 0 0 0 4 0"/>',
+  chevDown:'<path d="M6 9l6 6 6-6"/>',
+  search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/>',
+  video:'<rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/>',
+  mic:'<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/>',
+  dots:'<circle cx="5" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.7" fill="currentColor" stroke="none"/><circle cx="19" cy="12" r="1.7" fill="currentColor" stroke="none"/>',
+};
+function Ic({ n, s = 18, cls = '' }) {
+  return <svg width={s} height={s} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"
+    strokeLinecap="round" strokeLinejoin="round" className={cls} dangerouslySetInnerHTML={{ __html: ICONS[n] || '' }} />;
+}
+
+/* ============================ Data ============================ */
+const uid = () => (crypto.randomUUID ? crypto.randomUUID() : 'id' + Math.random().toString(36).slice(2));
+const slug = s => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '').slice(0, 40) || 'field';
+const keyOf = f => f.field_key || slug(f.label) || f.id;
+
+const FIELD_TYPES = [
+  { type:'short_text', label:'Short text', icon:'type', hint:'Single line' },
+  { type:'long_text', label:'Long text', icon:'align', hint:'Paragraph' },
+  { type:'email', label:'Email', icon:'mail', hint:'Validated email' },
+  { type:'phone', label:'Phone', icon:'phone', hint:'Phone number' },
+  { type:'number', label:'Number', icon:'hash', hint:'Numeric' },
+  { type:'dropdown', label:'Dropdown', icon:'chevSquare', hint:'Pick one' },
+  { type:'multi_select', label:'Multiple choice', icon:'checks', hint:'Pick many' },
+  { type:'checkbox', label:'Checkbox', icon:'checkbox', hint:'Yes / no' },
+  { type:'date', label:'Date', icon:'cal', hint:'Date picker' },
+  { type:'rating', label:'Rating', icon:'star', hint:'1–5 stars' },
+  { type:'file_upload', label:'File upload', icon:'clip', hint:'Attachment' },
+  { type:'signature', label:'Signature', icon:'pen', hint:'Draw to sign' },
+  { type:'info_block', label:'Information Block', icon:'align', hint:'Text / heading (no input)' },
+];
+const TASK_PROPERTIES = [
+  { property:'task_name', label:'Task Name', icon:'list', fieldType:'short_text' },
+  { property:'description', label:'Description', icon:'align', fieldType:'long_text' },
+  { property:'assignee', label:'Assignee', icon:'user', fieldType:'short_text' },
+  { property:'priority', label:'Priority', icon:'flag', fieldType:'dropdown',
+    options:[{label:'Urgent',value:'urgent'},{label:'High',value:'high'},{label:'Normal',value:'normal'},{label:'Low',value:'low'}] },
+  { property:'due_date', label:'Due Date', icon:'clock', fieldType:'date' },
+  { property:'tags', label:'Tags', icon:'tag', fieldType:'multi_select' },
+  { property:'status', label:'Status', icon:'circle', fieldType:'dropdown',
+    options:[{label:'To Do',value:'todo'},{label:'In Progress',value:'in_progress'},{label:'Complete',value:'complete'}] },
+  { property:'custom', label:'Custom Field', icon:'braces', fieldType:'short_text' },
+];
+const PRIORITIES = { urgent:{label:'Urgent',color:'#E5484D'}, high:{label:'High',color:'#F5A524'}, normal:{label:'Normal',color:'#3B82F6'}, low:{label:'Low',color:'#8b8b96'} };
+const STATUSES = ['todo','in_progress','complete'];
+const STATUS_LABEL = { todo:'TO DO', in_progress:'IN PROGRESS', complete:'COMPLETE' };
+const STATUS_DOT = { todo:'#8b95a5', in_progress:'#5B7FFF', complete:'#10B981' };
+const iconFor = t => (FIELD_TYPES.find(f => f.type === t) || {}).icon || 'type';
+const labelFor = t => (FIELD_TYPES.find(f => f.type === t) || {}).label || t;
+
+function makeField(type) {
+  const meta = FIELD_TYPES.find(f => f.type === type) || FIELD_TYPES[0];
+  const opts = type === 'dropdown' || type === 'multi_select';
+  return { id: uid(), field_key:'', field_type:type, label:meta.label, placeholder:'', help_text:'', required:false,
+    options: opts ? [{label:'Option 1',value:'option_1'},{label:'Option 2',value:'option_2'},{label:'Option 3',value:'option_3'}] : [],
+    config: type === 'rating' ? { scale:5 } : type === 'file_upload' ? { accept:'', maxSizeMb:10 } : {}, task_property:null };
+}
+function makeTP(property) {
+  const meta = TASK_PROPERTIES.find(t => t.property === property) || TASK_PROPERTIES[0];
+  const f = makeField(meta.fieldType);
+  f.label = meta.label === 'Custom Field' ? 'Custom field' : meta.label;
+  f.task_property = property === 'custom' ? 'custom:Custom field' : property;
+  if (meta.options) f.options = meta.options.map(o => ({ ...o }));
+  if (property === 'task_name' || property === 'description') f.required = true;
+  return f;
+}
+const f = (type, label, extra = {}) => Object.assign(makeField(type), { label }, extra);
+const tp = (prop, label, extra = {}) => Object.assign(makeTP(prop), label ? { label } : {}, extra);
+
+const TEMPLATES = [
+  { key:'feedback', name:'Feedback Form', desc:'Survey and collect feedback', icon:'align', accent:'#14B8A6',
+    build:() => ({ name:'Feedback Form', description:'We would love to hear your thoughts.', primary_color:'#14B8A6', fields:[
+      tp('task_name','Your name',{placeholder:'Jane Doe',required:true}),
+      f('email','Email',{required:true}),
+      f('rating','How satisfied are you?',{required:true,task_property:'custom:Satisfaction',config:{scale:5}}),
+      f('dropdown','Feedback about?',{task_property:'tags',options:[{label:'Product',value:'product'},{label:'Support',value:'support'},{label:'Billing',value:'billing'}]}),
+      tp('description','Tell us more',{label:'Your feedback',placeholder:'What can we improve?'}),
+    ] }) },
+  { key:'project_intake', name:'Project Intake', desc:'Streamline new project requests', icon:'list', accent:'#EC4899',
+    build:() => ({ name:'Project Intake', description:'Submit a new project request to the team.', primary_color:'#7B68EE', fields:[
+      tp('task_name','Project name',{placeholder:'Website redesign',required:true}),
+      tp('description','Project brief',{placeholder:'Goals, scope, context…'}),
+      tp('priority','Priority'),
+      tp('due_date','Target due date'),
+      f('short_text','Requested by',{task_property:'custom:Requested by'}),
+      f('number','Estimated budget (USD)',{task_property:'custom:Budget'}),
+    ] }) },
+  { key:'order_form', name:'Order Form', desc:'Capture and process client orders', icon:'cart', accent:'#8B5CF6',
+    build:() => ({ name:'Order Form', description:'Place your order below.', primary_color:'#8B5CF6', fields:[
+      tp('task_name','Customer name',{required:true}),
+      f('email','Email',{required:true}),
+      f('dropdown','Product',{required:true,task_property:'custom:Product',options:[{label:'Starter — $29',value:'starter'},{label:'Pro — $79',value:'pro'},{label:'Enterprise',value:'enterprise'}]}),
+      f('number','Quantity',{required:true,task_property:'custom:Quantity'}),
+      f('long_text','Shipping address',{required:true,task_property:'custom:Shipping address'}),
+    ] }) },
+  { key:'job_application', name:'Job Application', desc:'Accept and review applications for open roles', icon:'user', accent:'#F97316',
+    build:() => ({ name:'Job Application', description:'Apply to join our team.', primary_color:'#F97316', fields:[
+      tp('task_name','Full name',{required:true}),
+      f('email','Email',{required:true}),
+      f('phone','Phone',{required:true}),
+      f('dropdown','Position',{required:true,task_property:'tags',options:[{label:'Engineering',value:'engineering'},{label:'Design',value:'design'},{label:'Sales',value:'sales'}]}),
+      f('file_upload','Resume / CV',{required:true,task_property:'custom:Resume',config:{accept:'.pdf,.doc,.docx',maxSizeMb:10}}),
+      tp('description','Cover letter',{label:'Why are you a great fit?'}),
+    ] }) },
+  { key:'it_request', name:'IT Requests', desc:'Triage and prioritize IT service requests', icon:'list', accent:'#3B82F6',
+    build:() => ({ name:'IT Requests', description:'Report an issue or request access.', primary_color:'#3B82F6', fields:[
+      tp('task_name','Summary',{required:true}),
+      f('short_text','Your name',{required:true,task_property:'assignee'}),
+      f('dropdown','Request type',{required:true,task_property:'tags',options:[{label:'Hardware',value:'hardware'},{label:'Software',value:'software'},{label:'Access',value:'access'}]}),
+      tp('priority','Priority'),
+      tp('description','Describe the issue',{required:true}),
+    ] }) },
+  { key:'scratch', name:'Start from scratch', desc:'', icon:'plus', accent:'#6b7280',
+    build:() => ({ name:'Untitled form', primary_color:'#7B68EE', fields:[] }) },
+];
+const withPos = fields => fields.map((fl, i) => ({ ...fl, position: i }));
+
+/* Workspace hierarchy: Spaces -> Lists (where submissions land) */
+const SPACES = [
+  { id:'sp1', name:'Team Space',  color:'#7B68EE', lists:[{id:'l1',name:'Incoming'},{id:'l2',name:'Requests'},{id:'l3',name:'Bugs'}] },
+  { id:'sp2', name:'Client Work', color:'#EC4899', lists:[{id:'l4',name:'Intake'},{id:'l5',name:'Delivery'}] },
+  { id:'sp3', name:'Operations',  color:'#10B981', lists:[{id:'l6',name:'IT Requests'},{id:'l7',name:'HR Onboarding'}] },
+];
+
+function buildTask(form, fields, answers) {
+  let name = '', description = form.task_template.description || '';
+  let status = form.default_status || 'todo';
+  let priority = form.default_priority || '', assignee = form.auto_assign_name || '', due = '';
+  let tags = [...(form.task_template.tags || [])], custom = {};
+  fields.forEach(fl => {
+    if (!fl.task_property) return;
+    const v = answers[keyOf(fl)]; const val = Array.isArray(v) ? v : (v == null ? '' : String(v)); const t = fl.task_property;
+    if (t === 'task_name') { if (val) name = val; }
+    else if (t === 'description') { if (val) description = (description ? description + '\n\n' : '') + val; }
+    else if (t === 'assignee') { if (val) assignee = val; }
+    else if (t === 'priority') { if (val) priority = val; }
+    else if (t === 'status') { if (val) status = val; }
+    else if (t === 'due_date') { if (val) due = val; }
+    else if (t === 'tags') { if (Array.isArray(v)) tags = tags.concat(v); else if (val) tags.push(val); }
+    else if (t.startsWith('custom:')) custom[t.slice(7)] = Array.isArray(v) ? v.join(', ') : val;
+  });
+  if (!name) name = form.name + ' — new submission';
+  return { id: uid(), name, description, status, priority, assignee, due, tags, custom, created: Date.now() };
+}
+
+/* ============================ Atoms ============================ */
+const cx = (...a) => a.filter(Boolean).join(' ');
+function Btn({ variant = 'primary', size = 'md', children, className, ...p }) {
+  const V = { primary:'bg-[#7B68EE] hover:bg-[#6C5CE7] text-white', secondary:'bg-[#22222b] hover:bg-[#2c2c37] text-zinc-100 border border-[#33333f]',
+    outline:'bg-transparent hover:bg-[#1b1b23] text-zinc-200 border border-[#33333f]', ghost:'bg-transparent hover:bg-[#1b1b23] text-zinc-300',
+    danger:'bg-[#E5484D] hover:bg-[#d43b40] text-white' }[variant];
+  const S = { sm:'h-8 px-3 text-xs gap-1.5', md:'h-9 px-4 text-sm gap-2' }[size];
+  return <button className={cx('inline-flex items-center justify-center rounded-lg font-semibold transition-colors disabled:opacity-40 disabled:pointer-events-none', V, S, className)} {...p}>{children}</button>;
+}
+function IconBtn({ children, className, ...p }) {
+  return <button className={cx('inline-flex h-8 w-8 items-center justify-center rounded-md text-zinc-400 hover:bg-[#22222b] hover:text-zinc-100 transition-colors', className)} {...p}>{children}</button>;
+}
+const inputCls = 'w-full rounded-lg border border-[#2c2c37] bg-[#0f0f14] px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 focus:outline-none focus:border-[#7B68EE] transition';
+const Input = p => <input {...p} className={cx(inputCls, p.className)} />;
+const Textarea = p => <textarea {...p} className={cx(inputCls, 'min-h-[76px] resize-y', p.className)} />;
+const Select = ({ children, className, ...p }) => <select {...p} className={cx(inputCls, 'cursor-pointer', className)}>{children}</select>;
+const Label = ({ children, className }) => <label className={cx('mb-1.5 block text-xs font-semibold uppercase tracking-wide text-zinc-500', className)}>{children}</label>;
+function Switch({ checked, onChange }) {
+  return <button role="switch" aria-checked={checked} onClick={() => onChange(!checked)} className={cx('relative h-5 w-9 shrink-0 rounded-full transition-colors', checked ? 'bg-[#7B68EE]' : 'bg-[#33333f]')}><span className={cx('absolute top-0.5 h-4 w-4 rounded-full bg-white transition-all', checked ? 'left-[18px]' : 'left-0.5')} /></button>;
+}
+function Badge({ children, className, color }) {
+  return <span className={cx('inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold', !color && 'bg-[#22222b] text-zinc-300', className)} style={color ? { background: color + '22', color } : undefined}>{children}</span>;
+}
+
+/* ============================ Signature ============================ */
+function SignaturePad({ value, onChange }) {
+  const ref = useRef(null), drawing = useRef(false), last = useRef({ x:0, y:0 });
+  const [ink, setInk] = useState(!!value);
+  useEffect(() => { const c = ref.current, dpr = window.devicePixelRatio || 1, r = c.getBoundingClientRect(); c.width = r.width * dpr; c.height = 140 * dpr; const ctx = c.getContext('2d'); ctx.scale(dpr, dpr); ctx.lineWidth = 2.2; ctx.lineCap = 'round'; ctx.strokeStyle = '#111827'; }, []);
+  const pos = e => { const r = ref.current.getBoundingClientRect(), t = e.touches?.[0]; return { x:(t?t.clientX:e.clientX)-r.left, y:(t?t.clientY:e.clientY)-r.top }; };
+  const down = e => { drawing.current = true; last.current = pos(e); };
+  const move = e => { if (!drawing.current) return; e.preventDefault(); const ctx = ref.current.getContext('2d'), p = pos(e); ctx.beginPath(); ctx.moveTo(last.current.x, last.current.y); ctx.lineTo(p.x, p.y); ctx.stroke(); last.current = p; if (!ink) setInk(true); };
+  const up = () => { if (drawing.current) { drawing.current = false; onChange(ref.current.toDataURL()); } };
+  const clear = () => { const c = ref.current; c.getContext('2d').clearRect(0, 0, c.width, c.height); setInk(false); onChange(''); };
+  return <div className="relative rounded-lg border border-black/15 bg-white" style={{ height:140 }}>
+    <canvas ref={ref} style={{ width:'100%', height:140, touchAction:'none', cursor:'crosshair' }} onMouseDown={down} onMouseMove={move} onMouseUp={up} onMouseLeave={up} onTouchStart={down} onTouchMove={move} onTouchEnd={up} />
+    {!ink && <span className="pointer-events-none absolute inset-0 flex items-center justify-center text-sm text-black/30">Sign here</span>}
+    {ink && <button type="button" onClick={clear} className="absolute right-2 top-2 rounded bg-black/5 px-2 py-1 text-xs text-black/60 hover:bg-black/10">Clear</button>}
+  </div>;
+}
+
+/* ============================ Field Picker ============================ */
+function PickCard({ icon, label, hint, accent, onClick }) {
+  return <button onClick={onClick} className="flex w-full items-center gap-3 rounded-lg border border-[#26262f] bg-[#14141a] px-3 py-2.5 text-left transition hover:border-[#7B68EE]/60 hover:bg-[#1b1b23]">
+    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg" style={{ background: accent + '20', color: accent }}><Ic n={icon} s={18} /></span>
+    <span className="min-w-0"><span className="block text-sm font-semibold text-zinc-100">{label}</span><span className="block truncate text-xs text-zinc-500">{hint}</span></span>
+  </button>;
+}
+function FieldPicker({ open, onClose, onAdd }) {
+  return <div className={cx('fixed inset-0 z-50', open ? '' : 'pointer-events-none')}>
+    <div className={cx('absolute inset-0 bg-black/60 transition-opacity', open ? 'opacity-100' : 'opacity-0')} onClick={onClose} />
+    <div className={cx('absolute right-0 top-0 flex h-full w-[380px] max-w-[88vw] flex-col border-l border-[#26262f] bg-[#0d0d12] shadow-2xl transition-transform duration-200', open ? 'translate-x-0' : 'translate-x-full')}>
+      <div className="flex items-center justify-between border-b border-[#26262f] px-4 py-3.5"><h3 className="text-sm font-bold text-zinc-100">Add fields</h3><IconBtn onClick={onClose}><Ic n="x" s={16} /></IconBtn></div>
+      <div className="flex-1 space-y-6 overflow-y-auto p-4">
+        <section><h4 className="mb-2 text-[11px] font-bold uppercase tracking-wide text-zinc-500">Form fields</h4><div className="space-y-2">{FIELD_TYPES.map(ft => <PickCard key={ft.type} icon={ft.icon} label={ft.label} hint={ft.hint} accent="#7B68EE" onClick={() => onAdd(makeField(ft.type))} />)}</div></section>
+        <section><h4 className="mb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-500">Task properties</h4><p className="mb-2 text-xs text-zinc-500">Map an input straight onto the generated task.</p><div className="space-y-2">{TASK_PROPERTIES.map(t => <PickCard key={t.property} icon={t.icon} label={t.label} hint={t.property === 'custom' ? '→ custom field' : '→ task.' + t.property} accent="#10B981" onClick={() => onAdd(makeTP(t.property))} />)}</div></section>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ============================ Add-question dropdown (ClickUp style) ======== */
+function AddQuestionMenu({ onAdd }) {
+  const [open, setOpen] = useState(false);
+  const [sub, setSub] = useState(false);
+  const ref = useRef(null);
+  useEffect(() => {
+    if (!open) return;
+    const h = e => { if (ref.current && !ref.current.contains(e.target)) { setOpen(false); setSub(false); } };
+    document.addEventListener('mousedown', h);
+    return () => document.removeEventListener('mousedown', h);
+  }, [open]);
+  const pick = fl => { onAdd(fl); setOpen(false); setSub(false); };
+  const Item = ({ icon, label, onClick, arrow }) => (
+    <button onClick={onClick} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm text-zinc-200 hover:bg-[#1c1c22]">
+      <span className="text-zinc-400"><Ic n={icon} s={16} /></span>{label}{arrow && <Ic n="fwd" s={13} cls="ml-auto text-zinc-500" />}
+    </button>
+  );
+  return <div ref={ref} className="relative">
+    <button onClick={() => setOpen(o => !o)} className="flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-[#2c2c37] py-3 text-sm font-semibold text-zinc-400 transition hover:border-[#7B68EE]/60 hover:text-zinc-200">
+      <Ic n="plus" s={16} /> Add question
+    </button>
+    {open && <div className="absolute left-0 top-full z-40 mt-2 w-[262px] rounded-xl border border-[#26262f] bg-[#0d0d12] p-1.5 shadow-2xl">
+      <div className="relative" onMouseEnter={() => setSub(true)} onMouseLeave={() => setSub(false)}>
+        <Item icon="braces" label="Task property" arrow onClick={() => setSub(s => !s)} />
+        {sub && <div className="absolute left-full top-0 z-50 ml-1 w-[210px] rounded-xl border border-[#26262f] bg-[#0d0d12] p-1.5 shadow-2xl">
+          {TASK_PROPERTIES.map(t => <Item key={t.property} icon={t.icon} label={t.label} onClick={() => pick(makeTP(t.property))} />)}
+        </div>}
+      </div>
+      <div className="my-1 h-px bg-[#1e1e26]" />
+      {FIELD_TYPES.map(ft => <Item key={ft.type} icon={ft.icon} label={ft.label} onClick={() => pick(makeField(ft.type))} />)}
+    </div>}
+  </div>;
+}
+
+/* ============================ Canvas + Editor ============================ */
+function Canvas({ fields, selectedId, onSelect, onReorder, onDup, onDel, onAdd }) {
+  const drag = useRef(null);
+  const drop = id => { const from = fields.findIndex(f => f.id === drag.current), to = fields.findIndex(f => f.id === id); if (from < 0 || to < 0 || from === to) return; const n = [...fields]; const [m] = n.splice(from, 1); n.splice(to, 0, m); onReorder(n); drag.current = null; };
+  if (!fields.length) return <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-[#2c2c37] px-6 py-16 text-center"><Ic n="plus" s={30} cls="text-zinc-700" /><p className="mt-3 text-sm font-semibold text-zinc-300">Your form is empty</p><p className="mt-1 max-w-xs text-xs text-zinc-500">Add fields from the drawer, then map inputs to task properties to auto-fill generated tasks.</p><Btn size="sm" className="mt-4" onClick={onAdd}><Ic n="plus" s={15} /> Add a field</Btn></div>;
+  return <div className="space-y-2.5">{fields.map(fl => {
+    const sel = fl.id === selectedId, t = fl.task_property;
+    return <div key={fl.id} draggable onDragStart={() => (drag.current = fl.id)} onDragOver={e => e.preventDefault()} onDrop={() => drop(fl.id)} onClick={() => onSelect(fl.id)} className={cx('group flex cursor-pointer items-start gap-3 rounded-xl border bg-[#14141a] p-3 transition', sel ? 'border-[#7B68EE] ring-1 ring-[#7B68EE]/40' : 'border-[#26262f] hover:border-[#3a3a46]')}>
+      <span className="mt-0.5 cursor-grab text-zinc-600"><Ic n="grip" s={16} /></span>
+      <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[#22222b] text-zinc-300"><Ic n={iconFor(fl.field_type)} s={15} /></span>
+      <div className="min-w-0 flex-1"><div className="flex items-center gap-2"><span className="truncate text-sm font-semibold text-zinc-100">{fl.label || 'Untitled field'}</span>{fl.required && <span className="text-[#E5484D]">*</span>}</div>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5"><Badge>{labelFor(fl.field_type)}</Badge>{t && <Badge className="bg-[#10B981]/15 text-[#34d399]"><Ic n="link" s={11} /><span className="mono">{t.startsWith('custom:') ? t.slice(7) : 'task.' + t}</span></Badge>}</div></div>
+      <div className="flex shrink-0 items-center opacity-0 transition group-hover:opacity-100"><IconBtn onClick={e => { e.stopPropagation(); onDup(fl.id); }}><Ic n="copy" s={14} /></IconBtn><IconBtn onClick={e => { e.stopPropagation(); onDel(fl.id); }}><Ic n="trash" s={14} /></IconBtn></div>
+    </div>;
+  })}</div>;
+}
+function FieldEditor({ field, onChange, onClose }) {
+  if (!field) return <div className="flex h-full items-center justify-center p-6 text-center text-sm text-zinc-600">Select a field to edit its properties.</div>;
+  const set = patch => onChange({ ...field, ...patch });
+  const opts = field.field_type === 'dropdown' || field.field_type === 'multi_select';
+  const isCustom = (field.task_property || '').startsWith('custom:');
+  return <div className="flex h-full flex-col">
+    <div className="flex items-center justify-between border-b border-[#26262f] px-4 py-3"><h3 className="text-sm font-bold text-zinc-100">Field settings</h3><IconBtn onClick={onClose}><Ic n="x" s={16} /></IconBtn></div>
+    <div className="flex-1 space-y-4 overflow-y-auto p-4">
+      <div><Label>Label</Label><Input value={field.label} onChange={e => set({ label: e.target.value })} /></div>
+      {!['signature','checkbox','rating','info_block'].includes(field.field_type) && <div><Label>Placeholder</Label><Input value={field.placeholder || ''} onChange={e => set({ placeholder: e.target.value })} /></div>}
+      <div><Label>{field.field_type === 'info_block' ? 'Body text' : 'Help text'}</Label><Input value={field.help_text || ''} onChange={e => set({ help_text: e.target.value })} placeholder="Optional hint" /></div>
+      {opts && <div><Label>Options</Label><div className="space-y-2">{field.options.map((o, i) => <div key={i} className="flex items-center gap-2"><Input value={o.label} onChange={e => set({ options: field.options.map((x, j) => j === i ? { label: e.target.value, value: slug(e.target.value) } : x) })} /><IconBtn onClick={() => set({ options: field.options.filter((_, j) => j !== i) })}><Ic n="trash" s={14} /></IconBtn></div>)}<Btn variant="ghost" size="sm" onClick={() => set({ options: [...field.options, { label: 'Option ' + (field.options.length + 1), value: 'option_' + (field.options.length + 1) }] })}><Ic n="plus" s={14} /> Add option</Btn></div></div>}
+      {field.field_type === 'rating' && <div><Label>Max stars</Label><Select value={field.config.scale || 5} onChange={e => set({ config: { ...field.config, scale: +e.target.value } })}>{[3,5,7,10].map(n => <option key={n} value={n}>{n}</option>)}</Select></div>}
+      {field.field_type === 'file_upload' && <div><Label>Accepted types</Label><Input value={field.config.accept || ''} onChange={e => set({ config: { ...field.config, accept: e.target.value } })} placeholder=".pdf,.png" /></div>}
+      <div className="flex items-center justify-between rounded-lg border border-[#26262f] bg-[#14141a] px-3 py-2.5"><span className="text-sm text-zinc-200">Required</span><Switch checked={field.required} onChange={v => set({ required: v })} /></div>
+      <div className="rounded-lg border border-[#10B981]/25 bg-[#10B981]/5 p-3"><Label className="text-[#34d399]">Map to task property</Label>
+        <Select value={isCustom ? 'custom' : (field.task_property || '')} onChange={e => { const v = e.target.value; set({ task_property: v === '' ? null : v === 'custom' ? 'custom:' + (field.label || 'Custom field') : v }); }}><option value="">None (plain answer)</option>{TASK_PROPERTIES.map(t => <option key={t.property} value={t.property}>{t.label}</option>)}</Select>
+        {isCustom && <div className="mt-2"><Label>Custom field name</Label><Input value={field.task_property.slice(7)} onChange={e => set({ task_property: 'custom:' + e.target.value })} placeholder="e.g. Budget" /></div>}
+        <p className="mt-2 text-xs text-[#34d399]/70">Submitted values flow into the generated task automatically.</p>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ============================ Settings ============================ */
+const PRESETS = ['#7B68EE','#EC4899','#10B981','#F5A524','#3B82F6','#E5484D','#8B5CF6','#14B8A6'];
+function SettingsView({ form, set }) {
+  const tt = form.task_template;
+  const Section = ({ icon, title, desc, children }) => <section className="rounded-xl border border-[#26262f] bg-[#14141a] p-5"><div className="mb-4 flex items-center gap-3"><span className="flex h-9 w-9 items-center justify-center rounded-lg bg-[#7B68EE]/15 text-[#a99bf5]"><Ic n={icon} s={18} /></span><div><h3 className="text-sm font-bold text-zinc-100">{title}</h3><p className="text-xs text-zinc-500">{desc}</p></div></div><div className="space-y-4">{children}</div></section>;
+  const Row = ({ label, hint, children }) => <div className="flex items-center justify-between gap-4"><div><p className="text-sm text-zinc-200">{label}</p>{hint && <p className="text-xs text-zinc-500">{hint}</p>}</div>{children}</div>;
+  return <div className="mx-auto max-w-2xl space-y-5">
+    <Section icon="eye" title="Form styling" desc="How the public form looks.">
+      <div><Label>Theme</Label><div className="inline-flex rounded-lg border border-[#26262f] bg-[#0f0f14] p-1">{[['light','sun','Light'],['dark','moon','Dark']].map(([v, ic, lb]) => <button key={v} onClick={() => set({ theme: v })} className={cx('inline-flex items-center gap-2 rounded-md px-4 py-1.5 text-sm font-medium transition', form.theme === v ? 'bg-[#7B68EE] text-white' : 'text-zinc-400 hover:text-zinc-100')}><Ic n={ic} s={15} />{lb}</button>)}</div></div>
+      <div><Label>Primary color</Label><div className="flex flex-wrap items-center gap-3"><input type="color" value={form.primary_color} onChange={e => set({ primary_color: e.target.value })} className="h-9 w-12 cursor-pointer rounded-md border border-[#2c2c37] bg-transparent p-1" /><Input value={form.primary_color} onChange={e => set({ primary_color: e.target.value })} className="w-32 mono" /><div className="flex gap-1.5">{PRESETS.map(c => <button key={c} onClick={() => set({ primary_color: c })} className={cx('h-6 w-6 rounded-full border-2', form.primary_color === c ? 'border-white' : 'border-transparent')} style={{ background: c }} />)}</div></div></div>
+    </Section>
+    <Section icon="send" title="Submission" desc="What happens on submit.">
+      <div><Label>Submit button label</Label><Input value={form.submit_label} onChange={e => set({ submit_label: e.target.value })} /></div>
+      <div><Label>Success message</Label><Textarea value={form.success_message} onChange={e => set({ success_message: e.target.value })} /></div>
+      <div><Label>Redirect URL (optional)</Label><Input value={form.redirect_url} onChange={e => set({ redirect_url: e.target.value })} placeholder="https://example.com/thank-you" /></div>
+      <Row label="Enable reCAPTCHA" hint="Protect against spam."><Switch checked={form.recaptcha_enabled} onChange={v => set({ recaptcha_enabled: v })} /></Row>
+      <Row label="Show TAKSAM branding" hint="“Powered by” footer."><Switch checked={form.branding_enabled} onChange={v => set({ branding_enabled: v })} /></Row>
+    </Section>
+    <Section icon="spark" title="Task automation" desc="How generated tasks are created.">
+      <div><Label>Auto-assign tasks to</Label><Input value={form.auto_assign_name} onChange={e => set({ auto_assign_name: e.target.value })} placeholder="Team member name" /></div>
+      <div className="grid grid-cols-2 gap-3"><div><Label>Default status</Label><Select value={form.default_status} onChange={e => set({ default_status: e.target.value })}>{STATUSES.map(s => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}</Select></div><div><Label>Default priority</Label><Select value={form.default_priority} onChange={e => set({ default_priority: e.target.value })}><option value="">None</option>{Object.keys(PRIORITIES).map(p => <option key={p} value={p}>{PRIORITIES[p].label}</option>)}</Select></div></div>
+      <div><Label>Task template — default tags</Label><Input value={(tt.tags || []).join(', ')} onChange={e => set({ task_template: { ...tt, tags: e.target.value.split(',').map(s => s.trim()).filter(Boolean) } })} placeholder="intake, web (comma separated)" /></div>
+    </Section>
+  </div>;
+}
+
+/* ============================ Public form ============================ */
+function PublicForm({ form, fields, onSubmit }) {
+  const dark = form.theme === 'dark';
+  const [answers, setAnswers] = useState({}); const [errors, setErrors] = useState({}); const [done, setDone] = useState(false);
+  useEffect(() => { setAnswers({}); setErrors({}); setDone(false); }, [form.template_key]);
+  const setA = (k, v) => setAnswers(a => ({ ...a, [k]: v }));
+  const submit = e => { e.preventDefault(); const errs = {}; fields.forEach(fl => { if (fl.field_type === 'info_block') return; const k = keyOf(fl); const v = answers[k]; const empty = v == null || v === '' || v === false || (Array.isArray(v) && !v.length) || (v === 0 && fl.field_type === 'rating'); if (fl.required && empty) errs[k] = fl.label + ' is required'; }); setErrors(errs); if (Object.keys(errs).length) return; onSubmit(buildTask(form, fields, answers)); setDone(true); };
+  const inp = dark ? 'border-white/15 bg-white/5 text-white placeholder:text-zinc-500' : 'border-black/15 bg-white text-zinc-900 placeholder:text-zinc-400';
+  const base = 'w-full rounded-lg border px-3 py-2.5 text-sm focus:outline-none focus:ring-2 transition ' + inp;
+  const lbl = cx('mb-1.5 block text-sm font-medium', dark ? 'text-zinc-200' : 'text-zinc-700');
+  const Field = ({ fl }) => {
+    if (fl.field_type === 'info_block') return <div className={cx('rounded-lg border px-4 py-3', dark ? 'border-white/10 bg-white/5' : 'border-black/10 bg-black/5')}><p className={cx('text-sm font-semibold', dark ? 'text-zinc-100' : 'text-zinc-800')}>{fl.label}</p>{fl.help_text && <p className={cx('mt-1 text-sm', dark ? 'text-zinc-400' : 'text-zinc-500')}>{fl.help_text}</p>}</div>;
+    const k = keyOf(fl), v = answers[k], err = errors[k];
+    const L = () => <label className={lbl}>{fl.label}{fl.required && <span className="text-red-500"> *</span>}</label>;
+    const H = () => fl.help_text ? <p className={cx('mt-1 text-xs', dark ? 'text-zinc-500' : 'text-zinc-400')}>{fl.help_text}</p> : null;
+    const E = () => err ? <p className="mt-1 text-xs font-medium text-red-500">{err}</p> : null;
+    let ctrl;
+    if (fl.field_type === 'long_text') ctrl = <textarea rows={4} value={v || ''} placeholder={fl.placeholder} onChange={e => setA(k, e.target.value)} className={base + ' resize-y'} style={{ '--tw-ring-color': form.primary_color + '55' }} />;
+    else if (fl.field_type === 'dropdown') ctrl = <select value={v || ''} onChange={e => setA(k, e.target.value)} className={base + ' cursor-pointer'}><option value="">{fl.placeholder || 'Select…'}</option>{fl.options.map((o, i) => <option key={i} value={o.value}>{o.label}</option>)}</select>;
+    else if (fl.field_type === 'multi_select') { const arr = v || []; ctrl = <div className="flex flex-wrap gap-2">{fl.options.map((o, i) => { const on = arr.includes(o.value); return <button type="button" key={i} onClick={() => setA(k, on ? arr.filter(x => x !== o.value) : [...arr, o.value])} className={cx('rounded-full border px-3 py-1.5 text-xs font-medium transition', on ? 'text-white' : dark ? 'border-white/15 text-zinc-300' : 'border-black/15 text-zinc-600')} style={on ? { background: form.primary_color, borderColor: form.primary_color } : undefined}>{o.label}</button>; })}</div>; }
+    else if (fl.field_type === 'checkbox') return <div><label className="flex cursor-pointer items-start gap-2.5"><input type="checkbox" checked={!!v} onChange={e => setA(k, e.target.checked)} style={{ accentColor: form.primary_color }} className="mt-0.5 h-4 w-4" /><span className={cx('text-sm', dark ? 'text-zinc-200' : 'text-zinc-700')}>{fl.label}{fl.required && <span className="text-red-500"> *</span>}</span></label><E /></div>;
+    else if (fl.field_type === 'rating') { const sc = fl.config.scale || 5; ctrl = <div className="flex gap-1.5">{Array.from({ length: sc }).map((_, i) => <button type="button" key={i} onClick={() => setA(k, i + 1)}><svg width="28" height="28" viewBox="0 0 24 24" fill={i < (v || 0) ? form.primary_color : 'transparent'} stroke={form.primary_color} strokeWidth="2" style={{ opacity: i < (v || 0) ? 1 : .4 }} dangerouslySetInnerHTML={{ __html: ICONS.star }} /></button>)}</div>; }
+    else if (fl.field_type === 'file_upload') ctrl = <label className={cx('flex cursor-pointer items-center gap-3 rounded-lg border border-dashed px-4 py-3 text-sm', dark ? 'border-white/20 text-zinc-300' : 'border-black/20 text-zinc-600')}><Ic n="upload" s={16} /><span className="truncate">{v || 'Choose a file…'}</span><input type="file" className="hidden" accept={fl.config.accept || undefined} onChange={e => setA(k, e.target.files?.[0]?.name || '')} /></label>;
+    else if (fl.field_type === 'signature') ctrl = <SignaturePad value={v} onChange={val => setA(k, val)} />;
+    else ctrl = <input type={fl.field_type === 'email' ? 'email' : fl.field_type === 'number' ? 'number' : fl.field_type === 'date' ? 'date' : fl.field_type === 'phone' ? 'tel' : 'text'} value={v || ''} placeholder={fl.placeholder} onChange={e => setA(k, e.target.value)} className={base} style={{ colorScheme: dark ? 'dark' : 'light' }} />;
+    return <div><L />{ctrl}<H /><E /></div>;
+  };
+  return <div className={cx('min-h-full', dark ? 'bg-[#0f0f14]' : 'bg-zinc-100')} style={{ '--p': form.primary_color }}>
+    <div className="mx-auto w-full max-w-xl px-5 py-10">
+      <div className={cx('overflow-hidden rounded-2xl border shadow-xl', dark ? 'border-white/10 bg-[#1b1b23]' : 'border-black/10 bg-white')}>
+        <div className="h-1.5 w-full" style={{ background: form.primary_color }} />
+        <div className="px-6 py-7 sm:px-8">
+          <h1 className={cx('text-2xl font-extrabold tracking-tight', dark ? 'text-white' : 'text-zinc-900')}>{form.name}</h1>
+          {form.description && <p className={cx('mt-2 text-sm', dark ? 'text-zinc-400' : 'text-zinc-500')}>{form.description}</p>}
+          <div className="mt-6">
+            {done ? <div className="flex flex-col items-center py-8 text-center"><span style={{ color: form.primary_color }}><Ic n="check" s={44} /></span><p className={cx('mt-3 text-base font-bold', dark ? 'text-white' : 'text-zinc-900')}>{form.success_message}</p><p className={cx('mt-1 text-xs', dark ? 'text-zinc-500' : 'text-zinc-400')}>A task was created — open the Board tab.</p><button onClick={() => setDone(false)} className="mt-4 text-xs font-semibold underline" style={{ color: form.primary_color }}>Submit another</button></div>
+            : !fields.length ? <p className={cx('py-8 text-center text-sm', dark ? 'text-zinc-500' : 'text-zinc-400')}>Add fields in the Build tab to see them here.</p>
+            : <form onSubmit={submit} className="space-y-5">{fields.map(fl => <Field key={fl.id} fl={fl} />)}{form.recaptcha_enabled && <div className={cx('flex items-center gap-2 rounded-lg border px-3 py-2 text-xs', dark ? 'border-white/10 text-zinc-500' : 'border-black/10 text-zinc-400')}><span className="h-4 w-4 rounded border" /> Protected by reCAPTCHA</div>}<button type="submit" className="w-full rounded-lg px-4 py-3 text-sm font-bold text-white shadow transition hover:opacity-90" style={{ background: form.primary_color }}>{form.submit_label}</button></form>}
+          </div>
+        </div>
+      </div>
+      {form.branding_enabled && <p className={cx('mt-4 text-center text-xs', dark ? 'text-zinc-600' : 'text-zinc-400')}>Powered by <span className="font-bold" style={{ color: form.primary_color }}>TAKSAM Forms</span></p>}
+    </div>
+  </div>;
+}
+
+/* ============================ Board ============================ */
+function TaskMenuItem({ icon, label, onClick, danger }) {
+  return <button onClick={onClick} className={cx('flex w-full items-center gap-2.5 rounded-md px-2.5 py-2 text-left text-sm hover:bg-[#1c1c22]', danger ? 'text-[#ff6b6b]' : 'text-zinc-200')}><Ic n={icon} s={15} />{label}</button>;
+}
+
+const GROUP_COLORS = ['#8b95a5', '#EC4899', '#14B8A6', '#F5A524', '#8B5CF6', '#E5484D', '#3B82F6'];
+
+function Board({ tasks, cols, onCols, onMove, onUpdate, onDuplicate, onDelete, onAddTask }) {
+  const drag = useRef(null);
+  const [over, setOver] = useState(null);
+  const [menu, setMenu] = useState(null);        // task menu { id, x, y }
+  const [colMenu, setColMenu] = useState(null);  // group menu { key, x, y }
+  const [collapsed, setCollapsed] = useState({});
+  const [adding, setAdding] = useState(null);    // group key with open add-task input
+  const [addText, setAddText] = useState('');
+  const [newGroup, setNewGroup] = useState(false);
+  const [newText, setNewText] = useState('');
+  const setCols = onCols;  // groups are owned by App state so they persist across views
+
+  const colByKey = k => cols.find(c => c.key === k);
+  const firstKey = cols[0] ? cols[0].key : 'todo';
+  const grouped = {}; cols.forEach(c => grouped[c.key] = []); tasks.forEach(t => { (grouped[t.status] || grouped[firstKey]).push(t); });
+
+  const openMenu = (id, x, y) => setMenu({ id, x: Math.min(x, window.innerWidth - 234), y: Math.min(y, window.innerHeight - 360) });
+  const task = menu && tasks.find(t => t.id === menu.id);
+  const renameTask = (t) => { const v = window.prompt('Rename task', t.name); if (v != null && v.trim()) onUpdate(t.id, { name: v.trim() }); };
+
+  const addTask = (key) => { const v = addText.trim(); if (v) onAddTask(v, key); setAddText(''); setAdding(null); };
+  const addGroup = () => { const v = newText.trim(); if (v) { const key = slug(v) + '_' + Math.random().toString(36).slice(2, 5); setCols(cs => [...cs, { key, label: v.toUpperCase(), color: GROUP_COLORS[cs.length % GROUP_COLORS.length] }]); } setNewText(''); setNewGroup(false); };
+  const renameGroup = (c) => { const v = window.prompt('Rename group', c.label); if (v != null && v.trim()) setCols(cs => cs.map(x => x.key === c.key ? { ...x, label: v.trim().toUpperCase() } : x)); };
+  const deleteGroup = (c) => { if ((grouped[c.key] || []).length) { window.alert('Move or delete this group’s tasks first.'); return; } setCols(cs => cs.filter(x => x.key !== c.key)); };
+
+  return <>
+    <div className="flex h-full gap-4 overflow-x-auto p-1" style={{ minWidth: 'min-content' }}>
+      {cols.map(c => {
+        const s = c.key;
+        if (collapsed[s]) return <div key={s} onClick={() => setCollapsed(m => ({ ...m, [s]: false }))} title="Expand group" className="flex w-10 shrink-0 cursor-pointer flex-col items-center gap-2 rounded-xl border border-[#26262f] bg-[#14141a] py-3">
+          <Badge>{grouped[s].length}</Badge>
+          <span className="mt-1 text-[11px] font-bold tracking-wide" style={{ color: c.color, writingMode: 'vertical-rl' }}>{c.label}</span>
+        </div>;
+        return <div key={s}
+          onDragOver={e => { e.preventDefault(); if (over !== s) setOver(s); }}
+          onDragLeave={() => setOver(o => o === s ? null : o)}
+          onDrop={() => { if (drag.current) { onMove(drag.current, s); drag.current = null; } setOver(null); }}
+          className={cx('flex w-[300px] shrink-0 flex-col rounded-xl border bg-[#14141a] transition-colors', over === s ? 'border-[#7B68EE]' : 'border-[#26262f]')}>
+          <div className="flex items-center justify-between border-b border-[#26262f] px-3 py-2.5">
+            <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-bold tracking-wide" style={{ background: c.color + '22', color: c.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }} />{c.label}</span>
+            <div className="flex items-center gap-1"><Badge>{grouped[s].length}</Badge><button title="Group options" onClick={e => { const r = e.currentTarget.getBoundingClientRect(); setColMenu({ key: s, x: Math.min(r.right - 180, window.innerWidth - 190), y: r.bottom + 4 }); }} className="flex h-6 w-6 items-center justify-center rounded text-zinc-500 hover:bg-[#22222b] hover:text-zinc-100"><Ic n="dots" s={14} /></button></div>
+          </div>
+          <div className="flex-1 space-y-2.5 overflow-y-auto p-2.5">
+            {grouped[s].length === 0 && adding !== s && <p className="rounded-lg border border-dashed border-[#26262f] px-1 py-5 text-center text-xs text-zinc-600">Drop tasks here</p>}
+            {grouped[s].map(t => { const pm = PRIORITIES[t.priority]; const cust = Object.entries(t.custom || {}); return <div key={t.id} draggable onDragStart={() => { drag.current = t.id; }} onDragEnd={() => { drag.current = null; setOver(null); }} onContextMenu={e => { e.preventDefault(); openMenu(t.id, e.clientX, e.clientY); }} className="group relative cursor-grab rounded-lg border border-[#26262f] bg-[#0d0d12] p-3 transition hover:border-[#3a3a46] active:cursor-grabbing">
+              <div className="absolute right-2 top-2 flex items-center gap-0.5 opacity-0 transition group-hover:opacity-100">
+                <button title="Mark complete" onClick={e => { e.stopPropagation(); onMove(t.id, 'complete'); }} className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[#22222b] hover:text-emerald-400"><Ic n="check" s={14} /></button>
+                <button title="More" onClick={e => { e.stopPropagation(); const r = e.currentTarget.getBoundingClientRect(); openMenu(t.id, r.right - 220, r.bottom + 4); }} className="flex h-6 w-6 items-center justify-center rounded text-zinc-400 hover:bg-[#22222b] hover:text-zinc-100"><Ic n="dots" s={14} /></button>
+              </div>
+              <p className="pr-12 text-sm font-semibold text-zinc-100">{t.name}</p>
+              {t.description && <p className="mt-1 line-clamp-2 text-xs text-zinc-500">{t.description}</p>}
+              <div className="mt-2 flex flex-wrap gap-1.5">{pm && <Badge color={pm.color}><Ic n="flag" s={11} />{pm.label}</Badge>}{t.assignee && <Badge><Ic n="user" s={11} />{t.assignee}</Badge>}{t.due && <Badge><Ic n="clock" s={11} />{t.due}</Badge>}{(t.tags || []).map((tg, i) => <Badge key={i} className="bg-[#7B68EE]/15 text-[#a99bf5]"><Ic n="tag" s={11} />{tg}</Badge>)}</div>
+              {cust.length > 0 && <div className="mt-2 space-y-0.5 border-t border-[#1e1e26] pt-2">{cust.slice(0, 4).map(([k, v]) => <div key={k} className="flex gap-2 text-[11px]"><span className="text-zinc-500">{k}:</span><span className="truncate text-zinc-300">{String(v)}</span></div>)}</div>}
+              {t.example && <span className="mt-2 inline-block text-[10px] uppercase tracking-wide text-zinc-600">example</span>}
+            </div>; })}
+            {adding === s
+              ? <input autoFocus value={addText} onChange={e => setAddText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addTask(s); if (e.key === 'Escape') { setAdding(null); setAddText(''); } }} onBlur={() => addTask(s)} placeholder="Task name, then Enter" className="w-full rounded-lg border border-[#7B68EE] bg-[#0d0d12] px-3 py-2 text-sm text-zinc-100 outline-none" />
+              : <button onClick={() => { setAdding(s); setAddText(''); }} className="flex w-full items-center gap-1.5 rounded-lg px-2 py-1.5 text-left text-xs font-semibold text-zinc-500 transition hover:bg-[#1c1c22] hover:text-zinc-200"><Ic n="plus" s={13} /> Add Task</button>}
+          </div>
+        </div>;
+      })}
+      <div className="w-[220px] shrink-0 pt-1">
+        {newGroup
+          ? <input autoFocus value={newText} onChange={e => setNewText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') addGroup(); if (e.key === 'Escape') { setNewGroup(false); setNewText(''); } }} onBlur={addGroup} placeholder="Group name, then Enter" className="w-full rounded-lg border border-[#7B68EE] bg-[#14141a] px-3 py-2 text-sm text-zinc-100 outline-none" />
+          : <button onClick={() => { setNewGroup(true); setNewText(''); }} className="flex w-full items-center gap-1.5 rounded-lg border border-dashed border-[#26262f] px-3 py-2 text-sm font-semibold text-zinc-500 transition hover:border-[#7B68EE]/60 hover:text-zinc-200"><Ic n="plus" s={15} /> Add group</button>}
+      </div>
+    </div>
+
+    {colMenu && colByKey(colMenu.key) && <>
+      <div className="fixed inset-0 z-[90]" onClick={() => setColMenu(null)} />
+      <div className="fixed z-[95] w-[180px] rounded-xl border border-[#26262f] bg-[#0d0d12] p-1.5 shadow-2xl" style={{ left: colMenu.x, top: colMenu.y }}>
+        <TaskMenuItem icon="pen" label="Rename" onClick={() => { const c = colByKey(colMenu.key); setColMenu(null); renameGroup(c); }} />
+        <TaskMenuItem icon="chevUp" label="Collapse" onClick={() => { setCollapsed(m => ({ ...m, [colMenu.key]: true })); setColMenu(null); }} />
+        <div className="my-1 h-px bg-[#1e1e26]" />
+        <TaskMenuItem icon="trash" label="Delete group" danger onClick={() => { const c = colByKey(colMenu.key); setColMenu(null); deleteGroup(c); }} />
+      </div>
+    </>}
+
+    {menu && task && <>
+      <div className="fixed inset-0 z-[90]" onClick={() => setMenu(null)} onContextMenu={e => { e.preventDefault(); setMenu(null); }} />
+      <div className="fixed z-[95] w-[220px] rounded-xl border border-[#26262f] bg-[#0d0d12] p-1.5 shadow-2xl" style={{ left: menu.x, top: menu.y }}>
+        <p className="truncate px-2.5 pb-1 pt-1 text-[11px] font-semibold text-zinc-500">{task.name}</p>
+        <TaskMenuItem icon="pen" label="Rename" onClick={() => { setMenu(null); renameTask(task); }} />
+        <TaskMenuItem icon="copy" label="Duplicate" onClick={() => { onDuplicate(task.id); setMenu(null); }} />
+        <TaskMenuItem icon="check" label="Mark complete" onClick={() => { onMove(task.id, 'complete'); setMenu(null); }} />
+        <div className="my-1 h-px bg-[#1e1e26]" />
+        <p className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-zinc-600">Move to</p>
+        <div className="flex flex-wrap gap-1 px-2 pb-1.5">{cols.map(c => <button key={c.key} onClick={() => { onMove(task.id, c.key); setMenu(null); }} className={cx('rounded px-2 py-1 text-[10px] font-semibold', task.status === c.key && 'ring-1 ring-white/30')} style={{ background: c.color + '22', color: c.color }}>{c.label}</button>)}</div>
+        <p className="px-2.5 pb-1 text-[10px] font-bold uppercase tracking-wide text-zinc-600">Priority</p>
+        <div className="flex items-center gap-1 px-2 pb-1.5">
+          {Object.keys(PRIORITIES).map(pk => <button key={pk} title={PRIORITIES[pk].label} onClick={() => { onUpdate(task.id, { priority: pk }); setMenu(null); }} className="flex-1 rounded py-1.5 hover:bg-[#1c1c22]"><span className="mx-auto block h-2.5 w-2.5 rounded-full" style={{ background: PRIORITIES[pk].color }} /></button>)}
+          <button title="None" onClick={() => { onUpdate(task.id, { priority: '' }); setMenu(null); }} className="flex-1 rounded py-1 text-[10px] text-zinc-500 hover:bg-[#1c1c22]">None</button>
+        </div>
+        <div className="my-1 h-px bg-[#1e1e26]" />
+        <TaskMenuItem icon="trash" label="Delete" danger onClick={() => { onDelete(task.id); setMenu(null); }} />
+      </div>
+    </>}
+  </>;
+}
+
+/* ============================ ClickUp shell ============================ */
+function Rail({ onForms }) {
+  // Only the Forms icon (requested). It stays glowing as the active section.
+  const glow = 'bg-[#7B68EE] text-white shadow-[0_0_14px_rgba(123,104,238,0.75)]';
+  return <div className="flex w-[52px] shrink-0 flex-col items-center gap-1.5 border-r border-[#1e1e24] bg-[#0f0f12] py-2">
+    <button onClick={onForms} title="Forms" className={cx('flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-150', glow)}><Ic n="checkbox" s={18} /></button>
+  </div>;
+}
+function TopBar() {
+  const dim = 'text-zinc-500 hover:text-zinc-200';
+  return <div className="flex h-11 shrink-0 items-center gap-3 border-b border-[#1e1e24] bg-[#141417] px-3">
+    <button className="flex items-center gap-2 rounded-md px-2 py-1 hover:bg-[#1e1e24]"><span className="flex h-5 w-5 items-center justify-center rounded bg-gradient-to-br from-[#7B68EE] to-[#4a2d7a] text-[10px] font-bold text-white">T</span><span className="text-sm font-semibold text-zinc-100">Talha Tahir's Workspace</span><Ic n="chevDown" s={14} cls="text-zinc-500" /></button>
+    <button className={cx('rounded-md p-1', dim)}><Ic n="cal" s={16} /></button>
+    <div className="mx-auto flex items-center gap-2">
+      <button className={cx('rounded p-1', dim)}><Ic n="back" s={16} /></button>
+      <button className={cx('rounded p-1', dim)}><Ic n="fwd" s={16} /></button>
+      <div className="flex w-[360px] max-w-[40vw] items-center gap-2 rounded-lg border border-[#26262f] bg-[#0f0f13] px-3 py-1.5"><Ic n="search" s={15} cls="text-zinc-500" /><span className="text-sm text-zinc-500">Search</span><span className="ml-auto rounded bg-[#22222b] px-1.5 py-0.5 text-[10px] text-zinc-500">Ctrl J</span></div>
+      <button className="flex items-center gap-1.5 rounded-lg border border-[#26262f] px-2.5 py-1.5 text-xs font-semibold text-zinc-300 hover:bg-[#1e1e24]"><Ic n="spark" s={14} cls="text-[#a99bf5]" /> AI Chats</button>
+    </div>
+    <div className="flex items-center gap-1">
+      {['check','clip','video','mic','bell'].map((n, i) => <button key={i} className={cx('rounded p-1.5', dim)}><Ic n={n} s={16} /></button>)}
+      <div className="ml-1 h-7 w-7 rounded-full bg-gradient-to-br from-[#7B68EE] to-[#EC4899] ring-2 ring-[#2c1b4d]" />
+    </div>
+  </div>;
+}
+function FormsSidebar() {
+  return <div className="hidden w-[228px] shrink-0 flex-col border-r border-[#1e1e24] bg-[#0f0f13] md:flex">
+    <div className="flex items-center justify-between px-3 py-3"><h2 className="text-sm font-extrabold text-zinc-100">Forms</h2><IconBtn className="h-7 w-7"><Ic n="plus" s={16} /></IconBtn></div>
+    <div className="px-2">
+      <div className="flex items-center gap-2 rounded-lg bg-[#1c1c22] px-2.5 py-2 text-sm font-semibold text-zinc-100"><Ic n="checkbox" s={16} cls="text-[#a99bf5]" /> All Forms</div>
+      <div className="mt-0.5 flex items-center gap-2 rounded-lg px-2.5 py-2 text-sm text-zinc-400 hover:bg-[#16161a]"><span className="h-4 w-4 rounded-full bg-gradient-to-br from-[#F5A524] to-[#EC4899]" /> My Forms</div>
+    </div>
+    <div className="px-3 pt-5"><p className="text-[11px] font-bold uppercase tracking-wide text-zinc-600">Favorites</p>
+      <div className="mt-2 flex flex-col items-center justify-center rounded-lg border border-dashed border-[#26262f] px-3 py-6 text-center"><Ic n="star" s={18} cls="text-[#F5A524]" /><p className="mt-1.5 text-xs text-zinc-500">Star a Form to see it here</p></div>
+    </div>
+  </div>;
+}
+function Hub({ onPick }) {
+  return <div className="flex-1 overflow-y-auto">
+    <div className="mx-auto max-w-4xl px-6 py-16">
+      <h1 className="text-center text-[26px] font-extrabold tracking-tight text-white" style={{ textWrap: 'balance' }}>Choose a Form template</h1>
+      <p className="mx-auto mt-2 max-w-md text-center text-sm text-zinc-500">Create forms to kick off projects, collect feedback, and supercharge your productivity.</p>
+      <div className="mt-10 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {TEMPLATES.map(t => <button key={t.key} onClick={() => onPick(t.key)} className="group flex flex-col rounded-xl border border-[#22222a] bg-[#141418] p-5 text-left transition hover:-translate-y-0.5 hover:border-[#3a3a46] hover:bg-[#17171c] hover:shadow-lg">
+          <span className="flex h-12 w-12 items-center justify-center rounded-full" style={{ background: t.accent + '22', color: t.accent }}><Ic n={t.icon} s={22} /></span>
+          <span className="mt-4 text-[15px] font-bold text-zinc-100">{t.name}</span>
+          {t.desc && <span className="mt-1 text-[13px] leading-snug text-zinc-500">{t.desc}</span>}
+        </button>)}
+      </div>
+    </div>
+  </div>;
+}
+
+function LocationPicker({ onSelect, onClose }) {
+  const [q, setQ] = useState('');
+  const ql = q.trim().toLowerCase();
+  const spaces = SPACES
+    .map(s => ({ ...s, lists: s.lists.filter(l => !ql || l.name.toLowerCase().includes(ql) || s.name.toLowerCase().includes(ql)) }))
+    .filter(s => s.lists.length);
+  return <div className="relative flex-1 overflow-y-auto">
+    <button onClick={onClose} title="Close" className="absolute right-4 top-4 flex h-8 w-8 items-center justify-center rounded-full bg-[#1c1c22] text-zinc-400 hover:text-zinc-100"><Ic n="x" s={16} /></button>
+    <div className="mx-auto max-w-xl px-6 py-16 text-center">
+      <h1 className="text-[26px] font-extrabold text-white" style={{ textWrap: 'balance' }}>Where do you want submissions saved?</h1>
+      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-zinc-500">When a user submits a form, a task is created.<br />Select a List for responses.</p>
+      <div className="mt-8 rounded-xl border border-[#26262f] bg-[#0f0f13] p-3 text-left shadow-xl">
+        <div className="flex items-center gap-2 rounded-lg border border-[#26262f] bg-[#141418] px-3 py-2">
+          <Ic n="search" s={15} cls="text-zinc-500" />
+          <input autoFocus value={q} onChange={e => setQ(e.target.value)} placeholder="Search..." className="w-full bg-transparent text-sm text-zinc-100 placeholder:text-zinc-600 outline-none" />
+        </div>
+        <div className="mt-3 max-h-[300px] overflow-y-auto">
+          <p className="px-1 pb-1 text-[11px] font-bold uppercase tracking-wide text-zinc-600">Spaces</p>
+          {spaces.length === 0 && <p className="px-1 py-4 text-sm text-zinc-600">No matching lists</p>}
+          {spaces.map(s => <div key={s.id} className="mb-1">
+            <div className="flex items-center gap-2 rounded-md px-1.5 py-1.5 text-sm font-semibold text-zinc-200"><span className="flex h-5 w-5 items-center justify-center rounded text-[10px] font-bold text-white" style={{ background: s.color }}>{s.name[0]}</span>{s.name}</div>
+            {s.lists.map(l => <button key={l.id} onClick={() => onSelect(s, l)} className="flex w-full items-center gap-2 rounded-md py-1.5 pl-8 pr-2 text-left text-sm text-zinc-300 transition hover:bg-[#1c1c22]"><Ic n="checks" s={15} cls="text-zinc-500" />{l.name}</button>)}
+          </div>)}
+        </div>
+      </div>
+    </div>
+  </div>;
+}
+
+/* ============================ List view ============================ */
+function ListView({ tasks, cols, onMove, onUpdate, onDelete, onAddTask }) {
+  const [adding, setAdding] = useState(null);
+  const [text, setText] = useState('');
+  const grouped = {}; cols.forEach(c => grouped[c.key] = []); tasks.forEach(t => (grouped[t.status] || grouped[cols[0] && cols[0].key] || []).push(t));
+  const add = (k) => { const v = text.trim(); if (v) onAddTask(v, k); setText(''); setAdding(null); };
+  const rename = (t) => { const v = window.prompt('Rename task', t.name); if (v != null && v.trim()) onUpdate(t.id, { name: v.trim() }); };
+  return <div className="h-full overflow-y-auto p-5"><div className="mx-auto max-w-4xl space-y-5">
+    {cols.map(c => <div key={c.key}>
+      <div className="mb-1.5 flex items-center gap-2">
+        <span className="inline-flex items-center gap-1.5 rounded px-2 py-0.5 text-[11px] font-bold tracking-wide" style={{ background: c.color + '22', color: c.color }}><span className="h-1.5 w-1.5 rounded-full" style={{ background: c.color }} />{c.label}</span>
+        <span className="text-xs text-zinc-500">{grouped[c.key].length}</span>
+      </div>
+      <div className="overflow-hidden rounded-lg border border-[#26262f]">
+        {grouped[c.key].map((t, i) => { const pm = PRIORITIES[t.priority]; return <div key={t.id} className={cx('group flex items-center gap-3 px-3 py-2.5 text-sm', i > 0 && 'border-t border-[#1e1e26]')}>
+          <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: c.color }} />
+          <button onDoubleClick={() => rename(t)} title="Double-click to rename" className="flex-1 truncate text-left text-zinc-100">{t.name}</button>
+          {pm && <Badge color={pm.color}>{pm.label}</Badge>}
+          {t.assignee && <Badge><Ic n="user" s={11} />{t.assignee}</Badge>}
+          {t.due && <Badge><Ic n="clock" s={11} />{t.due}</Badge>}
+          <select value={t.status} onChange={e => onMove(t.id, e.target.value)} className="rounded border border-[#2c2c37] bg-[#0f0f14] px-1.5 py-1 text-[11px] text-zinc-300">{cols.map(x => <option key={x.key} value={x.key}>{x.label}</option>)}</select>
+          <button onClick={() => onDelete(t.id)} title="Delete" className="text-zinc-500 opacity-0 transition hover:text-red-400 group-hover:opacity-100"><Ic n="trash" s={14} /></button>
+        </div>; })}
+        {adding === c.key
+          ? <div className={cx('px-3 py-2', grouped[c.key].length > 0 && 'border-t border-[#1e1e26]')}><input autoFocus value={text} onChange={e => setText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') add(c.key); if (e.key === 'Escape') { setAdding(null); setText(''); } }} onBlur={() => add(c.key)} placeholder="Task name, then Enter" className="w-full bg-transparent text-sm text-zinc-100 outline-none placeholder:text-zinc-600" /></div>
+          : <button onClick={() => { setAdding(c.key); setText(''); }} className={cx('flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs font-semibold text-zinc-500 transition hover:bg-[#1c1c22] hover:text-zinc-200', grouped[c.key].length > 0 && 'border-t border-[#1e1e26]')}><Ic n="plus" s={13} /> Add Task</button>}
+      </div>
+    </div>)}
+  </div></div>;
+}
+
+/* ============================ App ============================ */
+function App() {
+  const LS_KEY = 'taksam_fb_demo_v1';
+  const loadSaved = () => { try { const s = JSON.parse(localStorage.getItem(LS_KEY)); if (s && s.form) return s; } catch { /* noop */ } return null; };
+  const saved = loadSaved();
+  const defaultForm = () => { const b = TEMPLATES[1].build(); return { name: b.name, description: b.description || '', template_key: 'project_intake', theme: 'light', primary_color: b.primary_color, submit_label: 'Submit', success_message: 'Thanks! Your response has been recorded.', redirect_url: '', recaptcha_enabled: false, branding_enabled: true, auto_assign_name: 'Alex Rivera', default_status: 'todo', default_priority: 'normal', task_template: { tags: ['intake'], description: '' }, space_name: 'Team Space', list_name: 'Incoming', status: 'draft' }; };
+  const defaultCols = () => STATUSES.map(s => ({ key: s, label: STATUS_LABEL[s], color: STATUS_DOT[s] }));
+  const defaultTasks = () => ([
+    { id: uid(), name: 'Marketing site refresh', description: 'Refresh the homepage and pricing page.', status: 'in_progress', priority: 'high', assignee: 'Alex Rivera', due: '', tags: ['intake', 'web'], custom: { 'Requested by': 'Sam Lee', 'Budget': '8000' }, created: Date.now(), example: true },
+    { id: uid(), name: 'Logo feedback', description: 'Received via the feedback form.', status: 'todo', priority: 'normal', assignee: '', due: '', tags: ['feedback'], custom: { 'Satisfaction': '4 / 5' }, created: Date.now(), example: true },
+  ]);
+
+  const [view, setView] = useState('hub');        // hub | location | workspace
+  const [wsView, setWsView] = useState('form');   // form | list | board
+  const [tab, setTab] = useState('build');        // build | settings | preview
+  const [form, setForm] = useState(saved && saved.form ? saved.form : defaultForm());
+  const [fields, setFields] = useState(saved && saved.fields ? saved.fields : []);
+  const [tasks, setTasks] = useState(saved && saved.tasks ? saved.tasks : defaultTasks());
+  const [cols, setCols] = useState(saved && saved.cols ? saved.cols : defaultCols());
+  const [selectedId, setSelectedId] = useState(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pendingTpl, setPendingTpl] = useState(null);
+
+  // Persist so deletions / added groups don't reappear after reload.
+  useEffect(() => { try { localStorage.setItem(LS_KEY, JSON.stringify({ form, fields, tasks, cols })); } catch { /* noop */ } }, [form, fields, tasks, cols]);
+
+  const moveTask = (id, status) => setTasks(ts => ts.map(t => t.id === id ? { ...t, status } : t));
+  const updateTask = (id, patch) => setTasks(ts => ts.map(t => t.id === id ? { ...t, ...patch } : t));
+  const deleteTask = (id) => setTasks(ts => ts.filter(t => t.id !== id));
+  const duplicateTask = (id) => setTasks(ts => { const t = ts.find(x => x.id === id); if (!t) return ts; return [{ ...t, id: uid(), name: t.name + ' (copy)', example: false }, ...ts]; });
+  const addTask = (name, status) => setTasks(ts => [{ id: uid(), name, description: '', status, priority: '', assignee: '', due: '', tags: [], custom: {}, created: Date.now() }, ...ts]);
+
+  const setF = patch => setForm(p => ({ ...p, ...patch }));
+  const selected = fields.find(f => f.id === selectedId) || null;
+
+  const pickTemplate = key => { setPendingTpl(key); setView('location'); };
+  const chooseLocation = (space, list) => { const t = TEMPLATES.find(x => x.key === pendingTpl) || TEMPLATES[0]; const b = t.build(); setForm({ ...defaultForm(), name: b.name, description: b.description || '', primary_color: b.primary_color, template_key: pendingTpl, status: 'draft', space_name: space.name, list_name: list.name }); const fl = withPos(b.fields); setFields(fl); setSelectedId(fl[0]?.id || null); setTasks([]); setCols(defaultCols()); setTab('build'); setWsView('form'); setView('workspace'); };
+  const addField = fl => { setFields(fs => withPos([...fs, fl])); setSelectedId(fl.id); setPickerOpen(false); };
+  const changeField = up => setFields(fs => fs.map(f => f.id === up.id ? up : f));
+  const dupField = id => setFields(fs => { const i = fs.findIndex(f => f.id === id); if (i < 0) return fs; const c = { ...fs[i], id: uid(), label: fs[i].label + ' (copy)' }; const n = [...fs]; n.splice(i + 1, 0, c); setSelectedId(c.id); return withPos(n); });
+  const delField = id => { setFields(fs => withPos(fs.filter(f => f.id !== id))); if (selectedId === id) setSelectedId(null); };
+
+  const published = form.status === 'published';
+  const SUBTABS = [['build', 'blocks', 'Build'], ['settings', 'settings', 'Settings'], ['preview', 'eye', 'Preview']];
+  const VIEWS = [['list', 'list', 'List'], ['board', 'board', 'Board'], ['form', 'align', form.name || 'Form']];
+
+  return <div className="flex h-full flex-col">
+    <TopBar />
+    <div className="flex min-h-0 flex-1">
+      <Rail onForms={() => setView('hub')} />
+      {view === 'hub' ? <><FormsSidebar /><Hub onPick={pickTemplate} /></>
+        : view === 'location' ? <><FormsSidebar /><LocationPicker onSelect={chooseLocation} onClose={() => setView('hub')} /></> : (
+        <div className="flex min-w-0 flex-1 flex-col bg-[#0d0d10]">
+          <div className="flex flex-wrap items-center gap-3 border-b border-[#1e1e24] px-4 py-2.5">
+            <IconBtn onClick={() => setView('hub')} title="Back to Forms"><Ic n="back" s={18} /></IconBtn>
+            <div className="min-w-0">
+              <input value={form.name} onChange={e => setF({ name: e.target.value })} className="w-48 truncate rounded bg-transparent px-1 text-sm font-bold text-zinc-100 outline-none hover:bg-[#1b1b23] focus:bg-[#1b1b23]" />
+              <div className="flex items-center gap-1.5 px-1"><Ic n="pin" s={11} cls="text-zinc-600" /><span className="text-[11px] text-zinc-500">{form.space_name} <span className="text-zinc-600">/</span> {form.list_name} · List</span><Badge className={published ? 'bg-[#10B981]/15 text-[#34d399]' : 'bg-[#F5A524]/15 text-[#f5c17a]'}>{published ? 'Published' : 'Draft'}</Badge></div>
+            </div>
+            <div className="ml-auto flex items-center gap-2">
+              <div className="inline-flex rounded-lg bg-[#141418] p-1 border border-[#26262f]">{VIEWS.map(([v, ic, lb]) => <button key={v} onClick={() => setWsView(v)} className={cx('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-semibold transition', wsView === v ? 'bg-[#7B68EE] text-white' : 'text-zinc-400 hover:text-zinc-100')}><Ic n={ic} s={15} /><span className="max-w-[140px] truncate">{lb}</span></button>)}</div>
+              <Btn size="sm" variant={published ? 'outline' : 'primary'} onClick={() => setF({ status: published ? 'draft' : 'published' })}><Ic n="send" s={15} /> {published ? 'Unpublish' : 'Publish'}</Btn>
+            </div>
+          </div>
+
+          {wsView === 'form' && <div className="flex min-h-0 flex-1 flex-col">
+            <div className="flex items-center gap-1 border-b border-[#1e1e24] px-4 py-1.5">{SUBTABS.map(([v, ic, lb]) => <button key={v} onClick={() => setTab(v)} className={cx('inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition', tab === v ? 'bg-[#1c1c22] text-zinc-100' : 'text-zinc-500 hover:text-zinc-200')}><Ic n={ic} s={14} />{lb}</button>)}</div>
+            <div className="min-h-0 flex-1 overflow-hidden">
+              {tab === 'build' && <div className="grid h-full grid-cols-1 lg:grid-cols-[1fr_336px]">
+                <div className="overflow-y-auto p-6"><div className="mx-auto max-w-2xl"><div className="mb-4 flex items-center justify-between"><div><h2 className="text-sm font-bold text-zinc-200">Canvas</h2><p className="text-xs text-zinc-500">{fields.length} field{fields.length === 1 ? '' : 's'}</p></div><Btn size="sm" onClick={() => setPickerOpen(true)}><Ic n="plus" s={15} /> Add fields</Btn></div><Canvas fields={fields} selectedId={selectedId} onSelect={setSelectedId} onReorder={fs => setFields(withPos(fs))} onDup={dupField} onDel={delField} onAdd={() => setPickerOpen(true)} /><div className="mt-3"><AddQuestionMenu onAdd={addField} /></div></div></div>
+                <aside className="hidden border-l border-[#1e1e24] bg-[#0d0d12] lg:block"><FieldEditor field={selected} onChange={changeField} onClose={() => setSelectedId(null)} /></aside>
+              </div>}
+              {tab === 'settings' && <div className="h-full overflow-y-auto p-6"><SettingsView form={form} set={setF} /></div>}
+              {tab === 'preview' && <div className="h-full overflow-y-auto"><PublicForm form={form} fields={fields} onSubmit={t => setTasks(ts => [{ ...t }, ...ts])} /></div>}
+            </div>
+          </div>}
+
+          {wsView === 'list' && <div className="min-h-0 flex-1"><ListView tasks={tasks} cols={cols} onMove={moveTask} onUpdate={updateTask} onDelete={deleteTask} onAddTask={addTask} /></div>}
+
+          {wsView === 'board' && <div className="min-h-0 flex-1 overflow-hidden p-5"><Board tasks={tasks} cols={cols} onCols={setCols} onMove={moveTask} onUpdate={updateTask} onDuplicate={duplicateTask} onDelete={deleteTask} onAddTask={addTask} /></div>}
+        </div>
+      )}
+    </div>
+    <FieldPicker open={pickerOpen} onClose={() => setPickerOpen(false)} onAdd={addField} />
+  </div>;
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
