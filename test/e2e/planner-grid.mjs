@@ -366,7 +366,7 @@ try {
   server.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
       `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
         'so "0 failed" describes the part it reached and nothing else.',

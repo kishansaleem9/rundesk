@@ -302,7 +302,7 @@ try {
 
 const ran = passed + failed
 console.log(`\n${passed}/${ran} passed`)
-if (ran < EXPECTED_CHECKS) {
+if (ran !== EXPECTED_CHECKS) {
   console.error(`\x1b[31monly ${ran} of ${EXPECTED_CHECKS} checks ran — the suite stopped early\x1b[0m`)
   process.exit(1)
 }

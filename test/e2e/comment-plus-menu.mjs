@@ -309,13 +309,23 @@ try {
     await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from projects where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from spaces where name like ${'%' + TAG}`.catch(() => {})
+    /*
+     * AND THE WORKSPACE. This suite creates one (`WS <TAG>`) and used to leave
+     * it behind, so the shared admin account gained one more per run, for ever.
+     * That matters because 46 other suites pick their workspace with
+     * `workspaces[0]` — a POSITION, not an identity — and the meaning of
+     * element zero drifts as the list grows. It is the mechanism behind the
+     * `save-comment` 403 fixed in 5b30bd1, which surfaced as a privacy failure
+     * when nothing about privacy was wrong.
+     */
+    await sql`delete from workspaces where name like ${'%' + TAG}`.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
       `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
         'so "0 failed" describes the part it reached and nothing else.',

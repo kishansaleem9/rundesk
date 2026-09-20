@@ -91,7 +91,7 @@ const done = async () => {
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  if (ran !== EXPECTED_CHECKS) {
     console.log(`\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early.`)
     process.exit(1)
   }
