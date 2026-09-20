@@ -180,8 +180,8 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs NINETY-THREE. At the same 1.1 minutes each that is about
-    # 102 minutes plus setup. 120 would still fit, with eighteen minutes of
+    # The job now runs NINETY-SIX. At the same 1.1 minutes each that is about
+    # 106 minutes plus setup. 120 would still fit, with fourteen minutes of
     # headroom — but the count has gone 50 → 85 → 88 → 93 in a day, and a limit
     # whose margin is thinner than one session's growth is a limit that fails
     # on somebody else's commit. 150.
@@ -1281,6 +1281,40 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
           DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §S16 frame `15:20` — the task header's next-status and mark-complete
+      # controls. Statuses are PER LIST, so the suite deletes all six defaults
+      # and renames the pipeline: a control that writes a hard-coded `done` has
+      # nothing left to match, and check 15 proves a list with no closed status
+      # disables the tick rather than inventing one.
+      - name: Task header status controls
+        if: '!cancelled()'
+        run: node test/e2e/task-header-status.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §S01 `[01:55]` — the activity feed's search and action filter. The
+      # needle is staged a year back beneath 120 newer entries, because the
+      # unfiltered read is capped at 100 — so a filter applied in the browser
+      # provably cannot find it. The confident zero, made unreachable.
+      - name: Task activity search and filter
+        if: '!cancelled()'
+        run: node test/e2e/task-activity-filter.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §S01 `[15:30]` — defining a custom field from an open task. Two lists in
+      # one project, so `scope` can be falsified against a sibling rather than
+      # only asserted on the list that set it.
+      - name: Create a custom field from a task
+        if: '!cancelled()'
+        run: node test/e2e/task-field-create.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
 
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not

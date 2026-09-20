@@ -711,9 +711,15 @@ How that is made up, so the number can be checked rather than believed:
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | §2, the sections table | 79 | 12 | 41 | 132 |
-| §5, recovered from the frame observations | 15 | 5 | 21 | 41 |
+| §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
 | §6, corrections applied to the above | −6 | +4 | +2 | 0 |
-| **consolidated** | **88** | **21** | **64** | **173** |
+| **consolidated** | **104** | **20** | **49** | **173** |
+
+Sixteen of §5's rows closed after it was written, each named with the suite
+that proves it — see the `closed by:` line on the row itself. A row is not
+moved here on the strength of the code having been written; it is moved when a
+suite exercises it against a real API, a real Postgres and a real browser, and
+the number beside it is that suite's check count.
 
 THE COUNT GOES UP WHEN THE AUDIT GETS BETTER, and that is the normal direction.
 The first audit compressed 116 frames into 14 items. This file reached 132 by
@@ -823,7 +829,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   (no workspace-level tasks route). `packages/db/src/schema/personal-tasks.ts:6-12`
   describes personal tasks as *"shown under Home → Personal List"*, i.e. one
   card on Home rather than a navigable section.
-- status: M
+- status: B
+- closed by: sidebar-sections 25/25
 - defect class: none
 - why not already a row: the ledger's `B | Rail sections **Assigned to me** and
   **Today & overdue**` is the **Planner** rail at frame `13:05`
@@ -847,7 +854,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   and renders no channel list. Channels live on the chat page only —
   `apps/web/src/pages/workspace-chat-page.tsx:421-422` splits
   `publicChannels`/`dmChannels`, drawn by `chat-sidebar.tsx:584`.
-- status: M
+- status: B
+- closed by: sidebar-sections 25/25
 - defect class: none
 - why not already a row: the ledger has `P | Sidebar Direct Messages — exists on
   the chat page, not the workspace tree`, which is the **sibling** section. The
@@ -948,7 +956,8 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
   (`ACTIVITY_PREVIEW = 10` plus "Show more"). There is no search input and no
   action-type filter anywhere in that component. The bell **is** built —
   `:1140-1149` is the watcher button with its count.
-- status: M
+- status: B
+- closed by: task-activity-filter 15/15
 - defect class: none
 - why not already a row: the ledger's two activity rows are
   `B | Relative times in the activity feed + "Show more"` and `B | **Activity
@@ -1396,7 +1405,8 @@ file never transcribed (`Card size`, `Card cover`).
   (route `app.$workspaceId.import.tsx`) and
   `apps/web/src/pages/workspace-templates-page.tsx` — just not from the point
   where somebody has decided to create something in this space.
-- status: M
+- status: B
+- closed by: sidebar-sections 25/25
 - defect class: none
 - why not already a row: `P | "+" on a space is a single action, not the 8-item
   menu` is the nearest, and it has been built — so it now reads as closed. The
@@ -1428,7 +1438,8 @@ file never transcribed (`Card size`, `Card cover`).
     `packages/db/src/migrations/*.sql` finds no folder equivalent of `0147`'s
     partial case-insensitive `(project_id, lower(name))` index. Three folders
     called "Clients" in one space are reachable today.
-- status: M
+- status: B
+- closed by: folder-create 20/20
 - defect class: none — but note the shape: one rule ("a container's name is
   unique and a failure is announced") implemented for lists and not for the
   sibling container created by the same menu.
@@ -1454,7 +1465,8 @@ file never transcribed (`Card size`, `Card cover`).
   `startOfMonth(new Date())` and is only ever moved by the two arrows
   (`:2858-2862`, `:2900-2904`), so once you have paged to March there is no
   control that returns you to the current period — you count back.
-- status: M
+- status: B
+- closed by: list-view-controls 49/49
 - defect class: none
 - why not already a row: `B | Calendar view, Gantt (today line, zoom, drag,
   critical path)` marks the calendar built and spends its detail on the Gantt.
@@ -1480,7 +1492,8 @@ file never transcribed (`Card size`, `Card cover`).
   `BOARD_CARD_ESTIMATE_PX` and `BoardTaskCard` (`:4730-4815`) has no size prop.
   (The view NAME is editable — `renameSavedView` on the tab's own menu,
   `.../$listId.tsx:2020` — just not from this panel. That half is built.)
-- status: M
+- status: B
+- closed by: list-card-cover 26/26
 - defect class: none
 - why not already a row: `M | Customize: Stack fields, Show empty fields,
   Collapse empty columns` is the row for this part of the panel and it names
@@ -1504,7 +1517,8 @@ file never transcribed (`Card size`, `Card cover`).
   `getTasksByList` (`:2106`) selects neither column, so the cover a person set
   through `cover-image-picker.tsx` is invisible everywhere except the task
   sheet that set it.
-- status: M
+- status: B
+- closed by: list-card-cover 26/26
 - defect class: its mirror — `tasks.cover_storage_key` / `cover_image_url` are
   written by a shipped, tested picker and read by exactly one surface.
 - why not already a row: the S01–S06 table has `B | Cover: Gallery / Upload /
@@ -1531,7 +1545,8 @@ file never transcribed (`Card size`, `Card cover`).
   from Add Task, and both land in the list's default status. Creating into a
   named group without leaving the list is not possible; grouping by priority
   (`:3157`) or assignee (`:3094`) has no equivalent anywhere.
-- status: M
+- status: B
+- closed by: list-view-controls 49/49
 - defect class: none
 - why not already a row: `B | Board view: … **per-lane add** …` is the nearest
   and it is the board. On the board a lane is a drop target and a creator; in
@@ -1555,7 +1570,8 @@ file never transcribed (`Card size`, `Card cover`).
   the in-list search that matches none of them, tells you the list is empty and
   invites you to create the first one. Nothing on that screen names the search,
   the assignee select or the filter rules, and nothing clears them.
-- status: M
+- status: B
+- closed by: list-empty-states 23/23
 - defect class: the confident zero — the verdict "there is nothing here" is read
   off the filtered set and reported as a fact about the list.
 - why not already a row: `B | In-list search, Save-view chip, filter rules,
@@ -1647,7 +1663,8 @@ file never transcribed (`Card size`, `Card cover`).
   over `apps/web/src/components/workspace-sidebar.tsx` returns **nothing** — the
   tree has no drag at all. (The list route has dnd-kit for the board and HTML5
   drag for the calendar; the sidebar has neither.)
-- status: P
+- status: B
+- closed by: sidebar-sections 25/25
 - defect class: none
 - why not already a row: `B | Skeletons on load; sidebar hierarchy; breadcrumb`
   covers the frame's *picture* — the hierarchy is drawn correctly — and nothing
@@ -1904,7 +1921,8 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   `apps/api/src/modules/ai/ai.service.ts:2947`, which is the `/ai/command` path;
   `chatStream` (`ai.service.ts:1467-1575`) passes **no `tools` array at all**,
   so the Ask surface — the one the frames use — cannot act on anything.
-- status: M
+- status: B
+- closed by: ai-create-containers 33/33
 - defect class: none (honest absence)
 - why not already a row: the ledger's S18–S22 block has `B | **Live step log**`
   and `B | **"No changes made."**; … **Follow ups**`, which are the *narration*
@@ -1927,7 +1945,8 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   (`grep -n "^import" … | grep -i markdown` → nothing), although
   `apps/web/src/components/markdown.tsx` exists and the comment composer already
   uses it. Line breaks survive; every other mark does not.
-- status: M
+- status: B
+- closed by: ai-answer-rendering 30/30
 - defect class: the duplicated list — one product with a block-markdown renderer
   already built and shipped for comments, and a second answer surface that
   re-implements "show the text" as string interpolation.
@@ -1949,7 +1968,8 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   `{error}` — `apps/api/src/modules/ai/ai.service.ts:1533-1560`) and no
   hydrating component. `apps/web/src/components/mention-text.tsx` resolves
   `@`-mentions in comments and is not reachable from the AI panel.
-- status: M
+- status: B
+- closed by: ai-answer-rendering 30/30
 - defect class: none
 - why not already a row: the ledger has `M | Success message with clickable path
   chips (rundesk › ddddd › List)`, which is the **container** chip from `18:48`.
@@ -2027,7 +2047,8 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   three POST call sites for creating a definition are
   `quick-create-modal.tsx:424`, `workspace-project-shell-page.tsx:762` and
   `app.$workspaceId.$spaceId.$projectId.$listId.tsx:1442`. None is on the task.
-- status: M
+- status: B
+- closed by: task-field-create 16/16
 - defect class: none for the absence — but the three existing creation paths are
   the standing duplicated-list hazard this audit has already hit twice, so a
   fourth must reuse one of them rather than add another.
@@ -2052,7 +2073,8 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   `statusOptions`. `grep -n "nextStatus\|advanceStatus\|markComplete" ` over the
   file returns nothing, and the header's action row (`:1178-1240`) is milestone,
   reminder, favourite, expand, save-as-template, `···` — no status control.
-- status: M
+- status: B
+- closed by: task-header-status 15/15
 - defect class: none
 - why not already a row: no ledger row in any section names the task's status
   control. The underlying capability (change a task's status from the detail
