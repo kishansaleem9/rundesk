@@ -172,9 +172,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs EIGHTY-EIGHT. At the same 1.1 minutes each that is about
-    # 97 minutes plus setup, so 75 would have failed exactly the same way. 120,
-    # which still has room — re-check it before it does not.
+    # The job now runs NINETY-THREE. At the same 1.1 minutes each that is about
+    # 102 minutes plus setup. 120 would still fit, with eighteen minutes of
+    # headroom — but the count has gone 50 → 85 → 88 → 93 in a day, and a limit
+    # whose margin is thinner than one session's growth is a limit that fails
+    # on somebody else's commit. 150.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -188,7 +190,7 @@ jobs:
     # Splitting across parallel jobs shortens the WALL CLOCK and not the bill —
     # the minutes are the same either way, plus a second setup — so it is worth
     # doing when somebody is waiting on the result, not to save the budget.
-    timeout-minutes: 120
+    timeout-minutes: 150
 
     services:
       postgres:
@@ -1212,6 +1214,65 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
+
+      # `spaces.default_permission` was written by the wizard, validated on create
+      # AND on update, and read by nothing — the mirror defect, with database
+      # columns standing as evidence for a feature that did not exist. Every
+      # check asserts the SERVER refuses and the row is unchanged afterwards;
+      # a UI that merely hides the control would pass none of them.
+      - name: Space default permission is enforced
+        if: '!cancelled()'
+        run: node test/e2e/space-default-permission.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §S09 `[08:55]` — a folder name collision is reported, not swallowed. The
+      # direct-SQL-insert check proves the INDEX refuses, so the rule cannot be
+      # bypassed by anything that writes folders another way.
+      - name: Folder create and name collisions
+        if: '!cancelled()'
+        run: node test/e2e/folder-create.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §S01 `[06:25]` — the sidebar's Channels and My Tasks sections, drag into a
+      # folder, and Recent Chats past the first five. The drag check asserts the
+      # TREE redraws, not just that the column moved: the bug it was written for
+      # lived in the gap between the two.
+      - name: Sidebar sections and drag
+        if: '!cancelled()'
+        run: node test/e2e/sidebar-sections.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §S18 `[17:44]`/`[18:45]` — the AI can create a list or a folder.
+      # `COMMAND_TOOLS` was six task-only tools and `chatStream` passed none at
+      # all. Every check asserts the ROW IN POSTGRES, never the assistant's
+      # words: a tool that reports success and writes nothing is the facade
+      # defect with a model in front of it.
+      - name: AI creates containers
+        if: '!cancelled()'
+        run: node test/e2e/ai-create-containers.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §S20 `[20:10]` — AI answers render markdown, with task chips carrying a
+      # live status badge and a ghost reference degrading to inert text rather
+      # than to a chip that lies.
+      - name: AI answer rendering
+        if: '!cancelled()'
+        run: node test/e2e/ai-answer-rendering.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
