@@ -48,7 +48,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 33
+const EXPECTED_CHECKS = 34
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -308,17 +308,50 @@ try {
    * AND OFF AGAIN. A control that keys its effect on a value rather than on the
    * change is dead on the second press; only the second half of the round trip
    * catches that.
+   *
+   * THE FIRST VERSION OF THIS CHECK WAS DECIDED BY CACHE TIMING, NOT BY THE
+   * PRODUCT, and it is worth writing down so it is not reintroduced.
+   * `apps/web/src/lib/query.ts:6` sets `staleTime: 30_000` on every query, so
+   * untoggling returns the observer to the queryKey fetched seconds earlier,
+   * which is still fresh: TanStack serves it from cache and NO REQUEST FIRES
+   * AT ALL. The check then asserted over an empty array — and had the run taken
+   * more than thirty seconds to reach this line the entry would have gone
+   * stale, a request would have fired, and the same code would have passed. A
+   * check whose answer depends on how fast the runner is, is a flake wearing an
+   * assertion's clothes.
+   *
+   * The falsifiable question the untoggle actually raises is whether `userId`
+   * left the STATE or merely stopped being drawn, so it is asked in two halves,
+   * neither of which can be answered by the cache:
+   *
+   *   · the control itself flipped back, and
+   *   · the next thing the page asks the server for — forced to MISS the cache
+   *     by moving to a range this run has never fetched — carries no `userId`.
+   *
+   * If "mine" had stopped being drawn while staying true in state, that forced
+   * request would still carry it.
    */
-  const beforeUntoggle = calls.length
   await page.getByTestId('ai-activity-mine').click()
-  const droppedUser = await waitUntil(
-    () => calls.slice(beforeUntoggle).some((u) => !u.includes('userId=')),
-    { timeoutMs: 10_000 },
-  )
+  await page.waitForTimeout(400)
   chk(
-    droppedUser,
-    'and pressing it again takes `userId` back out',
-    `the requests after untoggling were ${JSON.stringify(calls.slice(beforeUntoggle))}`,
+    (await page.getByTestId('ai-activity-mine').getAttribute('data-on')) === 'false',
+    'pressing it again turns the control back off',
+    `the toggle still reads data-on="${await page.getByTestId('ai-activity-mine').getAttribute('data-on')}" ` +
+      '— it can be switched on and never off',
+  )
+  const beforeMiss = calls.length
+  // Every request so far has used the 30-day range, so 7 days is a queryKey
+  // this run has never fetched: the refetch happens whatever the cache holds.
+  await page.getByTestId('ai-value-range-7').click()
+  const refetched = await waitUntil(() => calls.length > beforeMiss, { timeoutMs: 15_000 })
+  const forcedCall = calls[calls.length - 1] ?? ''
+  chk(
+    refetched && !forcedCall.includes('userId='),
+    'and `userId` is gone from the next thing the page asks for',
+    refetched
+      ? `the forced request was ${JSON.stringify(forcedCall)} — "mine" is still on in state, ` +
+          'it has only stopped being drawn'
+      : 'no activity request fired even after a guaranteed cache miss, so this proved nothing',
   )
 
   const beforeStatus = calls.length

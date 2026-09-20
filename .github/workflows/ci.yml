@@ -164,23 +164,30 @@ jobs:
     # The long job. Skipped when the push was prose only.
     needs: changes
     if: needs.changes.outputs.code == 'true'
-    # THE COMMENT HERE WAS STALE BY TWENTY-NINE SUITES, and the number under it
-    # would have failed the run.
+    # THIS NUMBER GOES STALE EVERY TIME A SUITE IS ADDED, AND IT HAS TWICE.
     #
-    # It said "it now runs twenty-one" and set 32 minutes, measured off the run
-    # at 2cd5d0a: seventeen suites in 18m30s, so roughly 1.1 minutes each. This
-    # job now runs FIFTY. At the rate its own comment records that is about 55
-    # minutes plus setup — so 32 was not a backstop any more, it was a
-    # guaranteed failure a few suites from the end, after paying for all of it.
+    # First it said "it now runs twenty-one" at 32 minutes, measured off the run
+    # at 2cd5d0a: seventeen suites in 18m30s, so roughly 1.1 minutes each — by
+    # then the job ran FIFTY, about 55 minutes, and 32 was not a backstop any
+    # more but a guaranteed failure a few suites from the end, after paying for
+    # all of it. It was raised to 75 for those fifty.
     #
-    # 75 costs nothing when the job finishes sooner: GitHub bills the runtime,
+    # The job now runs EIGHTY-FIVE. At the same 1.1 minutes each that is about
+    # 94 minutes plus setup, so 75 would have failed exactly the same way. 120.
+    #
+    # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
+    # this job gives the count; multiply by 1.1 and add a few minutes of setup.
+    # A limit that is merely old reads as a flaky pipeline, and a flaky pipeline
+    # is one nobody looks at.
+    #
+    # 120 costs nothing when the job finishes sooner: GitHub bills the runtime,
     # not the limit. The limit only decides whether a slow run is allowed to
     # finish or is killed with the answer half-written.
     #
     # Splitting across parallel jobs shortens the WALL CLOCK and not the bill —
     # the minutes are the same either way, plus a second setup — so it is worth
     # doing when somebody is waiting on the result, not to save the budget.
-    timeout-minutes: 75
+    timeout-minutes: 120
 
     services:
       postgres:
@@ -1018,6 +1025,164 @@ jobs:
       - name: List view controls
         if: '!cancelled()'
         run: node test/e2e/list-view-controls.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Work marked done has to count as done. Six of seven list-creation paths
+      # never seeded a status pipeline, and `resolveStatusForList` answered
+      # `category: 'open'` for ANY key on a list with none — so `done` stored
+      # `status='done'` and `statusCategory='open'`, permanently.
+      - name: List statuses are seeded
+        if: '!cancelled()'
+        run: node test/e2e/list-statuses-seeded.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `07:12` — the wizard's Required views. Each row is asserted by
+      # its OWN word: the Team row used to fall back to `list.viewList` and
+      # render as "List", and any check for "a label is present" passes on that.
+      - name: Space wizard required views
+        if: '!cancelled()'
+        run: node test/e2e/space-wizard-views.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `08:00` — the "+" on a space opens the 8-item Create menu.
+      - name: Space create menu
+        if: '!cancelled()'
+        run: node test/e2e/space-create-menu.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P `[07:20]` — "aap ke paas PACKAGE PLAN kaun sa hai". The gating is the
+      # point, not the count, so the checks assert the SERVER refuses a gated
+      # ClickApp for a free-plan actor, not merely that the UI hides it.
+      - name: ClickApps plan gating
+        if: '!cancelled()'
+        run: node test/e2e/clickapps-plan-gating.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §M frame `14:10` — the five Appearance settings that were stored and read
+      # by nothing. Each check asserts the GRID changed, not that a switch moved.
+      - name: Planner appearance toggles
+        if: '!cancelled()'
+        run: node test/e2e/planner-appearance-toggles.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §M — the Upcoming meeting page: time left, quick-join, desktop notice.
+      - name: Planner upcoming meeting
+        if: '!cancelled()'
+        run: node test/e2e/planner-upcoming-meeting.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §M frame `09:44` — Auto fit, week numbers, collapsible panels, export.
+      # The export check reads the downloaded bytes; a constant file fails it.
+      - name: Gantt controls
+        if: '!cancelled()'
+        run: node test/e2e/gantt-controls.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §M frame `20:57` — the Teams empty state. Asserted in BOTH conditions:
+      # a check run only when empty cannot tell an empty state from a broken page.
+      - name: Teams empty state
+        if: '!cancelled()'
+        run: node test/e2e/teams-empty-state.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §M frame `21:00` — per-person work cards. Two people are seeded with
+      # DIFFERENT work, so a card rendering the same person twice fails.
+      - name: Teams person cards
+        if: '!cancelled()'
+        run: node test/e2e/teams-person-cards.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `12:08` — the importers. A real file is imported and the
+      # resulting tasks are read from Postgres, including a row that must be
+      # REJECTED and is, with the line and column named.
+      - name: Spreadsheet and source imports
+        if: '!cancelled()'
+        run: node test/e2e/imports.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `18:39` — the integration error card carries the PROVIDER'S own
+      # message. A card rendering a constant string is the facade defect.
+      - name: Integration error card
+        if: '!cancelled()'
+        run: node test/e2e/integration-error-card.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §M — a countdown in the tab title, which must MOVE and must be RESTORED.
+      # Set-once and never-cleared are both easy to miss and both covered.
+      - name: Tab title countdown
+        if: '!cancelled()'
+        run: node test/e2e/tab-title-countdown.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `17:16` — "Best models", Speed/Intelligence bars, Show more, and
+      # a preferred model persisted server-side. ChatGPT and Gemini are listed
+      # and must stay unselectable: storing one is refused, not coerced.
+      - name: AI model picker
+        if: '!cancelled()'
+        run: node test/e2e/ai-model-picker.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frames `18:53`-`18:59` — 24 raw feature values grouped into 8
+      # categories, server-side. A failed run must move no tile.
+      - name: AI action categories
+        if: '!cancelled()'
+        run: node test/e2e/ai-action-categories.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `19:05` — Status and My-runs filters. Both are asserted to reach
+      # the SERVER: `userId` was accepted by the endpoint and sent by nothing.
+      - name: AI activity filters
+        if: '!cancelled()'
+        run: node test/e2e/ai-activity-filters.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frame `12:14` — the Template Center's facets. The counts come from SQL
+      # over the corpus, so ticking a facet must NOT move the type counts.
+      - name: Template centre facets
+        if: '!cancelled()'
+        run: node test/e2e/template-center.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §P frames `09:26` and `10:42` — the two paywall sites she names. Run as
+      # BOTH an entitled and a blocked actor, and list export must stay free.
+      - name: Paywall sites
+        if: '!cancelled()'
+        run: node test/e2e/paywall-sites.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

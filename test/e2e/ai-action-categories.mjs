@@ -53,11 +53,21 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 29
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
 const REPO = path.resolve(import.meta.dirname, '../..')
+
+/**
+ * The width the frame's 2×4 arrangement assumes.
+ *
+ * Stated rather than defaulted: the grid is two across below Tailwind's `xl`
+ * breakpoint (1280px) BY DESIGN, because these are viewport breakpoints and the
+ * AI page's left nav makes the panel narrower than the window. A suite that let
+ * the runner pick the width would be asserting a layout nobody guaranteed.
+ */
+const VIEWPORT = { width: 1440, height: 1100 }
 
 /** The frame's order, left to right then top to bottom. */
 const ORDER = [
@@ -253,7 +263,7 @@ try {
   // ── On screen ────────────────────────────────────────────────────────────
   console.log('\n▶ the grid, measured')
   browser = await chromium.launch(launchOptions())
-  ctx = await browser.newContext({ viewport: { width: 1440, height: 1100 } })
+  ctx = await browser.newContext({ viewport: VIEWPORT })
   const page = await ctx.newPage()
   await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', EMAIL)
@@ -287,27 +297,56 @@ try {
     `missing: ${boxes.filter((b) => !b.width).map((b) => b.id).join(', ')}`,
   )
   /*
-   * MEASURED, not eyeballed: two rows of four, as the frame lays them out.
-   * Rounded to the nearest 4px because sub-pixel layout would otherwise make
-   * four tiles on one line read as four separate rows.
+   * FOUR COLUMNS, ASKED OF THE LAYOUT RATHER THAN INFERRED FROM POSITIONS.
+   * Geometry can only ever say where things ended up; this says what the grid
+   * was told to do, so a wrap and a four-column grid cannot be confused.
    */
-  const rows = new Map()
-  for (const b of boxes) {
-    const key = Math.round(b.y / 4)
-    rows.set(key, [...(rows.get(key) ?? []), b])
+  const columnCount = await page.getByTestId('ai-value-categories').evaluate((el) => {
+    const cols = getComputedStyle(el).gridTemplateColumns
+    return cols === 'none' ? 0 : cols.trim().split(/\s+/).length
+  })
+  chk(
+    columnCount === 4,
+    `the grid is four columns wide at ${VIEWPORT.width}px`,
+    `grid-template-columns resolved to ${columnCount} column(s) — the frame's 2×4 needs the ` +
+      "`xl` (1280px) breakpoint, and 0 means it is not a grid at all",
+  )
+  /*
+   * MEASURED, and GROUPED BY PROXIMITY rather than by a rounding bucket.
+   *
+   * The first version of this keyed rows on `Math.round(y / 4)`, which puts a
+   * hard boundary every four pixels. Four tiles that genuinely share a row have
+   * the same grid row start but can differ by a hundredth of a pixel after
+   * fractional column widths; when that hundredth straddles the boundary, one
+   * tile lands in the next bucket and the suite reports "3 rows of 3/1/4" for a
+   * layout that is two clean rows of four. It reported exactly that.
+   *
+   * A tolerance cannot make the opposite mistake: same-row tiles share a row
+   * start to within a pixel, and two real rows are a whole tile-height apart.
+   */
+  const ROW_TOLERANCE_PX = 8
+  const rows = []
+  for (const b of [...boxes].sort((p, q) => p.y - q.y || p.x - q.x)) {
+    const row = rows.find((r) => Math.abs(r[0].y - b.y) <= ROW_TOLERANCE_PX)
+    if (row) row.push(b)
+    else rows.push([b])
   }
   chk(
-    rows.size === 2 && [...rows.values()].every((r) => r.length === 4),
-    'laid out as two rows of four',
-    `the tiles landed on ${rows.size} rows of ${[...rows.values()].map((r) => r.length).join('/')}`,
+    rows.length === 2 && rows.every((r) => r.length === 4),
+    'and lays the eight tiles out as two rows of four',
+    `at ${VIEWPORT.width}×${VIEWPORT.height} the tiles landed on ${rows.length} rows of ` +
+      `${rows.map((r) => r.length).join('/')} — the frame's arrangement assumes a viewport of at ` +
+      'least 1280px, below which the grid is two across by design',
   )
+  /*
+   * The whole sequence, not each row against itself. `rows` is already sorted
+   * top-to-bottom then left-to-right, so comparing it to ORDER pins reading
+   * order across the wrap as well as within each row.
+   */
   chk(
-    [...rows.values()].every((r) =>
-      r.map((b) => b.id).join(',') ===
-        r.slice().sort((a, b2) => a.x - b2.x).map((b) => b.id).join(','),
-    ),
-    'and each row reads left to right in the frame’s order',
-    `rows read ${[...rows.values()].map((r) => r.map((b) => b.id).join('>')).join(' | ')}`,
+    rows.flat().map((b) => b.id).join(',') === ORDER.join(','),
+    'reading left to right and top to bottom in the frame’s order',
+    `the tiles read ${rows.map((r) => r.map((b) => b.id).join('>')).join(' | ')}`,
   )
 
   console.log('\n▶ "not available" is not the same answer as zero')

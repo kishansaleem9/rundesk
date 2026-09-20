@@ -461,8 +461,22 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
               <h3 className="text-sm font-semibold">{t('aiValue.byCategory')}</h3>
               <p className="mt-0.5 text-[11px] text-muted-foreground">{t('aiValue.byCategoryUnit')}</p>
             </div>
+            {/*
+              TWO ACROSS, THEN FOUR — and never an odd number, at any width.
+              Eight tiles divide evenly by both column counts, so no breakpoint
+              can leave a lone tile stranded on a row of its own.
+
+              The four-across breakpoint is `xl` (1280px) rather than `lg`
+              (1024px) because these are VIEWPORT breakpoints and the panel's
+              width is a container question: the AI page carries a left nav, so
+              at a 1024px viewport the panel is a few hundred pixels narrower
+              than the breakpoint suggests, and "Summaries or updates
+              generated" in a quarter of that wraps to three lines. The frame's
+              2×4 arrangement is what a wide window shows; `ai-action-
+              categories.mjs` states 1280 as the width it measures at.
+            */}
             <div
-              className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4"
+              className="grid grid-cols-2 gap-px bg-border xl:grid-cols-4"
               data-testid="ai-value-categories"
             >
               {CATEGORY_META.map((meta) => {

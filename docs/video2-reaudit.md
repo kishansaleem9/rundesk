@@ -557,7 +557,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Activity names the item and the checklist it went into (frame `02:47`) |
 | M | Attachment thumbnail hover actions; attachments header view-toggle |
 | B | Cover: Gallery / Upload / Link / Attachments / Remove, Reposition, Change cover |
-| M | Cover: Search tab (documented as deliberate); Gallery "Custom" swatch |
+| P | Cover: Gallery "Custom" swatch built. Search tab still absent — the recorded reason was re-checked against the tree rather than trusted, and still holds: one grep finds no image provider anywhere |
 | M | Task type "Fill with AI" |
 | B | **Activity panel toggles to a rail** beside the fields; the tab drops out while it is up |
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
@@ -593,11 +593,11 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Create-a-Space: icon+name, description, **Default permission**, Make Private |
 | M | Space dialog footer "Use Templates" |
 | B | Space wizard: 4 presets, default views, statuses, ClickApps grid, per-space gating |
-| P | ClickApps — 6 keys vs the frames' 11 |
+| B | ClickApps — gated by PLAN, server-side as well as client-side; 3 dead labels removed |
 | M | "Default View Templates" tab |
-| P | View types — 5 of 11 (Map, Activity, Team, Mind Map, Timeline, Workload absent as list views) |
+| P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
 | M | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") |
-| P | "+" on a space is a single action, not the 8-item menu |
+| B | "+" on a space opens the 8-item Create menu, from one shared list both it and the quick-create tabs import |
 | P | Create Folder — no description column, no private toggle in the dialog, no templates |
 | M | Folder "Use Space statuses" inheritance |
 | B | Skeletons on load; sidebar hierarchy; breadcrumb |
@@ -605,10 +605,10 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | **Delete → trash + Undo + Ctrl+Z** |
 | B | Board view: status lanes, colours, counts, per-lane add, drag between lanes, + Add group |
 | B | **Team view** — a view type, ungated; rows per person with their own load |
-| P | Paywall that teaches — built, wired to one call site (see §1) |
+| B | Paywall that teaches — at the two sites she names, Team view `09:26` and board export `10:42`. List export stays free, and a check asserts it. Refused server-side, not just hidden |
 | M | Plan-tier paywall UI; "uses have expired" metered state |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
-| M | Gantt: Auto fit, week numbers, collapsible panels, local export |
+| B | Gantt: Auto fit, week numbers, collapsible panels, local export |
 | M | Create-modal placeholder "Add description, or write with ⚡AI" |
 | B | Customize view: Autosave, Pin, Private, Protected, Set default, Copy link, Sharing |
 | M | Customize: Stack fields, Show empty fields, Collapse empty columns |
@@ -622,9 +622,9 @@ Legend: **B** built · **P** partial · **M** missing.
 
 | | capability |
 |---|---|
-| P | Import — ClickUp CSV only (+ API token, beyond the frames) |
+| P | Import — a real delimited-file parser with per-source column presets covers 7 of the 10 named tools. Basecamp needs its API; Confluence exports pages not task rows; Slack exports conversation JSON. Monday and Wrike default to .xlsx, which is not read |
 | M | The ten named importers; spreadsheet/document import |
-| P | Template Center — a page, not a modal; no type facet, complexity, use-cases, categories |
+| B | Template Center — faceted browse with type, complexity, use-cases and categories, counted in SQL over the corpus rather than over the loaded page |
 | M | Planner onboarding screen |
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
 | P | "Team schedules" — one person at a time, no side-by-side grid |
@@ -633,24 +633,24 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Rail sections **Assigned to me** and **Today & overdue** |
 | M | Planner bottom command bar |
 | M | **Calendar picker grouped by account** (+ workspace calendars: Time off, Holidays) |
-| P | Calendar settings — 4 of 7 pages |
+| B | Calendar settings — 5 real pages plus two honestly recorded gaps (AI Notetaker needs a meeting bot; Automations parked at `14:29`) |
 | M | **Conferencing / Zoom** connect row |
-| M | Settings footer: What's new · Report a problem · Feature requests |
+| B | Settings footer: What's new · Report a problem · Feature requests |
 | B | **View selector Day / 4 days / Week / Month** + shortcuts `d x w m` |
 | B | Show weekends; event style; default duration; colour tasks by; start week on |
 | M | Appearance: Grid size |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
 | M | Sidebar: drag-reorder, "+ Add a new section" |
-| M | **Upcoming meeting page** entirely (show time left, desktop, quick-join) |
-| M | Time blocking: show closed, future recurring, focus-time visibility, per-day work schedule |
+| B | **Upcoming meeting page** — time left, quick-join, and desktop notification |
+| B | Time blocking + the five settings that were STORED AND READ BY NOTHING — showWeekNumbers, alwaysOpenAtStartOfWeek, darkenNonWorkingHours, savePersonalEventsQuickly, showRecurring — each now has a reader that changes the grid |
 | B | `showOverdue` — now read by the backlog |
 | B | `showAssigned` — given a control and a reader |
 | B | Default list for new tasks; timeblock prefix; quarter-hour snapping |
 | B | Task menu: Copy link/ID/New tab, Merge, Convert, Description history, Print, Send email, Duplicate, Move, Follow, Remind, Task type, Templates, Sharing, Delete |
 | B | Favorite in the task menu (same hook as the star) |
 | B | Archive in the task menu — and named honestly for the first time |
-| M | A PERMANENT delete for a task — the frame lists Archive *and* Delete; Rundesk has one soft archive and no purge |
+| B | A PERMANENT delete for a task — `deletedAt` into the same Trash the other entities use, restorable there, purged by the same cron after the same 30 days. Archive is never purged. An archived task must NOT appear in the Trash, and that check was impossible to satisfy before |
 | M | "Add to ›" (a task in more than one list) |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
 | M | "⚡ Assign with AI" — `assign_task` exists; CHOOSING the person does not |
@@ -667,24 +667,24 @@ Legend: **B** built · **P** partial · **M** missing.
 
 | | capability |
 |---|---|
-| P | Model picker — 2 tiers in a `<select>` vs 7+ named models |
+| B | Model picker — "Best models", hover cards with Speed/Intelligence bars, Show more, and a preferred model persisted SERVER-SIDE (it was localStorage only). ChatGPT and Gemini are listed and deliberately NOT selectable: no OpenAI or Google client exists, and an unroutable provider carries no model field so nothing can route to one by accident |
 | M | "Best models" header; hover cards with Speed/Intelligence bars; Show more |
 | M | Inline word suggestions while typing |
 | B | **Live step log**; steps emitted only after the lookup returns |
 | B | **"No changes made."**; copy / 👍👎 / retry; **Follow ups** (generated, capped at 3) |
-| P | Integration error card — thin banner, no "Help center article" link |
+| B | Integration error card — the provider's own message, stored per connection, cleared on a successful connect, with the Help-centre link |
 | M | Success message with clickable path chips (`rundesk › ddddd › List`) |
 | B | AI Analytics: Time Saved with its working, Human Cost Savings, editable rate, Edit benchmark, validation, net-can-be-negative |
-| P | "Actions completed" — per-feature breakdown exists; the frames' 8 categories do not |
+| B | "Actions completed" — the 24 raw feature values grouped into the frames' 8 categories, server-side. Three categories cannot be filled at all and print a reason rather than `0`: a zero meaning "impossible" and a zero meaning "you did none" look identical on screen. The unit stays a run, not an "action" |
 | M | **Credits entirely**: tab, category→credits table, usage-trend chart with limit line, Add credits, My Agent Performance |
 | M | Image generation |
 | B | App Center with categories, per-app descriptions, connection health |
 | P | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail absent |
 | M | "+ Suggest an app"; "Connect Custom MCP Servers" banner |
-| P | Activity log — no Status or My-agents filter |
+| B | Activity log — Status and My-runs filters, both reaching the server. `userId` had been accepted by the endpoint and sent by nothing; Status needed a column AND a failure-recording path, because `recordUsage` only ever fired on success |
 | B | Teams Hub reachable by a plain member; All Teams / All People / Org Chart; My Teams; search; org-chart empty state |
-| M | Teams empty-state headline; **Browse People / Create Team** buttons; two explainer cards |
-| M | Per-person work preview cards |
+| B | Teams empty-state headline; **Browse People / Create Team** buttons; two explainer cards |
+| B | Per-person work preview cards — each showing its own person's work, asserted by seeding two people differently |
 | M | Contextual starter cards that change with context |
 
 ---
