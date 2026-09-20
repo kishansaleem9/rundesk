@@ -12,19 +12,14 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
+import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
 
-/**
- * Default status pipeline seeded on every new list. Existing lists were
- * back-filled with the same rows in migration `0020_custom_list_statuses.sql`.
+/*
+ * The pipeline moved to `./list-statuses.defaults.ts`. It lived here, private,
+ * while six other places inserted into `lists` without it — see that file for
+ * the list and for what a status-less list actually does to a task marked done.
  */
-const DEFAULT_LIST_STATUSES = [
-  { key: 'backlog',     name: 'Backlog',     color: '#94a3b8', category: 'open' as const,         position: 0 },
-  { key: 'todo',        name: 'To do',       color: '#64748b', category: 'open' as const,         position: 1 },
-  { key: 'in_progress', name: 'In progress', color: '#3b82f6', category: 'in_progress' as const,  position: 2 },
-  { key: 'in_review',   name: 'In review',   color: '#a855f7', category: 'in_progress' as const,  position: 3 },
-  { key: 'done',        name: 'Done',        color: '#10b981', category: 'closed' as const,       position: 4 },
-  { key: 'cancelled',   name: 'Cancelled',   color: '#f43f5e', category: 'closed' as const,       position: 5 },
-]
+export { DEFAULT_LIST_STATUSES, seedListStatuses }
 
 @Injectable()
 export class ListsService {
@@ -163,10 +158,7 @@ export class ListsService {
 
     const list = result[0]
     // Seed the default status pipeline so the list is immediately usable.
-    await this.db
-      .insert(listStatuses)
-      .values(DEFAULT_LIST_STATUSES.map((s) => ({ listId: list.id, ...s })))
-      .onConflictDoNothing()
+    await seedListStatuses(this.db, list.id)
 
     return list
   }

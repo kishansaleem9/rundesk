@@ -14,6 +14,7 @@ import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
+import { seedListStatuses } from '../lists/list-statuses.defaults'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -1005,9 +1006,24 @@ export class WorkspacesService {
         .insert(projects)
         .values({ spaceId: space.id, name: seed.project, createdById: userId })
         .returning()
-      await tx
+      /*
+       * The starter list needs its status pipeline, and it has to commit in
+       * THIS transaction with the list itself.
+       *
+       * It was `tx.insert(lists)` alone. `ListsService.create` seeds the
+       * pipeline; a raw insert does not — so every workspace ever created
+       * through this path got a first list with no statuses at all. A task
+       * there could be set to `done` and still read back
+       * `statusCategory: 'open'`, because `resolveStatusForList` answered
+       * `{ category: 'open' }` for any key when a list had none. Work
+       * completed in a new workspace's first list never counted as completed,
+       * anywhere that reasons on the category.
+       */
+      const [starterList] = await tx
         .insert(lists)
         .values({ projectId: project.id, name: seed.list, createdById: userId })
+        .returning()
+      if (starterList) await seedListStatuses(tx, starterList.id)
 
       return workspace
     })

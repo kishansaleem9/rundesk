@@ -325,13 +325,23 @@ describe('AuthService.login — refresh token stored hashed', () => {
     const svc = makeAuthService({
       db,
       workspacesService: { findByMember: async () => [] },
+      /*
+       * `login` resolves the governing workspace through `getEffectiveForUser`,
+       * the same call `validateUser` already used. It used to take
+       * `memberships[0]` from a query with no ORDER BY and then call `get()`
+       * with whatever that returned, so this stub only had to answer `get`.
+       */
       securitySettings: {
-        get: async () => ({
-          sessionTimeoutMinutes: 60,
-          maxConcurrentSessions: 0,
-          ipAllowlistEnabled: false,
-          ipAllowlist: [],
-          ipAllowlistIncludeAdmins: false,
+        getEffectiveForUser: async () => ({
+          settings: {
+            workspaceId: null,
+            sessionTimeoutMinutes: 60,
+            maxConcurrentSessions: 0,
+            ipAllowlistEnabled: false,
+            ipAllowlist: [],
+            ipAllowlistIncludeAdmins: false,
+          },
+          isWorkspaceAdmin: false,
         }),
       },
       featureFlagsService: { resolveForUser: async () => ({ flags: {} }) },

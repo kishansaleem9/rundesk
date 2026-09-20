@@ -154,6 +154,21 @@ export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
  */
 const DESCRIPTION_REVISION_WINDOW_MS = 2 * 60 * 1000
 
+/**
+ * What category a status key means, when the list cannot tell us.
+ *
+ * Written once because it was needed in two places that had drifted apart:
+ * the branch that resolves a renamed status on a populated list inferred the
+ * category from the key, and the branch for a list with NO statuses returned
+ * `'open'` unconditionally. So the same word, `done`, meant closed on one list
+ * and open on another — and the second was the one nobody could see, because
+ * the UI renders the key and everything that matters reads the category.
+ */
+const CLOSED_STATUS_KEYS = new Set(['done', 'complete', 'completed', 'closed', 'cancelled'])
+function inferCategoryFromKey(key: string): StatusCategory {
+  return CLOSED_STATUS_KEYS.has(key.toLowerCase()) ? 'closed' : 'open'
+}
+
 type RecurrenceRule = {
   mode: 'daily' | 'weekly' | 'monthly'
   interval?: number
@@ -1613,10 +1628,32 @@ export class TasksService {
     const rows = await resolveEffectiveStatuses(this.db, listId)
 
     if (rows.length === 0) {
-      // Lists migrated from before custom-statuses always have seeded rows,
-      // so falling back to the legacy enum value keeps newly-created lists
-      // (whose statuses haven't been seeded yet) usable.
-      return { key: requestedKey ?? 'todo', category: 'open' }
+      /*
+       * A list with no statuses at all.
+       *
+       * THE COMMENT THAT USED TO BE HERE WAS A STALE REASON. It said the
+       * fallback "keeps newly-created lists (whose statuses haven't been
+       * seeded yet) usable", which assumes an unseeded list is a transient
+       * state. It is not: `ListsService.create` seeds the pipeline, but three
+       * other paths that insert into `lists` did not, so a workspace's starter
+       * list, a list from a template and a list from a ClickUp import were
+       * PERMANENTLY status-less.
+       *
+       * And the old answer was `category: 'open'` for ANY key. So a task on
+       * such a list could be set to `done`, store `status = 'done'`, and read
+       * back `statusCategory = 'open'` — accepted, no 400, no warning. The UI
+       * showed the status the person picked; lists, reports, the planner,
+       * Workload and the teams work preview all reason on the CATEGORY. They
+       * disagreed permanently, and work completed there never counted as
+       * completed anywhere.
+       *
+       * The creation paths are fixed and `0153` backfills the lists that
+       * already exist. This stays as the last line of defence, and it now
+       * infers the category the same way the populated branch below does —
+       * so even on a list that somehow has no statuses, "done" means closed.
+       */
+      const key = requestedKey ?? 'todo'
+      return { key, category: inferCategoryFromKey(key) }
     }
 
     if (requestedKey) {
@@ -1625,8 +1662,7 @@ export class TasksService {
       // Fallback: map common/legacy keys to a category and pick the list's first
       // status in that category, so callers passing 'done'/'todo' still work on
       // lists whose statuses were renamed (instead of a hard 400).
-      const closedKeys = new Set(['done', 'complete', 'completed', 'closed', 'cancelled'])
-      const inferred: StatusCategory = closedKeys.has(requestedKey.toLowerCase()) ? 'closed' : 'open'
+      const inferred: StatusCategory = inferCategoryFromKey(requestedKey)
       const byCategory =
         rows.find((r) => (r.category as StatusCategory) === inferred) ??
         (inferred === 'closed' ? rows[rows.length - 1] : rows[0])
@@ -2080,7 +2116,22 @@ export class TasksService {
       where: and(
         eq(tasks.listId, listId),
         includeSubtasks ? undefined : isNull(tasks.parentTaskId),
-        undefined,
+        /*
+         * A bare `undefined` sat here and `includeArchived` was destructured
+         * and never used, so this endpoint returned archived AND binned tasks
+         * to everyone, unconditionally — a parameter accepted, documented and
+         * dropped. It was `includeArchived ? undefined : eq(isArchived, false)`
+         * before the delete work and was lost in the edit.
+         *
+         * The two flags are not one flag any more. Archive and delete BOTH set
+         * `isArchived` (about forty read paths hide a task on that one flag),
+         * so a task in the bin must never come back just because someone asked
+         * to see archived ones: the bin has its own surface, with its own
+         * restore, and a task appearing in both is how you get a row that one
+         * screen offers to restore while another offers to destroy it.
+         */
+        includeArchived ? undefined : eq(tasks.isArchived, false),
+        isNull(tasks.deletedAt),
         visFilter,
       ),
       orderBy: [asc(tasks.position), asc(tasks.createdAt)],
