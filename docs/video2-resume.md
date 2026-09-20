@@ -29,7 +29,7 @@ Postgres and a real browser — never because the code was written.
 check from decoration. Of the patches that have been applied and observed:
 
 ```
-174 / 179 reddened the check they were aimed at
+184 / 189 reddened the check they were aimed at
 ```
 
 **All five that did not are in `folder-create`, and they are a pattern rather
@@ -60,6 +60,11 @@ tab-title-countdown (7)   task-cover (3)          focus-pill (12)
 list-card-cover (8)       task-header-status (7)  task-activity-filter (8)
 task-field-create (9)     integration-error-card (2, the new facet pair)
 ```
+
+`list-empty-states` (7) and `sidebar-sections` (15) were mid-run when the
+session ended, and their partial results are not trustworthy — a run that was
+cut off has restored neither the worktree nor its build. Re-run both from
+scratch rather than reading what is in `break-sidebar-sections.txt`.
 
 `scripts/e2e-lanes/drain.sh` walks that queue, one suite per worktree, waiting
 for a lane rather than assuming one. The patch scripts themselves live in the
