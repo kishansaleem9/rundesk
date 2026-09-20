@@ -36,6 +36,19 @@ export const DEFAULT_LIST_STATUSES = [
 ]
 
 /**
+ * The category a DEFAULT key carries, for callers writing a task straight into
+ * a freshly seeded list.
+ *
+ * Only for the default pipeline — a list whose statuses were renamed has its
+ * own answer, and `TasksService.resolveStatusForList` is the one that asks it.
+ * This exists because the ClickUp import wrote `status` without
+ * `status_category`, so an imported "Done" task read back as open forever.
+ */
+export function categoryForDefaultKey(key: string): 'open' | 'in_progress' | 'closed' {
+  return DEFAULT_LIST_STATUSES.find((s) => s.key === key)?.category ?? 'open'
+}
+
+/**
  * Give `listId` the default pipeline.
  *
  * Takes the db handle rather than closing over one, so a caller already inside

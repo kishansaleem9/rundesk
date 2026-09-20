@@ -12,16 +12,28 @@ import {
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { SPACE_VIEW_KEYS, SPACE_VIEW_LABEL, type SpaceViewKey } from '../lib/space-views'
 
-// §5 (ClickUp "required views") — the five task views a space's lists can show.
-const VIEWS: Array<{ id: string; labelKey: TranslationKey }> = [
-  { id: 'list', labelKey: 'list.viewList' },
-  { id: 'board', labelKey: 'list.viewBoard' },
-  { id: 'table', labelKey: 'list.viewTable' },
-  { id: 'calendar', labelKey: 'list.viewCalendar' },
-  { id: 'gantt', labelKey: 'list.viewGantt' },
-]
-const ALL_IDS = VIEWS.map((v) => v.id)
+/*
+ * §5 (ClickUp "required views") — the task views a space's lists can show.
+ *
+ * THIS LIST USED TO LIVE HERE, AND IT HAD DRIFTED. It held five and was missing
+ * `team`, while `ALL_IDS` below is the default for a space whose `viewConfig`
+ * is null — i.e. every space created before the wizard existed. So opening such
+ * a space's Views dialog and pressing Save PUT an `enabledViews` with no
+ * `team`, Team View disappeared, and the dialog offered no way to bring it
+ * back. Nobody chose that; a list two files apart from its twin simply fell
+ * behind.
+ *
+ * `SPACE_VIEW_LABEL` is `Record<SpaceViewKey, TranslationKey>`, so a view that
+ * exists without a label here is now a compile error rather than a row that
+ * silently vanishes on save.
+ */
+const VIEWS: Array<{ id: SpaceViewKey; labelKey: TranslationKey }> = SPACE_VIEW_KEYS.map((id) => ({
+  id,
+  labelKey: SPACE_VIEW_LABEL[id],
+}))
+const ALL_IDS: string[] = [...SPACE_VIEW_KEYS]
 
 export function SpaceViewsDialog({
   open,

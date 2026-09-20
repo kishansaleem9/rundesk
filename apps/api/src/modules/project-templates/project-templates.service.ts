@@ -18,6 +18,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SpacesService } from '../spaces/spaces.service'
+import { seedListStatuses } from '../lists/list-statuses.defaults'
 
 type TemplatePayload = NonNullable<typeof projectTemplates.$inferSelect.payload>
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -795,6 +796,14 @@ export class ProjectTemplatesService implements OnModuleInit {
           position: targetType === 'list' ? base + listsCreated : (list.position ?? listsCreated),
         })
         .returning()
+      /*
+       * A list from a template needs its status pipeline. Applying a template
+       * used to produce lists with no statuses at all, so a task in one could
+       * be set to `done` and still read back `statusCategory: 'open'` —
+       * permanently, and invisibly, because the UI renders the key while
+       * everything that matters reads the category.
+       */
+      if (createdList) await seedListStatuses(this.db, createdList.id)
       listsCreated++
 
       for (const task of list.tasks) {

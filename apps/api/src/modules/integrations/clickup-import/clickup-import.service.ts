@@ -39,6 +39,7 @@ import {
   type ClickUpComment,
   type ClickUpAttachment,
 } from './clickup-api.util'
+import { seedListStatuses, categoryForDefaultKey } from '../../lists/list-statuses.defaults'
 
 /** How to handle a row that duplicates an existing / already-seen task. */
 export type ConflictStrategy = 'skip' | 'create' | 'merge'
@@ -280,8 +281,19 @@ export class ClickUpImportService {
         try {
           ;[list] = await this.db
             .insert(lists)
-            .values({ projectId: project.id, name: listName, position: listPosition++ })
+            // `spaceId` was left null here, against the invariant `lists.ts:25`
+            // states. Every other creation path sets it.
+            .values({ projectId: project.id, spaceId, name: listName, position: listPosition++ })
             .returning()
+          /*
+           * An imported list needs its status pipeline, or everything in it
+           * arrives in a list that cannot express "done". `resolveStatusForList`
+           * used to answer `category: 'open'` for any key on a status-less
+           * list, so an imported "Done" task stored `status='done'` with
+           * `statusCategory='open'` — and Board view drew no columns at all
+           * for a list full of tasks.
+           */
+          await seedListStatuses(this.db, list.id)
           summary.listsCreated++
         } catch (e: any) {
           summary.errors.push(`List "${listName}": ${e?.message ?? 'unknown error'}`)
@@ -318,6 +330,15 @@ export class ClickUpImportService {
                   title: t.title.slice(0, 500),
                   description: t.description ?? null,
                   status: mapStatus(t.status),
+                  /*
+                   * The CATEGORY, not just the key. It was never set here, so
+                   * an imported "Done" task stored `status='done'` and kept
+                   * `statusCategory='open'` — and `tasks.service.ts:2424`, the
+                   * progress ring, reports, the planner and Workload all read
+                   * the category. Every imported completed task counted as
+                   * outstanding, with database rows standing as evidence for it.
+                   */
+                  statusCategory: categoryForDefaultKey(mapStatus(t.status)),
                   priority: mapPriority(t.priority),
                   dueDate: t.dueDate ? safeDate(t.dueDate) : undefined,
                 })

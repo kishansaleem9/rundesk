@@ -276,9 +276,22 @@ type PlanUsageResponse = {
   usage: { members: number; projects: number }
 }
 
-const PLAN_FEATURE_KEYS = [
-  'ai', 'automations', 'sso', 'customRoles', 'webhooks', 'guests', 'integrations', 'customBranding', 'prioritySupport',
-] as const
+/*
+ * THE PLAN'S FEATURES COME FROM THE PLAN, not from a list kept here.
+ *
+ * This was a hand-copy of the API's `PLAN_FEATURES` keys — nine of them — and
+ * it had already fallen behind: `teamView` and `boardExport` were added
+ * server-side and this card could not show them, so a person on Business had
+ * no way to see that the two features they had just been sold were included.
+ * The duplicated-list defect, and the copy is always the one that goes stale
+ * because nothing fails when it does.
+ *
+ * `GET /workspaces/:id/plan` returns `features` as the server understands it,
+ * so the card renders whatever the plan actually has. A key with no label falls
+ * back to the key itself: visibly unfinished, rather than silently missing.
+ */
+const planFeatureKeys = (features: Record<string, boolean> | undefined): string[] =>
+  Object.keys(features ?? {}).sort()
 
 /**
  * Plan §14.1 — a small read-only Plan card: current tier, member/project usage vs
@@ -296,7 +309,7 @@ function PlanCard({ workspaceId }: { workspaceId: string }) {
   const p = planQuery.data
   const usageLine = (used: number, limit: number | null) =>
     limit == null ? `${used} · ${t('plan.unlimited')}` : t('plan.ofLimit', { used, limit })
-  const enabledFeatures = PLAN_FEATURE_KEYS.filter((f) => p.features?.[f])
+  const enabledFeatures = planFeatureKeys(p.features).filter((f) => p.features?.[f])
   return (
     <Card className="p-6 space-y-4">
       <div className="flex items-center justify-between gap-3">

@@ -1,5 +1,5 @@
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, asc, desc, eq, isNotNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
@@ -277,7 +277,23 @@ export class WorkspacesService {
       .innerJoin(lists, eq(tasks.listId, lists.id))
       .innerJoin(projects, eq(lists.projectId, projects.id))
       .innerJoin(spaces, eq(projects.spaceId, spaces.id))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true), visFilter))
+      /*
+       * ARCHIVED, NOT BINNED. Archive and delete both set `isArchived` — about
+       * forty read paths hide a task on that one flag, so a delete that left it
+       * false would remove the task from nothing. The consequence is that this
+       * list, filtering on `isArchived` alone, also showed everything in the
+       * Trash: a row Settings → Archived tasks offered to RESTORE while the
+       * Trash offered to DESTROY it, with a thirty-day clock the person could
+       * not see from here.
+       */
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, true),
+          isNull(tasks.deletedAt),
+          visFilter,
+        ),
+      )
       .orderBy(desc(tasks.updatedAt))
       .limit(200)
   }
