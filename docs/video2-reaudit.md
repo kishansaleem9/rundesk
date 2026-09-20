@@ -2366,3 +2366,53 @@ the frames:
 
 `:383` is the load-bearing one: a row built from that line alone gets built in
 the wrong surface, and one was.
+
+---
+
+## 8. What the break tests actually proved
+
+Step 6 of the process — apply a patch that *should* redden exactly one check,
+rebuild, and watch it go red — is the step that separates a check from
+decoration. It is also the step most easily skipped, because a suite that is
+already green gives no reason to doubt it.
+
+Run against isolated git worktrees so patches could not collide, one run per
+worktree under a lock:
+
+| suite | patches | reddened |
+| --- | --- | --- |
+| `imports` | 19 | 19 |
+| `task-delete` | 15 | 15 |
+| `gantt-controls` | 12 | 12 |
+| `paywall-sites` | 10 | 10 |
+| `template-center` | 10 | 9 |
+| `ai-model-picker` | 8 | 8 |
+| `clickapps-plan-gating` | 8 | 8 |
+| `list-view-controls` | 8 | 8 |
+| `integration-error-card` | 7 | 7 |
+| …and the rest of the session's suites | | all |
+
+The one that did not: a `template-center` patch that does not compile. A patch
+that cannot build proves nothing about the check it was aimed at, and is
+counted as unproven rather than quietly folded into the total.
+
+### The two that mattered
+
+**A patch stopped reddening because the code got better.** `task-delete-6`
+removed the `isArchived` filter from the list query and the check still
+passed — not because the check was weak, but because a later fix had added
+`isNull(deletedAt)` *beside* it. Two independent conditions hide a binned
+task, so removing one proves nothing. Good code, stale patch; the patch was
+rewritten to remove both and reddens with *"the list endpoint returned
+deleted=true, control=true — a delete that leaves the task on screen is not a
+delete"*.
+
+**The harness itself was wrong twice, and both times it manufactured green.**
+`pkill -f` matches a command line, and the API was being killed by an
+environment variable that appears in none — so the old, unpatched server kept
+the port and every API-side patch reported its suite still passing, while
+web-side patches reddened normally. And after a web patch the built bundle
+stayed patched, so the next API-only patch measured the previous patch's
+breakage. Both are now in the process doc's trap list, because a break test
+that cannot break anything is the same defect this audit exists to find,
+one level up.
