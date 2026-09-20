@@ -17,6 +17,8 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { TasksService } from './tasks.service'
+import { PlansService } from '../plans/plans.service'
+import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto } from './dto/task.dto'
 import type { CurrentUserPayload } from './types'
@@ -29,7 +31,50 @@ export class TasksController {
   constructor(
     private tasks: TasksService,
     private emailToTask: EmailToTaskService,
+    private plans: PlansService,
   ) {}
+
+  /**
+   * §V2-13, frames `09:26` / `10:42` — REFUSE, don't hide.
+   *
+   * A paywall the browser draws is not a paywall; it is a `display:none` with a
+   * price on it. Both gated surfaces below therefore run this first, and the
+   * client's modal is the courtesy, not the control.
+   *
+   * Fails OPEN on a list whose workspace cannot be resolved, matching
+   * `PlanFeatureGuard`: gating must never break a read that used to work, and a
+   * list with no workspace is a database problem, not an entitlement one.
+   */
+  private async assertPlanFeature(listId: string, feature: PlanFeature): Promise<void> {
+    const workspaceId = await this.tasks.workspaceIdForList(listId)
+    if (!workspaceId) return
+    await this.plans.assertFeature(workspaceId, feature)
+  }
+
+  /**
+   * §V2-13, frame `09:26` — the rows Team View draws, and the 403 it gets
+   * instead when the workspace's plan does not include it.
+   */
+  @Get('list/:listId/team')
+  @UseGuards(ResourceMemberGuard)
+  async getTeamView(
+    @Param('listId') listId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('includeArchived') includeArchived?: string,
+    @Query('unassignedLabel') unassignedLabel?: string,
+  ) {
+    await this.assertPlanFeature(listId, 'teamView')
+    return this.tasks.getTeamRollup(
+      listId,
+      { id: user.id, role: user.role },
+      {
+        includeArchived: includeArchived === 'true',
+        // The caller's own word for "nobody", so the row reads in the language
+        // the rest of the page is in. Bounded, because it lands in a response.
+        unassignedLabel: unassignedLabel ? unassignedLabel.slice(0, 60) : undefined,
+      },
+    )
+  }
 
   @Get('workspace/:workspaceId/timeline')
   @UseGuards(WorkspaceMemberGuard)
@@ -98,8 +143,20 @@ export class TasksController {
     @Query('timeFormat') timeFormat?: string,
     @Query('includeArchived') includeArchived?: string,
     @Query('includeClosed') includeClosed?: string,
+    @Query('view') view?: string,
   ) {
     const mode = columns === 'names' || columns === 'all' ? columns : 'visible'
+    /*
+     * §V2-13 `[10:42]`–`[10:49]` — ONLY the board download is paid.
+     *
+     * "agar aap ke paas premium nahi [hai] to aap LIST VIEW download karo" is
+     * the requirement, so the assertion is deliberately inside this branch: no
+     * `view`, or any value that is not `board`, is the export that has always
+     * been free and stays free, and the narrowness of this `if` is the thing
+     * that stops the gate spreading.
+     */
+    const boardShaped = view === 'board'
+    if (boardShaped) await this.assertPlanFeature(listId, 'boardExport')
     const out = await this.tasks.exportListView(
       listId,
       { id: user.id, role: user.role },
@@ -113,6 +170,7 @@ export class TasksController {
         timeFormat: timeFormat as never,
         includeArchived: includeArchived === 'true',
         includeClosed: includeClosed !== 'false',
+        view: boardShaped ? 'board' : 'list',
       },
     )
     // Quoted, and stripped of anything that could end the header early: a list
@@ -392,6 +450,11 @@ export class TasksController {
     return this.tasks.restoreDescriptionRevision(taskId, revisionId, user.id)
   }
 
+  /**
+   * ARCHIVE. Reversible, kept for good, listed under
+   * `GET /workspaces/:id/archived-tasks`. The verb is historical — see
+   * `deleteTask` — and the menu row that fires this says "Archive".
+   */
   @Delete(':taskId')
   async delete(
     @Param('taskId') taskId: string,
@@ -401,6 +464,28 @@ export class TasksController {
     return this.tasks.deleteTask(taskId, user.id, ip)
   }
 
+  /**
+   * §V2-08 frame `15:32` — **DELETE**, the row under Archive.
+   *
+   * POST rather than a second DELETE because `DELETE /tasks/:id` is taken by
+   * archiving, and overloading it on a query flag is how a destructive action
+   * ends up one typo away from the reversible one.
+   *
+   * Moves the task into the workspace Trash: restorable from there via
+   * `POST /workspaces/:id/trash/task/:taskId/restore`, permanently removed by
+   * `DELETE /workspaces/:id/trash/task/:taskId`, and purged automatically after
+   * the retention window the response reports.
+   */
+  @Post(':taskId/trash')
+  async moveToTrash(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Ip() ip: string,
+  ) {
+    return this.tasks.binTask(taskId, user.id, ip)
+  }
+
+  /** Un-archive. Refuses a task that is in the Trash — that restore is the trash one. */
   @Post(':taskId/restore')
   async restore(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.tasks.restoreTask(taskId, user.id)

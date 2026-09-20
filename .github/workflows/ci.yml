@@ -984,6 +984,32 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/list-save-view.mjs --dist apps/web/dist
 
+      # §M frame `15:32` — the task menu lists Archive AND Delete, and they are
+      # two different things: archive keeps the task forever under Archived
+      # tasks, delete puts it in the same Trash the other entities use and the
+      # same cron purges it after 30 days. Check 9 is the anti-facade one — an
+      # archived task must NOT appear in the Trash, which was impossible to
+      # satisfy while the Trash selected tasks on `isArchived`.
+      - name: Task delete versus archive
+        if: '!cancelled()'
+        run: node test/e2e/task-delete.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Which workspace governs a session. `findByMember` had no ORDER BY, and
+      # `login` took `memberships[0]` from it to decide the token's workspaceId
+      # claim, the feature flags, the session TTL and whether the IP allowlist
+      # applied. The check with teeth is the rename: under MVCC an UPDATE moves
+      # the tuple to the end of the heap, so renaming a workspace reordered the
+      # list — and with it, the policy.
+      - name: Login workspace binding
+        if: '!cancelled()'
+        run: node test/e2e/login-workspace-binding.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §M `12:10` — the three chips over a List view: the Group chip naming its
       # current value, the Subtasks chip, and the Columns panel. The check with
       # teeth is the third Subtasks option: it asserts `includeSubtasks=true`

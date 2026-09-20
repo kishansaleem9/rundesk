@@ -1,6 +1,6 @@
 import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException, Logger } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
-import { and, eq, lt, isNotNull } from 'drizzle-orm'
+import { and, eq, lt, isNotNull, sql } from 'drizzle-orm'
 import { spaces, folders, projects, lists, tasks, docs, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -132,10 +132,20 @@ export class TrashService {
       for (const r of res) rows.push({ id: r.id, type: 'list', name: r.name, location: `${r.spaceName} › ${r.projectName}`, deletedAt: stamp(r.at), deletedBy: deleter(r) })
     }
 
+    /*
+     * §V2-08 frame `15:32` — TASKS COME IN ON `deletedAt`, NOT `isArchived`.
+     *
+     * The frame's menu draws Archive and Delete as two rows and this query used
+     * to make them one: it listed every archived task, so archiving a task put
+     * it in the Trash with a thirty-day clock on it and there was no way to
+     * delete one at all. `deletedAt` is set only by `POST /tasks/:id/trash`, so
+     * an archived task is never listed here and is never purged, and everything
+     * listed here really was deleted.
+     */
     if (wanted.has('task')) {
       const res = await this.db
         .select({
-          id: tasks.id, name: tasks.title, at: tasks.archivedAt,
+          id: tasks.id, name: tasks.title, at: tasks.deletedAt,
           spaceName: spaces.name, projectName: projects.name, listName: lists.name,
           byId: users.id, byName: users.displayName, byAvatar: users.avatarUrl,
         })
@@ -143,8 +153,8 @@ export class TrashService {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .leftJoin(users, eq(users.id, tasks.archivedById))
-        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, true)))
+        .leftJoin(users, eq(users.id, tasks.deletedById))
+        .where(and(eq(spaces.workspaceId, workspaceId), isNotNull(tasks.deletedAt)))
       for (const r of res) rows.push({ id: r.id, type: 'task', name: r.name, location: `${r.spaceName} › ${r.projectName} › ${r.listName}`, deletedAt: stamp(r.at), deletedBy: deleter(r) })
     }
 
@@ -181,27 +191,42 @@ export class TrashService {
 
   // ─── ownership check for a single item ──────────────────────────────────────
 
-  /** Resolve the item's workspace + who deleted it, or throw if it isn't in this workspace's trash. */
+  /**
+   * Resolve the item's workspace, who deleted it, and WHETHER IT IS ACTUALLY IN
+   * THE TRASH, or throw.
+   *
+   * That last part was missing. `locate` looked the row up by id alone, so
+   * `DELETE /workspaces/:id/trash/task/:taskId` would hard-delete a task that
+   * had never been deleted — an admin, or the person who happened to have
+   * archived it, could destroy a live task through an endpoint whose whole
+   * contract is "this thing is already in the bin". Both callers
+   * (`restore`, `deleteForever`) go through here, and restore on a live item
+   * was silently a no-op reported as success.
+   */
   private async locate(workspaceId: string, type: TrashType, id: string) {
     const q = {
-      space: () => this.db.select({ name: spaces.name, by: spaces.archivedById, ws: spaces.workspaceId })
+      space: () => this.db.select({ name: spaces.name, by: spaces.archivedById, ws: spaces.workspaceId, trashed: spaces.isArchived })
         .from(spaces).where(eq(spaces.id, id)).limit(1),
-      folder: () => this.db.select({ name: folders.name, by: folders.archivedById, ws: spaces.workspaceId })
+      folder: () => this.db.select({ name: folders.name, by: folders.archivedById, ws: spaces.workspaceId, trashed: folders.isArchived })
         .from(folders).innerJoin(spaces, eq(spaces.id, folders.spaceId)).where(eq(folders.id, id)).limit(1),
-      project: () => this.db.select({ name: projects.name, by: projects.archivedById, ws: spaces.workspaceId })
+      project: () => this.db.select({ name: projects.name, by: projects.archivedById, ws: spaces.workspaceId, trashed: projects.isArchived })
         .from(projects).innerJoin(spaces, eq(spaces.id, projects.spaceId)).where(eq(projects.id, id)).limit(1),
-      list: () => this.db.select({ name: lists.name, by: lists.archivedById, ws: spaces.workspaceId })
+      list: () => this.db.select({ name: lists.name, by: lists.archivedById, ws: spaces.workspaceId, trashed: lists.isArchived })
         .from(lists).innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId)).where(eq(lists.id, id)).limit(1),
-      task: () => this.db.select({ name: tasks.title, by: tasks.archivedById, ws: spaces.workspaceId })
+      // A task is in the trash when it was DELETED. Archived is a different
+      // state with a different surface, and restoring or purging one from here
+      // would be acting on something the Trash never showed.
+      task: () => this.db.select({ name: tasks.title, by: tasks.deletedById, ws: spaces.workspaceId, trashed: sql<boolean>`${tasks.deletedAt} is not null` })
         .from(tasks).innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId)).where(eq(tasks.id, id)).limit(1),
-      doc: () => this.db.select({ name: docs.title, by: docs.archivedById, ws: docs.workspaceId })
+      doc: () => this.db.select({ name: docs.title, by: docs.archivedById, ws: docs.workspaceId, trashed: docs.isArchived })
         .from(docs).where(eq(docs.id, id)).limit(1),
     }[type]
     const [row] = await q()
     if (!row || row.ws !== workspaceId) throw new NotFoundException('Item not found in this workspace trash')
+    if (!row.trashed) throw new NotFoundException(`This ${type} is not in the trash`)
     return row
   }
 
@@ -254,7 +279,21 @@ export class TrashService {
         .select({ listId: tasks.listId, projectId: lists.projectId, spaceId: projects.spaceId })
         .from(tasks).innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId)).where(eq(tasks.id, id)).limit(1)
-      await this.db.update(tasks).set(clear).where(eq(tasks.id, id))
+      /*
+       * A task carries BOTH flags while it is in the bin: `deletedAt` is what
+       * put it here, `isArchived` is what hides it from every list, search and
+       * report. Restoring has to clear both — clearing only `deletedAt` would
+       * take the task out of the Trash and leave it invisible everywhere, which
+       * is the worst of the two states.
+       *
+       * `archivedAt`/`archivedById` go too: if the task had been archived
+       * before it was deleted, leaving them set would put it straight back into
+       * Archived tasks after a restore that said it was bringing it back.
+       */
+      await this.db
+        .update(tasks)
+        .set({ ...clear, deletedAt: null, deletedById: null })
+        .where(eq(tasks.id, id))
       if (tk) {
         await this.db.update(lists).set(clear).where(eq(lists.id, tk.listId))
         await this.db.update(projects).set(clear).where(eq(projects.id, tk.projectId))
@@ -264,11 +303,38 @@ export class TrashService {
       await this.db.update(docs).set(clear).where(eq(docs.id, id))
     }
 
+    /*
+     * Binning a task took it out of the search index (`binTask` →
+     * `search.removeTask`), so restoring has to put it back. Without this a
+     * restored task looks fine everywhere except search, where it is
+     * permanently unfindable — the same bug `restoreTask` fixed on the archive
+     * side, which this door bypasses.
+     */
+    if (type === 'task') void this.reindexTask(id).catch(() => undefined)
+
     await this.security.logAuditEvent({
       workspaceId, actorId: actor.id, action: 'trash.restored', resourceType: type, resourceId: id,
       description: `Restored ${type} "${row.name}" from trash`, ipAddress: ip,
     })
     return { ok: true }
+  }
+
+  /** Re-index one restored task — the ids the index needs are a join away. */
+  private async reindexTask(taskId: string) {
+    const [row] = await this.db
+      .select({
+        id: tasks.id, title: tasks.title, description: tasks.description, listId: tasks.listId,
+        createdAt: tasks.createdAt, updatedAt: tasks.updatedAt,
+        projectId: lists.projectId, spaceId: projects.spaceId, workspaceId: spaces.workspaceId,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!row) return
+    await this.search.indexTask(row, row.workspaceId, row.spaceId, row.projectId)
   }
 
   // ─── permanent delete ───────────────────────────────────────────────────────
@@ -282,7 +348,16 @@ export class TrashService {
     else if (type === 'folder') await this.db.delete(folders).where(eq(folders.id, id))
     else if (type === 'project') await this.db.delete(projects).where(eq(projects.id, id))
     else if (type === 'list') await this.db.delete(lists).where(eq(lists.id, id))
-    else if (type === 'task') await this.db.delete(tasks).where(eq(tasks.id, id))
+    else if (type === 'task') {
+      await this.db.delete(tasks).where(eq(tasks.id, id))
+      /*
+       * The nightly purge has always de-indexed what it removed; this path —
+       * the one a person presses — never did, so "Delete forever" destroyed the
+       * row and left its title in search for good, pointing at an id that no
+       * longer resolves. Same removal, same reason.
+       */
+      await this.search.removeTask(id).catch(() => undefined)
+    }
     else await this.db.delete(docs).where(eq(docs.id, id))
 
     await this.security.logAuditEvent({
@@ -319,24 +394,35 @@ export class TrashService {
   @Cron(CronExpression.EVERY_DAY_AT_4AM, { name: 'trash-purge-expired' })
   async purgeExpired() {
     const cutoff = new Date(Date.now() - TRASH_RETENTION_DAYS * 24 * 60 * 60 * 1000)
-    const table = { space: spaces, folder: folders, project: projects, list: lists, task: tasks, doc: docs } as const
+    const table = { space: spaces, folder: folders, project: projects, list: lists, doc: docs } as const
     let total = 0
     for (const type of TRASH_TYPES) {
+      /*
+       * TASKS PURGE ON `deletedAt`, and only on `deletedAt`.
+       *
+       * They used to purge on `archivedAt`, which meant archiving a task was a
+       * thirty-day countdown to it being destroyed — the one state a person
+       * archives a task to avoid. An archived task is now kept until somebody
+       * deletes it; only a task that was actually deleted has a clock.
+       */
+      if (type === 'task') {
+        const gone = await this.db
+          .delete(tasks)
+          .where(and(isNotNull(tasks.deletedAt), lt(tasks.deletedAt, cutoff)))
+          .returning({ id: tasks.id })
+        // Binning a task takes it out of the search index, so anything reaching
+        // here should already be gone from it. This is the sweep for the ones
+        // that are not: any task that reached the bin by a cascade rather than
+        // through `binTask`. Without it those documents outlive the row.
+        for (const row of gone) await this.search.removeTask(row.id)
+        total += gone.length
+        continue
+      }
       const t = table[type]
       const gone = await this.db
         .delete(t)
         .where(and(eq(t.isArchived, true), isNotNull(t.archivedAt), lt(t.archivedAt, cutoff)))
         .returning({ id: t.id })
-      /*
-       * Binning a task now takes it out of the search index, so anything
-       * purged here should already be gone from it. This is the sweep for the
-       * ones that are not: every task archived before that change, plus any
-       * that reached the bin by a cascade rather than through deleteTask.
-       * Without it those documents would outlive the row itself.
-       */
-      if (type === 'task') {
-        for (const row of gone) await this.search.removeTask(row.id)
-      }
       total += gone.length
     }
     if (total > 0) this.logger.log(`Trash purge removed ${total} item(s) older than ${TRASH_RETENTION_DAYS} days`)

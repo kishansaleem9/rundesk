@@ -37,6 +37,10 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+// One source of truth for "how long the bin keeps things". The task delete
+// below reports it to the caller so the confirmation can say thirty days
+// without a second copy of the number drifting away from the purge job's.
+import { TRASH_RETENTION_DAYS } from '../trash/trash.service'
 import { toCsv } from '../../common/export/csv'
 import { toXlsx } from '../../common/export/xlsx'
 import {
@@ -253,6 +257,19 @@ export class TasksService {
       .where(eq(lists.id, listId))
       .limit(1)
     return row ?? null
+  }
+
+  /**
+   * §V2-13 — the workspace a list belongs to, for callers outside this service.
+   *
+   * The paywall is enforced in the controller (where PlansService is injected,
+   * so the ten unit tests that construct this service positionally keep
+   * working), and a plan is a property of the WORKSPACE, not of the list. This
+   * is the one fact the controller is missing.
+   */
+  async workspaceIdForList(listId: string): Promise<string | null> {
+    const ctx = await this.resolveWorkspaceForList(listId)
+    return ctx?.workspaceId ?? null
   }
 
   private async resolveWorkspaceName(workspaceId: string): Promise<string> {
@@ -2063,7 +2080,7 @@ export class TasksService {
       where: and(
         eq(tasks.listId, listId),
         includeSubtasks ? undefined : isNull(tasks.parentTaskId),
-        includeArchived ? undefined : eq(tasks.isArchived, false),
+        undefined,
         visFilter,
       ),
       orderBy: [asc(tasks.position), asc(tasks.createdAt)],
@@ -2240,6 +2257,17 @@ export class TasksService {
       format?: ExportFormat
       dateFormat?: DateFormat
       timeFormat?: TimeFormat
+      /**
+       * §V2-07 / §V2-13 `[10:42]`–`[10:49]` — WHICH view is being downloaded.
+       *
+       * `'board'` is a different artifact, not the same rows with a different
+       * name on the button: the sheet leads with the board column each task is
+       * sitting in and the rows come out column by column, which is what makes
+       * "board view download" worth having and worth paying for. `'list'` (the
+       * default, and anything unrecognised) is the free export that has always
+       * been here and must keep working untouched.
+       */
+      view?: 'list' | 'board'
     } = {},
   ) {
     const all = await this.getTasksByList(
@@ -2296,9 +2324,46 @@ export class TasksService {
     const columns = chosen.length > 0 ? chosen : COLUMNS.filter((c) => c.key === 'title')
 
     const name = list?.name ?? 'list'
+    const format: ExportFormat = opts.format === 'xlsx' ? 'xlsx' : 'csv'
+
+    /*
+     * §V2-13 `[11:06]` — "agar yeh download karega to same layout mein jo hai
+     * na, woh aap ko COLUMN mein list de dega". The board download is the board
+     * flattened: the column a card is sitting in comes first, the rows arrive
+     * grouped by column in the board's own left-to-right order, and only then
+     * do the ordinary task columns follow.
+     *
+     * Sorted by the status's POSITION, not alphabetically and not by whatever
+     * order the rows came back in — a board read out of order is a different
+     * board, and "Complete" ahead of "In progress" is the kind of wrong that
+     * still photographs correctly.
+     */
+    if (opts.view === 'board') {
+      const statuses = await resolveEffectiveStatuses(this.db, listId)
+      const byKey = new Map(statuses.map((s) => [s.key, s]))
+      const rank = (t: Record<string, any>) => byKey.get(t.status)?.position ?? Number.MAX_SAFE_INTEGER
+      const label = (t: Record<string, any>) => byKey.get(t.status)?.name ?? String(t.status ?? '')
+      const ordered = [...rows].sort((a, b) => rank(a as any) - rank(b as any))
+      const boardHeaders = ['Board column', ...columns.map((c) => c.header)]
+      const boardCells = ordered.map((task) => [
+        label(task as Record<string, any>),
+        ...columns.map((c) => c.read(task as Record<string, any>)),
+      ])
+      return {
+        name,
+        count: ordered.length,
+        format,
+        extension: format === 'xlsx' ? 'xlsx' : 'csv',
+        contentType:
+          format === 'xlsx'
+            ? 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+            : 'text/csv; charset=utf-8',
+        body: format === 'xlsx' ? toXlsx(name, boardHeaders, boardCells) : toCsv(boardHeaders, boardCells),
+      }
+    }
+
     const headers = columns.map((c) => c.header)
     const cells = rows.map((task) => columns.map((c) => c.read(task as Record<string, any>)))
-    const format: ExportFormat = opts.format === 'xlsx' ? 'xlsx' : 'csv'
 
     return {
       name,
@@ -2311,6 +2376,65 @@ export class TasksService {
           : 'text/csv; charset=utf-8',
       body: format === 'xlsx' ? toXlsx(name, headers, cells) : toCsv(headers, cells),
     }
+  }
+
+  /**
+   * §V2-13, frame `09:26` — TEAM VIEW's rollup, computed on the SERVER.
+   *
+   *   `[09:26]` "Is ke baad TEAM VIEW — yeh cheez ke liye humein of course BUY
+   *   karna parega."
+   *
+   * This exists so the paywall is a paywall. Team View used to be arithmetic
+   * the browser did over rows it already had, which means every possible gate
+   * on it was a gate on a `<div>` — switch the flag off in devtools and the
+   * feature is back. A blocked workspace now gets a 403 from here and there is
+   * nothing on the client to un-hide.
+   *
+   * A task with several assignees is on EACH of their plates, so the rows
+   * deliberately do not sum to the list: the question a workload board answers
+   * is "what is on this person's plate", and shared work is on both.
+   */
+  async getTeamRollup(
+    listId: string,
+    actor: { id: string; role?: string },
+    opts: { includeArchived?: boolean; unassignedLabel?: string } = {},
+  ) {
+    const tasksInList = await this.getTasksByList(
+      listId,
+      { includeSubtasks: false, includeArchived: opts.includeArchived ?? false },
+      actor,
+    )
+    const unassigned = opts.unassignedLabel || 'Nobody yet'
+    const by = new Map<string, { name: string; tasks: Array<{ id: string; title: string; statusCategory: string }> }>()
+    for (const task of tasksInList as Array<Record<string, any>>) {
+      const owners: Array<{ id: string; name: string }> = (task.assignees ?? []).length
+        ? (task.assignees as Array<any>).map((a) => ({
+            id: a.userId,
+            name: a.user?.displayName || a.user?.email || unassigned,
+          }))
+        : [{ id: '__none__', name: unassigned }]
+      for (const owner of owners) {
+        const row = by.get(owner.id) ?? { name: owner.name, tasks: [] }
+        row.tasks.push({ id: task.id, title: task.title, statusCategory: task.statusCategory })
+        by.set(owner.id, row)
+      }
+    }
+    return [...by.entries()]
+      .map(([id, row]) => {
+        const done = row.tasks.filter((x) => x.statusCategory === 'closed').length
+        return {
+          id,
+          name: row.name,
+          done,
+          total: row.tasks.length,
+          // Rounded once, here, so a bar and its caption cannot disagree.
+          pct: row.tasks.length ? Math.round((done / row.tasks.length) * 100) : 0,
+          tasks: row.tasks.map((x) => ({ id: x.id, title: x.title })),
+        }
+      })
+      // Busiest first, but nobody-in-particular last whatever its size: it is a
+      // gap to close, not a colleague to compare against.
+      .sort((a, b) => (a.id === '__none__' ? 1 : b.id === '__none__' ? -1 : b.total - a.total))
   }
 
   async getTask(taskId: string) {
@@ -3050,6 +3174,13 @@ export class TasksService {
     }
   }
 
+  /**
+   * ARCHIVE. The name is `deleteTask` and the route is `DELETE /tasks/:id`
+   * because that is what they have always been; what the method does is archive
+   * — `isArchived`, `archivedAt`, activity `archived`, listed under
+   * `GET /workspaces/:id/archived-tasks`, restored by `POST /tasks/:id/restore`,
+   * and kept for good. The frame's other row, Delete, is `binTask` below.
+   */
   async deleteTask(taskId: string, actorId: string, ipAddress?: string) {
     // allowArchived: deleting something already binned is a no-op, not a 409.
     await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
@@ -3058,6 +3189,13 @@ export class TasksService {
     await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
+    /*
+     * Archiving a task that is already in the bin would stamp `archivedAt` on
+     * top of `deletedAt` and the row would then be listed under BOTH Archived
+     * tasks and Trash — one deletion showing up as two. The bin is the stronger
+     * state; leave it alone.
+     */
+    if (before.deletedAt) return { ok: true }
     await this.db
       .update(tasks)
       .set({ isArchived: true, archivedAt: new Date(), archivedById: actorId ?? null, updatedAt: new Date() })
@@ -3094,6 +3232,78 @@ export class TasksService {
     return { ok: true }
   }
 
+  /**
+   * §V2-08 frame `15:32` — **DELETE**, the red row under Archive.
+   *
+   * Not `deleteTask` with a different label. `deleteTask` archives: the task
+   * keeps living under Settings → Archived tasks, for good, and nothing ever
+   * removes it. This puts the task in the workspace **Trash**, the same surface
+   * that already holds deleted spaces, folders, projects, lists and docs, where
+   * it can be restored for `TRASH_RETENTION_DAYS` and is then hard-deleted by
+   * the same nightly purge — or at once with "Delete forever".
+   *
+   * The two states are told apart by `deletedAt` and nothing else: the Trash
+   * selects tasks on `deletedAt IS NOT NULL`, so archiving can never put a task
+   * there and can never get one purged.
+   *
+   * `isArchived` goes true for both, deliberately. Every read path in the
+   * product — lists, search, reports, planner, AI, calendar sync — hides a task
+   * on that one flag, so a delete that left it false would take the task out of
+   * nothing. What stays empty here is `archivedAt`/`archivedById`: those belong
+   * to the other action, and the Trash's "Deleted by" column reads
+   * `deletedById`, so filling both would make one deletion look like two.
+   */
+  async binTask(taskId: string, actorId: string, ipAddress?: string) {
+    // allowArchived: an archived task can still be deleted — that is the whole
+    // point of two states — and re-deleting a binned one is a no-op, not a 409.
+    await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
+    // Managers can only delete within their own spaces (§3.3), exactly as for
+    // archiving; a weaker check here would be a way around that one.
+    await this.assertManagerDeleteScope(taskId, actorId)
+    const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (!before) throw new NotFoundException('Task not found')
+    // Idempotent: a second delete must not re-stamp the clock and hand the task
+    // another thirty days in the bin.
+    if (before.deletedAt) {
+      return { ok: true, deletedAt: before.deletedAt.toISOString(), retentionDays: TRASH_RETENTION_DAYS }
+    }
+
+    const now = new Date()
+    await this.db
+      .update(tasks)
+      .set({ isArchived: true, deletedAt: now, deletedById: actorId ?? null, updatedAt: now })
+      .where(eq(tasks.id, taskId))
+    await this.logActivity({ taskId, actorId, action: 'deleted' })
+    this.realtime.emitToList(before.listId, { type: 'task.deleted', listId: before.listId, taskId })
+
+    const ctx = await this.resolveWorkspaceForList(before.listId)
+    if (ctx) {
+      // §13.3 — audited apart from `task.deleted` (which archiving raises), so
+      // the audit log can tell a reversible archive from a binning that has a
+      // clock on it.
+      await this.security.logAuditEvent({
+        workspaceId: ctx.workspaceId,
+        actorId,
+        action: 'task.trashed',
+        resourceType: 'task',
+        resourceId: taskId,
+        description: `Moved task "${before.title}" to the trash`,
+        ipAddress,
+      })
+      void this.fireTaskEvent('task.deleted', ctx.workspaceId, { taskId, listId: before.listId }, {
+        taskId,
+        userId: actorId,
+        projectId: ctx.projectId,
+        listId: before.listId,
+      })
+    }
+    // Same clean-up as archiving: off every connected calendar and out of the
+    // search index. A task in the bin is not something anyone should find.
+    void this.calendarSync.deleteEverywhere(taskId).catch(() => undefined)
+    void this.search.removeTask(taskId).catch(() => undefined)
+    return { ok: true, deletedAt: now.toISOString(), retentionDays: TRASH_RETENTION_DAYS }
+  }
+
   /** Restore an archived (soft-deleted) task (Plan §13.4). */
   async restoreTask(taskId: string, actorId: string) {
     // allowArchived: this is the one operation that exists for binned tasks.
@@ -3104,6 +3314,16 @@ export class TasksService {
     await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
+    /*
+     * This un-archives. A task in the Trash is not archived — it is deleted,
+     * with a purge date — and un-archiving it here would put it back in every
+     * list while the Trash still offered to delete it forever: live and binned
+     * at once. Restoring from the Trash is a different door, and it is the one
+     * that clears `deletedAt`.
+     */
+    if (before.deletedAt) {
+      throw new ConflictException('This task is in the trash. Restore it from Trash instead.')
+    }
     if (!before.isArchived) return before
     const [row] = await this.db
       .update(tasks)

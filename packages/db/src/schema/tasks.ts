@@ -82,10 +82,37 @@ export const tasks = pgTable('tasks', {
       skipWeekends?: boolean
     } | null
   }>(),
+  /**
+   * "Not live." Set by BOTH archiving and deleting, because every read path in
+   * the product (lists, search, reports, planner, AI) hides a task on this one
+   * flag and a delete that left it false would leave the task on screen.
+   * Which of the two it was is `deletedAt`, below.
+   */
   isArchived:    boolean('is_archived').notNull().default(false),
-  // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).
+  // §13.4 Trash — when the item was ARCHIVED and by whom (null = unknown/legacy).
   archivedAt:   timestamp('archived_at', { withTimezone: true }),
   archivedById: uuid('archived_by_id').references(() => users.id, { onDelete: 'set null' }),
+  /**
+   * §V2-08 frame `15:32` — the task menu draws **Archive** and **Delete** as two
+   * rows, and until now Rundesk had one soft archive wearing both names.
+   *
+   * These two columns are what makes them different things:
+   *
+   *   archive → isArchived=true, archivedAt set, deletedAt NULL
+   *             · listed under GET /workspaces/:id/archived-tasks
+   *             · restored by POST /tasks/:id/restore
+   *             · kept for good — the retention purge never sees it
+   *   delete  → isArchived=true, deletedAt + deletedById set
+   *             · listed in the workspace Trash beside spaces/lists/docs
+   *             · restored by POST /workspaces/:id/trash/task/:id/restore
+   *             · hard-deleted by the same nightly purge after
+   *               TRASH_RETENTION_DAYS, or at once via "Delete forever"
+   *
+   * `deletedAt` is the ONLY thing the Trash selects tasks on, so an archived
+   * task can never appear there and can never be purged.
+   */
+  deletedAt:    timestamp('deleted_at', { withTimezone: true }),
+  deletedById:  uuid('deleted_by_id').references(() => users.id, { onDelete: 'set null' }),
   // §2 per-item privacy: a 'private' task is visible only to its creator, its
   // assignees, and workspace managers/admins (enforced on every read path).
   visibility:    containerVisibilityEnum('visibility').notNull().default('public'),
@@ -94,6 +121,9 @@ export const tasks = pgTable('tasks', {
 }, (t) => [
   index('idx_tasks_list_status').on(t.listId, t.status),
   index('tasks_task_type_idx').on(t.taskTypeId),
+  // The Trash lists binned tasks newest-first and the nightly purge scans by
+  // age; both read this column and nothing else.
+  index('idx_tasks_deleted_at').on(t.deletedAt),
 ])
 
 export const taskAssignees = pgTable('task_assignees', {

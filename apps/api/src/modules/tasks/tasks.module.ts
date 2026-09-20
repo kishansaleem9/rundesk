@@ -20,6 +20,7 @@ import { NotificationsModule } from '../notifications/notifications.module'
 import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
 import { SecurityModule } from '../security/security.module'
 import { EmailToTaskModule } from '../email-to-task/email-to-task.module'
+import { PlansModule } from '../plans/plans.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
@@ -34,6 +35,9 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
     // §V2-08 — the task menu's "Send email to task" needs the address this
     // module already routes on.
     EmailToTaskModule,
+    // §V2-13 frames `09:26` / `10:42` — Team View and the board download are
+    // refused by the SERVER for a workspace whose plan does not include them.
+    PlansModule,
   ],
   providers: [TasksService, ChecklistTemplatesService, TaskTypesService, WorkspaceMemberGuard],
   controllers: [

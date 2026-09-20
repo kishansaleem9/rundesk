@@ -293,7 +293,7 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
               )}
               {!trashQuery.isLoading && items.length === 0 && (
                 <tr>
-                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground">
+                  <td colSpan={6} className="px-4 py-10 text-center text-muted-foreground" data-testid="trash-empty">
                     <Trash2 className="h-5 w-5 mx-auto mb-2 opacity-50" />
                     {t('trash.empty')}
                   </td>
@@ -303,7 +303,19 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
                 const meta = TYPE_META.find((m) => m.value === item.type)
                 const Icon = meta?.icon ?? Folder
                 return (
-                  <tr key={`${item.type}:${item.id}`} className="hover:bg-accent/5">
+                  /*
+                   * The row carries its type and id as data attributes so a
+                   * suite can say "the task I deleted is in the trash" rather
+                   * than "some row is in the trash" — this table is shared with
+                   * every other deleted thing in the workspace.
+                   */
+                  <tr
+                    key={`${item.type}:${item.id}`}
+                    className="hover:bg-accent/5"
+                    data-testid="trash-row"
+                    data-trash-type={item.type}
+                    data-trash-id={item.id}
+                  >
                     <td className="px-4 py-2.5">
                       <div className="flex items-center gap-2 min-w-0">
                         <Icon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
@@ -328,12 +340,14 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
                           <button
                             className="h-7 w-7 rounded-md text-muted-foreground hover:bg-accent/15 hover:text-foreground flex items-center justify-center"
                             aria-label={t('nav.actionsFor', { name: item.name })}
+                            data-testid={`trash-actions-${item.type}-${item.id}`}
                           >
                             <MoreHorizontal className="h-4 w-4" />
                           </button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="w-44">
                           <DropdownMenuItem
+                            data-testid={`trash-restore-${item.type}-${item.id}`}
                             disabled={restore.isPending}
                             onClick={() => restore.mutate(item)}
                           >
@@ -341,7 +355,11 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
                             {t('trash.restore')}
                           </DropdownMenuItem>
                           <DropdownMenuSeparator />
+                          {/* The permanent half of §V2-08's Delete: the bin row
+                              goes for good, here or after the retention window,
+                              whichever comes first. */}
                           <DropdownMenuItem
+                            data-testid={`trash-delete-forever-${item.type}-${item.id}`}
                             className="text-destructive focus:text-destructive"
                             disabled={deleteForever.isPending}
                             onClick={() => {

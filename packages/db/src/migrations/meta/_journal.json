@@ -1044,6 +1044,34 @@
       "when": 1900000116029,
       "tag": "0148_task_comment_saves",
       "breakpoints": true
+    },
+    {
+      "idx": 149,
+      "version": "7",
+      "when": 1900000117029,
+      "tag": "0149_task_permanent_delete",
+      "breakpoints": true
+    },
+    {
+      "idx": 150,
+      "version": "7",
+      "when": 1900000118029,
+      "tag": "0150_ai_run_status_and_model_preference",
+      "breakpoints": true
+    },
+    {
+      "idx": 151,
+      "version": "7",
+      "when": 1900000119029,
+      "tag": "0151_template_center_facets",
+      "breakpoints": true
+    },
+    {
+      "idx": 152,
+      "version": "7",
+      "when": 1900000120029,
+      "tag": "0152_integration_last_error",
+      "breakpoints": true
     }
   ]
 }

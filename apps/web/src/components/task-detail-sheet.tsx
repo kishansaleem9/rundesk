@@ -29,6 +29,10 @@ import {
   Minimize2,
   Copy,
   Trash2,
+  // Frame `15:32` draws Archive with a box-into-tray glyph and Delete with a
+  // bin, in red. Two actions, two icons — the menu used one bin for the only
+  // row there was, which read as a delete and was not one.
+  Archive as ArchiveIcon,
   Sparkles,
   Wand2,
   Paperclip,
@@ -70,6 +74,7 @@ import {
   Loader2,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { offerUndo } from '../lib/undoable-delete'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
 import { parseEstimate, formatEstimate } from '../lib/estimate'
 import { FavoriteStar, useFavorites, useToggleFavorite } from '../lib/use-favorites'
@@ -189,6 +194,10 @@ const ACTIVITY_ACTION_LABEL_KEYS: Record<string, TranslationKey> = {
   created: 'taskDetail.activity.created',
   updated: 'taskDetail.activity.updated',
   archived: 'taskDetail.activity.archived',
+  // §V2-08 frame `15:32` — Delete is its own action, so the feed has to be able
+  // to say so. `deleted` has been in the activity enum since the beginning and
+  // nothing ever wrote it, because nothing ever deleted a task.
+  deleted: 'taskDetail.activity.deleted',
   restored: 'taskDetail.activity.restored',
   moved: 'taskDetail.activity.moved',
   assigned: 'taskDetail.activity.assigned',
@@ -752,9 +761,11 @@ export function TaskDetailSheet({
    * button, which called it Delete and warned "This cannot be undone" — the
    * opposite of the truth, about the one action people most need to trust.
    *
-   * There is no permanent delete for a task in Rundesk. Offering a second menu
-   * item called "Delete" that ran this same request would be two names for one
-   * behaviour; the frame lists both, and the honest half is the one that exists.
+   * The frame's OTHER row, Delete, is `deleteTask` below — a real one now, on
+   * `POST /tasks/:id/trash`. Archive keeps the task for good under Settings →
+   * Archived tasks; Delete puts it in the workspace Trash with thirty days on
+   * the clock. Different request, different column, different surface: the two
+   * rows are two actions, which is the only reason both are here.
    */
   const archiveTask = useMutation({
     mutationFn: () => api(`/tasks/${taskId}`, { method: 'DELETE' }),
@@ -769,6 +780,46 @@ export function TaskDetailSheet({
   })
   const confirmArchive = () => {
     if (window.confirm(t('taskDetail.confirmArchiveTask'))) archiveTask.mutate()
+  }
+
+  /*
+   * §V2-08 frame `15:32` — **DELETE**, the red row under Archive.
+   *
+   * Moves the task into the workspace Trash, beside the deleted spaces, lists
+   * and docs that were already there. Restorable from Settings → Trash for
+   * thirty days, then purged by the same nightly job; "Delete forever" on that
+   * row removes it at once.
+   *
+   * The Undo is the same `offerUndo` the sidebar's container deletes use, and
+   * it calls the same trash restore endpoint. Reused rather than re-written: a
+   * second undo would be a second place for the restore route to drift.
+   */
+  const deleteTask = useMutation({
+    mutationFn: () => api<{ ok: boolean; retentionDays?: number }>(`/tasks/${taskId}/trash`, { method: 'POST' }),
+    onSuccess: async () => {
+      if (fallbackWorkspaceId && taskId) {
+        offerUndo({
+          workspaceId: fallbackWorkspaceId,
+          type: 'task',
+          id: taskId,
+          message: t('taskDetail.taskDeleted'),
+          undoLabel: t('trash.undo'),
+          restoredMessage: t('taskDetail.taskUndeleted'),
+          failedMessage: t('taskDetail.couldNotUndelete'),
+          onRestored: () => qc.invalidateQueries(),
+        })
+      } else {
+        toast.success(t('taskDetail.taskDeleted'))
+      }
+      await qc.invalidateQueries()
+      onOpenChange(false)
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotDelete'))
+    },
+  })
+  const confirmDelete = () => {
+    if (window.confirm(t('taskDetail.confirmDeleteTask'))) deleteTask.mutate()
   }
 
   const commitTitle = () => {
@@ -905,9 +956,9 @@ export function TaskDetailSheet({
                 data-testid="task-archive"
                 onClick={confirmArchive}
                 disabled={archiveTask.isPending}
-                className="absolute left-[7.25rem] top-3 h-7 gap-1.5 px-2.5 text-xs text-red-600 hover:text-red-600 opacity-90 hover:opacity-100"
+                className="absolute left-[7.25rem] top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <ArchiveIcon className="h-3.5 w-3.5" />
                 {t('taskDetail.archiveTask')}
               </Button>
               {/* Reposition sits beside Change cover, and only for an image. */}
@@ -1304,14 +1355,35 @@ export function TaskDetailSheet({
                         Archive, second from the bottom in the frame. Same
                         mutation as the banner button — one action, one name, in
                         both of the places the walkthrough reaches for it.
+
+                        Neutral, not red: the frame draws Archive in the plain
+                        menu colour and only Delete in red, and it is right to.
+                        Archiving is reversible and keeps the task for good; the
+                        red one is the row with a clock on it.
                       */}
                       <DropdownMenuItem
                         data-testid="task-menu-archive"
                         onSelect={confirmArchive}
+                      >
+                        <ArchiveIcon className="mr-2 h-4 w-4" />
+                        {t('taskDetail.archiveTask')}
+                      </DropdownMenuItem>
+                      {/*
+                        DELETE — the last row in the frame, red, under Archive.
+                        A different request (`POST /tasks/:id/trash`), a
+                        different column (`deletedAt`), a different surface
+                        (Settings → Trash) and a different ending (purged after
+                        thirty days). Two rows only earn their place by being
+                        two actions.
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-delete"
+                        onSelect={confirmDelete}
+                        disabled={deleteTask.isPending}
                         className="text-red-600 focus:text-red-600"
                       >
                         <Trash2 className="mr-2 h-4 w-4" />
-                        {t('taskDetail.archiveTask')}
+                        {t('taskDetail.deleteTask')}
                       </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
