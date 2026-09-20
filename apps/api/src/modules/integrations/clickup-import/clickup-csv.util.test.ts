@@ -138,4 +138,33 @@ describe('buildDropdownOptions + dupKey + mappers', () => {
     assert.equal(mapPriority('Urgent'), 'urgent')
     assert.equal(mapPriority('2'), 'high')
   })
+
+  /*
+   * `mapPriority` decided by SUBSTRING ORDER: `includes('high')` ran before
+   * anything could look at `highest`, so "Highest" — the tier ABOVE high —
+   * imported as `high`, and `lowest` was unreachable for the same reason.
+   * Neither word is in ClickUp's own vocabulary, which is why it went
+   * unnoticed; but the generic spreadsheet importer feeds this the same
+   * column, and those are ordinary words in a sheet exported from elsewhere.
+   */
+  it('reads Highest as urgent and Lowest as low — the two substring order ate', () => {
+    assert.equal(mapPriority('Highest'), 'urgent')
+    assert.equal(mapPriority('HIGHEST'), 'urgent')
+    assert.equal(mapPriority('  highest '), 'urgent')
+    assert.equal(mapPriority('Lowest'), 'low')
+    assert.equal(mapPriority('Priority: Highest'), 'urgent')
+    assert.equal(mapPriority('Priority: Lowest'), 'low')
+  })
+
+  it('keeps the four words, the four numbers, and normal for anything else', () => {
+    assert.equal(mapPriority('High'), 'high')
+    assert.equal(mapPriority('Normal'), 'normal')
+    assert.equal(mapPriority('Low'), 'low')
+    assert.equal(mapPriority('1'), 'urgent')
+    assert.equal(mapPriority('3'), 'normal')
+    assert.equal(mapPriority('4'), 'low')
+    assert.equal(mapPriority(undefined), 'normal')
+    assert.equal(mapPriority(''), 'normal')
+    assert.equal(mapPriority('banana'), 'normal')
+  })
 })

@@ -162,11 +162,24 @@ try {
    * that renders "now" would pass the check above on every task in the product
    * while being wrong about all but the newest.
    */
+  /*
+   * PARSED, NOT SUBSTRING-MATCHED. This used to ask whether the chip text
+   * CONTAINED today's day-of-month, which is true of "8/7/2026" on the 20th of
+   * any month — because the year carries "20". It also matched on the 2nd, the
+   * 6th and the 26th. A check that fails on four days in thirty is not a check,
+   * it is a calendar, and it reported the failure as "it is rendering the
+   * current date" while the chip was right.
+   *
+   * The numbers are pulled out and compared as numbers, with the year dropped
+   * so it cannot stand in for a day.
+   */
   const seeded = new Date(CREATED_AT)
   const todayYmd = new Date()
-  const hasSeededDay = chipText.includes(String(seeded.getDate()))
+  const nums = (chipText.match(/\d+/g) ?? []).map(Number)
+  const dayish = nums.filter((n) => n !== seeded.getFullYear() && n !== todayYmd.getFullYear())
+  const hasSeededDay = dayish.includes(seeded.getDate())
   const looksLikeToday =
-    chipText.includes(String(todayYmd.getDate())) && todayYmd.getDate() !== seeded.getDate()
+    dayish.includes(todayYmd.getDate()) && todayYmd.getDate() !== seeded.getDate()
   chk(
     hasSeededDay && !looksLikeToday,
     'and it shows when the task was really created, not today',
