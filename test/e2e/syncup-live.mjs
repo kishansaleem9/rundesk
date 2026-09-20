@@ -190,6 +190,19 @@ const check = (ok, label, detail = '') => {
  * output, and three recording checks that need the AI Notes entitlement. Set
  * the floor at 53 and a perfectly healthy CI runner fails for having no
  * soundcard.
+ *
+ * THIS IS THE ONE SUITE THAT KEEPS A FLOOR, AND IT IS DELIBERATE. Every other
+ * suite in `test/e2e` compares with `!==`, because `<` lets a run that skipped
+ * a branch report "0 failed" — the trap `docs/video2-reaudit-process.md` names
+ * first. A sweep converted all 65 to exact; this file was the only one where
+ * that was wrong, and it failed with "only 53 of 48 checks ran" while being
+ * perfectly healthy, because the local machine HAS a soundcard and the
+ * entitlement. The five conditional checks are the reason, and they are named
+ * above so the exception can be checked rather than believed.
+ *
+ * If you are tempted to make this exact: the number is not one number. It is
+ * 48 on a headless runner and 53 here, and an exact comparison has to be wrong
+ * on one of them.
  */
 const EXPECTED_CHECKS = 48
 
@@ -198,7 +211,10 @@ const done = async (browser, stack) => {
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran !== EXPECTED_CHECKS) {
+  // A FLOOR, not an equality — see the comment on EXPECTED_CHECKS. Running
+  // MORE than the floor is the healthy machine doing the five conditional
+  // checks as well; running fewer is the suite shrinking.
+  if (ran < EXPECTED_CHECKS) {
     console.log(
       `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
         'so "0 failed" describes the part it reached and nothing else.',
