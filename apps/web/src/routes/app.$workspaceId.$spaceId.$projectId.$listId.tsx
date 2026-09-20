@@ -44,6 +44,12 @@ import {
   ShieldCheck,
   Home,
   Link2,
+  // §M frame `12:10` — the three chips' glyphs, in the frame's order: a
+  // layered stack, a branching subtask, a three-column block.
+  Layers,
+  GitBranch,
+  Columns3,
+  Check,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -325,6 +331,36 @@ type SortField = 'title' | 'status' | 'priority' | 'due' | 'assignee' | 'created
 type SortState = { field: SortField; dir: SortDir }
 type ColumnFilters = { statuses: string[]; priorities: TaskPriority[]; assignees: string[] }
 const EMPTY_COLUMN_FILTERS: ColumnFilters = { statuses: [], priorities: [], assignees: [] }
+
+/**
+ * §M frame `12:10` — how the Subtasks chip is set.
+ *
+ * `collapsed` and `expanded` decide where a parent row STARTS; `separate` is a
+ * different question asked of the server (`includeSubtasks=true`), so the
+ * children arrive as rows of their own and the nesting is switched off — with
+ * both on, every child would be drawn twice.
+ */
+type SubtaskMode = 'collapsed' | 'expanded' | 'separate'
+
+/**
+ * The hideable built-in columns, and WHICH VIEW ACTUALLY DRAWS EACH ONE.
+ *
+ * The list rows and the table do not render the same set — the list row has no
+ * status pill and no created date — so a single panel listing all five would
+ * offer the list two switches that could change nothing. A control that cannot
+ * do what its label says is worse than a missing one, because it reads as
+ * done. `views` is what keeps the panel honest.
+ *
+ * Name/title is deliberately absent: the reference will not let you hide it
+ * either, and a row with no name is not a row.
+ */
+const BUILTIN_COLUMNS: { key: string; labelKey: TranslationKey; views: ('list' | 'table')[] }[] = [
+  { key: 'col:status', labelKey: 'list.columns.status', views: ['table'] },
+  { key: 'col:priority', labelKey: 'list.columns.priority', views: ['list', 'table'] },
+  { key: 'col:assignees', labelKey: 'list.columns.assignees', views: ['list', 'table'] },
+  { key: 'col:due', labelKey: 'list.columns.due', views: ['list', 'table'] },
+  { key: 'col:created', labelKey: 'list.columns.created', views: ['table'] },
+]
 
 const PRIORITY_WEIGHT: Record<TaskPriority, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
 
@@ -1255,6 +1291,23 @@ function ListDetail() {
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
+  /*
+   * §M frame `12:10` — the Subtasks chip. The reference offers three things and
+   * they are not three of a kind: two decide whether the nested rows start
+   * open, the third changes the REQUEST, because subtasks-as-rows is a
+   * different result set and is also what puts children into filter results.
+   *
+   * `subtaskStamp` exists because "Expand all" is an ACTION, not a state. A row
+   * collapsed by hand must re-expand when the menu item is chosen again, and
+   * with a boolean alone that second click changes nothing and reads as a dead
+   * control.
+   */
+  const [subtaskMode, setSubtaskMode] = useState<SubtaskMode>('collapsed')
+  const [subtaskStamp, setSubtaskStamp] = useState(0)
+  const chooseSubtaskMode = (mode: SubtaskMode) => {
+    setSubtaskMode(mode)
+    setSubtaskStamp((n) => n + 1)
+  }
   const [fieldSearch, setFieldSearch] = useState('')
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState<CustomFieldDef['type']>('text')
@@ -1262,7 +1315,9 @@ function ListDetail() {
   // The Table "Fields" popover is a native <details>; native <details> doesn't
   // close on an outside click, so wire one up to match the other toolbar popovers.
   const fieldsDetailsRef = useRef<HTMLDetailsElement | null>(null)
+  const subtaskDetailsRef = useRef<HTMLDetailsElement | null>(null)
   useDismissableDetails(fieldsDetailsRef)
+  useDismissableDetails(subtaskDetailsRef)
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
   const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
@@ -1330,9 +1385,22 @@ function ListDetail() {
     // `showArchived` is in the key because it changes WHICH ROWS the server
     // returns — leaving it out would serve the unarchived cache for both
     // states and the toggle would look broken exactly once, on the second use.
-    queryKey: ['tasks', listId, showArchived],
-    queryFn: () =>
-      api<TaskItem[]>(`/tasks/list/${listId}${showArchived ? '?includeArchived=true' : ''}`),
+    /*
+     * `subtaskMode === 'separate'` is in the key for the same reason
+     * `showArchived` is, and with the same failure: it changes WHICH ROWS the
+     * server returns. The query is also the only reader of `includeSubtasks`,
+     * an API option the web app had never once sent — the server has accepted
+     * it since the list endpoint was written, so "As separate tasks" was a
+     * built, tested, documented parameter that nothing could reach.
+     */
+    queryKey: ['tasks', listId, showArchived, subtaskMode === 'separate'],
+    queryFn: () => {
+      const q = new URLSearchParams()
+      if (showArchived) q.set('includeArchived', 'true')
+      if (subtaskMode === 'separate') q.set('includeSubtasks', 'true')
+      const qs = q.toString()
+      return api<TaskItem[]>(`/tasks/list/${listId}${qs ? `?${qs}` : ''}`)
+    },
     refetchInterval: refresh.refetchInterval,
   })
   const { data: projectFields = [] } = useQuery({
@@ -1589,6 +1657,15 @@ function ListDetail() {
     setFilterRules(Array.isArray(cfg.filterRules) ? (cfg.filterRules as FilterNode[]) : [])
     setGroupBy((cfg.groupBy as 'status' | 'priority' | 'assignee') ?? 'status')
     setHiddenFields(new Set(Array.isArray(cfg.hiddenFields) ? (cfg.hiddenFields as string[]) : []))
+    /*
+     * Through `chooseSubtaskMode`, not the setter: applying a view has to bump
+     * the stamp too, or the rows keep whatever they were expanded to and the
+     * view remembers a setting the screen does not show.
+     */
+    const savedSubtaskMode = cfg.subtaskMode as SubtaskMode | undefined
+    chooseSubtaskMode(
+      savedSubtaskMode === 'expanded' || savedSubtaskMode === 'separate' ? savedSubtaskMode : 'collapsed',
+    )
     setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
     setViewStamp((n) => n + 1)
   }
@@ -1603,6 +1680,7 @@ function ListDetail() {
     filterRules,
     groupBy,
     hiddenFields: Array.from(hiddenFields),
+    subtaskMode,
     wipLimits,
   })
 
@@ -2099,6 +2177,14 @@ function ListDetail() {
                 value={taskSearch}
                 onChange={(e) => setTaskSearch(e.target.value)}
                 placeholder={t('list.searchTasks')}
+                /*
+                 * Addressable, because a suite that wants to talk about ITS OWN
+                 * rows in a shared list needs a way to be left with only those.
+                 * Past a few hundred rows the status group virtualises and a
+                 * row created at the end is not in the DOM at all, which reads
+                 * exactly like the feature being broken.
+                 */
+                data-testid="list-task-search"
                 aria-label={t('list.searchTasks')}
                 className="h-8 w-40 rounded-md border border-border/80 bg-card pl-7 pr-6 text-[12px] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-violet-500/25"
               />
@@ -2189,18 +2275,178 @@ function ListDetail() {
             >
               {sort.dir === 'asc' ? '↑' : '↓'}
             </button>
-            <WorkFilterSelect
-              value={groupBy}
-              onChange={(v) => setGroupBy(v as typeof groupBy)}
-              testId="list-group-by"
-              ariaLabel={t('list.groupByStatus')}
-            >
-              <option value="status">{t('list.groupByStatus')}</option>
-              {/* Grouping by a field the space has switched off would produce
-                  buckets for something nothing displays. */}
-              {spaceFeatures.priority && <option value="priority">{t('list.groupByPriority')}</option>}
-              <option value="assignee">{t('list.groupByAssignee')}</option>
-            </WorkFilterSelect>
+            {/*
+              §M frame `12:10` — THE THREE CHIPS, AS ONE CLUSTER.
+
+              Zoomed, the frame shows three rounded pills abreast with nothing
+              between them: `≋ Group: Status` (tinted, because grouping is on),
+              `⑂ Subtasks`, `▥ Columns`.
+
+              The cluster is a container rather than three loose controls, and
+              that is measured rather than decorative. Rundesk's list toolbar
+              also carries Search, Filter, Sort, Closed, Archived, Customize,
+              Statuses and Email, so at 1600px it wraps — and loose, the wrap
+              lands BETWEEN Group and Subtasks with every chip present and
+              correct. Adjacent in the markup AND one flex item is what keeps
+              the wrap outside the cluster.
+            */}
+            <div className="flex shrink-0 items-center gap-2" data-testid="list-view-controls">
+            {/*
+              The first chip NAMES ITS CURRENT VALUE. Rundesk's said "By
+              status", which is the same information in a form that takes a
+              moment longer to read and does not say what the control is. The
+              relabelling is in the catalogue, so the option list and the
+              collapsed chip can never drift.
+
+              Still a native <select>: keyboard- and screen-reader-complete for
+              free, and three suites already drive it by `list-group-by`. The
+              icon is drawn behind it and the padding makes room, which is the
+              one thing a bare select cannot host.
+            */}
+            <span className="relative inline-flex shrink-0 items-center" data-testid="list-group-chip">
+              <Layers className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-accent" aria-hidden />
+              <WorkFilterSelect
+                value={groupBy}
+                onChange={(v) => setGroupBy(v as typeof groupBy)}
+                testId="list-group-by"
+                ariaLabel={t('list.groupByStatus')}
+                className="rounded-full border-accent/50 bg-accent/10 pl-7 text-accent"
+              >
+                <option value="status">{t('list.groupByStatus')}</option>
+                {/* Grouping by a field the space has switched off would produce
+                    buckets for something nothing displays. */}
+                {spaceFeatures.priority && <option value="priority">{t('list.groupByPriority')}</option>}
+                <option value="assignee">{t('list.groupByAssignee')}</option>
+              </WorkFilterSelect>
+            </span>
+
+            {/*
+              The Subtasks chip. Only on the two views that DRAW a subtask: the
+              board's cards carry a done/total badge and no tree, and the
+              calendar has no rows, so offering it there would be a switch with
+              nowhere to land.
+            */}
+            {(activeView === 'table' || activeView === 'list') && (
+              /* `data-mode` on the <details>, not on its <summary>: the
+                 <details> is the element every check addresses, and an
+                 attribute a check cannot reach from the handle it holds is an
+                 attribute nobody reads. */
+              <details ref={subtaskDetailsRef} className="relative" data-testid="list-subtasks" data-mode={subtaskMode}>
+                <summary
+                  className={cn(
+                    'list-none h-8 px-2.5 flex items-center gap-1.5 rounded-full border text-[12px] cursor-pointer select-none',
+                    subtaskMode === 'collapsed'
+                      ? 'border-border/80 bg-card text-muted-foreground hover:bg-muted/40 hover:text-foreground'
+                      : 'border-accent/50 bg-accent/10 text-accent',
+                  )}
+                  title={t('list.subtasks.modeAria')}
+                >
+                  <GitBranch className="h-3.5 w-3.5" aria-hidden />
+                  {t('list.subtasks.chip')}
+                </summary>
+                <div
+                  className="absolute z-20 mt-1 w-60 rounded-md border border-border bg-card p-1 shadow-lg"
+                  role="radiogroup"
+                  aria-label={t('list.subtasks.modeAria')}
+                >
+                  {([
+                    ['collapsed', 'list.subtasks.collapseAll', undefined],
+                    ['expanded', 'list.subtasks.expandAll', undefined],
+                    ['separate', 'list.subtasks.asSeparate', 'list.subtasks.asSeparateHint'],
+                  ] as const).map(([mode, labelKey, hintKey]) => (
+                    <button
+                      key={mode}
+                      type="button"
+                      role="radio"
+                      aria-checked={subtaskMode === mode}
+                      data-testid={`list-subtasks-${mode}`}
+                      onClick={() => {
+                        chooseSubtaskMode(mode)
+                        /* Collapse all and Expand all are ACTIONS — the menu is
+                           done once one is chosen, and leaving it open over the
+                           rows it just changed hides the result. */
+                        if (subtaskDetailsRef.current) subtaskDetailsRef.current.open = false
+                      }}
+                      className={cn(
+                        'w-full flex items-start gap-2 rounded px-2 py-1.5 text-left text-[13px] hover:bg-muted/40',
+                        subtaskMode === mode && 'text-accent',
+                      )}
+                    >
+                      <Check
+                        className={cn('mt-0.5 h-3.5 w-3.5 shrink-0', subtaskMode === mode ? 'opacity-100' : 'opacity-0')}
+                        aria-hidden
+                      />
+                      <span className="min-w-0">
+                        {t(labelKey)}
+                        {hintKey && (
+                          <span className="block text-[11px] text-muted-foreground">{t(hintKey)}</span>
+                        )}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
+
+            {(activeView === 'table' || activeView === 'list') && (
+              /*
+                The Columns chip. It was a "Fields (n/m)" box that could hide
+                only CUSTOM fields, so the columns every list has were the ones
+                you could not touch — and the whole control was gated on the
+                customFields ClickApp, which meant switching that off took away
+                the ability to hide Due date.
+              */
+              <details ref={fieldsDetailsRef} className="relative" data-testid="list-columns">
+                <summary className="list-none h-8 px-2.5 flex items-center gap-1.5 rounded-full border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+                  <Columns3 className="h-3.5 w-3.5" aria-hidden />
+                  {t('list.columns.chip')}
+                </summary>
+                <div className="absolute right-0 z-20 mt-1 w-60 rounded-md border border-border bg-card p-1.5 shadow-lg">
+                  <p className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                    {t('list.columns.builtIn')}
+                  </p>
+                  {BUILTIN_COLUMNS.filter((c) => c.views.includes(activeView as 'list' | 'table')).map((c) => (
+                    <label
+                      key={c.key}
+                      className="flex items-center gap-2 rounded px-2 py-1.5 text-[13px] hover:bg-muted/40 cursor-pointer"
+                    >
+                      <input
+                        type="checkbox"
+                        data-testid={`list-column-${c.key.slice(4)}`}
+                        checked={!hiddenFields.has(c.key)}
+                        onChange={(e) =>
+                          setHiddenFields((prev) => {
+                            const next = new Set(prev)
+                            if (e.target.checked) next.delete(c.key)
+                            else next.add(c.key)
+                            return next
+                          })
+                        }
+                      />
+                      <span className="truncate">{t(c.labelKey)}</span>
+                    </label>
+                  ))}
+                  <p className="px-2 pb-1 text-[11px] text-muted-foreground">{t('list.columns.nameAlways')}</p>
+                  {spaceFeatures.customFields && (
+                    /* §V2-06 P06 — this SECTION's presence is the read site for
+                       the resolved `customFields` feature, so it stays
+                       addressable. It is a section of the Columns panel rather
+                       than the panel itself, because the built-in columns above
+                       it are not custom fields and must not vanish with the
+                       ClickApp. */
+                    <div data-testid="list-fields-panel" className="border-t border-border/60 pt-1.5">
+                      <p className="px-1 pb-1 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        {t('list.table.fields', {
+                          shown: projectFields.filter((f) => !hiddenFields.has(f.id)).length,
+                          total: projectFields.length,
+                        })}
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </details>
+            )}
+            </div>
             {/*
               §V2-07 `[11:32]`/`[11:37]` — the two switches that change which
               rows are on screen, next to the filters rather than buried, which
@@ -2379,6 +2625,9 @@ function ListDetail() {
           <GroupedListView
             tasks={visibleTasks}
             groupBy={groupBy}
+            subtaskMode={subtaskMode}
+            subtaskStamp={subtaskStamp}
+            hiddenCols={hiddenFields}
             selectedTaskIds={selectedTaskIds}
             onPatchTask={async (taskId, patch) => {
               await api(`/tasks/${taskId}`, { method: 'PATCH', body: JSON.stringify(patch) })
@@ -2504,6 +2753,9 @@ function ListDetail() {
             workspaceId={workspaceId}
             projectId={projectId}
             projectFields={projectFields.filter((f) => !hiddenFields.has(f.id))}
+            /* §M `12:10` — the same Set, read for the `col:*` keys instead. One
+               Set means one thing to persist and one thing to fingerprint. */
+            hiddenCols={hiddenFields}
             customFieldByTask={customFieldByTask}
             workspaceMembers={workspaceMembers}
             sort={sort}
@@ -2736,6 +2988,9 @@ function GroupedListView({
   onOpenTask,
   onToggleDone,
   onPatchTask,
+  subtaskMode,
+  subtaskStamp,
+  hiddenCols,
   onAddTask,
 }: {
   tasks: TaskItem[]
@@ -2745,6 +3000,10 @@ function GroupedListView({
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
+  /** §M `12:10` — passed to every row; see TaskRow for what each value means. */
+  subtaskMode: SubtaskMode
+  subtaskStamp: number
+  hiddenCols: Set<string>
   onAddTask: (
     status: TaskStatus,
     title: string,
@@ -2808,6 +3067,9 @@ function GroupedListView({
                   onToggleSelect={onToggleSelect}
                   onOpenTask={onOpenTask}
                   onToggleDone={onToggleDone}
+                  subtaskMode={subtaskMode}
+                  subtaskStamp={subtaskStamp}
+                  hiddenCols={hiddenCols}
                 />
               ) : (
                 group.tasks.map((task) => (
@@ -2818,6 +3080,9 @@ function GroupedListView({
                     onToggleSelect={(additive) => onToggleSelect(task.id, additive)}
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
+                    subtaskMode={subtaskMode}
+                    subtaskStamp={subtaskStamp}
+                    hiddenCols={hiddenCols}
                   />
                 ))
               )}
@@ -2850,6 +3115,9 @@ function GroupedListView({
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
                     onPatchTask={onPatchTask}
+                    subtaskMode={subtaskMode}
+                    subtaskStamp={subtaskStamp}
+                    hiddenCols={hiddenCols}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -2861,6 +3129,9 @@ function GroupedListView({
                       onOpenTask={onOpenTask}
                       onToggleDone={onToggleDone}
                       onPatchTask={onPatchTask}
+                      subtaskMode={subtaskMode}
+                      subtaskStamp={subtaskStamp}
+                      hiddenCols={hiddenCols}
                     />
                   ))
                 )}
@@ -2910,6 +3181,9 @@ function GroupedListView({
                     onOpenTask={onOpenTask}
                     onToggleDone={onToggleDone}
                     onPatchTask={onPatchTask}
+                    subtaskMode={subtaskMode}
+                    subtaskStamp={subtaskStamp}
+                    hiddenCols={hiddenCols}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -2921,6 +3195,9 @@ function GroupedListView({
                       onOpenTask={onOpenTask}
                       onToggleDone={onToggleDone}
                       onPatchTask={onPatchTask}
+                      subtaskMode={subtaskMode}
+                      subtaskStamp={subtaskStamp}
+                      hiddenCols={hiddenCols}
                     />
                   ))
                 )}
@@ -2942,6 +3219,9 @@ function VirtualizedTaskRows({
   onOpenTask,
   onToggleDone,
   onPatchTask,
+  subtaskMode,
+  subtaskStamp,
+  hiddenCols,
 }: {
   virtualKey: string
   tasks: TaskItem[]
@@ -2950,6 +3230,10 @@ function VirtualizedTaskRows({
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
+  /** §M `12:10` — passed to every row; see TaskRow for what each value means. */
+  subtaskMode: SubtaskMode
+  subtaskStamp: number
+  hiddenCols: Set<string>
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null)
   const rowVirtualizer = useVirtualizer({
@@ -2982,6 +3266,9 @@ function VirtualizedTaskRows({
                 onOpenTask={onOpenTask}
                 onToggleDone={onToggleDone}
                 onPatchTask={onPatchTask}
+                subtaskMode={subtaskMode}
+                subtaskStamp={subtaskStamp}
+                hiddenCols={hiddenCols}
               />
             </div>
           )
@@ -2998,6 +3285,9 @@ function TaskRow({
   onOpenTask,
   onToggleDone,
   onPatchTask,
+  subtaskMode = 'collapsed',
+  subtaskStamp = 0,
+  hiddenCols,
 }: {
   task: TaskItem
   selected: boolean
@@ -3005,6 +3295,17 @@ function TaskRow({
   onOpenTask: (taskId: string) => void
   onToggleDone: (task: TaskItem) => Promise<void> | void
   onPatchTask?: (taskId: string, patch: TaskPatch) => Promise<void> | void
+  /**
+   * §M frame `12:10` — what the Subtasks chip is set to. `separate` means the
+   * children are already in `tasks` as rows of their own, so the tree here has
+   * to go: with both, every subtask would be drawn twice and the count at the
+   * top of the list would disagree with the rows under it.
+   */
+  subtaskMode?: SubtaskMode
+  /** Bumped on every choice, so choosing "Expand all" twice expands twice. */
+  subtaskStamp?: number
+  /** Built-in columns the Columns panel has switched off, keyed `col:*`. */
+  hiddenCols?: Set<string>
 }) {
   const { t, locale } = useTranslation()
   // statusCategory ('closed') is the post-custom-statuses signal; falling
@@ -3015,9 +3316,21 @@ function TaskRow({
   // Subtasks tree (Plan §4.3): nest children under an expander, with the
   // parent showing rolled-up progress.
   const subtasks = task.subtasks ?? []
-  const hasSubtasks = subtasks.length > 0
+  const nestSubtasks = subtaskMode !== 'separate'
+  const hasSubtasks = nestSubtasks && subtasks.length > 0
   const subtasksDone = subtasks.filter((s) => s.statusCategory === 'closed' || s.status === 'done').length
-  const [expanded, setExpanded] = useState(false)
+  const [expanded, setExpanded] = useState(subtaskMode === 'expanded')
+  /*
+   * Keyed on the STAMP, not on the mode. Keyed on the mode, a row collapsed by
+   * hand would ignore a second "Expand all" — the mode has not changed, so
+   * nothing re-runs, and the menu item looks broken on exactly the press that
+   * matters. The per-row toggle still wins until the next choice.
+   */
+  useEffect(() => {
+    if (subtaskMode !== 'separate') setExpanded(subtaskMode === 'expanded')
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtaskStamp])
+  const showCol = (key: string) => !hiddenCols?.has(key)
   // Inline edits (Plan §5): cycle priority on click; edit due date in place.
   const cyclePriority = () => {
     const order: TaskPriority[] = ['low', 'normal', 'high', 'urgent']
@@ -3028,6 +3341,15 @@ function TaskRow({
   return (
     <div>
     <div
+      /*
+       * ADDRESSABLE, AND BY ID. A check that wants to say something about ONE
+       * row cannot do it by text: the "Task created" toast names the task too,
+       * so `getByText(title)` is true whether or not the list refreshed. The
+       * id is here for the same reason the toast carries one — a check should
+       * be able to say which row it found.
+       */
+      data-testid="list-task-row"
+      data-task-id={task.id}
       className={cn(
         'group flex items-center gap-3 px-3 py-2 hover:bg-muted/60 cursor-pointer transition-colors',
         selected && 'bg-accent/10 hover:bg-accent/15',
@@ -3125,7 +3447,10 @@ function TaskRow({
         ) : null}
       </div>
 
-      {onPatchTask ? (
+      {/* §M `12:10` — the Columns panel decides whether these three are drawn.
+          Each is gated where it is RENDERED rather than by a wrapper, so the
+          row's flex spacing closes up instead of leaving a hole. */}
+      {showCol('col:priority') && (onPatchTask ? (
         <button
           type="button"
           onClick={(e) => {
@@ -3140,12 +3465,12 @@ function TaskRow({
         </button>
       ) : (
         <Flag className={cn('h-3.5 w-3.5 shrink-0', PRIORITY_COLORS[task.priority])} />
-      )}
+      ))}
 
       {/* Coarse on purpose — this is a nudge from a row, not the place you set
           a deadline. It may change the day; it may not quietly drop a time the
           row is carrying, which sending a bare YYYY-MM-DD did. */}
-      {onPatchTask ? (
+      {showCol('col:due') && (onPatchTask ? (
         <input
           type="date"
           value={toDateInput(task.dueDate)}
@@ -3161,8 +3486,9 @@ function TaskRow({
             {shortDate(new Date(task.dueDate), locale)}
           </div>
         )
-      )}
+      ))}
 
+      {showCol('col:assignees') && (
       <div className="flex -space-x-1 shrink-0 min-w-[40px] justify-end">
         {assignees.slice(0, 3).map((a) => {
           const label = a.user?.displayName?.[0]?.toUpperCase() ?? '?'
@@ -3182,6 +3508,7 @@ function TaskRow({
           </div>
         )}
       </div>
+      )}
     </div>
     {hasSubtasks && expanded && (
       <div className="divide-y divide-border/50 border-t border-border/50 bg-muted/20">
@@ -3367,6 +3694,7 @@ function TableView({
   workspaceId,
   projectId,
   projectFields,
+  hiddenCols,
   customFieldByTask,
   workspaceMembers,
   sort,
@@ -3382,6 +3710,13 @@ function TableView({
   workspaceId: string
   projectId: string
   projectFields: CustomFieldDef[]
+  /**
+   * §M `12:10` — the built-in columns the Columns panel has switched off,
+   * keyed `col:*`. The custom fields are already filtered out of
+   * `projectFields` by the parent; the same Set carries both because it is one
+   * per-view setting, not two.
+   */
+  hiddenCols: Set<string>
   /** Fetched by the parent, which also needs them for custom-field filters. */
   customFieldByTask: Record<string, Record<string, unknown>>
   workspaceMembers: WorkspaceMember[]
@@ -3485,7 +3820,22 @@ function TableView({
     sortField?: SortField
     filterKind?: 'status' | 'priority' | 'assignee'
   }
-  const columns: TableCol[] = [
+  /*
+   * §M `12:10` — HIDING A COLUMN TAKES TWO EDITS IN THIS TABLE, not one.
+   *
+   * The header row maps over this array; the body does NOT — each cell is
+   * written out by hand below, in the same order, with a `{/* Status *\/}`
+   * comment over it. So filtering here alone removes a heading and leaves its
+   * cells, putting every row one column out of step with the row above it —
+   * and the result still looks like a table, which is the worst kind of wrong.
+   * `showCol` is therefore applied at each cell as well; the two must name the
+   * same key.
+   *
+   * Checkbox and title are not offered: `BUILTIN_COLUMNS` does not list them,
+   * and a row with no name is not a row.
+   */
+  const showCol = (key: string) => !hiddenCols.has(key)
+  const allColumns: TableCol[] = [
     { key: 'checkbox', label: '', width: 'w-9' },
     { key: 'title', label: t('list.table.colTitle'), width: 'flex-1 min-w-[240px]', sortField: 'title' },
     { key: 'status', label: t('taskDetail.fieldStatus'), width: 'w-36', sortField: 'status', filterKind: 'status' },
@@ -3494,6 +3844,7 @@ function TableView({
     { key: 'due', label: t('taskDetail.fieldDueDate'), width: 'w-28', sortField: 'due' },
     { key: 'created', label: t('list.table.colCreated'), width: 'w-24', sortField: 'created' },
   ]
+  const columns = allColumns.filter((c) => showCol(`col:${c.key}`))
   // Visibility is controlled upstream by the view's Fields picker; render all
   // that were passed in (Plan §4/§5 per-view custom-field visibility).
   const customColumns = projectFields
@@ -3547,10 +3898,20 @@ function TableView({
       <div className="overflow-x-auto">
         <div className="min-w-[980px]">
           {/* Header — click a label to sort, funnel to filter (Plan §5.1/§5.5) */}
-          <div className="sticky top-0 z-10 flex items-center bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide">
+          <div
+            data-testid="list-table-head"
+            className="sticky top-0 z-10 flex items-center bg-muted/50 border-b border-border text-xs font-medium text-muted-foreground uppercase tracking-wide"
+          >
             {columns.map((col) => (
               <div
                 key={col.key}
+                /*
+                 * §M `12:10` — named PER COLUMN so a check can say WHICH
+                 * heading went. Counting the children would also count the
+                 * custom-field headings, so a suite that hid Status and gained
+                 * a field would read as passing.
+                 */
+                data-testid={`list-table-head-${col.key}`}
                 className={cn('group px-3 py-2 flex items-center gap-1', col.width)}
               >
                 {col.key === 'checkbox' ? (
@@ -3698,7 +4059,8 @@ function TableView({
                   </div>
 
                   {/* Status */}
-                  <div className="w-36 px-3 flex items-center relative">
+                  {showCol('col:status') && (
+                  <div data-testid="list-table-status-cell" className="w-36 px-3 flex items-center relative">
                     <button
                       type="button"
                       onClick={(e) => {
@@ -3746,8 +4108,10 @@ function TableView({
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Priority */}
+                  {showCol('col:priority') && (
                   <div className="w-28 px-3 flex items-center relative">
                     <button
                       type="button"
@@ -3786,8 +4150,10 @@ function TableView({
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Assignees */}
+                  {showCol('col:assignees') && (
                   <div className="w-28 px-3 flex items-center relative">
                     <button
                       type="button"
@@ -3861,8 +4227,10 @@ function TableView({
                       </div>
                     )}
                   </div>
+                  )}
 
                   {/* Due date */}
+                  {showCol('col:due') && (
                   <div className="w-28 px-3 flex items-center relative">
                     {dateOpenFor === task.id ? (
                       <input
@@ -3902,11 +4270,14 @@ function TableView({
                       </button>
                     )}
                   </div>
+                  )}
 
                   {/* Created */}
+                  {showCol('col:created') && (
                   <div className="w-24 px-3 flex items-center text-xs text-muted-foreground tabular-nums">
                     {task.createdAt ? relativeTime(task.createdAt, locale) : '—'}
                   </div>
+                  )}
 
                   {customColumns.map((field) => {
                     const open = customOpen?.taskId === task.id && customOpen.fieldId === field.id
