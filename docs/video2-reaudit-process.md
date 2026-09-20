@@ -156,6 +156,15 @@ all the warning that is needed once the shape is familiar.
 - The API build emits extensionless imports into `packages/db/src`, so plain
   `node dist/apps/api/src/main.js` cannot resolve them. Run it through the tsx
   loader (`--require tsx/dist/preflight.cjs --import tsx/dist/loader.mjs`).
+- **A running API already has the schema the WORKING TREE has.** Because of the
+  loader above, `packages/db/src/schema/*.ts` is compiled from source at require
+  time — so the moment anyone adds a column, every running API instance starts
+  writing it, while the database still lacks it. The symptom is
+  `PostgresError: column "x" of relation "y" does not exist` from an API you
+  never rebuilt, against a database you never touched. Push the schema before
+  concluding anything is broken. This is also why `dist` being stale is not a
+  safe assumption in either direction: the web bundle is frozen, the server
+  schema is live.
 - `drizzle-kit push` without `--force` waits on an interactive prompt, exits 0,
   and applies nothing. Pipe `yes` into it and pass `--force`.
 - `ALLOW_SCHEMA_RESET` stays unset on anything that is not a local throwaway
