@@ -131,6 +131,48 @@ all the warning that is needed once the shape is familiar.
   falls back to a sibling's string, the assertion passes on the bug. (This is
   exactly the `VIEW_LABEL` "team" defect: the row rendered "List" because the
   key was missing, and any check for "a label is present" would have passed.)
+- **A negative assertion over a list that can be empty.**
+  `!requests.some(u => /type=/.test(u))` is *true* when nothing was requested.
+  The check reads as "no request carried the parameter" and means "there were
+  no requests". Assert the collection is non-empty first, in the same check.
+
+### Checks that fail for reasons that are not the code
+
+The mirror of the above, and just as costly: a check that reddens on something
+irrelevant trains everyone to ignore it.
+
+- **A check that fails on a calendar.** `activity-rail` asked whether the
+  chip's text *contained* today's day-of-month. Today was the 20th, the chip
+  read `"Created 8/7/2026"`, and the year carries `"20"` — so it reported the
+  chip as wrong while the chip was right, and would do the same on the 2nd,
+  6th and 26th of any month in 2026. Parse dates into numbers and compare
+  numbers; never substring-match a date.
+- **Asserting on rendered text when CSS transforms it.** `innerText` applies
+  `text-transform`; `textContent` does not. A menu label styled `uppercase`
+  reads "CREATE" through one and "Create" through the other. Decide which you
+  mean and say so in the check's message.
+- **A request-based check against a warm cache.** `apps/web/src/lib/query.ts`
+  sets a 30-second `staleTime`, so returning to a query key fetched seconds
+  ago fires *no request at all*. A check asserting "the request carried X"
+  then depends on how fast the runner got there — a flake wearing an
+  assertion's clothes. Force a cache miss by construction (ask for a key this
+  run has never fetched), never by timing.
+- **A `waitFor` that waits for the opposite of what the check wants.**
+  Playwright's default `state: 'visible'` needs a non-zero box, so waiting on
+  a *collapsed* (0px) panel can never resolve. Poll the quantity the check
+  itself measures.
+
+### Selectors
+
+- **A testid prefix is a namespace.** `[data-testid^="space-wizard-feature-"]`
+  counted 18 where 6 was meant, because two more testids — `-row-${key}` and
+  `-label-${key}` — were later added under the same prefix. Six features times
+  three element kinds. Adding a variant under an existing prefix silently
+  changes what every prefix query in the repo counts.
+- **`.locator('x')` is a descendant search.** `getByTestId('list-customize')
+  .locator('summary')` matched two elements once a nested `<details>` appeared
+  inside the panel. Use `'> summary'` when you mean the element's own child;
+  `.first()` keeps passing if the two ever swap order.
 
 ### Suite construction
 
@@ -150,6 +192,37 @@ all the warning that is needed once the shape is familiar.
 - **Bump a stamp, don't key on the value.** A "collapse all" that keys its effect
   on the mode is dead on the second press, because the mode did not change. Key
   on a counter that increments per choice.
+
+### Break-testing itself
+
+Step 6 has its own failure modes, and all four of these produced a page of
+green "confirmations" that meant nothing until they were found.
+
+- **Kill the server by PORT, not by environment variable.** `pkill -f` matches
+  a *command line*; `PORTMARK=2` is an environment variable and appears in no
+  command line, so it matched nothing. The old, unpatched API kept the port,
+  the new one failed to bind, and every API-side patch reported its suite
+  still passing while web-side patches reddened normally. The pattern in the
+  results — one class passing, the other failing — is what gives it away.
+  `lsof -t -i ":$PORT" -sTCP:LISTEN` is the honest question.
+- **Rebuild the bundle between patches, not only when this patch touches it.**
+  After a web patch, the built bundle stays patched. An API-only patch that
+  follows runs against it, so its checks measure the *previous* patch's
+  breakage.
+- **One runner per worktree, enforced.** Two break runs sharing a checkout
+  check out, patch and build over each other, and every result afterwards is
+  about whichever wrote last. Take a lock.
+- **A break patch goes stale when the code gets more robust.** One patch
+  removed the `isArchived` filter from a list query and the check still
+  passed — because a later fix had added `isNull(deletedAt)` *beside* it. Two
+  independent conditions hid the row, so removing one proved nothing. That is
+  good code and a bad patch: rewrite the patch to remove both, rather than
+  concluding the check is weak.
+- **A worktree is pinned at the commit you created it from.** Results are
+  about that commit, not about HEAD. Update it, or say which commit the
+  numbers describe.
+- **A patch that does not compile proves nothing**, and the harness must say
+  so out loud rather than counting it among the confirmed.
 
 ### Environment
 
@@ -171,6 +244,14 @@ all the warning that is needed once the shape is familiar.
   database.
 - Suites need `PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers`; the browser is
   preinstalled and must not be re-downloaded.
+- Some suites stage state directly in Postgres — a column with no endpoint
+  that writes it — and need `DATABASE_URL`. Without it they refuse to run,
+  correctly, and every break patch then "fails" for the same irrelevant
+  reason.
+- **Do not build the web bundle from a tree other people are editing.** A
+  bundle built during someone else's half-finished edit fails at runtime with
+  no build error, and everything measured against it is noise. Build from a
+  checkout nobody else is touching, or wait for a quiet tree.
 
 ### Scope
 
