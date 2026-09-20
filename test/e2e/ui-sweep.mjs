@@ -135,6 +135,27 @@ const columns = () => page.evaluate(() => {
 const selectWith = (text) =>
   page.locator('select').filter({ has: page.locator(`option:text-is("${text}")`) }).first()
 
+/*
+ * The grouping control, BY TESTID rather than by the words in its options.
+ *
+ * This used to be `selectWith('By status')`, and §M frame `12:10` relabelled
+ * those options: the chip names its CURRENT VALUE ("Group: Status"), not the
+ * axis ("By status"). The control was unchanged and still worked; the suite
+ * simply could not find it any more, and reported "no grouping control found"
+ * — which reads as the feature being gone.
+ *
+ * A testid survives copy changes. Option TEXT is a translation, and pinning a
+ * control to its own translated label means every copy edit looks like a
+ * regression. The labels themselves are asserted in `list-view-controls.mjs`,
+ * where that is the thing under test.
+ */
+const grouperSelect = () => page.getByTestId('list-group-by')
+const GROUP_LABELS = {
+  status: 'Group: Status',
+  priority: 'Group: Priority',
+  assignee: 'Group: Assignee',
+}
+
 /** The group bucket labels, read from the grid rather than assuming a tag. */
 /**
  * Dismiss the task sheet. Escape alone does not always land, and the sheet's
@@ -173,10 +194,10 @@ try {
   say('1. List view: the grouped-by column is dropped (V1)')
   await page.goto(`${B}/app/${WS}/${LIST_PATH}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3200)
-  const grouper = selectWith('By status')
+  const grouper = grouperSelect()
   check(await grouper.count() > 0, 'the grouping control is present', 'no grouping control found')
 
-  for (const [label, hidden] of [['By status', 'Status'], ['By priority', 'Priority'], ['By assignee', 'Assignees']]) {
+  for (const [label, hidden] of [[GROUP_LABELS.status, 'Status'], [GROUP_LABELS.priority, 'Priority'], [GROUP_LABELS.assignee, 'Assignees']]) {
     await grouper.selectOption({ label })
     await page.waitForTimeout(1400)
     const cols = await columns()
@@ -187,13 +208,13 @@ try {
   }
 
   say('1b. Grouping actually regroups the rows')
-  await grouper.selectOption({ label: 'By status' })
+  await grouper.selectOption({ label: GROUP_LABELS.status })
   await page.waitForTimeout(1500)
   const byStatus = await groupHeadings()
-  await grouper.selectOption({ label: 'By priority' })
+  await grouper.selectOption({ label: GROUP_LABELS.priority })
   await page.waitForTimeout(1800)
   const byPriority = await groupHeadings()
-  await grouper.selectOption({ label: 'By assignee' })
+  await grouper.selectOption({ label: GROUP_LABELS.assignee })
   await page.waitForTimeout(1800)
   const byAssignee = await groupHeadings()
   check(byStatus.length > 0 && byPriority.length > 0,
@@ -204,7 +225,7 @@ try {
   check(byAssignee.some((h) => /Unassigned/i.test(h)),
     `grouping by assignee produces people buckets: ${JSON.stringify(byAssignee.slice(0, 4))}`,
     `no assignee buckets: ${JSON.stringify(byAssignee)}`)
-  await grouper.selectOption({ label: 'By status' })
+  await grouper.selectOption({ label: GROUP_LABELS.status })
   await page.waitForTimeout(1200)
 
   say('2. Fields picker with search (V2)')

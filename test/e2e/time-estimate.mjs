@@ -30,8 +30,18 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 10
+/**
+ * "0 failed" is not "it ran".
+ *
+ * 11, not 10. It was 10 while the file had eleven unconditional checks — an
+ * eleventh was added and this constant was not raised. Nothing noticed,
+ * because the comparison was `ran < EXPECTED_CHECKS`: running MORE than the
+ * floor never trips it, so the constant drifts upward-blind and quietly stops
+ * guarding the thing it exists for. Exact comparison is what surfaced it.
+ *
+ * Raise this when a check is added; that is the whole contract.
+ */
+const EXPECTED_CHECKS = 11
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
