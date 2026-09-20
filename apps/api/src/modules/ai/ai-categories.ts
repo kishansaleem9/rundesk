@@ -41,8 +41,10 @@
  *
  * `images`, `externalActions` and `externalSearches` have no contributing
  * feature and no code path that could produce one: there is no image
- * generation in `apps/api`, and `COMMAND_TOOLS` is six internal tools with
- * nothing that reaches a connected app. A tile that can only ever render 0 is
+ * generation in `apps/api`, and every tool in `COMMAND_TOOLS` acts on this
+ * product's own rows — §V2-S16 added `create_list` / `create_folder` to it and
+ * neither reaches a connected app, so the reason below is re-checked rather
+ * than assumed and still holds. A tile that can only ever render 0 is
  * indistinguishable from a true zero on screen — this audit's "confident zero"
  * — so those three carry `supported: false` and the surface prints the reason
  * instead of a number. A count of zero is a fact about your workspace; "not

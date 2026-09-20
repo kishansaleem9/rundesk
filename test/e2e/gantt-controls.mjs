@@ -60,7 +60,7 @@ const argOf = (name, fallback) => {
  * download that never arrived — turns into a shorter run that still reports
  * "0 failed". Exact makes a skipped branch a failure.
  */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 28
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -83,6 +83,11 @@ const SEED = {
   lastDue: '2026-06-24T12:00:00.000Z',
   otherStart: '2026-03-09T12:00:00.000Z',
   otherDue: '2026-03-11T12:00:00.000Z',
+  bulk: [
+    ['Bulk one', '2026-03-16T12:00:00.000Z', '2026-03-18T12:00:00.000Z'],
+    ['Bulk two', '2026-05-04T12:00:00.000Z', '2026-05-06T12:00:00.000Z'],
+    ['Bulk three', '2026-05-18T12:00:00.000Z', '2026-05-20T12:00:00.000Z'],
+  ],
 }
 const FIRST_MONDAY = '2026-03-02'
 
@@ -168,7 +173,17 @@ try {
   const idMid = await mkTask(listA.id, TITLES.mid, SEED.midStart, SEED.midDue)
   const idLast = await mkTask(listA.id, TITLES.last, SEED.lastStart, SEED.lastDue)
   await mkTask(listB.id, TITLES.other, SEED.otherStart, SEED.otherDue)
-  const MINE = [idFirst, idMid, idLast]
+  /*
+   * Three more, all INSIDE the window the three above already span, so the
+   * plotted range — and every span measurement built on it — is unchanged.
+   * They are here for height: the sticky section at the end needs the chart
+   * taller than its own scrollport, and three rows is not taller than anything.
+   */
+  const idBulk = []
+  for (const [label, start, due] of SEED.bulk) {
+    idBulk.push(await mkTask(listA.id, `${label} ${TAG}`, start, due))
+  }
+  const MINE = [idFirst, idMid, idLast, ...idBulk]
   console.log(`\x1b[2m  workspace ${workspaceId}, project ${projectA.id}, tag ${TAG}\x1b[0m`)
 
   const ctx = await browser.newContext({
@@ -223,6 +238,8 @@ try {
       const panel = q('[data-testid="timeline-task-panel"]')
       return {
         viewW: vp ? vp.clientWidth : -1,
+        scrollLeft: vp ? vp.scrollLeft : -1,
+        anchorToday: ax ? ax.dataset.anchorToday : null,
         spanW: ax ? ax.getBoundingClientRect().width : -1,
         axisH: ax ? ax.getBoundingClientRect().height : -1,
         panelW: panel ? panel.getBoundingClientRect().width : -1,
@@ -248,15 +265,18 @@ try {
 
   // ══ 1. THE FOUR CONTROLS, AS THE FRAME DRAWS THEM ═════════════════════════
   console.log('\n▶ frame `09:44` — the Gantt toolbar')
-  const controls = await Promise.all(
-    ['timeline-panel-toggle', 'timeline-week-numbers', 'timeline-autofit', 'timeline-export'].map((id) =>
-      page.getByTestId(id).count(),
-    ),
-  )
+  const TOOLBAR = [
+    'timeline-panel-toggle',
+    'timeline-today',
+    'timeline-week-numbers',
+    'timeline-autofit',
+    'timeline-export',
+  ]
+  const controls = await Promise.all(TOOLBAR.map((id) => page.getByTestId(id).count()))
   chk(
     controls.every((n) => n === 1),
-    'the toolbar draws a panel toggle, Week numbers, Auto fit and Export',
-    `found ${JSON.stringify(controls)} for [panel, weeks, autofit, export] — the frame has one of each`,
+    'the toolbar draws a panel toggle, Today, Week numbers, Auto fit and Export',
+    `found ${JSON.stringify(controls)} for ${JSON.stringify(TOOLBAR)} — the frame has one of each`,
   )
 
   // ══ 2. WEEK NUMBERS — the frame's `W32` ═══════════════════════════════════
@@ -460,7 +480,109 @@ try {
     `range ${afterFit.rangeStart} → ${afterFit.rangeEnd} does not cover ${SEED.firstStart.slice(0, 10)} → ${SEED.lastDue.slice(0, 10)}`,
   )
 
-  // ══ 6. LOCAL EXPORT ═══════════════════════════════════════════════════════
+  // ══ 6. TODAY ══════════════════════════════════════════════════════════════
+  console.log("\n▶ `Today` `09:44` — the viewport has to actually move")
+  /*
+   * Back to a plain zoom first: with Auto fit still on, the whole chart fits
+   * the viewport, and a viewport with nothing to scroll cannot show that
+   * anything scrolled. This clears the fit (it does not matter that `week` is
+   * already the zoom — the click is what clears it).
+   */
+  await page.getByTestId('timeline-zoom-week').click()
+  const preToday = await waitUntil(async () => (await geom()).fit === 'off', { timeoutMs: 10_000 })
+  if (!preToday) throw new Error('clicking the week zoom did not clear the fit')
+
+  /** Where the today line sits relative to the viewport, or null if undrawn. */
+  const todayVsViewport = () =>
+    page.evaluate(() => {
+      const vp = document.querySelector('[data-testid="timeline-chart-viewport"]')
+      const line = document.querySelector('[data-testid="timeline-today-line"]')
+      if (!vp) return null
+      if (!line) return { drawn: false, inside: false, lineLeft: null }
+      const v = vp.getBoundingClientRect()
+      const l = line.getBoundingClientRect()
+      return {
+        drawn: true,
+        inside: l.left >= v.left - 1 && l.right <= v.right + 1,
+        lineLeft: Math.round(l.left - v.left),
+      }
+    })
+
+  /*
+   * DETERMINISTIC, NOT LUCKY. Every seeded date is in the past and can only get
+   * further into the past, so today is always beyond the plotted range and the
+   * line is never drawn before the button is pressed. No branch, no skip.
+   */
+  const beforeToday = await geom()
+  const todayBefore = await todayVsViewport()
+  chk(
+    !!todayBefore && todayBefore.drawn === false && beforeToday.anchorToday === 'false',
+    `before: the range stops at ${beforeToday.rangeEnd}, today is past it, and no today line is drawn`,
+    `expected no today line outside the range; got ${JSON.stringify(todayBefore)} with data-anchor-today=${beforeToday.anchorToday}`,
+  )
+
+  await page.getByTestId('timeline-today').click()
+  const todayLanded = await waitUntil(
+    async () => {
+      const t = await todayVsViewport()
+      return !!t && t.drawn && t.inside
+    },
+    { timeoutMs: 10_000 },
+  )
+  const afterToday = await geom()
+  const todayAfter = await todayVsViewport()
+  /*
+   * THE CHECK WITH TEETH. Not "the button is there" and not "state flipped" —
+   * the line has to be ON THE CHART and INSIDE the viewport, and the viewport
+   * has to have moved to put it there. A Today that sets its flag and scrolls
+   * nothing leaves the line drawn but off to the right, at scrollLeft 0.
+   */
+  chk(
+    todayLanded &&
+      !!todayAfter &&
+      todayAfter.drawn &&
+      todayAfter.inside &&
+      beforeToday.scrollLeft === 0 &&
+      afterToday.scrollLeft > 0,
+    `pressing Today draws the line and scrolls it into view — scrollLeft ${beforeToday.scrollLeft} → ${Math.round(afterToday.scrollLeft)}, ` +
+      `line ${todayAfter?.lineLeft}px from the viewport's left edge`,
+    `line=${JSON.stringify(todayAfter)}, scrollLeft ${beforeToday.scrollLeft} → ${Math.round(afterToday.scrollLeft)}, ` +
+      `data-anchor-today=${afterToday.anchorToday} ` +
+      `(anchor "true" with scrollLeft unmoved means the range grew and nothing scrolled)`,
+  )
+  chk(
+    afterToday.rangeEnd > beforeToday.rangeEnd && afterToday.spanDays > beforeToday.spanDays,
+    `and it reached today by growing the range ${beforeToday.rangeEnd} → ${afterToday.rangeEnd} ` +
+      `(${beforeToday.spanDays} → ${afterToday.spanDays} days), not by moving the tasks`,
+    `range went ${beforeToday.rangeEnd} → ${afterToday.rangeEnd}, span ${beforeToday.spanDays} → ${afterToday.spanDays} days`,
+  )
+
+  /*
+   * AND IT WORKS TWICE. `anchorToday` is already true by now, so an
+   * implementation keyed on that flag instead of on a per-press stamp is dead
+   * from here on — and would have passed everything above.
+   */
+  await page.evaluate(() => {
+    document.querySelector('[data-testid="timeline-chart-viewport"]').scrollLeft = 0
+  })
+  const scrolledAway = await waitUntil(async () => (await geom()).scrollLeft === 0, { timeoutMs: 5_000 })
+  await page.getByTestId('timeline-today').click()
+  const secondLanded = await waitUntil(
+    async () => {
+      const t = await todayVsViewport()
+      return !!t && t.drawn && t.inside
+    },
+    { timeoutMs: 10_000 },
+  )
+  const secondGeom = await geom()
+  chk(
+    scrolledAway && secondLanded && secondGeom.scrollLeft > 0,
+    'and a second press scrolls back to today after the chart was scrolled away',
+    `after scrolling to 0 and pressing Today again: scrollLeft ${Math.round(secondGeom.scrollLeft)}, ` +
+      `line ${JSON.stringify(await todayVsViewport())} — a Today keyed on its own flag is dead from the second press`,
+  )
+
+  // ══ 7. LOCAL EXPORT ═══════════════════════════════════════════════════════
   console.log('\n▶ `⤓ Export` `09:44` — a real file, with this run\'s tasks in it')
   const grab = async () => {
     const [download] = await Promise.all([
@@ -524,6 +646,85 @@ try {
       second.text !== first.text,
     'and the file follows the view: filtered to the other project, it holds that task and none of the first three',
     `the second export ${second.text === first.text ? 'was byte-identical to the first' : 'held the wrong rows'}`,
+  )
+
+  // ══ 8. THE STICKY HEADERS ═════════════════════════════════════════════════
+  console.log('\n▶ the date header stays put while the rows scroll under it')
+  /*
+   * Both headers were declared `sticky top-0` and neither stuck: every ancestor
+   * that could have been their scrollport was either `overflow-hidden` (a
+   * scrollport that never scrolls) or unbounded (a scrollport with nothing to
+   * scroll). The fix is a bounded chart pane, so this proves the pane really is
+   * a scrollport and that the header really does hold position inside it.
+   *
+   * Back to the six-task project first, then a short window so the chart is
+   * taller than its own pane. Resizing the browser is the test arranging the
+   * conditions; the 70vh bound is the product's, and is not touched.
+   */
+  await page.getByTestId('timeline-project-filter').selectOption(projectA.id, { timeout: 20_000 })
+  const backOnA = await waitUntil(async () => (await barIds()).length === MINE.length, { timeoutMs: 20_000 })
+  if (!backOnA) throw new Error('could not get back to the six-task project')
+  await page.setViewportSize({ width: 1600, height: 400 })
+
+  const paneScroll = () =>
+    page.evaluate(() => {
+      const pane = document.querySelector('[data-testid="timeline-chart-viewport"]')
+      const panel = document.querySelector('[data-testid="timeline-task-panel"]')
+      const head = document.querySelector('[data-testid="timeline-chart-header"]')
+      const bar = document.querySelector('[data-testid="timeline-bar"]')
+      if (!pane || !head || !bar) return null
+      return {
+        scrollable: pane.scrollHeight - pane.clientHeight,
+        scrollTop: pane.scrollTop,
+        panelTop: panel ? panel.scrollTop : -1,
+        paneRectTop: pane.getBoundingClientRect().top,
+        headRectTop: head.getBoundingClientRect().top,
+        barRectTop: bar.getBoundingClientRect().top,
+      }
+    })
+
+  const SCROLL_BY = 50
+  const roomToScroll = await waitUntil(
+    async () => {
+      const s = await paneScroll()
+      return !!s && s.scrollable >= SCROLL_BY
+    },
+    { timeoutMs: 10_000 },
+  )
+  const stickyBefore = await paneScroll()
+  await page.evaluate((by) => {
+    document.querySelector('[data-testid="timeline-chart-viewport"]').scrollTop = by
+  }, SCROLL_BY)
+  const synced = await waitUntil(
+    async () => {
+      const s = await paneScroll()
+      return !!s && s.scrollTop === SCROLL_BY && s.panelTop === SCROLL_BY
+    },
+    { timeoutMs: 10_000 },
+  )
+  const stickyAfter = await paneScroll()
+
+  chk(
+    roomToScroll &&
+      synced &&
+      !!stickyAfter &&
+      stickyAfter.scrollTop === SCROLL_BY &&
+      stickyAfter.panelTop === SCROLL_BY,
+    `the chart is a real scrollport — ${Math.round(stickyBefore?.scrollable ?? -1)}px of room, scrolled to ${stickyAfter?.scrollTop}, ` +
+      'and the task panel came with it',
+    `scrollable=${stickyBefore?.scrollable}, chart scrollTop=${stickyAfter?.scrollTop}, panel scrollTop=${stickyAfter?.panelTop} ` +
+      '(0 room means the pane is unbounded again and its header has nothing to stick to; ' +
+      'a panel that stayed at 0 means the two panes have come unsynced and the rows no longer line up with their bars)',
+  )
+  chk(
+    !!stickyBefore &&
+      !!stickyAfter &&
+      Math.abs(stickyAfter.headRectTop - stickyAfter.paneRectTop) <= 1 &&
+      Math.abs(stickyBefore.barRectTop - stickyAfter.barRectTop - SCROLL_BY) <= 1,
+    `and the date header held the top of the pane while the bars moved ${SCROLL_BY}px up under it`,
+    `after scrolling ${SCROLL_BY}px the header sits ${Math.round((stickyAfter?.headRectTop ?? 0) - (stickyAfter?.paneRectTop ?? 0))}px ` +
+      `from the pane's top and the first bar moved ${Math.round((stickyBefore?.barRectTop ?? 0) - (stickyAfter?.barRectTop ?? 0))}px ` +
+      '(header offset ≈ the scroll distance means it scrolled away with the content — it is not sticking)',
   )
 
   await page.close()

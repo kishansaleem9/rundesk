@@ -31,8 +31,10 @@
  *
  * THREE OF THE EIGHT CANNOT BE FILLED, AND SAY SO. There is no image
  * generation in `apps/api`, and no tool in `COMMAND_TOOLS` reaches a connected
- * app. Those tiles print the reason rather than a zero, because a zero that
- * means "impossible" and a zero that means "you did none" look identical.
+ * app — re-checked after §V2-S16 added `create_list` / `create_folder`, which
+ * act on this product's own rows. Those tiles print the reason rather than a
+ * zero, because a zero that means "impossible" and a zero that means "you did
+ * none" look identical.
  *
  * CREDITS ARE DELIBERATELY ABSENT. The frames show a credit balance and "Add
  * credits"; Rundesk bills in dollars and has no credit concept. Minting an
@@ -455,7 +457,40 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
             none — this audit's "confident zero" — so those three print the
             reason instead of a number. A count of zero is a fact about your
             workspace; "not available" is a fact about the product.
+
+            §V2-S16 DEFECT, FIXED HERE. This Card used to sit OUTSIDE the
+            `valueQuery.isPending` branch above, which covered only the four
+            Stat tiles. While the query was in flight `data` was `undefined`,
+            so `row?.supported ?? false` was false for all eight and every
+            tile — including *Tasks created or updated*, which this product
+            fills constantly — printed **"not available"** before flipping to
+            a number. That is the page's own fact-about-the-product string
+            appearing as a fact about a workspace: exactly the confusion the
+            header comment above exists to prevent, shown to every visitor for
+            the length of one request.
+
+            The grid is now absent rather than wrong while loading, and the
+            skeleton carries its OWN testid. A skeleton reusing
+            `ai-value-categories` would be worse than the bug: every check
+            that waits for the grid would resolve against a placeholder.
           */}
+          {valueQuery.isPending ? (
+            <Card className="overflow-hidden" data-testid="ai-value-categories-skeleton" aria-busy="true">
+              <div className="border-b border-border px-4 py-3">
+                <h3 className="text-sm font-semibold">{t('aiValue.byCategory')}</h3>
+                <p className="mt-0.5 text-[11px] text-muted-foreground">{t('aiValue.byCategoryUnit')}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-px bg-border xl:grid-cols-4">
+                {CATEGORY_META.map((meta) => (
+                  <div key={meta.id} className="bg-card p-3">
+                    <div className="h-4 w-4 rounded bg-muted animate-pulse" />
+                    <div className="mt-1.5 h-6 w-10 rounded bg-muted animate-pulse" />
+                    <div className="mt-1 h-3 w-24 rounded bg-muted/70 animate-pulse" />
+                  </div>
+                ))}
+              </div>
+            </Card>
+          ) : (
           <Card className="overflow-hidden">
             <div className="border-b border-border px-4 py-3">
               <h3 className="text-sm font-semibold">{t('aiValue.byCategory')}</h3>
@@ -530,6 +565,7 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
               </p>
             )}
           </Card>
+          )}
 
           <Card className="overflow-hidden">
             <div className="border-b border-border px-4 py-3">

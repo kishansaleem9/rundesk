@@ -131,7 +131,7 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
       tasks: [{ id: 't1' }], // access query returns only the accessible task
       docs: [{ id: 'd1' }],
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const svc = new AiService(noKeyConfig, db, {} as any, localEmbeddings)
 
     const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
       userId: 'u-member',
@@ -151,7 +151,6 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
       noKeyConfig,
       makeDb({ workspace_members: [{ role: 'member' }], knowledge_embeddings: [] }),
       {} as any,
-      undefined,
       localEmbeddings,
     )
     const res = await svc.answerKnowledge('w1', 'u1', 'nothing here', { workspaceId: 'w1' })
@@ -170,7 +169,7 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
         embRow('task', 't2', 'B', '/b', 'roadmap beta gamma'),
       ],
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const svc = new AiService(noKeyConfig, db, {} as any, localEmbeddings)
     const res = await svc.answerKnowledge('w1', 'admin', 'roadmap alpha', { workspaceId: 'w1' })
     assert.deepEqual(res.sources.map((s) => s.id), ['t1', 't2'])
   })
@@ -183,7 +182,7 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
         embRow('task', 'near', 'On topic', '/near', 'mobile app launch marketing plan'),
       ],
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const svc = new AiService(noKeyConfig, db, {} as any, localEmbeddings)
     const res = await svc.answerKnowledge('w1', 'admin', 'when is the mobile app launch', { workspaceId: 'w1' })
     const ids = res.sources.map((s) => s.id)
     assert.equal(ids[0], 'near', 'semantically-closer item ranks first')
@@ -201,7 +200,7 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
       ],
       task_attachments: [{ id: 'a1' }], // access query returns a1 => accessible
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const svc = new AiService(noKeyConfig, db, {} as any, localEmbeddings)
     const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
       userId: 'u-member',
       workspaceId: 'w1',
@@ -223,7 +222,7 @@ describe('AiService.answerKnowledge — vector retrieval + access scope (§15.1 
       ],
       task_attachments: [], // access query returns nothing => inaccessible
     })
-    const svc = new AiService(noKeyConfig, db, {} as any, undefined, localEmbeddings)
+    const svc = new AiService(noKeyConfig, db, {} as any, localEmbeddings)
     const res = await svc.answerKnowledge('w1', 'u-member', 'roadmap launch plan', {
       userId: 'u-member',
       workspaceId: 'w1',

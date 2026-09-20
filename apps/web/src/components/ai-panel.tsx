@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect } from 'react'
+import { Fragment, createContext, useContext, useMemo, useState, useRef, useEffect, type ReactNode } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import {
@@ -24,7 +24,11 @@ import {
   ChevronsUp,
   Star,
   Ban,
+  FolderPlus,
+  ListTree,
+  Brain,
 } from 'lucide-react'
+import { renderInlineMarkdown, renderMarkdownBlocks } from './markdown'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -89,6 +93,204 @@ type Message = {
    * flow, as opposed to a menu that only exists for the newest reply.
    */
   followUps?: string[]
+  /**
+   * §V2-S16 `[18:48]` — containers this turn actually brought into existence,
+   * as the SERVER reported them on the wire (`{created: …}`), not as parsed out
+   * of the answer's prose.
+   *
+   * The distinction is the whole row. A model can write "Done, created the
+   * list" having called nothing; these entries exist only because a tool
+   * returned an id that came back from an insert. So this is the evidence, and
+   * the sentence beside it is the account.
+   */
+  created?: CreatedContainer[]
+}
+
+type CreatedContainer = { kind: 'list' | 'folder'; id: string; name: string; path: string }
+
+// ─── §V2-S16 frame `20:10` — inline references, resolved live ───────────────
+
+/**
+ * `[[task:<uuid>]]` / `[[list:<uuid>]]`, the reference syntax an answer carries.
+ *
+ * Deliberately not a link and not a name: the frame's chips each show the
+ * task's own **status badge** inline in the prose, and an answer is a record of
+ * what was true when it was written. A status copied into the text would be
+ * wrong the moment anybody moved the task — and wrong in the most confident
+ * way, inside a sentence. So the answer stores an id and nothing else, and
+ * every chip is hydrated from the database at render time.
+ */
+const REF_TOKEN =
+  /\[\[(task|list):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]\]/g
+
+type ResolvedTask = {
+  id: string
+  title: string
+  status: string
+  statusCategory: string
+  listId: string
+  listName: string
+}
+type ResolvedList = { id: string; name: string; path: string }
+type RefResponse = { tasks: ResolvedTask[]; lists: ResolvedList[] }
+
+type RefIndex = {
+  tasks: Map<string, ResolvedTask>
+  lists: Map<string, ResolvedList>
+  /** True while the batch is in flight, so a chip can be a skeleton not a gap. */
+  pending: boolean
+}
+
+const EMPTY_REFS: RefIndex = { tasks: new Map(), lists: new Map(), pending: false }
+const AiRefs = createContext<RefIndex>(EMPTY_REFS)
+
+/** Every distinct id an answer refers to, by kind. Pure, and cheap to re-run. */
+function collectRefs(texts: string[]): { taskIds: string[]; listIds: string[] } {
+  const taskIds = new Set<string>()
+  const listIds = new Set<string>()
+  for (const text of texts) {
+    if (!text) continue
+    // `matchAll` on a /g regex needs a fresh lastIndex per use; a new iterator
+    // from the same literal is safe because the literal is re-evaluated never —
+    // so reset explicitly rather than relying on it.
+    REF_TOKEN.lastIndex = 0
+    for (const m of text.matchAll(REF_TOKEN)) {
+      ;(m[1] === 'task' ? taskIds : listIds).add(m[2].toLowerCase())
+    }
+  }
+  return { taskIds: [...taskIds].sort(), listIds: [...listIds].sort() }
+}
+
+/**
+ * The frame's status badge: the CATEGORY drives the colour, the status key is
+ * the word.
+ *
+ * Category rather than the key, because a workspace can rename "Done" to
+ * anything and a colour keyed on the word would go grey the moment it did —
+ * the same drift `resolveStatusForList` exists to prevent on the server.
+ */
+const STATUS_TONE: Record<string, string> = {
+  open: 'bg-muted text-muted-foreground',
+  in_progress: 'bg-blue-500/15 text-blue-600 dark:text-blue-400',
+  closed: 'bg-emerald-500/15 text-emerald-600 dark:text-emerald-400',
+}
+
+/**
+ * One chip, resolving itself.
+ *
+ * THREE STATES, AND THE THIRD IS THE IMPORTANT ONE. Pending draws the frame's
+ * grey skeleton; resolved draws the name and the live badge; UNRESOLVED draws
+ * the reference as plain text. Unresolved is not a failure to paper over — an
+ * id the reader may not see, or one the model invented, must not become a chip
+ * that asserts a title, so it degrades to something visibly inert.
+ */
+function AiRefChip({ kind, id }: { kind: 'task' | 'list'; id: string }) {
+  const refs = useContext(AiRefs)
+  const task = kind === 'task' ? refs.tasks.get(id) : undefined
+  const list = kind === 'list' ? refs.lists.get(id) : undefined
+
+  if (!task && !list) {
+    if (refs.pending) {
+      return (
+        <span
+          data-testid={`ai-ref-skeleton-${id}`}
+          data-ref-kind={kind}
+          aria-busy="true"
+          className="mx-0.5 inline-block h-4 w-20 animate-pulse rounded bg-muted align-middle"
+        />
+      )
+    }
+    return (
+      <span
+        data-testid={`ai-ref-unresolved-${id}`}
+        data-ref-kind={kind}
+        className="mx-0.5 rounded bg-muted/60 px-1 py-px font-mono text-[10px] text-muted-foreground"
+      >
+        {kind}:{id.slice(0, 8)}
+      </span>
+    )
+  }
+
+  if (list) {
+    return (
+      <span
+        data-testid={`ai-ref-list-${id}`}
+        data-ref-kind="list"
+        data-ref-path={list.path}
+        className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded border border-border/70 bg-muted/40 px-1.5 py-px align-middle text-[11px]"
+      >
+        <ListTree className="h-3 w-3 shrink-0 text-muted-foreground" />
+        <span className="truncate">{list.path}</span>
+      </span>
+    )
+  }
+
+  const t = task!
+  return (
+    <span
+      data-testid={`ai-ref-task-${id}`}
+      data-ref-kind="task"
+      data-ref-status={t.status}
+      data-ref-status-category={t.statusCategory}
+      className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded border border-border/70 bg-muted/40 px-1.5 py-px align-middle text-[11px]"
+    >
+      <CheckSquare className="h-3 w-3 shrink-0 text-muted-foreground" />
+      <span className="truncate">{t.title}</span>
+      <span
+        data-testid={`ai-ref-task-badge-${id}`}
+        className={cn('rounded px-1 text-[9px] font-semibold uppercase tracking-wide', STATUS_TONE[t.statusCategory] ?? STATUS_TONE.open)}
+      >
+        {t.status}
+      </span>
+    </span>
+  )
+}
+
+/**
+ * §V2-S16 `20:10` — the inline renderer an AI answer is parsed with.
+ *
+ * Splits out references FIRST, then hands every remaining run to the markdown
+ * renderer this product already ships. Wrapping it rather than forking it is
+ * the point: `markdown.tsx` is one implementation used by comments, task
+ * descriptions and now answers, and a second "show the text" would be the
+ * duplicated list — which is exactly what the answer bubble was before this,
+ * rendering `{message.content}` as a string while a block renderer sat one
+ * import away.
+ */
+function renderAiInline(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let cursor = 0
+  let k = 0
+  REF_TOKEN.lastIndex = 0
+  for (const m of text.matchAll(REF_TOKEN)) {
+    const at = m.index ?? 0
+    if (at > cursor) nodes.push(...renderInlineMarkdown(text.slice(cursor, at), `${keyPrefix}-t${k++}`))
+    nodes.push(
+      <AiRefChip
+        key={`${keyPrefix}-r${k++}`}
+        kind={m[1] === 'task' ? 'task' : 'list'}
+        id={m[2].toLowerCase()}
+      />,
+    )
+    cursor = at + m[0].length
+  }
+  if (cursor < text.length) nodes.push(...renderInlineMarkdown(text.slice(cursor), `${keyPrefix}-t${k++}`))
+  return nodes
+}
+
+/**
+ * An answer, rendered.
+ *
+ * `renderMarkdownBlocks` with our inline renderer, so headings, lists, tables,
+ * code fences and bold all work — frame `20:10` has four distinct bold runs in
+ * one paragraph — and a reference inside any of them still becomes a chip.
+ */
+function AiAnswer({ content, testId }: { content: string; testId: string }) {
+  return (
+    <div data-testid={testId} className="ai-answer text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+      {renderMarkdownBlocks(content, renderAiInline)}
+    </div>
+  )
 }
 
 type AiPanelProps = {
@@ -169,6 +371,68 @@ const AI_STEP_LABEL: Record<string, TranslationKey> = {
   workspace: 'aiPanel.stepWorkspace',
   skill: 'aiPanel.stepSkill',
   writing: 'aiPanel.stepWriting',
+  // §V2-S16 frame `18:45` — *"Creating the new rundesk list"*. Written by the
+  // server immediately before the write, so a step that is here is a write that
+  // was attempted; what came of it is in the answer.
+  create_list: 'aiPanel.stepCreatingList',
+  create_folder: 'aiPanel.stepCreatingFolder',
+}
+
+/**
+ * §V2-S16 — the steps that mean the assistant is ACTING rather than reading.
+ *
+ * Kept as a set derived from the same map above, so a step added there and
+ * forgotten here is impossible to introduce by adding one line: a new action
+ * step has to be listed, and a retrieval step has to not be.
+ */
+const ACTION_STEPS: ReadonlySet<string> = new Set(['create_list', 'create_folder'])
+
+/**
+ * §V2-S16 frames `18:00` / `18:45` / `20:10` — the busy state, in words.
+ *
+ * Above the step log the frames draw a status word that changes with what is
+ * happening: **Handling** at `18:45` while a container is being made, **Cookin'**
+ * at `20:10` while the answer streams, settling to **Brain** at `18:48` when it
+ * lands. Rundesk drew a bare spinner, so a turn spending four seconds writing
+ * into your workspace looked exactly like a turn that had not started.
+ *
+ * DERIVED FROM REAL SIGNALS, NEVER FROM A TIMER. The three states come from
+ * what the server has actually sent — an action step, a text delta, or neither
+ * yet — so the word is a report and not an animation with vocabulary. A state
+ * that cycled on a timer would be the facade: it would look identical on a turn
+ * that had already died.
+ */
+type BusyState = 'acting' | 'writing' | 'thinking'
+
+function busyStateFor(steps: string[], hasText: boolean): BusyState {
+  // Text first: once prose is arriving, "Handling" would describe a tool call
+  // that has already finished.
+  if (hasText) return 'writing'
+  if (steps.some((s) => ACTION_STEPS.has(s))) return 'acting'
+  return 'thinking'
+}
+
+const BUSY_LABEL: Record<BusyState, TranslationKey> = {
+  acting: 'aiPanel.busyActing',
+  writing: 'aiPanel.busyWriting',
+  thinking: 'aiPanel.busyThinking',
+}
+
+function AiBusyState({ state, t }: { state: BusyState; t: (k: TranslationKey) => string }) {
+  return (
+    <div className="flex items-center gap-2" data-testid="ai-busy-state" data-state={state}>
+      <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-brand-700 to-brand-500">
+        <Brain className="h-3.5 w-3.5 text-white" />
+      </div>
+      <span
+        className="text-xs font-medium text-muted-foreground"
+        aria-live="polite"
+        data-testid="ai-busy-label"
+      >
+        {t(BUSY_LABEL[state])}
+      </span>
+    </div>
+  )
 }
 
 const SUGGESTED_PROMPT_KEYS = [
@@ -327,6 +591,46 @@ export function AiPanel({
     retry: false,
   })
 
+  /*
+   * §V2-S16 frame `20:10` — the chips' live data, fetched ONCE for the whole
+   * conversation rather than once per chip.
+   *
+   * The key is the id list itself, so it changes exactly when the set of things
+   * being referred to changes: reopening a thread with the same six tasks is
+   * one request, and a seventh reference is a new key rather than a stale
+   * answer. `staleTime` is 30s globally, which is the right trade here — a
+   * badge is re-read on every mount, and a status changed in another tab
+   * appears on the next visit rather than mid-sentence.
+   *
+   * The streaming buffer is included, so a chip in a half-written answer starts
+   * resolving while the rest of the sentence is still arriving — which is what
+   * the frame's row of grey skeletons is.
+   */
+  const refIds = useMemo(
+    () => collectRefs([...messages.map((m) => m.content), streamBuffer]),
+    [messages, streamBuffer],
+  )
+  const refsQuery = useQuery({
+    queryKey: ['ai-refs', workspaceId, refIds.taskIds.join(','), refIds.listIds.join(',')],
+    queryFn: () =>
+      api<RefResponse>('/ai/refs', {
+        method: 'POST',
+        body: JSON.stringify({ workspaceId, taskIds: refIds.taskIds, listIds: refIds.listIds }),
+      }),
+    enabled: !!workspaceId && (refIds.taskIds.length > 0 || refIds.listIds.length > 0),
+    retry: false,
+  })
+  const refIndex = useMemo<RefIndex>(
+    () => ({
+      tasks: new Map((refsQuery.data?.tasks ?? []).map((t) => [t.id, t])),
+      lists: new Map((refsQuery.data?.lists ?? []).map((l) => [l.id, l])),
+      // `isFetching` rather than `isPending`: a disabled query is "pending"
+      // forever, and every chip would be a skeleton that never resolves.
+      pending: refsQuery.isFetching,
+    }),
+    [refsQuery.data, refsQuery.isFetching],
+  )
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, streamBuffer])
@@ -456,6 +760,13 @@ export function AiPanel({
       // whatever it held one render ago.
       const collectedSteps: string[] = []
       let collectedFollowUps: string[] = []
+      /*
+       * §V2-S16 — containers the SERVER said it created, kept apart from the
+       * prose on purpose. These are ids that came back from an insert; the
+       * sentence beside them is the model's account of the same event, and only
+       * one of the two is evidence.
+       */
+      const collectedCreated: CreatedContainer[] = []
 
       while (true) {
         const { done, value } = await reader.read()
@@ -478,6 +789,15 @@ export function AiPanel({
               if (Array.isArray(parsed.followUps)) {
                 collectedFollowUps = parsed.followUps.map((f: unknown) => String(f))
               }
+              // §V2-S16 `[18:48]` — a row that now exists, named on the wire.
+              if (parsed.created?.id && (parsed.created.kind === 'list' || parsed.created.kind === 'folder')) {
+                collectedCreated.push({
+                  kind: parsed.created.kind,
+                  id: String(parsed.created.id),
+                  name: String(parsed.created.name ?? ''),
+                  path: String(parsed.created.path ?? ''),
+                })
+              }
               if (parsed.delta) {
                 accumulated += parsed.delta
                 setStreamBuffer(accumulated)
@@ -496,6 +816,7 @@ export function AiPanel({
         id: Date.now().toString(),
         steps: collectedSteps.length ? collectedSteps : undefined,
         followUps: collectedFollowUps.length ? collectedFollowUps : undefined,
+        created: collectedCreated.length ? collectedCreated : undefined,
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
@@ -549,8 +870,10 @@ export function AiPanel({
   }
 
   const aiAvailable = statusQuery.data?.available !== false
+  const busy = busyStateFor(steps, streamBuffer.length > 0)
 
   return (
+    <AiRefs.Provider value={refIndex}>
     <div className={cn('flex flex-col h-full bg-card', className)}>
       {/* Header */}
       <div className="flex items-center gap-2 px-4 py-3 border-b border-border shrink-0">
@@ -658,6 +981,13 @@ export function AiPanel({
           skipped a piece of work, its line is absent, which is what makes this
           evidence rather than a loading animation with words on it.
         */}
+        {/*
+          §V2-S16 frames `18:45` / `20:10` — the word, ABOVE the step log,
+          exactly where the frames put it. It replaces nothing: the step log is
+          the honest half and stays as it is. This is the state before the first
+          step arrives, which is the half that was a bare spinner.
+        */}
+        {isStreaming && <AiBusyState state={busy} t={t} />}
         {isStreaming && <AiTrace steps={steps} t={t} />}
 
         {/* Streaming */}
@@ -666,8 +996,14 @@ export function AiPanel({
             <div className="h-6 w-6 rounded-full bg-gradient-to-br from-brand-700 to-brand-500 flex items-center justify-center shrink-0 mt-0.5">
               <Bot className="h-3.5 w-3.5 text-white" />
             </div>
-            <div className="bg-muted rounded-xl rounded-tl-sm px-3 py-2 text-sm max-w-xs whitespace-pre-wrap">
-              {streamBuffer}
+            <div className="bg-muted rounded-xl rounded-tl-sm px-3 py-2 max-w-xs">
+              {/*
+                The same renderer as a settled answer, so a heading or a chip
+                does not pop into a different shape the instant the stream ends.
+                A partially-arrived `[[task:` is simply not a match yet and
+                renders as the text it currently is.
+              */}
+              <AiAnswer content={streamBuffer} testId="ai-answer-streaming" />
               <span className="inline-block w-1 h-3.5 bg-brand-700 ml-0.5 animate-pulse" />
             </div>
           </div>
@@ -910,8 +1246,30 @@ export function AiPanel({
         <div className="relative z-50 flex gap-2">
           <Input
             value={input}
-            onChange={(e) => setInput(e.target.value)}
-            placeholder={t('aiPanel.inputPlaceholder')}
+            data-testid="ai-composer-input"
+            /*
+             * §V2-S16 frames `18:45` / `20:10` — the composer reads **"Working
+             * on it…"** while the answer is being produced, and goes back to
+             * the invitation afterwards.
+             *
+             * THE DEFECT THIS FIXES, separately from the frame. The input is
+             * `disabled` one line below while streaming and while AI is not
+             * configured, and it kept saying *"Ask Rundesk AI anything…"*
+             * throughout — a dead control inviting you to type into it. Three
+             * states now, and each says what is true: busy, unavailable, ready.
+             *
+             * BUSY WINS OVER UNAVAILABLE, in that order. An answer in flight is
+             * the more specific fact and it is the one the frame shows; the
+             * configuration notice is the resting state and it is still on
+             * screen above the composer while a request is out.
+             */
+            placeholder={
+              isStreaming
+                ? t('aiPanel.placeholderWorking')
+                : !aiAvailable
+                  ? t('aiPanel.placeholderUnavailable')
+                  : t('aiPanel.inputPlaceholder')
+            }
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -946,6 +1304,7 @@ export function AiPanel({
         </div>
       </div>
     </div>
+    </AiRefs.Provider>
   )
 }
 
@@ -989,15 +1348,50 @@ function MessageBubble({
       </div>
       <div className="group max-w-xs relative">
         <div
+          data-testid={isUser ? `ai-question-${message.id}` : undefined}
           className={cn(
-            'rounded-xl px-3 py-2 text-sm whitespace-pre-wrap',
+            'rounded-xl px-3 py-2 text-sm',
             isUser
-              ? 'bg-brand-700 text-white rounded-tr-sm'
+              ? 'bg-brand-700 text-white rounded-tr-sm whitespace-pre-wrap'
               : 'bg-muted rounded-tl-sm',
           )}
         >
-          {message.content}
+          {/*
+            §V2-S16 frame `20:10` — *"**Project status:** 13 open tasks total:
+            **11 To Do, 1 In Progress, 1 Complete**…"*, four bold runs in one
+            paragraph, plus the chips that follow it.
+
+            An answer goes through the renderer this product already ships for
+            comments and descriptions; a QUESTION does not. What you typed is
+            what you typed — running your own words through a markdown parser
+            would silently eat an asterisk out of a question about globbing,
+            and there is nothing to gain from formatting your own input.
+          */}
+          {isUser ? message.content : <AiAnswer content={message.content} testId={`ai-answer-${message.id}`} />}
         </div>
+        {/*
+          §V2-S16 `[18:48]` — what this turn actually brought into existence.
+
+          Rendered from the ids the SERVER reported on the wire, beside the
+          sentence rather than inside it. The row exists whatever the answer
+          says about it, and if the answer says something and this is empty,
+          the difference is visible instead of buried.
+        */}
+        {!isUser && (message.created?.length ?? 0) > 0 && (
+          <div className="flex flex-wrap items-center gap-1 pt-1" data-testid={`ai-created-${message.id}`}>
+            {message.created!.map((c) => (
+              <span
+                key={c.id}
+                data-testid={`ai-created-${c.kind}-${c.id}`}
+                data-created-kind={c.kind}
+                className="inline-flex items-center gap-1 rounded border border-emerald-500/40 bg-emerald-500/10 px-1.5 py-px text-[11px] text-emerald-700 dark:text-emerald-400"
+              >
+                {c.kind === 'folder' ? <FolderPlus className="h-3 w-3" /> : <ListTree className="h-3 w-3" />}
+                <span className="truncate">{c.path || c.name}</span>
+              </span>
+            ))}
+          </div>
+        )}
         {/* §15 — her six-icon row, frames `302_1842` / `303_1858`: copy, create
             task, save to doc, regenerate, thumbs up, thumbs down.
             Only under an ANSWER: "save this to a doc" under your own question

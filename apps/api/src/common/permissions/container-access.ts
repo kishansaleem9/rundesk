@@ -2,6 +2,7 @@ import { ForbiddenException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { workspaceMembers, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+import { assertSpaceLevel } from './space-default-permission'
 
 const ADMIN_ROLES = new Set(['super_admin', 'workspace_admin'])
 
@@ -20,6 +21,13 @@ const ADMIN_ROLES = new Set(['super_admin', 'workspace_admin'])
  *   - otherwise (project / list, both manager-grantable): a manager may delete
  *     only within a space they belong to ("own space"), mirroring the task
  *     delete-scope check (`spaceMembers` membership). Admins keep delete-any.
+ *
+ * §V2-06 frame `06:52`: when a `spaceId` is given, the owning space's
+ * **Default permission** is consulted FIRST and can only narrow — see the
+ * comment on that branch, and `space-default-permission.ts` for what the
+ * column means. The opening sentence above is therefore now "…and only in a
+ * space whose default permission (or the actor's explicit grant on it) reaches
+ * `edit`".
  */
 export async function assertCanManageContainer(
   db: Db,
@@ -37,6 +45,39 @@ export async function assertCanManageContainer(
   },
 ): Promise<void> {
   const action = params.action ?? 'manage'
+
+  /*
+   * §V2-06 frame `06:52` — the space's Default permission, honoured.
+   *
+   * BEFORE the creator short-circuit on purpose. A space set to "View only"
+   * means its members may not change what is in it, and "I made this list
+   * myself" is not an exception to that — it is the commonest way the rule
+   * would be avoided. The space's own creator is unaffected: `createSpace`
+   * seeds them as a `space_members` admin, which `resolveSpaceLevel` treats as
+   * the explicit grant it is.
+   *
+   * `edit` for BOTH manage and delete, not `admin` for delete. `admin` on this
+   * ladder is the rung that may re-share an object (`SharesService.canShare`),
+   * and deleting a container you are otherwise allowed to edit is not a
+   * sharing act. Requiring `admin` here would also mean the column's own
+   * default — `edit`, on every row that exists — started refusing deletes it
+   * has always allowed, which is a migration disguised as a permission check.
+   *
+   * Only runs when the caller told us which space this container lives in.
+   * `lists`, `projects` and `folders` already pass `spaceId` (they need it for
+   * the manager own-space rule below) and `spaces` passes its own id; a caller
+   * that passes none gets exactly the behaviour it had, rather than a gate
+   * that silently guesses.
+   */
+  if (params.spaceId) {
+    await assertSpaceLevel(db, {
+      spaceId: params.spaceId,
+      actorId: params.actorId,
+      required: 'edit',
+      kind: params.kind,
+    })
+  }
+
   // The creator may always manage / delete their own container.
   if (params.createdById && params.createdById === params.actorId) return
 

@@ -43,7 +43,13 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 24
+/*
+ * 24 → 25. §V2-11's App Center row moved from nine facets to the fourteen
+ * frame `19:07` draws, so the chip-count assertion below changed its number
+ * (9 → 14) and one check was ADDED: every facet has to be able to return
+ * something. The other twenty-four are untouched.
+ */
+const EXPECTED_CHECKS = 25
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -151,10 +157,21 @@ try {
     'the search box can be reached by name',
     'the integrations search input is still unaddressable',
   )
+  /*
+   * FOURTEEN, not the nine this asserted when it was written. Frame `19:07`
+   * draws the App Center's facet rail in full — All Apps · Featured ·
+   * Analytics · Calendars · Cloud Storage · Communication · Connected Search ·
+   * CRM & Support · Design · Development · Email · Finance & Accounting ·
+   * Knowledge Base · Time Tracking — and the page shipped nine of them, two of
+   * which ("Installed", "AI") are not facets in the frame at all. The rail is
+   * now derived from the frame's list filtered to the facets that match at
+   * least one app, so this number also fails if a facet ever loses its last
+   * integration and becomes a chip that can only empty the grid.
+   */
   chk(
-    await page.locator('[data-testid^="integrations-category-"]').count() === 9,
-    'and so is every category chip',
-    `${await page.locator('[data-testid^="integrations-category-"]').count()} of 9 category chips were addressable`,
+    await page.locator('[data-testid^="integrations-category-"]').count() === 14,
+    'and so is every one of the fourteen category chips frame `19:07` draws',
+    `${await page.locator('[data-testid^="integrations-category-"]').count()} of 14 category chips were addressable`,
   )
   const tiles = await page.locator('[data-testid="integration-card"]').count()
   chk(tiles > 0, 'every integration tile is addressable',
@@ -170,6 +187,34 @@ try {
     `${tiles} tiles, ${await page.locator('[data-testid="integration-toggle"]').count()} switches, ` +
       `${await page.locator('[data-testid="integration-action"]').count()} buttons`,
   )
+
+  /*
+   * A FACET WITH NOTHING BEHIND IT IS A CHECKBOX THAT CAN ONLY EMPTY THE GRID.
+   * Seven facets were added to reach the fourteen frame `19:07` draws, and the
+   * cheap way to do that is to name them and leave five of them matching no
+   * app at all — which demos perfectly, because nobody clicks every chip.
+   * So every chip is clicked and the grid has to still hold something.
+   */
+  const facetIds = await page.$$eval('[data-testid^="integrations-category-"]', (els) =>
+    els.map((el) => el.getAttribute('data-testid')),
+  )
+  const empties = []
+  for (const id of facetIds) {
+    await page.locator(`[data-testid="${id}"]`).click()
+    const held = await waitUntil(
+      () => page.locator('[data-testid="integration-card"]').count().then((n) => n > 0),
+      { timeoutMs: 4000 },
+    )
+    if (!held) empties.push(id)
+  }
+  chk(
+    facetIds.length === 14 && empties.length === 0,
+    'and every one of them can return something — no chip that only empties the grid',
+    `${empties.length} of ${facetIds.length} facets matched no app at all: ${JSON.stringify(empties)}`,
+  )
+  // Back to a clean page: the checks below read the gcal tile, which is not in
+  // whichever facet the loop above finished on.
+  await openIntegrations()
 
   console.log('\n▶ `18:39` the card, on the integration it belongs to')
   chk(

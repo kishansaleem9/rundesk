@@ -5,6 +5,10 @@ import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import {
+  resolveSpaceLevels,
+  spaceLevelReaches,
+} from '../../common/permissions/space-default-permission'
 import { SecurityService } from '../security/security.service'
 import { ListsService } from '../lists/lists.service'
 import { PlansService } from '../plans/plans.service'
@@ -269,9 +273,18 @@ export class SpacesService {
    * The destination tree for the Move picker: every space the actor can see,
    * with its folders and projects. Reuses getSpacesByWorkspace so a private
    * space the actor isn't in never appears as a move target.
+   *
+   * §V2-06 `06:52` — AND every space they may actually write to. Seeing a
+   * space and being allowed to put something in it are different questions,
+   * and `default_permission: view` answers the second one "no". Offering such
+   * a space here would be a destination that looks available and produces a
+   * 403 on arrival — the Move dialog's version of the dead control. Filtered
+   * with the same resolver the write path refuses with, so the picker and the
+   * server cannot disagree.
    */
   async moveTargets(workspaceId: string, actorId?: string) {
-    const visible = await this.getSpacesByWorkspace(workspaceId, actorId)
+    const seen = await this.getSpacesByWorkspace(workspaceId, actorId)
+    const visible = actorId ? await this.narrowToWritable(workspaceId, seen, actorId) : seen
     if (visible.length === 0) return []
     const spaceIds = visible.map((s) => s.id)
 
@@ -309,6 +322,31 @@ export class SpacesService {
           .filter((l) => spProjectIds.has(l.projectId))
           .map((l) => ({ id: l.id, name: l.name, projectId: l.projectId })),
       }
+    })
+  }
+
+  /**
+   * Keep only the spaces this actor holds at least `edit` on.
+   *
+   * A space the resolver says nothing about is KEPT, not dropped: the map is
+   * empty for an actor with no `workspace_members` row (a super-admin acting
+   * across workspaces, or an internal caller), and dropping everything for
+   * them would be this method quietly answering a question it was never asked.
+   */
+  private async narrowToWritable<T extends { id: string }>(
+    workspaceId: string,
+    rows: T[],
+    actorId: string,
+  ): Promise<T[]> {
+    if (rows.length === 0) return rows
+    const levels = await resolveSpaceLevels(this.db, {
+      workspaceId,
+      spaceIds: rows.map((r) => r.id),
+      actorId,
+    })
+    return rows.filter((row) => {
+      const resolved = levels.get(row.id)
+      return !resolved || spaceLevelReaches(resolved.level, 'edit')
     })
   }
 
@@ -458,6 +496,11 @@ export class SpacesService {
       action,
       // Deleting an entire space is admin-only (space.delete not in MANAGER_DELTA).
       adminOnlyDelete: true,
+      // §V2-06 `06:52` — a space is its own owning space, so the Default
+      // permission gate applies to editing the space's settings too. Without
+      // this the one container whose setting it IS would be the one container
+      // it did not reach.
+      spaceId,
     })
     return space
   }

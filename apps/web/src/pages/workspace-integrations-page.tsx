@@ -28,13 +28,34 @@ import { CalendarSyncWizard } from '../components/calendar-sync-wizard'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 
+type IntegrationCategory =
+  | 'comms'
+  | 'storage'
+  | 'dev'
+  | 'calendar'
+  | 'analytics'
+  | 'crm'
+  | 'ai'
+  | 'design'
+  | 'email'
+  | 'finance'
+  | 'knowledge'
+  | 'timeTracking'
+
 type Integration = {
   id: string
   name: string
   descKey: TranslationKey
-  category: 'comms' | 'storage' | 'dev' | 'calendar' | 'analytics' | 'crm' | 'ai'
+  category: IntegrationCategory
   popular?: boolean
   comingSoon?: boolean
+  /**
+   * §V2-11, frame `19:07` — this app is one of the sources federated search can
+   * actually reach. Not a taste judgement: it mirrors `SEARCH_SOURCES` /
+   * `SOURCE_PROVIDER` in `apps/api/src/modules/search/sources.ts`, which is the
+   * server's own list of what a "Connected Search" query goes out to.
+   */
+  connectedSearch?: boolean
   brandColor: string
   // simple wordmark/letter for the card
   logo: string
@@ -76,10 +97,15 @@ const INTEGRATIONS: Integration[] = [
   { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', comingSoon: true, brandColor: '#5059C9', logo: 'T' },
   { id: 'zoom', name: 'Zoom', descKey: 'integrations.desc.zoom', category: 'comms', popular: true, brandColor: '#2D8CFF', logo: 'Z' },
 
-  { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, brandColor: '#1FA463', logo: 'G' },
+  { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, connectedSearch: true, brandColor: '#1FA463', logo: 'G' },
   { id: 'dropbox', name: 'Dropbox', descKey: 'integrations.desc.dropbox', category: 'storage', brandColor: '#0061FF', logo: 'D' },
-  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', comingSoon: true, brandColor: '#0078D4', logo: 'O' },
-  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'storage', comingSoon: true, brandColor: '#F24E1E', logo: 'F' },
+  // `onedrive` is also the credential SharePoint search borrows — see
+  // `SOURCE_PROVIDER.sharepoint` in the API's `search/sources.ts`.
+  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', comingSoon: true, connectedSearch: true, brandColor: '#0078D4', logo: 'O' },
+  // Moved out of Cloud Storage into Design (frame `19:07` lists both): Figma is
+  // not a file store here, it is the thing the Design facet is about, and it
+  // was the only reason that facet would otherwise have nothing behind it.
+  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'design', comingSoon: true, brandColor: '#F24E1E', logo: 'F' },
 
   { id: 'github', name: 'GitHub', descKey: 'integrations.desc.github', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
   { id: 'gitlab', name: 'GitLab', descKey: 'integrations.desc.gitlab', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
@@ -90,11 +116,29 @@ const INTEGRATIONS: Integration[] = [
   { id: 'outlook', name: 'Outlook Calendar', descKey: 'integrations.desc.outlook', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
   { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', comingSoon: true, brandColor: '#000', logo: 'C' },
 
+  /*
+   * Gmail is not padding for the Email facet: `SEARCH_SOURCES` in the API
+   * already names `gmail` as a federated search source with its own tab in the
+   * search UI, so the product talks about it and had no card for it. Listed as
+   * "coming soon" because `listSupportedProviders()` has no `gmail` OAuth
+   * provider to connect one with — which is a defect recorded separately, not
+   * a thing this card should pretend away.
+   */
+  { id: 'gmail', name: 'Gmail', descKey: 'integrations.desc.gmail', category: 'email', comingSoon: true, connectedSearch: true, brandColor: '#EA4335', logo: 'M' },
+  { id: 'outlook-mail', name: 'Outlook Mail', descKey: 'integrations.desc.outlookMail', category: 'email', comingSoon: true, brandColor: '#0F6CBD', logo: 'O' },
+
+  { id: 'notion', name: 'Notion', descKey: 'integrations.desc.notion', category: 'knowledge', comingSoon: true, brandColor: '#111', logo: 'N' },
+
+  { id: 'toggl', name: 'Toggl Track', descKey: 'integrations.desc.toggl', category: 'timeTracking', comingSoon: true, brandColor: '#E57CD8', logo: 'T' },
+
   { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', comingSoon: true, brandColor: '#1F71F4', logo: 'A' },
   { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', comingSoon: true, brandColor: '#7856FF', logo: 'M' },
   { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', comingSoon: true, brandColor: '#1D4AFF', logo: 'P' },
 
-  { id: 'stripe', name: 'Stripe', descKey: 'integrations.desc.stripe', category: 'crm', brandColor: '#635BFF', logo: 'S' },
+  // Stripe pays for things; it is not a CRM. Moved into Finance & Accounting,
+  // which the frame lists and which its own description already describes
+  // ("track billable client work and create invoices from time logs").
+  { id: 'stripe', name: 'Stripe', descKey: 'integrations.desc.stripe', category: 'finance', brandColor: '#635BFF', logo: 'S' },
   { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', comingSoon: true, brandColor: '#FF7A59', logo: 'H' },
   { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', comingSoon: true, brandColor: '#00A1E0', logo: 'S' },
 
@@ -106,17 +150,69 @@ const INTEGRATIONS: Integration[] = [
   { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', comingSoon: true, brandColor: '#1F71F4', logo: 'G' },
 ]
 
-const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; labelKey: TranslationKey }> = [
+/**
+ * §V2-11, frame `19:07` — the App Center's facet rail, all FOURTEEN of it.
+ *
+ * What the frame draws, under an "INTEGRATIONS" heading and in this order:
+ * All Apps · Featured · Analytics · Calendars · Cloud Storage · Communication ·
+ * Connected Search · CRM & Support · Design · Development · Email ·
+ * Finance & Accounting · Knowledge Base · Time Tracking. (A separate "AI"
+ * heading below it carries "Suggest an app", which is its own ledger row.)
+ *
+ * This page shipped NINE, and the gap was not cosmetic: a category is how you
+ * find an app you cannot name, so seven missing facets are seven directories
+ * with no door. Two of the nine — "Installed" and "AI" — are not facets in the
+ * frame at all; connection state is shown on the card (the green check on
+ * Google Calendar at `19:07`), and the installed count is still in this page's
+ * subtitle. The `ai` CATEGORY is kept on the two model connectors so the data
+ * stays truthful; they are reached through All Apps and search.
+ *
+ * THE RULE THAT MATTERS, and the reason this is derived rather than written
+ * out: a facet with nothing behind it is a checkbox that can only ever empty
+ * the grid. `FACETS` below is `FRAME_FACETS` filtered to the ones that match at
+ * least one integration, so a facet cannot outlive its apps — delete the last
+ * Design app and the Design chip goes with it, instead of becoming a dead
+ * control nobody notices until a customer clicks it.
+ */
+type FacetId =
+  | 'all'
+  | 'featured'
+  | 'connectedSearch'
+  | IntegrationCategory
+
+const FRAME_FACETS: Array<{ id: FacetId; labelKey: TranslationKey }> = [
   { id: 'all', labelKey: 'integrations.category.all' },
-  { id: 'installed', labelKey: 'integrations.category.installed' },
-  { id: 'comms', labelKey: 'integrations.category.comms' },
-  { id: 'storage', labelKey: 'integrations.category.storage' },
-  { id: 'dev', labelKey: 'integrations.category.dev' },
-  { id: 'calendar', labelKey: 'integrations.category.calendar' },
+  { id: 'featured', labelKey: 'integrations.category.featured' },
   { id: 'analytics', labelKey: 'integrations.category.analytics' },
+  { id: 'calendar', labelKey: 'integrations.category.calendar' },
+  { id: 'storage', labelKey: 'integrations.category.storage' },
+  { id: 'comms', labelKey: 'integrations.category.comms' },
+  { id: 'connectedSearch', labelKey: 'integrations.category.connectedSearch' },
   { id: 'crm', labelKey: 'integrations.category.crm' },
-  { id: 'ai', labelKey: 'integrations.category.ai' },
+  { id: 'design', labelKey: 'integrations.category.design' },
+  { id: 'dev', labelKey: 'integrations.category.dev' },
+  { id: 'email', labelKey: 'integrations.category.email' },
+  { id: 'finance', labelKey: 'integrations.category.finance' },
+  { id: 'knowledge', labelKey: 'integrations.category.knowledge' },
+  { id: 'timeTracking', labelKey: 'integrations.category.timeTracking' },
 ]
+
+/**
+ * Does this app belong under this facet?
+ *
+ * "Featured" and "Connected Search" are not categories — an app has exactly one
+ * category and can be featured as well — so they read their own flags. Stated
+ * once here, and used both to render the grid and to decide which facets exist
+ * at all, so the two can never disagree about what a facet means.
+ */
+function matchesFacet(integration: Integration, facet: FacetId): boolean {
+  if (facet === 'all') return true
+  if (facet === 'featured') return Boolean(integration.popular)
+  if (facet === 'connectedSearch') return Boolean(integration.connectedSearch)
+  return integration.category === facet
+}
+
+const FACETS = FRAME_FACETS.filter((facet) => INTEGRATIONS.some((i) => matchesFacet(i, facet.id)))
 
 /**
  * §V2-11, frame `18:39` — the "Help center article" button under the error.
@@ -146,7 +242,7 @@ export function IntegrationsMarketplacePage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/integrations' })
   const qc = useQueryClient()
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<typeof CATEGORIES[number]['id']>('all')
+  const [filter, setFilter] = useState<FacetId>('all')
   const [activeIntegration, setActiveIntegration] = useState<Integration | null>(null)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
   const [slackWebhookUrl, setSlackWebhookUrl] = useState('')
@@ -350,12 +446,7 @@ export function IntegrationsMarketplacePage() {
   }, [accessRequestsQuery.data])
 
   const filtered = INTEGRATIONS.filter((i) => {
-    if (filter === 'installed') {
-      if (i.id === 'slack') return Boolean(slackQuery.data?.isEnabled)
-      if (oauthProviders.has(i.id)) return Boolean(serverConnected.get(i.id))
-      return false
-    }
-    if (filter !== 'all' && i.category !== filter) return false
+    if (!matchesFacet(i, filter)) return false
     return (
       i.name.toLowerCase().includes(query.toLowerCase()) ||
       t(i.descKey).toLowerCase().includes(query.toLowerCase())
@@ -458,7 +549,7 @@ export function IntegrationsMarketplacePage() {
           data-testid="integrations-search"
         />
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none bg-card/40 border border-border/60 rounded-lg p-1">
-          {CATEGORIES.map((c) => (
+          {FACETS.map((c) => (
             <button
               key={c.id}
               onClick={() => setFilter(c.id)}

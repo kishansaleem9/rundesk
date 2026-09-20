@@ -1401,6 +1401,19 @@ function FolderForm({
       onClose()
       navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId } })
     },
+    /*
+     * §V2-S10 frame `08:25`, spoken at `[08:55]`: "agar koi error aata hai to
+     * yeh yahan show kar deta hai."
+     *
+     * THIS MUTATION HAD NO `onError` — the identical defect commit `88830db`
+     * found and fixed on the List tab a few hundred lines up, on the Folder tab
+     * standing right beside it. A refused create did nothing at all: the dialog
+     * stayed open with the button looking un-pressed, which is indistinguishable
+     * from a hang. Now that folder names are unique per space (0157) there is
+     * something for it to report, and until this line there was no way for it to
+     * reach anybody.
+     */
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.folderFailed')),
   })
 
   return (
@@ -1415,7 +1428,7 @@ function FolderForm({
       <Select data-testid="quick-create-folder-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
-        <Button type="submit" size="sm" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createFolder')}</Button>
+        <Button type="submit" size="sm" data-testid="quick-create-folder-submit" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createFolder')}</Button>
       </div>
     </form>
   )

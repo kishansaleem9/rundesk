@@ -2229,12 +2229,49 @@ export class TasksService {
       if (dep.type === 'blocks') addEdge(dep.taskId, dep.relatedTaskId)
     }
 
+    /*
+     * §V2-S13 frame `10:35` — "Card cover  Image ›". THE COVER HAS TO REACH THE
+     * LIST, or the control above it configures something nothing can draw.
+     *
+     * `cover_storage_key` and `cover_image_url` were written by a shipped,
+     * tested picker (`cover-image-picker.tsx`, suite `task-cover.mjs`) and
+     * resolved into one renderable `coverUrl` in exactly ONE place: `getTask`,
+     * the single-task read behind the detail sheet. Every other surface — the
+     * board card, the list row, the export — got the raw columns and could do
+     * nothing with them, because a storage key is not an image address. A
+     * stored value no reader honours is *its mirror*, and worse than a missing
+     * feature: the database is evidence the cover exists.
+     *
+     * Resolved here rather than at each call site so the two kinds cannot drift
+     * apart again — a stored image is a KEY and needs presigning, a linked one
+     * is already a URL and must be passed through untouched (`${CDN}/https://…`
+     * is the bug task attachments still have). Only rows that carry a key are
+     * signed, so a list of five hundred coverless tasks does no extra work.
+     */
+    const coverUrlByTask = new Map<string, string | null>()
+    await Promise.all(
+      rows.map(async (r) => {
+        if (!r.coverStorageKey) {
+          coverUrlByTask.set(r.id, r.coverImageUrl ?? null)
+          return
+        }
+        if (!this.r2.configured) {
+          coverUrlByTask.set(r.id, null)
+          return
+        }
+        // One unsignable key must not take the whole list down with it.
+        const signed = await this.r2.getObjectUrl(r.coverStorageKey).catch(() => null)
+        coverUrlByTask.set(r.id, signed)
+      }),
+    )
+
     return rows.map((r) => ({
       ...r,
       labels: byTask.get(r.id) ?? [],
       openBlockerCount: openBlockerCount.get(r.id) ?? 0,
       blocksOpenCount: blocksOpenCount.get(r.id) ?? 0,
       blockedBy: [...(blockedBy.get(r.id) ?? [])],
+      coverUrl: coverUrlByTask.get(r.id) ?? null,
     }))
   }
 

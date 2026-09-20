@@ -274,12 +274,20 @@ try {
       'a stale countdown is worse than no countdown, because it is read as live',
   )
 
-  // Restored has to mean "handed back", not "the hook died": put a second
-  // block on and require the countdown to come back before leaving.
+  /*
+   * Restored has to mean "handed back", not "the hook died": put a second
+   * block on and require the countdown to come back before leaving.
+   *
+   * TEN MINUTES, not four. This block has one job — to still be RUNNING at the
+   * instant of the navigation below. If it ends first, the tab is restored by
+   * the ticker noticing the end (the thing check 7 already tests) and the last
+   * check passes without the code it names ever running. The length is the
+   * precondition; check 10 asserts it held rather than assuming it.
+   */
   await addBlock({
     taskId,
     startsAt: new Date(Date.now() - 30_000).toISOString(),
-    endsAt: new Date(Date.now() + 240_000).toISOString(),
+    endsAt: new Date(Date.now() + 600_000).toISOString(),
   })
   await page.reload({ waitUntil: 'domcontentloaded' })
   const secondRun = await waitUntil(async () => (await page.title()).includes(taskTitle), { timeoutMs: 20_000 })
@@ -290,6 +298,19 @@ try {
   )
 
   console.log('\n▶ leaving the app takes the countdown with it')
+  /*
+   * THE PRECONDITION, READ AT THE LAST POSSIBLE MOMENT.
+   *
+   * This check is about a LIVE countdown meeting a navigation. If the block
+   * has quietly ended by now, the tab was already restored by the ticker and
+   * the assertion below would pass on that instead — green for a reason that
+   * has nothing to do with leaving the app. So the title is read immediately
+   * before the navigation and carried into the check itself, which fails, with
+   * a different message, if the countdown was not on screen.
+   */
+  const atNav = await page.title()
+  const liveAtNav = atNav.includes(taskTitle) && /\d+m \d+s|\d+h \d+m/.test(atNav)
+
   /*
    * A CLIENT-SIDE navigation, not `page.goto`. A full load would fetch
    * index.html again and the title would be the static one no matter what this
@@ -311,10 +332,15 @@ try {
   )
   const awayTitle = await page.title()
   chk(
-    awayTitle === baseTitle,
-    `and the tab reads ${JSON.stringify(awayTitle)} again, not a countdown for a block on another page`,
-    `on /privacy the tab still reads ${JSON.stringify(awayTitle)} — a countdown that outlives the app ` +
-      'is a stale one on a page that knows nothing about it',
+    liveAtNav && awayTitle === baseTitle,
+    `a live countdown (${JSON.stringify(atNav)}) met the navigation, and the tab reads ` +
+      `${JSON.stringify(awayTitle)} again on the page that left it behind`,
+    liveAtNav
+      ? `on /privacy the tab still reads ${JSON.stringify(awayTitle)} — a countdown that outlives the ` +
+        'app is a stale one on a page that knows nothing about it'
+      : `the tab read ${JSON.stringify(atNav)} at the moment of the navigation, which is not a running ` +
+        'countdown — this check proves nothing unless a live countdown is what meets the navigation. ' +
+        "Lengthen the fixture block's endsAt; do not move the check earlier.",
   )
 } catch (e) {
   failed += 1

@@ -66,6 +66,7 @@ import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, ACCENT_PALETTE, ACCENT_HEX } from '@rundesk/feature-flags'
 import type { AccentName } from '@rundesk/feature-flags'
 import { InlineSkeleton } from './loading-skeletons'
+import { useRunningFocusBlock } from '../lib/use-focus-tab-title'
 import {
   useTopbarVisible,
   usePinnedTopbarItems,
@@ -231,6 +232,58 @@ function PinnedTool({
   )
 }
 
+/**
+ * §V2-06 — the live focus countdown, in the header where the frames put it.
+ *
+ * WHAT THE FRAMES DRAW, verified rather than remembered. At `15:20`, `15:35`
+ * and `15:50`: a moon glyph, "Work on dbgdh", then "2h 56m left" in a lighter
+ * weight, sitting immediately right of the workspace switcher. At `16:00` and
+ * `16:10` the same pill reads "2h 55m left" — one block, ten minutes later. At
+ * `16:05` the page behind it is the LIST view, not the planner, so the pill
+ * belongs to the app shell; at `16:10` it carries a hover fill and a pointer
+ * cursor, so it is a control and not a label. `docs/video2-frame-observations.md:383`
+ * calls this the browser tab and quotes "2m 3s left"; neither is in any frame.
+ *
+ * It renders NOTHING when no block is running — the frames draw no empty pill,
+ * and a countdown that is set once and never cleared is the version of this
+ * bug that survives a demo.
+ *
+ * The number comes from `useRunningFocusBlock`, which shares its fetch, its
+ * choice of block and its one-second clock with the tab-title writer. There is
+ * no second countdown in this file, deliberately: see `use-focus-tab-title.ts`.
+ */
+function FocusBlockPill({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const running = useRunningFocusBlock(workspaceId)
+  if (!running) return null
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <button
+          type="button"
+          data-testid="focus-block-pill"
+          onClick={() => navigate({ to: '/app/$workspaceId/calendar', params: { workspaceId } })}
+          aria-label={t('focusPill.aria', { label: running.label, remaining: running.remaining })}
+          className="hidden md:flex items-center gap-1.5 h-7 shrink-0 rounded-md px-2 text-[13px] text-foreground hover:bg-card/60 transition-colors"
+        >
+          <Moon className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+          <span data-testid="focus-block-pill-label" className="truncate max-w-[160px] font-medium">
+            {running.label}
+          </span>
+          <span
+            data-testid="focus-block-pill-remaining"
+            className="shrink-0 tabular-nums text-muted-foreground"
+          >
+            {t('focusPill.remaining', { remaining: running.remaining })}
+          </span>
+        </button>
+      </TooltipTrigger>
+      <TooltipContent side="bottom">{t('focusPill.openPlanner')}</TooltipContent>
+    </Tooltip>
+  )
+}
+
 export function AppTopbar({
   onCommandOpen,
   onMenuOpen,
@@ -266,6 +319,13 @@ export function AppTopbar({
       )}
       <BrandingApplier workspaceId={isUuidLike(params.workspaceId) ? params.workspaceId : undefined} />
       <Breadcrumbs {...params} />
+      {/*
+        §V2-06 frames `15:20`–`16:20` — the focus countdown sits at the LEFT of
+        the app header, immediately right of the workspace identity, and not
+        with the tools on the right. Here for the same reason it is in the
+        shell rather than on the planner: `16:05` draws it over the List page.
+      */}
+      {isUuidLike(params.workspaceId) && <FocusBlockPill workspaceId={params.workspaceId} />}
       <div className="flex-1" />
       {/* §1.5 — "yeh option jo hai woh humare members ke paas hona chahiye …
           humare paas NAV BAR ko set down karne ka option nahi hai". Search and
@@ -419,8 +479,11 @@ function Breadcrumbs({
 
   const Sep = () => <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/60 shrink-0" />
 
+  // `topbar-breadcrumbs` is the workspace identity in Rundesk's header — the
+  // element the frames' workspace switcher corresponds to, and what
+  // `focus-block-pill` is measured against in `test/e2e/focus-pill.mjs`.
   return (
-    <nav className="hidden sm:flex items-center gap-1.5 text-sm min-w-0">
+    <nav data-testid="topbar-breadcrumbs" className="hidden sm:flex items-center gap-1.5 text-sm min-w-0">
       {workspace && (
         <Link
           to="/app/$workspaceId"

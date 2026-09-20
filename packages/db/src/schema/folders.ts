@@ -1,5 +1,5 @@
-import { pgTable, text, timestamp, uuid, boolean, integer, index } from 'drizzle-orm/pg-core'
-import { relations } from 'drizzle-orm'
+import { pgTable, text, timestamp, uuid, boolean, integer, index, uniqueIndex } from 'drizzle-orm/pg-core'
+import { relations, sql } from 'drizzle-orm'
 import { spaces } from './spaces'
 import { projects } from './projects'
 import { users } from './users'
@@ -30,7 +30,33 @@ export const folders = pgTable(
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
-  (t) => [index('idx_folders_space').on(t.spaceId, t.position)],
+  (t) => [
+    index('idx_folders_space').on(t.spaceId, t.position),
+    /**
+     * §V2-S10 frame `08:25` — "FOLDER banaya … folder ka bhi SAME NAAM dete
+     * hain" `[08:23]`, and `[08:55]` on the error that should answer.
+     *
+     * The same rule `lists` got in migration 0147, for the sibling container
+     * created from the same menu, and stated in the same three ways so the two
+     * cannot drift:
+     *
+     *   · `lower(name)`, because "Clients" and "clients" are one name to the
+     *     person reading the tree;
+     *   · PARTIAL on `is_archived = false`, because `remove()` archives rather
+     *     than deletes and a folder in the Trash must not reserve its name for
+     *     ever;
+     *   · scoped to the SPACE, which is the container the sidebar draws folders
+     *     under. Two spaces may each have a "Clients"; one space may not.
+     *
+     * Declared here AND written as migration 0157. The schema is compiled from
+     * source at require time, so a declaration with no migration behind it is a
+     * constraint that exists on the developer's machine and nowhere else —
+     * which is precisely how 0147 was nearly shipped without its index.
+     */
+    uniqueIndex('uq_folders_space_name_active')
+      .on(t.spaceId, sql`lower(${t.name})`)
+      .where(sql`${t.isArchived} = false`),
+  ],
 )
 
 export const foldersRelations = relations(folders, ({ one, many }) => ({

@@ -1,0 +1,403 @@
+/**
+ * §V2-S10 — "Folder name taken", frames `08:25` / `08:55`.
+ *
+ * WHAT THE FRAMES AND THE WORDS SAY. At `08:25` the Create menu is open on a
+ * space and she picks **Folder**; at `[08:23]` she says it outright — *"FOLDER
+ * banaya; main folder banaoongi, folder ka bhi SAME NAAM dete hain"* — she is
+ * deliberately reusing a name. At `08:55` two error toasts are stacked
+ * BOTTOM-LEFT reading *"List name taken"*, and she narrates them: *"Yahan pe na
+ * yeh ERROR de raha hai filhaal, lekin agar koi error aata hai to yeh yahan show
+ * kar deta hai."* The toast is the general answer to a refused create, not a
+ * list-only one.
+ *
+ * THREE THINGS WERE WRONG, and they are the same three `88830db` fixed for
+ * lists — on the sibling container created from the same eight-item menu:
+ *
+ *   1. `FoldersService.create` inserted whatever it was handed. No constraint
+ *      and no check, so one space could hold three folders called "Clients" and
+ *      the tree gave you nothing but their ids to tell them apart.
+ *   2. The quick-create dialog's FOLDER tab had `onSuccess` and NO `onError` —
+ *      the exact line `88830db` added to the List tab a few hundred lines above
+ *      it. A refused create did nothing at all.
+ *   3. The sidebar's "New folder" was `window.prompt` + `window.alert`, so the
+ *      two folder paths disagreed about whether a failure was even mentioned,
+ *      and in a headless browser `alert` is no surface at all.
+ *
+ * WHERE THE RULE LIVES: migration 0157, a partial case-insensitive unique index
+ * on `(space_id, lower(name)) where is_archived = false` — 0147's index for the
+ * other container. The service check on top exists ONLY so the answer carries
+ * words a person can read, so this suite checks BOTH, including one write that
+ * goes straight past the service to the index.
+ *
+ * THREE DOORS reach that namespace and all three are driven here: create,
+ * rename, and move-into-another-space. The third is the one that is easy to
+ * forget and the one that would have surfaced as a 500.
+ *
+ * AGAINST THE REAL STACK, necessarily: the load-bearing claim is a database
+ * constraint and a stub cannot have one.
+ *
+ * ITS OWN FIXTURES: two spaces named with this run's tag, and every folder name
+ * carries it. Nothing here counts rows in the shared database.
+ *
+ *   node test/e2e/folder-create.mjs --api 3011 --dist apps/web/dist
+ */
+import path from 'node:path'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { apiClient, login } from './lib/fixture.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
+import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { openDb } from './lib/db.mjs'
+import { waitUntil, readText } from './lib/wait.mjs'
+
+const argOf = (name, fallback) => {
+  const i = process.argv.indexOf(name)
+  return i === -1 ? fallback : process.argv[i + 1]
+}
+
+/** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
+const EXPECTED_CHECKS = 20
+
+const REPO = path.resolve(import.meta.dirname, '../..')
+const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
+const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
+
+const results = []
+const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
+const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
+const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+
+const chromium = await resolveChromium()
+let stack = null
+let B = (process.env.BASE ?? '').replace(/\/$/, '')
+if (!B) {
+  stack = await startLocalStack({
+    dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
+    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+  })
+  B = stack.base
+}
+
+const TAG = `e2e-fc-${Date.now()}`
+/** The name she reuses on camera. Tagged, so it is this run's name and nobody else's. */
+const NAME = `Clients ${TAG}`
+
+let browser = null
+let ctx = null
+let sql = null
+
+try {
+  const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
+  const api = apiClient(`${B}/api/v1`, auth.accessToken)
+
+  const wsRes = await api('/workspaces')
+  // The fixture's apiClient NEVER THROWS — it answers {status, data, error} —
+  // so a bad call has to be read off `status` or it reads as success.
+  if (wsRes.status >= 300) throw new Error(`GET /workspaces answered ${wsRes.status}`)
+  const rows = wsRes.data ?? []
+  const WS = (rows[0]?.workspace ?? rows[0])?.id
+  if (!WS) throw new Error('this account can see no workspace')
+
+  sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL — the load-bearing claim here is an index')
+
+  const mkSpace = async (label) => {
+    const res = await api('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${label} ${TAG}` } })
+    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make space ${label}: ${res.status}`)
+    return res.data.id
+  }
+  const SPACE_A = await mkSpace('SpaceA')
+  const SPACE_B = await mkSpace('SpaceB')
+
+  // ---------------------------------------------------------------------------
+  console.log('\n▶ the API refuses a duplicate folder name, in the frame\'s words')
+
+  const first = await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: NAME } })
+  chk(
+    first.status < 300 && !!first.data?.id,
+    'the first folder is created',
+    `POST /spaces/:id/folders answered ${first.status}`,
+  )
+
+  const second = await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: NAME } })
+  chk(
+    second.status === 409,
+    'the second is refused with a 409',
+    `it answered ${second.status} — a duplicate folder name was accepted, or refused as ` +
+      'something else. Before 0157 this was a 201 and the space had two folders with one name.',
+  )
+  chk(
+    /folder name taken/i.test(JSON.stringify(second.error ?? '')),
+    'and the message reads "Folder name taken"',
+    `the error was ${JSON.stringify(second.error)} — a Postgres unique violation surfacing ` +
+      'as "That resource already exists" is the index working and the service not answering',
+  )
+
+  /*
+   * CASE-INSENSITIVE. "Clients" and "clients" are the same name to whoever is
+   * reading the tree, and a rule that let both through would be enforcing
+   * something nobody means.
+   */
+  const cased = await api(`/spaces/${SPACE_A}/folders`, {
+    method: 'POST',
+    body: { name: NAME.toUpperCase() },
+  })
+  chk(
+    cased.status === 409,
+    'and case does not get around it',
+    `"${NAME.toUpperCase()}" was accepted alongside "${NAME}" (${cased.status})`,
+  )
+
+  // ---------------------------------------------------------------------------
+  console.log('\n▶ but the rule is scoped to the SPACE, and to live folders')
+
+  const elsewhere = await api(`/spaces/${SPACE_B}/folders`, { method: 'POST', body: { name: NAME } })
+  chk(
+    elsewhere.status < 300,
+    'the same name is fine in a different space',
+    `a second space could not have its own "${NAME}" (${elsewhere.status})`,
+  )
+
+  /*
+   * `remove()` ARCHIVES a folder so it can come back out of the Trash, so a name
+   * sitting in the bin must not be reserved for ever — the index is partial on
+   * `is_archived = false` for exactly this.
+   */
+  const binned = await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: `Binned ${TAG}` } })
+  if (binned.status >= 300) throw new Error(`could not make the folder to bin: ${binned.status}`)
+  const delRes = await api(`/spaces/${SPACE_A}/folders/${binned.data.id}`, { method: 'DELETE' })
+  chk(delRes.status < 300, 'a folder can be deleted', `DELETE answered ${delRes.status}`)
+  const reused = await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: `Binned ${TAG}` } })
+  chk(
+    reused.status < 300,
+    'and a deleted folder does not hold its name hostage',
+    `the name stayed reserved by a binned folder (${reused.status})`,
+  )
+
+  // ---------------------------------------------------------------------------
+  console.log('\n▶ THE CONSTRAINT IS IN THE DATABASE, not only in the service')
+
+  /*
+   * The service check produces a good error. The INDEX is what makes the rule
+   * true — for two requests racing, and for any code path that forgets to ask.
+   * So this writes straight past the service.
+   */
+  let rawRefused = false
+  try {
+    await sql`insert into folders (space_id, name) values (${SPACE_A}, ${NAME})`
+  } catch {
+    rawRefused = true
+  }
+  chk(
+    rawRefused,
+    'a direct insert of a duplicate is refused by the index itself',
+    'the database accepted it — the rule lives only in the service, so anything that ' +
+      'writes folders another way can still make two, and a schema declared without a ' +
+      'migration behind it is a constraint that exists on one machine',
+  )
+
+  // ---------------------------------------------------------------------------
+  console.log('\n▶ and the other two doors onto the same namespace')
+
+  /*
+   * RENAME. Guarding only `create` leaves the rule reachable-around: make
+   * "Clients 2", rename it to "Clients", and the index — not the API — answers,
+   * with a 500 out of an ordinary edit.
+   */
+  const spare = await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: `Spare ${TAG}` } })
+  if (spare.status >= 300) throw new Error(`could not make the spare folder: ${spare.status}`)
+  const renamed = await api(`/spaces/${SPACE_A}/folders/${spare.data.id}`, {
+    method: 'PATCH',
+    body: { name: NAME },
+  })
+  chk(
+    renamed.status === 409,
+    'renaming a folder onto a taken name is refused with a 409',
+    `PATCH answered ${renamed.status} — 500 means the index answered instead of the service, ` +
+      '200 means the rule has a second door standing open',
+  )
+  // ...and renaming a folder to the name it already has is not a clash with itself.
+  const noop = await api(`/spaces/${SPACE_A}/folders/${spare.data.id}`, {
+    method: 'PATCH',
+    body: { name: `Spare ${TAG}` },
+  })
+  chk(
+    noop.status < 300,
+    'while renaming a folder to its own name is still allowed',
+    `a folder could not keep its own name (${noop.status}) — the check is not excluding itself`,
+  )
+
+  /*
+   * MOVE. The index is on `(space_id, lower(name))`, so carrying "Clients" into
+   * a space that already has a "Clients" is a unique violation, out of a move
+   * that looked ordinary.
+   */
+  const clash = await api(`/spaces/${SPACE_B}/folders`, { method: 'POST', body: { name: `Movable ${TAG}` } })
+  if (clash.status >= 300) throw new Error(`could not make the movable folder: ${clash.status}`)
+  await api(`/spaces/${SPACE_A}/folders`, { method: 'POST', body: { name: `Movable ${TAG}` } })
+  const moved = await api(`/spaces/${SPACE_B}/folders/${clash.data.id}/move`, {
+    method: 'POST',
+    body: { targetSpaceId: SPACE_A },
+  })
+  chk(
+    moved.status === 409,
+    'and moving a folder into a space that already has that name is refused with a 409',
+    `the move answered ${moved.status} — 500 is the index answering a question the service ` +
+      'never asked, and 200 means two folders now share a name in one space',
+  )
+
+  // ---------------------------------------------------------------------------
+  console.log('\n▶ and the refusal reaches the person, on BOTH create paths')
+
+  browser = await chromium.launch(launchOptions())
+  ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
+  const page = await ctx.newPage()
+
+  /*
+   * Every folder POST the browser makes. The toast is only evidence of the fix
+   * if the request that provoked it actually left — a dialog that refused
+   * client-side would raise the same toast and prove nothing.
+   */
+  const folderPosts = []
+  page.on('request', (r) => {
+    if (r.method() === 'POST' && /\/spaces\/[^/]+\/folders$/.test(new URL(r.url()).pathname)) {
+      folderPosts.push(r.url())
+    }
+  })
+
+  await page.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
+  await page.fill('input[type=email]', EMAIL)
+  await page.fill('input[type=password]', PASSWORD)
+  await page.click('button[type=submit]')
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
+  await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
+
+  // ── path 1: the quick-create dialog's Folder tab (the one with no onError) ──
+  await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
+  await page.getByTestId('create-tab-folder').click({ timeout: 20_000 })
+  await page.getByTestId('quick-create-folder-name').fill(NAME)
+  await page.getByTestId('quick-create-folder-space').selectOption(SPACE_A)
+  const postsBefore = folderPosts.length
+  await page.getByTestId('quick-create-folder-submit').click()
+
+  chk(
+    await waitUntil(() => folderPosts.length > postsBefore, { timeoutMs: 15_000 }),
+    'the Folder tab really asks the server to create it',
+    'no POST to /spaces/:id/folders left the browser — whatever happened next was ' +
+      'not the server answering',
+  )
+
+  const toast = page.locator('[data-sonner-toast]').first()
+  chk(
+    await waitUntil(() => toast.isVisible().catch(() => false), { timeoutMs: 15_000 }),
+    'the refusal reaches the person as a toast',
+    'the Folder tab swallowed it — this mutation had no onError, so the server said no ' +
+      'and the dialog sat there with the button looking un-pressed',
+  )
+  const toastText = await readText(toast)
+  chk(
+    /taken/i.test(toastText),
+    'and it reads "Folder name taken", the frame\'s shape of words',
+    `the toast read "${toastText}"`,
+  )
+
+  /*
+   * POSITION IS THE FRAME'S CLAIM, so it is read off the bounding box rather
+   * than an attribute of the toast library — a person cannot read
+   * `data-x-position`. Bottom-LEFT, as `08:55` draws both of them.
+   */
+  const box = await toast.boundingBox()
+  const viewport = page.viewportSize()
+  chk(
+    !!box && !!viewport &&
+      box.y + box.height / 2 > viewport.height / 2 &&
+      box.x + box.width / 2 < viewport.width / 2,
+    'and it sits bottom-left, where frame `08:55` stacks them',
+    `the toast's centre was at (${box ? Math.round(box.x + box.width / 2) : '?'}, ` +
+      `${box ? Math.round(box.y + box.height / 2) : '?'}) of ${viewport?.width}×${viewport?.height}`,
+  )
+
+  // ── path 2: the sidebar's "New folder" (the window.prompt / window.alert one) ──
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId(`space-toggle-${SPACE_A}`).click({ timeout: 25_000 })
+  await page.getByTestId(`space-new-folder-${SPACE_A}`).click({ timeout: 20_000 })
+  await page.getByTestId('sidebar-folder-name').fill(NAME)
+  const sidebarPostsBefore = folderPosts.length
+  await page.getByTestId('sidebar-folder-submit').click()
+
+  chk(
+    await waitUntil(() => folderPosts.length > sidebarPostsBefore, { timeoutMs: 15_000 }),
+    'the sidebar path asks the server too',
+    'the sidebar create sent nothing',
+  )
+  const sidebarToast = page.locator('[data-sonner-toast]').first()
+  chk(
+    await waitUntil(async () => /taken/i.test(await readText(sidebarToast, { timeoutMs: 1500 })), {
+      timeoutMs: 15_000,
+    }),
+    'the sidebar path reports the refusal with the same words',
+    'the sidebar swallowed it — this was window.alert, which in a headless browser is ' +
+      'no surface at all, so the two folder paths disagreed about whether a failure exists',
+  )
+
+  /*
+   * AND THE DIALOG STAYS OPEN, with the name still in the box. A refusal you
+   * have to retype your way back to is a refusal you cannot act on, and this is
+   * the reason this path does not reuse `ContainerEditDialog`.
+   */
+  chk(
+    await page.getByTestId('sidebar-folder-dialog').isVisible().catch(() => false) &&
+      (await page.getByTestId('sidebar-folder-name').inputValue().catch(() => '')) === NAME,
+    'and the dialog stays open with the rejected name still in the box',
+    'the dialog closed on a refusal, so the name has to be retyped to try again',
+  )
+
+  /*
+   * THE SUCCESS PATH, by construction rather than by timing: a name nothing has
+   * used, so the create cannot be refused, and the tree read AFTER the row
+   * exists rather than after a sleep.
+   */
+  const FRESH = `Fresh ${TAG}`
+  await page.getByTestId('sidebar-folder-name').fill(FRESH)
+  await page.getByTestId('sidebar-folder-submit').click()
+  chk(
+    await waitUntil(
+      async () => !(await page.getByTestId('sidebar-folder-dialog').isVisible().catch(() => false)),
+      { timeoutMs: 15_000 },
+    ),
+    'a name that is free closes the dialog',
+    'the dialog stayed open on a create that should have succeeded',
+  )
+  const rowsAfter = await sql`
+    select id from folders
+    where space_id = ${SPACE_A} and name = ${FRESH} and is_archived = false`
+  chk(
+    rowsAfter.length === 1,
+    'and exactly one folder with that name now exists in the space',
+    `the database holds ${rowsAfter.length} folders called "${FRESH}" in this space`,
+  )
+} catch (e) {
+  bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
+} finally {
+  /*
+   * Only this run's rows: every space and folder made here carries the tag, so
+   * nothing belonging to another suite on the shared database is touched.
+   */
+  if (sql) {
+    await sql`delete from folders where name like ${'%' + TAG}`.catch(() => {})
+    await sql`delete from projects where name like ${'%' + TAG}`.catch(() => {})
+    await sql`delete from spaces where name like ${'%' + TAG}`.catch(() => {})
+    await sql.end({ timeout: 5 }).catch(() => {})
+  }
+  await ctx?.close().catch(() => {})
+  await browser?.close().catch(() => {})
+}
+
+const failed = () => results.filter((x) => !x).length
+if (results.length !== EXPECTED_CHECKS) {
+  console.log(`  \x1b[31mFAIL\x1b[0m ran ${results.length} checks, expected ${EXPECTED_CHECKS}`)
+  results.push(0)
+}
+console.log(`\n${results.length - failed()} passed, ${failed()} failed`)
+await stack?.close?.()
+process.exit(failed() ? 1 : 0)

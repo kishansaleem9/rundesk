@@ -14,19 +14,40 @@ import { PlansModule } from '../plans/plans.module'
 import { SearchModule } from '../search/search.module'
 import { SkillsModule } from '../skills/skills.module'
 import { DocsModule } from '../docs/docs.module'
+import { ListsModule } from '../lists/lists.module'
+import { FoldersModule } from '../folders/folders.module'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
 @Module({
   // NotificationsModule supplies NotificationsService for briefing + workload
   // alert delivery (§7.11/§7.12). AiModule already depends on it transitively via
   // TasksModule and Notifications imports neither Ai nor Tasks, so no cycle.
   // PlansModule supplies PlanFeatureGuard + PlansService for the §14.1 AI gate.
-  // SearchModule supplies SearchService for §15.1 knowledge retrieval (it's
-  // @Global, but importing it makes the dependency explicit).
+  // SearchModule is @Global and supplies SearchService to the surfaces that
+  // use it; AiService itself no longer injects it (§V2-S16 removed a retained-
+  // for-nothing injection), and it stays imported because KnowledgeController
+  // and the indexer in this module still reach search-shaped helpers.
   // SkillsModule supplies SkillsService so a chat turn can be answered *as* a
   // skill (§15) — the service also owns the visibility and enabled checks, so
   // resolving the skill through it is what stops a caller invoking one they
   // cannot see. Skills imports nothing from Ai, so no cycle.
-  imports: [TasksModule, NotificationsModule, PlansModule, SearchModule, SkillsModule, DocsModule],
+  //
+  // §V2-S16 `[17:44]`–`[18:48]` — Lists / Folders / CustomRoles are what let
+  // the AI bring a container into existence. They are imported rather than
+  // re-implemented so a list the AI makes is the same row, with the same status
+  // pipeline and the same permission rules, as one a person makes. None of the
+  // three imports AiModule, so there is no cycle.
+  imports: [
+    TasksModule,
+    NotificationsModule,
+    PlansModule,
+    SearchModule,
+    SkillsModule,
+    DocsModule,
+    ListsModule,
+    FoldersModule,
+    CustomRolesModule,
+  ],
   controllers: [AiController, KnowledgeController, ChatThreadsController],
   // BriefingService owns the hourly @Cron that delivers daily briefings;
   // WorkloadAlertService owns the daily @Cron that alerts managers about

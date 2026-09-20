@@ -170,7 +170,8 @@ try {
     'the Save view chip was showing on a freshly loaded, unmodified view',
   )
 
-  // Change the grouping — one of the eight things `currentViewConfig` carries.
+  // Change the grouping — one of the ten things `currentViewConfig` carries
+  // (eight, plus §V2-S13 `10:35`'s Card size and Card cover).
   const groupBy = page.locator('[data-testid="list-group-by"]')
   const groupCount = await groupBy.count()
   chk(groupCount > 0, 'the grouping control is on the toolbar',

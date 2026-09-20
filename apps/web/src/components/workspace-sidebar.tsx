@@ -54,16 +54,26 @@ import {
   CalendarClock,
   ListChecks,
   CalendarDays,
+  Import,
+  LayoutTemplate,
 } from 'lucide-react'
 import {
   Button,
   cn,
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
+  Input,
+  Label,
+  toast,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -443,15 +453,166 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const [wsDialogOpen, setWsDialogOpen] = useState(false)
   const [savingWs, setSavingWs] = useState(false)
 
-  const createFolder = async (spaceId: string) => {
-    const name = window.prompt(t('nav.newFolderPrompt'))?.trim()
-    if (!name) return
+  /*
+   * §V2-S10 frames `08:25` / `08:55`.
+   *
+   * This was `window.prompt` + `window.alert`, so the two folder-creation paths
+   * disagreed about whether a failure was even mentioned, and neither could
+   * produce the frame's toast. `window.alert` is also a modal the person has to
+   * dismiss before they can look at what went wrong, and in a headless browser
+   * it is nothing at all — the refusal had no surface anybody could read.
+   *
+   * Now the same dialog the rename path already uses, and the same bottom-left
+   * toast the List tab raises, so "Folder name taken" lands in one place
+   * whichever door was used.
+   */
+  const [folderDialog, setFolderDialog] = useState<{ spaceId: string; name: string } | null>(null)
+  const [savingFolder, setSavingFolder] = useState(false)
+
+  /*
+   * §V2-S12 `[08:23]` — *"[Kuch] cheezein folder mein MOVE kar sakti hoon —
+   * DRAG AND DROP ka option hai."* Named outright, and frames `08:35` / `08:55`
+   * are the result: the tree and the breadcrumb both read
+   * `rundesk › ruruuu (folder) › List`.
+   *
+   * THE DESTINATION LOGIC AND THE ENDPOINTS ALREADY EXISTED — `move-dialog.tsx`
+   * flattens the same tree into rows and posts to the same three routes. What
+   * did not exist was the gesture: `draggable`, `onDragStart`, `onDrop`,
+   * `DndContext` — none of them appeared anywhere in this file. The list route
+   * has dnd-kit for the board and HTML5 drag for the calendar; the sidebar had
+   * neither.
+   *
+   * HTML5 drag, not dnd-kit, because the tree is a scrolling column of links
+   * and a pointer-sensor library would have to take over their click handling
+   * to tell a drag from a navigation.
+   *
+   * WHAT MOVES WHERE follows the model, not the picture. Rundesk's `folderId`
+   * lives on `projects`, so a folder groups projects and a project owns lists:
+   *   · project → folder   `POST /projects/:id/move { spaceId, folderId }`
+   *   · project → space    the same route with `folderId: null` — the reverse
+   *     gesture, so this is not a one-way trip into a folder
+   *   · list → project     `POST /lists/:id/move { projectId }`
+   * Dragging the project that owns a list into a folder produces exactly the
+   * frame's `space › folder › project › list`.
+   */
+  /*
+   * Exactly what the drop reads, and nothing else. It carried `name` and
+   * `parentId` too; `parentId` was the stale value described under `canDropOn`,
+   * and once that stopped being consulted both were values written on every
+   * drag that no reader honoured.
+   */
+  type DragPayload = { kind: 'project' | 'list'; id: string }
+  const [dragItem, setDragItem] = useState<DragPayload | null>(null)
+  const [dropTarget, setDropTarget] = useState<string | null>(null)
+
+  /**
+   * Can what is being dragged LIVE at this target?
+   *
+   * A project belongs in a folder or directly under a space; a list belongs in
+   * a project. That is the whole rule, and it is deliberately not joined to
+   * "…and it is not already there".
+   *
+   * IT USED TO ASK THAT SECOND QUESTION, and it made the gesture one-way. The
+   * only answer available is `dragItem.parentId`, taken from the tree payload's
+   * `folderId` — and the tree is a refetch behind the move that just happened,
+   * because `dropOn` invalidates the queries AFTER the server has already
+   * written the row. So on the drag straight back out:
+   *
+   *   · into a folder  — `parentId !== target.id` is `null !== <uuid>`, true,
+   *     and the drop landed whether or not the client was up to date;
+   *   · back to the space — `parentId !== null` is `null !== null`, FALSE, and
+   *     the drop was refused for a project that really was in a folder.
+   *
+   * One stale value, and only the second direction could ever notice it. A drop
+   * that lands where the item already is now sends an idempotent move, which is
+   * a great deal better than a gesture that silently does nothing because the
+   * client is one request behind the truth.
+   */
+  const canDropOn = (target: { kind: 'folder' | 'space' | 'project'; id: string }) => {
+    if (!dragItem) return false
+    if (dragItem.kind === 'project') return target.kind === 'folder' || target.kind === 'space'
+    return target.kind === 'project'
+  }
+
+  const dropOn = async (target: { kind: 'folder' | 'space' | 'project'; id: string; spaceId: string }) => {
+    const item = dragItem
+    setDragItem(null)
+    setDropTarget(null)
+    if (!item || !canDropOn(target)) return
     try {
-      await api(`/spaces/${spaceId}/folders`, { method: 'POST', body: { name } })
-      setExpandedSpaces((prev) => ({ ...prev, [spaceId]: true }))
-      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      if (item.kind === 'project') {
+        await api(`/projects/${item.id}/move`, {
+          method: 'POST',
+          body:
+            target.kind === 'folder'
+              ? { spaceId: target.spaceId, folderId: target.id }
+              : { spaceId: target.id, folderId: null },
+        })
+      } else {
+        await api(`/lists/${item.id}/move`, { method: 'POST', body: { projectId: target.id } })
+      }
+      toast.success(t('move.moved'))
+      // The same keys the Move dialog invalidates, for the same reason: the
+      // tree, the move-target list and the per-container caches all describe
+      // the arrangement that just changed.
+      for (const key of ['spaces', 'space-tree', 'projects', 'folders', 'lists', 'move-targets']) {
+        await qc.invalidateQueries({ queryKey: [key] })
+      }
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : t('nav.createFolderError'))
+      toast.error(err instanceof Error && err.message ? err.message : t('move.failed'))
+    }
+  }
+
+  /** The handlers every drop target in the tree shares. */
+  const dropProps = (target: { kind: 'folder' | 'space' | 'project'; id: string; spaceId: string }) => ({
+    onDragOver: (e: React.DragEvent) => {
+      if (!canDropOn(target)) return
+      // Without preventDefault the browser refuses the drop and `onDrop` never
+      // fires — the commonest way an HTML5 drop target does nothing at all.
+      e.preventDefault()
+      e.dataTransfer.dropEffect = 'move' as const
+      if (dropTarget !== target.id) setDropTarget(target.id)
+    },
+    onDragLeave: () => setDropTarget((prev) => (prev === target.id ? null : prev)),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      void dropOn(target)
+    },
+    'data-drop-active': dropTarget === target.id && canDropOn(target) ? 'true' : undefined,
+  })
+
+  /** The handlers every draggable row in the tree shares. */
+  const dragProps = (item: DragPayload) => ({
+    draggable: true,
+    onDragStart: (e: React.DragEvent) => {
+      setDragItem(item)
+      e.dataTransfer.effectAllowed = 'move' as const
+      // Firefox will not start a drag without data on the transfer.
+      e.dataTransfer.setData('text/plain', `${item.kind}:${item.id}`)
+    },
+    onDragEnd: () => {
+      setDragItem(null)
+      setDropTarget(null)
+    },
+    'data-dragging': dragItem?.id === item.id ? 'true' : undefined,
+  })
+
+  const submitCreateFolder = async () => {
+    if (!folderDialog) return
+    const name = folderDialog.name.trim()
+    if (!name) return
+    setSavingFolder(true)
+    try {
+      await api(`/spaces/${folderDialog.spaceId}/folders`, { method: 'POST', body: { name } })
+      setExpandedSpaces((prev) => ({ ...prev, [folderDialog.spaceId]: true }))
+      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
+      setFolderDialog(null)
+    } catch (err) {
+      // The refusal reaches the person, in the API's words when it has any.
+      toast.error(err instanceof Error && err.message ? err.message : t('nav.createFolderError'))
+    } finally {
+      setSavingFolder(false)
     }
   }
 
@@ -720,6 +881,23 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     queryFn: () => api<Array<{ id: string; name: string }>>(`/spaces/workspace/${workspaceId}`),
     enabled: !!workspaceId,
   })
+  /*
+   * §V2-S01 frame `06:25` — the `1` beside **Personal List**.
+   *
+   * The section itself was built by `3d81f04`; the count on its third row was
+   * not, and a row that is one of three identical-looking links gives no reason
+   * to open it. OPEN tasks, not all of them — a badge that never falls as you
+   * tick things off is a number about the past.
+   *
+   * The same query key Home's Personal List card uses, so ticking one there
+   * moves this without a second fetch or a second source of truth.
+   */
+  const personalTasksQuery = useQuery({
+    queryKey: ['personal-tasks', workspaceId],
+    queryFn: () => api<Array<{ id: string; done: boolean }>>(`/workspaces/${workspaceId}/personal-tasks`),
+    enabled: !!workspaceId,
+  })
+  const openPersonalTasks = (personalTasksQuery.data ?? []).filter((task) => !task.done).length
   const spaceTreeQuery = useQuery({
     queryKey: ['space-tree', workspaceId],
     enabled: !!workspaceId,
@@ -1427,7 +1605,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             </div>
             <MyTasksLink workspaceId={workspaceId} section="assigned-to-me" icon={CircleCheck} label={t('appWorkspace.assignedToMe')} />
             <MyTasksLink workspaceId={workspaceId} section="today-overdue" icon={CalendarClock} label={t('appWorkspace.todayOverdue')} />
-            <MyTasksLink workspaceId={workspaceId} section="personal-list" icon={ListChecks} label={t('appWorkspace.personalList')} />
+            <MyTasksLink workspaceId={workspaceId} section="personal-list" icon={ListChecks} label={t('appWorkspace.personalList')} badge={openPersonalTasks} />
           </div>
 
           <div className="pt-1">
@@ -1633,6 +1811,11 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     page is useful with the assistant switched off. */}
                 <NavLink to={"/app/$workspaceId/meetings" as any} params={{ workspaceId }} icon={Video} label={t('nav.meetings')} compact favorite={favoriteProps('Meetings', `/app/${workspaceId}/meetings`)} />
                 {featureEnabled(FLAGS.AI) && <AiChatsSection workspaceId={workspaceId} />}
+                {/* §V2-S02 frames `00:05` / `06:25`, spoken at `[06:21]`:
+                    "yahan saari chats show hoti hain — yeh group communication
+                    CHANNELS, direct messages, aur spaces." Directly under AI
+                    Chats, exactly as both frames stack them. */}
+                {featureEnabled(FLAGS.CHAT) && <ChannelsSection workspaceId={workspaceId} />}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
                 <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact favorite={favoriteProps('Shared with me', `/app/${workspaceId}/shared`)} />
@@ -1798,7 +1981,15 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         )
                         const listActive = pathsEqual(pathname, listPath)
                         return (
-                        <div key={list.id} className="group flex items-center gap-1">
+                        <div
+                          key={list.id}
+                          className={cn(
+                            'group flex items-center gap-1 rounded-md',
+                            dragItem?.kind === 'list' && dragItem.id === list.id && 'opacity-50',
+                          )}
+                          data-testid={`tree-list-${list.id}`}
+                          {...dragProps({ kind: 'list', id: list.id })}
+                        >
                           <Link
                             to="/app/$workspaceId/$spaceId/$projectId/$listId"
                             params={{ workspaceId, spaceId: space.id, projectId: ownerProjectId, listId: list.id }}
@@ -1881,7 +2072,18 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
 
               const renderProjectNode = (project: (typeof space.projects)[number]) => (
                 <div key={project.id} className="space-y-0.5">
-                  <div className="group flex items-center gap-1">
+                  <div
+                    className={cn(
+                      'group flex items-center gap-1 rounded-md',
+                      dragItem?.kind === 'project' && dragItem.id === project.id && 'opacity-50',
+                      dropTarget === project.id &&
+                        canDropOn({ kind: 'project', id: project.id }) &&
+                        'ring-1 ring-brand-500 bg-accent/20',
+                    )}
+                    data-testid={`tree-project-${project.id}`}
+                    {...dragProps({ kind: 'project', id: project.id })}
+                    {...dropProps({ kind: 'project', id: project.id, spaceId: space.id })}
+                  >
                     {/* Same split as the space row above, for the same reason. */}
                     <button
                       type="button"
@@ -1966,7 +2168,21 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               const ungrouped = space.projects.filter((p) => !p.folderId)
               return (
               <div key={space.id} className="space-y-0.5">
-                <div className="group flex items-center gap-1">
+                {/* The space row is the way BACK OUT of a folder — drop a
+                    project here and its `folderId` is cleared, mirroring the
+                    Move dialog's "move back". Without it the gesture would be
+                    one-way, and a project dragged into a folder by accident
+                    would need a different control to undo. */}
+                <div
+                  className={cn(
+                    'group flex items-center gap-1 rounded-md',
+                    dropTarget === space.id &&
+                      canDropOn({ kind: 'space', id: space.id }) &&
+                      'ring-1 ring-brand-500 bg-accent/20',
+                  )}
+                  data-testid={`tree-space-${space.id}`}
+                  {...dropProps({ kind: 'space', id: space.id, spaceId: space.id })}
+                >
                   {/*
                     Two targets, not one. This used to be a <Link> nested inside
                     the toggle <button> — invalid HTML, and behaviourally it
@@ -2055,6 +2271,47 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           </DropdownMenuItem>
                         </Fragment>
                       ))}
+                      {/*
+                        §V2-S09 frame `08:00` — the menu's THIRD group.
+
+                        The frame rules its eight items into three: the two
+                        containers with a line of prose each, then Doc ·
+                        Dashboard · Whiteboard · Form, then **Imports ›** and
+                        **Templates**. `[12:04]` names the middle four and
+                        finishes "IMPORT — kuch aur cheezein hum kahin aur se
+                        [la] sakte hain", and `[12:10]` "TEMPLATES wali cheez
+                        hai … yahan aap use kar sakte hain."
+
+                        These two are NOT `CreateKind`s and must not become
+                        them: everything above makes a new empty thing in this
+                        space, while these two go and fetch one that already
+                        exists somewhere else. Putting them through
+                        `SPACE_CREATE_TYPES` would mean inventing a creator for
+                        each that only ever navigates away — the dead control,
+                        twice. Both destinations have been shipped and reachable
+                        from the Browse rail for some time; what was missing is
+                        them being offered HERE, at the point where somebody has
+                        already decided to put something in this space.
+                      */}
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem
+                        data-testid="space-create-imports"
+                        onClick={() =>
+                          navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
+                        }
+                      >
+                        <Import className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{t('createMenu.imports')}</span>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem
+                        data-testid="space-create-templates"
+                        onClick={() =>
+                          navigate({ to: '/app/$workspaceId/templates', params: { workspaceId } })
+                        }
+                      >
+                        <LayoutTemplate className="h-3.5 w-3.5 shrink-0" />
+                        <span className="truncate">{t('createMenu.templates')}</span>
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <DropdownMenu>
@@ -2093,7 +2350,21 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                       const open = filtering || (expandedFolders[folder.id] ?? true)
                       return (
                         <div key={folder.id} className="space-y-0.5">
-                          <div className="group flex items-center gap-1">
+                          {/* §V2-S12 `[08:23]` — the folder is the drop target
+                              she names. `data-drop-active` only ever appears
+                              while a drop here would really move something,
+                              so a highlight cannot claim more than the gesture
+                              can deliver. */}
+                          <div
+                            className={cn(
+                              'group flex items-center gap-1 rounded-md',
+                              dropTarget === folder.id &&
+                                canDropOn({ kind: 'folder', id: folder.id }) &&
+                                'ring-1 ring-brand-500 bg-accent/20',
+                            )}
+                            data-testid={`tree-folder-${folder.id}`}
+                            {...dropProps({ kind: 'folder', id: folder.id, spaceId: space.id })}
+                          >
                             <button
                               className="flex-1 min-w-0 flex items-center gap-2 rounded-md px-2 py-1 text-[13px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
                               onClick={() => setExpandedFolders((prev) => ({ ...prev, [folder.id]: !(prev[folder.id] ?? true) }))}
@@ -2166,7 +2437,10 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                             </DropdownMenu>
                           </div>
                           {open && (
-                            <div className="ml-4 space-y-0.5">
+                            // Named so a check can ask whether a row really is
+                            // INSIDE this folder, rather than inferring it from
+                            // a database column the tree may not have read yet.
+                            <div className="ml-4 space-y-0.5" data-testid={`tree-folder-children-${folder.id}`}>
                               {folderProjects.map((project) => renderProjectNode(project))}
                               {folderProjects.length === 0 && (
                                 <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.emptyFolder')}</div>
@@ -2198,7 +2472,8 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     )}
                     <button
                       className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                      onClick={() => createFolder(space.id)}
+                      data-testid={`space-new-folder-${space.id}`}
+                      onClick={() => setFolderDialog({ spaceId: space.id, name: '' })}
                     >
                       <FolderPlus className="h-3.5 w-3.5 shrink-0" />
                       {t('nav.newFolder')}
@@ -2436,6 +2711,60 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
         </>
       )}
 
+      {/*
+        §V2-S10 frames `08:25` / `08:55` — the sidebar's own "New folder".
+
+        Its own dialog rather than `ContainerEditDialog` for one reason: the
+        shared dialog closes on submit, and this path has to STAY OPEN when the
+        server refuses, with the name still in the box, so "Folder name taken"
+        is something you can act on rather than something you have to retype
+        your way back to.
+      */}
+      <Dialog
+        open={folderDialog !== null}
+        onOpenChange={(next) => {
+          if (!next) setFolderDialog(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-md" data-testid="sidebar-folder-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('nav.newFolder')}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label htmlFor="sidebar-folder-name">{t('container.nameLabel')}</Label>
+            <Input
+              id="sidebar-folder-name"
+              autoFocus
+              data-testid="sidebar-folder-name"
+              value={folderDialog?.name ?? ''}
+              placeholder={t('nav.newFolderPrompt')}
+              onChange={(e) =>
+                setFolderDialog((prev) => (prev ? { ...prev, name: e.target.value } : prev))
+              }
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  void submitCreateFolder()
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setFolderDialog(null)}>
+              {t('common.cancel')}
+            </Button>
+            <Button
+              size="sm"
+              data-testid="sidebar-folder-submit"
+              disabled={!folderDialog?.name.trim() || savingFolder}
+              onClick={() => void submitCreateFolder()}
+            >
+              {t('quickCreate.createFolder')}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <ContainerEditDialog
         open={treeEdit !== null}
         onOpenChange={(next) => {
@@ -2549,11 +2878,14 @@ function MyTasksLink({
   section,
   icon: Icon,
   label,
+  badge,
 }: {
   workspaceId: string
   section: 'assigned-to-me' | 'today-overdue' | 'personal-list'
   icon: typeof Home
   label: string
+  /** Frame `06:25` puts a count on Personal List. Omitted = no badge at all. */
+  badge?: number
 }) {
   const search = useSearch({ strict: false }) as { section?: string }
   const pathname = useRouterState({ select: (st) => st.location.pathname })
@@ -2572,7 +2904,20 @@ function MyTasksLink({
       )}
     >
       <Icon className="h-4 w-4 shrink-0" />
-      <span className="truncate">{label}</span>
+      <span className="truncate flex-1">{label}</span>
+      {/*
+        Nothing at zero. A badge reading `0` is a different claim from no badge —
+        it says "counted, and the answer is none", which is exactly what an
+        empty list looks like from the outside and is not worth a chip.
+      */}
+      {typeof badge === 'number' && badge > 0 && (
+        <span
+          data-testid={`sidebar-my-tasks-${section}-count`}
+          className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-accent/40 text-[10px] font-semibold flex items-center justify-center tabular-nums"
+        >
+          {badge > 99 ? '99+' : badge}
+        </span>
+      )}
     </Link>
   )
 }
@@ -2717,15 +3062,186 @@ function DockLink({
  * hidden — a list of "New Chat" rows nobody said anything in is worse than no
  * list, and this is exactly what she is looking at when she reopens hers.
  */
+/**
+ * §V2-S02 frames `00:05` and `06:25` — the sidebar's **Channels** section.
+ *
+ * The frame draws, under AI Chats: a heading **Channels**, `# General - Leo`
+ * (with a hover `⋯`), `# Welcome`, then a `+ Add Channel` row — and **Direct
+ * Messages** as a SEPARATE section beneath with its own `+ New message`. At
+ * `[06:21]`: *"yahan saari chats show hoti hain — yeh group communication
+ * channels, direct messages, aur spaces."*
+ *
+ * Rundesk had the data and none of the surface. `workspace-sidebar.tsx` carried
+ * a channel *icon* in a type map and pinned-favourite handling, and rendered no
+ * channel list at all; channels existed only on the chat page, which you had to
+ * already be on to see that you had any.
+ *
+ * PUBLIC CHANNELS ONLY. `GET …/chat/channels` returns both kinds behind one
+ * `isDm` flag, and the frame is emphatic that these are two sections with two
+ * different creation gestures — folding DMs in here would make `+ Add Channel`
+ * the button that also makes a DM, which is not a thing it can do.
+ *
+ * The rows are links into the chat page's `?channel=` deep link, which has been
+ * honoured since §6: this navigates somewhere real rather than re-implementing
+ * a conversation in the tree.
+ */
+function ChannelsSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [saving, setSaving] = useState(false)
+
+  const channelsQuery = useQuery({
+    queryKey: ['chat-channels', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string | null; isDm?: boolean }>>(
+        `/workspaces/${workspaceId}/chat/channels`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const channels = (channelsQuery.data ?? []).filter((c) => !c.isDm)
+
+  const submit = async () => {
+    const name = newName.trim()
+    if (!name || saving) return
+    setSaving(true)
+    try {
+      const created = await api<{ id: string }>(`/workspaces/${workspaceId}/chat/channels`, {
+        method: 'POST',
+        body: { name },
+      })
+      /*
+       * The SAME query key the chat page reads, so the new channel is in both
+       * places at once. Invalidating a key nobody else uses would leave the
+       * chat page showing a list this section had already moved on from.
+       */
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      setCreating(false)
+      setNewName('')
+      if (created?.id) {
+        navigate({
+          to: '/app/$workspaceId/chat',
+          params: { workspaceId },
+          search: { channel: created.id },
+        })
+      }
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : t('nav.createChannelError'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  /*
+   * Nothing to draw before the first answer arrives, and nothing to draw if it
+   * never came. A headed, empty section is a CLAIM — "you have no channels" —
+   * and neither "not yet" nor "the request failed" is that claim. The chat
+   * routes sit behind a feature flag the client resolves separately, so a 403
+   * here is an ordinary outcome rather than a broken build.
+   */
+  if (channelsQuery.isLoading || channelsQuery.isError) return null
+
+  return (
+    <div className="pt-1" data-testid="sidebar-channels" data-count={channels.length}>
+      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        {t('nav.channels')}
+      </div>
+      {channels.map((channel) => (
+        <Link
+          key={channel.id}
+          to="/app/$workspaceId/chat"
+          params={{ workspaceId }}
+          search={{ channel: channel.id }}
+          data-testid={`sidebar-channel-${channel.id}`}
+          title={channel.name ?? ''}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+        >
+          <Hash className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{channel.name}</span>
+        </Link>
+      ))}
+      {creating ? (
+        <div className="flex items-center gap-1 px-2 py-1">
+          <Input
+            autoFocus
+            data-testid="sidebar-add-channel-name"
+            value={newName}
+            placeholder={t('nav.channelNamePlaceholder')}
+            className="h-7 text-[12px]"
+            onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault()
+                void submit()
+              }
+              if (e.key === 'Escape') {
+                setCreating(false)
+                setNewName('')
+              }
+            }}
+          />
+          <Button
+            size="sm"
+            className="h-7 px-2 text-[11px]"
+            data-testid="sidebar-add-channel-save"
+            disabled={!newName.trim() || saving}
+            onClick={() => void submit()}
+          >
+            {t('common.save')}
+          </Button>
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-testid="sidebar-add-channel"
+          onClick={() => setCreating(true)}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+        >
+          <Plus className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t('nav.addChannel')}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * How many conversations the section shows before it has to be asked for more.
+ *
+ * Frame `06:25` draws three rows and a `⋯ More` under them, so five is a
+ * PREVIEW, not the extent of the list. Named rather than inlined because the
+ * count and the "is there more" test have to be the same number — two `5`s a
+ * few lines apart is how an off-by-one hides.
+ */
+const AI_CHATS_PREVIEW = 5
+
 function AiChatsSection({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const { data: threads = [] } = useAiChatThreads(workspaceId)
-  const withContent = threads.filter((thread) => thread.messageCount > 0).slice(0, 5)
-  if (withContent.length === 0) return null
+  /*
+   * §V2-S02 frame `06:25` — the `⋯ More` under this section.
+   *
+   * This was `.slice(0, 5)` and nothing else: `GET /ai-chats` returns every
+   * thread you have, the section rendered the first five, and the sixth
+   * conversation onwards was UNREACHABLE FROM THE UI — not collapsed, not
+   * paginated, just absent, with no control anywhere that could have shown it.
+   * The frame draws the affordance that fixes it, directly under the same
+   * section, and her sidebar has the identical `⋯ More` under My Tasks.
+   *
+   * Expanding is local state, not a refetch: the data is already here. The
+   * defect was never that the client lacked the rows.
+   */
+  const [expanded, setExpanded] = useState(false)
+  const all = threads.filter((thread) => thread.messageCount > 0)
+  const withContent = expanded ? all : all.slice(0, AI_CHATS_PREVIEW)
+  const hidden = all.length - withContent.length
+  if (all.length === 0) return null
 
   return (
-    <div className="pt-1" data-testid="ai-chats-section">
+    <div className="pt-1" data-testid="ai-chats-section" data-total={all.length} data-shown={withContent.length}>
       <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
         {t('nav.aiChats')}
       </div>
@@ -2747,6 +3263,38 @@ function AiChatsSection({ workspaceId }: { workspaceId: string }) {
           <span className="truncate">{thread.title}</span>
         </button>
       ))}
+      {/*
+        Frame `06:25`: `⋯ More`, directly under the last conversation.
+
+        Rendered only when something is actually hidden — a "More" that reveals
+        nothing is the dead control, and it is worse here than absence because it
+        would answer the very question it was added to settle. It says HOW MANY
+        for the same reason: "More" on its own cannot tell you whether the
+        section is holding one conversation back or forty.
+      */}
+      {hidden > 0 && (
+        <button
+          type="button"
+          data-testid="ai-chats-more"
+          data-hidden={hidden}
+          onClick={() => setExpanded(true)}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t('nav.moreCount', { count: hidden })}</span>
+        </button>
+      )}
+      {expanded && all.length > AI_CHATS_PREVIEW && (
+        <button
+          type="button"
+          data-testid="ai-chats-less"
+          onClick={() => setExpanded(false)}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+        >
+          <ChevronDown className="h-3.5 w-3.5 shrink-0 rotate-180" />
+          <span className="truncate">{t('nav.showLess')}</span>
+        </button>
+      )}
     </div>
   )
 }

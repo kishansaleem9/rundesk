@@ -1,4 +1,12 @@
 import type Anthropic from '@anthropic-ai/sdk'
+import {
+  CONTAINER_TOOLS,
+  containerPath,
+  resolveContainerSpace,
+  toolString,
+  type ContainerRefusal,
+  type ContainerSpace,
+} from './ai-containers'
 
 /**
  * Agentic AI command capability (Plan §7.6 / §7.8): a bounded tool set the model
@@ -46,6 +54,13 @@ export type CommandContext = {
   lists: CommandList[]
   members: CommandMember[]
   tasks: CommandTask[]
+  /**
+   * §V2-S16 `[17:44]` — the spaces a container may be created in, already
+   * filtered to what the actor can see. Optional so the many unit constructions
+   * of a task-only context keep compiling; an absent catalog simply means no
+   * space can be resolved, which refuses rather than guesses.
+   */
+  spaces?: ContainerSpace[]
 }
 
 /**
@@ -92,6 +107,23 @@ export type PlanAction =
       humanLabel: string
       affectedTaskIds: string[]
     }
+  /**
+   * §V2-S16 `[18:45]`→`[18:48]` — a CONTAINER, not a task. `spaceId` is already
+   * resolved and verified against the actor's visible catalog by the planner;
+   * the executor re-checks workspace membership and container access anyway,
+   * because an action arrives in the body of `/ai/command/execute` and a body is
+   * attacker-supplied.
+   */
+  | {
+      tool: 'create_list'
+      args: { spaceId: string; name: string; description?: string; visibility?: 'public' | 'private' }
+      humanLabel: string
+    }
+  | {
+      tool: 'create_folder'
+      args: { spaceId: string; name: string; color?: string }
+      humanLabel: string
+    }
 
 export type CommandSearchResult = {
   query: string
@@ -120,6 +152,12 @@ export type CommandActionResult = {
   status: 'succeeded' | 'skipped' | 'failed'
   reason?: string
   affectedTaskIds?: string[]
+  /**
+   * §V2-S16 — the container that now exists, so the caller can link to a row
+   * rather than to the sentence that claims one. Present only on a `succeeded`
+   * `create_list` / `create_folder`, and carrying the id the database returned.
+   */
+  container?: { kind: 'list' | 'folder'; id: string; name: string; path: string; spaceId: string }
 }
 
 export type CommandExecuteResult = { results: CommandActionResult[] }
@@ -130,6 +168,11 @@ export type ToolCall = { name: string; input: Record<string, unknown> }
 /**
  * The bounded tool set exposed to the model. Only `search_tasks` is read-only;
  * the rest are mutating and get previewed rather than executed.
+ *
+ * §V2-S16 — the container tools are appended at the bottom of this file rather
+ * than written out again here, because two tool lists for one model is exactly
+ * the duplicated list this audit keeps finding: the second copy drifts, and
+ * each one is individually plausible.
  */
 export const COMMAND_TOOLS: Anthropic.Messages.Tool[] = [
   {
@@ -219,6 +262,10 @@ export const COMMAND_TOOLS: Anthropic.Messages.Tool[] = [
       required: ['filter', 'toDate'],
     },
   },
+  // §V2-S16 `[17:44]`/`[18:45]` — create_list, create_folder. Defined in
+  // `./ai-containers` with the resolution and refusal vocabulary they share
+  // with the chat surface, which gets the same two tools.
+  ...CONTAINER_TOOLS,
 ]
 
 function normalize(value: unknown): string {
@@ -278,6 +325,26 @@ export function tasksForBulkFilter(filter: Record<string, unknown>, ctx: Command
   })
 }
 
+/**
+ * §V2-S16 — why a container was not planned, in the plan's own `warnings`.
+ *
+ * The refusal CODE is what `ai-containers.ts` owns; this turns it into the
+ * sentence a plan carries, naming the thing that was asked for so a person
+ * reading three warnings can tell which is which.
+ */
+function containerWarning(kind: 'list' | 'folder', name: string, reason: ContainerRefusal): string {
+  switch (reason) {
+    case 'unknown_space':
+      return `Skipped creating the ${kind} "${name}": that space is not in this workspace.`
+    case 'ambiguous_space':
+      return `Skipped creating the ${kind} "${name}": more than one space has that name.`
+    case 'no_space':
+      return `Skipped creating the ${kind} "${name}": no space was named.`
+    default:
+      return `Skipped creating the ${kind} "${name}".`
+  }
+}
+
 function bulkFilterDescription(filter: Record<string, unknown>): string {
   if (filter.overdue === true) return 'overdue tasks'
   if (typeof filter.status === 'string' && filter.status.trim()) return `${filter.status.trim()} tasks`
@@ -335,6 +402,8 @@ function buildSummary(actions: PlanAction[], readOnly: CommandSearchResult[], na
     reschedule_task: 'reschedule',
     assign_task: 'assignment',
     bulk_reschedule: 'bulk reschedule',
+    create_list: 'list creation',
+    create_folder: 'folder creation',
   }
   const parts = [...counts.entries()].map(([tool, n]) => `${n} ${labels[tool]}${n > 1 ? 's' : ''}`)
   return `Proposed ${actions.length} change${actions.length > 1 ? 's' : ''}: ${parts.join(', ')}.`
@@ -499,6 +568,52 @@ export function planFromToolCalls(
           humanLabel: `Move ${taskIds.length} ${bulkFilterDescription(filter)} to ${toDate}`,
           affectedTaskIds: taskIds,
         })
+        break
+      }
+      /*
+       * §V2-S16 — a container, planned. Both cases resolve the SPACE and stop
+       * on anything they cannot resolve exactly: an unknown or ambiguous name
+       * becomes a warning, never a nearest-match. A list created one space over
+       * is harder to notice than a list that was never created.
+       *
+       * Planned, not executed, on this path — `/ai/command` previews and
+       * `/ai/command/execute` writes, exactly as the five task tools do. The
+       * chat surface executes during the turn instead, which is the frames'
+       * behaviour; the difference is in the CALLER, not in this function.
+       */
+      case 'create_list':
+      case 'create_folder': {
+        const kind = call.name === 'create_list' ? 'list' : 'folder'
+        const name = toolString(input.name)
+        if (!name) {
+          warnings.push(`Skipped a ${kind}: no name was provided.`)
+          break
+        }
+        const resolved = resolveContainerSpace(input, ctx.spaces ?? [])
+        if ('refusal' in resolved) {
+          warnings.push(containerWarning(kind, name, resolved.refusal))
+          break
+        }
+        const space = resolved.space
+        // Built from the RESOLVED space, not from the model's wording, so the
+        // preview a person confirms names where it is actually going.
+        const path = containerPath(space.name, name)
+        if (call.name === 'create_list') {
+          const visibility = input.visibility === 'private' ? 'private' : undefined
+          const description = toolString(input.description) || undefined
+          actions.push({
+            tool: 'create_list',
+            args: { spaceId: space.id, name, description, visibility },
+            humanLabel: `Create list ${path}${visibility ? ' (private)' : ''}`,
+          })
+        } else {
+          const color = toolString(input.color) || undefined
+          actions.push({
+            tool: 'create_folder',
+            args: { spaceId: space.id, name, color },
+            humanLabel: `Create folder ${path}`,
+          })
+        }
         break
       }
       default:

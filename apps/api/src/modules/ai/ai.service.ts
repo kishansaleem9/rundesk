@@ -7,12 +7,13 @@ import {
   ForbiddenException,
   NotFoundException,
   BadRequestException,
+  ConflictException,
 } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
+import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, listStatuses, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
@@ -33,11 +34,14 @@ import {
 import { R2Service } from '../../common/storage/r2.service'
 import { estimateAiCostUsd } from './ai-cost'
 import { TasksService } from '../tasks/tasks.service'
-import { SearchService } from '../search/search.service'
+import { ListsService } from '../lists/lists.service'
+import { FoldersService } from '../folders/folders.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { EmbeddingService } from './embedding.service'
 import { embedText, cosineSimilarity } from './embedding'
 import { ATTACHMENT_TEXT_CAP, extractAttachmentText, isExtractableAttachment } from './attachment-text'
-import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { checkContainerAccess, isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import {
   assembleKnowledgeContext,
@@ -52,6 +56,19 @@ import {
   type KnowledgeSource,
   type RawSearchHit,
 } from './knowledge'
+import {
+  CONTAINER_TOOLS,
+  CONTAINER_TOOL_INSTRUCTION,
+  REFERENCE_INSTRUCTION,
+  containerPath,
+  describeContainerResult,
+  isContainerTool,
+  refuse,
+  resolveContainerSpace,
+  toolString,
+  type ContainerSpace,
+  type ContainerToolResult,
+} from './ai-containers'
 import {
   COMMAND_TOOLS,
   planFromToolCalls,
@@ -99,6 +116,46 @@ function truncate(input: string, max: number): string {
   return t.length > max ? `${t.slice(0, max)}…` : t
 }
 
+/**
+ * §V2-S16 — the ids a `[[task:…]]` / `[[list:…]]` batch may actually contain.
+ *
+ * Every id here addresses a `uuid` column, so a value that cannot be one is a
+ * query Postgres refuses (a 500) rather than a lookup that misses. Filtered and
+ * capped rather than rejected wholesale: an answer with one malformed reference
+ * in it should resolve the other nine, and the cap stops a crafted message
+ * turning one chip render into a thousand-id `IN` list.
+ */
+const REF_BATCH_CAP = 60
+function uniqueUuids(values: unknown): string[] {
+  if (!Array.isArray(values)) return []
+  const seen = new Set<string>()
+  for (const v of values) {
+    if (typeof v !== 'string') continue
+    const id = v.trim().toLowerCase()
+    if (isUuid(id)) seen.add(id)
+    if (seen.size >= REF_BATCH_CAP) break
+  }
+  return [...seen]
+}
+
+/**
+ * §V2-S16 frame `19:50`→`20:10` — the **Project Status** card's answer:
+ * *"13 open tasks total: 11 To Do, 1 In Progress, 1 Complete"*, a
+ * whole-workspace count broken down by status.
+ *
+ * One row per STATUS, carrying its category, plus the id of the task so a
+ * chip can address it. Built once by `workspaceStatusBreakdown` and read by
+ * both the context string and `GET /ai/project-status`, so the sentence and
+ * the number a person can check against cannot disagree.
+ */
+export type WorkspaceStatusBreakdown = {
+  /** Every non-archived task the caller can see. Not "open" — see the note. */
+  total: number
+  byCategory: { open: number; in_progress: number; closed: number }
+  /** Sorted by count, descending, then by status key, so it is stable. */
+  byStatus: Array<{ status: string; statusCategory: StatusCategory; count: number }>
+}
+
 export type WorkspaceContextData = {
   workspaceName: string
   role: string
@@ -107,6 +164,16 @@ export type WorkspaceContextData = {
   openTasks: Array<{ title: string; dueDate: Date | string | null; priority: string }>
   history: Array<{ title: string; status: string; updatedAt: Date | string | null }>
   currentView?: string
+  /**
+   * §V2-S16 — the breakdown behind a project-status answer.
+   *
+   * Optional so every existing caller and unit construction is unchanged; when
+   * absent no breakdown line is emitted, which is honest — the previous
+   * behaviour was one aggregate labelled "Workspace totals" sitting beside the
+   * caller's OWN fifteen tasks, which is one careless sentence away from being
+   * summarised as if the personal list were the workspace's breakdown.
+   */
+  statusBreakdown?: WorkspaceStatusBreakdown
 }
 
 /**
@@ -121,6 +188,32 @@ export function formatWorkspaceContext(data: WorkspaceContextData): string {
   lines.push(
     `Workspace totals: ${c.spaces} spaces, ${c.projects} projects, ${c.lists} lists, ${c.openTasks} open tasks`,
   )
+
+  /*
+   * §V2-S16 `20:10` — the per-status breakdown, and WHY IT IS LABELLED SO
+   * HEAVILY.
+   *
+   * Asked to "summarize all current tasks", the model previously had one total
+   * and fifteen of the CALLER'S OWN rows to answer from. The likeliest way to
+   * write that up is to describe your own list and attach the workspace total
+   * to it — an answer that is wrong in a way nobody in the room can detect.
+   *
+   * So the two are named apart, out loud: this block says it covers everybody,
+   * the block below says it is only yours, and the numbers here are a real
+   * GROUP BY rather than an arithmetic on the fifteen.
+   */
+  if (data.statusBreakdown) {
+    const b = data.statusBreakdown
+    const perStatus = b.byStatus.length
+      ? b.byStatus.map((s) => `${s.count} ${s.status}`).join(', ')
+      : 'none'
+    lines.push(
+      'Task status breakdown (EVERY task in this workspace you can see, not just yours):\n' +
+        `- ${b.total} tasks in total\n` +
+        `- by category: ${b.byCategory.open} open, ${b.byCategory.in_progress} in progress, ${b.byCategory.closed} closed\n` +
+        `- by status: ${perStatus}`,
+    )
+  }
 
   if (data.spaces.length) {
     const structure = data.spaces
@@ -789,12 +882,20 @@ export class AiService {
     private config: ConfigService,
     @Inject(DB_TOKEN) private db: Db,
     private tasks: TasksService,
-    // §15.1 Knowledge base retrieval. SearchService is retained for other
-    // surfaces; knowledge now retrieves via vector similarity (EmbeddingService
-    // + knowledge_embeddings). Both are @Optional so the many unit tests that
-    // construct `new AiService(config, db, tasks)` keep compiling; injected in
-    // production (SearchModule is @Global; EmbeddingService lives in AiModule).
-    @Optional() private search?: SearchService,
+    /*
+     * §15.1 Knowledge base retrieval — via vector similarity (EmbeddingService
+     * + knowledge_embeddings). @Optional so the many unit tests that construct
+     * `new AiService(config, db, tasks)` keep compiling; injected in production
+     * (EmbeddingService lives in AiModule).
+     *
+     * §V2-S16 — SEARCHSERVICE USED TO BE INJECTED HERE and never called. The
+     * comment above it said it was "retained for other surfaces", which is a
+     * stale reason of the exact kind this audit names: within this class it was
+     * retained for none (`grep "this.search"` returned nothing), and a reason
+     * suppresses the investigation that would have found that. Removed rather
+     * than left standing — when a connected-app search lands it can be injected
+     * by the code that calls it.
+     */
     @Optional() private embeddings?: EmbeddingService,
     // §15.1 — used to hydrate attachment hits with their extracted text at
     // answer-time (the embeddings table stores only title/url). @Optional so the
@@ -802,6 +903,25 @@ export class AiService {
     // injected in production (StorageModule is @Global). When absent, attachment
     // citations simply carry no body — the answer path degrades gracefully.
     @Optional() private r2?: R2Service,
+    /*
+     * §V2-S16 `[17:44]`–`[18:48]` — the services that actually WRITE a
+     * container, and the one that answers whether this actor may.
+     *
+     * Reached through the same services the REST routes call rather than by
+     * inserting rows here, for one reason that matters more than tidiness: a
+     * list created by a raw insert gets no status pipeline, and a list with no
+     * statuses accepts `status = 'done'` while keeping `status_category =
+     * 'open'` forever. `ListsService.createList` calls `seedListStatuses`; a
+     * second creation path would be the seventh place that forgot.
+     *
+     * @Optional, like the rest, so the unit constructions keep compiling — and
+     * when absent the tools REFUSE with `unavailable` rather than reporting a
+     * success they did not perform. `test/e2e/ai-create-containers.mjs` proves
+     * they are wired in the running app by asserting the row in Postgres.
+     */
+    @Optional() private lists?: ListsService,
+    @Optional() private folders?: FoldersService,
+    @Optional() private roles?: CustomRolesService,
   ) {
     const apiKey = config.get<string>('ANTHROPIC_API_KEY')
     if (apiKey) {
@@ -1492,10 +1612,35 @@ Focus on the key goals, current status, and any blockers.`,
      * opens its own, so every existing caller is unaffected.
      */
     opened?: SseStream,
+    /**
+     * §V2-S16 `[17:44]`–`[18:48]` — the actor on whose behalf a container tool
+     * may run. Omitted means NO TOOLS ARE OFFERED, which is why an ordinary
+     * caller and every unit construction behave exactly as before.
+     *
+     * It carries the actor rather than a boolean because a tool that writes
+     * needs somebody to be responsible for the write: there is no "the
+     * assistant did it" row in this product, and there should not be one.
+     */
+    agent?: { workspaceId: string; userId: string },
   ): Promise<void> {
     // Enforce rate limits before we hijack the reply for streaming.
     await this.assertWithinRateLimit(ctx, new Date(), 'chat')
     const model = modelForTier(tier)
+
+    /*
+     * §V2-S16 — WHEN THE ASK SURFACE GETS TOOLS, and when it must not.
+     *
+     * Not under a skill. A rendered skill prompt ends with the boundary
+     * sentence "You shape this reply; you do not take actions on your own" —
+     * handing that same turn a tool that writes would contradict the one line
+     * the skill's author was promised would be the last word.
+     *
+     * Not without an actor, and not without the services that write. In both
+     * cases the tools are simply absent rather than present-and-failing: a tool
+     * the model can call that cannot work is the worst version of this row.
+     */
+    const canAct = !!agent && !skillPrompt?.trim() && !!this.lists && !!this.folders
+    const tools = canAct ? CONTAINER_TOOLS : []
 
     const intro = skillPrompt?.trim()
       ? skillPrompt.trim()
@@ -1503,6 +1648,13 @@ Focus on the key goals, current status, and any blockers.`,
 You help users manage tasks, understand their workspace, draft messages, generate content, and answer questions.
 Be concise, helpful, and action-oriented.`
 
+    /*
+     * Appended AFTER the follow-up instruction, and never inserted between
+     * "Workspace context:" and the context itself — `skill-chat.test.ts` pins
+     * that adjacency, and it pins it because a block wedged in there is a block
+     * the model reads as part of the workspace.
+     */
+    const agentPrompt = canAct ? `\n\n${CONTAINER_TOOL_INSTRUCTION}\n\n${REFERENCE_INSTRUCTION}` : ''
     const systemPrompt = `${intro}
 
 Workspace context:
@@ -1510,7 +1662,7 @@ ${workspaceContext}
 
 Current date: ${new Date().toISOString().split('T')[0]}
 
-${FOLLOW_UP_INSTRUCTION}`
+${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
 
     // Already open when the caller reported its own steps first (G13-10);
     // otherwise open it here. Calling setHeader twice throws once the headers
@@ -1527,13 +1679,6 @@ ${FOLLOW_UP_INSTRUCTION}`
        * somewhere else is how a trace stops being evidence.
        */
       raw.write(`data: ${JSON.stringify({ step: 'writing' })}\n\n`)
-      const stream = this.claude.messages.stream({
-        model,
-        max_tokens: 2048,
-        // Cache the (large, repeated) system context across turns.
-        system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
-        messages,
-      })
 
       /*
        * G13-9 [18:42] — the follow-ups ride this same completion, after a
@@ -1542,29 +1687,120 @@ ${FOLLOW_UP_INSTRUCTION}`
        * characters that could still become the marker, so a reader never sees
        * `<<<FOLLOW` when a chunk boundary lands mid-marker, and ordinary prose
        * is never delayed.
+       *
+       * ONE splitter across the whole turn, including across a tool call: text
+       * before the tool and text after it are one answer, and a second splitter
+       * would re-arm the marker search halfway through a sentence.
        */
       const followUps = createFollowUpSplitter()
-      for await (const chunk of stream) {
-        if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
-          const visible = followUps.push(chunk.delta.text)
-          if (visible) raw.write(`data: ${JSON.stringify({ delta: visible })}\n\n`)
-        }
+      /*
+       * §V2-S16 — the turn, which is a loop now rather than a single call.
+       *
+       * Bounded at three passes. A model that keeps asking for tools past that
+       * is not converging, and an unbounded loop here is an unbounded bill.
+       * `turns === 1` when no tools are offered, so a chat turn without an
+       * actor is byte-identical to what it was.
+       */
+      const MAX_TOOL_PASSES = tools.length ? 3 : 1
+      const convo: Anthropic.Messages.MessageParam[] = [...messages]
+      /*
+       * The space catalog, read ONCE PER TURN and only when a tool is actually
+       * called.
+       *
+       * Once, because the catalog cannot change mid-answer and two reads invite
+       * the two to disagree about which space "rundesk" is. Only on demand,
+       * because `loadCommandContext` is a four-query read and the overwhelming
+       * majority of chat turns never touch a tool — paying for it on all of
+       * them to serve a few would be a tax nobody could see on the screen.
+       */
+      let spacesPromise: Promise<ContainerSpace[]> | null = null
+      const spaceCatalog = () => {
+        spacesPromise ??= (async () =>
+          agent
+            ? await this.loadCommandContext(agent.workspaceId, agent.userId)
+                .then((c) => c.spaces ?? [])
+                .catch(() => [] as ContainerSpace[])
+            : [])()
+        return spacesPromise
       }
+
+      let final: Anthropic.Messages.Message | null = null
+      for (let pass = 0; pass < MAX_TOOL_PASSES; pass += 1) {
+        const stream = this.claude.messages.stream({
+          model,
+          max_tokens: 2048,
+          // Cache the (large, repeated) system context across turns.
+          system: [{ type: 'text', text: systemPrompt, cache_control: { type: 'ephemeral' } }],
+          messages: convo,
+          ...(tools.length ? { tools } : {}),
+        })
+
+        for await (const chunk of stream) {
+          if (chunk.type === 'content_block_delta' && chunk.delta.type === 'text_delta') {
+            const visible = followUps.push(chunk.delta.text)
+            if (visible) raw.write(`data: ${JSON.stringify({ delta: visible })}\n\n`)
+          }
+        }
+        final = await stream.finalMessage().catch(() => null)
+        /*
+         * ONE `ai_usage` ROW PER CALL TO THE MODEL, which is what the Analytics
+         * panel's unit note says a run is. A loop that recorded once per TURN
+         * would quietly make two model calls look like one, and every figure on
+         * that page is a count of this table.
+         */
+        void this.recordUsage('chat', model, ctx, final?.usage?.input_tokens ?? 0, final?.usage?.output_tokens ?? 0)
+
+        const toolUses = ((final?.content ?? []) as Anthropic.Messages.ContentBlock[]).filter(
+          (block): block is Anthropic.Messages.ToolUseBlock => block.type === 'tool_use',
+        )
+        if (!toolUses.length || !canAct || !agent) break
+
+        convo.push({ role: 'assistant', content: final!.content })
+        const toolResults: Anthropic.Messages.ToolResultBlockParam[] = []
+        for (const use of toolUses) {
+          const input = (use.input ?? {}) as Record<string, unknown>
+          /*
+           * §V2-S16 frame `18:45` — *"Creating the new rundesk list"*, written
+           * BEFORE the write and naming the thing being written.
+           *
+           * The step carries the tool name rather than a sentence so the wire
+           * stays a stable key and the panel owns the words, exactly as the
+           * three retrieval steps already do.
+           */
+          raw.write(`data: ${JSON.stringify({ step: use.name })}\n\n`)
+          const result = await this.runContainerTool(use.name, input, agent, await spaceCatalog())
+          /*
+           * The tool result is the DETERMINISTIC sentence built from the row,
+           * not a re-description. The model is free to add to it; it is not
+           * free to be the only source of what happened.
+           */
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: use.id,
+            is_error: !result.ok,
+            content: JSON.stringify({
+              ...result,
+              say: describeContainerResult(result),
+            }),
+          })
+          // And the client is told, on the wire, what now exists — so the panel
+          // can chip it without parsing the prose.
+          if (result.ok) {
+            raw.write(
+              `data: ${JSON.stringify({
+                created: { kind: result.kind, id: result.id, name: result.name, path: result.path },
+              })}\n\n`,
+            )
+          }
+        }
+        convo.push({ role: 'user', content: toolResults })
+      }
+
       // Anything still held back was never a marker and belongs to the answer.
       const tail = followUps.flush()
       if (tail) raw.write(`data: ${JSON.stringify({ delta: tail })}\n\n`)
       const suggestions = followUps.followUps()
       if (suggestions.length) raw.write(`data: ${JSON.stringify({ followUps: suggestions })}\n\n`)
-      const final = await stream.finalMessage().catch(() => null)
-      void this.recordUsage(
-        'chat',
-        // The model actually used. Hardcoding the old one here would make the
-        // usage table quietly wrong the moment anyone picked Fast.
-        model,
-        ctx,
-        final?.usage?.input_tokens ?? 0,
-        final?.usage?.output_tokens ?? 0,
-      )
       raw.write('data: [DONE]\n\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AI request failed'
@@ -1626,7 +1862,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
   ): Promise<string> {
     try {
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
-      const [[wsRow], [roleRow], [counts], spaceRows, projectRows, openTasks, history] = await Promise.all([
+      const [[wsRow], [roleRow], [counts], spaceRows, projectRows, openTasks, history, statusBreakdown] = await Promise.all([
         this.db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1),
         this.db
           .select({ role: workspaceMembers.role })
@@ -1695,6 +1931,17 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           )
           .orderBy(desc(tasks.updatedAt))
           .limit(40),
+        /*
+         * §V2-S16 `20:10` — the real per-status counts.
+         *
+         * Best-effort on purpose: `buildWorkspaceContext` already falls back to
+         * a workspace-ID stub on any failure, and a breakdown that throws must
+         * not cost the model the rest of its grounding. `null` simply omits the
+         * block, which is the honest degradation — a MISSING breakdown makes
+         * the model say it cannot break the numbers down, while a zeroed one
+         * would make it announce an empty workspace.
+         */
+        this.workspaceStatusBreakdown(workspaceId, userId).catch(() => null),
       ])
 
       const projectsBySpace = new Map<string, string[]>()
@@ -1716,9 +1963,157 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         openTasks,
         history,
         currentView: opts.currentView,
+        statusBreakdown: statusBreakdown ?? undefined,
       })
     } catch {
       return `Workspace ID: ${workspaceId}`
+    }
+  }
+
+  /**
+   * §V2-S16 frame `20:10` — *"13 open tasks total: 11 To Do, 1 In Progress, 1
+   * Complete"*, computed rather than inferred.
+   *
+   * ONE GROUP BY, not a count of the rows we happened to load. The old context
+   * carried a single `open tasks` aggregate and fifteen of the caller's own
+   * rows; anything derived from those fifteen would be a confident number about
+   * the wrong population, which is indistinguishable from the right one on
+   * screen. This counts EVERY non-archived task in the workspace that this
+   * actor may see — the same visibility filter `loadCommandContext` uses, so a
+   * member is never told a total that includes private work they cannot open.
+   *
+   * Read by `buildWorkspaceContext` (grounding the answer) and by
+   * `GET /ai/project-status` (so the number can be checked against the
+   * workspace, which is what frame `20:10`'s second step claims to do).
+   */
+  async workspaceStatusBreakdown(
+    workspaceId: string,
+    actorId: string,
+    actorRole?: string | null,
+  ): Promise<WorkspaceStatusBreakdown> {
+    const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId, actorRole) : false
+    const rows = await this.db
+      .select({
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        count: sql<number>`count(*)::int`,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          taskVisibilityFilter(this.db, actorId, isManager),
+        ),
+      )
+      .groupBy(tasks.status, tasks.statusCategory)
+
+    const byCategory = { open: 0, in_progress: 0, closed: 0 }
+    let total = 0
+    const byStatus = rows.map((r) => {
+      const n = Number(r.count) || 0
+      total += n
+      const category = (r.statusCategory as StatusCategory) ?? 'open'
+      if (category in byCategory) byCategory[category] += n
+      return { status: r.status, statusCategory: category, count: n }
+    })
+    /*
+     * Sorted here rather than in SQL, and by count THEN key. A breakdown whose
+     * order changes between two reads of the same data reads as the data having
+     * changed, and the panel compares these two lists.
+     */
+    byStatus.sort((a, b) => b.count - a.count || a.status.localeCompare(b.status))
+    return { total, byCategory, byStatus }
+  }
+
+  /**
+   * §V2-S16 frame `20:10` — what an inline `[[task:id]]` / `[[list:id]]` chip
+   * in an answer resolves to.
+   *
+   * THE STATUS IS READ NOW, NOT QUOTED FROM THE ANSWER. The frame's chips each
+   * carry the task's own status badge; an answer is a record of what was true
+   * when it was written, so a badge copied out of the prose would be wrong the
+   * moment anybody moved the task — and wrong in the most confident way, since
+   * it sits inside a sentence. Every chip is hydrated from this read at render
+   * time.
+   *
+   * Ids the caller may not see simply do not come back. The panel then renders
+   * the reference as plain text, which is the honest answer: better an
+   * unresolved reference than a chip claiming a title the reader has no access
+   * to.
+   */
+  async resolveRefs(
+    workspaceId: string,
+    actorId: string,
+    ids: { taskIds?: string[]; listIds?: string[] },
+    actorRole?: string | null,
+  ): Promise<{
+    tasks: Array<{ id: string; title: string; status: string; statusCategory: string; listId: string; listName: string }>
+    lists: Array<{ id: string; name: string; path: string }>
+  }> {
+    const taskIds = uniqueUuids(ids.taskIds)
+    const listIds = uniqueUuids(ids.listIds)
+    if (!taskIds.length && !listIds.length) return { tasks: [], lists: [] }
+    const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId, actorRole) : false
+
+    const [taskRows, listRows] = await Promise.all([
+      taskIds.length
+        ? this.db
+            .select({
+              id: tasks.id,
+              title: tasks.title,
+              status: tasks.status,
+              statusCategory: tasks.statusCategory,
+              listId: tasks.listId,
+              listName: lists.name,
+            })
+            .from(tasks)
+            .innerJoin(lists, eq(lists.id, tasks.listId))
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(
+              and(
+                eq(spaces.workspaceId, workspaceId),
+                inArray(tasks.id, taskIds),
+                taskVisibilityFilter(this.db, actorId, isManager),
+              ),
+            )
+        : Promise.resolve([]),
+      listIds.length
+        ? this.db
+            .select({ id: lists.id, name: lists.name, projectName: projects.name, spaceName: spaces.name })
+            .from(lists)
+            .innerJoin(projects, eq(projects.id, lists.projectId))
+            .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+            .where(
+              and(
+                eq(spaces.workspaceId, workspaceId),
+                inArray(lists.id, listIds),
+                listVisibilityFilter(actorId, isManager),
+              ),
+            )
+        : Promise.resolve([]),
+    ])
+
+    return {
+      tasks: taskRows.map((t) => ({
+        id: t.id,
+        title: t.title,
+        status: t.status,
+        statusCategory: String(t.statusCategory ?? 'open'),
+        listId: t.listId,
+        listName: t.listName,
+      })),
+      lists: listRows.map((l) => ({
+        id: l.id,
+        name: l.name,
+        // The path the container tools compose, so a chip made by the AI and a
+        // chip resolved afterwards read identically.
+        path: containerPath(l.spaceName, l.name),
+      })),
     }
   }
 
@@ -2526,7 +2921,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
     // they don't own (or, for tasks, aren't assigned to). Managers are unrestricted.
     const isManager = actorId ? await resolveIsManager(this.db, workspaceId, actorId, actorRole) : false
     const today = new Date().toISOString().slice(0, 10)
-    const [listRows, memberRows, taskRows] = await Promise.all([
+    const [listRows, memberRows, taskRows, spaceRows] = await Promise.all([
       this.db
         .select({ id: lists.id, name: lists.name, projectName: projects.name, spaceName: spaces.name })
         .from(lists)
@@ -2556,6 +2951,21 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), taskVisibilityFilter(this.db, actorId, isManager)))
         .orderBy(asc(tasks.dueDate))
         .limit(300),
+      /*
+       * §V2-S16 `[17:44]` — the spaces a container may be created in.
+       *
+       * A private space a non-manager is not a member of is NOT filtered out
+       * here — `checkContainerAccess` in the executor is what refuses it, and
+       * doing it in one place rather than two is what stops the catalog and the
+       * gate drifting apart. What this list is for is resolving "rundesk" to an
+       * id; being in it is not permission to write into it.
+       */
+      this.db
+        .select({ id: spaces.id, name: spaces.name, visibility: spaces.visibility })
+        .from(spaces)
+        .where(eq(spaces.workspaceId, workspaceId))
+        .orderBy(asc(spaces.name))
+        .limit(100),
     ])
 
     const taskIds = taskRows.map((t) => t.id)
@@ -2577,6 +2987,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
       today,
       lists: listRows.map((l) => ({ id: l.id, name: l.name, path: `${l.spaceName} / ${l.projectName} / ${l.name}` })),
       members: memberRows.map((m) => ({ userId: m.userId, email: m.email, displayName: m.displayName })),
+      spaces: spaceRows.map((s) => ({ id: s.id, name: s.name, visibility: s.visibility as string | null })),
       tasks: taskRows.map((t) => ({
         id: t.id,
         title: t.title,
@@ -2922,17 +3333,27 @@ Today is ${new Date().toISOString().split('T')[0]}.`,
       .slice(0, 60)
       .map((l) => `- ${l.id}: ${l.path}`)
       .join('\n')
+    // §V2-S16 — so "on rundesk space" can be resolved to an id rather than
+    // guessed at. The planner refuses an unknown or ambiguous name outright.
+    const spaceCatalog = (planCtx.spaces ?? [])
+      .slice(0, 60)
+      .map((s) => `- ${s.id}: ${s.name}`)
+      .join('\n')
     const systemPrompt = `You are Rundesk's command assistant. Translate the user's natural-language request into tool calls.
 Today's date is ${planCtx.today}.
 Use search_tasks (READ-ONLY) to locate task ids before proposing changes; reference tasks by their id.
-For any change (create_task / set_task_status / reschedule_task / assign_task / bulk_reschedule) call the matching tool. Changes are PREVIEWED for the user to confirm and are NOT executed until they confirm — do not claim you have already made a change.
+For any change (create_task / set_task_status / reschedule_task / assign_task / bulk_reschedule / create_list / create_folder) call the matching tool. Changes are PREVIEWED for the user to confirm and are NOT executed until they confirm — do not claim you have already made a change.
 When creating a task, pick a listId from "Available lists". Resolve people by their email.
+When creating a list or a folder, name the space with spaceName or a spaceId from "Available spaces". If you cannot tell which space is meant, say so instead of choosing one.
 
 Workspace context:
 ${workspaceContext}
 
 Available lists (id: path):
-${listCatalog || '(none)'}`
+${listCatalog || '(none)'}
+
+Available spaces (id: name):
+${spaceCatalog || '(none)'}`
 
     const messages: Anthropic.Messages.MessageParam[] = [{ role: 'user', content: message }]
     const collected: ToolCall[] = []
@@ -3003,7 +3424,9 @@ ${listCatalog || '(none)'}`
           humanLabel: action.humanLabel,
           status: skippable ? 'skipped' : 'failed',
           reason,
-          affectedTaskIds: action.affectedTaskIds,
+          // §V2-S16 — the container actions carry no task ids, so this is read
+          // off the variants that have one rather than off every PlanAction.
+          affectedTaskIds: 'affectedTaskIds' in action ? action.affectedTaskIds : undefined,
         })
       }
     }
@@ -3059,6 +3482,44 @@ ${listCatalog || '(none)'}`
         await this.tasks.addAssignee(action.args.taskId, action.args.assigneeId, userId)
         return { tool: action.tool, humanLabel: action.humanLabel, status: 'succeeded', affectedTaskIds: action.affectedTaskIds }
       }
+      /*
+       * §V2-S16 `[18:45]`→`[18:48]` — the container, written.
+       *
+       * Delegated to `createContainer` so the `/ai/command/execute` path and
+       * the chat surface's inline tool call go through ONE gate. Two doors into
+       * one mutation is how a permission check ends up on one of them.
+       */
+      case 'create_list':
+      case 'create_folder': {
+        const kind = action.tool === 'create_list' ? 'list' : 'folder'
+        const result = await this.createContainer(
+          kind,
+          action.tool === 'create_list'
+            ? { ...action.args, kind: 'list' as const }
+            : { ...action.args, kind: 'folder' as const },
+          userId,
+        )
+        if (!result.ok) {
+          return {
+            tool: action.tool,
+            humanLabel: action.humanLabel,
+            status: 'skipped',
+            reason: result.reason,
+          }
+        }
+        return {
+          tool: action.tool,
+          humanLabel: action.humanLabel,
+          status: 'succeeded',
+          container: {
+            kind: result.kind,
+            id: result.id,
+            name: result.name,
+            path: result.path,
+            spaceId: result.spaceId,
+          },
+        }
+      }
       case 'bulk_reschedule': {
         const res = await this.tasks.bulkUpdateTasks(action.args.taskIds, userId, { dueDate: new Date(action.args.dueDate) })
         const status: CommandActionResult['status'] = res.updatedCount > 0 ? 'succeeded' : 'skipped'
@@ -3070,6 +3531,211 @@ ${listCatalog || '(none)'}`
             : undefined
         return { tool: action.tool, humanLabel: action.humanLabel, status, reason, affectedTaskIds: action.args.taskIds }
       }
+    }
+  }
+
+  // ─── §V2-S16 the AI creates a container ───────────────────────────────────
+
+  /**
+   * THE ONE GATE, and the only place a container the AI made is written.
+   *
+   * This is the row the audit calls "the facade with a model in front of it":
+   * a tool that reports success without writing anything leaves the transcript
+   * of a conversation standing as evidence that it worked, and a person finds
+   * out days later. So every branch below either returns an id that came back
+   * from the database, or refuses with a code.
+   *
+   * PERMISSION IS CHECKED EXACTLY AS THE REST ROUTE CHECKS IT, in the same
+   * order, because "the AI can do what you can do" is only true if the two
+   * paths agree:
+   *
+   *   · `POST /lists`                 — JwtAuthGuard + ResourceMemberGuard, i.e.
+   *     workspace membership and, for a private space, container membership.
+   *   · `POST /spaces/:id/folders`    — the same, PLUS PermissionsGuard with
+   *     `space.create`.
+   *
+   * The membership check also refuses a `guest`, matching `create_task` above:
+   * a guest can be a workspace member and must not be able to make containers.
+   *
+   * The write itself goes through `ListsService` / `FoldersService` rather than
+   * an insert here. For a list that is load-bearing rather than tidy:
+   * `createList` calls `seedListStatuses`, and a list with no status pipeline
+   * accepts `status = 'done'` while keeping `status_category = 'open'` forever.
+   */
+  private async createContainer(
+    kind: 'list' | 'folder',
+    args:
+      | { kind: 'list'; spaceId: string; name: string; description?: string; visibility?: 'public' | 'private' }
+      | { kind: 'folder'; spaceId: string; name: string; color?: string },
+    actorId: string,
+  ): Promise<ContainerToolResult> {
+    const name = toolString(args.name)
+    if (!name) return refuse(kind, 'missing_name')
+    if (!isUuid(args.spaceId)) return refuse(kind, 'unknown_space')
+
+    const [space] = await this.db
+      .select({
+        id: spaces.id,
+        name: spaces.name,
+        visibility: spaces.visibility,
+        workspaceId: spaces.workspaceId,
+      })
+      .from(spaces)
+      .where(eq(spaces.id, args.spaceId))
+      .limit(1)
+    if (!space) return refuse(kind, 'unknown_space')
+
+    const role = await this.memberRole(space.workspaceId, actorId)
+    if (!role || role === 'guest') return refuse(kind, 'no_permission')
+
+    // A private space needs space membership, exactly as ResourceMemberGuard
+    // enforces it for the REST route. Managers pass, as they do there.
+    const reachable = await checkContainerAccess(
+      this.db,
+      { spaceId: space.id, spaceVisibility: space.visibility as string | null },
+      { userId: actorId, workspaceRole: role },
+    )
+    if (!reachable) return refuse(kind, 'no_permission')
+
+    if (kind === 'folder') {
+      /*
+       * `space.create`, the permission the folder route requires and the list
+       * route does not. Asked of CustomRolesService so a custom role that was
+       * granted or denied it is honoured — reimplementing the legacy-role
+       * cascade here would be a second copy of the rule, and the second copy is
+       * the one that drifts.
+       */
+      if (!this.folders || !this.roles) return refuse(kind, 'unavailable')
+      const resolution = await this.roles.resolveForUser(space.workspaceId, actorId)
+      if (!resolution || !resolution.permissions.includes('space.create')) {
+        return refuse(kind, 'no_permission')
+      }
+      const color = args.kind === 'folder' ? args.color : undefined
+      let row: { id: string; name: string } | undefined
+      try {
+        row = await this.folders.create(space.id, { name, color }, actorId)
+      } catch (err) {
+        // A folder name is unique per space, same as a list name is per project.
+        // A clash is a refusal a person can act on, not an error to swallow.
+        if (err instanceof ConflictException) return refuse(kind, 'name_taken')
+        throw err
+      }
+      if (!row?.id) return refuse(kind, 'unavailable')
+      return {
+        ok: true,
+        kind: 'folder',
+        id: row.id,
+        name: row.name ?? name,
+        spaceId: space.id,
+        spaceName: space.name,
+        path: containerPath(space.name, row.name ?? name),
+        statuses: [],
+      }
+    }
+
+    if (!this.lists) return refuse(kind, 'unavailable')
+    const projectId = await this.lists.defaultContainerForSpace(space.id, actorId)
+    let created: { id: string; name: string } | undefined
+    try {
+      const row = await this.lists.createList(
+        projectId,
+        {
+          name,
+          description: args.kind === 'list' ? args.description : undefined,
+          visibility: args.kind === 'list' && args.visibility === 'private' ? 'private' : 'public',
+        },
+        actorId,
+      )
+      created = row ? { id: row.id, name: row.name } : undefined
+    } catch (err) {
+      // §V2-S11 `08:50` — "List name taken" is a 409 from the service, and it
+      // is a refusal a person can act on, not an error to swallow.
+      if (err instanceof ConflictException) return refuse(kind, 'name_taken')
+      throw err
+    }
+    if (!created?.id) return refuse(kind, 'unavailable')
+
+    /*
+     * READ THE PIPELINE BACK. `describeContainerResult` says "with standard
+     * task statuses" and that sentence goes to the person, so it has to be a
+     * fact about this row rather than a fact about what `createList` usually
+     * does. An empty array makes the sentence say so instead.
+     */
+    const statusRows = await this.db
+      .select({ key: listStatuses.key })
+      .from(listStatuses)
+      .where(eq(listStatuses.listId, created.id))
+      .orderBy(asc(listStatuses.position))
+    return {
+      ok: true,
+      kind: 'list',
+      id: created.id,
+      name: created.name,
+      spaceId: space.id,
+      spaceName: space.name,
+      path: containerPath(space.name, created.name),
+      statuses: statusRows.map((s) => s.key),
+    }
+  }
+
+  /**
+   * §V2-S16 `[18:45]` — one container tool call from the CHAT surface, resolved
+   * and executed during the turn.
+   *
+   * The difference from `/ai/command` is deliberate and is the frames': there
+   * is no preview here. `[18:09]` — *"aap ko pata bhi rahega ke main kya kar
+   * rahi hoon"* — the accountability is the step log, which names each action
+   * as it happens, not a confirm button. So this must never be reachable from a
+   * surface whose steps are not shown.
+   *
+   * Space resolution is the PURE function the planner uses, against the same
+   * catalog, so "which space did they mean" has one answer in this product.
+   */
+  async runContainerTool(
+    name: string,
+    input: Record<string, unknown>,
+    actor: { workspaceId: string; userId: string },
+    spaceCatalog?: ContainerSpace[],
+  ): Promise<ContainerToolResult> {
+    const kind = name === 'create_list' ? 'list' : 'folder'
+    if (!isContainerTool(name)) return refuse(kind, 'unavailable')
+    const containerName = toolString(input.name)
+    if (!containerName) return refuse(kind, 'missing_name')
+
+    const catalog = spaceCatalog ?? (await this.loadCommandContext(actor.workspaceId, actor.userId)).spaces ?? []
+    const resolved = resolveContainerSpace(input, catalog)
+    if ('refusal' in resolved) return refuse(kind, resolved.refusal)
+
+    try {
+      return await this.createContainer(
+        kind,
+        kind === 'list'
+          ? {
+              kind: 'list',
+              spaceId: resolved.space.id,
+              name: containerName,
+              description: toolString(input.description) || undefined,
+              visibility: input.visibility === 'private' ? 'private' : 'public',
+            }
+          : {
+              kind: 'folder',
+              spaceId: resolved.space.id,
+              name: containerName,
+              color: toolString(input.color) || undefined,
+            },
+        actor.userId,
+      )
+    } catch (err) {
+      /*
+       * A throw here would abort the stream mid-answer and leave the person
+       * with neither a container nor a reason. Turned into a refusal instead —
+       * and into `no_permission` specifically when the services said so, since
+       * that is the one a person can act on.
+       */
+      if (err instanceof ForbiddenException) return refuse(kind, 'no_permission')
+      if (err instanceof NotFoundException) return refuse(kind, 'unknown_space')
+      if (err instanceof ConflictException) return refuse(kind, 'name_taken')
+      return refuse(kind, 'unavailable')
     }
   }
 

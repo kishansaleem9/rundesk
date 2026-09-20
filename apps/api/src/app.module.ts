@@ -53,6 +53,7 @@ import { IntegrationConnectionsModule } from './modules/integrations/connections
 import { ExternalLinkSyncModule } from './modules/integrations/external-link-sync/external-link-sync.module'
 import { ProjectTemplatesModule } from './modules/project-templates/project-templates.module'
 import { CustomFieldsModule } from './modules/custom-fields/custom-fields.module'
+import { ActivityModule } from './modules/activity/activity.module'
 import { SearchModule } from './modules/search/search.module'
 import { RealtimeModule } from './modules/realtime/realtime.module'
 import { HealthModule } from './modules/health/health.module'
@@ -141,6 +142,7 @@ import { TenantDatabasesModule } from './modules/tenant-databases/tenant-databas
     ExternalLinkSyncModule,
     ProjectTemplatesModule,
     CustomFieldsModule,
+    ActivityModule,
     DashboardsModule,
     ClipsModule,
     CanvasesModule,

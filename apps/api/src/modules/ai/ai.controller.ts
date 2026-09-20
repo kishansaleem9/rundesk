@@ -1,4 +1,4 @@
-import { Body, Controller, Get, Patch, Post, Put, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
+import { Body, Controller, Get, HttpCode, Patch, Post, Put, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService, openSseStream, type AiRunStatus } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
@@ -439,6 +439,15 @@ export class AiController {
     // a status code and that has to happen before anything is written.
     if (skillPrompt) step('skill')
 
+    /*
+     * §V2-S16 `[17:44]`–`[18:48]` — the actor the container tools act as.
+     *
+     * Passed ONLY when the request names a workspace, because a tool that
+     * writes has to write somewhere and a chat turn with a pasted context names
+     * nothing. `chatStream` refuses the tools again on its own side when a
+     * skill is answering; both checks are cheap and the cost of getting this
+     * one wrong is a container created by a turn nobody could see the steps of.
+     */
     await this.ai.chatStream(
       body.messages,
       context,
@@ -447,7 +456,68 @@ export class AiController {
       skillPrompt,
       body.tier,
       stream,
+      body.workspaceId ? { workspaceId: body.workspaceId, userId: user.id } : undefined,
     )
+  }
+
+  /**
+   * §V2-S16 frame `20:10` — what an inline `[[task:…]]` / `[[list:…]]` chip in
+   * an answer resolves to, in one round trip for the whole answer.
+   *
+   * A POST because the id list is a body, not a URL: an answer can mention
+   * dozens of tasks and a query string is the wrong shape for that. It reads
+   * nothing and writes nothing — the service applies the same per-item
+   * visibility filter the rest of the product uses, and anything the caller may
+   * not see simply does not come back, so the panel renders the reference as
+   * plain text instead of as a chip that leaks a title.
+   */
+  @Post('refs')
+  /*
+   * 200, NOT NEST'S DEFAULT 201 FOR A POST. This route creates nothing — it is
+   * a read whose argument is a list of ids, and a list of ids is a body rather
+   * than a query string because an answer can refer to dozens of tasks.
+   *
+   * Left at 201 it announces "Created" on every chip hydration: wrong for any
+   * client that branches on the status, wrong in the access log, and wrong for
+   * a check asserting that a read did not write — which is exactly how this was
+   * found, by `ai-create-containers.mjs` reporting a resolve as a create.
+   */
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'Resolve task/list references in an AI answer (live titles and statuses)' })
+  async refs(
+    @CurrentUser() user: any,
+    @Body() body: { workspaceId?: string; taskIds?: string[]; listIds?: string[] },
+  ) {
+    if (!body?.workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
+    return this.ai.resolveRefs(body.workspaceId, user.id, {
+      taskIds: body.taskIds,
+      listIds: body.listIds,
+    })
+  }
+
+  /**
+   * §V2-S16 frame `20:10` — *"13 open tasks total: 11 To Do, 1 In Progress, 1
+   * Complete"*, as a number rather than as a sentence.
+   *
+   * This is the fact a project-status ANSWER is built from: the same method
+   * grounds `buildWorkspaceContext`, so the prose and this endpoint cannot
+   * disagree about the workspace. Exposed because the frame's own step log
+   * claims to be *"Double-checking the live open-task count"* — a claim that is
+   * only checkable if the count is reachable.
+   *
+   * No model, so it answers on an instance with no provider key at all.
+   */
+  @Get('project-status')
+  @ApiOperation({ summary: 'Per-status task breakdown for a workspace (no model; the grounding behind a status answer)' })
+  async projectStatus(@CurrentUser() user: any, @Query('workspaceId') workspaceId?: string) {
+    if (!workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    await this.ai.assertWorkspaceMember(workspaceId, user.id)
+    return this.ai.workspaceStatusBreakdown(workspaceId, user.id)
   }
 
   @Post('suggest-tasks')

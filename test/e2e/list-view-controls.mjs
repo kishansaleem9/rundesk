@@ -40,8 +40,14 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 40
+/**
+ * "0 failed" is not "it ran". Exact, so a skipped branch is a failure.
+ *
+ * 40 → 49: the last nine cover two controls that live in this same toolbar and
+ * this same list body and had no suite of their own — §V2-S13 `10:52`'s
+ * per-group `+ Add Task` (four) and §V2-S13 `09:35`'s calendar `Today` (five).
+ */
+const EXPECTED_CHECKS = 49
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -379,6 +385,96 @@ try {
     'changing the Subtasks mode marks the view unsaved',
     `the Save view chip did not appear (it was ${sawSaveChipBefore ? 'already' : 'not'} showing before)`)
   await chooseSubtaskMode('collapsed')
+
+  /*
+   * ── §V2-S13 frame `10:52` — `+ Add Task` INSIDE a group ──────────────────
+   *
+   * The frame's List tab is grouped by status: a collapsible header, the
+   * group's rows, then its own `+ Add Task` — and the empty `TO DO 0` group
+   * still offers it. Rundesk's status groups grew one, but priority and
+   * assignee groupings had none at all, and nothing anywhere proved that the
+   * control creates into the group it sits in rather than into the list's
+   * default status. A composer that lands the task in another group looks
+   * right, reports success, and puts the row where it was not asked to go.
+   */
+  console.log('\n▶ every group carries its own + Add Task, empty ones included')
+  const groupSections = page.locator('[data-testid="list-group"]')
+  const groupCount = await groupSections.count()
+  chk(groupCount >= 2, 'the list draws more than one status group to compare',
+    `it drew ${groupCount} groups — with one there is no empty group to check`)
+  const addPerGroup = await groupSections.evaluateAll((els) =>
+    els.map((el) => el.querySelectorAll('[data-testid="list-group-add-task"]').length),
+  )
+  chk(addPerGroup.length > 0 && addPerGroup.every((n) => n === 1),
+    'each one carries exactly one add control',
+    `the groups carried ${JSON.stringify(addPerGroup)} add controls`)
+  const emptyGroup = page.locator('[data-testid="list-group"][data-count="0"]').first()
+  chk(await emptyGroup.count() === 1 &&
+      await emptyGroup.locator('[data-testid="list-group-add-task"]').count() === 1,
+    'including a group with nothing in it, which is the frame\'s `TO DO 0`',
+    'an empty group offered no way to add to it — the case you most want it in')
+
+  /*
+   * THE CHECK WITH TEETH. Read back from the SERVER, and compared with the
+   * group's own key: "a task was created" is true of the old quick-add too.
+   */
+  const targetGroup = await emptyGroup.getAttribute('data-group')
+  const GROUP_TITLE = `group add ${TAG}`
+  await emptyGroup.locator('[data-testid="list-group-add-task"]').click()
+  await emptyGroup.locator('[data-testid="list-group-add-title"]').fill(GROUP_TITLE)
+  await page.keyboard.press('Enter')
+  const landed = await waitUntil(async () => {
+    const rows = (await api(`/tasks/list/${fixture.listId}`)).data ?? []
+    return rows.some((r) => r.title === GROUP_TITLE)
+  }, { timeoutMs: 12_000 })
+  const rowsNow = (await api(`/tasks/list/${fixture.listId}`)).data ?? []
+  const madeHere = rowsNow.find((r) => r.title === GROUP_TITLE)
+  if (madeHere?.id) created.push(madeHere.id)
+  chk(landed && !!madeHere, 'typing a title into a group\'s composer creates a task',
+    'nothing was created from the group composer')
+  chk(madeHere?.status === targetGroup,
+    `and it lands in that group (${targetGroup}), not in the list's default status`,
+    `the new task came back with status ${JSON.stringify(madeHere?.status)}, and the group was ${JSON.stringify(targetGroup)}`)
+
+  /*
+   * ── §V2-S13 frame `09:35` — the calendar's `Today` ───────────────────────
+   *
+   * The frame's calendar toolbar reads `Today` · `Month ▾` · `‹` `›` ·
+   * `August 2026`. Rundesk had the two arrows and nothing else, and
+   * `calendarMonth` is only ever MOVED by them — so once you had paged forward
+   * there was no control that brought you back and you counted clicks. The
+   * period is compared as a key rather than as the rendered heading, which is
+   * locale-dependent and would make this a test of `toLocaleDateString`.
+   */
+  console.log('\n▶ the calendar has a Today, and it is the way back')
+  await page.getByTestId('work-view-tab-type-calendar').click()
+  await page.waitForSelector('[data-testid="list-calendar"]', { timeout: 20_000 })
+  const todayBtn = page.getByTestId('list-calendar-today')
+  const prevBtn = page.getByTestId('list-calendar-prev')
+  const todayBox = await todayBtn.boundingBox()
+  const prevBox = await prevBtn.boundingBox()
+  chk(!!todayBox && !!prevBox && todayBox.x < prevBox.x,
+    'Today is on the toolbar, and leftmost as the frame draws it',
+    `Today at ${todayBox ? Math.round(todayBox.x) : 'absent'}, Prev at ${prevBox ? Math.round(prevBox.x) : 'absent'}`)
+  chk(await todayBtn.isDisabled(),
+    'and is inert while the calendar is already showing the current period',
+    'Today was live on a calendar that had not moved — it cannot say where you are')
+  const startPeriod = await page.getByTestId('list-calendar').getAttribute('data-calendar-period')
+  await page.getByTestId('list-calendar-next').click()
+  await page.getByTestId('list-calendar-next').click()
+  await page.waitForTimeout(600)
+  const movedPeriod = await page.getByTestId('list-calendar').getAttribute('data-calendar-period')
+  chk(movedPeriod !== startPeriod && !(await todayBtn.isDisabled()),
+    'paging forward moves the calendar and wakes Today up',
+    `the period went ${JSON.stringify(startPeriod)} → ${JSON.stringify(movedPeriod)}, ` +
+      `Today ${(await todayBtn.isDisabled()) ? 'stayed disabled' : 'is live'}`)
+  await todayBtn.click()
+  await page.waitForTimeout(600)
+  chk(await page.getByTestId('list-calendar').getAttribute('data-calendar-period') === startPeriod,
+    'and one press brings it back to the current period',
+    `after pressing Today the calendar sat on ` +
+      `${JSON.stringify(await page.getByTestId('list-calendar').getAttribute('data-calendar-period'))}, ` +
+      `where it started on ${JSON.stringify(startPeriod)}`)
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
   await page.screenshot({ path: '/tmp/claude-0/shots/list-view-controls-fail.png', fullPage: true }).catch(() => {})

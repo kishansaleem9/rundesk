@@ -223,6 +223,21 @@ green "confirmations" that meant nothing until they were found.
   numbers describe.
 - **A patch that does not compile proves nothing**, and the harness must say
   so out loud rather than counting it among the confirmed.
+- **You cannot sandbox a patch script by stubbing `io` in its globals.** Each
+  patch does its own `import io`, which rebinds the name to the real module —
+  so a "dry run" verifier written this way silently applies every patch to the
+  live tree. Three separate people hit this in one day, one of them writing
+  into a file they did not own. Verify by parsing the script with `ast`, or by
+  copying the target files into a scratch directory and rewriting the paths
+  inside the patch. Never by executing it and hoping.
+- **`pkill -f <pattern>` matches your own shell.** The command line that runs
+  the `pkill` contains the pattern, so it kills the process doing the killing
+  and the surrounding script dies mid-way. Kill by port
+  (`lsof -t -i ":$PORT" -sTCP:LISTEN`) or by a PID you recorded.
+- **`VAR=x yes | cmd` sets `VAR` for `yes`, not for `cmd`.** The variable
+  attaches to the first command in the pipeline. `export` it instead. This
+  costs a confusing round trip every time, because the failure is `cmd`
+  complaining that a perfectly-set variable is missing.
 
 ### Environment
 

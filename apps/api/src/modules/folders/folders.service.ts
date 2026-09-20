@@ -1,5 +1,5 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, asc, eq, type SQL } from 'drizzle-orm'
+import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common'
+import { and, asc, eq, ne, sql, type SQL } from 'drizzle-orm'
 import { folders, spaces, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -35,12 +35,57 @@ export class FoldersService {
       .orderBy(asc(folders.position), asc(folders.name))
   }
 
+  /**
+   * §V2-S10 frame `08:25`, spoken at `[08:23]`: *"FOLDER banaya … folder ka bhi
+   * SAME NAAM dete hain"* — she deliberately reuses the name, and `[08:55]`
+   * narrates the answer: *"agar koi error aata hai to yeh yahan show kar deta
+   * hai."*
+   *
+   * THE SAME RULE LISTS ALREADY HAVE, stated the same way. `assertListNameFree`
+   * and migration 0147 gave a list a unique name per project; the sibling
+   * container created from the same eight-item menu had neither, so one space
+   * could hold three folders called "Clients" and the sidebar gave you nothing
+   * but their ids to tell them apart.
+   *
+   * The constraint lives in migration 0157 — a partial, case-insensitive unique
+   * index on `(space_id, lower(name)) where is_archived = false`. This check
+   * exists ONLY so the answer is a 409 carrying words a person can read rather
+   * than a Postgres unique violation surfacing as a 500.
+   *
+   *   · case-insensitive — "Clients" and "clients" are the same name to whoever
+   *     is reading the tree;
+   *   · partial on `is_archived` — a folder in the Trash must not hold its name
+   *     hostage, matching `remove()` below, which archives rather than deletes;
+   *   · scoped to the SPACE, which is the container the sidebar draws folders
+   *     under. Two spaces may each have a "Clients"; one space may not.
+   */
+  private async assertFolderNameFree(spaceId: string, name: string, exceptFolderId?: string) {
+    const trimmed = name.trim()
+    if (!trimmed) return
+    const clash = await this.db
+      .select({ id: folders.id })
+      .from(folders)
+      .where(
+        and(
+          eq(folders.spaceId, spaceId),
+          eq(folders.isArchived, false),
+          sql`lower(${folders.name}) = lower(${trimmed})`,
+          exceptFolderId ? ne(folders.id, exceptFolderId) : undefined,
+        ),
+      )
+      .limit(1)
+    if (clash.length > 0) throw new ConflictException('Folder name taken')
+  }
+
   async create(spaceId: string, data: { name: string; color?: string }, actorId?: string) {
+    const name = (data.name ?? '').trim()
+    if (!name) throw new BadRequestException('Folder name is required')
+    await this.assertFolderNameFree(spaceId, name)
     const [row] = await this.db
       .insert(folders)
       .values({
         spaceId,
-        name: data.name,
+        name,
         color: data.color || '#354fb0',
         createdById: actorId ?? null,
       })
@@ -56,8 +101,12 @@ export class FoldersService {
     if (patch.visibility !== undefined && patch.visibility !== 'public' && patch.visibility !== 'private') {
       throw new BadRequestException('visibility must be public or private')
     }
+    // Rename is the other door onto the same namespace. Guarding only `create`
+    // would leave the rule reachable-around: make "Clients 2", rename it to
+    // "Clients", and the index — not the API — answers, with a 500.
+    if (patch.name !== undefined) await this.assertFolderNameFree(spaceId, patch.name, folderId)
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    if (patch.name !== undefined) set.name = patch.name
+    if (patch.name !== undefined) set.name = patch.name.trim()
     if (patch.color !== undefined) set.color = patch.color
     if (patch.position !== undefined) set.position = patch.position
     if (patch.visibility !== undefined) set.visibility = patch.visibility
@@ -100,6 +149,15 @@ export class FoldersService {
     }
     if (target.isArchived) throw new BadRequestException('Cannot move into a deleted space')
     if (targetSpaceId === spaceId) return { ok: true, movedProjects: 0 }
+
+    /*
+     * The THIRD door onto the namespace, and the one that is easy to forget:
+     * the index is on `(space_id, lower(name))`, so carrying "Clients" into a
+     * space that already has a "Clients" is a unique violation — a 500 out of a
+     * move that looked ordinary. Answered here with the same 409 and the same
+     * words the other two doors use.
+     */
+    await this.assertFolderNameFree(targetSpaceId, src.name, folderId)
 
     if (actorId) {
       await assertCanManageContainer(this.db, {

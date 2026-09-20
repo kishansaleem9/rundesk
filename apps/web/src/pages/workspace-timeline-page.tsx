@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState, Badge, cn } from '@rundesk/ui'
@@ -7,6 +7,7 @@ import {
   Diamond,
   PanelLeftClose,
   PanelLeftOpen,
+  CalendarDays,
   Maximize2,
   Download,
   ChevronDown,
@@ -45,6 +46,12 @@ const DATE_ROW_H = 38
 const WEEK_ROW_H = 22
 const GROUP_ROW_H = 32
 const TASK_ROW_H = 48
+
+/** How tall the chart is allowed to get before its rows scroll under the date
+ *  header instead of running down the page. Both panes share it so their rows
+ *  stay level; see the comment on the chart pane for why it has to be bounded
+ *  at all. */
+const PANE_MAX_H = '70vh'
 
 const PRIORITY_BG: Record<string, string> = {
   urgent: 'bg-gradient-to-r from-rose-500 to-red-500',
@@ -209,7 +216,13 @@ export function TimelinePage() {
   const [showWeekNumbers, setShowWeekNumbers] = useState<boolean>(() => readFlag(LS_WEEK_NUMBERS))
   const [panelCollapsed, setPanelCollapsed] = useState<boolean>(() => readFlag(LS_PANEL_COLLAPSED))
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({})
+  // §S07-S12 frame `09:44` — `Today`. The flag widens the range to reach today;
+  // the stamp is what makes a second press scroll again. See `goToToday`.
+  const [anchorToday, setAnchorToday] = useState(false)
+  const [todayStamp, setTodayStamp] = useState(0)
+  const handledTodayStamp = useRef(0)
   const viewportRef = useRef<HTMLDivElement | null>(null)
+  const panelRef = useRef<HTMLDivElement | null>(null)
 
   const tasksQuery = useQuery({
     queryKey: ['timeline', workspaceId],
@@ -260,13 +273,28 @@ export function TimelinePage() {
       if (t.startDate) allDates.push(new Date(t.startDate).getTime())
       if (t.dueDate) allDates.push(new Date(t.dueDate).getTime())
     }
+    /*
+     * WHAT `Today` DOES WHEN TODAY IS NOWHERE ON THE CHART.
+     *
+     * The plotted range is derived from the tasks, so a project that finished
+     * in June does not include a day in September — the today line is not drawn
+     * at all, and "scroll to today" has nothing to scroll to. A button that
+     * silently did nothing in that case would be the dead control this audit
+     * keeps finding, and disabling it would just move the dead end.
+     *
+     * So pressing `Today` first makes today part of the range, and only then
+     * scrolls. It is opt-in rather than always-on because always-on would drag
+     * every chart out to today — a three-week project six months old would
+     * render as six months of empty grid, which is worse than the problem.
+     */
+    if (anchorToday) allDates.push(startOfDay(Date.now()))
     const min = Math.min(...allDates)
     const max = Math.max(...allDates)
     const startMs = startOfDay(min - 3 * 86400_000)
     const endMs = startOfDay(max + 3 * 86400_000)
     const days = Math.max(14, Math.ceil((endMs - startMs) / 86400_000))
     return { startMs, days }
-  }, [tasks])
+  }, [tasks, anchorToday])
 
   /*
    * AUTO FIT IS A px-PER-DAY, NOT A ZOOM PRESET.
@@ -292,6 +320,52 @@ export function TimelinePage() {
     if (!(width > 0) || !(days > 0)) return
     setFitDayPx(width / days)
   }, [days])
+
+  /*
+   * A STAMP, NOT A FLAG.
+   *
+   * `anchorToday` is already true the second time `Today` is pressed, so an
+   * effect keyed on it would not re-run and the button would be dead from the
+   * second press onward — working once is how this kind of control passes
+   * review. The counter changes on every press, so the scroll happens on every
+   * press.
+   */
+  const goToToday = useCallback(() => {
+    setAnchorToday(true)
+    setTodayStamp((n) => n + 1)
+  }, [])
+
+  /*
+   * Layout effect, not a plain effect: both state changes above land in one
+   * render, so by the time this runs the range already includes today and the
+   * chart is already its new width. Scrolling before paint means no visible
+   * jump from the old offset to the new one.
+   */
+  useLayoutEffect(() => {
+    if (todayStamp === handledTodayStamp.current) return
+    handledTodayStamp.current = todayStamp
+    const el = viewportRef.current
+    if (!el) return
+    const maxScroll = Math.max(0, el.scrollWidth - el.clientWidth)
+    // Centre today where there is room, and settle for "on screen" at the ends.
+    el.scrollLeft = Math.max(0, Math.min(todayOffsetPx - el.clientWidth / 2, maxScroll))
+  }, [todayStamp, todayOffsetPx])
+
+  /*
+   * The two panes scroll vertically as one.
+   *
+   * They are separate scrollports on purpose (see the header comment on the
+   * chart pane), which means nothing keeps their rows lined up unless this
+   * does. The equality guard is what stops the echo: assigning `scrollTop`
+   * fires a scroll event on the other pane, whose handler finds the two already
+   * equal and returns, so there is no ping-pong and no need for a lock.
+   */
+  const syncPaneScroll = useCallback((from: 'panel' | 'chart') => {
+    const source = from === 'panel' ? panelRef.current : viewportRef.current
+    const target = from === 'panel' ? viewportRef.current : panelRef.current
+    if (!source || !target || source.scrollTop === target.scrollTop) return
+    target.scrollTop = source.scrollTop
+  }, [])
 
   const toggleWeekNumbers = useCallback(() => {
     setShowWeekNumbers((prev) => {
@@ -367,9 +441,15 @@ export function TimelinePage() {
     const out: Array<{ key: string; left: number; width: number; week: number; monday: string }> = []
     const endMs = startMs + days * 86400_000
     let cursor = mondayOf(startMs)
-    // Bounded by construction (cursor advances a week each pass), but a DST
-    // hour is not allowed to turn that into a spin.
-    for (let guard = 0; cursor < endMs && guard < 400; guard += 1) {
+    /*
+     * Bounded by construction (cursor advances a week each pass); the guard is
+     * only there so a DST hour cannot turn that into a spin. It is derived from
+     * the span rather than a round number, because a fixed cap silently TRUNCATES
+     * the band on a long chart — and `Today` can stretch the range by months, so
+     * "400 is surely enough" stops being true the moment anyone presses it.
+     */
+    const maxCells = Math.ceil(days / 7) + 2
+    for (let guard = 0; cursor < endMs && guard < maxCells; guard += 1) {
       out.push({
         key: String(cursor),
         left: ((cursor - startMs) / 86400_000) * dayPx,
@@ -547,6 +627,16 @@ export function TimelinePage() {
             </button>
             <button
               type="button"
+              data-testid="timeline-today"
+              onClick={goToToday}
+              className={toolbarBtn}
+              title={t('timeline.todayHint')}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              {t('timeline.today')}
+            </button>
+            <button
+              type="button"
               data-testid="timeline-week-numbers"
               aria-pressed={showWeekNumbers}
               data-on={showWeekNumbers ? 'true' : 'false'}
@@ -580,17 +670,46 @@ export function TimelinePage() {
             </button>
           </div>
 
-          <Card variant="glass" className="overflow-hidden p-0">
+          {/*
+            `overflow-clip`, DELIBERATELY, AND NOT `overflow-hidden`.
+            ────────────────────────────────────────────────────────────────
+            Both clip to the rounded corner. Only one of them invents a scroll
+            container: `overflow: hidden` IS a scrollport — it just never
+            scrolls — and `position: sticky` resolves against the nearest
+            scrollport, so a sticky header under an `overflow-hidden` ancestor
+            sticks to a box that cannot move. That is the bug this replaces:
+            both headers below were declared sticky and neither stuck.
+
+            `overflow: clip` clips without becoming a scrollport, so it cannot
+            swallow a descendant's stickiness. Note this class is doing real
+            work even though `Card variant="glass"` looks like it already
+            clips: `.card-glass` itself carries `@apply overflow-hidden`
+            (`packages/ui/src/styles.css`), and this utility overrides it
+            because Tailwind emits utilities after components. Removing it does
+            not remove the clip, it restores the broken one.
+
+            The headers do NOT resolve against this element, though — each pane
+            below is its own bounded scrollport, which is what actually makes
+            them stick. That is on purpose: `packages/ui` is not ours, so the
+            fix must not depend on what `.card-glass` does next week.
+          */}
+          <Card variant="glass" className="overflow-clip p-0">
             <div className="flex items-stretch">
               {/* ── Task panel (collapsible) ─────────────────────────────────
                   Width goes to 0, and because the chart beside it is the flex
-                  child that grows, the grid takes the space back. */}
+                  child that grows, the grid takes the space back.
+
+                  Scrolls vertically in lockstep with the chart (`syncPaneScroll`)
+                  so its header has a scrollport of its own to stick to and the
+                  rows stay level with their bars. */}
               <div
+                ref={panelRef}
                 data-testid="timeline-task-panel"
                 data-collapsed={panelCollapsed ? 'true' : 'false'}
-                style={{ width: panelCollapsed ? 0 : TASK_COL_WIDTH }}
+                style={{ width: panelCollapsed ? 0 : TASK_COL_WIDTH, maxHeight: PANE_MAX_H }}
+                onScroll={() => syncPaneScroll('panel')}
                 className={cn(
-                  'shrink-0 overflow-hidden bg-card/60',
+                  'shrink-0 overflow-y-auto overflow-x-hidden bg-card/60',
                   !panelCollapsed && 'border-r border-border/60',
                 )}
               >
@@ -604,6 +723,7 @@ export function TimelinePage() {
                 */}
                 {!panelCollapsed && (
                   <div
+                    data-testid="timeline-panel-header"
                     className="sticky top-0 z-20 flex items-end border-b border-border/60 bg-card/95 px-4 pb-2.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground backdrop-blur-sm"
                     style={{ height: headerH }}
                   >
@@ -664,13 +784,38 @@ export function TimelinePage() {
               </div>
 
               {/* ── Chart ──────────────────────────────────────────────────── */}
+              {/*
+                A BOUNDED SCROLLPORT, WHICH IS WHAT MAKES THE HEADER STICK.
+                ──────────────────────────────────────────────────────────────
+                This was `overflow-x-auto` with no height, and the date header
+                inside it was `sticky top-0` and never stuck to anything. Two
+                reasons, and fixing only one would not have helped:
+
+                  · `overflow-x: auto` with `overflow-y: visible` computes the
+                    y axis to `auto` as well, so this element was already the
+                    nearest scrollport for its header — the page scroll could
+                    never reach it. That is unavoidable: the header has to sit
+                    inside the horizontal scroller to stay aligned with the
+                    bars under it.
+                  · and an unbounded element never scrolls vertically, so the
+                    scrollport it offered had nothing to offer.
+
+                Giving it a height makes the scrollport real: the rows scroll
+                under a header that stays put, which is how the date axis stops
+                being lost the moment a project has twenty tasks. The task
+                panel is bounded to match and the two are kept level in
+                `syncPaneScroll`.
+              */}
               <div
                 ref={viewportRef}
                 data-testid="timeline-chart-viewport"
-                className="flex-1 min-w-0 overflow-x-auto"
+                style={{ maxHeight: PANE_MAX_H }}
+                onScroll={() => syncPaneScroll('chart')}
+                className="flex-1 min-w-0 overflow-auto"
               >
                 <div className="relative" style={{ width: totalWidth, minWidth: '100%' }}>
                   <div
+                    data-testid="timeline-chart-header"
                     className="sticky top-0 z-20 border-b border-border/60 bg-card/95 backdrop-blur-sm"
                     style={{ height: headerH }}
                   >
@@ -686,6 +831,7 @@ export function TimelinePage() {
                       data-range-start={localIsoDate(startMs)}
                       data-range-end={localIsoDate(addDays(startMs, days - 1))}
                       data-fit={fitDayPx == null ? 'off' : 'on'}
+                      data-anchor-today={anchorToday ? 'true' : 'false'}
                       className="relative h-full"
                       style={{ width: totalWidth }}
                     >

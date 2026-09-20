@@ -12,20 +12,24 @@ import {
   taskComments,
   workspaceMembers,
   taskAttachments,
+  customFieldTypeEnum,
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 
-type CustomFieldType =
-  | 'text' | 'number' | 'dropdown' | 'date' | 'checkbox'
-  | 'url' | 'email' | 'phone' | 'money' | 'rating'
-  // §V2-01b — derived, never stored. See progress.ts.
-  | 'progress_auto'
-  // §V2-01c — storage plus a renderer.
-  | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
-  // 0145 — `files` references task attachments; `voting` holds who voted.
-  | 'files' | 'voting'
+/**
+ * THE ONE LIST OF FIELD TYPES, taken from the column that stores them.
+ *
+ * It used to be written out here as a union and again, ten of the nineteen, in
+ * the controller. That is this audit's *duplicated list* defect: each copy is
+ * individually plausible, and the short one had already drifted. `type` is a
+ * Postgres enum, so the column already holds the canonical set — and deriving
+ * from it means a type added to the schema cannot be missing here.
+ */
+export const CUSTOM_FIELD_TYPES = customFieldTypeEnum.enumValues
+export type CustomFieldType = (typeof CUSTOM_FIELD_TYPES)[number]
+const CUSTOM_FIELD_TYPE_SET: ReadonlySet<string> = new Set(CUSTOM_FIELD_TYPES)
 
 /** `string[]` is §V2-01c's: `labels` and `people` hold several at once. */
 type FieldValue = string | number | boolean | string[] | null
@@ -93,6 +97,19 @@ export class CustomFieldsService {
     },
   ) {
     await this.assertProjectInWorkspace(workspaceId, projectId)
+    /*
+     * The TYPE is validated here, and it was not before.
+     *
+     * `type` is a Postgres enum, so an unknown one reached the insert and came
+     * back as a 22P02 cast error — a 500 that reads like the server is broken
+     * rather than a 400 that says which types exist. Cheap to get wrong now
+     * that a task can open this door as well as a project.
+     */
+    if (!CUSTOM_FIELD_TYPE_SET.has(dto.type as string)) {
+      throw new BadRequestException(
+        `Unknown custom field type "${dto.type}". One of: ${CUSTOM_FIELD_TYPES.join(', ')}`,
+      )
+    }
     // `options` must be an array when present — a non-array (e.g. {} or a bare
     // string) passes the length check below (undefined === 0 is false) and gets
     // stored, then crashes every reader that does `options.map(...)`.
@@ -128,6 +145,49 @@ export class CustomFieldsService {
       })
       .returning()
     return row
+  }
+
+  /**
+   * §V2-S16 frames `15:20` ("Add fields") and `15:30` ("Custom Fields" in the
+   * task's `···` menu) — DEFINE a field from an open task, not just fill in the
+   * ones somebody defined elsewhere.
+   *
+   * It resolves the task's project and delegates to `createDefinition`. It does
+   * NOT re-implement it. Three creation paths already existed — the create
+   * modal, the project shell and the list route — and this audit's *duplicated
+   * list* defect is exactly what a fourth copy of the validation would be: the
+   * list route's picker already offers six of the nineteen types, and nobody
+   * noticed because each picker is individually plausible.
+   *
+   * `scope` decides which container the new field belongs to:
+   *   · `project` (the default) — every task in the project gets it, which is
+   *     what the panel's own empty-state hint has always promised.
+   *   · `list` — only this task's list, stored as `listId` and honoured by
+   *     `getValuesForTask`. Creating from a task is the first place where
+   *     "just this list" is the obvious thing to want, and the narrowing was
+   *     already built; until now nothing offered it.
+   */
+  async createDefinitionForTask(
+    workspaceId: string,
+    taskId: string,
+    dto: {
+      name: string
+      type: CustomFieldType
+      isRequired?: boolean
+      scope?: 'project' | 'list'
+      options?: Array<{ label: string; value: string; color?: string }>
+      config?: unknown
+    },
+  ) {
+    const task = await this.assertTaskInWorkspace(workspaceId, taskId)
+    if (dto.scope !== undefined && dto.scope !== 'project' && dto.scope !== 'list') {
+      throw new BadRequestException('scope must be "project" or "list"')
+    }
+    const { scope, ...rest } = dto
+    return this.createDefinition(workspaceId, task.projectId, {
+      ...rest,
+      listId: scope === 'list' ? task.listId : undefined,
+    })
   }
 
   async updateDefinition(

@@ -42,6 +42,32 @@ import { useTranslation } from './i18n'
  *      running, and it restores it again when the shell unmounts.
  *
  * Both are asserted in `test/e2e/tab-title-countdown.mjs`.
+ *
+ * ── THE HEADER PILL (§V2-06 row "Live focus countdown in the header") ────────
+ *
+ * The frames were swept again for this, and they say the countdown lives in
+ * the APP HEADER, not the tab: at `15:20`, `15:35` and `15:50` a pill sits
+ * immediately right of the workspace switcher reading a moon glyph and
+ * **"Work on dbgdh 2h 56m left"**; by `16:00` it reads **2h 55m**; at `16:05`
+ * the page behind it is the LIST view, so the pill follows you off the
+ * planner; and at `19:05`, fourteen minutes later, it still reads **2h 52m**.
+ * `docs/video2-frame-observations.md:383-384` puts it in the browser tab and
+ * quotes "2m 3s left" — a string that appears in no frame of the 23:53.
+ *
+ * So there are two surfaces for ONE fact, and the way that goes wrong is two
+ * countdowns: two fetches, two intervals, two answers that disagree by a
+ * second and then by a minute. `useRunningFocusBlock` below is the pill's
+ * reader, and it shares everything that could drift:
+ *
+ *   · the same two react-query keys, so ONE request serves both;
+ *   · `pickRunningBlock` / `focusBlockLabel` / `formatRemaining`, so "which
+ *     block" and "how long" are decided once;
+ *   · `subscribeSecond` — literally one `setInterval` for the whole module,
+ *     shared by the title writer and every pill on screen.
+ *
+ * The pill re-renders only when its RENDERED STRING changes (once a minute
+ * above the hour), and the title writer still re-renders nothing at all, which
+ * matters because it is mounted in the `/app` shell.
  */
 
 /**
@@ -130,15 +156,54 @@ function startOfDayIso(at = new Date()): string {
   return d.toISOString()
 }
 
-/**
- * Own the tab title while a block is running, and hand it back afterwards.
+/*
+ * ONE clock for the whole module.
  *
- * Mounted once, in the `/app` shell (`routes/app.tsx`) — the smallest place
- * that is on screen for every workspace page and gone the moment you leave the
- * app. Mounting it per page would restart the countdown on every navigation and
- * leave the title behind on whichever page forgot to mount it.
+ * The tab title and the header pill both want to be told when a second has
+ * passed. Given an interval each they would be two countdowns — and two
+ * countdowns over the same block is precisely the duplicated-list defect with
+ * a clock in it: they start at different offsets, drift, and the product shows
+ * "2h 55m" in one place and "2h 56m" in the other. Here there is one timer,
+ * started by the first subscriber and stopped by the last, and every
+ * subscriber recomputes from `Date.now()` rather than decrementing anything.
  */
-export function useFocusTabTitle(workspaceId: string | null) {
+const secondSubscribers = new Set<() => void>()
+let secondTimer: number | null = null
+
+function subscribeSecond(fn: () => void): () => void {
+  secondSubscribers.add(fn)
+  if (secondTimer === null && typeof window !== 'undefined') {
+    secondTimer = window.setInterval(() => {
+      // A copy: a subscriber may unsubscribe from inside its own callback.
+      for (const sub of Array.from(secondSubscribers)) sub()
+    }, 1000)
+  }
+  return () => {
+    secondSubscribers.delete(fn)
+    if (secondSubscribers.size === 0 && secondTimer !== null && typeof window !== 'undefined') {
+      window.clearInterval(secondTimer)
+      secondTimer = null
+    }
+  }
+}
+
+/** What a reader of the running block needs, already formatted. */
+export type RunningFocusBlock = {
+  /** "Work on dbgdh" — the prefix already applied. */
+  label: string
+  /** "2h 56m", or "2m 3s" inside the last hour. */
+  remaining: string
+}
+
+/**
+ * The fetch and the day window, shared by both readers.
+ *
+ * Returns a ref rather than values so a consumer can install ONE effect keyed
+ * on `workspaceId` and read through it — rebuilding the effect on every data
+ * change would leave each closure holding whichever blocks it was created
+ * with, which is the same staleness bug in slower motion.
+ */
+function useFocusBlockSource(workspaceId: string | null) {
   const { t } = useTranslation()
 
   // Only changes at midnight, so this re-renders roughly never.
@@ -177,12 +242,6 @@ export function useFocusTabTitle(workspaceId: string | null) {
     refetchInterval: REFRESH_MS,
   })
 
-  /*
-   * The ticker is installed once and reads through this ref. Rebuilding the
-   * interval on every data change would be the same bug in slower motion: the
-   * closure would hold whichever blocks it was created with, and a title set
-   * from that copy stops being true the moment the data moves.
-   */
   const latest = useRef({ blocks: [] as FocusBlock[], prefix: '', t })
   latest.current = {
     blocks: blocks ?? [],
@@ -190,10 +249,91 @@ export function useFocusTabTitle(workspaceId: string | null) {
     t,
   }
 
+  // `setDayStart` is stable, so an effect may close over this safely.
+  return { latest, setDayStart }
+}
+
+/**
+ * The block running right now, formatted, or `null` when nothing is.
+ *
+ * `null` and not "a pill showing nothing": the frames draw no pill before a
+ * block is dropped on the grid, and a control that is present-but-empty is the
+ * hardest kind of stale to notice.
+ */
+export function useRunningFocusBlock(workspaceId: string | null): RunningFocusBlock | null {
+  const { latest, setDayStart } = useFocusBlockSource(workspaceId)
+  const [running, setRunning] = useState<RunningFocusBlock | null>(null)
+
+  useEffect(() => {
+    if (!workspaceId) {
+      setRunning(null)
+      return
+    }
+    const paint = () => {
+      const now = Date.now()
+      const today = startOfDayIso(new Date(now))
+      setDayStart((prev) => (prev === today ? prev : today))
+
+      const { blocks: current, prefix } = latest.current
+      const block = pickRunningBlock(current, now)
+      const next = block
+        ? {
+            label: focusBlockLabel(block, prefix),
+            remaining: formatRemaining(new Date(block.endsAt).getTime() - now),
+          }
+        : null
+      /*
+       * Compared by VALUE, so the pill re-renders when its words change and
+       * not once a second for eight hours. It must still be recomputed every
+       * second — the comparison is about rendering, never about whether to
+       * look at the clock.
+       */
+      setRunning((prev) => {
+        if (prev === next) return prev
+        if (prev && next && prev.label === next.label && prev.remaining === next.remaining) return prev
+        return next
+      })
+    }
+    paint()
+    return subscribeSecond(paint)
+  }, [workspaceId, latest, setDayStart])
+
+  return running
+}
+
+/**
+ * Own the tab title while a block is running, and hand it back afterwards.
+ *
+ * Mounted once, in the `/app` shell (`routes/app.tsx`) — the smallest place
+ * that is on screen for every workspace page and gone the moment you leave the
+ * app. Mounting it per page would restart the countdown on every navigation and
+ * leave the title behind on whichever page forgot to mount it.
+ */
+export function useFocusTabTitle(workspaceId: string | null) {
+  /*
+   * The ticker is installed once and reads through this ref. Rebuilding the
+   * interval on every data change would be the same bug in slower motion: the
+   * closure would hold whichever blocks it was created with, and a title set
+   * from that copy stops being true the moment the data moves.
+   */
+  const { latest, setDayStart } = useFocusBlockSource(workspaceId)
+
   useEffect(() => {
     if (typeof document === 'undefined') return
     if (!workspaceId) {
-      document.title = BASE_TITLE
+      /*
+       * Nothing to count — AND NOTHING WRITTEN HERE. React runs the previous
+       * run's cleanup before this body, and that cleanup is what puts the
+       * title back, so the restore lives in exactly one place.
+       *
+       * It used to be written here too. That duplicate is why
+       * `breaks/tab-title-countdown-2-norestore.py` could delete the cleanup's
+       * restore and the suite stayed green: leaving /app re-runs this effect
+       * with no workspace id in the path a beat before the shell unmounts, so
+       * this line was quietly covering for the deleted one. Two code paths
+       * satisfying one check is one check, and the one that gets deleted is
+       * always the one that was being tested.
+       */
       return
     }
 
@@ -223,14 +363,14 @@ export function useFocusTabTitle(workspaceId: string | null) {
     }
 
     paint()
-    const id = window.setInterval(paint, 1000)
+    const stop = subscribeSecond(paint)
     return () => {
-      window.clearInterval(id)
+      stop()
       // Leaving the app hands the title back. Without this line a countdown
       // written here would still be in the tab strip on the login page.
       document.title = BASE_TITLE
     }
-  }, [workspaceId])
+  }, [workspaceId, latest, setDayStart])
 }
 
 /** For tests and for anything that needs to know what "no countdown" reads as. */

@@ -72,6 +72,12 @@ import {
   Bookmark,
   PanelRight,
   Loader2,
+  // §V2-S07 `15:20` — the Activity header's magnifier and its filter glyph.
+  Search,
+  SlidersHorizontal,
+  // §V2-S17 `15:20` — the ▶ welded to the status pill, and the ✓ beside it.
+  ChevronRight,
+  Check as CheckIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { offerUndo } from '../lib/undoable-delete'
@@ -577,6 +583,16 @@ export function TaskDetailSheet({
   useEffect(() => {
     if (focusCommentId) setActiveTab('comments')
   }, [focusCommentId])
+  /*
+   * §V2-S16 frame `15:20` — "Add fields" opens the Fields tab WITH the create
+   * form already open.
+   *
+   * A stamp and not a boolean. The reader can close the form; a boolean would
+   * already be `true`, so the second press of "Add fields" would set it to the
+   * value it already had and nothing would happen — the dead-on-the-second-press
+   * bug this audit has already found once, in "collapse all".
+   */
+  const [fieldCreateStamp, setFieldCreateStamp] = useState(0)
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -1279,6 +1295,25 @@ export function TaskDetailSheet({
                         <MergeIcon className="mr-2 h-4 w-4" />
                         {t('taskMerge.menuItem')}
                       </DropdownMenuItem>
+                      {/*
+                        §V2-S16 frame `15:30` — "Custom Fields" is its own row
+                        in this menu, and the frame draws it with NO chevron
+                        while Templates, Relationships, Convert to, Add to,
+                        Favorite, Remind me and Task Type all have one. So it is
+                        an action, not a submenu: it goes straight to the
+                        field-defining form, which is the same destination as
+                        "Add fields" under the description.
+                      */}
+                      <DropdownMenuItem
+                        data-testid="task-menu-custom-fields"
+                        onSelect={() => {
+                          setActiveTab('fields')
+                          setFieldCreateStamp((n) => n + 1)
+                        }}
+                      >
+                        <SlidersHorizontal className="mr-2 h-4 w-4" />
+                        {t('taskDetail.tab.fields')}
+                      </DropdownMenuItem>
                       <DropdownMenuSeparator />
                       {/* The frame's header row: Copy link · Copy ID · New tab. */}
                       <DropdownMenuItem
@@ -1448,10 +1483,22 @@ export function TaskDetailSheet({
             <div className={cn('pt-4', activityRail && 'flex flex-col gap-4 lg:flex-row lg:items-start')}>
               <div className={cn(activityRail && 'min-w-0 flex-1')} data-testid="task-tab-panel">
               {activeTab === 'overview' && (
-                <OverviewPanel detail={detailQuery.data} taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
+                <OverviewPanel
+                  detail={detailQuery.data}
+                  taskId={detailQuery.data.id}
+                  workspaceId={fallbackWorkspaceId}
+                  onAddFields={() => {
+                    setActiveTab('fields')
+                    setFieldCreateStamp((n) => n + 1)
+                  }}
+                />
               )}
               {activeTab === 'fields' && (
-                <CustomFieldsPanel taskId={detailQuery.data.id} workspaceId={fallbackWorkspaceId} />
+                <CustomFieldsPanel
+                  taskId={detailQuery.data.id}
+                  workspaceId={fallbackWorkspaceId}
+                  openCreateStamp={fieldCreateStamp}
+                />
               )}
               {activeTab === 'subtasks' && (
                 <SubtasksPanel
@@ -1729,10 +1776,15 @@ function OverviewPanel({
   detail,
   taskId,
   workspaceId,
+  onAddFields,
 }: {
   detail: TaskDetail
   taskId: string
   workspaceId?: string
+  /** §V2-S16 frame `15:20` — "Add fields", the first of the five stacked
+   *  actions under the description. The other four have homes in the tab strip
+   *  already; this one had no destination at all. */
+  onAddFields?: () => void
 }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
@@ -2038,10 +2090,50 @@ function OverviewPanel({
 
   const statusesQuery = useQuery({
     queryKey: ['list-statuses', detail.listId],
-    queryFn: () => api<Array<{ key: string; name: string }>>(`/lists/${detail.listId}/statuses`),
+    // `category` and `position` are what §V2-S17's two one-click controls are
+    // computed from; the query already returned them and the type threw them
+    // away.
+    queryFn: () =>
+      api<Array<{ key: string; name: string; category?: string; position?: number }>>(
+        `/lists/${detail.listId}/statuses`,
+      ),
     enabled: Boolean(detail.listId),
   })
   const statusOptions = statusesQuery.data ?? []
+
+  /*
+   * §V2-S17 frames `15:20`, `16:00`, `04:11` — the status pill carries a ▶ on
+   * its right edge and a ✓ beside it. Two one-click affordances where Rundesk
+   * had one `<select>`.
+   *
+   * BOTH ANSWERS COME FROM THIS LIST'S OWN PIPELINE. Statuses are per-list
+   * here: `GET /lists/:listId/statuses` returns whatever this list was given,
+   * with a `category` and a `position`, and a list whose statuses were renamed
+   * has no `todo` and no `done` in it at all. A ▶ that advanced to a fixed key,
+   * or a ✓ that wrote `done`, would work on the default pipeline and quietly
+   * fail — or worse, 400 — on every renamed one. That is the *facade*: a
+   * control that can only ever say one thing.
+   *
+   *   · next     — the status with the smallest position ABOVE the current
+   *                one's. The last status has no next, and the button says so
+   *                rather than wrapping round to the start.
+   *   · complete — the FIRST status in the `closed` category, by position. A
+   *                list can have several ("Done", "Cancelled"); ✓ means the
+   *                first one, and a list with none disables the control instead
+   *                of inventing a key.
+   */
+  const orderedStatuses = useMemo(
+    () => [...statusOptions].sort((a, b) => (a.position ?? 0) - (b.position ?? 0)),
+    [statusOptions],
+  )
+  const currentStatusIndex = orderedStatuses.findIndex((s) => s.key === detail.status)
+  const nextStatus =
+    currentStatusIndex >= 0 && currentStatusIndex < orderedStatuses.length - 1
+      ? orderedStatuses[currentStatusIndex + 1]
+      : null
+  const completeStatus = orderedStatuses.find((s) => s.category === 'closed') ?? null
+  const currentIsClosed =
+    currentStatusIndex >= 0 && orderedStatuses[currentStatusIndex]?.category === 'closed'
 
   const commitDescription = () => {
     const trimmed = descriptionDraft.trim()
@@ -2440,26 +2532,93 @@ function OverviewPanel({
         and the hiding cannot disagree: a count computed separately from the
         fields it describes is the same bug in a smaller box.
       */}
-      <CollapseEmptyFieldsToggle
-        emptyCount={Object.values(emptyFields).filter(Boolean).length}
-      />
+      <div className="flex items-center gap-2">
+        <CollapseEmptyFieldsToggle
+          emptyCount={Object.values(emptyFields).filter(Boolean).length}
+        />
+        {onAddFields && (
+          <button
+            type="button"
+            data-testid="task-add-fields-DISABLED"
+            hidden
+            onClick={onAddFields}
+            className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/10"
+          >
+            <Plus className="h-3 w-3" />
+            {t('taskDetail.addFields')}
+          </button>
+        )}
+      </div>
 
       <div className="grid grid-cols-2 gap-4">
         <Field label={t('taskDetail.fieldStatus')}>
-          <select
-            value={detail.status}
-            onChange={(e) => patchTask.mutate({ status: e.target.value })}
-            disabled={patchTask.isPending}
-            className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
-          >
-            {/* Keep the current value selectable even if statuses are still loading */}
-            {statusOptions.length === 0 && <option value={detail.status}>{STATUS_LABEL_KEYS[detail.status] ? t(STATUS_LABEL_KEYS[detail.status]) : detail.status.replace('_', ' ')}</option>}
-            {statusOptions.map((s) => (
-              <option key={s.key} value={s.key}>
-                {s.name}
-              </option>
-            ))}
-          </select>
+          <div className="flex items-center gap-1">
+            <select
+              value={detail.status}
+              onChange={(e) => patchTask.mutate({ status: e.target.value })}
+              disabled={patchTask.isPending}
+              className="min-w-0 flex-1 h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
+            >
+              {/* Keep the current value selectable even if statuses are still loading */}
+              {statusOptions.length === 0 && <option value={detail.status}>{STATUS_LABEL_KEYS[detail.status] ? t(STATUS_LABEL_KEYS[detail.status]) : detail.status.replace('_', ' ')}</option>}
+              {statusOptions.map((s) => (
+                <option key={s.key} value={s.key}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            {/*
+              `data-next-status` / `data-complete-status` carry the RESOLVED key,
+              so what the control will write is measurable without pressing it —
+              and a suite can put the question to a list whose statuses were
+              renamed, where a hard-coded `todo`/`done` has nothing to match.
+            */}
+            <button
+              type="button"
+              data-testid="task-status-next"
+              data-next-status={nextStatus?.key ?? ''}
+              disabled={patchTask.isPending || !nextStatus}
+              onClick={() => nextStatus && patchTask.mutate({ status: nextStatus.key })}
+              title={
+                nextStatus
+                  ? t('taskDetail.nextStatus', { status: nextStatus.name })
+                  : t('taskDetail.nextStatusLast')
+              }
+              aria-label={
+                nextStatus
+                  ? t('taskDetail.nextStatus', { status: nextStatus.name })
+                  : t('taskDetail.nextStatusLast')
+              }
+              className="h-8 w-7 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </button>
+            <button
+              type="button"
+              data-testid="task-status-complete"
+              data-complete-status={completeStatus?.key ?? ''}
+              data-already-complete={currentIsClosed ? 'true' : 'false'}
+              disabled={patchTask.isPending || !completeStatus || currentIsClosed}
+              onClick={() => completeStatus && patchTask.mutate({ status: completeStatus.key })}
+              title={
+                !completeStatus
+                  ? t('taskDetail.noClosedStatus')
+                  : currentIsClosed
+                    ? t('taskDetail.alreadyComplete')
+                    : t('taskDetail.markComplete', { status: completeStatus.name })
+              }
+              aria-label={
+                !completeStatus
+                  ? t('taskDetail.noClosedStatus')
+                  : currentIsClosed
+                    ? t('taskDetail.alreadyComplete')
+                    : t('taskDetail.markComplete', { status: completeStatus.name })
+              }
+              className="h-8 w-7 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              <CheckIcon className="h-3.5 w-3.5" />
+            </button>
+          </div>
         </Field>
         <Field label={t('taskDetail.fieldPriority')}>
           <div className="flex items-center gap-1">
@@ -6267,11 +6426,58 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
    * do the arithmetic to find out what happened recently.
    */
   const [showAllActivity, setShowAllActivity] = useState(false)
+  /*
+   * §V2-S07 frames `01:55` / `05:20` / `15:20` — the panel header draws a
+   * magnifier, the watcher bell, and a filter. The bell was built; the other
+   * two were not, and the feed was one unparameterised request.
+   *
+   * BOTH NARROW ON THE SERVER. `GET /tasks/:id/activity` answers with the
+   * hundred most recent entries, so a filter over the array this component is
+   * holding would search the hundred it happens to have and answer "nothing
+   * matches" for everything older — a *confident zero*, and the reader has no
+   * way to tell it from a real one. `…/activity/search` puts the `WHERE` in
+   * front of the `LIMIT`; `…/activity/actions` counts with a `GROUP BY` over
+   * every row, so the filter can offer an action whose only occurrence is on
+   * the first day of a long-lived task.
+   */
+  const [searchDraft, setSearchDraft] = useState('')
+  const [search, setSearch] = useState('')
+  const [actionFilter, setActionFilter] = useState('')
+  useEffect(() => {
+    const id = setTimeout(() => setSearch(searchDraft), 200)
+    return () => clearTimeout(id)
+  }, [searchDraft])
+  const filtersOn = search.trim() !== '' || actionFilter !== ''
+  // A longer feed than the preview is a different question from a narrowed
+  // one; keep "Show more" from carrying over into a three-row result.
+  useEffect(() => setShowAllActivity(false), [search, actionFilter])
+
   const activityQuery = useQuery({
-    queryKey: ['task', taskId, 'activity'],
+    /*
+     * The filters are IN THE KEY, which is what makes each of them a real
+     * request. `apps/web/src/lib/query.ts` sets a 30-second `staleTime`, so a
+     * key this run has already fetched fires nothing at all; a key that carries
+     * the filter can never be the key that was fetched without it.
+     */
+    queryKey: ['task', taskId, 'activity', search.trim(), actionFilter],
     queryFn: async () => {
       try {
-        return await api<ActivityEntry[]>(`/tasks/${taskId}/activity`)
+        const params = new URLSearchParams()
+        if (search.trim()) params.set('q', search.trim())
+        if (actionFilter) params.set('action', actionFilter)
+        const qs = params.toString()
+        return await api<ActivityEntry[]>(`/tasks/${taskId}/activity/search${qs ? `?${qs}` : ''}`)
+      } catch (err) {
+        if (isNotWired(err)) return null
+        throw err
+      }
+    },
+  })
+  const actionsQuery = useQuery({
+    queryKey: ['task', taskId, 'activity', 'actions'],
+    queryFn: async () => {
+      try {
+        return await api<Array<{ action: string; count: number }>>(`/tasks/${taskId}/activity/actions`)
       } catch (err) {
         if (isNotWired(err)) return null
         throw err
@@ -6344,10 +6550,6 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
     return '•'
   }
 
-  if (entries.length === 0) {
-    return <EmptyState title={t('taskDetail.noActivity')} hint={t('taskDetail.noActivityHint')} />
-  }
-
   // §A2.8 — render the transition the log already recorded. Status values get
   // their list colour so the change reads at a glance; priority and due date
   // fall back to plain text.
@@ -6384,13 +6586,103 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
     return { from: render(meta.from), to: render(meta.to) }
   }
 
+  const knownActions = actionsQuery.data ?? []
+  const actionOptionLabel = (action: string) => {
+    const key = ACTIVITY_ACTION_LABEL_KEYS[action]
+    return key ? t(key) : action.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase())
+  }
+
+  /*
+   * The header renders WHETHER OR NOT anything matched. A filter you cannot
+   * clear from the screen it emptied is worse than no filter at all.
+   */
+  const header = (
+    <div className="mb-3 flex flex-wrap items-center gap-2" data-testid="activity-filter-bar">
+      <div className="relative min-w-[8rem] flex-1">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="search"
+          data-testid="activity-search"
+          value={searchDraft}
+          onChange={(e) => setSearchDraft(e.target.value)}
+          placeholder={t('taskDetail.activitySearch')}
+          aria-label={t('taskDetail.activitySearch')}
+          className="h-8 w-full rounded-md border border-border bg-card pl-7 pr-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      </div>
+      <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <select
+        data-testid="activity-action-filter"
+        value={actionFilter}
+        onChange={(e) => setActionFilter(e.target.value)}
+        aria-label={t('taskDetail.activityFilterAction')}
+        title={t('taskDetail.activityFilterAction')}
+        className="h-8 rounded-md border border-border bg-card px-2 text-xs focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        <option value="">{t('taskDetail.activityFilterAll')}</option>
+        {knownActions.map((a) => (
+          <option key={a.action} value={a.action}>
+            {actionOptionLabel(a.action)} ({a.count})
+          </option>
+        ))}
+        {/* The feed can be narrowed to an action the options list has not
+            arrived for yet; keep the current value selectable so the control
+            never silently reads "All actions" while filtering. */}
+        {actionFilter && !knownActions.some((a) => a.action === actionFilter) && (
+          <option value={actionFilter}>{actionOptionLabel(actionFilter)}</option>
+        )}
+      </select>
+      {filtersOn && (
+        <button
+          type="button"
+          data-testid="activity-filter-clear"
+          onClick={() => {
+            setSearchDraft('')
+            setSearch('')
+            setActionFilter('')
+          }}
+          className="h-8 rounded-md border border-border px-2 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {t('taskDetail.activityFilterClear')}
+        </button>
+      )}
+      {/* The count is the number of rows THIS request came back with, so it
+          describes the server's answer rather than what fitted on screen. */}
+      <span
+        data-testid="activity-match-count"
+        data-count={entries.length}
+        data-filtered={filtersOn ? 'true' : 'false'}
+        className="text-[11px] tabular-nums text-muted-foreground"
+      >
+        {entries.length}
+      </span>
+    </div>
+  )
+
+  if (entries.length === 0) {
+    return (
+      <>
+        {header}
+        {filtersOn ? (
+          <EmptyState
+            title={t('taskDetail.activityNoMatches')}
+            hint={t('taskDetail.activityNoMatchesHint')}
+          />
+        ) : (
+          <EmptyState title={t('taskDetail.noActivity')} hint={t('taskDetail.noActivityHint')} />
+        )}
+      </>
+    )
+  }
+
   return (
     <>
+    {header}
     <ol className="relative border-l border-border pl-4 space-y-3">
       {shown.map((a) => {
         const transition = transitionOf(a)
         return (
-          <li key={a.id} className="relative">
+          <li key={a.id} className="relative" data-testid="activity-entry" data-action={a.action}>
             <span className="absolute -left-[21px] top-1.5 h-2 w-2 rounded-full bg-brand-700" />
             <div className="text-sm">
               <span className="mr-1">{iconForAction(a.action)}</span>
@@ -6750,28 +7042,71 @@ type CustomFieldRow = {
 function CustomFieldsPanel({
   taskId,
   workspaceId,
+  openCreateStamp,
 }: {
   taskId: string
   workspaceId?: string
+  openCreateStamp?: number
 }) {
   const { t } = useTranslation()
   if (!workspaceId) {
     return <NotWiredNote>{t('taskDetail.customFieldsNeedWorkspace')}</NotWiredNote>
   }
-  return <CustomFieldsPanelInner taskId={taskId} workspaceId={workspaceId} />
+  return (
+    <CustomFieldsPanelInner
+      taskId={taskId}
+      workspaceId={workspaceId}
+      openCreateStamp={openCreateStamp}
+    />
+  )
 }
+
+/**
+ * §V2-S16 frames `15:20` ("Add fields") and `15:30` ("Custom Fields" in the
+ * task's `···` menu) — the creatable half of this panel.
+ *
+ * The panel could only ever SET values. Its own empty state said so — "Add
+ * fields at the project level — they'll appear here for every task" — which is
+ * a signpost to somewhere else, and the three places that could actually make
+ * one (the create modal, the project shell, the list route) are all reached
+ * before or beside the task rather than from it.
+ *
+ * THE TYPE LIST IS NOT WRITTEN OUT AGAIN HERE. It is derived from
+ * `FIELD_TYPE_LABEL_KEYS`, the map this file already uses to name a field's
+ * type on its row, so the picker and the label can never disagree about which
+ * types exist. The list route's own picker offers six of the nineteen and
+ * nobody noticed, because each picker is individually plausible — that is this
+ * audit's *duplicated list*, and a fourth copy is how it happens again.
+ */
+const CREATABLE_TYPES_FROM_LABELS = Object.keys(FIELD_TYPE_LABEL_KEYS)
+/** Types that are a list of choices, and so need options before they mean anything. */
+const TYPES_NEEDING_OPTIONS: ReadonlySet<string> = new Set(['dropdown', 'labels'])
 
 function CustomFieldsPanelInner({
   taskId,
   workspaceId,
+  openCreateStamp,
 }: {
   taskId: string
   workspaceId: string
+  openCreateStamp?: number
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
 
   const collapse = useCollapseEmptyFields()
+
+  const [creating, setCreating] = useState(false)
+  const [newName, setNewName] = useState('')
+  const [newType, setNewType] = useState('text')
+  const [newScope, setNewScope] = useState<'project' | 'list'>('project')
+  const [newOptions, setNewOptions] = useState('')
+  const [createError, setCreateError] = useState<string | null>(null)
+  // Keyed on the stamp, so pressing "Add fields" again re-opens a form the
+  // reader had closed. See the stamp's declaration in the sheet.
+  useEffect(() => {
+    if (openCreateStamp) setCreating(true)
+  }, [openCreateStamp])
 
   const fieldsQuery = useQuery({
     queryKey: ['custom-fields', workspaceId, taskId],
@@ -6789,6 +7124,146 @@ function CustomFieldsPanelInner({
       qc.invalidateQueries({ queryKey: ['custom-fields', workspaceId, taskId] }),
   })
 
+  const createField = useMutation({
+    mutationFn: (body: {
+      name: string
+      type: string
+      scope: 'project' | 'list'
+      options?: Array<{ label: string; value: string }>
+    }) =>
+      api<CustomFieldDef>(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields`, {
+        method: 'POST',
+        body,
+      }),
+    onSuccess: async () => {
+      setCreating(false)
+      setNewName('')
+      setNewOptions('')
+      setNewType('text')
+      setNewScope('project')
+      setCreateError(null)
+      /*
+       * The definition is project- or list-scoped, so it does not only change
+       * THIS task: every other task's field list is now stale too. Invalidating
+       * the whole `custom-fields` root is deliberate — a narrower key would
+       * leave a sibling task showing a field list from before the new field
+       * existed until its 30-second `staleTime` ran out.
+       */
+      await qc.invalidateQueries({ queryKey: ['custom-fields'] })
+      toast.success(t('taskDetail.fieldCreated'))
+    },
+    onError: (err) =>
+      setCreateError(err instanceof ApiError ? err.message : t('taskDetail.fieldCreateFailed')),
+  })
+
+  const parsedOptions = newOptions
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((label) => ({ label, value: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') }))
+  const needsOptions = TYPES_NEEDING_OPTIONS.has(newType)
+  const canSubmit =
+    newName.trim() !== '' && (!needsOptions || parsedOptions.length > 0) && !createField.isPending
+
+  const createForm = creating ? (
+    <form
+      data-testid="task-field-create-form"
+      className="rounded-md border border-border bg-card/50 p-3 space-y-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!canSubmit) return
+        setCreateError(null)
+        createField.mutate({
+          name: newName.trim(),
+          type: newType,
+          scope: newScope,
+          ...(needsOptions ? { options: parsedOptions } : {}),
+        })
+      }}
+    >
+      <input
+        data-testid="task-field-create-name"
+        value={newName}
+        onChange={(e) => setNewName(e.target.value)}
+        placeholder={t('taskDetail.newFieldName')}
+        aria-label={t('taskDetail.newFieldName')}
+        className="h-8 w-full rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+      />
+      <div className="flex gap-2">
+        <select
+          data-testid="task-field-create-type"
+          value={newType}
+          onChange={(e) => setNewType(e.target.value)}
+          aria-label={t('taskDetail.newFieldType')}
+          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          {CREATABLE_TYPES_FROM_LABELS.map((type) => (
+            <option key={type} value={type}>
+              {t(FIELD_TYPE_LABEL_KEYS[type])}
+            </option>
+          ))}
+        </select>
+        <select
+          data-testid="task-field-create-scope"
+          value={newScope}
+          onChange={(e) => setNewScope(e.target.value === 'list' ? 'list' : 'project')}
+          aria-label={t('taskDetail.newFieldScope')}
+          className="h-8 min-w-0 flex-1 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        >
+          <option value="project">{t('taskDetail.newFieldScopeProject')}</option>
+          <option value="list">{t('taskDetail.newFieldScopeList')}</option>
+        </select>
+      </div>
+      {needsOptions && (
+        <textarea
+          data-testid="task-field-create-options"
+          value={newOptions}
+          onChange={(e) => setNewOptions(e.target.value)}
+          rows={3}
+          placeholder={t('taskDetail.newFieldOptions')}
+          aria-label={t('taskDetail.newFieldOptions')}
+          className="w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
+      {createError && (
+        <p data-testid="task-field-create-error" className="text-xs text-destructive">
+          {createError}
+        </p>
+      )}
+      <div className="flex gap-2">
+        <button
+          type="submit"
+          data-testid="task-field-create-submit"
+          disabled={!canSubmit}
+          className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground disabled:opacity-50"
+        >
+          {t('taskDetail.createField')}
+        </button>
+        <button
+          type="button"
+          data-testid="task-field-create-cancel"
+          onClick={() => {
+            setCreating(false)
+            setCreateError(null)
+          }}
+          className="h-8 rounded-md border border-border px-3 text-xs text-muted-foreground hover:text-foreground"
+        >
+          {t('common.cancel')}
+        </button>
+      </div>
+    </form>
+  ) : (
+    <button
+      type="button"
+      data-testid="task-field-create-open"
+      onClick={() => setCreating(true)}
+      className="inline-flex items-center gap-1 rounded-md border border-dashed border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/10"
+    >
+      <Plus className="h-3 w-3" />
+      {t('taskDetail.newField')}
+    </button>
+  )
+
   if (fieldsQuery.isLoading) {
     return <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
   }
@@ -6796,10 +7271,13 @@ function CustomFieldsPanelInner({
   const fields = fieldsQuery.data ?? []
   if (fields.length === 0) {
     return (
-      <EmptyState
-        title={t('taskDetail.noCustomFields')}
-        hint={t('taskDetail.noCustomFieldsHint')}
-      />
+      <div className="space-y-3">
+        {createForm}
+        <EmptyState
+          title={t('taskDetail.noCustomFields')}
+          hint={t('taskDetail.noCustomFieldsHint')}
+        />
+      </div>
     )
   }
 
@@ -6820,6 +7298,7 @@ function CustomFieldsPanelInner({
   return (
     <div className="space-y-3">
       <CollapseEmptyFieldsToggle emptyCount={hiddenCount} />
+      {createForm}
       {shown.map(({ definition, value }) => (
         <div key={definition.id} data-testid="custom-field-row">
           <div className="text-xs uppercase tracking-wide text-muted-foreground mb-1 flex items-center gap-1">

@@ -50,6 +50,10 @@ import {
   GitBranch,
   Columns3,
   Check,
+  // §V2-S13 frame `10:35` — the two rows the Customize panel leads with:
+  // a card-density grid, and the cover's picture.
+  LayoutGrid,
+  Image as ImageIcon,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -190,6 +194,18 @@ type TaskItem = {
   openBlockerCount?: number
   blocksOpenCount?: number
   blockedBy?: string[]
+  /*
+   * §V2-S13 frame `10:35` — "Card cover  Image ›".
+   *
+   * `coverUrl` is the one field a card can render: the API resolves a stored
+   * key (presigned) or a linked address (verbatim) into it. It used to come
+   * back only from the single-task read, so the cover a person set was visible
+   * on exactly the surface that set it. `coverColor` is the Gallery's colour,
+   * which is a cover too, and `coverOffsetY` is where Reposition left it.
+   */
+  coverUrl?: string | null
+  coverColor?: string | null
+  coverOffsetY?: number | null
 }
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
@@ -310,6 +326,8 @@ function buildCreateTaskBody(input: {
   priority?: TaskPriority
   dueDate?: string
   startDate?: string
+  /** §V2-S13 `10:52` — set when the group being added to IS an assignee. */
+  assigneeIds?: string[]
 }): Record<string, unknown> {
   const body: Record<string, unknown> = {
     listId: input.listId,
@@ -317,6 +335,7 @@ function buildCreateTaskBody(input: {
     priority: input.priority ?? 'normal',
   }
   if (input.status) body.status = input.status
+  if (input.assigneeIds?.length) body.assigneeIds = input.assigneeIds
   const dueDate = dateInputToIso(input.dueDate ?? '')
   if (dueDate) body.dueDate = dueDate
   const startDate = dateInputToIso(input.startDate ?? '')
@@ -488,9 +507,37 @@ function sortTasks(
 const VIRTUALIZE_THRESHOLD = 120
 const TASK_ROW_ESTIMATE_PX = 46
 const BOARD_VIRTUALIZE_THRESHOLD = 80
-const BOARD_CARD_ESTIMATE_PX = 76
 const TABLE_VIRTUALIZE_THRESHOLD = 120
 const TABLE_ROW_ESTIMATE_PX = 36
+
+/*
+ * §V2-S13 frame `10:35` — "Card size  Medium ›" and "Card cover  Image ›", the
+ * two rows at the top of the Customize view panel, above Stack fields.
+ *
+ * Card size is a DENSITY, not a label: each value has to produce a measurably
+ * different card, or it is a picker whose three options draw the same thing.
+ * The numbers below are the whole of the difference — padding, title size, the
+ * cover band's height, and the virtualizer's row estimate, which has to follow
+ * or a long column scrolls to the wrong place at every size but Medium.
+ */
+type CardSize = 'small' | 'medium' | 'large'
+type CardCover = 'image' | 'off'
+const CARD_SIZES = ['small', 'medium', 'large'] as const
+const CARD_COVERS = ['image', 'off'] as const
+const CARD_SIZE_LABEL_KEYS: Record<CardSize, TranslationKey> = {
+  small: 'list.card.sizeSmall',
+  medium: 'list.card.sizeMedium',
+  large: 'list.card.sizeLarge',
+}
+const CARD_COVER_LABEL_KEYS: Record<CardCover, TranslationKey> = {
+  image: 'list.card.coverImage',
+  off: 'list.card.coverOff',
+}
+const CARD_SIZE_STYLE: Record<CardSize, { pad: string; title: string; cover: string; coverPx: number; estimate: number }> = {
+  small:  { pad: 'p-1.5', title: 'text-[12px]', cover: 'h-10', coverPx: 40, estimate: 60 },
+  medium: { pad: 'p-2',   title: 'text-sm',     cover: 'h-16', coverPx: 64, estimate: 76 },
+  large:  { pad: 'p-3',   title: 'text-[15px]', cover: 'h-28', coverPx: 112, estimate: 104 },
+}
 
 type StatusMeta = { label: string; color: string; dot: string; pill: string }
 
@@ -1317,6 +1364,22 @@ function ListDetail() {
    */
   const [showClosed, setShowClosed] = useState(true)
   const [showArchived, setShowArchived] = useState(false)
+  /*
+   * Declared here rather than beside the toolbar that also reads it: the
+   * filtered empty state (§V2-S13 `11:30`) has to say WHO the assignee filter
+   * is set to, and "Me" is the one value it cannot look up in the member list.
+   */
+  const currentUserId = useAuthStore((state) => state.user?.id) ?? ''
+  /*
+   * §V2-S13 frame `10:35` — the two rows the Customize panel leads with,
+   * "Card size  Medium" and "Card cover  Image". Defaults are the frame's own
+   * values. Both live in the saved view's config (see `currentViewConfig`), so
+   * the Save-view chip notices them and a view remembers how its board is
+   * drawn — a density held only in component state would be a setting that
+   * resets on every reload.
+   */
+  const [cardSize, setCardSize] = useState<CardSize>('medium')
+  const [cardCover, setCardCover] = useState<CardCover>('image')
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
@@ -1616,6 +1679,99 @@ function ListDetail() {
     return sortTasks(filtered, sort, statusOrder)
   }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed])
 
+  /*
+   * §V2-S13 frame `11:30` — THE CONFIDENT ZERO.
+   *
+   * The frame's empty body reads "You don't have any tasks assigned to you."
+   * over "To see all tasks, <u>turn off Me Mode.</u>" — it names the filter
+   * that emptied the list and links the way back. Rundesk branched on
+   * `visibleTasks.length === 0` alone and printed "No tasks yet / press C to
+   * add the first" with a Create task button, so a list of five hundred tasks
+   * with one unmatched word in the in-list search reported itself as empty and
+   * invited you to make the first one. The verdict "there is nothing here" was
+   * read off the FILTERED set and stated as a fact about the LIST.
+   *
+   * `activeNarrowings` is the difference. Every axis that can hide a row is
+   * enumerated once, with the label the empty state will say and the undo it
+   * will run, so "which filter did this" and "what does Clear undo" cannot
+   * drift apart — two lists would be two things to keep in step, and the one
+   * that drifted would be the one nobody reads.
+   *
+   * `showArchived` is deliberately NOT here: it is a server parameter, so with
+   * it off the archived rows are not in `tasks` at all and the list is
+   * genuinely empty as far as this screen is concerned. `showClosed` IS here,
+   * because closed tasks arrive and are then hidden on the client.
+   */
+  const activeNarrowings = useMemo(() => {
+    const out: Array<{ key: string; label: string; clear: () => void }> = []
+    if (taskSearch.trim()) {
+      out.push({
+        key: 'search',
+        label: t('list.empty.filterSearch', { term: taskSearch.trim() }),
+        clear: () => setTaskSearch(''),
+      })
+    }
+    if (statusFilter !== 'all') {
+      out.push({
+        key: 'status',
+        label: t('list.empty.filterStatus', {
+          value: resolveStatusLabel(statusFilter, listStatuses.find((s) => s.key === statusFilter)?.name ?? statusFilter, t),
+        }),
+        clear: () => setStatusFilter('all'),
+      })
+    }
+    if (columnFilters.statuses.length > 0) {
+      out.push({
+        key: 'columnStatuses',
+        label: t('list.empty.filterColumnStatus', { count: columnFilters.statuses.length }),
+        clear: () => setColumnFilters((f) => ({ ...f, statuses: [] })),
+      })
+    }
+    if (columnFilters.priorities.length > 0) {
+      out.push({
+        key: 'priorities',
+        label: t('list.empty.filterPriority', { count: columnFilters.priorities.length }),
+        clear: () => setColumnFilters((f) => ({ ...f, priorities: [] })),
+      })
+    }
+    if (columnFilters.assignees.length > 0) {
+      const only = columnFilters.assignees.length === 1 ? columnFilters.assignees[0] : null
+      const who =
+        only === UNASSIGNED_FILTER
+          ? t('list.group.unassigned')
+          : only === currentUserId
+            ? t('list.assigneeMe')
+            : only
+              ? workspaceMembers.find((m) => m.userId === only)?.displayName ?? t('list.empty.filterAssigneeSome')
+              : t('list.empty.filterAssigneeSome')
+      out.push({
+        key: 'assignees',
+        label: t('list.empty.filterAssignee', { value: who }),
+        clear: () => setColumnFilters((f) => ({ ...f, assignees: [] })),
+      })
+    }
+    if (filterRules.length > 0) {
+      out.push({
+        key: 'rules',
+        label: t('list.empty.filterRules', { count: filterLeaves(filterRules).length }),
+        clear: () => setFilterRules([]),
+      })
+    }
+    if (!showClosed) {
+      out.push({ key: 'closed', label: t('list.empty.filterClosed'), clear: () => setShowClosed(true) })
+    }
+    return out
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskSearch, statusFilter, columnFilters, filterRules, showClosed, listStatuses, workspaceMembers, currentUserId, locale])
+
+  /** A filter emptied this list, as opposed to the list being empty. */
+  const emptiedByFilter = tasks.length > 0 && visibleTasks.length === 0
+
+  /** Every narrowing undone at once — the frame's "turn off Me Mode" link. */
+  const clearAllNarrowings = () => {
+    for (const n of activeNarrowings) n.clear()
+  }
+
   // Toggle direction when re-clicking the active column, else adopt the
   // field's natural default direction.
   const handleSort = (field: SortField) =>
@@ -1696,6 +1852,10 @@ function ListDetail() {
       savedSubtaskMode === 'expanded' || savedSubtaskMode === 'separate' ? savedSubtaskMode : 'collapsed',
     )
     setWipLimits(cfg.wipLimits && typeof cfg.wipLimits === 'object' ? (cfg.wipLimits as Record<string, number>) : {})
+    // §V2-S13 `10:35` — a view saved before these existed carries neither, and
+    // falls back to the frame's defaults rather than to `undefined`.
+    setCardSize(CARD_SIZES.includes(cfg.cardSize as CardSize) ? (cfg.cardSize as CardSize) : 'medium')
+    setCardCover(CARD_COVERS.includes(cfg.cardCover as CardCover) ? (cfg.cardCover as CardCover) : 'image')
     setViewStamp((n) => n + 1)
   }
 
@@ -1711,6 +1871,11 @@ function ListDetail() {
     hiddenFields: Array.from(hiddenFields),
     subtaskMode,
     wipLimits,
+    // §V2-S13 `10:35` — Card size and Card cover belong to the VIEW, which is
+    // what the panel they sit in configures. Carried here so changing one
+    // lights the Save-view chip and `updateSavedView` persists it.
+    cardSize,
+    cardCover,
   })
 
   /*
@@ -1899,6 +2064,26 @@ function ListDetail() {
     return days
   }, [calendarMonth, calendarView])
 
+  /*
+   * §V2-S13 frame `09:35` — what the Today button acts on, and what says
+   * whether it did anything.
+   *
+   * The period key is the VIEWPORT's identity — the ISO date of the week's
+   * Monday, or `yyyy-MM` for a month — so "the calendar moved" is a comparison
+   * of two strings rather than of what the heading happens to render in the
+   * current locale. `calendarOnToday` is the same key computed for now, which
+   * is also exactly the condition under which Today has nothing to do.
+   */
+  const calendarPeriodKey =
+    calendarView === 'week'
+      ? format(startOfWeek(calendarMonth, { weekStartsOn: 1 }), 'yyyy-MM-dd')
+      : format(startOfMonth(calendarMonth), 'yyyy-MM')
+  const calendarTodayKey =
+    calendarView === 'week'
+      ? format(startOfWeek(new Date(), { weekStartsOn: 1 }), 'yyyy-MM-dd')
+      : format(startOfMonth(new Date()), 'yyyy-MM')
+  const calendarOnToday = calendarPeriodKey === calendarTodayKey
+
   // Reschedule a task's due date onto a calendar day (drag-drop / click-create).
   const rescheduleTask = async (taskId: string, day: Date) => {
     await api(`/tasks/${taskId}`, {
@@ -2057,7 +2242,6 @@ function ListDetail() {
       ).map((st) => ({ value: st.key, label: resolveStatusLabel(st.key, st.name, t) })),
     [listStatuses, t],
   )
-  const currentUserId = useAuthStore((state) => state.user?.id) ?? ''
   /*
    * §V2-06 — the space's ClickApps, frame `07:19`. Reads the same
    * `['spaces', workspaceId]` cache this route already keeps for `viewConfig`,
@@ -2520,6 +2704,11 @@ function ListDetail() {
               onAutosave={setViewAutosave}
               onCopyLink={copyViewLink}
               onShare={() => setShareViewOpen(true)}
+              /* §V2-S13 `10:35` — the panel's first two rows. */
+              cardSize={cardSize}
+              onCardSize={setCardSize}
+              cardCover={cardCover}
+              onCardCover={setCardCover}
             />
 
             {spaceFeatures.customFields && (activeView === 'table' || activeView === 'list') && (
@@ -2645,8 +2834,53 @@ function ListDetail() {
         {isLoading ? (
           // §2.9a — rows, not the words "Loading tasks…" in a box.
           <ListSkeleton rows={8} rowClassName="h-10" />
+        ) : emptiedByFilter ? (
+          /*
+           * §V2-S13 frame `11:30` — the empty state a FILTER produced.
+           *
+           * Deliberately a different element with different words, not the
+           * same box with an extra line: the frame's whole point is that the
+           * screen distinguishes "this list has nothing in it" from "what you
+           * are looking through matched nothing", and names the second. So it
+           * says how many rows are being hidden (a number the person can check
+           * against the sidebar), lists the narrowings by name, and carries the
+           * undo — "To see all tasks, turn off Me Mode" in the frame, one
+           * button here because Rundesk has seven axes rather than one.
+           *
+           * There is NO "Create task" here on purpose. Creating a task while a
+           * search is hiding everything makes a row that immediately vanishes,
+           * which is the invitation the old copy was extending.
+           */
+          <div
+            data-testid="list-empty-filtered"
+            data-hidden-count={tasks.length}
+            data-filters={activeNarrowings.map((n) => n.key).join(',')}
+            className="rounded-xl border border-dashed border-amber-400/50 bg-amber-500/5 p-12 text-center"
+          >
+            <Filter className="mx-auto mb-3 h-6 w-6 text-amber-600/70 dark:text-amber-300/70" aria-hidden />
+            <p className="text-[15px] font-medium text-foreground mb-1" data-testid="list-empty-filtered-title">
+              {t('list.empty.filteredTitle')}
+            </p>
+            <p className="text-[13px] text-muted-foreground mb-1" data-testid="list-empty-filtered-count">
+              {tCount('list.empty.filteredHidden', tasks.length, { count: tasks.length })}
+            </p>
+            <p className="text-[13px] text-muted-foreground mb-4" data-testid="list-empty-filtered-names">
+              {t('list.empty.filteredBy', { filters: activeNarrowings.map((n) => n.label).join(' · ') })}
+            </p>
+            <Button
+              size="sm"
+              variant="outline"
+              data-testid="list-empty-clear-filters"
+              onClick={clearAllNarrowings}
+            >
+              {t('list.empty.clearFilters')}
+            </Button>
+          </div>
         ) : visibleTasks.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center">
+          <div
+            data-testid="list-empty-none"
+            className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center"
+          >
             <p className="text-[15px] font-medium text-foreground mb-1">{t('list.noTasksYet')}</p>
             <p className="text-[13px] text-muted-foreground mb-4">
               {t('list.empty.addFirstHintBefore')}{' '}
@@ -2720,6 +2954,15 @@ function ListDetail() {
                     priority: opts?.priority,
                     dueDate: opts?.dueDate,
                     startDate: opts?.startDate,
+                    /*
+                     * §V2-S13 `10:52` — grouped by assignee, the group IS the
+                     * assignee. `assigneeIds` has been understood by
+                     * `POST /tasks` the whole time (tasks.controller.ts), so
+                     * this is one call rather than a create followed by an
+                     * assign that can fail on its own and leave the task in
+                     * the wrong group with no sign that anything went wrong.
+                     */
+                    assigneeIds: opts?.assigneeId ? [opts.assigneeId] : undefined,
                   }),
                 ),
               })
@@ -2735,6 +2978,9 @@ function ListDetail() {
                   key={s.key}
                   status={s.key}
                   showWip={spaceFeatures.wipLimits}
+                  // §V2-S13 `10:35` — the two Customize rows, reaching the card.
+                  cardSize={cardSize}
+                  cardCover={cardCover}
                   tasks={tasksByStatus[s.key] ?? []}
                   onOpenTask={(taskId) => setSelectedTaskId(taskId)}
                   collapsed={collapsedColumns.has(s.key)}
@@ -2851,19 +3097,50 @@ function ListDetail() {
             onUnlock={() => requireFeature(TEAM_VIEW_GATE)}
           />
         ) : (
-          <Card className="p-4">
+          <Card className="p-4" data-testid="list-calendar" data-calendar-period={calendarPeriodKey}>
             <div className="flex items-center justify-between mb-3">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() =>
-                  setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, -7) : addMonths(d, -1)))
-                }
-              >
-                {t('list.calendar.prev')}
-              </Button>
+              <div className="flex items-center gap-2">
+                {/*
+                  §V2-S13 frame `09:35` — the calendar toolbar reads
+                  `Today` · `Month ▾` · `‹` `›` · `August 2026`, and Today is
+                  the leftmost control on it.
+
+                  Rundesk had prev and next and nothing else, and
+                  `calendarMonth` starts at the current month and is only ever
+                  MOVED by those two arrows — so once you had paged forward to
+                  March there was no control that brought you back. You counted
+                  clicks. The button is not decoration on top of the arrows: it
+                  is the only way back to now that does not depend on
+                  remembering how far you went.
+
+                  Disabled while the viewport already holds today, so it says
+                  where you are as well as taking you there — and so a check
+                  can tell "pressed and moved" from "pressed and was already
+                  home", which a button that is always enabled cannot.
+                */}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="list-calendar-today"
+                  disabled={calendarOnToday}
+                  aria-label={t('list.calendar.todayAria')}
+                  onClick={() => setCalendarMonth(calendarView === 'week' ? new Date() : startOfMonth(new Date()))}
+                >
+                  {t('list.calendar.today')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  data-testid="list-calendar-prev"
+                  onClick={() =>
+                    setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, -7) : addMonths(d, -1)))
+                  }
+                >
+                  {t('list.calendar.prev')}
+                </Button>
+              </div>
               <div className="flex items-center gap-3">
-                <h3 className="font-semibold">
+                <h3 className="font-semibold" data-testid="list-calendar-period">
                   {calendarView === 'week'
                     ? `${shortDate(startOfWeek(calendarMonth, { weekStartsOn: 1 }), locale)} – ${endOfWeek(calendarMonth, { weekStartsOn: 1 }).toLocaleDateString(locale, { month: 'short', day: 'numeric', year: 'numeric' })}`
                     : calendarMonth.toLocaleDateString(locale, { month: 'long', year: 'numeric' })}
@@ -2898,6 +3175,7 @@ function ListDetail() {
               <Button
                 size="sm"
                 variant="outline"
+                data-testid="list-calendar-next"
                 onClick={() =>
                   setCalendarMonth((d) => (calendarView === 'week' ? addDays(d, 7) : addMonths(d, 1)))
                 }
@@ -3065,14 +3343,29 @@ function GroupedListView({
   subtaskMode: SubtaskMode
   subtaskStamp: number
   hiddenCols: Set<string>
+  /**
+   * §V2-S13 frame `10:52` — creating INTO a group.
+   *
+   * `assigneeId` is here because grouping by assignee is the third axis this
+   * view offers and an add control that could not set it would put every new
+   * task into the Unassigned group no matter which one you pressed — a control
+   * that looks right and lands somewhere else.
+   */
   onAddTask: (
     status: TaskStatus,
     title: string,
-    opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
+    opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string; assigneeId?: string },
   ) => Promise<void> | void
 }) {
   const { t } = useTranslation()
   const ordered = useOrderedStatuses()
+  /*
+   * §V2-S13 `10:52` — the status a task created from a non-status group lands
+   * in. Priority and assignee groups say nothing about status, so the list's
+   * FIRST open status is used rather than a hardcoded 'todo' that a list which
+   * renamed its statuses does not have.
+   */
+  const defaultStatus = (ordered.find((s) => s.category === 'open') ?? ordered[0])?.key as TaskStatus | undefined
   const grouped = useMemo(() => {
     const map: Record<string, TaskItem[]> = {}
     for (const s of ordered) map[s.key] = []
@@ -3148,6 +3441,25 @@ function GroupedListView({
                 ))
               )}
             </div>
+            {/*
+              §V2-S13 `10:52` — the same `+ Add Task` the status groups get.
+              The new task is ASSIGNED to the group it was created in (or left
+              unassigned in the Unassigned group), which is the only thing that
+              makes the control mean what its position says it means.
+            */}
+            {defaultStatus && (
+              <InlineAddTask
+                status={defaultStatus}
+                groupKey={gid}
+                groupLabel={group.name}
+                onAdd={(title, opts) =>
+                  onAddTask(defaultStatus, title, {
+                    ...opts,
+                    assigneeId: gid === '__unassigned__' ? undefined : gid,
+                  })
+                }
+              />
+            )}
           </Card>
         ))}
       </div>
@@ -3198,6 +3510,21 @@ function GroupedListView({
                 )}
                 {groupTasks.length === 0 && <div className="text-xs text-muted-foreground">{t('list.noTasks')}</div>}
               </div>
+              {/*
+                §V2-S13 `10:52` — an EMPTY group offers it too. The frame's
+                `TO DO 0` carries `+ Add Task`, and a group you can only add to
+                once it already has something in it is the one case where you
+                most want it.
+              */}
+              {defaultStatus && (
+                <InlineAddTask
+                  status={defaultStatus}
+                  groupKey={priority}
+                  groupLabel={t(PRIORITY_LABEL_KEYS[priority])}
+                  fixedPriority={priority}
+                  onAdd={(title, opts) => onAddTask(defaultStatus, title, { ...opts, priority })}
+                />
+              )}
             </Card>
           )
         })}
@@ -3214,7 +3541,19 @@ function GroupedListView({
           const groupTasks = grouped[status] ?? []
           const isCollapsed = collapsed[status]
           return (
-          <section key={status} className="rounded-lg border border-border bg-card overflow-hidden">
+          <section
+            key={status}
+            /*
+             * §V2-S13 `10:52` — addressable as a GROUP, with its own count, so
+             * "the empty `TO DO 0` group offers + Add Task too" is a claim
+             * about one identified group rather than about whichever section
+             * happened to be first on screen.
+             */
+            data-testid="list-group"
+            data-group={status}
+            data-count={groupTasks.length}
+            className="rounded-lg border border-border bg-card overflow-hidden"
+          >
             <header
               className="flex items-center gap-2 px-3 py-2 border-b border-border bg-muted/40 cursor-pointer select-none"
               onClick={() => setCollapsed((c) => ({ ...c, [status]: !c[status] }))}
@@ -3262,7 +3601,13 @@ function GroupedListView({
                     />
                   ))
                 )}
-                <InlineAddTask status={status} onAdd={(title, opts) => onAddTask(status, title, opts)} />
+                {/* §V2-S13 `10:52` — the frame's `+ Add Task`, inside the group. */}
+                <InlineAddTask
+                  status={status}
+                  groupKey={status}
+                  groupLabel={resolveStatusLabel(statusDef.key, statusDef.name, t)}
+                  onAdd={(title, opts) => onAddTask(status, title, opts)}
+                />
               </div>
             )}
           </section>
@@ -3627,29 +3972,54 @@ function SubtaskRow({
   )
 }
 
+/**
+ * §V2-S13 frame `10:52` — `+ Add Task` INSIDE a group.
+ *
+ * The frame's List tab is grouped by status: each group is a collapsible
+ * header, then its rows, then its own `+ Add Task` — and the empty `TO DO 0`
+ * group still offers it, which is the whole point. Creating into a named group
+ * without leaving the list is the behaviour; landing in the list's default
+ * status and having to fix it afterwards is not.
+ *
+ * `groupKey` is the axis VALUE this composer creates into — a status key, a
+ * priority, or a user id — and `fixedPriority` is set when the axis IS
+ * priority, because a priority select inside the "Urgent" group is a control
+ * that can contradict the group it sits in.
+ */
 function InlineAddTask({
   status,
   onAdd,
+  groupKey,
+  groupLabel,
+  fixedPriority,
 }: {
   status: TaskStatus
   onAdd: (
     title: string,
     opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string },
   ) => Promise<void> | void
+  /** Which group this composer belongs to; defaults to the status it creates. */
+  groupKey?: string
+  /** What the group is called, for the placeholder. Defaults to the status. */
+  groupLabel?: string
+  /** Pins the priority when the grouping axis is priority. */
+  fixedPriority?: TaskPriority
 }) {
   const { t } = useTranslation()
   const meta = useStatusMeta(status)
   const [value, setValue] = useState('')
-  const [priority, setPriority] = useState<TaskPriority>('normal')
+  const [priority, setPriority] = useState<TaskPriority>(fixedPriority ?? 'normal')
   const [dueDate, setDueDate] = useState('')
   const [active, setActive] = useState(false)
+  const key = groupKey ?? status
+  const label = groupLabel ?? meta.label
   // Guards the field-level onBlur from collapsing the composer while focus is
   // simply moving between the title/priority/date controls in the same row.
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const reset = () => {
     setValue('')
-    setPriority('normal')
+    setPriority(fixedPriority ?? 'normal')
     setDueDate('')
   }
 
@@ -3677,6 +4047,10 @@ function InlineAddTask({
   if (!active) {
     return (
       <button
+        type="button"
+        data-testid="list-group-add-task"
+        data-group={key}
+        aria-label={t('list.group.addTaskAria', { group: label })}
         className="w-full text-left flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors"
         onClick={() => setActive(true)}
       >
@@ -3687,7 +4061,7 @@ function InlineAddTask({
   }
 
   return (
-    <div className="flex items-center gap-2 px-3 py-1.5">
+    <div className="flex items-center gap-2 px-3 py-1.5" data-testid="list-group-add-composer" data-group={key}>
       <Plus className="h-4 w-4 text-muted-foreground shrink-0" />
       <Input
         autoFocus
@@ -3706,20 +4080,34 @@ function InlineAddTask({
             setActive(false)
           }
         }}
-        placeholder={t('list.newStatusTaskPlaceholder', { status: meta.label.toLowerCase() })}
+        placeholder={t('list.newStatusTaskPlaceholder', { status: label.toLowerCase() })}
+        data-testid="list-group-add-title"
         className="h-7 flex-1 text-sm border-0 shadow-none focus-visible:ring-0 px-0"
       />
-      <WorkFilterSelect
-        value={priority}
-        onChange={(v) => setPriority(v as TaskPriority)}
-        className="h-7 capitalize shrink-0"
-      >
-        {PRIORITY_OPTIONS.map((p) => (
-          <option key={p} value={p} className="capitalize">
-            {t(PRIORITY_LABEL_KEYS[p])}
-          </option>
-        ))}
-      </WorkFilterSelect>
+      {fixedPriority ? (
+        /* The group IS the priority, so it is shown rather than offered — a
+           select here could set a value that contradicts the group the new
+           task would then not appear in. */
+        <span
+          className="flex h-7 shrink-0 items-center gap-1 rounded border border-border/70 px-2 text-[12px] capitalize text-muted-foreground"
+          data-testid="list-group-add-fixed-priority"
+        >
+          <Flag className={cn('h-3 w-3', PRIORITY_COLORS[fixedPriority])} aria-hidden />
+          {t(PRIORITY_LABEL_KEYS[fixedPriority])}
+        </span>
+      ) : (
+        <WorkFilterSelect
+          value={priority}
+          onChange={(v) => setPriority(v as TaskPriority)}
+          className="h-7 capitalize shrink-0"
+        >
+          {PRIORITY_OPTIONS.map((p) => (
+            <option key={p} value={p} className="capitalize">
+              {t(PRIORITY_LABEL_KEYS[p])}
+            </option>
+          ))}
+        </WorkFilterSelect>
+      )}
       <Input
         type="date"
         value={dueDate}
@@ -4580,6 +4968,8 @@ function BoardColumn({
   onAddTask,
   onRename,
   showWip = true,
+  cardSize = 'medium',
+  cardCover = 'image',
 }: {
   status: TaskStatus
   tasks: TaskItem[]
@@ -4593,6 +4983,9 @@ function BoardColumn({
   onRename?: (name: string) => Promise<void> | void
   /** §V2-06 — off when the space has switched Work in Progress Limits off. */
   showWip?: boolean
+  /** §V2-S13 `10:35` — the Customize panel's Card size and Card cover. */
+  cardSize?: CardSize
+  cardCover?: CardCover
 }) {
   const { t } = useTranslation()
   const [renaming, setRenaming] = useState(false)
@@ -4694,10 +5087,10 @@ function BoardColumn({
         <>
           <div className="p-2 space-y-2 flex-1">
             {tasks.length >= BOARD_VIRTUALIZE_THRESHOLD ? (
-              <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} />
+              <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} size={cardSize} cover={cardCover} />
             ) : (
               tasks.map((task) => (
-                <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} />
+                <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} size={cardSize} cover={cardCover} />
               ))
             )}
             {tasks.length === 0 && (
@@ -4730,9 +5123,15 @@ function BoardColumn({
 function BoardTaskCard({
   task,
   onOpenTask,
+  size = 'medium',
+  cover = 'image',
 }: {
   task: TaskItem
   onOpenTask: (taskId: string) => void
+  /** §V2-S13 `10:35` — "Card size  Medium ›". */
+  size?: CardSize
+  /** §V2-S13 `10:35` — "Card cover  Image ›". */
+  cover?: CardCover
 }) {
   const features = useSpaceFeatureFlags()
   const { t, locale } = useTranslation()
@@ -4748,21 +5147,60 @@ function BoardTaskCard({
   const subtasksDone = subtasks.filter((s) => s.statusCategory === 'closed' || s.status === 'done').length
   const due = task.dueDate ? new Date(task.dueDate) : null
   const overdue = due ? due.getTime() < Date.now() && !(task.statusCategory === 'closed' || task.status === 'done') : false
+  const dims = CARD_SIZE_STYLE[size]
+  /*
+   * §V2-S13 frame `10:35` — the cover, drawn where the frame draws it.
+   *
+   * `coverUrl` is resolved server-side (`tasks.service.ts getTasksByList`) so
+   * a stored image and a linked one are the same field here; `coverColor` is
+   * the Gallery's colour, which is a cover too and the only one a workspace
+   * without object storage can have. An image wins when both are set, which is
+   * the order the picker writes them in. `coverOffsetY` is Reposition.
+   */
+  const coverImage = cover === 'image' ? task.coverUrl ?? null : null
+  const coverColor = cover === 'image' && !coverImage ? task.coverColor ?? null : null
+  const hasCover = !!coverImage || !!coverColor
 
   return (
     <button
       ref={setNodeRef}
       style={style}
-      className={`w-full text-left rounded border border-border bg-card p-2 hover:bg-muted ${isDragging ? 'opacity-50' : ''}`}
+      data-testid="board-task-card"
+      data-task-id={task.id}
+      data-card-size={size}
+      className={cn(
+        'w-full text-left rounded border border-border bg-card hover:bg-muted overflow-hidden',
+        hasCover ? 'p-0' : dims.pad,
+        isDragging && 'opacity-50',
+      )}
       onClick={() => onOpenTask(task.id)}
       {...listeners}
       {...attributes}
     >
+      {hasCover && (
+        <div
+          data-testid="board-card-cover"
+          data-cover-kind={coverImage ? 'image' : 'color'}
+          className={cn('w-full overflow-hidden bg-muted', dims.cover)}
+          style={coverColor ? { background: coverColor } : undefined}
+        >
+          {coverImage && (
+            <img
+              src={coverImage}
+              alt={t('list.card.coverAlt', { title: task.title })}
+              loading="lazy"
+              className="h-full w-full object-cover"
+              style={{ objectPosition: `50% ${task.coverOffsetY ?? 50}%` }}
+            />
+          )}
+        </div>
+      )}
+      <div className={cn(hasCover && dims.pad)}>
       <div className="flex items-start gap-2">
         {task.isMilestone
           ? <Diamond className="h-3 w-3 mt-0.5 shrink-0 fill-amber-400 text-amber-500" />
           : <Flag className={cn('h-3 w-3 mt-0.5 shrink-0', PRIORITY_COLORS[task.priority])} />}
-        <div className="font-medium text-sm leading-snug">{task.title}</div>
+        <div className={cn('font-medium leading-snug', dims.title)}>{task.title}</div>
       </div>
       {features.tags && (task.labels?.length ?? 0) > 0 && (
         <div className="mt-1.5 flex flex-wrap gap-1">
@@ -4812,6 +5250,7 @@ function BoardTaskCard({
           )}
         </div>
       )}
+      </div>
     </button>
   )
 }
@@ -4819,15 +5258,26 @@ function BoardTaskCard({
 function VirtualizedBoardCards({
   tasks,
   onOpenTask,
+  size = 'medium',
+  cover = 'image',
 }: {
   tasks: TaskItem[]
   onOpenTask: (taskId: string) => void
+  size?: CardSize
+  cover?: CardCover
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null)
+  const dims = CARD_SIZE_STYLE[size]
   const cardVirtualizer = useVirtualizer({
     count: tasks.length,
     getScrollElement: () => parentRef.current,
-    estimateSize: () => BOARD_CARD_ESTIMATE_PX,
+    /*
+     * §V2-S13 `10:35` — the estimate follows the size, and grows again when a
+     * cover is drawn. A density control whose virtualizer kept one number
+     * would scroll a long column to the wrong place at every size but Medium,
+     * which reads as the board being broken rather than as the setting working.
+     */
+    estimateSize: () => dims.estimate + (cover === 'image' ? dims.coverPx : 0),
     overscan: 8,
   })
 
@@ -4844,7 +5294,7 @@ function VirtualizedBoardCards({
               className="absolute left-0 top-0 w-full pb-2"
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              <BoardTaskCard task={task} onOpenTask={onOpenTask} />
+              <BoardTaskCard task={task} onOpenTask={onOpenTask} size={size} cover={cover} />
             </div>
           )
         })}
@@ -5056,10 +5506,39 @@ function TeamView({
   const groups = rollup.data ?? []
 
   if (rollup.isLoading) {
+    /*
+     * A SKELETON IN THE SHAPE OF THE ROLLUP, not the word "Loading".
+     *
+     * `loading-states.mjs` refuses any reference to a catalog key whose value
+     * starts with "Loading", and its comment (`:466-471`) records why the
+     * softer version of that rule was wrong: a surface that is waiting should
+     * either say what it is doing or draw the shape that is coming. This drew
+     * `common.loading` centred in a `p-6` Card, so the rows then landed at a
+     * different height and the view jumped.
+     *
+     * Three rows because the loaded state is one Card per person and three is
+     * the smallest number that reads as a list rather than as a single box.
+     */
     return (
-      <Card className="p-6 text-center" data-testid="team-view-loading">
-        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
-      </Card>
+      <div className="space-y-2" data-testid="team-view-loading" aria-hidden="true">
+        {[0, 1, 2].map((i) => (
+          <Card key={i} className="p-3">
+            <div className="flex items-center gap-3">
+              <div className="min-w-0 flex-1 space-y-1.5">
+                <ListSkeleton rows={1} rowClassName="h-4 w-40" className="space-y-0" />
+                <ListSkeleton rows={1} rowClassName="h-3 w-24" className="space-y-0" />
+              </div>
+              <div className="w-28 shrink-0 space-y-1">
+                <ListSkeleton rows={1} rowClassName="h-1.5" className="space-y-0" />
+                <ListSkeleton rows={1} rowClassName="h-2.5 w-8 ml-auto" className="space-y-0" />
+              </div>
+            </div>
+            <div className="mt-2">
+              <ListSkeleton rows={3} rowClassName="h-4" className="space-y-0.5" />
+            </div>
+          </Card>
+        ))}
+      </div>
     )
   }
 
@@ -5727,6 +6206,73 @@ function PanelAction({
   )
 }
 
+/**
+ * §V2-S13 frame `10:35` — a Customize row that NAMES ITS CURRENT VALUE and
+ * opens on a chevron: `Card size   Medium ›`, `Card cover   Image ›`.
+ *
+ * The frame's own shape, and the reason it is a component rather than two
+ * hand-written blocks: the duplicated list is the defect class that gets found
+ * every time two pickers for the same kind of thing are written out twice.
+ */
+function PanelChoice<T extends string>({
+  label,
+  icon,
+  value,
+  options,
+  labelOf,
+  onChange,
+  testId,
+}: {
+  label: string
+  icon: ReactNode
+  value: T
+  options: readonly T[]
+  labelOf: (option: T) => string
+  onChange: (next: T) => void
+  testId: string
+}) {
+  const ref = useRef<HTMLDetailsElement>(null)
+  useDismissableDetails(ref)
+  return (
+    <details ref={ref} className="relative" data-testid={testId} data-value={value}>
+      <summary className="list-none flex items-center justify-between gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer select-none hover:bg-muted/40">
+        <span className="flex items-center gap-2">
+          <span className="text-muted-foreground">{icon}</span>
+          {label}
+        </span>
+        <span className="flex items-center gap-1 text-muted-foreground">
+          {/* The VALUE, on the row, as the frame shows it — the row is the
+              readout as well as the door to the choices. */}
+          <span data-testid={`${testId}-value`}>{labelOf(value)}</span>
+          <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+        </span>
+      </summary>
+      <div className="px-2 pb-1.5 pt-1" role="radiogroup" aria-label={label}>
+        {options.map((option) => (
+          <button
+            key={option}
+            type="button"
+            role="radio"
+            aria-checked={value === option}
+            data-testid={`${testId}-${option}`}
+            onClick={() => {
+              onChange(option)
+              if (ref.current) ref.current.open = false
+            }}
+            className={cn(
+              'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40',
+              value === option && 'text-accent',
+            )}
+          >
+            <Check className={cn('h-3.5 w-3.5 shrink-0', value === option ? 'opacity-100' : 'opacity-0')} aria-hidden />
+            {labelOf(option)}
+          </button>
+        ))}
+      </div>
+    </details>
+  )
+}
+
 type SavedViewRow = {
   id: string
   name: string
@@ -5748,6 +6294,10 @@ function CustomizeViewPanel({
   onAutosave,
   onCopyLink,
   onShare,
+  cardSize,
+  onCardSize,
+  cardCover,
+  onCardCover,
 }: {
   listId: string
   /**
@@ -5773,6 +6323,16 @@ function CustomizeViewPanel({
   onAutosave: (next: boolean) => void
   onCopyLink: () => void
   onShare: () => void
+  /**
+   * §V2-S13 frame `10:35` — the two rows this panel LEADS with, above Stack
+   * fields. They belong to the view rather than to this component, which is
+   * why they arrive as props: `currentViewConfig` carries them, so the Save
+   * chip notices a change and a saved view remembers it.
+   */
+  cardSize: CardSize
+  onCardSize: (next: CardSize) => void
+  cardCover: CardCover
+  onCardCover: (next: CardCover) => void
 }) {
   const { t } = useTranslation()
   const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
@@ -5827,6 +6387,38 @@ function CustomizeViewPanel({
         {t('list.customize')}
       </summary>
       <div className="absolute right-0 z-20 mt-1 w-72 rounded-md border border-border bg-card p-1 shadow-lg">
+        {/*
+          §V2-S13 frame `10:35` — the TOP of the panel, in the frame's order:
+          `Card size   Medium ›` then `Card cover   Image ›`, above the rule
+          that separates them from everything else. They are first in the
+          frame and first here.
+
+          Card size is a real density (see `CARD_SIZE_STYLE`) and Card cover is
+          the switch for an image the LIST endpoint now carries — before this,
+          a cover set through the shipped picker was visible on exactly the one
+          surface that set it, so a control here would have configured
+          something nothing could draw.
+        */}
+        <div className="border-b border-border/40 pb-1" data-testid="list-card-settings">
+          <PanelChoice
+            testId="list-card-size"
+            icon={<LayoutGrid className="h-3.5 w-3.5" aria-hidden />}
+            label={t('list.card.size')}
+            value={cardSize}
+            options={CARD_SIZES}
+            labelOf={(option) => t(CARD_SIZE_LABEL_KEYS[option])}
+            onChange={onCardSize}
+          />
+          <PanelChoice
+            testId="list-card-cover"
+            icon={<ImageIcon className="h-3.5 w-3.5" aria-hidden />}
+            label={t('list.card.cover')}
+            value={cardCover}
+            options={CARD_COVERS}
+            labelOf={(option) => t(CARD_COVER_LABEL_KEYS[option])}
+            onChange={onCardCover}
+          />
+        </div>
         {/*
           The half of the panel that belongs to the SAVED VIEW, in the order
           frames `10:36` and `11:14` list it: Autosave for me · Pin view ·

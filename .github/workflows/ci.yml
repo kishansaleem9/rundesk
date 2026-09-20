@@ -172,8 +172,9 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs EIGHTY-FIVE. At the same 1.1 minutes each that is about
-    # 94 minutes plus setup, so 75 would have failed exactly the same way. 120.
+    # The job now runs EIGHTY-EIGHT. At the same 1.1 minutes each that is about
+    # 97 minutes plus setup, so 75 would have failed exactly the same way. 120,
+    # which still has room — re-check it before it does not.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -1025,6 +1026,31 @@ jobs:
       - name: List view controls
         if: '!cancelled()'
         run: node test/e2e/list-view-controls.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §V2-S13 frame `11:30` — the confident zero on the list body. A list of
+      # five hundred tasks with one unmatched word in the in-list search said
+      # "No tasks yet / press C to add the first" and offered to create one.
+      # The check with teeth is that the two empty states are DIFFERENT
+      # strings: "an empty state renders" passes on the bug, because there was
+      # always an empty state — it just said the wrong thing.
+      - name: List empty states
+        if: '!cancelled()'
+        run: node test/e2e/list-empty-states.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # §V2-S13 frame `10:35` — "Card size Medium" / "Card cover Image", and
+      # the cover the list payload never carried. `getTask` resolved `coverUrl`
+      # and `getTasksByList` did not, so a cover set by the shipped picker was
+      # visible on exactly the surface that set it. This reads the LIST
+      # endpoint, not the single-task one, and measures the three card sizes.
+      - name: List card cover and card size
+        if: '!cancelled()'
+        run: node test/e2e/list-card-cover.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

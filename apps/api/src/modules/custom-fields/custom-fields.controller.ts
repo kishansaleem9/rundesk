@@ -1,11 +1,16 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { CustomFieldsService } from './custom-fields.service'
+import { CustomFieldsService, type CustomFieldType } from './custom-fields.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
-type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url' | 'email' | 'phone' | 'money' | 'rating'
+/*
+ * The type union used to be written out again here, ten of the nineteen the
+ * service accepts — so Swagger described a narrower API than the one that
+ * shipped, and a typed caller could not ask for `voting` or `people`. One list
+ * now, derived from the enum the column is declared with.
+ */
 
 @ApiTags('custom-fields')
 @ApiBearerAuth()
@@ -70,6 +75,29 @@ export class CustomFieldsController {
     @Param('taskId') taskId: string,
   ) {
     return this.svc.getValuesForTask(workspaceId, taskId)
+  }
+
+  /**
+   * §V2-S16 frames `15:20` / `15:30` — create a definition from an open task.
+   * Same service method the project-scoped POST ends up in; see the service.
+   */
+  @Post('tasks/:taskId/custom-fields')
+  @ApiOperation({ summary: 'Create a custom field definition from an open task' })
+  createFromTask(
+    @Param('workspaceId') workspaceId: string,
+    @Param('taskId') taskId: string,
+    @Body()
+    body: {
+      name: string
+      type: CustomFieldType
+      isRequired?: boolean
+      /** `project` (default) or `list` — see the service. */
+      scope?: 'project' | 'list'
+      options?: Array<{ label: string; value: string; color?: string }>
+      config?: unknown
+    },
+  ) {
+    return this.svc.createDefinitionForTask(workspaceId, taskId, body)
   }
 
   @Put('tasks/:taskId/custom-fields/:fieldId')
