@@ -2416,3 +2416,69 @@ stayed patched, so the next API-only patch measured the previous patch's
 breakage. Both are now in the process doc's trap list, because a break test
 that cannot break anything is the same defect this audit exists to find,
 one level up.
+
+---
+
+## 9. The misclassified rows, resolved
+
+§6 listed eighteen rows whose recorded status was wrong, four of them marked
+**built** while being the mirror defect. This is what happened to them.
+
+### `spaces.default_permission` — built for real
+
+The column was written by the create-space wizard, validated on create *and*
+on update, declared in the controller, and honoured by no access check
+anywhere. It now gates update and delete for spaces, projects, lists and
+folders through `assertCanManageContainer`, and filters the Move picker so the
+server and the UI cannot disagree about a destination.
+
+**It can only narrow.** `edit` is the column's default and the rung the gate
+requires, so every space that exists today behaves byte for byte as it did;
+only `view` and `comment` change an answer. The verdict on the row was
+deliberate rather than automatic: a column nobody reads is better deleted than
+left as evidence, and this one was kept because its meaning came straight from
+its own schema comment and the four-rung ladder it names already existed. 18
+e2e checks prove a member who should be refused is refused **by the server**,
+with the row unchanged afterwards; 21 unit tests cover the resolution order.
+
+**And it exposed a bigger one.** Container *create* is completely ungated:
+`lists.service.ts` and `projects.service.ts` check workspace membership and
+container privacy and nothing else, so a plain member can create a list inside
+a view-only space and is only refused when they try to edit it. That is its
+own row, and it is open.
+
+### The header pill — built on the surface the frames actually draw
+
+`use-focus-tab-title.ts` computed a countdown whose only consumer wrote
+`document.title`. The pill the frames show at `15:20`–`16:20`, immediately
+right of the workspace switcher, did not exist.
+
+The way this goes wrong is two countdowns — two fetches, two intervals, two
+answers that disagree by a second and then by a minute. The pill and the tab
+title now share one react-query key, one `setInterval` for the whole module,
+and one `pickRunningBlock`. A suite check asserts a single `/planner/blocks`
+request serves both, and it has already earned itself: a later refactor
+reintroduced a second fetch and the check caught it.
+
+### App Center — fourteen facets, derived
+
+Nine facets against the frame's fourteen. Now fourteen, and **derived from the
+apps** rather than written out: a facet that nothing matches is filtered out
+before it renders, so a facet cannot outlive the thing behind it. That is the
+duplicated-list defect closed at the class level rather than the instance.
+
+### Recent Chats, folder errors, Team view
+
+Recent Chats was hard-sliced to five with no "More" while the endpoint
+returned all of them — conversation six onward was unreachable. Folder
+creation reported nothing on failure and folder names were not unique, both
+of which lists had fixed long ago and folders had not. Team View's "must not
+be gated" note was a stale reason contradicted by `[09:26]`.
+
+### Two that were closable all along
+
+An uploaded voice note already rendered as a player, and `List` was already
+un-removable in the wizard. Both sat unbuilt behind reasons that had stopped
+being true — *the stale reason*, which is the defect class that suppresses
+exactly the investigation that would find it. Re-checking rows marked done is
+not a formality; it closed two rows for free and reopened one that was wrong.
