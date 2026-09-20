@@ -12,13 +12,14 @@ import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
 import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
-import { aiAnswerFeedback, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
+import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { FOLLOW_UP_INSTRUCTION, createFollowUpSplitter } from './follow-ups'
 import { summariseValue, validateBenchmark } from './ai-value'
 import { formatStandupFallback, type StandupData } from '../people/standup'
-import { modelForTier } from './model-tiers'
+import { DEFAULT_TIER, isSelectableTier, modelForTier, type ModelTier } from './model-tiers'
+import { rollUpByCategory } from './ai-categories'
 import {
   fallbackProposal,
   noPatternsFound,
@@ -65,6 +66,26 @@ import {
 } from './ai-command'
 
 export type AiCtx = { userId?: string; workspaceId?: string }
+
+/**
+ * §V2-11 — which `ai_usage` rows the hourly cap counts, now that failures land
+ * in the same table.
+ *
+ * THIS IS A REGRESSION THAT 0150 WOULD OTHERWISE HAVE INTRODUCED, and it is
+ * worth spelling out. The cap is `count(*)` over an hour of `ai_usage`. Start
+ * writing failures into that table and a workspace with no API key configured
+ * would rack up two hundred `not_configured` rows and lock itself out for an
+ * hour — the limiter charging people for the calls it refused to make.
+ *
+ * So the cap counts what actually reached the provider: successes, and
+ * provider errors (a 500 from the model still consumed a request). Runs this
+ * service turned away itself — `not_configured`, `rate_limited` — are recorded
+ * for the activity log and excluded from the count that produced them.
+ */
+const COUNTS_TOWARD_LIMIT = sql`(${aiUsage.errorCode} is null or ${aiUsage.errorCode} = 'provider_error')`
+
+/** `ai_usage.status`, as the activity log filters on it. */
+export type AiRunStatus = 'succeeded' | 'failed'
 
 /** Format a Date | string | null to YYYY-MM-DD, or '' when absent/invalid. */
 function toDayString(value: Date | string | null | undefined): string {
@@ -809,18 +830,17 @@ export class AiService {
     return Number.isFinite(v) && v > 0 ? v : 2000
   }
 
-  async assertWithinRateLimit(ctx: AiCtx, now: Date = new Date()) {
+  async assertWithinRateLimit(ctx: AiCtx, now: Date = new Date(), feature = 'unknown') {
     const since = new Date(now.getTime() - 3_600_000)
     if (ctx.userId) {
       const [row] = await this.db
         .select({ c: sql<number>`count(*)::int` })
         .from(aiUsage)
-        .where(and(eq(aiUsage.userId, ctx.userId), gte(aiUsage.createdAt, since)))
+        .where(and(eq(aiUsage.userId, ctx.userId), gte(aiUsage.createdAt, since), COUNTS_TOWARD_LIMIT))
       if ((row?.c ?? 0) >= this.hourlyLimit) {
-        throw new HttpException(
-          `AI hourly rate limit reached (${this.hourlyLimit}/hour). Try again later.`,
-          HttpStatus.TOO_MANY_REQUESTS,
-        )
+        const message = `AI hourly rate limit reached (${this.hourlyLimit}/hour). Try again later.`
+        await this.recordFailure(feature, 'rate-limited', ctx, 'rate_limited', message)
+        throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS)
       }
     }
     // Per-organization (workspace) cap (Plan §7.15).
@@ -828,14 +848,30 @@ export class AiService {
       const [row] = await this.db
         .select({ c: sql<number>`count(*)::int` })
         .from(aiUsage)
-        .where(and(eq(aiUsage.workspaceId, ctx.workspaceId), gte(aiUsage.createdAt, since)))
+        .where(and(eq(aiUsage.workspaceId, ctx.workspaceId), gte(aiUsage.createdAt, since), COUNTS_TOWARD_LIMIT))
       if ((row?.c ?? 0) >= this.orgHourlyLimit) {
-        throw new HttpException(
-          `Workspace AI hourly limit reached (${this.orgHourlyLimit}/hour). Try again later.`,
-          HttpStatus.TOO_MANY_REQUESTS,
-        )
+        const message = `Workspace AI hourly limit reached (${this.orgHourlyLimit}/hour). Try again later.`
+        await this.recordFailure(feature, 'rate-limited', ctx, 'rate_limited', message)
+        throw new HttpException(message, HttpStatus.TOO_MANY_REQUESTS)
       }
     }
+  }
+
+  /**
+   * §V2-11 — the guard that used to be twelve copies of `if (!isAvailable())`
+   * in the controller, each throwing a 503 and recording nothing.
+   *
+   * It records first and throws second, because "AI features are not
+   * configured" is a FAILED RUN from the point of view of the person who asked
+   * for one, and until 0150 it was the single most common AI failure in this
+   * product and left no trace anywhere. A Status filter with no failures behind
+   * it is a dropdown with one reachable value.
+   */
+  async assertAvailable(feature: string, ctx: AiCtx = {}) {
+    if (this.isAvailable()) return
+    const message = 'AI features are not configured'
+    await this.recordFailure(feature, 'none', ctx, 'not_configured', message)
+    throw new HttpException(message, HttpStatus.SERVICE_UNAVAILABLE)
   }
 
   /**
@@ -847,13 +883,34 @@ export class AiService {
     ctx: AiCtx,
     params: Anthropic.Messages.MessageCreateParamsNonStreaming,
   ) {
-    await this.assertWithinRateLimit(ctx)
+    await this.assertWithinRateLimit(ctx, new Date(), feature)
     // Prompt caching: mark the (repeated) system prompt as a cache breakpoint.
     const finalParams: Anthropic.Messages.MessageCreateParamsNonStreaming =
       typeof params.system === 'string' && params.system.length > 200
         ? { ...params, system: [{ type: 'text', text: params.system, cache_control: { type: 'ephemeral' } }] }
         : params
-    const response = await this.claude.messages.create(finalParams)
+    /*
+     * §V2-11 — THE OTHER HALF OF THE STATUS COLUMN.
+     *
+     * Every non-streaming AI call funnels through here, so this is the one
+     * place a provider failure can be written down without adding a catch to
+     * forty call sites. The error is rethrown untouched: this records, it does
+     * not handle. Swallowing it here would turn an outage into forty callers
+     * quietly returning their fallbacks.
+     */
+    let response: Anthropic.Messages.Message
+    try {
+      response = await this.claude.messages.create(finalParams)
+    } catch (err) {
+      await this.recordFailure(
+        feature,
+        params.model,
+        ctx,
+        'provider_error',
+        err instanceof Error ? err.message : 'AI request failed',
+      )
+      throw err
+    }
     void this.recordUsage(feature, params.model, ctx, response.usage?.input_tokens ?? 0, response.usage?.output_tokens ?? 0)
     return response
   }
@@ -867,9 +924,47 @@ export class AiService {
         model,
         inputTokens,
         outputTokens,
+        status: 'succeeded',
       })
     } catch {
       // Usage tracking must never break an AI response.
+    }
+  }
+
+  /**
+   * §V2-11, frame `19:05` — a run that did not work, written down.
+   *
+   * AWAITED, unlike `recordUsage`. A success is recorded alongside a response
+   * that is already on its way back, so a fire-and-forget write costs nobody
+   * anything. A failure is recorded on the way OUT of a request that is about
+   * to throw, and `void`-ing it there is how the row loses the race with the
+   * response and the Status filter comes up empty exactly when it matters.
+   *
+   * Zero tokens, because nothing was generated. `error_message` is capped at
+   * 500 characters: a provider stack trace in a log row is not a sentence
+   * anybody reads, and the column is rendered in a list.
+   */
+  async recordFailure(
+    feature: string,
+    model: string,
+    ctx: AiCtx,
+    errorCode: 'not_configured' | 'rate_limited' | 'provider_error',
+    errorMessage: string,
+  ) {
+    try {
+      await this.db.insert(aiUsage).values({
+        workspaceId: ctx.workspaceId ?? null,
+        userId: ctx.userId ?? null,
+        feature,
+        model,
+        inputTokens: 0,
+        outputTokens: 0,
+        status: 'failed',
+        errorCode,
+        errorMessage: (errorMessage ?? '').slice(0, 500) || null,
+      })
+    } catch {
+      // Recording a failure must never become a second failure.
     }
   }
 
@@ -893,11 +988,24 @@ export class AiService {
       if (!member) throw new ForbiddenException('Workspace membership required')
     }
 
-    const filters = []
+    /*
+     * §V2-11 — SUCCEEDED RUNS ONLY, and this is load-bearing.
+     *
+     * Before 0150 every row in `ai_usage` was a success, so `count(*)` and "how
+     * many runs happened" were the same number. Now that failures are recorded
+     * they are not, and every figure the value panel shows is derived from this
+     * count: a workspace with no API key would have reported hundreds of runs
+     * and hours of time saved on calls that never happened. A failed run cost
+     * nothing and saved nobody any time.
+     *
+     * The activity log (`runLog`) deliberately does NOT do this — showing both
+     * is the entire point of the Status filter.
+     */
+    const filters = [eq(aiUsage.status, 'succeeded')]
     if (opts.workspaceId) filters.push(eq(aiUsage.workspaceId, opts.workspaceId))
     if (opts.from) filters.push(gte(aiUsage.createdAt, opts.from))
     if (opts.to) filters.push(lte(aiUsage.createdAt, opts.to))
-    const where = filters.length ? and(...filters) : undefined
+    const where = and(...filters)
 
     const rows = await this.db
       .select({
@@ -963,6 +1071,22 @@ export class AiService {
       .limit(1)
     if (!ws) throw new NotFoundException('Workspace not found')
 
+    /*
+     * §V2-11, frames `18:53`/`18:56`/`18:59` — the eight tiles, GROUPED HERE
+     * rather than in the panel.
+     *
+     * The panel had the raw per-feature map and would have had to invent the
+     * taxonomy itself, which means the next reader — a report, an export, the
+     * usage tab — invents its own and the two drift. Rolled up once, server
+     * side, the numbers cannot disagree between callers because there is only
+     * one place they are computed.
+     *
+     * `byFeature` stays exactly as it was. The categories are a level ABOVE
+     * it, not a replacement, and the Activity tab's feature filter reads the
+     * detail.
+     */
+    const rollup = rollUpByCategory(usage.byFeature)
+
     return {
       ...summariseValue(usage.totals.calls, usage.totals.costUsd, {
         minutesSavedPerRun: ws.minutes,
@@ -971,6 +1095,14 @@ export class AiService {
       // Carried through so the panel can break the saving down by what produced
       // it — a total nobody can attribute is a total nobody believes.
       byFeature: usage.byFeature,
+      byCategory: rollup.categories,
+      /*
+       * Features the taxonomy does not know about. Returned rather than
+       * dropped: runs that happened and appear in no tile are a confident zero,
+       * and a caller that can see the list can say so instead of quietly
+       * under-reporting.
+       */
+      uncategorisedFeatures: rollup.unmapped,
     }
   }
 
@@ -1016,10 +1148,21 @@ export class AiService {
   /**
    * §V2-11, frame `19:05` — the Activity log: one row per AI run.
    *
-   * The frame filters by Date run, Status, My agents and Agent. Rundesk has no
-   * agents, so the equivalent axes are the ones its runs actually have: when,
-   * which FEATURE, and whose. Offering an "Agent" filter over a product with no
-   * agents would be a control that can only ever return everything.
+   * The frame's filter row is `Date run ▾ · Status ▾ · My agents · Agent ▾`.
+   * Three of the four now have a counterpart:
+   *
+   *   · **Date run** — `from`/`to`, which the range buttons drive.
+   *   · **Status** — `status`, real as of 0150. See `recordFailure`: until then
+   *     only successes were written, so this filter could not have existed
+   *     without first building the thing it filters on.
+   *   · **My agents** — `userId`. THE ENDPOINT ALWAYS TOOK THIS PARAMETER and
+   *     the web client never sent it, so the toggle that existed was a UI-only
+   *     build: it re-rendered and asked the server for exactly the same rows.
+   *     Rundesk has no agents, so the honest reading of "mine" is "runs I
+   *     started", and the label says that rather than borrowing a word for a
+   *     thing this product does not have.
+   *   · **Agent** — still nothing to filter on, still deliberate. A dropdown
+   *     over a product with no agents can only ever return everything.
    *
    * Capped and newest-first. An unbounded log of every model call a busy
    * workspace has ever made is a page that never finishes rendering.
@@ -1031,6 +1174,7 @@ export class AiService {
     to?: Date
     feature?: string
     userId?: string
+    status?: AiRunStatus
     limit?: number
   }) {
     // Same confidentiality as the summary, asserted the same way.
@@ -1041,6 +1185,7 @@ export class AiService {
     if (opts.to) filters.push(lte(aiUsage.createdAt, opts.to))
     if (opts.feature) filters.push(eq(aiUsage.feature, opts.feature))
     if (opts.userId) filters.push(eq(aiUsage.userId, opts.userId))
+    if (opts.status) filters.push(eq(aiUsage.status, opts.status))
 
     const limit = Math.min(Math.max(opts.limit ?? 100, 1), 500)
     const rows = await this.db
@@ -1052,6 +1197,9 @@ export class AiService {
         outputTokens: aiUsage.outputTokens,
         createdAt: aiUsage.createdAt,
         userId: aiUsage.userId,
+        status: aiUsage.status,
+        errorCode: aiUsage.errorCode,
+        errorMessage: aiUsage.errorMessage,
       })
       .from(aiUsage)
       .where(and(...filters))
@@ -1062,6 +1210,75 @@ export class AiService {
       ...r,
       costUsd: Math.round(estimateAiCostUsd(r.model, r.inputTokens, r.outputTokens) * 10000) / 10000,
     }))
+  }
+
+  /**
+   * §V2-S18 `[17:32]` — "apna [preferred] AI bhi set down karna hai."
+   *
+   * Read from the database rather than from the browser. The preference has
+   * existed since §15 and lived in `localStorage` under `rundesk.aiTier`, which
+   * meant the thing the frame calls *your preferred AI* did not survive a
+   * second machine, a second browser, or a cleared cache — it was a habit, not
+   * a setting.
+   *
+   * Absent is a legitimate answer: it means "never chosen", and the caller uses
+   * `DEFAULT_TIER`, which is exactly what chat used before a picker existed.
+   */
+  async modelPreference(userId: string, workspaceId: string): Promise<{
+    preferredTier: ModelTier['id']
+    /** False when nothing is stored, so the surface can say "not set" honestly. */
+    isSet: boolean
+    updatedAt: Date | null
+  }> {
+    const [row] = await this.db
+      .select({ tier: aiModelPreferences.preferredTier, updatedAt: aiModelPreferences.updatedAt })
+      .from(aiModelPreferences)
+      .where(and(eq(aiModelPreferences.userId, userId), eq(aiModelPreferences.workspaceId, workspaceId)))
+      .limit(1)
+    // A value that stopped being a tier (a renamed tier, a hand-edited row) is
+    // reported as unset rather than echoed back: the picker would have nothing
+    // to select, and `modelForTier` would silently answer with the default
+    // anyway. Saying "not set" is the same behaviour, told truthfully.
+    if (!row || !isSelectableTier(row.tier)) {
+      return { preferredTier: DEFAULT_TIER, isSet: false, updatedAt: null }
+    }
+    return { preferredTier: row.tier, isSet: true, updatedAt: row.updatedAt }
+  }
+
+  /**
+   * Store somebody's preferred tier for this workspace.
+   *
+   * REFUSES ANYTHING THAT IS NOT A ROUTABLE TIER rather than coercing it. The
+   * frame offers ChatGPT and Gemini and this product has no client for either
+   * (`UNROUTABLE_PROVIDERS`); accepting `openai` here and quietly resolving it
+   * to Claude is how "I set Gemini and it saved" becomes true on a product that
+   * cannot run Gemini. The row would round-trip through Postgres and mean
+   * nothing — the mirror of a facade, and worse, because the database would
+   * then be evidence for a feature that does not exist.
+   */
+  async setModelPreference(userId: string, workspaceId: string, preferredTier: string) {
+    if (!isSelectableTier(preferredTier)) {
+      throw new BadRequestException(
+        `"${preferredTier}" is not a model this workspace can route to`,
+      )
+    }
+    const [member] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!member) throw new ForbiddenException('Workspace membership required')
+
+    // Upsert on the unique (user, workspace) index — one statement, so two
+    // tabs pressing "set as preferred" at once cannot insert two rows.
+    await this.db
+      .insert(aiModelPreferences)
+      .values({ userId, workspaceId, preferredTier })
+      .onConflictDoUpdate({
+        target: [aiModelPreferences.userId, aiModelPreferences.workspaceId],
+        set: { preferredTier, updatedAt: new Date() },
+      })
+    return this.modelPreference(userId, workspaceId)
   }
 
   // ─── Task generation from a natural language prompt ───────────────────────
@@ -1277,7 +1494,7 @@ Focus on the key goals, current status, and any blockers.`,
     opened?: SseStream,
   ): Promise<void> {
     // Enforce rate limits before we hijack the reply for streaming.
-    await this.assertWithinRateLimit(ctx)
+    await this.assertWithinRateLimit(ctx, new Date(), 'chat')
     const model = modelForTier(tier)
 
     const intro = skillPrompt?.trim()
@@ -1351,6 +1568,9 @@ ${FOLLOW_UP_INSTRUCTION}`
       raw.write('data: [DONE]\n\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AI request failed'
+      // §V2-11 — a stream that died is a failed run. The client sees `{error}`
+      // and always did; until 0150 nothing else ever did.
+      await this.recordFailure('chat', model, ctx, 'provider_error', message)
       raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
     } finally {
       raw.end()
@@ -1556,7 +1776,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
     res: Response,
     ctx: AiCtx = {},
   ): Promise<void> {
-    await this.assertWithinRateLimit(ctx)
+    await this.assertWithinRateLimit(ctx, new Date(), 'summarize')
 
     const systemPrompt = `You are a concise summarizer for Rundesk.
 Write a clear summary of the given ${type} in plain text (3-5 sentences).
@@ -1594,6 +1814,7 @@ Focus on the key goals, current status, recent activity, and any blockers or ris
       raw.write('data: [DONE]\n\n')
     } catch (err) {
       const message = err instanceof Error ? err.message : 'AI request failed'
+      await this.recordFailure('summarize', 'claude-haiku-4-5', ctx, 'provider_error', message)
       raw.write(`data: ${JSON.stringify({ error: message })}\n\n`)
     } finally {
       raw.end()

@@ -1,0 +1,276 @@
+"use strict";
+/**
+ * Convert a Tiptap/ProseMirror document (the JSON shape stored in docs.content)
+ * to GitHub-flavored Markdown. Pure + dependency-free so it's trivially testable
+ * and safe to run on the request path.
+ */
+Object.defineProperty(exports, "__esModule", { value: true });
+exports.tiptapToPlainLines = tiptapToPlainLines;
+exports.tiptapToMarkdown = tiptapToMarkdown;
+/** Apply inline marks to a text run (code innermost → link outermost). */
+function applyMarks(text, marks = []) {
+    if (!text)
+        return text;
+    let out = text;
+    const has = (t) => marks.some((m) => m.type === t);
+    if (has('code'))
+        out = `\`${out}\``;
+    if (has('bold') || has('strong'))
+        out = `**${out}**`;
+    if (has('italic') || has('em'))
+        out = `*${out}*`;
+    if (has('strike'))
+        out = `~~${out}~~`;
+    const link = marks.find((m) => m.type === 'link');
+    if (link) {
+        const href = typeof link.attrs?.href === 'string' ? link.attrs.href : '';
+        if (href)
+            out = `[${out}](${href})`;
+    }
+    return out;
+}
+/** Render a node's inline children (text runs, hard breaks, inline images). */
+function renderInline(nodes = []) {
+    return nodes
+        .map((n) => {
+        if (n.type === 'text')
+            return applyMarks(n.text ?? '', n.marks);
+        if (n.type === 'hardBreak')
+            return '\n';
+        if (n.type === 'image') {
+            const src = typeof n.attrs?.src === 'string' ? n.attrs.src : '';
+            const alt = typeof n.attrs?.alt === 'string' ? n.attrs.alt : '';
+            return src ? `![${alt}](${src})` : '';
+        }
+        // Fallback: descend into anything else that carries inline content.
+        if (n.content)
+            return renderInline(n.content);
+        return '';
+    })
+        .join('');
+}
+/** Render list items with the given bullet/number, indenting nested lists. */
+function renderList(node, ordered, depth) {
+    const indent = '  '.repeat(depth);
+    const items = (node.content ?? []).map((item, i) => {
+        let marker;
+        if (node.type === 'taskList') {
+            const checked = item.attrs?.checked === true;
+            marker = `- [${checked ? 'x' : ' '}] `;
+        }
+        else {
+            marker = ordered ? `${i + 1}. ` : '- ';
+        }
+        // A list item is paragraphs (inline) plus possibly nested lists.
+        const lines = [];
+        for (const child of item.content ?? []) {
+            if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
+                lines.push(renderList(child, child.type === 'orderedList', depth + 1).replace(/\n+$/, ''));
+            }
+            else {
+                lines.push(renderInline(child.content));
+            }
+        }
+        const [first, ...rest] = lines;
+        const body = [`${indent}${marker}${first ?? ''}`, ...rest].join('\n');
+        return body;
+    });
+    return items.join('\n') + '\n\n';
+}
+function renderBlock(node, depth = 0) {
+    switch (node.type) {
+        case 'heading': {
+            const level = Math.min(Math.max(Number(node.attrs?.level ?? 1), 1), 6);
+            return `${'#'.repeat(level)} ${renderInline(node.content)}\n\n`;
+        }
+        case 'paragraph':
+            return `${renderInline(node.content)}\n\n`;
+        case 'bulletList':
+            return renderList(node, false, depth);
+        case 'orderedList':
+            return renderList(node, true, depth);
+        case 'taskList':
+            return renderList(node, false, depth);
+        case 'blockquote':
+            return ((node.content ?? [])
+                .map((c) => renderBlock(c, depth).trim())
+                .filter(Boolean)
+                .map((line) => line.split('\n').map((l) => `> ${l}`).join('\n'))
+                .join('\n> \n') + '\n\n');
+        case 'codeBlock': {
+            const lang = typeof node.attrs?.language === 'string' ? node.attrs.language : '';
+            const code = (node.content ?? []).map((c) => c.text ?? '').join('');
+            return `\`\`\`${lang}\n${code}\n\`\`\`\n\n`;
+        }
+        case 'horizontalRule':
+            return `---\n\n`;
+        // A5.8 blocks. A callout is a plain wrapper, so the default descend below
+        // already handles it; these two would otherwise export as loose paragraphs
+        // (table) or vanish entirely (the atom list embed).
+        case 'table':
+            return renderTable(node);
+        case 'listEmbed': {
+            const name = typeof node.attrs?.listName === 'string' ? node.attrs.listName : '';
+            return `> **Embedded list:** ${name || 'Untitled list'}\n\n`;
+        }
+        default:
+            // Unknown block: descend if it has children, else drop.
+            return node.content ? node.content.map((c) => renderBlock(c, depth)).join('') : '';
+    }
+}
+/** GFM table. The first row is the header when it holds tableHeader cells. */
+function renderTable(node) {
+    const rows = (node.content ?? []).map((row) => (row.content ?? []).map((cell) => (cell.content ?? [])
+        .map((block) => renderInline(block.content))
+        .join(' ')
+        .replace(/\|/g, '\\|')
+        .trim()));
+    if (rows.length === 0)
+        return '';
+    const width = Math.max(...rows.map((r) => r.length));
+    const pad = (cells) => Array.from({ length: width }, (_, i) => cells[i] ?? '');
+    const firstIsHeader = (node.content?.[0]?.content ?? []).some((c) => c.type === 'tableHeader');
+    const header = firstIsHeader ? pad(rows[0]) : Array.from({ length: width }, () => '');
+    const body = firstIsHeader ? rows.slice(1) : rows;
+    const lines = [
+        `| ${header.join(' | ')} |`,
+        `| ${Array.from({ length: width }, () => '---').join(' | ')} |`,
+        ...body.map((r) => `| ${pad(r).join(' | ')} |`),
+    ];
+    return lines.join('\n') + '\n\n';
+}
+/** Plain text of an inline run (marks stripped), hard breaks as newlines. */
+function plainInline(nodes = []) {
+    return nodes
+        .map((n) => {
+        if (n.type === 'text')
+            return n.text ?? '';
+        if (n.type === 'hardBreak')
+            return '\n';
+        if (n.content)
+            return plainInline(n.content);
+        return '';
+    })
+        .join('');
+}
+function linesForList(node, ordered, depth, out) {
+    const pad = '  '.repeat(depth);
+    (node.content ?? []).forEach((item, i) => {
+        let marker;
+        if (node.type === 'taskList')
+            marker = item.attrs?.checked === true ? '[x] ' : '[ ] ';
+        else
+            marker = ordered ? `${i + 1}. ` : '- ';
+        for (const child of item.content ?? []) {
+            if (child.type === 'bulletList' || child.type === 'orderedList' || child.type === 'taskList') {
+                linesForList(child, child.type === 'orderedList', depth + 1, out);
+            }
+            else {
+                const text = plainInline(child.content).split('\n');
+                text.forEach((t, ti) => out.push(ti === 0 ? `${pad}${marker}${t}` : `${pad}   ${t}`));
+            }
+        }
+    });
+}
+function linesForBlock(node, out) {
+    switch (node.type) {
+        case 'heading': {
+            const text = plainInline(node.content);
+            const level = Math.min(Math.max(Number(node.attrs?.level ?? 1), 1), 6);
+            out.push('');
+            out.push(text);
+            if (level === 1)
+                out.push('='.repeat(Math.min(text.length, 72)));
+            else if (level === 2)
+                out.push('-'.repeat(Math.min(text.length, 72)));
+            break;
+        }
+        case 'paragraph': {
+            const text = plainInline(node.content);
+            text.split('\n').forEach((t) => out.push(t));
+            out.push('');
+            break;
+        }
+        case 'bulletList':
+            linesForList(node, false, 0, out);
+            out.push('');
+            break;
+        case 'orderedList':
+            linesForList(node, true, 0, out);
+            out.push('');
+            break;
+        case 'taskList':
+            linesForList(node, false, 0, out);
+            out.push('');
+            break;
+        case 'blockquote':
+            for (const c of node.content ?? []) {
+                const before = out.length;
+                linesForBlock(c, out);
+                for (let i = before; i < out.length; i++)
+                    if (out[i])
+                        out[i] = `> ${out[i]}`;
+            }
+            break;
+        case 'codeBlock':
+            for (const l of (node.content ?? []).map((c) => c.text ?? '').join('').split('\n'))
+                out.push(`    ${l}`);
+            out.push('');
+            break;
+        case 'horizontalRule':
+            out.push('─'.repeat(40));
+            out.push('');
+            break;
+        case 'table':
+            // The PDF writer is line-based, so a table becomes tab-joined rows.
+            for (const row of node.content ?? []) {
+                out.push((row.content ?? []).map((cell) => plainInline(cell.content).trim()).join('\t'));
+            }
+            out.push('');
+            break;
+        case 'listEmbed': {
+            const name = typeof node.attrs?.listName === 'string' ? node.attrs.listName : '';
+            out.push(`[Embedded list: ${name || 'Untitled list'}]`);
+            out.push('');
+            break;
+        }
+        default:
+            if (node.content)
+                for (const c of node.content)
+                    linesForBlock(c, out);
+    }
+}
+/**
+ * Flatten a Tiptap doc to plain text lines for the line-based PDF writer.
+ * Marks are stripped; headings are underlined; lists get plain markers.
+ */
+function tiptapToPlainLines(content) {
+    if (!content || typeof content !== 'object')
+        return [];
+    const root = content;
+    const out = [];
+    for (const b of root.content ?? [])
+        linesForBlock(b, out);
+    // Trim leading/trailing blanks and collapse 2+ consecutive blank lines.
+    const collapsed = [];
+    for (const l of out) {
+        if (l === '' && collapsed[collapsed.length - 1] === '')
+            continue;
+        collapsed.push(l);
+    }
+    while (collapsed[0] === '')
+        collapsed.shift();
+    while (collapsed[collapsed.length - 1] === '')
+        collapsed.pop();
+    return collapsed;
+}
+function tiptapToMarkdown(content) {
+    if (!content || typeof content !== 'object')
+        return '';
+    const root = content;
+    const blocks = root.content ?? [];
+    const md = blocks.map((b) => renderBlock(b)).join('');
+    // Collapse 3+ blank lines and trim trailing whitespace.
+    return md.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n';
+}
+//# sourceMappingURL=tiptap-markdown.js.map

@@ -76,9 +76,65 @@ export class IntegrationConnectionsService {
       scopes: row.scopes,
       externalAccountEmail: row.externalAccountEmail,
       tokenExpiresAt: row.tokenExpiresAt,
+      /*
+       * §V2-11 frame `18:39` — "Google gave us this error: …". Sent verbatim,
+       * because the provider's own words are the only part of that card worth
+       * reading; a message this service paraphrased would be a constant with a
+       * variable's name, which is the facade defect.
+       */
+      lastError: row.lastError ?? null,
+      lastErrorAt: row.lastErrorAt ?? null,
       connectedAt: row.createdAt,
       updatedAt: row.updatedAt,
     }))
+  }
+
+  /**
+   * §V2-11 frame `18:39` — remember what the provider said, against the
+   * integration it said it about.
+   *
+   * Upserts rather than requiring a row: a connection that has NEVER succeeded
+   * is exactly the case the card exists for, and it has no row yet. The token
+   * columns are deliberately untouched, so recording a failed refresh does not
+   * throw away a credential that may still work.
+   *
+   * Best-effort by contract — the caller is an error path, and an error path
+   * that can itself fail is how a person ends up with a blank screen instead of
+   * a message.
+   */
+  async recordFailure(workspaceId: string, providerRaw: string, message: string): Promise<void> {
+    const provider = this.assertProvider(providerRaw)
+    // Bounded: this lands in a card and in a response. A provider that returns
+    // a page of HTML must not be able to paste it into somebody's UI.
+    const lastError = String(message ?? '').trim().slice(0, 500) || 'Unknown error'
+    const now = new Date()
+    const existing = await this.db
+      .select({ id: workspaceIntegrationConnections.id })
+      .from(workspaceIntegrationConnections)
+      .where(
+        and(
+          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
+          eq(workspaceIntegrationConnections.provider, provider),
+        ),
+      )
+      .limit(1)
+    if (existing[0]) {
+      await this.db
+        .update(workspaceIntegrationConnections)
+        .set({ lastError, lastErrorAt: now, updatedAt: now })
+        .where(eq(workspaceIntegrationConnections.id, existing[0].id))
+      return
+    }
+    await this.db.insert(workspaceIntegrationConnections).values({
+      workspaceId,
+      provider,
+      // `disconnected`, not `connected`: nothing was ever connected here, and a
+      // row that claims otherwise would light up the tile as healthy while
+      // carrying the reason it is not.
+      status: 'disconnected',
+      lastError,
+      lastErrorAt: now,
+    })
   }
 
   listSupportedProviders() {
@@ -170,6 +226,14 @@ export class IntegrationConnectionsService {
       tokenExpiresAt: token.expiresAt,
       metadata: profile.metadata,
       connectedById: payload.userId,
+      /*
+       * §V2-11 — a successful connect CLEARS the last failure. Without this the
+       * card would keep showing yesterday's error over a working integration,
+       * which is worse than showing nothing: it sends somebody to fix a
+       * problem that is already fixed.
+       */
+      lastError: null,
+      lastErrorAt: null,
       updatedAt: new Date(),
     } as const
 
@@ -603,9 +667,46 @@ export class IntegrationConnectionsService {
     return `${webBase}/app/${workspaceId}/integrations?oauth=success&provider=${encodeURIComponent(provider)}`
   }
 
-  getFailureRedirect(reason: string) {
+  /**
+   * §V2-11 — where a failed grant lands.
+   *
+   * **A defect, found while building the card.** This used to send every
+   * failure to `/app?oauth=error&reason=…` — the app root. The banner that
+   * reads `?oauth=error` is on `/app/:workspaceId/integrations` and nowhere
+   * else, so it rendered on no failure that has ever happened: the one piece
+   * of UI whose whole job was to explain a failed connection was unreachable
+   * from the failure path. Classic dead control, and invisible because both
+   * halves individually look right.
+   *
+   * With a workspace in hand the redirect now goes where the banner lives; the
+   * app root stays as the fallback for a state so broken that not even the
+   * workspace could be read out of it.
+   */
+  getFailureRedirect(reason: string, ctx?: { workspaceId?: string | null; provider?: string | null }) {
     const webBase = this.getWebBase().replace(/\/$/, '')
-    return `${webBase}/app?oauth=error&reason=${encodeURIComponent(reason)}`
+    const params = new URLSearchParams({ oauth: 'error', reason })
+    if (ctx?.provider) params.set('provider', ctx.provider)
+    return ctx?.workspaceId
+      ? `${webBase}/app/${ctx.workspaceId}/integrations?${params.toString()}`
+      : `${webBase}/app?${params.toString()}`
+  }
+
+  /**
+   * Read a callback's state WITHOUT throwing — for the failure path only.
+   *
+   * The error card is attached to an integration, so the failure handler needs
+   * to know which one even when the thing that failed is what would normally
+   * tell it. Signature-checked all the same: an unsigned state must not be
+   * able to write an error message onto somebody else's workspace.
+   */
+  peekState(state: string): { workspaceId: string; provider: Provider } | null {
+    try {
+      const payload = this.verifyState(state)
+      if (!payload?.workspaceId || !payload?.provider) return null
+      return { workspaceId: payload.workspaceId, provider: payload.provider }
+    } catch {
+      return null
+    }
   }
 
   private async exchangeCode(cfg: ProviderConfig, code: string, redirectUri: string) {

@@ -100,3 +100,45 @@ export class WorkspaceGroupsController {
     return this.groups.removeMember(workspaceId, groupId, user.id, userId)
   }
 }
+
+/**
+ * §V2-12 — the Teams Hub itself, as opposed to one team.
+ *
+ * A separate controller under `/workspaces/:id/teams` rather than more routes
+ * on `/groups`, because none of this is about a group: the person cards at
+ * frame `21:00` are per MEMBER, and half the people on that screen are in no
+ * team at all. Hanging them off `/groups/:groupId/...` would have forced the
+ * page to invent a group id it does not have.
+ *
+ * `WorkspaceMemberGuard`, not admin — the entire point of §V2-12 was that
+ * looking at your own organisation stopped requiring admin rights. The one
+ * write here does its own permission check (yours, or an admin's), because
+ * "only admins" and "yours or an admin's" are different rules and a guard
+ * cannot express the second.
+ */
+@ApiTags('workspace-groups')
+@ApiBearerAuth()
+@Controller('workspaces/:workspaceId/teams')
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+export class TeamsHubController {
+  constructor(private groups: WorkspaceGroupsService) {}
+
+  /** Everyone in the workspace, with the work each of them actually has open. */
+  @Get('work-preview')
+  workPreview(@Param('workspaceId') workspaceId: string, @Query('perPerson') perPerson?: string) {
+    return this.groups.workPreview(workspaceId, {
+      perPerson: perPerson ? Number(perPerson) : undefined,
+    })
+  }
+
+  /** The line under the name on a person card. */
+  @Put('people/:userId/title')
+  setJobTitle(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+    @Body() body: { jobTitle?: string | null },
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.groups.setJobTitle(workspaceId, user.id, userId, body?.jobTitle ?? null)
+  }
+}

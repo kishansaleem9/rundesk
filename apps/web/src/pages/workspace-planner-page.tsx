@@ -49,7 +49,25 @@ type Block = {
   isAllDay: boolean
   taskStatus?: string | null
   taskPriority?: string | null
+  /** For "Colour tasks by → List", the fourth value the picker never offered. */
+  taskListId?: string | null
+  /**
+   * §V2-02e — the cadence of the task this block is about, when it has one.
+   * `listBlocks` sends the task's stored recurrence rather than pre-computed
+   * dates, because the horizon is whatever span the grid is drawing.
+   */
+  taskRecurrence?: { cadenceDays?: number | null; rule?: { mode?: string; interval?: number } | null } | null
 }
+
+/**
+ * §V2-02e — one projected future occurrence of a recurring block.
+ *
+ * NOT A BLOCK. It has no id in `task_time_blocks` and nothing in the database
+ * corresponds to it; it is what the grid can say about a task that recurs. Kept
+ * a separate shape, and drawn under a separate testid, so that nothing can
+ * accidentally drag, resize or delete a row that does not exist yet.
+ */
+type Projection = { key: string; label: string; startsAt: Date; endsAt: Date }
 
 type PlannerSettings = {
   showWeekends?: boolean
@@ -57,11 +75,31 @@ type PlannerSettings = {
   blockPrefix?: string
   /** Frame `14:10`: Subtle | Solid. */
   eventStyle?: 'subtle' | 'solid'
-  colorTasksBy?: 'none' | 'priority' | 'status'
+  /** FOUR values. The dialog's copy of this union had three and the server had
+   *  always accepted four — see `planner-settings-dialog.tsx`. */
+  colorTasksBy?: 'none' | 'priority' | 'status' | 'list'
   /** Which rail sections are shown — the Sidebar page. */
   railSections?: string[]
   /** A `users` column, surfaced here because the Appearance page edits it. */
   weekStart?: string
+  /*
+   * §V2-02e, frame `14:10`'s **Others** group — the five keys that were stored
+   * and read by nothing, and the same omission that killed `showAssigned` and
+   * `showOverdue` before them: this page's private copy of the settings type
+   * did not list them, so it could not read them, and no compiler ever noticed
+   * because the two hand-written types never meet. THE FIX IS THE READER, not
+   * the switch. Each line below points at the code that honours it.
+   */
+  /** Week number beside the month — week view only, per the frame's own text. */
+  showWeekNumbers?: boolean
+  /** Land on the week's first day instead of today when the planner opens. */
+  alwaysOpenAtStartOfWeek?: boolean
+  /** Dim the columns the workspace's schedule says are not working days. */
+  darkenNonWorkingHours?: boolean
+  /** Typed personal events save on Enter instead of asking to confirm. */
+  savePersonalEventsQuickly?: boolean
+  /** Draw the next occurrences of a block whose task recurs. */
+  showRecurring?: boolean
   /*
    * §V2-02d, frame `14:20` — and THIS OMISSION IS WHY THEY WERE DEAD.
    *
@@ -143,6 +181,89 @@ const addDays = (d: Date, n: number) => {
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
+/**
+ * A day, as `YYYY-MM-DD`, IN LOCAL TIME.
+ *
+ * DEFECT FOUND WHILE BUILDING §V2-02e. The day column's `data-day` was
+ * `d.toISOString().slice(0, 10)`, and `d` is a local midnight — so east of
+ * Greenwich `toISOString` moves it back into the previous day and every column
+ * was labelled with the date before the one it drew. In Asia/Karachi (the
+ * frame's own zone, `14:10`) Monday the 3rd carried `data-day="2026-08-02"`.
+ * Nothing in the product read the attribute, so it was invisible; the moment a
+ * check compares a column to a calendar date it is off by one for half the
+ * world. The same slice would have been wrong for the holiday comparison below.
+ */
+const localDayKey = (d: Date) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+/**
+ * §V2-02e — the ISO-8601 week number, for "Show week numbers".
+ *
+ * ISO, and therefore ALWAYS MONDAY-BASED, regardless of `users.weekStart`. A
+ * "week 34" that meant something different to two colleagues because one of
+ * them starts their calendar on Sunday would be worse than no number at all —
+ * the number's whole use is saying which week you mean to somebody else.
+ *
+ * The Thursday trick: week 1 is the one containing the year's first Thursday,
+ * so shifting to the Thursday of this week and counting from January 1st gets
+ * the year boundary right without a table of special cases.
+ */
+function isoWeekNumber(d: Date): number {
+  const t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))
+  // getUTCDay: Sunday 0 … Saturday 6. ISO wants Monday 1 … Sunday 7.
+  const isoDay = t.getUTCDay() === 0 ? 7 : t.getUTCDay()
+  t.setUTCDate(t.getUTCDate() + 4 - isoDay)
+  const yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1))
+  return Math.ceil(((t.getTime() - yearStart.getTime()) / 86_400_000 + 1) / 7)
+}
+
+/**
+ * §V2-02e — the next occurrence of a recurring task, from a given one.
+ *
+ * Reads the same shape `tasks.recurrence` stores and `tasks.service.ts`
+ * applies: either a plain `cadenceDays`, or a `rule` with a mode and an
+ * interval. Monthly steps by MONTH rather than by thirty days, because a
+ * monthly block that drifts four days a quarter is one nobody trusts; the day
+ * is clamped so the 31st of a month recurring into a 30-day one lands on the
+ * 30th instead of silently skipping into the next month.
+ */
+function nextOccurrence(from: Date, rec: Block['taskRecurrence']): Date | null {
+  if (!rec) return null
+  const mode = rec.rule?.mode
+  const interval = Math.max(1, Math.min(52, Math.round(rec.rule?.interval ?? 1)))
+  const out = new Date(from)
+  if (mode === 'monthly') {
+    const day = out.getDate()
+    out.setDate(1)
+    out.setMonth(out.getMonth() + interval)
+    const lastOfMonth = new Date(out.getFullYear(), out.getMonth() + 1, 0).getDate()
+    out.setDate(Math.min(day, lastOfMonth))
+    return out
+  }
+  const days =
+    mode === 'weekly' ? interval * 7
+    : mode === 'daily' ? interval
+    : Math.round(rec.cadenceDays ?? 0)
+  if (!Number.isFinite(days) || days <= 0) return null
+  out.setDate(out.getDate() + days)
+  return out
+}
+
+/**
+ * Which hue a list is drawn in, for "Colour tasks by → List".
+ *
+ * A stable hash rather than a stored colour: lists have no colour column, and
+ * inventing one so the calendar could tint a pill would be a schema change in
+ * service of a tint. What matters is only that two blocks on the same list
+ * match and two on different lists usually do not, which a hash gives.
+ */
+const LIST_HUES = ['rose', 'orange', 'emerald', 'slate', 'accent'] as const
+function listHue(listId: string): string {
+  let h = 0
+  for (let i = 0; i < listId.length; i += 1) h = (h * 31 + listId.charCodeAt(i)) % 100_003
+  return LIST_HUES[h % LIST_HUES.length]
+}
+
 export function PlannerPage() {
   const { t, tCount, locale } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId: string }
@@ -202,6 +323,21 @@ export function PlannerPage() {
     enabled: !!workspaceId,
   })
   const showWeekends = settings?.showWeekends !== false
+  /*
+   * §V2-02e — the four Appearance switches and the one Time-blocking switch
+   * that nothing read.
+   *
+   * The defaults are not uniform and the asymmetry is deliberate. The three
+   * that change what an existing planner looks like the moment it loads —
+   * week numbers, opening on Monday, dimmed columns — are OPT IN, so nobody's
+   * calendar rearranges itself because a reader was added. The two that only
+   * ever ADD something (quick save, projected recurrences) follow the frame
+   * and are on.
+   */
+  const showWeekNumbers = settings?.showWeekNumbers === true
+  const darkenNonWorking = settings?.darkenNonWorkingHours === true
+  const saveQuickly = settings?.savePersonalEventsQuickly !== false
+  const showRecurring = settings?.showRecurring !== false
 
   /*
    * The account's own week start, not a hard-coded Monday. `users.weekStart`
@@ -211,6 +347,30 @@ export function PlannerPage() {
    */
   const weekStartsOn = { sunday: 0, monday: 1, saturday: 6 }[settings?.weekStart ?? 'sunday'] ?? 0
   const weekStart = useMemo(() => startOfWeek(anchor, weekStartsOn), [anchor, weekStartsOn])
+
+  /*
+   * §V2-02e — "Always open at the start of the week".
+   *
+   * ONCE, WHEN THE SETTINGS FIRST ARRIVE, and never again. The anchor has to
+   * be initialised before the settings query resolves (the grid draws on the
+   * first frame), so this cannot live in `useState`'s initialiser; and an
+   * effect that re-ran on every settings change would yank the calendar back
+   * to Monday the moment anybody pressed an arrow and then saved any other
+   * setting. The ref is the guard, and it is per mount: leaving the planner
+   * and coming back is "opening it" again, which is exactly what the switch
+   * is about.
+   *
+   * Only meaningful in the spans that start where the anchor is — Day and
+   * 4 days. Week and Month already draw the whole span whatever the anchor is,
+   * so moving it changes nothing there, and that is not a bug in the setting.
+   */
+  const openedAtStart = useRef(false)
+  useEffect(() => {
+    if (openedAtStart.current || !settings) return
+    openedAtStart.current = true
+    if (settings.alwaysOpenAtStartOfWeek !== true) return
+    setAnchor((current) => startOfWeek(current, weekStartsOn))
+  }, [settings, weekStartsOn])
 
   /*
    * §V2-S14c frame `13:50` — Day (d) · 4 days (x) · Week (w) · Month (m).
@@ -266,6 +426,43 @@ export function PlannerPage() {
       ),
     enabled: !!workspaceId,
   })
+
+  /*
+   * §V2-02e — "Darken non-working hours", and where the work schedule comes
+   * from.
+   *
+   * `GET /workspaces/:id/work-schedule` is the workspace's real one:
+   * `work_days` as ISO weekdays plus the dated `workspace_holidays` rows that
+   * Workload already honours. NOT the weekend, which the grid has always
+   * tinted on its own — a team whose working week is Sunday to Thursday has a
+   * Saturday that is a weekend and a working day, and a Thursday that is
+   * neither. Reusing the weekend shading here would make the switch look like
+   * it worked for the five-day teams and do the wrong thing for everyone else.
+   *
+   * Fetched only when the switch is on. It also means the request itself is
+   * evidence the setting was read, which the suite checks: a reader that never
+   * asks for the schedule cannot be honouring it.
+   */
+  const { data: workSchedule } = useQuery({
+    queryKey: ['work-schedule', workspaceId],
+    queryFn: () =>
+      api<{ workDays: number[]; holidays: Array<{ day: string; name: string }> }>(
+        `/workspaces/${workspaceId}/work-schedule`,
+      ),
+    enabled: !!workspaceId && darkenNonWorking,
+  })
+
+  /** ISO weekday, 1 = Monday … 7 = Sunday, matching `workspaces.work_days`. */
+  const isoDay = (d: Date) => (d.getDay() === 0 ? 7 : d.getDay())
+  const holidays = useMemo(
+    () => new Set((workSchedule?.holidays ?? []).map((h) => h.day.slice(0, 10))),
+    [workSchedule],
+  )
+  const nonWorking = (d: Date) => {
+    if (!darkenNonWorking || !workSchedule) return false
+    if (holidays.has(localDayKey(d))) return true
+    return !(workSchedule.workDays ?? []).includes(isoDay(d))
+  }
 
   /* The roster the search filters. Fetched once; the filtering is local,
    * because a workspace's member list is small and a keystroke should not be
@@ -469,6 +666,12 @@ export function PlannerPage() {
       hue = { urgent: 'rose', high: 'orange', normal: 'accent', low: 'slate' }[b.taskPriority] ?? 'accent'
     } else if (by === 'status' && b.taskStatus) {
       hue = b.taskStatus === 'done' ? 'emerald' : 'accent'
+    } else if (by === 'list' && b.taskListId) {
+      /* §V2-02e — the fourth value. The server has accepted `list` since this
+       * setting shipped; the select offered three options and this function
+       * knew three, so choosing it (which only the API could do) coloured
+       * everything accent — a value that round-tripped and did nothing. */
+      hue = listHue(b.taskListId)
     }
     const map: Record<string, { subtle: string; solid: string }> = {
       accent: { subtle: 'border-accent/40 bg-accent/15 text-accent', solid: 'border-accent bg-accent text-accent-foreground' },
@@ -495,16 +698,78 @@ export function PlannerPage() {
   const railOn = (key: string) => (settings?.railSections ?? [...RAIL_SECTIONS]).includes(key)
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
+  /*
+   * §V2-02e — "Show recurring", and what it draws.
+   *
+   * Only FORWARD, and never over the block it came from. A recurring task's
+   * block is a real row; the occurrences after it are not, and the grid says
+   * so by drawing them differently and by giving them no block id. Walking
+   * rather than multiplying, because a monthly rule does not have a fixed
+   * length: `nextOccurrence` steps by months when the rule says months.
+   *
+   * The walk is bounded twice — by the end of the drawn range and by a hard
+   * cap — so a task recurring daily inside a month view cannot turn into an
+   * unbounded loop if a rule ever arrives with a cadence of zero.
+   */
+  const projections = useMemo<Projection[]>(() => {
+    if (!showRecurring) return []
+    const until = rangeTo.getTime()
+    const out: Projection[] = []
+    for (const b of blocks) {
+      if (!b.taskRecurrence) continue
+      const length = new Date(b.endsAt).getTime() - new Date(b.startsAt).getTime()
+      let cursor: Date | null = new Date(b.startsAt)
+      for (let n = 0; n < 60; n += 1) {
+        cursor = nextOccurrence(cursor as Date, b.taskRecurrence)
+        if (!cursor || cursor.getTime() >= until) break
+        out.push({
+          key: `${b.id}-${cursor.toISOString()}`,
+          label: blockLabel(b),
+          startsAt: new Date(cursor),
+          endsAt: new Date(cursor.getTime() + length),
+        })
+      }
+    }
+    return out
+    // `blockLabel` closes over the prefix, which is itself a setting; listing
+    // it would re-run this on every render rather than when the data changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blocks, showRecurring, rangeTo, prefix])
+
   /** Which task is currently under the pointer, mid-drag. */
   const [dragging, setDragging] = useState<{ taskId: string; title: string } | null>(null)
   const [ghost, setGhost] = useState<{ x: number; y: number } | null>(null)
 
+  /*
+   * §V2-02e — "Save personal events quickly", and the thing it needed first:
+   * A WAY TO MAKE A PERSONAL EVENT AT ALL.
+   *
+   * The grid could only receive a task dragged off the Backlog. `[14:10]`'s
+   * switch is about "personal events" — lunch, the school run, the things
+   * `taskTimeBlocks.title` has been nullable for since §V2-02 — and there was
+   * no control anywhere that made one. So the setting could not have been read
+   * even by a page that wanted to: there was no confirmation step to skip.
+   *
+   * Clicking an empty spot in a column opens a draft at that quarter hour.
+   * With the switch on, Enter saves it. With it off, Enter shows what is about
+   * to be saved and waits — which is the whole difference the switch names.
+   */
+  const [draft, setDraft] = useState<{ startsAt: Date; title: string; confirming: boolean } | null>(null)
+
   const createBlock = useMutation({
-    mutationFn: (body: { taskId: string; startsAt: string }) =>
+    mutationFn: (body: { taskId?: string; title?: string; startsAt: string }) =>
       api(`/planner/${workspaceId}/blocks`, { method: 'POST', body }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['planner-blocks', workspaceId] }),
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('planner.blockFailed')),
   })
+
+  /** Send the draft as a personal event — a block with a title and no task. */
+  const savePersonalEvent = () => {
+    const title = draft?.title.trim()
+    if (!draft || !title) return
+    createBlock.mutate({ title, startsAt: draft.startsAt.toISOString() })
+    setDraft(null)
+  }
 
   /*
    * A drag that ends anywhere but a day column has to end. Without this the
@@ -547,6 +812,24 @@ export function PlannerPage() {
   }
 
   /*
+   * §V2-02e — a click on empty grid starts a personal event.
+   *
+   * Anything already drawn there is left alone: clicking a block, a projected
+   * occurrence or somebody else's busy window is not "empty grid", and opening
+   * a composer on top of one would make the grid impossible to read. A drag in
+   * progress is not a click either — the drop handler owns that gesture.
+   */
+  const onClickColumn = (day: Date, e: React.MouseEvent<HTMLDivElement>) => {
+    if (dragging) return
+    const el = e.target as HTMLElement | null
+    if (el?.closest('[data-testid="planner-block"], [data-testid="planner-recurring-block"], [data-testid="planner-busy-block"], [data-testid="planner-event-draft"]')) {
+      return
+    }
+    const rect = e.currentTarget.getBoundingClientRect()
+    setDraft({ startsAt: dropTime(day, e.clientY - rect.top), title: '', confirming: false })
+  }
+
+  /*
    * `[16:09]` "is task ka itna time bach gaya" — the tab header of frame
    * `14:45` reads "Work on dbgdh · 2h 55m left". The block being worked on
    * RIGHT NOW, and how much of it is left.
@@ -571,6 +854,20 @@ export function PlannerPage() {
   const monthLabel = new Intl.DateTimeFormat(locale, { month: 'long', year: 'numeric' }).format(
     days[0] ?? weekStart,
   )
+
+  /*
+   * §V2-02e — WHICH day the week number is taken from, and why it is not the
+   * first one.
+   *
+   * ISO weeks run Monday to Sunday. On a calendar whose week starts on Sunday
+   * — `users.weekStart` allows it, and so does frame `14:10`'s picker — the
+   * first column belongs to the ISO week that has just ENDED, so taking the
+   * number from `days[0]` would label six days of the week with the previous
+   * week's number. The middle of the drawn span is inside the intended week
+   * for every start day the product offers (Saturday, Sunday or Monday) and
+   * with weekends hidden as well.
+   */
+  const weekNumberShown = isoWeekNumber(days[Math.floor(days.length / 2)] ?? weekStart)
   const dayName = (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d)
 
   const hours = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, i) => FIRST_HOUR + i)
@@ -913,6 +1210,26 @@ export function PlannerPage() {
             <ChevronRight className="h-4 w-4" />
           </button>
           <span className="text-[13px] font-medium" data-testid="planner-month">{monthLabel}</span>
+          {/*
+            §V2-02e, frame `14:10` — "Calendar week number will appear in the
+            header beside the month. ONLY VISIBLE FOR THE WEEK VIEW."
+
+            The second sentence is the requirement, not a note about it: a week
+            number over a Day column is a different claim ("this day is in week
+            34" — true but not what was asked for) and over a Month grid it is
+            simply wrong, because the month spans five of them. So the view is
+            part of the condition, and the suite checks the other three spans
+            draw nothing.
+          */}
+          {showWeekNumbers && view === 'week' && (
+            <span
+              className="rounded bg-muted px-1.5 py-0.5 text-[11px] text-muted-foreground"
+              data-testid="planner-week-number"
+              data-week={weekNumberShown}
+            >
+              {t('planner.weekNumber', { n: weekNumberShown })}
+            </span>
+          )}
           <Button
             size="sm"
             variant="outline"
@@ -1129,9 +1446,10 @@ export function PlannerPage() {
                 <div
                   key={d.toISOString()}
                   data-testid="planner-day-column"
-                  data-day={d.toISOString().slice(0, 10)}
+                  data-day={localDayKey(d)}
                   data-weekend={isWeekend ? 'true' : 'false'}
                   onPointerUp={(e) => onDropInColumn(d, e)}
+                  onClick={(e) => onClickColumn(d, e)}
                   className={cn(
                     'relative border-l border-border/40',
                     isWeekend && 'bg-muted/20',
@@ -1145,6 +1463,27 @@ export function PlannerPage() {
                       style={{ top: i * HOUR_PX, height: HOUR_PX }}
                     />
                   ))}
+                  {/*
+                    §V2-02e — "Visually dim the hours outside your work schedule
+                    on the calendar grid."
+
+                    A separate overlay rather than a class on the column, for
+                    two reasons that both matter: the weekend tint is already a
+                    class there and two tints would compound into an unreadable
+                    column on a Saturday that is also non-working; and an
+                    element that only exists when the setting is on is something
+                    a check can count, where a class that is sometimes also
+                    applied for another reason is not. `pointer-events-none` so
+                    a dimmed day can still be clicked and dropped on — it is
+                    outside the schedule, not forbidden.
+                  */}
+                  {nonWorking(d) && (
+                    <div
+                      data-testid="planner-nonworking"
+                      data-day={localDayKey(d)}
+                      className="pointer-events-none absolute inset-0 bg-foreground/[0.10] dark:bg-background/40"
+                    />
+                  )}
                   {timed
                     .filter((b) => sameDay(new Date(b.startsAt), d))
                     .map((b) => {
@@ -1193,6 +1532,96 @@ export function PlannerPage() {
                         />
                       )
                     })}
+
+                  {/*
+                    §V2-02e — the next occurrences of a recurring task.
+
+                    A FORECAST, DRAWN AS ONE: dashed, dimmed, and with no block
+                    id, because none of these exist in `task_time_blocks` yet.
+                    Under their own testid so that every existing check that
+                    counts `planner-block` keeps counting real rows — a
+                    projection that joined that count would silently change what
+                    four other suites mean by "a block".
+                  */}
+                  {projections
+                    .filter((p) => sameDay(p.startsAt, d))
+                    .map((p) => {
+                      const top = (p.startsAt.getHours() + p.startsAt.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
+                      const height = Math.max(18, ((p.endsAt.getTime() - p.startsAt.getTime()) / 3_600_000) * HOUR_PX)
+                      return (
+                        <div
+                          key={p.key}
+                          data-testid="planner-recurring-block"
+                          data-starts-at={p.startsAt.toISOString()}
+                          title={t('planner.recurringHint')}
+                          className="pointer-events-none absolute inset-x-1 overflow-hidden rounded border border-dashed border-accent/50 bg-accent/5 px-1.5 py-0.5 text-[11px] text-accent/70"
+                          style={{ top, height }}
+                        >
+                          {p.label}
+                        </div>
+                      )
+                    })}
+
+                  {/*
+                    §V2-02e — the personal-event draft, at the quarter hour the
+                    click landed on. One at a time: a grid of half-written
+                    events is a grid nobody would finish.
+                  */}
+                  {draft && sameDay(draft.startsAt, d) && (
+                    <div
+                      data-testid="planner-event-draft"
+                      className="absolute inset-x-1 z-20 rounded border border-accent bg-card p-1 shadow"
+                      style={{
+                        top: (draft.startsAt.getHours() + draft.startsAt.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX,
+                      }}
+                    >
+                      <input
+                        autoFocus
+                        value={draft.title}
+                        placeholder={t('planner.personalEventPlaceholder')}
+                        aria-label={t('planner.personalEvent')}
+                        data-testid="planner-event-title"
+                        onChange={(e) => setDraft({ ...draft, title: e.target.value })}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Escape') return setDraft(null)
+                          if (e.key !== 'Enter') return
+                          e.preventDefault()
+                          if (!draft.title.trim()) return
+                          /*
+                            THE SWITCH, AND THE ONLY PLACE IT IS READ. On, this
+                            posts. Off, it stops here and asks — which is the
+                            difference between "saves quickly" and "saves".
+                          */
+                          if (saveQuickly) savePersonalEvent()
+                          else setDraft({ ...draft, confirming: true })
+                        }}
+                        className="h-6 w-full rounded border border-border bg-background px-1 text-[11px]"
+                      />
+                      {draft.confirming && (
+                        <div className="mt-1 flex items-center gap-1" data-testid="planner-event-confirm">
+                          <span className="flex-1 truncate text-[10px] text-muted-foreground">
+                            {new Intl.DateTimeFormat(locale, { hour: '2-digit', minute: '2-digit' }).format(draft.startsAt)}
+                          </span>
+                          <button
+                            type="button"
+                            data-testid="planner-event-save"
+                            onClick={savePersonalEvent}
+                            className="rounded bg-accent px-1.5 py-0.5 text-[10px] text-accent-foreground"
+                          >
+                            {t('common.save')}
+                          </button>
+                          <button
+                            type="button"
+                            data-testid="planner-event-cancel"
+                            onClick={() => setDraft(null)}
+                            className="rounded px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                          >
+                            {t('common.cancel')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {/* The red now-line, on today's column only. */}
                   {nowOffset !== null && col === nowColumn && (

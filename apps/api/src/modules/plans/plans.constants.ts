@@ -27,6 +27,23 @@ export const PLAN_FEATURES = [
   'integrations',
   'customBranding',
   'prioritySupport',
+  /*
+   * §V2-13, frames `09:26` and `10:42` — the two surfaces the walkthrough
+   * NAMES as paid.
+   *
+   *   `[09:26]` "Is ke baad TEAM VIEW — yeh cheez ke liye humein of course BUY
+   *   karna parega."
+   *   `[10:42]` "agar aap ke paas woh hai PREMIUM ACCESS … to aap ke paas board
+   *   view download karne ka bhi option hoga. Lekin agar aap ke paas premium
+   *   nahi [hai] to aap LIST VIEW download karo."
+   *
+   * The second sentence is the boundary and it is the important half: the LIST
+   * export is free and stays free. `boardExport` gates the board-shaped export
+   * only, which is a different artifact (grouped by board column), so a free
+   * workspace loses nothing it had.
+   */
+  'teamView',
+  'boardExport',
 ] as const
 export type PlanFeature = (typeof PLAN_FEATURES)[number]
 
@@ -63,6 +80,8 @@ const ALL_FEATURES_OFF: Record<PlanFeature, boolean> = {
   integrations: false,
   customBranding: false,
   prioritySupport: false,
+  teamView: false,
+  boardExport: false,
 }
 
 const ALL_FEATURES_ON: Record<PlanFeature, boolean> = {
@@ -75,6 +94,14 @@ const ALL_FEATURES_ON: Record<PlanFeature, boolean> = {
   integrations: true,
   customBranding: true,
   prioritySupport: true,
+  /*
+   * On from Business up, which is exactly what frame `09:26` offers: the panel
+   * is headed "Try Business for FREE to unlock Team View" and lists Team View
+   * and Custom Exporting among what Business includes. `pro` spreads
+   * ALL_FEATURES_OFF and names what it adds, so it does not get these.
+   */
+  teamView: true,
+  boardExport: true,
 }
 
 export const PLAN_TIERS: Record<PlanId, PlanTier> = {
@@ -127,6 +154,37 @@ export function isPlanId(value: unknown): value is PlanId {
   return typeof value === 'string' && (PLAN_IDS as readonly string[]).includes(value)
 }
 
+/**
+ * The ladder, as a number.
+ *
+ * `PLAN_IDS` is already written in ascending order of what a tier includes, and
+ * `plans.constants.test.ts` asserts that order, so the rank is derived from it
+ * rather than written out a second time — a second copy is the duplicated-list
+ * defect and this audit has found four of them.
+ */
+export const PLAN_RANK: Record<PlanId, number> = Object.fromEntries(
+  PLAN_IDS.map((id, i) => [id, i]),
+) as Record<PlanId, number>
+
+/**
+ * Is `planId` at least `minimum`? The comparison every "this needs Pro or
+ * better" gate makes.
+ *
+ * §V2-06 `[07:20]` — "ClickUp Apps is also dependent on that — ke aap ke paas
+ * PACKAGE PLAN kaun sa hai … [Free] mein of course apna option LIMITED hota
+ * hai." Gating by TIER, not by a per-feature boolean: a free workspace gets a
+ * smaller set of ClickApps and a paid one gets more, which a
+ * `Record<PlanFeature, boolean>` cannot express without one flag per ClickApp
+ * per tier.
+ *
+ * Enterprise is the top of the ladder, so this is `true` for every minimum
+ * there — the §14.1 invariant that gating never restricts an enterprise
+ * workspace holds by construction, not by remembering to special-case it.
+ */
+export function planIncludes(planId: PlanId, minimum: PlanId): boolean {
+  return PLAN_RANK[planId] >= PLAN_RANK[minimum]
+}
+
 /** Optional per-workspace override stored in `workspaces.plan_limits`. */
 export type PlanLimitsOverride = {
   maxMembers?: number | null
@@ -142,6 +200,13 @@ export type ResolvedPlan = {
   trialDays: number
   limits: PlanLimits
   features: Record<PlanFeature, boolean>
+  /**
+   * Whether `id` came from a plan value this build knows, or from the fail-open
+   * default below. See `resolvePlanConfig` — without this a caller cannot tell
+   * "enterprise because the row says enterprise" from "enterprise because the
+   * row said something nobody recognises", and those are very different facts.
+   */
+  recognized: boolean
 }
 
 /**
@@ -151,8 +216,23 @@ export type ResolvedPlan = {
  * bad value can never accidentally restrict a workspace (reinforces the "gating
  * never restricts current behavior" guarantee). The override may widen or narrow
  * the tier's numeric limits and toggle individual features.
+ *
+ * §V2-06 — IS FAILING OPEN RIGHT HERE? Re-examined while putting ClickApps
+ * behind the plan, and kept, for one reason that is not inertia: every existing
+ * workspace stores `enterprise` (schema/workspaces.ts:69 default, migration
+ * 0070), so a fail-CLOSED default would only ever fire on a value that is
+ * already wrong — and it would fire by taking features away from a live
+ * workspace, which is an outage, not a gate. A bad plan string is an
+ * operational fault to be fixed in the row, not a reason to lock somebody out
+ * of their own Space settings.
+ *
+ * What WAS wrong is that the fail-open was silent. `recognized` makes it
+ * legible: `getWorkspacePlan` already carries `raw`, and a caller (or an
+ * operator reading `GET /workspaces/:id/plan`) can now see that the tier was
+ * defaulted rather than read. The gate stays open; it no longer lies about why.
  */
 export function resolvePlanConfig(planId: string | null | undefined, override?: PlanLimitsOverride | null): ResolvedPlan {
+  const recognized = isPlanId(planId)
   const tier = PLAN_TIERS[isPlanId(planId) ? planId : 'enterprise']
   const limits: PlanLimits = {
     maxMembers: override?.maxMembers !== undefined ? override.maxMembers : tier.limits.maxMembers,
@@ -166,6 +246,7 @@ export function resolvePlanConfig(planId: string | null | undefined, override?: 
     trialDays: tier.trialDays,
     limits,
     features,
+    recognized,
   }
 }
 

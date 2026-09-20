@@ -85,7 +85,23 @@ const SESSION = {
   version: 0,
 }
 
-/** The shape `GET /space-presets` really returns, so the UI has real input. */
+/**
+ * The shape `GET /space-presets` really returns, so the UI has real input.
+ *
+ * §V2-06 RE-AUDIT — this stub had drifted from the server it stands in for. Its
+ * `features` listed `multipleAssignees`, `timeTracking` and `timeEstimates`,
+ * none of which `SPACE_FEATURE_KEYS` has ever contained (they live on the task
+ * detail sheet, which does not know its task's space), and its `views` was
+ * missing `team`. A stub that describes a server that does not exist is a
+ * sixth copy of a list this audit has already found five copies of — and the
+ * one place the drift could never be noticed, because the suite reading it
+ * also wrote it. Both now match `apps/api/.../space-presets.ts` exactly.
+ *
+ * No plan block here on purpose: the un-scoped route has none, and its absence
+ * is what an ungated workspace looks like, so the panel below draws no
+ * padlocks. `clickapps-plan-gating.mjs` covers the gated case against the real
+ * API, where the plan is a fact rather than a fixture's opinion.
+ */
 const PRESETS = {
   presets: [
     { key: 'starter', views: ['list', 'board'], defaultView: 'list',
@@ -96,14 +112,13 @@ const PRESETS = {
       features: ['priority', 'tags', 'listEmail'], seedLists: ['Campaigns', 'Content calendar'] },
     { key: 'project', views: ['list', 'board', 'gantt'], defaultView: 'list',
       statuses: [{ key: 'todo', name: 'To do', color: '#94a3b8', category: 'open' }],
-      features: ['priority', 'timeTracking'], seedLists: ['Project plan'] },
+      features: ['priority', 'customFields'], seedLists: ['Project plan'] },
     { key: 'product', views: ['list', 'board', 'table'], defaultView: 'board',
       statuses: [{ key: 'todo', name: 'To do', color: '#94a3b8', category: 'open' }],
       features: ['priority', 'wipLimits'], seedLists: ['Roadmap'] },
   ],
-  features: ['priority', 'tags', 'customFields', 'multipleAssignees', 'timeTracking',
-    'timeEstimates', 'milestones', 'wipLimits', 'listEmail'],
-  views: ['list', 'board', 'table', 'calendar', 'gantt'],
+  features: ['priority', 'tags', 'customFields', 'milestones', 'wipLimits', 'listEmail'],
+  views: ['list', 'board', 'table', 'calendar', 'gantt', 'team'],
 }
 
 const envelope = (data) => JSON.stringify({ data, error: null })

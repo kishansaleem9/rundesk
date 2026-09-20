@@ -16,6 +16,12 @@ import { PersonPanel } from '../components/person-panel'
 import { ShortcutsOverlay } from '../components/shortcuts-overlay'
 import { SupportWidget } from '../components/support-widget'
 import { NewBuildAvailable } from '../components/new-build-available'
+// §V2-02f — the running time block's countdown, in the browser tab. Mounted
+// here because the shell is the one thing on screen for every workspace page
+// and gone the moment you leave /app, which is exactly the life the title
+// needs: it follows you between pages (frame `16:05` is the LIST page) and it
+// is handed back when the app unmounts.
+import { useFocusTabTitle } from '../lib/use-focus-tab-title'
 
 const CommandPalette = lazy(
   lazyChunk(async () => {
@@ -112,6 +118,11 @@ function AppShell() {
   }, [pathname])
   const aiDocked = aiOpen && !!workspaceId && !isAdminRoute
   const routeLoading = useRouteLoading()
+
+  // Above the admin early-return on purpose: hooks run unconditionally, and the
+  // admin subtree is still inside the app — a block running while you read the
+  // admin pages is still running.
+  useFocusTabTitle(workspaceId)
 
   if (isAdminRoute) {
     return (

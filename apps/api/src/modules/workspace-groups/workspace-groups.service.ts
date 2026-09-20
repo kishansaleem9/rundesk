@@ -1,6 +1,24 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common'
-import { and, eq, inArray, ilike, sql } from 'drizzle-orm'
-import { workspaceGroups, workspaceGroupMembers, users, workspaceMembers } from '@rundesk/db'
+import {
+  Injectable,
+  Inject,
+  NotFoundException,
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+} from '@nestjs/common'
+import { and, eq, inArray, ilike, ne, sql } from 'drizzle-orm'
+import {
+  workspaceGroups,
+  workspaceGroupMembers,
+  workspaceMemberProfiles,
+  users,
+  workspaceMembers,
+  tasks,
+  taskAssignees,
+  lists,
+  projects,
+  spaces,
+} from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
@@ -278,6 +296,164 @@ export class WorkspaceGroupsService {
       metadata: { count: userIds.length },
     })
     return this.get(workspaceId, groupId)
+  }
+
+  /**
+   * §V2-12 / frame `21:00` — the per-person work preview cards.
+   *
+   * The frame draws one card per person: avatar, name, job title, then a
+   * NUMBERED list of what that person is working on — Priya Gupta's five items
+   * beside Sarah Chang's five different ones. So the whole content of the
+   * feature is that each card answers for ITS OWN person.
+   *
+   * WHICH IS THE PART THAT IS EASY TO FAKE, and this audit has found both
+   * halves of the fake in shipped code:
+   *
+   *   - the FACADE: every card rendering the same list (the caller's own work,
+   *     or the first person's), which looks perfect until two people have
+   *     different work;
+   *   - the CONFIDENT ZERO: a count that is always 0 because the grouping keyed
+   *     on the wrong id. In the UI that is indistinguishable from a person who
+   *     genuinely has nothing on.
+   *
+   * So: ONE query for everybody's open work, grouped in memory on
+   * `task_assignees.user_id` — the key that was selected, not one reconstructed
+   * afterwards — and `openCount` is the true total for that person, not the
+   * length of the slice the card shows. A card that says 12 and lists 5 is
+   * correct; a card that says 5 because it counted its own list is a number
+   * that can never disagree with the list, which makes it decoration.
+   *
+   * Tasks reach a workspace only through list → project → space, the same join
+   * chain the person profile and the activity feed use. `isArchived` covers
+   * both archived and trashed tasks (see the note in schema/tasks.ts), so
+   * neither shows up as somebody's current work.
+   */
+  async workPreview(workspaceId: string, opts: { perPerson?: number } = {}) {
+    const limit = Math.min(Math.max(Math.trunc(opts.perPerson ?? 5) || 5, 1), 10)
+
+    const people = await this.db
+      .select({
+        userId: workspaceMembers.userId,
+        displayName: users.displayName,
+        email: users.email,
+        avatarUrl: users.avatarUrl,
+        role: workspaceMembers.role,
+        jobTitle: workspaceMemberProfiles.jobTitle,
+      })
+      .from(workspaceMembers)
+      .innerJoin(users, eq(users.id, workspaceMembers.userId))
+      .leftJoin(
+        workspaceMemberProfiles,
+        and(
+          eq(workspaceMemberProfiles.userId, workspaceMembers.userId),
+          eq(workspaceMemberProfiles.workspaceId, workspaceId),
+        ),
+      )
+      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .orderBy(users.displayName)
+
+    if (people.length === 0) return []
+
+    const ids = people.map((p) => p.userId)
+    const rows = await this.db
+      .select({
+        userId: taskAssignees.userId,
+        id: tasks.id,
+        title: tasks.title,
+        status: tasks.status,
+        statusCategory: tasks.statusCategory,
+        dueDate: tasks.dueDate,
+        listId: tasks.listId,
+      })
+      .from(taskAssignees)
+      .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(spaces.workspaceId, workspaceId),
+          inArray(taskAssignees.userId, ids),
+          eq(tasks.isArchived, false),
+          ne(tasks.statusCategory, 'closed'),
+        ),
+      )
+      // Soonest first, undated last — the order the card's 1…5 numbering means.
+      .orderBy(sql`${tasks.dueDate} asc nulls last`, tasks.position, tasks.title)
+
+    const byPerson = new Map<string, typeof rows>()
+    for (const row of rows) {
+      const bucket = byPerson.get(row.userId)
+      if (bucket) bucket.push(row)
+      else byPerson.set(row.userId, [row])
+    }
+
+    return people.map((person) => {
+      const own = byPerson.get(person.userId) ?? []
+      return {
+        userId: person.userId,
+        displayName: person.displayName,
+        email: person.email,
+        avatarUrl: person.avatarUrl,
+        role: person.role,
+        jobTitle: person.jobTitle ?? null,
+        /** Everything open, not the slice below. */
+        openCount: own.length,
+        items: own.slice(0, limit).map((r) => ({
+          id: r.id,
+          title: r.title,
+          status: r.status,
+          statusCategory: r.statusCategory,
+          dueDate: r.dueDate,
+          listId: r.listId,
+        })),
+      }
+    })
+  }
+
+  /**
+   * The job title under the name on a person card.
+   *
+   * Yours, or anybody's if you administer the workspace. Not a free-for-all:
+   * a title is what the org says you do, and letting any colleague rewrite it
+   * makes the card unusable as an answer to "who is this".
+   *
+   * Upsert on (workspace, user) so a second save edits rather than duplicates;
+   * clearing it back to NULL is a legitimate answer, distinct from never having
+   * been asked, and the card falls back to the workspace role for neither — it
+   * simply says nothing.
+   */
+  async setJobTitle(workspaceId: string, actorId: string, userId: string, rawTitle: string | null) {
+    const [actor] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    const isAdmin = !!actor && ['workspace_admin', 'manager', 'super_admin'].includes(actor.role)
+    if (actorId !== userId && !isAdmin) {
+      throw new ForbiddenException('Only a workspace admin may change somebody else’s job title')
+    }
+
+    const [target] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (!target) throw new NotFoundException('That person is not a member of this workspace')
+
+    const trimmed = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 120) : ''
+    const jobTitle = trimmed.length > 0 ? trimmed : null
+
+    const [row] = await this.db
+      .insert(workspaceMemberProfiles)
+      .values({ workspaceId, userId, jobTitle })
+      .onConflictDoUpdate({
+        target: [workspaceMemberProfiles.workspaceId, workspaceMemberProfiles.userId],
+        set: { jobTitle, updatedAt: new Date() },
+      })
+      .returning()
+
+    return { userId, jobTitle: row?.jobTitle ?? null }
   }
 
   /**

@@ -263,10 +263,17 @@ try {
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  /*
+   * EXACT, not `<`. With `<`, a branch that silently stopped being reached
+   * turns into a shorter run that still reports green, and a check added
+   * without raising the number goes unnoticed in the other direction. There
+   * are exactly 14 unconditional `chk` calls above; any other total means this
+   * run was not this suite.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
-        'so "0 failed" describes the part it reached and nothing else.',
+      `\n✗ ${ran} of ${EXPECTED_CHECKS} checks ran — a run that is not exactly the suite is not the ` +
+        'suite, so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)
   }

@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router'
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSidebarStore } from '../store/sidebar'
 import {
@@ -61,6 +61,7 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   Tooltip,
@@ -80,6 +81,8 @@ import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { CreateSpaceWizard } from './create-space-wizard'
+import { QuickCreateModal } from './quick-create-modal'
+import { SPACE_CREATE_TYPES, type CreateKind } from '../lib/create-types'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
 import { ListSkeleton } from './loading-skeletons'
@@ -429,6 +432,12 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   // the folder/project affordances). `null` = closed; mode drives POST vs PUT.
   const [spaceDialog, setSpaceDialog] = useState<{ mode: 'create' | 'rename'; id?: string; name: string } | null>(null)
   const [savingSpace, setSavingSpace] = useState(false)
+  /*
+   * §V2-06 frame `08:00` — what the "+" on a space row was chosen from.
+   * Carries the space as well as the kind, so the creator opens with the
+   * question "which space" already answered.
+   */
+  const [spaceCreate, setSpaceCreate] = useState<{ spaceId: string; kind: CreateKind } | null>(null)
   // §2.2 — create a new Workspace under the caller's existing org from the
   // switcher (instead of bouncing to the full sign-up/registration flow).
   const [wsDialogOpen, setWsDialogOpen] = useState(false)
@@ -446,22 +455,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     }
   }
 
-  // §2.4 — create a project directly under a space from the sidebar (the "+" on
-  // a space row), so users don't have to open the global create modal each time.
-  const createProject = async (spaceId: string) => {
-    if (!workspaceId) return
-    const name = window.prompt(t('nav.newProjectPrompt'))?.trim()
-    if (!name) return
-    try {
-      const created = await api<{ id: string }>(`/projects`, { method: 'POST', body: { spaceId, name } })
-      setExpandedSpaces((prev) => ({ ...prev, [spaceId]: true }))
-      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
-      navigate({ to: '/app/$workspaceId/$spaceId/$projectId', params: { workspaceId, spaceId, projectId: created.id } })
-    } catch (err) {
-      window.alert(err instanceof Error ? err.message : t('nav.createProjectError'))
-    }
-  }
-
+  /*
+   * §2.4's `createProject` stood here: a `window.prompt` behind the "+" on a
+   * space row. §V2-06 frame `08:00` replaces it with the Create menu — project
+   * is one of that menu's eight items, and it now goes through the same
+   * creator every other type does rather than through a browser prompt that
+   * could collect a name and nothing else.
+   */
 
   // §2/§13.4 — DELETE /spaces/:spaceId/folders/:folderId removes the folder;
   // its projects fall back to the ungrouped list (they are not deleted).
@@ -2002,14 +2002,61 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     )}
                     <span className="truncate">{space.name}</span>
                   </Link>
-                  <button
-                    className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground"
-                    aria-label={t('nav.addProjectTo', { name: space.name })}
-                    title={t('nav.newProject')}
-                    onClick={() => void createProject(space.id)}
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                  </button>
+                  {/*
+                    §V2-06 `[07:56]`, frame `08:00` — "Space ke ooper yeh jo
+                    PLUS ka option hota hai, us par click karoge to LIST /
+                    FOLDER [aata hai]." The frame's menu is headed **Create**
+                    and offers eight things.
+
+                    What stood here was a single action: a `window.prompt` for a
+                    project name and nothing else. Seven of the eight were
+                    unreachable from the one place a person has already decided
+                    to create something, and the eighth was chosen for them.
+
+                    The eight come from `lib/create-types.ts`, which the
+                    quick-create tab strip renders from as well — one list, two
+                    surfaces. Each lands on that type's creator with THIS space
+                    already filled in.
+                  */}
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <button
+                        className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
+                        aria-label={t('nav.createInSpace', { name: space.name })}
+                        title={t('createMenu.title')}
+                        data-testid={`space-create-open-${space.id}`}
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                      </button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="start" className="w-60" data-testid="space-create-menu">
+                      <DropdownMenuLabel data-testid="space-create-menu-title">{t('createMenu.title')}</DropdownMenuLabel>
+                      {SPACE_CREATE_TYPES.map((type, i) => (
+                        // A Fragment, not a <div>: a plain element between
+                        // role="menu" and its items is not a menu any more.
+                        <Fragment key={type.value}>
+                          {/* The frame rules its menu into groups; ours divides
+                              the things that go INSIDE a container from the
+                              containers themselves. */}
+                          {i === 5 && <DropdownMenuSeparator />}
+                          <DropdownMenuItem
+                            data-testid={`space-create-${type.value}`}
+                            onClick={() => setSpaceCreate({ spaceId: space.id, kind: type.value })}
+                          >
+                            <type.icon className="h-3.5 w-3.5 shrink-0" />
+                            <span className="flex min-w-0 flex-col">
+                              <span className="truncate" data-testid={`space-create-label-${type.value}`}>
+                                {t(type.labelKey)}
+                              </span>
+                              <span className="truncate text-[11px] text-muted-foreground">
+                                {t(type.blurbKey)}
+                              </span>
+                            </span>
+                          </DropdownMenuItem>
+                        </Fragment>
+                      ))}
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -2173,6 +2220,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             )}
             <button
               className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+              data-testid="nav-new-space"
               onClick={() => setSpaceDialog({ mode: 'create', name: '' })}
             >
               <Plus className="h-3.5 w-3.5 shrink-0" />
@@ -2427,6 +2475,20 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             setSpaceDialog(null)
             navigate({ to: '/app/$workspaceId/$spaceId', params: { workspaceId, spaceId: space.id } })
           }}
+        />
+      )}
+
+      {/*
+        §V2-06 frame `08:00` — the creator the "+" menu chose, opened on that
+        type with this space already selected. The quick-create modal IS the
+        creator for all eight; routing here to a second set of forms would be
+        the duplicated-list defect wearing a different hat.
+      */}
+      {spaceCreate && (
+        <QuickCreateModal
+          initialMode={spaceCreate.kind}
+          initialSpaceId={spaceCreate.spaceId}
+          onClose={() => setSpaceCreate(null)}
         />
       )}
 

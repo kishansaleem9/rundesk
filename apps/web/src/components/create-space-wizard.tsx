@@ -17,6 +17,8 @@ import { ChevronLeft, ChevronRight, Lock, Layers, Circle, ToggleRight } from 'lu
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { CONTAINER_COLORS, CONTAINER_ICONS } from './container-edit-dialog'
+import { viewLabelKey } from '../lib/space-views'
+import type { SpaceFeatureKey } from '../lib/use-space-features'
 import { toast } from '@rundesk/ui'
 
 /**
@@ -46,7 +48,17 @@ type SpacePreset = {
   features: string[]
   seedLists: string[]
 }
-type PresetPayload = { presets: SpacePreset[]; features: string[]; views: string[] }
+/** `[07:20]` — what this workspace's plan does and does not reach. */
+type LockedFeature = { key: string; requiresPlan: string; requiresLabel: string }
+type PresetPayload = {
+  presets: SpacePreset[]
+  features: string[]
+  views: string[]
+  /** Absent on the un-scoped `/space-presets`; present on `/space-presets/:workspaceId`. */
+  plan?: { id: string; label: string; recognized: boolean }
+  allowedFeatures?: string[]
+  lockedFeatures?: LockedFeature[]
+}
 
 /** The four rungs, using the wording the share dialog already uses for them. */
 const PERMISSIONS: Array<{ value: string; labelKey: TranslationKey }> = [
@@ -56,32 +68,58 @@ const PERMISSIONS: Array<{ value: string; labelKey: TranslationKey }> = [
   { value: 'admin', labelKey: 'share.levelFull' },
 ]
 
-const VIEW_LABEL: Record<string, TranslationKey> = {
-  list: 'list.viewList',
-  board: 'list.viewBoard',
-  table: 'list.viewTable',
-  calendar: 'list.viewCalendar',
-  gantt: 'list.viewGantt',
+/**
+ * §V2-06 — DEFECT FIXED. The view-label map lived here and had no `team` entry,
+ * so the Team row fell through `?? 'list.viewList'` and rendered the word
+ * "List": frame `07:12`'s panel showed two rows both labelled List, and any
+ * assertion of the form "the row has a label" passed on it.
+ *
+ * It is now `lib/space-views.ts`, where the map is
+ * `Record<SpaceViewKey, TranslationKey>` — a missing view does not compile —
+ * and where an UNKNOWN view returns `null` instead of a sibling's string, so a
+ * key this build does not know renders as itself rather than disguised as
+ * another view. See `viewLabel` below.
+ */
+function useViewLabel() {
+  const { t } = useTranslation()
+  return (view: string) => {
+    const key = viewLabelKey(view)
+    return key ? t(key) : view
+  }
 }
 
 /*
  * Frame `07:19` lists ClickApps that have no Rundesk equivalent (Remap Subtask
  * Due Dates, Incomplete Warning). Those are absent rather than decorative —
  * the server decides the set, and this map only supplies wording for whatever
- * it sends. A key arriving with no entry here renders as itself rather than
- * disappearing, so a new server-side feature is visible-but-untranslated
- * instead of silently missing.
+ * it sends.
+ *
+ * §V2-06 — DEFECT FIXED. This map was `Record<string, TranslationKey>` and
+ * carried THREE DEAD LABELS: `multipleAssignees`, `timeTracking` and
+ * `timeEstimates`, none of which `SPACE_FEATURE_KEYS` has ever contained, so
+ * the server could not send them and nothing could ever render them. They were
+ * the remains of a set that was narrowed on the server and not here — the dead
+ * control, in its quietest form: three strings translated into four languages
+ * for switches that do not exist.
+ *
+ * Typed against `SpaceFeatureKey` now, so the compiler refuses both halves of
+ * the drift: a ClickApp with no wording, and wording for a ClickApp that is
+ * not one.
  */
-const FEATURE_LABEL: Record<string, TranslationKey> = {
+const FEATURE_LABEL: Record<SpaceFeatureKey, TranslationKey> = {
   priority: 'taskDetail.fieldPriority',
   tags: 'list.filter.fieldTags',
   customFields: 'spaceWizard.featureCustomFields',
-  multipleAssignees: 'spaceWizard.featureMultipleAssignees',
-  timeTracking: 'spaceWizard.featureTimeTracking',
-  timeEstimates: 'spaceWizard.featureTimeEstimates',
   milestones: 'spaceWizard.featureMilestones',
   wipLimits: 'spaceWizard.featureWipLimits',
   listEmail: 'spaceWizard.featureListEmail',
+}
+
+/** Wording for a ClickApp, or the raw key — visible rather than missing. */
+function featureLabelKey(key: string): TranslationKey | null {
+  return Object.prototype.hasOwnProperty.call(FEATURE_LABEL, key)
+    ? FEATURE_LABEL[key as SpaceFeatureKey]
+    : null
 }
 
 const PRESET_LABEL: Record<string, { name: TranslationKey; blurb: TranslationKey }> = {
@@ -105,6 +143,7 @@ export function CreateSpaceWizard({
   onCreated?: (space: { id: string; name: string }) => void
 }) {
   const { t } = useTranslation()
+  const viewLabel = useViewLabel()
   const qc = useQueryClient()
 
   const [step, setStep] = useState<1 | 2>(1)
@@ -121,14 +160,40 @@ export function CreateSpaceWizard({
   const [defaultView, setDefaultView] = useState<string | null>(null)
   const [features, setFeatures] = useState<string[] | null>(null)
 
+  /*
+   * §V2-06 `[07:20]` — "ClickUp Apps is also dependent on that — ke aap ke paas
+   * PACKAGE PLAN kaun sa hai."
+   *
+   * Scoped to the workspace, because the answer is. The presets themselves are
+   * still a constant; what this adds is which ClickApps THIS workspace's plan
+   * reaches, so the panel can say "Custom Fields — Pro" rather than either
+   * offering a switch that the server will refuse or hiding a feature that
+   * exists and is simply not paid for.
+   */
   const { data: payload } = useQuery({
-    queryKey: ['space-presets'],
-    queryFn: () => api<PresetPayload>('/space-presets'),
-    enabled: open,
-    staleTime: Infinity, // it is a constant
+    queryKey: ['space-presets', workspaceId],
+    queryFn: () => api<PresetPayload>(`/space-presets/${workspaceId}`),
+    enabled: open && !!workspaceId,
+    staleTime: 5 * 60 * 1000,
   })
   const presets = payload?.presets ?? []
   const preset = presets.find((p) => p.key === presetKey)
+
+  /*
+   * The locked set, by key. Empty when the plan withholds nothing — which is
+   * business, enterprise, and therefore every workspace that has not been
+   * deliberately put on a smaller tier.
+   */
+  const locked = useMemo(() => {
+    const out = new Map<string, LockedFeature>()
+    for (const row of payload?.lockedFeatures ?? []) out.set(row.key, row)
+    return out
+  }, [payload])
+  const allFeatures = useMemo(() => payload?.features ?? [], [payload])
+  const allowedFeatures = useMemo(
+    () => (payload?.allowedFeatures ?? allFeatures).filter((k) => !locked.has(k)),
+    [payload, allFeatures, locked],
+  )
 
   // A fresh dialog should not show the last visit's answers.
   useEffect(() => {
@@ -151,7 +216,15 @@ export function CreateSpaceWizard({
 
   const effectiveViews = views ?? preset?.views ?? ['list']
   const effectiveDefaultView = defaultView ?? preset?.defaultView ?? 'list'
-  const effectiveFeatures = features ?? preset?.features ?? []
+  /*
+   * A preset's ClickApps, minus the ones this plan cannot have. The server
+   * filters presets the same way (and REFUSES an explicit request for a locked
+   * one), so what this previews is what will be applied — but the filter is
+   * repeated here rather than trusted, because previewing "Custom Fields" on a
+   * free plan and then quietly creating a space without it is exactly the
+   * mirror defect the rest of this wizard exists to avoid.
+   */
+  const effectiveFeatures = (features ?? preset?.features ?? []).filter((f) => !locked.has(f))
 
   const create = useMutation({
     mutationFn: () =>
@@ -194,6 +267,12 @@ export function CreateSpaceWizard({
         onDone={() => setPanel('none')}
         testId="space-wizard-views"
       >
+        {/*
+          Same namespace rule as the ClickApps grid below:
+          `space-wizard-view-${view}` is ONE SWITCH PER VIEW and the key is
+          arbitrary, so the row and its label sit outside that prefix rather
+          than tripling anything that counts it.
+        */}
         {(payload?.views ?? []).map((view) => {
           // §V2-06 frame 07:12 — List is marked "Required" and cannot be turned
           // off. Everything on a list falls back to it, so a space without it
@@ -201,9 +280,13 @@ export function CreateSpaceWizard({
           const required = view === 'list'
           const on = required || effectiveViews.includes(view)
           return (
-            <div key={view} className="flex items-center justify-between gap-3 rounded px-2 py-2 hover:bg-muted/40">
+            <div
+              key={view}
+              data-testid={`space-wizard-viewrow-${view}`}
+              className="flex items-center justify-between gap-3 rounded px-2 py-2 hover:bg-muted/40"
+            >
               <span className="flex items-center gap-2 text-[13px]">
-                {t(VIEW_LABEL[view] ?? 'list.viewList')}
+                <span data-testid={`space-wizard-viewlabel-${view}`}>{viewLabel(view)}</span>
                 {required && <Badge variant="secondary">{t('spaceWizard.required')}</Badge>}
                 {effectiveDefaultView === view && <Badge variant="soft">{t('spaceWizard.defaultView')}</Badge>}
               </span>
@@ -240,7 +323,6 @@ export function CreateSpaceWizard({
   }
 
   if (panel === 'features') {
-    const all = payload?.features ?? []
     const allOff = effectiveFeatures.length === 0
     return (
       <PanelShell
@@ -252,38 +334,90 @@ export function CreateSpaceWizard({
         onDone={() => setPanel('none')}
         testId="space-wizard-features"
       >
+        {/*
+          `[07:20]` — "aap ke paas PACKAGE PLAN kaun sa hai … [Free] mein of
+          course apna option LIMITED hota hai."
+
+          Said out loud at the top of the panel rather than left to be inferred
+          from a row of greyed switches. A person on Free should be able to read
+          why half the grid is locked without hovering anything.
+        */}
+        {locked.size > 0 && payload?.plan && (
+          <p
+            className="mb-2 rounded-md bg-muted/50 px-2.5 py-2 text-[12px] text-muted-foreground"
+            data-testid="space-wizard-plan-note"
+          >
+            {t('spaceWizard.planNote', { plan: payload.plan.label, count: String(locked.size) })}
+          </p>
+        )}
         {/* Frame 07:19's master switch, top-left of the grid. */}
         <label className="mb-2 flex items-center gap-2 rounded px-2 py-2 text-[13px]">
           <Switch
             checked={allOff}
             data-testid="space-wizard-features-none"
-            onCheckedChange={(next) => setFeatures(next ? [] : [...all])}
+            // Back ON means every one this plan REACHES. `[...all]` would hand
+            // the server a locked key and take a 403 for a switch the person
+            // never touched.
+            onCheckedChange={(next) => setFeatures(next ? [] : [...allowedFeatures])}
           />
           {t('spaceWizard.turnOffAll')}
         </label>
+        {/*
+          TESTID NAMESPACES. `space-wizard-feature-${key}` is ONE SWITCH PER
+          ClickApp and nothing else — `space-wizard.mjs` counts that prefix to
+          assert the grid offers a switch for every feature the server sends.
+          The key is arbitrary, so anything else named `space-wizard-feature-…`
+          silently joins that count: adding a row and a label under it turned
+          "6 switches" into 18 matches and reddened a green suite. Everything
+          that is PART OF a row, rather than the switch itself, lives under
+          `space-wizard-clickapp-…`.
+        */}
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {all.map((key) => (
-            <label
-              key={key}
-              className="flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2.5 text-[13px]"
-            >
-              <span className="flex items-center gap-2">
-                <ToggleRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
-                {FEATURE_LABEL[key] ? t(FEATURE_LABEL[key]) : key}
-              </span>
-              <Switch
-                checked={effectiveFeatures.includes(key)}
-                data-testid={`space-wizard-feature-${key}`}
-                onCheckedChange={(next) =>
-                  setFeatures(
-                    next
-                      ? [...effectiveFeatures, key]
-                      : effectiveFeatures.filter((f) => f !== key),
-                  )
-                }
-              />
-            </label>
-          ))}
+          {allFeatures.map((key) => {
+            const gate = locked.get(key)
+            const labelKey = featureLabelKey(key)
+            return (
+              <label
+                key={key}
+                data-testid={`space-wizard-clickapp-row-${key}`}
+                data-locked={gate ? 'true' : 'false'}
+                className={cn(
+                  'flex items-center justify-between gap-2 rounded-lg border border-border/70 px-3 py-2.5 text-[13px]',
+                  gate && 'opacity-70',
+                )}
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  {gate ? (
+                    <Lock className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  ) : (
+                    <ToggleRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden />
+                  )}
+                  <span className="truncate" data-testid={`space-wizard-clickapp-label-${key}`}>
+                    {labelKey ? t(labelKey) : key}
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-2">
+                  {gate && (
+                    <Badge variant="secondary" data-testid={`space-wizard-clickapp-lock-${key}`}>
+                      {gate.requiresLabel}
+                    </Badge>
+                  )}
+                  <Switch
+                    checked={!gate && effectiveFeatures.includes(key)}
+                    disabled={!!gate}
+                    data-testid={`space-wizard-feature-${key}`}
+                    onCheckedChange={(next) =>
+                      setFeatures(
+                        next
+                          ? [...effectiveFeatures, key]
+                          : effectiveFeatures.filter((f) => f !== key),
+                      )
+                    }
+                  />
+                </span>
+              </label>
+            )
+          })}
         </div>
       </PanelShell>
     )
@@ -368,7 +502,7 @@ export function CreateSpaceWizard({
             <SummaryRow
               testId="space-wizard-row-views"
               label={t('spaceWizard.defaultViews')}
-              value={effectiveViews.map((v) => t(VIEW_LABEL[v] ?? 'list.viewList')).join(', ')}
+              value={effectiveViews.map(viewLabel).join(', ')}
               onClick={() => setPanel('views')}
             />
             <SummaryRow
@@ -382,7 +516,12 @@ export function CreateSpaceWizard({
               label={t('spaceWizard.clickApps')}
               value={
                 effectiveFeatures.length
-                  ? effectiveFeatures.map((f) => (FEATURE_LABEL[f] ? t(FEATURE_LABEL[f]) : f)).join(', ')
+                  ? effectiveFeatures
+                      .map((f) => {
+                        const key = featureLabelKey(f)
+                        return key ? t(key) : f
+                      })
+                      .join(', ')
                   : t('spaceWizard.noneOn')
               }
               onClick={() => setPanel('features')}

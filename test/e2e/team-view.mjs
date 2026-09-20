@@ -6,17 +6,25 @@
  * where ClickUp paywalls it and the paywall teaches what it would show — a
  * member card, a 16/8 load, a 25% donut, and Ready / In Progress / Review.
  *
- * WHY IT IS NOT PAYWALLED HERE. The re-audit recorded this as "the teach-then-
- * offer paywall is wired to one call site", which was true and beside the
- * point: ClickUp gates Team View because it is a paid tier THERE. Imitating
- * the gate would mean offering to unlock something Rundesk did not have. The
- * ask is the view; the view is built; gating it afterwards would be inventing
- * a tier in order to take it away.
+ * IT IS NOW PAYWALLED, AND THE NOTE THAT USED TO BE HERE WAS WRONG. It argued
+ * that "the ask is the view; gating it afterwards would be inventing a tier in
+ * order to take it away". That is a *stale reason* — the defect class this
+ * audit keeps finding, where a written-down justification suppresses exactly
+ * the investigation that would overturn it. `[09:26]` is not ambiguous: "Is ke
+ * baad TEAM VIEW — yeh cheez ke liye humein of course BUY karna parega", said
+ * over a modal with a price on it. The tier was not invented here; it was in
+ * the frame the row was written from.
  *
- * List export is deliberately left ungated for the mirror-image reason — it
- * sat behind `WorkspaceAdminGuard` and REMOVING that was the fix
- * (`list-export.mjs`). Adding a plan tier now would take a working feature
- * away to match a screenshot.
+ * The list export stays free, and that is not the mirror-image of this: it is
+ * the other half of the same instruction. `[10:49]` "agar aap ke paas premium
+ * nahi [hai] to aap LIST VIEW download karo" — see `list-export.mjs`.
+ *
+ * SO THIS SUITE NOW RUNS AS TWO ACTORS. Everything above the paywall section
+ * is the ENTITLED one, and those checks are worth more than they were: the
+ * rollup they assert on is computed by the SERVER now, because a paywall over
+ * arithmetic a browser does has nothing behind it to refuse. The blocked actor
+ * at the bottom is the other half — without it, a Team tab that drew nothing
+ * would pass as a paywall. The deeper matrix lives in `paywall-sites.mjs`.
  *
  * WHAT THESE CHECKS ARE FOR. A view that groups by person is easy to draw and
  * easy to draw wrongly: rows of names photograph identically whether or not
@@ -42,8 +50,8 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 9
+/** "0 failed" is not "it ran". Exact, so a skipped branch is a failure too. */
+const EXPECTED_CHECKS = 12
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -222,6 +230,54 @@ try {
     `the last row was ${JSON.stringify(last.replace(/\s+/g, ' ').slice(0, 60))}`,
   )
 
+  /*
+   * §V2-13 `[09:26]` — THE OTHER ACTOR.
+   *
+   * Everything above ran in a workspace whose plan includes Team View, which
+   * is what makes the rest of this section readable: the same build, the same
+   * person, one column different. A workspace of its own rather than a
+   * downgrade of the one above, so a run that dies here cannot leave the
+   * shared workspace on a Free plan.
+   */
+  console.log('\n▶ §V2-13 — and the plan that does not include it `[09:26]`')
+  const lockedWs = (await A('/workspaces', { method: 'POST', body: { name: `Locked ${TAG}` } })).data
+  if (!lockedWs?.id) throw new Error('could not create the blocked workspace this section is about')
+  const lockedSpace = ((await A(`/spaces/workspace/${lockedWs.id}`)).data ?? [])[0]
+  const lockedProject = lockedSpace ? ((await A(`/projects/space/${lockedSpace.id}`)).data ?? [])[0] : null
+  const lockedList = lockedProject
+    ? (await A('/lists', { method: 'POST', body: { projectId: lockedProject.id, name: `Locked list ${TAG}` } })).data
+    : null
+  if (!lockedList?.id) throw new Error('the blocked workspace came up without a list')
+  await A('/tasks', { method: 'POST', body: { listId: lockedList.id, title: `Locked task ${TAG}` } })
+  await sql`update workspaces set plan = 'free' where id = ${lockedWs.id}`
+
+  const refused = await A(`/tasks/list/${lockedList.id}/team`)
+  chk(
+    refused.status === 403,
+    'the server refuses the rollup outright on a plan without Team View',
+    `GET /tasks/list/:id/team answered ${refused.status} on a Free plan — a gate the browser draws is not a gate`,
+  )
+
+  await page.goto(`${stack.base}/app/${lockedWs.id}/${lockedSpace.id}/${lockedProject.id}/${lockedList.id}`, {
+    waitUntil: 'domcontentloaded',
+  })
+  await page.waitForSelector('[data-testid="list-view-controls"]', { timeout: 25_000 })
+  await page.waitForTimeout(1200)
+  await page.getByTestId('work-view-tab-type-team').click()
+  chk(
+    await waitUntil(() => page.getByTestId('feature-gate').isVisible().catch(() => false), { timeoutMs: 15_000 }),
+    'and pressing Team opens the paywall rather than an empty view',
+    'the Team tab on a Free plan drew neither the view nor the gate',
+  )
+  // The tab must not have become current either: a locked placeholder behind a
+  // locked modal is still a tab that navigated when it was told not to.
+  const blockedTabCurrent = await page.getByTestId('work-view-tab-type-team').getAttribute('aria-current')
+  chk(
+    blockedTabCurrent !== 'true' && (await page.getByTestId('team-view').count()) === 0,
+    'with the view itself still not on screen, and the tab still not current',
+    `aria-current was ${JSON.stringify(blockedTabCurrent)} — the modal is decoration over a feature handed over anyway`,
+  )
+
   await ctx.close()
 } catch (e) {
   failed += 1
@@ -232,15 +288,27 @@ try {
     await sql`delete from lists where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from projects where name like ${'%' + TAG}`.catch(() => {})
     await sql`delete from spaces where name like ${'%' + TAG}`.catch(() => {})
+    /*
+     * The Free-plan workspace goes too, and it matters more than the rest: it
+     * cascades to its own space/project/list, and leaving one behind would put
+     * a workspace with a restricted plan in the path of every other suite's
+     * `pickWorkspace`.
+     */
+    await sql`delete from workspaces where name like ${'%' + TAG}`.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  /*
+   * EXACT, not `<`. With `<`, a branch that silently stopped being reached
+   * turns into a shorter run that still passes — which is precisely what would
+   * happen if the paywall section below ever stopped executing.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ran ${ran} checks, expected exactly ${EXPECTED_CHECKS} — ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)

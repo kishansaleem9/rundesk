@@ -4,7 +4,14 @@ import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SpacesService } from './spaces.service'
-import { SPACE_PRESETS, SPACE_FEATURE_KEYS, SPACE_VIEW_KEYS } from './space-presets'
+import { PlansService } from '../plans/plans.service'
+import {
+  SPACE_PRESETS,
+  SPACE_FEATURE_KEYS,
+  SPACE_VIEW_KEYS,
+  clickAppsForPlan,
+  lockedClickApps,
+} from './space-presets'
 import type { SpaceDefaultPermission } from '@rundesk/db'
 
 @Controller('spaces')
@@ -82,6 +89,9 @@ export class SpacesController {
       features: Record<string, boolean> | null
     }>,
   ) {
+    // Passed whole rather than field-by-field: the service whitelists, and a
+    // second whitelist here is how `features` and `defaultPermission` came to
+    // be declared in this signature and dropped on the way through.
     return this.spacesService.updateSpace(spaceId, body, user.id)
   }
 
@@ -112,8 +122,43 @@ export class SpacesController {
 @Controller('space-presets')
 @UseGuards(JwtAuthGuard)
 export class SpacePresetsController {
+  constructor(private plans: PlansService) {}
+
   @Get()
   listPresets() {
     return { presets: SPACE_PRESETS, features: SPACE_FEATURE_KEYS, views: SPACE_VIEW_KEYS }
+  }
+
+  /**
+   * §V2-06 `[07:20]` — the same constant, plus what THIS workspace's plan
+   * reaches.
+   *
+   * > "ClickUp Apps is also dependent on that — ke aap ke paas PACKAGE PLAN
+   * > kaun sa hai."
+   *
+   * A separate, workspace-scoped route rather than a `?workspaceId=` on the one
+   * above, for a reason that is not style: `ResourceMemberGuard` resolves the
+   * workspace from route params and body and NOT from the query string, so a
+   * query parameter would be an ungated read of another workspace's commercial
+   * tier. As a path param the existing guard does the work.
+   *
+   * `features` stays the full set and `lockedFeatures` says which of them this
+   * plan cannot have, rather than the server quietly sending a shorter list.
+   * A ClickApp that simply vanishes is indistinguishable from one that was
+   * never built — and "upgrade to get this" is the thing the transcript is
+   * actually describing.
+   */
+  @Get(':workspaceId')
+  @UseGuards(ResourceMemberGuard)
+  async listPresetsForWorkspace(@Param('workspaceId') workspaceId: string) {
+    const plan = await this.plans.getWorkspacePlan(workspaceId)
+    return {
+      presets: SPACE_PRESETS,
+      features: SPACE_FEATURE_KEYS,
+      views: SPACE_VIEW_KEYS,
+      plan: { id: plan.id, label: plan.label, recognized: plan.recognized },
+      allowedFeatures: clickAppsForPlan(plan.id),
+      lockedFeatures: lockedClickApps(plan.id),
+    }
   }
 }

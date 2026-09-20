@@ -13,7 +13,7 @@ import {
   Input,
   cn,
 } from '@rundesk/ui'
-import { Upload, Image as ImageIcon, Link2, Paperclip, Loader2 } from 'lucide-react'
+import { Upload, Image as ImageIcon, Link2, Paperclip, Loader2, Pipette } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { api } from '../lib/api'
 
@@ -36,6 +36,27 @@ import { api } from '../lib/api'
  * named after is worse than a missing tab, because the missing one is honest.
  * They are gone; if a photo provider is ever configured, Search comes back as a
  * tab that searches.
+ *
+ * RE-CHECKED 20 Sep 2026, because a reason for an absence is the one kind of
+ * comment that suppresses the investigation that would find the bug, and this
+ * audit has already closed two rows that a stale reason had been holding shut.
+ * The reason still holds, and here is the whole of what decides it:
+ *
+ *     grep -rniE "unsplash|pexels|pixabay|stock ?photo|imageProvider" \
+ *       apps packages docs .env .env.example
+ *     → one hit: this comment.
+ *
+ * `.env.example` has storage credentials (`R2_*`) and no image-search
+ * credential of any kind; `modules/search/sources.ts` lists every source search
+ * can be scoped to — `rundesk`, `google-drive`, `gmail`, `sharepoint` — and
+ * none of them returns photographs to put on a cover. So a Search tab built
+ * today would be a search box over nothing: the exact "Photos" tab this file
+ * deleted, rebuilt. It stays a DECISION (an absence with a reason), not a gap,
+ * until somebody configures a provider — and the grep above is how the next
+ * person checks that in one command instead of trusting this paragraph.
+ *
+ * The Gallery's **Custom** swatch is a different matter and is built below: it
+ * needs no provider, only a colour.
  */
 
 /** The Gallery tab: CSS colours, which is the half that always worked. */
@@ -89,6 +110,14 @@ export function CoverImagePicker({
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [attachments, setAttachments] = useState<Attachment[] | null>(null)
   const fileRef = useRef<HTMLInputElement>(null)
+  /*
+   * §V2-09 frame `03:07` — the Gallery's last cell is **Custom**, next to the
+   * eight fixed colours. Opening it reveals the chooser rather than firing a
+   * colour straight away: a swatch that committed on click could only ever
+   * commit one colour, which is the facade this file exists to keep out.
+   */
+  const [customOpen, setCustomOpen] = useState(false)
+  const [customColor, setCustomColor] = useState('#7c5cff')
 
   function commit(choice: CoverChoice) {
     onPick?.(choice)
@@ -121,6 +150,7 @@ export function CoverImagePicker({
     setUploadError(null)
     setAttachments(null)
     setTab('gallery')
+    setCustomOpen(false)
   }, [open])
 
   async function upload(file: File) {
@@ -190,7 +220,60 @@ export function CoverImagePicker({
                     <div className="absolute inset-0 bg-grid-dim opacity-30" />
                   </button>
                 ))}
+                {/*
+                  Frame `03:07`: the cell after the fixed colours, bordered
+                  rather than filled, with an eyedropper and the word Custom.
+                */}
+                <button
+                  type="button"
+                  data-testid="cover-gallery-custom"
+                  aria-expanded={customOpen}
+                  onClick={() => setCustomOpen((v) => !v)}
+                  className="aspect-[5/3] rounded-lg border-2 border-dashed border-border/70 hover:border-accent transition-colors flex items-center justify-center gap-1.5 text-xs font-medium text-muted-foreground"
+                  style={customOpen ? { borderColor: customColor, color: customColor } : undefined}
+                >
+                  <Pipette className="h-3.5 w-3.5" aria-hidden />
+                  {t('coverImage.custom')}
+                </button>
               </div>
+
+              {customOpen && (
+                /*
+                 * The chooser, once asked for. `input[type=color]` is the
+                 * native one on purpose — a hand-drawn wheel here would be a
+                 * third picker of the same thing, and the keyboard and the
+                 * eyedropper come free with the real control.
+                 */
+                <div className="mt-3 flex items-center gap-2 rounded-lg border border-border/60 bg-card/40 px-3 py-2">
+                  <input
+                    type="color"
+                    value={customColor}
+                    data-testid="cover-custom-input"
+                    aria-label={t('coverImage.custom')}
+                    onChange={(e) => setCustomColor(e.target.value)}
+                    className="h-8 w-12 cursor-pointer rounded border border-border/60 bg-transparent p-0.5"
+                  />
+                  <code className="text-xs text-muted-foreground" data-testid="cover-custom-value">
+                    {customColor}
+                  </code>
+                  <Button
+                    size="sm"
+                    variant="gradient"
+                    className="ml-auto"
+                    data-testid="cover-custom-apply"
+                    /*
+                     * Commits THE CHOSEN VALUE. The whole point of the cell is
+                     * that the colour is the person's, so this reads state
+                     * rather than a constant — see
+                     * `breaks/task-cover-2-customfacade.py`, which makes it a
+                     * constant and must turn the suite red.
+                     */
+                    onClick={() => commit({ kind: 'color', value: customColor })}
+                  >
+                    {t('coverImage.useCustom')}
+                  </Button>
+                </div>
+              )}
             </TabsContent>
 
             <TabsContent value="upload">

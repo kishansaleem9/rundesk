@@ -10,7 +10,17 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { Palette, PanelLeft, CalendarClock, CalendarPlus } from 'lucide-react'
+import {
+  Palette,
+  PanelLeft,
+  CalendarClock,
+  CalendarPlus,
+  Video,
+  Megaphone,
+  LifeBuoy,
+  Lightbulb,
+  ArrowLeft,
+} from 'lucide-react'
 import { PlannerAccountsPage } from './planner-accounts-page'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
@@ -21,7 +31,8 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  * The frame's left nav has seven pages: Appearance · Accounts · Sidebar ·
  * Upcoming meeting · Time blocking · AI Notetaker · Automations.
  *
- * FOUR ARE HERE. The other three are not, and their absence is the point.
+ * FIVE ARE HERE. Two are not, and both absences are recorded decisions rather
+ * than gaps — which is a different thing, and has to stay a different thing.
  *
  *   · **Accounts** IS HERE NOW, and the reasoning that kept it out was wrong.
  *     It said a page here "would be a read-only copy of one that already
@@ -32,17 +43,37 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  *     them, with a default and a set that count as busy; none of that has an
  *     entry point anywhere else, which is what makes this page real rather
  *     than duplicate.
- *   · **Upcoming meeting** is mostly a desktop menubar and a quick-join
- *     window. Rundesk has no desktop app; two of its three switches would
- *     toggle nothing.
- *   · **AI Notetaker** picks which calendar the notetaker joins. Rundesk's
- *     notetaker is gated by a feature flag and has no per-calendar binding to
- *     pick from yet.
- *   · **Automations** is "sync a list to a Google Calendar", which is a
- *     feature, not a setting — it belongs with the automations module.
+ *   · **Upcoming meeting** IS HERE NOW, and the reason that kept it out had
+ *     gone stale — the second time on this one file, which is why the process
+ *     doc says to re-check a recorded reason before trusting it. The comment
+ *     said the page was "mostly a desktop menubar and a quick-join window"
+ *     and that "two of its three switches would toggle nothing". The
+ *     countdown and the quick-join are not a menubar: `[19:16]`'s Upcoming
+ *     list has drawn both since §2.8 (`workspace-meetings-page.tsx`), with
+ *     nothing anywhere able to turn either off. The third switch, "Show in
+ *     desktop", is a desktop NOTIFICATION, which a browser raises without a
+ *     desktop app. Three switches, three readers.
+ *
+ * AND TWO THAT STAY OUT, for reasons that are still true today:
+ *
+ *   · **AI Notetaker** needs a bot that joins the call and records it. The
+ *     build-vs-buy decision on that bot sits with the client and has not been
+ *     made, so there is nothing for a "which calendar does it join" picker to
+ *     pick between. This is a RECORDED DECISION, not an oversight, and it must
+ *     not quietly become "built". (The older wording here — "gated by a
+ *     feature flag, no per-calendar binding yet" — described a symptom rather
+ *     than the decision, which is how a decision turns back into a to-do.)
+ *   · **Automations** is parked at the client's own instruction. `[14:29]`
+ *     "AUTOMATIONS aap build up kar sakte ho", then `[14:32]`–`[14:38]` "yeh
+ *     aap ko baad mein bataoongi, end mein … main aap ko [samjhaoongi] ke
+ *     automation kis tarah se work karta hai" — and the video ends without
+ *     ever coming back to it, so the explanation was never given. The
+ *     requirement has not been given yet; building a guess at it would be
+ *     inventing scope, and hiding the nav entry would lose the fact that it
+ *     was asked for.
  *
  * A settings nav with pages that do nothing is the facade this codebase has
- * spent two videos removing. Better four real pages and an honest gap.
+ * spent two videos removing. Five real pages and two honest gaps.
  *
  * WEEK START AND TIMEZONE ARE NOT PLANNER SETTINGS. Frame `14:10` shows both
  * on the Appearance page, and they are account-wide columns on `users` that
@@ -51,19 +82,49 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  * calendar a private opinion about which day the week starts on.
  */
 
+/*
+ * §V2-02e — THIS TYPE IS THE SECOND COPY, and the copy is the defect.
+ *
+ * `PlannerSettings` in `packages/db/src/schema/time-blocks.ts` is the one the
+ * server stores and the controller accepts. This one is hand-written, and the
+ * two never meet, so nothing fails to compile when they disagree. They
+ * disagreed twice at once:
+ *
+ *   · five keys the schema declared were simply absent here, so the dialog
+ *     could not draw a control for them and the page could not read them —
+ *     stored, round-tripped, honoured by nothing;
+ *   · `colorTasksBy` was narrowed to three of the schema's four values, so the
+ *     select offered three options to a server that accepts four. Fourth
+ *     instance of the duplicated-list defect in this codebase.
+ *
+ * Kept as a local type rather than imported because `@rundesk/ui` and the web
+ * app do not depend on `@rundesk/db`; the mitigation is that every field below
+ * is in the same order as the schema's, so a diff of the two is readable.
+ */
 type Settings = {
   eventStyle?: 'subtle' | 'solid'
   defaultDurationMinutes?: number
-  colorTasksBy?: 'none' | 'priority' | 'status'
+  colorTasksBy?: 'none' | 'priority' | 'status' | 'list'
   showWeekends?: boolean
+  showWeekNumbers?: boolean
+  alwaysOpenAtStartOfWeek?: boolean
+  darkenNonWorkingHours?: boolean
+  savePersonalEventsQuickly?: boolean
   blockPrefix?: string
   showAssigned?: boolean
+  showRecurring?: boolean
   showOverdue?: boolean
+  upcomingShowTimeLeft?: boolean
+  upcomingQuickJoin?: boolean
+  upcomingDesktopNotify?: boolean
   defaultListId?: string | null
   railSections?: string[]
   weekStart?: string
   timezone?: string
 }
+
+/** What the workspace publishes as "what's new" — the banner's own endpoint. */
+type Announcement = { id: string; title: string; body: string; createdAt?: string }
 
 type ListRow = { id: string; name: string }
 
@@ -88,12 +149,40 @@ const ALL_ZONES: string[] = (() => {
   return ['UTC', 'Asia/Karachi', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
 })()
 
-const PAGES: Array<{ key: 'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'; icon: typeof Palette; labelKey: TranslationKey }> = [
+type PageKey = 'appearance' | 'accounts' | 'sidebar' | 'upcomingMeeting' | 'timeBlocking'
+/** IN THE FRAME'S ORDER. `14:10` lists them top to bottom and the nav is the
+ *  one place a reordering would go unnoticed. */
+const PAGES: Array<{ key: PageKey; icon: typeof Palette; labelKey: TranslationKey }> = [
   { key: 'appearance', icon: Palette, labelKey: 'plannerSettings.appearance' },
   // §V2-14, frame `13:50` — a person's own calendar accounts.
   { key: 'accounts', icon: CalendarPlus, labelKey: 'plannerSettings.accounts' },
   { key: 'sidebar', icon: PanelLeft, labelKey: 'plannerSettings.sidebar' },
+  // §V2-02e — the page whose recorded reason for being absent had gone stale.
+  { key: 'upcomingMeeting', icon: Video, labelKey: 'plannerSettings.upcomingMeeting' },
   { key: 'timeBlocking', icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
+]
+
+/**
+ * The footer of frame `14:10`, under the nav: What's new · Report a problem ·
+ * Feature requests.
+ *
+ * Each one goes somewhere that exists. "What's new" reads the workspace's own
+ * announcements — the same endpoint the app-shell banner reads, so what it
+ * lists is what was actually published. The other two file a real support
+ * ticket through `POST /support/tickets`, which is the channel the Help page
+ * and the support widget already use; they differ by the subject that routes
+ * them and by the priority they carry, because `support_tickets.kind` is
+ * constrained to `question | call` and inventing a third value here would mean
+ * editing a module this item does not own.
+ *
+ * A footer link that opens nothing is the dead-control defect with a smaller
+ * hit-box. Three links, three destinations, or they would not be drawn.
+ */
+type FooterPane = 'whatsNew' | 'reportProblem' | 'featureRequest'
+const FOOTER: Array<{ key: FooterPane; icon: typeof Palette; labelKey: TranslationKey }> = [
+  { key: 'whatsNew', icon: Megaphone, labelKey: 'plannerSettings.whatsNew' },
+  { key: 'reportProblem', icon: LifeBuoy, labelKey: 'plannerSettings.reportProblem' },
+  { key: 'featureRequest', icon: Lightbulb, labelKey: 'plannerSettings.featureRequests' },
 ]
 
 /**
@@ -140,7 +229,11 @@ export function PlannerSettingsDialog({
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [page, setPage] = useState<'appearance' | 'accounts' | 'sidebar' | 'timeBlocking'>('appearance')
+  const [page, setPage] = useState<PageKey>('appearance')
+  /** Which footer destination is open, or none. Not a nav page: the frame draws
+   *  these under a rule, and counting them among the pages would be a nav that
+   *  claims seven entries by including three that are not settings. */
+  const [pane, setPane] = useState<FooterPane | null>(null)
 
   const { data: settings } = useQuery({
     queryKey: ['planner-settings', workspaceId],
@@ -171,7 +264,7 @@ export function PlannerSettingsDialog({
   })
   const set = (patch: Settings) => save.mutate(patch)
 
-  useEffect(() => { if (!open) setPage('appearance') }, [open])
+  useEffect(() => { if (!open) { setPage('appearance'); setPane(null) } }, [open])
 
   /* The account's own zone is always offered, even if this browser's list
    * lacks it — otherwise opening the page on a different machine would show a
@@ -191,27 +284,58 @@ export function PlannerSettingsDialog({
         </DialogHeader>
 
         <div className="flex min-h-[380px]">
-          <nav className="w-48 shrink-0 border-r border-border/60 p-2">
+          <nav className="flex w-48 shrink-0 flex-col border-r border-border/60 p-2">
             {PAGES.map((p) => (
               <button
                 key={p.key}
                 type="button"
-                onClick={() => setPage(p.key)}
+                onClick={() => { setPage(p.key); setPane(null) }}
                 data-testid={`planner-settings-nav-${p.key}`}
-                aria-current={page === p.key}
+                aria-current={pane === null && page === p.key}
                 className={cn(
                   'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px]',
-                  page === p.key ? 'bg-muted font-medium' : 'hover:bg-muted/40',
+                  pane === null && page === p.key ? 'bg-muted font-medium' : 'hover:bg-muted/40',
                 )}
               >
                 <p.icon className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
                 {t(p.labelKey)}
               </button>
             ))}
+
+            {/* Frame `14:10` puts these three at the bottom of the nav, under a
+                rule. Deliberately NOT `planner-settings-nav-*`: they are not
+                settings pages, and a nav count that included them would report
+                seven by counting three things that change nothing. */}
+            <div className="mt-auto space-y-0.5 border-t border-border/60 pt-2" data-testid="planner-settings-footer">
+              {FOOTER.map((f) => (
+                <button
+                  key={f.key}
+                  type="button"
+                  onClick={() => setPane(f.key)}
+                  data-testid={`planner-settings-footer-${f.key}`}
+                  aria-current={pane === f.key}
+                  className={cn(
+                    'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px]',
+                    pane === f.key ? 'bg-muted font-medium' : 'text-muted-foreground hover:bg-muted/40',
+                  )}
+                >
+                  <f.icon className="h-3.5 w-3.5" aria-hidden />
+                  {t(f.labelKey)}
+                </button>
+              ))}
+            </div>
           </nav>
 
           <div className="min-w-0 flex-1 overflow-y-auto p-4">
-            {page === 'appearance' && (
+            {pane !== null && (
+              <FooterPaneView
+                pane={pane}
+                workspaceId={workspaceId}
+                onBack={() => setPane(null)}
+              />
+            )}
+
+            {pane === null && page === 'appearance' && (
               <div className="space-y-4" data-testid="planner-settings-appearance">
                 <Row label={t('plannerSettings.eventStyle')}>
                   <div className="grid grid-cols-2 gap-1 rounded-md border border-border/70 p-0.5">
@@ -260,6 +384,15 @@ export function PlannerSettingsDialog({
                     <option value="none">{t('plannerSettings.colorNone')}</option>
                     <option value="priority">{t('taskDetail.fieldPriority')}</option>
                     <option value="status">{t('taskDetail.fieldStatus')}</option>
+                    {/*
+                      §V2-02e — the fourth option, which the server has accepted
+                      since this page shipped and this select never offered.
+                      `PlannerSettings.colorTasksBy` is a four-value union; the
+                      local copy of that type above was written with three, so
+                      the picker was individually plausible and quietly short —
+                      the duplicated-list defect, fourth instance.
+                    */}
+                    <option value="list">{t('plannerSettings.colorList')}</option>
                   </select>
                 </Row>
 
@@ -308,19 +441,81 @@ export function PlannerSettingsDialog({
                   </select>
                 </Row>
 
-                <Row label={t('plannerSettings.showWeekends')}>
+                {/*
+                  §V2-02e, frame `14:10` — the **Others** group, headed "Choose
+                  other settings for your calendar", and the four switches under
+                  it with the frame's own helper text.
+
+                  FOUR OF THESE FIVE WERE THE MIRROR DEFECT. `showWeekNumbers`,
+                  `alwaysOpenAtStartOfWeek`, `darkenNonWorkingHours` and
+                  `savePersonalEventsQuickly` were declared in the schema,
+                  accepted by the controller and written to Postgres, and the
+                  local `Settings` type above did not even list them — so this
+                  page could not draw them, the planner could not read them, and
+                  the Appearance page simply ended at "Show weekends". The
+                  database held evidence for four features that did not exist.
+                  Each switch below now names, in `time-blocks.ts`, the reader
+                  that honours it.
+                */}
+                <div className="pt-1">
+                  <div className="text-[13px] font-medium">{t('plannerSettings.others')}</div>
+                  <div className="text-[11px] text-muted-foreground">{t('plannerSettings.othersHint')}</div>
+                </div>
+
+                <Row label={t('plannerSettings.showWeekends')} hint={t('plannerSettings.showWeekendsHint')}>
                   <Switch
                     checked={settings?.showWeekends !== false}
                     data-testid="planner-show-weekends"
                     onCheckedChange={(next) => set({ showWeekends: next })}
                   />
                 </Row>
+
+                {/* Default OFF, unlike its neighbours: the frame shows this one
+                    switched off, and a week number nobody asked for appearing in
+                    every existing planner's header would be a change of product
+                    dressed as a bug fix. */}
+                <Row label={t('plannerSettings.showWeekNumbers')} hint={t('plannerSettings.showWeekNumbersHint')}>
+                  <Switch
+                    checked={settings?.showWeekNumbers === true}
+                    data-testid="planner-show-week-numbers"
+                    onCheckedChange={(next) => set({ showWeekNumbers: next })}
+                  />
+                </Row>
+
+                {/* Also default OFF. The frame has it on, but that is one
+                    person's preference: turning it on for everybody would move
+                    every existing planner off today on the next load. */}
+                <Row label={t('plannerSettings.alwaysOpenAtStartOfWeek')} hint={t('plannerSettings.alwaysOpenAtStartOfWeekHint')}>
+                  <Switch
+                    checked={settings?.alwaysOpenAtStartOfWeek === true}
+                    data-testid="planner-always-open-start"
+                    onCheckedChange={(next) => set({ alwaysOpenAtStartOfWeek: next })}
+                  />
+                </Row>
+
+                <Row label={t('plannerSettings.darkenNonWorkingHours')} hint={t('plannerSettings.darkenNonWorkingHoursHint')}>
+                  <Switch
+                    checked={settings?.darkenNonWorkingHours === true}
+                    data-testid="planner-darken-non-working"
+                    onCheckedChange={(next) => set({ darkenNonWorkingHours: next })}
+                  />
+                </Row>
+
+                {/* ON by default, as the frame has it: the confirmation step is
+                    the thing you opt INTO. */}
+                <Row label={t('plannerSettings.savePersonalEventsQuickly')} hint={t('plannerSettings.savePersonalEventsQuicklyHint')}>
+                  <Switch
+                    checked={settings?.savePersonalEventsQuickly !== false}
+                    data-testid="planner-save-personal-quickly"
+                    onCheckedChange={(next) => set({ savePersonalEventsQuickly: next })}
+                  />
+                </Row>
               </div>
             )}
 
-            {page === 'accounts' && <PlannerAccountsPage workspaceId={workspaceId} />}
+            {pane === null && page === 'accounts' && <PlannerAccountsPage workspaceId={workspaceId} />}
 
-            {page === 'sidebar' && (
+            {pane === null && page === 'sidebar' && (
               <div className="space-y-1" data-testid="planner-settings-sidebar">
                 <p className="mb-2 text-[12px] text-muted-foreground">{t('plannerSettings.sidebarHint')}</p>
                 {RAIL_SECTIONS.map((key) => (
@@ -343,7 +538,7 @@ export function PlannerSettingsDialog({
               </div>
             )}
 
-            {page === 'timeBlocking' && (
+            {pane === null && page === 'timeBlocking' && (
               <div className="space-y-4" data-testid="planner-settings-time-blocking">
                 <Row label={t('plannerSettings.blockPrefix')} hint={t('plannerSettings.blockPrefixHint')}>
                   <input
@@ -395,6 +590,70 @@ export function PlannerSettingsDialog({
                     onCheckedChange={(next) => set({ showOverdue: next })}
                   />
                 </Row>
+
+                {/*
+                  §V2-02e — the fifth dead key, and the only one that belongs on
+                  this page rather than under Appearance.
+
+                  A block on a recurring task is one occurrence of something
+                  that happens again, and the grid had no way to say so: the
+                  server never sent the task's cadence, so the next occurrences
+                  could not be drawn and this switch gated nothing. Projected
+                  occurrences are drawn as `planner-recurring-block`, apart from
+                  real blocks, because they are a forecast rather than a record
+                  — dragging one would be editing a row that does not exist yet.
+                */}
+                <Row label={t('plannerSettings.showRecurring')} hint={t('plannerSettings.showRecurringHint')}>
+                  <Switch
+                    checked={settings?.showRecurring !== false}
+                    data-testid="planner-show-recurring"
+                    onCheckedChange={(next) => set({ showRecurring: next })}
+                  />
+                </Row>
+              </div>
+            )}
+
+            {/*
+              §V2-02e, frame `14:10` — **Upcoming meeting**.
+
+              Three switches, and each one turns off something that is on screen
+              today with no way to stop it: the countdown badge, the Join pill
+              and — "Show in desktop" — the notification a browser raises when a
+              meeting becomes joinable. `workspace-meetings-page.tsx` reads all
+              three. The recorded reason for leaving this page out said two of
+              the three "would toggle nothing"; that was true of a desktop
+              menubar Rundesk does not have, and was never true of these.
+            */}
+            {pane === null && page === 'upcomingMeeting' && (
+              <div className="space-y-4" data-testid="planner-settings-upcoming-meeting">
+                <p className="text-[12px] text-muted-foreground">{t('plannerSettings.upcomingHint')}</p>
+
+                <Row label={t('plannerSettings.upcomingTimeLeft')} hint={t('plannerSettings.upcomingTimeLeftHint')}>
+                  <Switch
+                    checked={settings?.upcomingShowTimeLeft !== false}
+                    data-testid="planner-upcoming-time-left"
+                    onCheckedChange={(next) => set({ upcomingShowTimeLeft: next })}
+                  />
+                </Row>
+
+                <Row label={t('plannerSettings.upcomingQuickJoin')} hint={t('plannerSettings.upcomingQuickJoinHint')}>
+                  <Switch
+                    checked={settings?.upcomingQuickJoin !== false}
+                    data-testid="planner-upcoming-quick-join"
+                    onCheckedChange={(next) => set({ upcomingQuickJoin: next })}
+                  />
+                </Row>
+
+                {/* OFF by default, and it has to be: a notification nobody
+                    asked for is the one kind of setting that cannot be undone
+                    after the fact. */}
+                <Row label={t('plannerSettings.upcomingDesktop')} hint={t('plannerSettings.upcomingDesktopHint')}>
+                  <Switch
+                    checked={settings?.upcomingDesktopNotify === true}
+                    data-testid="planner-upcoming-desktop"
+                    onCheckedChange={(next) => set({ upcomingDesktopNotify: next })}
+                  />
+                </Row>
               </div>
             )}
           </div>
@@ -407,6 +666,139 @@ export function PlannerSettingsDialog({
         </div>
       </DialogContent>
     </Dialog>
+  )
+}
+
+/**
+ * Where the three footer links go.
+ *
+ * `whatsNew` lists what the workspace actually published — the same
+ * `announcements/active` read the app shell's banner makes, so the two can
+ * never disagree about what is new. The other two file a real ticket through
+ * `POST /support/tickets`, the channel the Help page and the support widget
+ * already use, and they differ in the two fields that route a ticket: its
+ * subject and its priority. A problem is `high`; a feature request is `low`,
+ * because a wish that pages someone at 2am is a wish nobody will send twice.
+ */
+function FooterPaneView({
+  pane,
+  workspaceId,
+  onBack,
+}: {
+  pane: FooterPane
+  workspaceId: string
+  onBack: () => void
+}) {
+  const { t } = useTranslation()
+
+  const { data: news = [], isLoading: newsLoading } = useQuery({
+    queryKey: ['workspace-announcements', workspaceId],
+    queryFn: () => api<Announcement[]>(`/workspaces/${workspaceId}/announcements/active`),
+    enabled: pane === 'whatsNew' && !!workspaceId,
+  })
+
+  const [text, setText] = useState('')
+  const [filed, setFiled] = useState<string | null>(null)
+
+  const isProblem = pane === 'reportProblem'
+  const file = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>('/support/tickets', {
+        method: 'POST',
+        body: {
+          workspaceId,
+          subject: isProblem
+            ? t('plannerSettings.reportSubject')
+            : t('plannerSettings.featureSubject'),
+          body: text.trim(),
+          priority: isProblem ? 'high' : 'low',
+        },
+      }),
+    onSuccess: (ticket) => {
+      setFiled(ticket.id)
+      setText('')
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('plannerSettings.saveFailed')),
+  })
+
+  // A pane switch starts a new report rather than showing the last one's
+  // receipt under a different heading.
+  useEffect(() => { setText(''); setFiled(null) }, [pane])
+
+  return (
+    <div className="space-y-3" data-testid={`planner-settings-pane-${pane}`}>
+      <button
+        type="button"
+        onClick={onBack}
+        data-testid="planner-settings-pane-back"
+        className="flex items-center gap-1.5 text-[12px] text-muted-foreground hover:text-foreground"
+      >
+        <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+        {t('common.back')}
+      </button>
+
+      {pane === 'whatsNew' ? (
+        <div className="space-y-2" data-testid="planner-whats-new">
+          <h3 className="text-[13px] font-medium">{t('plannerSettings.whatsNew')}</h3>
+          {newsLoading ? null : news.length === 0 ? (
+            /* Said plainly. An empty list and a list that failed to load look
+               identical otherwise, and one of them is a bug. */
+            <p className="text-[12px] text-muted-foreground" data-testid="planner-whats-new-empty">
+              {t('plannerSettings.whatsNewEmpty')}
+            </p>
+          ) : (
+            <ul className="space-y-2">
+              {news.map((item) => (
+                <li
+                  key={item.id}
+                  data-testid="planner-whats-new-item"
+                  data-announcement-id={item.id}
+                  className="rounded-md border border-border/70 px-3 py-2"
+                >
+                  <div className="text-[12px] font-medium">{item.title}</div>
+                  <p className="mt-0.5 text-[11px] text-muted-foreground">{item.body}</p>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          <h3 className="text-[13px] font-medium">
+            {t(isProblem ? 'plannerSettings.reportProblem' : 'plannerSettings.featureRequests')}
+          </h3>
+          <p className="text-[11px] text-muted-foreground">
+            {t(isProblem ? 'plannerSettings.reportProblemHint' : 'plannerSettings.featureRequestsHint')}
+          </p>
+          {filed ? (
+            /* The ticket's own id, not "thanks!" — it is the thing you quote
+               when you chase it. */
+            <p className="text-[12px]" data-testid="planner-support-filed" data-ticket-id={filed}>
+              {t('plannerSettings.supportFiled', { id: filed.slice(0, 8) })}
+            </p>
+          ) : (
+            <>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                data-testid="planner-support-body"
+                rows={4}
+                aria-label={t(isProblem ? 'plannerSettings.reportProblem' : 'plannerSettings.featureRequests')}
+                className="w-full rounded-md border border-border bg-background px-2 py-1.5 text-[12px]"
+              />
+              <Button
+                size="sm"
+                data-testid="planner-support-send"
+                disabled={!text.trim() || file.isPending}
+                onClick={() => file.mutate()}
+              >
+                {t('plannerSettings.supportSend')}
+              </Button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   )
 }
 

@@ -1,0 +1,221 @@
+/**
+ * A Folder groups multiple projects inside a Space — the plan's Level-4
+ * container (Org > Workspace > Space > Folder > Project). `projects.folderId`
+ * is nullable: a null folder means the project sits directly under the space
+ * ("ungrouped"), so folders are purely optional organisation.
+ */
+export declare const folders: import("node_modules/drizzle-orm/pg-core").PgTableWithColumns<{
+    name: "folders";
+    schema: undefined;
+    columns: {
+        id: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "id";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        spaceId: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "space_id";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        name: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "name";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        color: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "color";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        position: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "position";
+            tableName: "folders";
+            dataType: "number";
+            columnType: "PgInteger";
+            data: number;
+            driverParam: string | number;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdById: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "created_by_id";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        isArchived: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "is_archived";
+            tableName: "folders";
+            dataType: "boolean";
+            columnType: "PgBoolean";
+            data: boolean;
+            driverParam: boolean;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        archivedAt: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "archived_at";
+            tableName: "folders";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        archivedById: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "archived_by_id";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        visibility: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "visibility";
+            tableName: "folders";
+            dataType: "string";
+            columnType: "PgEnumColumn";
+            data: "public" | "private";
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: ["public", "private"];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAt: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "created_at";
+            tableName: "folders";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        updatedAt: import("node_modules/drizzle-orm/pg-core").PgColumn<{
+            name: "updated_at";
+            tableName: "folders";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    };
+    dialect: "pg";
+}>;
+export declare const foldersRelations: import("node_modules/drizzle-orm").Relations<"folders", {
+    space: import("node_modules/drizzle-orm").One<"spaces", true>;
+    projects: import("node_modules/drizzle-orm").Many<"projects">;
+}>;

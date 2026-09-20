@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { Link, useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
@@ -21,6 +21,8 @@ import {
   Plug,
   CheckCircle2,
   Calendar,
+  XCircle,
+  BookOpen,
 } from 'lucide-react'
 import { CalendarSyncWizard } from '../components/calendar-sync-wizard'
 import { useTranslation } from '../lib/i18n'
@@ -38,6 +40,35 @@ type Integration = {
   logo: string
 }
 type ConnectionHealth = 'healthy' | 'expiring' | 'expired' | 'disconnected'
+
+/**
+ * §V2-11, frame `18:39` — the integration error card.
+ *
+ *   We couldn't connect your Google account.
+ *   Google gave us this error: OAuth authentication timed out. Please try
+ *   again. If it keeps happening, try checking your permissions — that often
+ *   does the trick.
+ *   [ Help center article ]
+ *
+ * THE CLAUSE THAT MATTERS is "Google gave us this error: …" — the provider's
+ * own words, about one integration, still there tomorrow. What Rundesk had was
+ * `?oauth=error&reason=` on a redirect: one page load long, attached to no
+ * particular integration, and pointed at the app root rather than at the page
+ * that reads it. So the card could only ever say that something had failed.
+ *
+ * `lastError` is now a stored column and this is its reader. Both halves had to
+ * ship together: a column nothing reads is the mirror of a facade, and a card
+ * that renders a constant is the facade itself.
+ */
+type ConnectionState = {
+  status: string
+  health: ConnectionHealth
+  externalAccountEmail?: string | null
+  tokenExpiresAt?: string | null
+  updatedAt?: string
+  lastError?: string | null
+  lastErrorAt?: string | null
+}
 
 const INTEGRATIONS: Integration[] = [
   { id: 'slack', name: 'Slack', descKey: 'integrations.desc.slack', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
@@ -86,6 +117,29 @@ const CATEGORIES: Array<{ id: Integration['category'] | 'all' | 'installed'; lab
   { id: 'crm', labelKey: 'integrations.category.crm' },
   { id: 'ai', labelKey: 'integrations.category.ai' },
 ]
+
+/**
+ * §V2-11, frame `18:39` — the "Help center article" button under the error.
+ *
+ * Points at `/app/help`, the page, and NOT at `/app/help#help-integrations`.
+ * The help page builds its anchors from the curated topic list and there is no
+ * integrations topic in it, so an anchored link would scroll to nothing —
+ * which is the failure that page's own notes call out: "a source you can click
+ * and that does nothing is worse than one that is not offered."
+ */
+function HelpCentreLink({ testId }: { testId: string }) {
+  const { t } = useTranslation()
+  return (
+    <Link
+      to="/app/help"
+      data-testid={testId}
+      className="inline-flex items-center gap-1.5 rounded-md border border-border/70 bg-card px-2 py-1 text-[11px] font-medium hover:bg-muted/50"
+    >
+      <BookOpen className="h-3 w-3" aria-hidden />
+      {t('integrations.helpArticle')}
+    </Link>
+  )
+}
 
 export function IntegrationsMarketplacePage() {
   const { t } = useTranslation()
@@ -159,6 +213,9 @@ export function IntegrationsMarketplacePage() {
         externalAccountEmail?: string | null
         tokenExpiresAt?: string | null
         updatedAt?: string
+        /** §V2-11 `18:39` — what the provider actually said, verbatim. */
+        lastError?: string | null
+        lastErrorAt?: string | null
       }>>(
         `/workspaces/${workspaceId}/integrations/connections`,
       ),
@@ -270,16 +327,7 @@ export function IntegrationsMarketplacePage() {
     return map
   }, [connectionsQuery.data])
   const connectionByProvider = useMemo(() => {
-    const map = new Map<
-      string,
-      {
-        status: string
-        health: ConnectionHealth
-        externalAccountEmail?: string | null
-        tokenExpiresAt?: string | null
-        updatedAt?: string
-      }
-    >()
+    const map = new Map<string, ConnectionState>()
     for (const row of connectionsQuery.data ?? []) {
       map.set(row.provider, {
         status: row.status,
@@ -287,6 +335,8 @@ export function IntegrationsMarketplacePage() {
         externalAccountEmail: row.externalAccountEmail,
         tokenExpiresAt: row.tokenExpiresAt,
         updatedAt: row.updatedAt,
+        lastError: row.lastError ?? null,
+        lastErrorAt: row.lastErrorAt ?? null,
       })
     }
     return map
@@ -349,14 +399,22 @@ export function IntegrationsMarketplacePage() {
   }
 
   return (
-    <div className="p-6 space-y-7 max-w-7xl mx-auto">
+    <div className="p-6 space-y-7 max-w-7xl mx-auto" data-testid="integrations-page">
       {oauthStatus?.oauth === 'success' ? (
-        <Card className="p-3 border-emerald-500/30 bg-emerald-500/5 text-sm">
+        <Card className="p-3 border-emerald-500/30 bg-emerald-500/5 text-sm" data-testid="integrations-oauth-success">
           {t('integrations.connectedSuccess', { provider: oauthStatus.provider })}
         </Card>
       ) : oauthStatus?.oauth === 'error' ? (
-        <Card className="p-3 border-rose-500/30 bg-rose-500/5 text-sm">
-          {t('integrations.oauthFailed')}{oauthStatus.reason ? `: ${oauthStatus.reason}` : '.'}
+        <Card className="p-3 border-rose-500/30 bg-rose-500/5 text-sm space-y-2" data-testid="integrations-oauth-error">
+          <div>
+            {t('integrations.oauthFailed')}{oauthStatus.reason ? `: ${oauthStatus.reason}` : '.'}
+          </div>
+          {/*
+            §V2-11 `18:39` — the banner gets the same way out as the card. The
+            redirect that produces it now lands HERE rather than on the app
+            root, which is what made this banner reachable at all.
+          */}
+          <HelpCentreLink testId="integrations-oauth-error-help" />
         </Card>
       ) : null}
       <header className="flex items-start justify-between gap-4">
@@ -375,7 +433,12 @@ export function IntegrationsMarketplacePage() {
             {t('integrations.subtitle', { count: installed.length })}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => setCalendarSyncOpen(true)}>
+        <Button
+          variant="outline"
+          size="sm"
+          onClick={() => setCalendarSyncOpen(true)}
+          data-testid="integrations-calendar-sync"
+        >
           <Calendar className="h-3.5 w-3.5 mr-1" /> {t('integrations.calendarSync')}
         </Button>
       </header>
@@ -392,12 +455,15 @@ export function IntegrationsMarketplacePage() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="max-w-sm"
+          data-testid="integrations-search"
         />
         <div className="flex items-center gap-1 overflow-x-auto scrollbar-none bg-card/40 border border-border/60 rounded-lg p-1">
           {CATEGORIES.map((c) => (
             <button
               key={c.id}
               onClick={() => setFilter(c.id)}
+              data-testid={`integrations-category-${c.id}`}
+              aria-pressed={filter === c.id}
               className={cn(
                 'text-xs px-3 py-1.5 rounded-md font-medium transition-all whitespace-nowrap',
                 filter === c.id
@@ -411,7 +477,7 @@ export function IntegrationsMarketplacePage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="integrations-grid">
         {filtered.map((integration) => (
           <IntegrationCard
             key={integration.id}
@@ -469,7 +535,7 @@ export function IntegrationsMarketplacePage() {
       </div>
 
       <Dialog open={Boolean(activeIntegration)} onOpenChange={(open) => !open && setActiveIntegration(null)}>
-        <DialogContent>
+        <DialogContent data-testid="integration-connect-dialog" data-provider={activeIntegration?.id ?? ''}>
           <DialogHeader>
             <DialogTitle>{t('integrations.connectDialogTitle', { name: activeIntegration?.name ?? '' })}</DialogTitle>
             <DialogDescription>
@@ -489,11 +555,13 @@ export function IntegrationsMarketplacePage() {
                   placeholder="https://hooks.slack.com/services/T.../B.../..."
                   value={slackWebhookUrl}
                   onChange={(e) => setSlackWebhookUrl(e.target.value)}
+                  data-testid="integration-slack-webhook"
                 />
                 <Input
                   placeholder={t('integrations.channelNamePlaceholder')}
                   value={slackChannelName}
                   onChange={(e) => setSlackChannelName(e.target.value)}
+                  data-testid="integration-slack-channel"
                 />
                 {slackQuery.data?.webhookUrlHint ? (
                   <p className="text-xs text-muted-foreground">
@@ -516,6 +584,7 @@ export function IntegrationsMarketplacePage() {
                         </span>
                         <button
                           className="ml-auto text-rose-500 hover:text-rose-600"
+                          data-testid="integration-slack-rule-remove"
                           onClick={() => removeSlackRule.mutate(r.id)}
                         >
                           {t('integrations.remove')}
@@ -527,12 +596,14 @@ export function IntegrationsMarketplacePage() {
                       value={ruleWebhook}
                       onChange={(e) => setRuleWebhook(e.target.value)}
                       className="h-8 text-xs"
+                      data-testid="integration-rule-webhook"
                     />
                     <Input
                       placeholder={t('integrations.eventsPlaceholder')}
                       value={ruleEvents}
                       onChange={(e) => setRuleEvents(e.target.value)}
                       className="h-8 text-xs"
+                      data-testid="integration-rule-events"
                     />
                     <div className="flex items-center gap-2">
                       <select
@@ -541,6 +612,8 @@ export function IntegrationsMarketplacePage() {
                           setRuleSpaceId(e.target.value)
                           setRuleProjectId('')
                         }}
+                        aria-label={t('integrations.allProjects')}
+                        data-testid="integration-rule-space"
                         className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs"
                       >
                         <option value="">{t('integrations.allProjects')}</option>
@@ -552,6 +625,8 @@ export function IntegrationsMarketplacePage() {
                         value={ruleProjectId}
                         onChange={(e) => setRuleProjectId(e.target.value)}
                         disabled={!ruleSpaceId}
+                        aria-label={t('integrations.wholeSpace')}
+                        data-testid="integration-rule-project"
                         className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-xs disabled:opacity-50"
                       >
                         <option value="">{t('integrations.wholeSpace')}</option>
@@ -563,6 +638,7 @@ export function IntegrationsMarketplacePage() {
                         size="sm"
                         variant="outline"
                         className="h-8 text-xs"
+                        data-testid="integration-rule-add"
                         disabled={!ruleWebhook.trim() || addSlackRule.isPending}
                         onClick={() => addSlackRule.mutate()}
                       >
@@ -574,11 +650,16 @@ export function IntegrationsMarketplacePage() {
               </>
             ) : null}
             <div className="flex items-center justify-end gap-2">
-              <Button variant="outline" onClick={() => setActiveIntegration(null)}>
+              <Button
+                variant="outline"
+                onClick={() => setActiveIntegration(null)}
+                data-testid="integration-connect-cancel"
+              >
                 {t('common.cancel')}
               </Button>
               <Button
                 onClick={runConnectFlow}
+                data-testid="integration-connect-confirm"
                 title={
                   activeIntegration && !isSupportedIntegration(activeIntegration)
                     ? t('integrations.notAvailableYetTitle')
@@ -627,17 +708,17 @@ function IntegrationCard({
   setupReason?: string
   accessRequest?: { status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }
   onRequestAccess: () => void
-  connection?: {
-    status: string
-    health: ConnectionHealth
-    externalAccountEmail?: string | null
-    tokenExpiresAt?: string | null
-    updatedAt?: string
-  }
+  connection?: ConnectionState
 }) {
   const { t } = useTranslation()
   return (
-    <Card variant="glass" className="p-4 group transition-all hover:border-accent/40">
+    <Card
+      variant="glass"
+      className="p-4 group transition-all hover:border-accent/40"
+      data-testid="integration-card"
+      data-provider={integration.id}
+      data-health={connection?.health ?? 'none'}
+    >
       <div className="flex items-start gap-3">
         <div
           className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-white font-bold text-sm shadow-sm"
@@ -703,16 +784,47 @@ function IntegrationCard({
               {t('integrations.decisionUpdated')} {new Date(accessRequest.updatedAt).toLocaleString()}
             </p>
           ) : null}
+
+          {/*
+            §V2-11, frame `18:39`. Rendered on the STORED message, so a card is
+            only ever on screen because a provider actually said something —
+            and it says what was said. A card that rendered a constant would be
+            the facade defect wearing this exact layout.
+          */}
+          {connection?.lastError ? (
+            <div
+              className="mt-2 rounded-md border border-rose-500/30 bg-rose-500/5 p-2.5 space-y-1.5"
+              data-testid="integration-error-card"
+              data-provider={integration.id}
+            >
+              <div className="flex items-start gap-1.5 text-[12px] font-medium" data-testid="integration-error-title">
+                <XCircle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-rose-500" aria-hidden />
+                <span>{t('integrations.errorTitle', { provider: integration.name })}</span>
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground" data-testid="integration-error-body">
+                {t('integrations.errorBody', { provider: integration.name, error: connection.lastError })}
+              </p>
+              {connection.lastErrorAt ? (
+                <p className="text-[10px] text-muted-foreground" data-testid="integration-error-when">
+                  {t('integrations.errorWhen', { when: new Date(connection.lastErrorAt).toLocaleString() })}
+                </p>
+              ) : null}
+              <HelpCentreLink testId="integration-error-help" />
+            </div>
+          ) : null}
+
           <div className="mt-3 flex items-center justify-between">
             <Switch
               checked={connected}
               onCheckedChange={onToggle}
               disabled={integration.comingSoon || isLoading || !supported || !providerReady}
+              data-testid="integration-toggle"
             />
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
+              data-testid="integration-action"
               disabled={
                 integration.comingSoon ||
                 isLoading ||

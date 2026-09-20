@@ -3,55 +3,36 @@ import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
-import { CheckSquare, ClipboardList, Folder, FolderOpen, FileText, Layers, Upload, X, Clock, PenTool, LayoutDashboard, Bell, Paperclip } from 'lucide-react'
+import { Layers, Upload, X, Bell, Paperclip } from 'lucide-react'
 import { api } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { parseEstimate } from '../lib/estimate'
+import { CREATE_TYPES, type CreateKind } from '../lib/create-types'
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
 type List = { id: string; name: string }
 type TaskType = { id: string; name: string; isDefault?: boolean }
 
-type Mode =
-  | 'task'
-  | 'list'
-  | 'folder'
-  | 'project'
-  | 'space'
-  | 'doc'
-  | 'reminder'
-  | 'whiteboard'
-  | 'dashboard'
-
 /*
- * The `value` is the persisted Mode identifier; `labelKey` references an i18n
- * catalog entry resolved at render time. A1.9 adds List and Folder: both were
- * creatable only by first navigating to the page that owns them.
+ * §V2-06 — the nine creatable types, their icons and their wording, now live in
+ * `lib/create-types.ts`, because the sidebar's "+" menu on a space renders the
+ * same set (frame `08:00`). Two hand-kept copies of one list is the
+ * duplicated-list defect; this file renders the shared one as a tab strip.
  *
- * §G15 [21:36] — "jab task banate hain to pehle task, uske baad woh DOCUMENT ka
- * poochta hai, phir REMINDER ka, phir WHITEBOARD ka, phir DASHBOARD ka." The
- * last three are the order she named them in, and all three already existed as
- * whole features — reachable only by first navigating to the page that owns
- * them, which is the same complaint List and Folder answered.
+ * A1.9 added List and Folder: both were creatable only by first navigating to
+ * the page that owns them. §G15 [21:36] fixed the order of the first five —
+ * "pehle task, uske baad woh DOCUMENT ka poochta hai, phir REMINDER ka, phir
+ * WHITEBOARD ka, phir DASHBOARD ka".
  */
-const MODE_TABS = [
-  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task' },
-  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc' },
-  { value: 'reminder', icon: Clock, labelKey: 'quickCreate.tab.reminder' },
-  { value: 'whiteboard', icon: PenTool, labelKey: 'quickCreate.tab.whiteboard' },
-  { value: 'dashboard', icon: LayoutDashboard, labelKey: 'quickCreate.tab.dashboard' },
-  { value: 'list', icon: ClipboardList, labelKey: 'quickCreate.tab.list' },
-  { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder' },
-  { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project' },
-  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space' },
-] as const
+type Mode = CreateKind
 
 export function QuickCreateModal({
   onClose,
   initialMode,
+  initialSpaceId,
 }: {
   onClose: () => void
   /*
@@ -61,6 +42,13 @@ export function QuickCreateModal({
    * more; the topbar keeps the default.
    */
   initialMode?: Mode
+  /*
+   * §V2-06 frame `08:00` — opened from the "+" on a space row, so the space is
+   * already answered. Without this the menu item lands on a form whose first
+   * question is the one the person just answered by choosing WHERE to click,
+   * which is the "+ that is really the global create modal" it replaces.
+   */
+  initialSpaceId?: string
 }) {
   const { t } = useTranslation()
   const params = useParams({ strict: false }) as { workspaceId?: string }
@@ -85,14 +73,14 @@ export function QuickCreateModal({
       <Card>
         <Header onClose={onClose} titleKey="quickCreate.title" />
         <div className="px-5 pt-3 pb-2 flex flex-wrap gap-1 border-b border-border">
-          {MODE_TABS.map((tab) => (
+          {CREATE_TYPES.map((tab) => (
             <ModeTab key={tab.value} mode={mode} value={tab.value} setMode={setMode} icon={tab.icon} labelKey={tab.labelKey} />
           ))}
         </div>
-        {mode === 'task' && <TaskForm workspaceId={workspaceId} onClose={onClose} />}
-        {mode === 'list' && <ListForm workspaceId={workspaceId} onClose={onClose} />}
-        {mode === 'folder' && <FolderForm workspaceId={workspaceId} onClose={onClose} />}
-        {mode === 'project' && <ProjectForm workspaceId={workspaceId} onClose={onClose} />}
+        {mode === 'task' && <TaskForm workspaceId={workspaceId} onClose={onClose} initialSpaceId={initialSpaceId} />}
+        {mode === 'list' && <ListForm workspaceId={workspaceId} onClose={onClose} initialSpaceId={initialSpaceId} />}
+        {mode === 'folder' && <FolderForm workspaceId={workspaceId} onClose={onClose} initialSpaceId={initialSpaceId} />}
+        {mode === 'project' && <ProjectForm workspaceId={workspaceId} onClose={onClose} initialSpaceId={initialSpaceId} />}
         {mode === 'space' && <SpaceForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'doc' && <DocForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'reminder' && <ReminderForm workspaceId={workspaceId} onClose={onClose} />}
@@ -229,12 +217,18 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
 type TaskTemplate = { id: string; name: string }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
 
-function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function TaskForm({
+  workspaceId,
+  onClose,
+  initialSpaceId,
+}: { workspaceId: string; onClose: () => void; initialSpaceId?: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
-  const [spaceId, setSpaceId] = useState('')
+  // §V2-06 frame `08:00` — answered already when this was opened from a space's
+  // "+". Still a <select>, so it can be changed; it just is not blank.
+  const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
   const [projectId, setProjectId] = useState('')
   const [listId, setListId] = useState('')
   const [taskTypeId, setTaskTypeId] = useState('')
@@ -1171,14 +1165,19 @@ function TaskForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =
   )
 }
 
-function ListForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function ListForm({
+  workspaceId,
+  onClose,
+  initialSpaceId,
+}: { workspaceId: string; onClose: () => void; initialSpaceId?: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [listPrivate, setListPrivate] = useState(false)
   const [createdList, setCreatedList] = useState<{ id: string; name: string } | null>(null)
-  const [spaceId, setSpaceId] = useState('')
+  // §V2-06 frame `08:00` — "+ → List" on a space means a list in THAT space.
+  const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
   const [projectId, setProjectId] = useState('')
 
   const spaces = useQuery({
@@ -1376,12 +1375,16 @@ function ListSettingsStep({
   )
 }
 
-function FolderForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function FolderForm({
+  workspaceId,
+  onClose,
+  initialSpaceId,
+}: { workspaceId: string; onClose: () => void; initialSpaceId?: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
-  const [spaceId, setSpaceId] = useState('')
+  const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -1408,8 +1411,8 @@ function FolderForm({ workspaceId, onClose }: { workspaceId: string; onClose: ()
         if (name.trim() && spaceId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder={t('quickCreate.folderNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
-      <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+      <Input autoFocus data-testid="quick-create-folder-name" placeholder={t('quickCreate.folderNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      <Select data-testid="quick-create-folder-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createFolder')}</Button>
@@ -1418,12 +1421,16 @@ function FolderForm({ workspaceId, onClose }: { workspaceId: string; onClose: ()
   )
 }
 
-function ProjectForm({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
+function ProjectForm({
+  workspaceId,
+  onClose,
+  initialSpaceId,
+}: { workspaceId: string; onClose: () => void; initialSpaceId?: string }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [name, setName] = useState('')
-  const [spaceId, setSpaceId] = useState('')
+  const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
@@ -1449,8 +1456,8 @@ function ProjectForm({ workspaceId, onClose }: { workspaceId: string; onClose: (
         if (name.trim() && spaceId) create.mutate()
       }}
     >
-      <Input autoFocus placeholder={t('quickCreate.projectNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
-      <Select labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
+      <Input autoFocus data-testid="quick-create-project-name" placeholder={t('quickCreate.projectNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      <Select data-testid="quick-create-project-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createProject')}</Button>

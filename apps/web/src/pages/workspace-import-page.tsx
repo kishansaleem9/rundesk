@@ -1,10 +1,22 @@
-import { useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge } from '@rundesk/ui'
-import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound } from 'lucide-react'
+import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import {
+  SHEET_FIELDS,
+  fetchSheetJob,
+  fetchSheetJobs,
+  fetchSheetSources,
+  previewSheet,
+  startSheetImport,
+  type ColumnMapping,
+  type SheetField,
+  type SheetJob,
+  type SheetPreview,
+} from '../lib/imports-api'
 
 type ConflictStrategy = 'skip' | 'create' | 'merge'
 
@@ -51,7 +63,540 @@ type Job = {
   result: ImportSummary | null
 }
 
+type ImportTab = 'clickup' | 'sheet'
+
+/**
+ * §V2-S13 frame `12:08` — Create › **Imports** ›.
+ *
+ * The frame's submenu has twelve rows: Spreadsheet files, Document files, and
+ * ten named tools. Rundesk had one importer (ClickUp CSV). Drawing ten tiles
+ * that open a dialog which cannot import would be the facade defect at ten
+ * times scale, so this page grows exactly one new thing — a real delimited-file
+ * importer with an explicit column mapping — and the named tools appear only as
+ * column PRESETS over that one importer, which is something the parser can
+ * actually honour.
+ *
+ * The four rows with no preset are listed as text with the reason and no
+ * control at all. See `import-unsupported` below.
+ */
 export function ImportPage() {
+  const { t } = useTranslation()
+  const [tab, setTab] = useState<ImportTab>('sheet')
+
+  return (
+    <div className="container mx-auto max-w-4xl p-6 space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold tracking-tight">{t('import.pageTitle')}</h1>
+        <p className="text-muted-foreground mt-1">{t('import.pageSubtitle')}</p>
+      </div>
+
+      <div className="flex gap-2 border-b" data-testid="import-tabs">
+        <TabButton
+          testid="import-tab-sheet"
+          active={tab === 'sheet'}
+          onClick={() => setTab('sheet')}
+          icon={<Table2 className="h-4 w-4" />}
+          label={t('import.tabSheet')}
+        />
+        <TabButton
+          testid="import-tab-clickup"
+          active={tab === 'clickup'}
+          onClick={() => setTab('clickup')}
+          icon={<Upload className="h-4 w-4" />}
+          label={t('import.tabClickup')}
+        />
+      </div>
+
+      {tab === 'sheet' ? <SpreadsheetImportPanel /> : <ClickUpImportPanel />}
+    </div>
+  )
+}
+
+function TabButton({
+  testid,
+  active,
+  onClick,
+  icon,
+  label,
+}: {
+  testid: string
+  active: boolean
+  onClick: () => void
+  icon: React.ReactNode
+  label: string
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testid}
+      data-active={active ? 'true' : 'false'}
+      onClick={onClick}
+      className={`flex items-center gap-2 px-3 py-2 text-sm font-medium border-b-2 -mb-px ${
+        active ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground hover:text-foreground'
+      }`}
+    >
+      {icon}
+      {label}
+    </button>
+  )
+}
+
+// ═══ Spreadsheet files ════════════════════════════════════════════════════════
+
+const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'col'
+
+function SpreadsheetImportPanel() {
+  const { t, tCount } = useTranslation()
+  const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
+
+  const [preset, setPreset] = useState('generic')
+  const [content, setContent] = useState('')
+  const [filename, setFilename] = useState('')
+  const [mapping, setMapping] = useState<ColumnMapping | null>(null)
+  const [preview, setPreview] = useState<SheetPreview | null>(null)
+  const [projectName, setProjectName] = useState('')
+  const [defaultListName, setDefaultListName] = useState('')
+  const [strategy, setStrategy] = useState<ConflictStrategy>('skip')
+  const [jobId, setJobId] = useState<string | null>(null)
+
+  const catalogue = useQuery({
+    queryKey: ['sheet-import-sources', workspaceId],
+    queryFn: () => fetchSheetSources(workspaceId),
+  })
+
+  const previewMut = useMutation({
+    mutationFn: (override?: { preset?: string; mapping?: ColumnMapping }) =>
+      previewSheet(workspaceId, {
+        content,
+        preset: override?.preset ?? preset,
+        mapping: override?.mapping ?? mapping ?? undefined,
+        defaultListName: defaultListName.trim() || undefined,
+      }),
+    onSuccess: (data) => {
+      setPreview(data)
+      setMapping(data.mapping)
+    },
+  })
+
+  const importMut = useMutation({
+    mutationFn: () =>
+      startSheetImport(workspaceId, {
+        content,
+        preset,
+        mapping: mapping ?? undefined,
+        targetProjectName: projectName.trim() || undefined,
+        defaultListName: defaultListName.trim() || undefined,
+        strategy,
+      }),
+    onSuccess: (data) => setJobId(data.jobId),
+  })
+
+  const jobQuery = useQuery({
+    queryKey: ['sheet-import-job', workspaceId, jobId],
+    queryFn: () => fetchSheetJob(workspaceId, jobId!),
+    enabled: !!jobId,
+    refetchInterval: (query) => {
+      const status = (query.state.data as SheetJob | undefined)?.status
+      return status === 'completed' || status === 'failed' ? false : 700
+    },
+  })
+
+  const job = jobQuery.data
+  const result = job?.status === 'completed' ? job.result : null
+
+  const history = useQuery({
+    queryKey: ['sheet-import-history', workspaceId, job?.status],
+    queryFn: () => fetchSheetJobs(workspaceId, 'spreadsheet'),
+  })
+
+  // A new file invalidates everything downstream of it.
+  useEffect(() => {
+    setPreview(null)
+    setMapping(null)
+    setJobId(null)
+  }, [content])
+
+  const fieldLabel = (f: SheetField) =>
+    t(`import.field.${f}` as Parameters<typeof t>[0]) as string
+
+  const accepted = catalogue.data?.acceptedExtensions ?? ['.csv', '.tsv', '.txt']
+  const activeSource = useMemo(
+    () => catalogue.data?.sources.find((s) => s.key === preset),
+    [catalogue.data, preset],
+  )
+
+  function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFilename(file.name)
+    const reader = new FileReader()
+    reader.onload = () => setContent(typeof reader.result === 'string' ? reader.result : '')
+    reader.readAsText(file)
+  }
+
+  function choosePreset(key: string) {
+    setPreset(key)
+    // Re-derive the mapping from the new preset rather than keeping the old
+    // one: a preset that did not change the columns would be a dead control.
+    setMapping(null)
+    if (content) previewMut.mutate({ preset: key, mapping: undefined })
+  }
+
+  function setColumn(header: string, field: SheetField) {
+    const next: ColumnMapping = { ...(mapping ?? {}), [header]: field }
+    setMapping(next)
+    previewMut.mutate({ mapping: next })
+  }
+
+  return (
+    <div className="space-y-6" data-testid="import-sheet-panel">
+      {/* Step 1 — where the export came from */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Table2 className="h-4 w-4" />
+          {t('import.sheetSourceTitle')}
+        </div>
+        <div className="flex flex-wrap gap-2" data-testid="import-source-picker">
+          {(catalogue.data?.sources ?? []).map((s) => (
+            <button
+              key={s.key}
+              type="button"
+              data-testid={`import-source-${s.key}`}
+              data-active={preset === s.key ? 'true' : 'false'}
+              onClick={() => choosePreset(s.key)}
+              className={`rounded-md border px-3 py-1.5 text-sm font-medium ${
+                preset === s.key ? 'border-primary bg-primary/10' : 'hover:bg-muted/50'
+              }`}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
+        {activeSource && (
+          <p className="text-xs text-muted-foreground" data-testid="import-source-hint">
+            {activeSource.exportHint}
+          </p>
+        )}
+
+        {/* The frame's remaining rows — stated, never drawn as a control. */}
+        {(catalogue.data?.unsupported ?? []).length > 0 && (
+          <div
+            className="rounded-md border border-border/60 bg-muted/30 p-3 text-xs text-muted-foreground space-y-2"
+            data-testid="import-unsupported"
+          >
+            <div className="flex items-center gap-1.5 font-medium text-foreground">
+              <Ban className="h-3.5 w-3.5" />
+              {t('import.sheetUnsupportedTitle')}
+            </div>
+            <p>{t('import.sheetUnsupportedNote')}</p>
+            <ul className="space-y-1">
+              {(catalogue.data?.unsupported ?? []).map((u) => (
+                <li key={u.key} data-testid={`import-unsupported-${u.key}`}>
+                  <span className="font-medium text-foreground">{u.label}</span> — {u.reason}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+      </Card>
+
+      {/* Step 2 — upload */}
+      <Card className="p-6 space-y-4">
+        <div className="flex items-center gap-2 text-sm font-medium">
+          <Upload className="h-4 w-4" />
+          {t('import.sheetStep1')}
+        </div>
+        <input
+          type="file"
+          data-testid="import-sheet-file"
+          accept={accepted.join(',')}
+          onChange={onFileChange}
+          className="block w-full text-sm file:mr-4 file:rounded file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground file:font-medium hover:file:bg-primary/90"
+        />
+        <p className="text-xs text-muted-foreground" data-testid="import-sheet-accepted">
+          {t('import.sheetAccepted', { list: accepted.join(' · ') })} {t('import.sheetNoXlsx')}
+        </p>
+        {filename && (
+          <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="import-sheet-filename">
+            <FileText className="h-4 w-4" />
+            {t('import.fileInfo', { name: filename, size: (content.length / 1024).toFixed(1) })}
+          </div>
+        )}
+        <Button
+          data-testid="import-sheet-preview"
+          onClick={() => previewMut.mutate(undefined)}
+          disabled={!content || previewMut.isPending}
+          variant="secondary"
+        >
+          {previewMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+          {t('import.preview')}
+        </Button>
+        {previewMut.isError && <ErrorBox message={(previewMut.error as Error).message} />}
+      </Card>
+
+      {/* Step 3 — the column mapping */}
+      {preview && !jobId && (
+        <Card className="p-6 space-y-5" data-testid="import-sheet-review">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+            {t('import.sheetStep2')}
+          </div>
+
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+            <Stat testid="import-sheet-total" label={t('import.totalRows')} value={preview.totalRows} />
+            <Stat testid="import-sheet-importable" label={t('import.sheetImportable')} value={preview.importableRows} />
+            <Stat testid="import-sheet-rejected" label={t('import.sheetRejected')} value={preview.rejectedRows} />
+            <Stat testid="import-sheet-duplicates" label={t('import.duplicatesLabel')} value={preview.duplicates} />
+          </div>
+
+          <div className="rounded-md border divide-y" data-testid="import-mapping">
+            <div className="grid grid-cols-2 gap-2 px-3 py-2 text-xs uppercase tracking-wide text-muted-foreground">
+              <span>{t('import.sheetColumn')}</span>
+              <span>{t('import.sheetMapsTo')}</span>
+            </div>
+            {preview.headers.map((h) => (
+              <div key={h} className="grid grid-cols-2 gap-2 items-center px-3 py-2">
+                <span className="text-sm font-medium truncate" title={h}>
+                  {h}
+                </span>
+                <select
+                  data-testid={`import-map-${slug(h)}`}
+                  data-column={h}
+                  value={(mapping ?? preview.mapping)[h] ?? 'ignore'}
+                  onChange={(e) => setColumn(h, e.target.value as SheetField)}
+                  className="rounded-md border bg-background px-2 py-1 text-sm"
+                >
+                  {SHEET_FIELDS.map((f) => (
+                    <option key={f} value={f}>
+                      {fieldLabel(f)}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ))}
+          </div>
+          {preview.mappingError && (
+            <div className="text-sm text-destructive" data-testid="import-mapping-error">
+              {preview.mappingError}
+            </div>
+          )}
+
+          {/* The refusals, before anything is written. */}
+          <div data-testid="import-sheet-rejections">
+            <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+              {t('import.sheetRejectedTitle')}
+            </div>
+            {preview.rowErrors.length === 0 ? (
+              <p className="text-sm text-muted-foreground" data-testid="import-sheet-rejections-none">
+                {t('import.sheetRejectedNone')}
+              </p>
+            ) : (
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {preview.rowErrors.slice(0, 50).map((e) => (
+                  <li
+                    key={`${e.row}-${e.code}`}
+                    data-testid="import-sheet-reject-row"
+                    data-row={e.row}
+                    data-code={e.code}
+                    className="rounded bg-muted px-2 py-1"
+                  >
+                    {e.message}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+
+          {preview.uniqueLists.length > 0 && (
+            <div>
+              <div className="text-xs uppercase tracking-wide text-muted-foreground mb-2">
+                {t('import.listsToCreate')}
+              </div>
+              <div className="flex flex-wrap gap-1.5" data-testid="import-sheet-lists">
+                {preview.uniqueLists.map((l) => (
+                  <Badge key={l} variant="secondary">
+                    {l}
+                  </Badge>
+                ))}
+              </div>
+            </div>
+          )}
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="sheet-project">
+                {t('import.projectName')}
+              </label>
+              <Input
+                id="sheet-project"
+                data-testid="import-sheet-project"
+                value={projectName}
+                onChange={(e) => setProjectName(e.target.value)}
+                placeholder={preview.presetLabel}
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm font-medium" htmlFor="sheet-list">
+                {t('import.sheetDefaultList')}
+              </label>
+              <Input
+                id="sheet-list"
+                data-testid="import-sheet-listname"
+                value={defaultListName}
+                onChange={(e) => setDefaultListName(e.target.value)}
+                placeholder="Imported Tasks"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="sheet-strategy">
+              {t('import.sheetStrategy')}
+            </label>
+            <select
+              id="sheet-strategy"
+              data-testid="import-sheet-strategy"
+              value={strategy}
+              onChange={(e) => setStrategy(e.target.value as ConflictStrategy)}
+              className="block w-full rounded-md border bg-background px-2 py-1.5 text-sm"
+            >
+              <option value="skip">{t('import.strategySkip')}</option>
+              <option value="create">{t('import.strategyCreate')}</option>
+              <option value="merge">{t('import.strategyMerge')}</option>
+            </select>
+          </div>
+
+          <Button
+            data-testid="import-sheet-start"
+            onClick={() => importMut.mutate()}
+            disabled={importMut.isPending || !!preview.mappingError || preview.importableRows === 0}
+            className="w-full"
+          >
+            {importMut.isPending ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
+            {tCount('import.startImport', preview.importableRows)}
+          </Button>
+          {importMut.isError && <ErrorBox message={(importMut.error as Error).message} />}
+        </Card>
+      )}
+
+      {/* Step 4 — live progress */}
+      {jobId && job && job.status !== 'completed' && (
+        <Card className="p-6 space-y-4" data-testid="import-sheet-progress">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            {job.status === 'failed' ? (
+              <AlertCircle className="h-4 w-4 text-destructive" />
+            ) : (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            )}
+            {job.status === 'failed' ? t('import.importFailed') : t('import.progressTitle')}
+          </div>
+          {job.status === 'failed' ? (
+            <ErrorBox message={job.error ?? t('import.importFailed')} />
+          ) : (
+            <>
+              <Progress value={job.total > 0 ? Math.round((job.processed / job.total) * 100) : 0} />
+              <div className="text-sm text-muted-foreground">
+                {t('import.progressCount', { processed: job.processed, total: job.total })}
+              </div>
+            </>
+          )}
+        </Card>
+      )}
+
+      {/* Step 5 — the report */}
+      {result && (
+        <Card className="p-6 space-y-4" data-testid="import-sheet-report">
+          <div className="flex items-center gap-2 text-sm font-medium">
+            <CheckCircle2 className="h-5 w-5 text-emerald-500" />
+            {t('import.completeTitle')}
+            <span
+              className="ml-auto rounded bg-muted px-2 py-0.5 text-xs font-normal"
+              data-testid="import-sheet-preset"
+              data-preset={result.sourcePreset}
+            >
+              {t('import.sheetPreset')}: {result.sourcePreset}
+            </span>
+          </div>
+          <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
+            <Stat testid="import-sheet-r-lists" label={t('import.lists')} value={result.listsCreated} />
+            <Stat testid="import-sheet-r-created" label={t('import.created')} value={result.tasksCreated} />
+            <Stat testid="import-sheet-r-updated" label={t('import.updated')} value={result.tasksUpdated} />
+            <Stat testid="import-sheet-r-skipped" label={t('import.skipped')} value={result.tasksSkipped} />
+            <Stat testid="import-sheet-r-rejected" label={t('import.sheetRejected')} value={result.tasksRejected} />
+            <Stat testid="import-sheet-r-labels" label={t('import.labels')} value={result.labelsCreated} />
+            <Stat testid="import-sheet-r-assignees" label={t('import.assignees')} value={result.assigneesLinked} />
+            <Stat
+              testid="import-sheet-r-unmatched"
+              label={t('import.sheetAssigneesUnmatched')}
+              value={result.assigneesUnmatched}
+            />
+          </div>
+
+          {result.rowErrors.length > 0 && (
+            <div className="rounded-md border border-amber-500/30 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm space-y-2">
+              <div className="font-medium">{t('import.sheetRejectedTitle')}</div>
+              <ul className="space-y-1 text-xs text-muted-foreground">
+                {result.rowErrors.slice(0, 50).map((e) => (
+                  <li
+                    key={`${e.row}-${e.code}`}
+                    data-testid="import-sheet-error-row"
+                    data-row={e.row}
+                    data-code={e.code}
+                  >
+                    {e.message}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {result.errors.length > 0 && (
+            <details className="rounded-md border p-3 text-sm">
+              <summary className="font-medium cursor-pointer">{result.errors.length}</summary>
+              <ul className="mt-2 space-y-1 list-disc list-inside text-xs text-muted-foreground">
+                {result.errors.slice(0, 50).map((e, i) => (
+                  <li key={i}>{e}</li>
+                ))}
+              </ul>
+            </details>
+          )}
+        </Card>
+      )}
+
+      {/* The history — the reader of `clickup_import_jobs.source`. */}
+      <Card className="p-6 space-y-3" data-testid="import-sheet-history">
+        <div className="text-sm font-medium">{t('import.sheetHistory')}</div>
+        {(history.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="import-sheet-history-none">
+            {t('import.sheetHistoryNone')}
+          </p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {(history.data ?? []).map((h) => (
+              <li
+                key={h.id}
+                data-testid="import-sheet-history-row"
+                data-job={h.id}
+                data-source={h.source}
+                data-preset={h.sourcePreset ?? ''}
+                className="flex items-center gap-3 py-2"
+              >
+                <Badge variant="secondary">{h.sourcePreset ?? h.source}</Badge>
+                <span className="text-muted-foreground">
+                  {t('import.progressCount', { processed: h.processed, total: h.total })}
+                </span>
+                <span className="ml-auto text-xs text-muted-foreground">{h.status}</span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Card>
+    </div>
+  )
+}
+
+// ═══ ClickUp CSV (unchanged behaviour; testids added) ═════════════════════════
+
+function ClickUpImportPanel() {
   const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
   const [csv, setCsv] = useState<string>('')
@@ -102,7 +647,6 @@ export function ImportPage() {
   })
 
   const job = jobQuery.data
-  const isRunning = !!jobId && job?.status !== 'completed' && job?.status !== 'failed'
   const result = job?.status === 'completed' ? job.result : null
 
   function onFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -128,10 +672,10 @@ export function ImportPage() {
   }
 
   return (
-    <div className="container mx-auto max-w-4xl p-6 space-y-6">
+    <div className="space-y-6" data-testid="import-clickup-panel">
       <div>
-        <h1 className="text-3xl font-bold tracking-tight">{t('import.title')}</h1>
-        <p className="text-muted-foreground mt-1">{t('import.subtitle')}</p>
+        <h2 className="text-lg font-semibold">{t('import.title')}</h2>
+        <p className="text-muted-foreground text-sm mt-1">{t('import.subtitle')}</p>
       </div>
 
       {/* Step 1 — upload */}
@@ -142,17 +686,19 @@ export function ImportPage() {
         </div>
         <input
           type="file"
+          data-testid="import-clickup-file"
           accept=".csv,text/csv"
           onChange={onFileChange}
           className="block w-full text-sm file:mr-4 file:rounded file:border-0 file:bg-primary file:px-4 file:py-2 file:text-primary-foreground file:font-medium hover:file:bg-primary/90"
         />
         {filename && (
-          <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <div className="flex items-center gap-2 text-sm text-muted-foreground" data-testid="import-clickup-filename">
             <FileText className="h-4 w-4" />
             {t('import.fileInfo', { name: filename, size: (csv.length / 1024).toFixed(1) })}
           </div>
         )}
         <Button
+          data-testid="import-clickup-preview"
           onClick={() => previewMut.mutate()}
           disabled={!csv || previewMut.isPending}
           variant="secondary"
@@ -165,16 +711,20 @@ export function ImportPage() {
 
       {/* Step 2 — review + conflicts */}
       {preview && !jobId && (
-        <Card className="p-6 space-y-5">
+        <Card className="p-6 space-y-5" data-testid="import-clickup-review">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2 className="h-4 w-4 text-emerald-500" />
             {t('import.step2Title')}
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-            <Stat label={t('import.totalRows')} value={preview.totalRows} />
-            <Stat label={t('import.listsDetected')} value={preview.uniqueLists.length} />
-            <Stat label={t('import.customFields')} value={preview.customFields.length} />
-            <Stat label={t('import.duplicatesLabel')} value={preview.duplicates.count} />
+            <Stat testid="import-clickup-total" label={t('import.totalRows')} value={preview.totalRows} />
+            <Stat testid="import-clickup-lists" label={t('import.listsDetected')} value={preview.uniqueLists.length} />
+            <Stat testid="import-clickup-fields" label={t('import.customFields')} value={preview.customFields.length} />
+            <Stat
+              testid="import-clickup-duplicates"
+              label={t('import.duplicatesLabel')}
+              value={preview.duplicates.count}
+            />
           </div>
 
           {/* Detected custom fields */}
@@ -252,7 +802,12 @@ export function ImportPage() {
 
           <div className="space-y-2 pt-1">
             <label className="text-sm font-medium">{t('import.projectName')}</label>
-            <Input value={projectName} onChange={(e) => setProjectName(e.target.value)} placeholder="ClickUp Import" />
+            <Input
+              data-testid="import-clickup-project"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="ClickUp Import"
+            />
           </div>
 
           {/* §12.5 — optional ClickUp API token unlocks comments + attachments. */}
@@ -264,6 +819,7 @@ export function ImportPage() {
             </label>
             <Input
               type="password"
+              data-testid="import-clickup-token"
               autoComplete="off"
               value={apiToken}
               onChange={(e) => setApiToken(e.target.value)}
@@ -277,6 +833,7 @@ export function ImportPage() {
           )}
 
           <Button
+            data-testid="import-clickup-start"
             onClick={() => importMut.mutate()}
             disabled={importMut.isPending}
             className="w-full"
@@ -290,7 +847,7 @@ export function ImportPage() {
 
       {/* Step 3 — live progress */}
       {jobId && job && job.status !== 'completed' && (
-        <Card className="p-6 space-y-4">
+        <Card className="p-6 space-y-4" data-testid="import-clickup-progress">
           <div className="flex items-center gap-2 text-sm font-medium">
             {job.status === 'failed' ? (
               <AlertCircle className="h-4 w-4 text-destructive" />
@@ -308,9 +865,9 @@ export function ImportPage() {
                 {t('import.progressCount', { processed: job.processed, total: job.total })}
               </div>
               <div className="grid grid-cols-3 gap-4">
-                <Stat label={t('import.created')} value={job.createdCount} />
-                <Stat label={t('import.updated')} value={job.updatedCount} />
-                <Stat label={t('import.skipped')} value={job.skippedCount} />
+                <Stat testid="import-clickup-p-created" label={t('import.created')} value={job.createdCount} />
+                <Stat testid="import-clickup-p-updated" label={t('import.updated')} value={job.updatedCount} />
+                <Stat testid="import-clickup-p-skipped" label={t('import.skipped')} value={job.skippedCount} />
               </div>
             </>
           )}
@@ -319,33 +876,49 @@ export function ImportPage() {
 
       {/* Step 4 — final report */}
       {result && (
-        <Card className="p-6 space-y-4">
+        <Card className="p-6 space-y-4" data-testid="import-clickup-report">
           <div className="flex items-center gap-2 text-sm font-medium">
             <CheckCircle2 className="h-5 w-5 text-emerald-500" />
             {t('import.completeTitle')}
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-4">
-            <Stat label={t('import.spaces')} value={result.spacesCreated} />
-            <Stat label={t('import.projects')} value={result.projectsCreated} />
-            <Stat label={t('import.lists')} value={result.listsCreated} />
-            <Stat label={t('import.tasks')} value={result.tasksCreated} />
-            <Stat label={t('import.updated')} value={result.tasksUpdated} />
-            <Stat label={t('import.skipped')} value={result.tasksSkipped} />
-            <Stat label={t('import.customFields')} value={result.customFieldsCreated} />
-            <Stat label={t('import.customValues')} value={result.customFieldValuesSet} />
+            <Stat testid="import-clickup-r-spaces" label={t('import.spaces')} value={result.spacesCreated} />
+            <Stat testid="import-clickup-r-projects" label={t('import.projects')} value={result.projectsCreated} />
+            <Stat testid="import-clickup-r-lists" label={t('import.lists')} value={result.listsCreated} />
+            <Stat testid="import-clickup-r-tasks" label={t('import.tasks')} value={result.tasksCreated} />
+            <Stat testid="import-clickup-r-updated" label={t('import.updated')} value={result.tasksUpdated} />
+            <Stat testid="import-clickup-r-skipped" label={t('import.skipped')} value={result.tasksSkipped} />
+            <Stat testid="import-clickup-r-fields" label={t('import.customFields')} value={result.customFieldsCreated} />
+            <Stat
+              testid="import-clickup-r-values"
+              label={t('import.customValues')}
+              value={result.customFieldValuesSet}
+            />
           </div>
           <div className="grid grid-cols-3 gap-4">
-            <Stat label={t('import.labels')} value={result.labelsCreated} />
-            <Stat label={t('import.assignees')} value={result.assigneesLinked} />
-            <Stat label={t('import.subtasks')} value={result.subtasksLinked} />
+            <Stat testid="import-clickup-r-labels" label={t('import.labels')} value={result.labelsCreated} />
+            <Stat testid="import-clickup-r-assignees" label={t('import.assignees')} value={result.assigneesLinked} />
+            <Stat testid="import-clickup-r-subtasks" label={t('import.subtasks')} value={result.subtasksLinked} />
           </div>
 
           {/* §12.5 — comments/attachments only exist when an API token was used. */}
           {result.commentsImported != null || result.attachmentsImported != null ? (
             <div className="grid grid-cols-3 gap-4">
-              <Stat label={t('import.commentsImported')} value={result.commentsImported ?? 0} />
-              <Stat label={t('import.attachmentsImported')} value={result.attachmentsImported ?? 0} />
-              <Stat label={t('import.attachmentsSkipped')} value={result.attachmentsSkipped ?? 0} />
+              <Stat
+                testid="import-clickup-r-comments"
+                label={t('import.commentsImported')}
+                value={result.commentsImported ?? 0}
+              />
+              <Stat
+                testid="import-clickup-r-attachments"
+                label={t('import.attachmentsImported')}
+                value={result.attachmentsImported ?? 0}
+              />
+              <Stat
+                testid="import-clickup-r-attachments-skipped"
+                label={t('import.attachmentsSkipped')}
+                value={result.attachmentsSkipped ?? 0}
+              />
             </div>
           ) : (
             <NotIncludedNote note={t('import.notIncludedNote')} title={t('import.notIncludedTitle')} />
@@ -364,7 +937,7 @@ export function ImportPage() {
             </details>
           )}
           <div className="flex gap-2">
-            <Button variant="secondary" onClick={reset}>
+            <Button variant="secondary" data-testid="import-clickup-another" onClick={reset}>
               {t('import.importAnother')}
             </Button>
           </div>
@@ -374,9 +947,9 @@ export function ImportPage() {
   )
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, testid }: { label: string; value: number; testid?: string }) {
   return (
-    <div className="rounded-md border p-3">
+    <div className="rounded-md border p-3" data-testid={testid} data-value={value}>
       <div className="text-2xl font-bold">{value}</div>
       <div className="text-xs uppercase tracking-wide text-muted-foreground">{label}</div>
     </div>
@@ -386,7 +959,7 @@ function Stat({ label, value }: { label: string; value: number }) {
 function StrategyOption({ value, label, help }: { value: string; label: string; help: string }) {
   return (
     <label className="flex items-start gap-3 rounded-md border bg-background p-3 cursor-pointer hover:bg-muted/40">
-      <RadioGroupItem value={value} className="mt-0.5" />
+      <RadioGroupItem value={value} data-testid={`import-strategy-${value}`} className="mt-0.5" />
       <span>
         <span className="block text-sm font-medium">{label}</span>
         <span className="block text-xs text-muted-foreground">{help}</span>

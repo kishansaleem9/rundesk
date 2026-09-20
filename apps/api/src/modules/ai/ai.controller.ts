@@ -1,8 +1,8 @@
-import { Body, Controller, Get, Patch, Post, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
+import { Body, Controller, Get, Patch, Post, Put, Query, Res, UseGuards, HttpException, HttpStatus } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { AiService, openSseStream } from './ai.service'
+import { AiService, openSseStream, type AiRunStatus } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
-import { MODEL_TIERS } from './model-tiers'
+import { MODEL_TIERS, UNROUTABLE_PROVIDERS } from './model-tiers'
 import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -28,10 +28,48 @@ export class AiController {
     private readonly skills: SkillsService,
   ) {}
 
+  /**
+   * §V2-S18, frame `[17:16]` — what the composer's picker is allowed to offer.
+   *
+   * TWO LISTS, NOT ONE LIST WITH A FLAG. `models` is what this server can
+   * actually route to; `unavailable` is what the frame names and this product
+   * has no client for. They are separate shapes so no rewrite of the picker can
+   * accidentally hand an unroutable id to `modelForTier` — the unroutable shape
+   * has no field to put a model in.
+   *
+   * The unavailable entries carry a translation KEY, not a sentence: this is
+   * read by a person in four locales.
+   */
   @Get('models')
-  @ApiOperation({ summary: '§15 — the tiers the composer offers' })
+  @ApiOperation({ summary: '§15 — the tiers the composer offers, and the ones it cannot' })
   models() {
-    return MODEL_TIERS
+    return { models: MODEL_TIERS, unavailable: UNROUTABLE_PROVIDERS }
+  }
+
+  /**
+   * §V2-S18 `[17:28]`–`[17:32]` — "apna [preferred] AI bhi set down karna hai."
+   *
+   * The preference was `localStorage` only (`rundesk.aiTier`), which is a
+   * per-browser habit rather than a setting: it did not follow anybody to a
+   * second machine. It is a row now, per person per workspace.
+   */
+  @Get('preferences')
+  @ApiOperation({ summary: 'The signed-in person’s preferred model tier for this workspace' })
+  modelPreference(@CurrentUser() user: any, @Query('workspaceId') workspaceId: string) {
+    return this.ai.modelPreference(user.id, workspaceId)
+  }
+
+  @Put('preferences')
+  @ApiOperation({ summary: 'Set the preferred model tier for this workspace' })
+  setModelPreference(
+    @CurrentUser() user: any,
+    @Query('workspaceId') workspaceId: string,
+    @Body() body: { preferredTier?: string },
+  ) {
+    // Refused rather than coerced when it is not a routable tier — see
+    // `setModelPreference`. A stored "gemini" nothing can run is worse than
+    // refusing the write.
+    return this.ai.setModelPreference(user.id, workspaceId, body?.preferredTier ?? '')
   }
 
   @Get('status')
@@ -78,9 +116,19 @@ export class AiController {
   /**
    * §V2-11, frame `19:05` — the Activity log, one row per AI run.
    *
-   * Filtered by when, which feature and whose. The frame's "Agent" filter has
-   * no counterpart here on purpose: Rundesk has no agents, and a filter that
-   * can only ever return everything is a control that lies about what it does.
+   * The frame's filter row is `Date run ▾ · Status ▾ · My agents · Agent ▾`.
+   *
+   * `userId` HAS BEEN ACCEPTED HERE SINCE THIS ENDPOINT WAS WRITTEN and the web
+   * client never sent it, so the "mine only" toggle re-rendered and asked the
+   * server for exactly the same rows — a UI-only build, and a live defect
+   * rather than a missing feature. The client sends it now.
+   *
+   * `status` is new, and could not have existed before migration 0150: nothing
+   * wrote a failed run, so the filter would have had one reachable value.
+   *
+   * The frame's "Agent" filter still has no counterpart, on purpose. Rundesk
+   * has no agents, and a filter that can only ever return everything is a
+   * control that lies about what it does.
    */
   @Get('activity')
   @ApiOperation({ summary: 'Individual AI runs, newest first' })
@@ -91,6 +139,7 @@ export class AiController {
     @Query('to') to?: string,
     @Query('feature') feature?: string,
     @Query('userId') userId?: string,
+    @Query('status') status?: string,
     @Query('limit') limit?: string,
   ) {
     const parse = (s?: string) => {
@@ -98,6 +147,14 @@ export class AiController {
       const d = new Date(s)
       return Number.isNaN(d.getTime()) ? undefined : d
     }
+    /*
+     * An unrecognised status is dropped rather than passed through. Passed
+     * through it matches nothing, and an empty list is how somebody concludes
+     * they have no failed runs when what they actually have is a typo in a
+     * query string.
+     */
+    const runStatus: AiRunStatus | undefined =
+      status === 'succeeded' || status === 'failed' ? status : undefined
     return this.ai.runLog({
       workspaceId,
       actor: { id: user.id, role: user.role },
@@ -105,6 +162,7 @@ export class AiController {
       to: parse(to),
       feature: feature || undefined,
       userId: userId || undefined,
+      status: runStatus,
       limit: limit ? Number(limit) : undefined,
     })
   }
@@ -150,9 +208,7 @@ export class AiController {
       customFields?: Array<{ name: string; type: string; options?: string[] }>
     },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('task.generate', { userId: user.id, workspaceId: body.workspaceId })
     return this.ai.generateTask(
       body.prompt,
       body.context,
@@ -167,9 +223,7 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { title: string; description?: string; workspaceId?: string },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('task.priority', { userId: user.id, workspaceId: body.workspaceId })
     return this.ai.suggestPriority(body.title, body.description, { userId: user.id, workspaceId: body.workspaceId })
   }
 
@@ -179,9 +233,7 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { title: string; description?: string; teamWorkload?: string; taskId?: string; workspaceId?: string },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('task.deadline', { userId: user.id, workspaceId: body.workspaceId })
     // Factor in current team workload (Plan §7.4). Prefer a client-supplied
     // signal; otherwise enrich server-side from the task's assignees' open-task
     // counts (access-checked, like the summarize taskId path).
@@ -214,9 +266,7 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { content?: string; taskId?: string; type?: 'task' | 'project'; workspaceId?: string },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('summarize', { userId: user.id, workspaceId: body.workspaceId })
     // When a taskId is provided, enrich the input server-side (Plan §7.5) with
     // recent activity, open subtasks, open blockers, and recent comments — but
     // first assert the caller can access that task's workspace (Plan §7.5 hardening).
@@ -237,6 +287,9 @@ export class AiController {
     @Res() res: any,
   ) {
     if (!this.ai.isAvailable()) {
+      // §V2-11 — recorded before the 503, like `assertAvailable`. This route
+      // owns its own response (it streams), so it sends rather than throws.
+      await this.ai.recordFailure('summarize', 'none', { userId: user.id, workspaceId: body.workspaceId }, 'not_configured', 'AI features are not configured')
       res.status(503).send({ error: 'AI features are not configured' })
       return
     }
@@ -258,9 +311,7 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { text: string; mode?: 'improve' | 'shorten' | 'expand' | 'format'; workspaceId?: string },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('writing.improve', { userId: user.id, workspaceId: body.workspaceId })
     const improved = await this.ai.improveWriting(body.text, body.mode ?? 'improve', {
       userId: user.id,
       workspaceId: body.workspaceId,
@@ -271,18 +322,14 @@ export class AiController {
   @Post('meeting-notes')
   @ApiOperation({ summary: 'Extract action items from meeting notes' })
   async extractFromNotes(@CurrentUser() user: any, @Body() body: { notes: string; workspaceId?: string }) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('meeting.notes', { userId: user.id, workspaceId: body.workspaceId })
     return this.ai.extractTasksFromNotes(body.notes, { userId: user.id, workspaceId: body.workspaceId })
   }
 
   @Post('insights')
   @ApiOperation({ summary: 'Generate AI insights from real workspace metrics' })
   async insights(@CurrentUser() user: any, @Body() body: { context: string; workspaceId?: string }) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('insights', { userId: user.id, workspaceId: body.workspaceId })
     return this.ai.generateInsights(body.context ?? '', { userId: user.id, workspaceId: body.workspaceId })
   }
 
@@ -292,9 +339,7 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { availableWidgets: Array<{ type: string; label: string }>; context?: string; workspaceId?: string },
   ) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('dashboard.layout', { userId: user.id, workspaceId: body.workspaceId })
     return this.ai.suggestDashboardLayout(body.availableWidgets ?? [], body.context ?? '', {
       userId: user.id,
       workspaceId: body.workspaceId,
@@ -319,6 +364,9 @@ export class AiController {
     @Res() res: any,
   ) {
     if (!this.ai.isAvailable()) {
+      // §V2-11 — recorded before the 503, like `assertAvailable`. This route
+      // owns its own response (it streams), so it sends rather than throws.
+      await this.ai.recordFailure('chat', 'none', { userId: user.id, workspaceId: body.workspaceId }, 'not_configured', 'AI features are not configured')
       res.status(503).send({ error: 'AI features are not configured' })
       return
     }
@@ -620,9 +668,7 @@ export class AiController {
   @Post('command')
   @ApiOperation({ summary: 'Plan a natural-language command via tool use (preview, nothing mutates)' })
   async command(@CurrentUser() user: any, @Body() body: { workspaceId?: string; message?: string }) {
-    if (!this.ai.isAvailable()) {
-      throw new HttpException('AI features are not configured', HttpStatus.SERVICE_UNAVAILABLE)
-    }
+    await this.ai.assertAvailable('command', { userId: user.id, workspaceId: body.workspaceId })
     if (!body?.workspaceId || !body?.message?.trim()) {
       throw new HttpException('workspaceId and message are required', HttpStatus.BAD_REQUEST)
     }

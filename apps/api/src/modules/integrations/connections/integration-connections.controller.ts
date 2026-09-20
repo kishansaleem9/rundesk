@@ -98,7 +98,25 @@ export class IntegrationConnectionsController {
       const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
       return reply.redirect(this.svc.getSuccessRedirect(result.workspaceId, result.provider), 302)
     } catch (error: any) {
-      return reply.redirect(this.svc.getFailureRedirect(error?.message ?? 'oauth_callback_failed'), 302)
+      /*
+       * §V2-11 frame `18:39` — "Google gave us this error: …".
+       *
+       * The provider's own message is written against the integration it
+       * belongs to BEFORE the redirect, so the card survives the page load
+       * that used to be the only place it existed. `peekState` re-reads the
+       * signed state the failed attempt carried; when even that is unreadable
+       * there is no integration to attach anything to and the old app-root
+       * redirect is all that is left.
+       */
+      const reason = error?.message ?? 'oauth_callback_failed'
+      const ctx = state ? this.svc.peekState(state) : null
+      if (ctx) {
+        await this.svc.recordFailure(ctx.workspaceId, ctx.provider, reason).catch(() => undefined)
+      }
+      return reply.redirect(
+        this.svc.getFailureRedirect(reason, { workspaceId: ctx?.workspaceId, provider: ctx?.provider ?? provider }),
+        302,
+      )
     }
   }
 

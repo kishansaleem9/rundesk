@@ -1,0 +1,281 @@
+import type { Db } from '@rundesk/db';
+import { TasksService } from '../tasks/tasks.service';
+export declare class InboundWebhooksService {
+    private db;
+    private tasks;
+    constructor(db: Db, tasks: TasksService);
+    listForList(listId: string): Omit<import("drizzle-orm/pg-core").PgSelectBase<"inbound_webhooks", {
+        id: import("drizzle-orm/pg-core").PgColumn<{
+            name: "id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        listId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "list_id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        token: import("drizzle-orm/pg-core").PgColumn<{
+            name: "token";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        name: import("drizzle-orm/pg-core").PgColumn<{
+            name: "name";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        isEnabled: import("drizzle-orm/pg-core").PgColumn<{
+            name: "is_enabled";
+            tableName: "inbound_webhooks";
+            dataType: "boolean";
+            columnType: "PgBoolean";
+            data: boolean;
+            driverParam: boolean;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdById: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_by_id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_at";
+            tableName: "inbound_webhooks";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    }, "single", Record<"inbound_webhooks", "not-null">, false, "where" | "orderBy", {
+        id: string;
+        listId: string;
+        token: string;
+        name: string;
+        isEnabled: boolean;
+        createdById: string | null;
+        createdAt: Date;
+    }[], {
+        id: import("drizzle-orm/pg-core").PgColumn<{
+            name: "id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: true;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        listId: import("drizzle-orm/pg-core").PgColumn<{
+            name: "list_id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        token: import("drizzle-orm/pg-core").PgColumn<{
+            name: "token";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        name: import("drizzle-orm/pg-core").PgColumn<{
+            name: "name";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgText";
+            data: string;
+            driverParam: string;
+            notNull: true;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: [string, ...string[]];
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        isEnabled: import("drizzle-orm/pg-core").PgColumn<{
+            name: "is_enabled";
+            tableName: "inbound_webhooks";
+            dataType: "boolean";
+            columnType: "PgBoolean";
+            data: boolean;
+            driverParam: boolean;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdById: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_by_id";
+            tableName: "inbound_webhooks";
+            dataType: "string";
+            columnType: "PgUUID";
+            data: string;
+            driverParam: string;
+            notNull: false;
+            hasDefault: false;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+        createdAt: import("drizzle-orm/pg-core").PgColumn<{
+            name: "created_at";
+            tableName: "inbound_webhooks";
+            dataType: "date";
+            columnType: "PgTimestamp";
+            data: Date;
+            driverParam: string;
+            notNull: true;
+            hasDefault: true;
+            isPrimaryKey: false;
+            isAutoincrement: false;
+            hasRuntimeDefault: false;
+            enumValues: undefined;
+            baseColumn: never;
+            identity: undefined;
+            generated: undefined;
+        }, {}, {}>;
+    }>, "where" | "orderBy">;
+    create(listId: string, name: string, createdById: string): Promise<{
+        id: string;
+        name: string;
+        createdAt: Date;
+        createdById: string | null;
+        listId: string;
+        token: string;
+        isEnabled: boolean;
+    }>;
+    remove(id: string, listId: string): Promise<{
+        ok: boolean;
+    }>;
+    /**
+     * Receive an external POST and create a task in the token's list (Plan §12).
+     * Accepts { title (required), description?, priority?, dueDate? }.
+     */
+    receive(token: string, payload: {
+        title?: string;
+        description?: string;
+        priority?: string;
+        dueDate?: string;
+    }): Promise<{
+        ok: boolean;
+        taskId: string | undefined;
+    }>;
+}

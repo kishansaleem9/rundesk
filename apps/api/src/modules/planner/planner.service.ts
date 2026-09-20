@@ -81,6 +81,19 @@ export class PlannerService {
         taskStatus: tasks.status,
         taskPriority: tasks.priority,
         taskListId: tasks.listId,
+        /*
+         * §V2-02e — what "Show recurring" has to have in order to mean
+         * anything. A block on a recurring task is one occurrence of something
+         * that happens again; the grid can only draw the next ones if it is
+         * told the cadence, and it was not. The setting existed, the column
+         * existed, and the two had never been introduced.
+         *
+         * Sent as the task's stored recurrence rather than as pre-computed
+         * dates: the range the grid draws changes with the view and the
+         * arrows, and a server that baked in a horizon would be wrong for
+         * every span but the one it guessed.
+         */
+        taskRecurrence: tasks.recurrence,
       })
       .from(taskTimeBlocks)
       .leftJoin(tasks, eq(tasks.id, taskTimeBlocks.taskId))
@@ -145,6 +158,43 @@ export class PlannerService {
     }
     if (timezone !== undefined && !isKnownTimezone(timezone)) {
       throw new BadRequestException('That is not a timezone this system knows')
+    }
+    /*
+     * §V2-02e — the switches are booleans, and until now anything at all was
+     * accepted into the blob.
+     *
+     * This matters more than it looks. A reader written as `value !== false`
+     * treats the string `"false"` as ON, and a reader written as
+     * `value === true` treats it as OFF — so a bad value does not fail, it
+     * makes two readers of one setting disagree. Rejecting it here is the only
+     * place that cannot drift.
+     */
+    const BOOLEAN_KEYS = [
+      'showWeekends',
+      'showWeekNumbers',
+      'alwaysOpenAtStartOfWeek',
+      'darkenNonWorkingHours',
+      'savePersonalEventsQuickly',
+      'showAssigned',
+      'showRecurring',
+      'showOverdue',
+      'upcomingShowTimeLeft',
+      'upcomingQuickJoin',
+      'upcomingDesktopNotify',
+    ] as const
+    for (const key of BOOLEAN_KEYS) {
+      const value = (plannerOnly as Record<string, unknown>)[key]
+      if (value !== undefined && typeof value !== 'boolean') {
+        throw new BadRequestException(`"${key}" must be true or false`)
+      }
+    }
+    /* The fourth value is `list`, and the web dialog's own copy of this union
+     * was missing it for as long as the controller has accepted it. */
+    if (patch.colorTasksBy !== undefined) {
+      const allowed = ['none', 'priority', 'status', 'list']
+      if (!allowed.includes(patch.colorTasksBy as string)) {
+        throw new BadRequestException(`Colour tasks by must be one of ${allowed.join(', ')}`)
+      }
     }
     if (patch.defaultDurationMinutes !== undefined) {
       const n = patch.defaultDurationMinutes

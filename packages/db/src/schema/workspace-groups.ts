@@ -53,6 +53,47 @@ export const workspaceGroupMembers = pgTable(
   ],
 )
 
+/**
+ * §V2-12 / frame `21:00` — what a person card says underneath the name.
+ *
+ * The Teams Hub person previews are "Priya Gupta / UI designer", "Sarah Chang /
+ * Software Engineer", "Mei Chen / Cloud Solutions Architect", "Ryan Johnson /
+ * DevOps Engineer" — a NAME and a JOB TITLE, then that person's current work.
+ * Rundesk stored neither: `users` has displayName/bio/timezone and no title,
+ * and `workspace_members.role` is a PERMISSION (`workspace_admin`, `member`,
+ * `guest`), not a job. Rendering the permission where the frame draws the job
+ * would put "member" under four different people and call it their role.
+ *
+ * Per WORKSPACE, not per user, for the same reason group membership is: the
+ * same person is a contractor in one workspace and a lead in another, and one
+ * global string would leak the first workspace's answer into the second.
+ *
+ * Kept out of `workspace_members` deliberately, mirroring the note above about
+ * SCIM: that table's columns are role/capacity/manager, written by the
+ * membership and IdP-sync paths. Display metadata that anybody may edit about
+ * themselves does not belong in rows an IdP overwrites.
+ */
+export const workspaceMemberProfiles = pgTable(
+  'workspace_member_profiles',
+  {
+    id:          uuid('id').primaryKey().defaultRandom(),
+    workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
+    /** Free text — "UI designer" is not an enum, and a picker of job titles would be wrong everywhere. */
+    jobTitle:    text('job_title'),
+    updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('uq_workspace_member_profiles_workspace_user').on(t.workspaceId, t.userId),
+    index('idx_workspace_member_profiles_workspace').on(t.workspaceId),
+  ],
+)
+
+export const workspaceMemberProfilesRelations = relations(workspaceMemberProfiles, ({ one }) => ({
+  workspace: one(workspaces, { fields: [workspaceMemberProfiles.workspaceId], references: [workspaces.id] }),
+  user:      one(users, { fields: [workspaceMemberProfiles.userId], references: [users.id] }),
+}))
+
 export const workspaceGroupsRelations = relations(workspaceGroups, ({ one, many }) => ({
   workspace: one(workspaces, { fields: [workspaceGroups.workspaceId], references: [workspaces.id] }),
   createdBy: one(users, { fields: [workspaceGroups.createdById], references: [users.id] }),

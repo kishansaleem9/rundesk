@@ -1,5 +1,5 @@
 import { Fragment, useState, useRef, useEffect } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Input, cn, toast } from '@rundesk/ui'
 import {
   Sparkles,
@@ -18,12 +18,52 @@ import {
   ThumbsUp,
   ThumbsDown,
   Check,
+  ChevronDown,
+  ChevronUp,
+  ChevronsDown,
+  ChevronsUp,
+  Star,
+  Ban,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useAiChatActions, useAiChatThread, useAiMessageActions } from '../lib/skills-api'
+
+/**
+ * §V2-S18 frame `[17:16]` — what `GET /ai/models` answers with.
+ *
+ * TWO LISTS WITH DIFFERENT SHAPES, ON PURPOSE. A `ModelTier` carries the tier
+ * id the composer sends; an `UnavailableModel` has no such field, so there is
+ * nothing for a later refactor to accidentally put in the request body. The
+ * frame offers ChatGPT and Gemini; `apps/api` has no OpenAI or Google client,
+ * and a pickable row that quietly answers from Claude is the facade this audit
+ * exists to catch.
+ */
+type ModelTier = {
+  id: string
+  label: string
+  hint: string
+  provider: string
+  group: string
+  /** 1–5, the frame's hover-card bars. Relative to each other, not absolute. */
+  speed: number
+  intelligence: number
+}
+
+type UnavailableModel = {
+  id: string
+  label: string
+  provider: string
+  /** A translation key, so the reason is readable in all four locales. */
+  reasonKey: string
+}
+
+type ModelCatalog = { models: ModelTier[]; unavailable: UnavailableModel[] }
+
+/** §V2-S18 `[17:32]` — the preferred AI, stored per person per workspace. */
+type ModelPreference = { preferredTier: string; isSet: boolean; updatedAt: string | null }
 
 type Message = {
   role: 'user' | 'assistant'
@@ -153,6 +193,7 @@ export function AiPanel({
   onThreadTitled,
 }: AiPanelProps) {
   const { t, locale } = useTranslation()
+  const qc = useQueryClient()
   const [messages, setMessages] = useState<Message[]>([])
   const chat = useAiChatActions(workspaceId)
   /*
@@ -175,15 +216,25 @@ export function AiPanel({
   // replaces the conversation instead of appending to it.
   const loadedThreadRef = useRef<string | null>(null)
   const [input, setInput] = useState('')
-  // §15 — her composer's "Max ▾", frames `296_1817` / `301_1836`. Remembered
-  // per person: whichever trade you prefer, you prefer it next time too.
-  const [tier, setTier] = useState<string>(() => {
-    try {
-      return localStorage.getItem('rundesk.aiTier') ?? 'deep'
-    } catch {
-      return 'deep'
-    }
-  })
+  /*
+   * §15 / §V2-S18 — her composer's "Max ▴", frames `296_1817` / `301_1836` and
+   * the one this row is about, `[17:16]`.
+   *
+   * THE DEFECT THIS REPLACES. The tier lived in `localStorage` under
+   * `rundesk.aiTier` and nowhere else. `[17:32]` calls it *setting your
+   * preferred AI*, and a preference that does not survive a second browser is
+   * not a preference, it is a habit this one browser happens to remember. It
+   * is a row now (`ai_model_preferences`, migration 0150) and `localStorage` is
+   * gone rather than kept as a mirror — two sources of truth for one setting is
+   * how they drift.
+   *
+   * `null` until the server answers, so the picker cannot flash the default and
+   * then jump to what you actually chose.
+   */
+  const [tier, setTier] = useState<string | null>(null)
+  const [pickerOpen, setPickerOpen] = useState(false)
+  /** The frame's "Show more" disclosure, closed on arrival as it is there. */
+  const [showMoreModels, setShowMoreModels] = useState(false)
   const [isStreaming, setIsStreaming] = useState(false)
   /*
    * G13-10 [18:33–18:36] — what the server says it is reading, as it reads it.
@@ -195,6 +246,8 @@ export function AiPanel({
   const [steps, setSteps] = useState<string[]>([])
   const [streamBuffer, setStreamBuffer] = useState('')
   const bottomRef = useRef<HTMLDivElement>(null)
+  /** The picker's root, so an outside click can be told from an inside one. */
+  const pickerRef = useRef<HTMLDivElement>(null)
   const abortRef = useRef<AbortController | null>(null)
 
   // Voice dictation for the chat composer (Plan §15.2) — a final transcript is
@@ -205,14 +258,68 @@ export function AiPanel({
       setInput((prev) => (prev.trim() ? `${prev.trim()} ${transcript}` : transcript)),
   })
 
-  // The tiers come from the server so the labels and the models they resolve
-  // to have one home.
-  const { data: modelTiers = [] } = useQuery({
+  /*
+   * The tiers come from the server so the labels and the models they resolve
+   * to have one home — and, since §V2-S18, so do the providers it CANNOT
+   * reach. Two lists, because they are two different things: `models` route,
+   * `unavailable` are named in frame `[17:16]` and have no client in this
+   * product. Rendering the second as pickable would be the facade.
+   */
+  const { data: modelCatalog } = useQuery({
     queryKey: ['ai-models'],
-    queryFn: () => api<Array<{ id: string; label: string; hint: string }>>('/ai/models'),
+    queryFn: () => api<ModelCatalog>('/ai/models'),
     staleTime: Infinity,
     retry: false,
   })
+  const modelTiers = modelCatalog?.models ?? []
+  const unavailableModels = modelCatalog?.unavailable ?? []
+
+  /** §V2-S18 `[17:32]` — the preferred AI, read from the server, not the browser. */
+  const preferenceQuery = useQuery({
+    queryKey: ['ai-model-preference', workspaceId],
+    queryFn: () => api<ModelPreference>(`/ai/preferences?workspaceId=${workspaceId}`),
+    retry: false,
+  })
+  const preferredTier = preferenceQuery.data?.isSet ? preferenceQuery.data.preferredTier : null
+
+  /*
+   * Adopt the stored preference ONCE, and only while nothing has been chosen
+   * in this session. Keying the effect on the query data instead would undo
+   * somebody's in-session choice on the next refetch — the model silently
+   * changing back under them mid-conversation.
+   */
+  useEffect(() => {
+    if (tier !== null) return
+    if (preferenceQuery.isPending) return
+    setTier(preferenceQuery.data?.preferredTier ?? 'deep')
+  }, [tier, preferenceQuery.isPending, preferenceQuery.data?.preferredTier])
+
+  const savePreference = useMutation({
+    mutationFn: (preferred: string) =>
+      api<ModelPreference>(`/ai/preferences?workspaceId=${workspaceId}`, {
+        method: 'PUT',
+        body: JSON.stringify({ preferredTier: preferred }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['ai-model-preference', workspaceId] })
+      toast.success(t('aiModels.preferredSaved'))
+    },
+    onError: () => toast.error(t('aiModels.preferredFailed')),
+  })
+
+  /*
+   * Close the picker on an outside click. Without it the popover sits over the
+   * composer and swallows the first click anywhere else on the panel, which
+   * reads as the panel being frozen.
+   */
+  useEffect(() => {
+    if (!pickerOpen) return
+    const onDown = (e: MouseEvent) => {
+      if (!pickerRef.current?.contains(e.target as Node)) setPickerOpen(false)
+    }
+    document.addEventListener('mousedown', onDown)
+    return () => document.removeEventListener('mousedown', onDown)
+  }, [pickerOpen])
 
   const statusQuery = useQuery({
     queryKey: ['ai-status'],
@@ -321,7 +428,10 @@ export function AiPanel({
           // §15 — omitted entirely when absent, so a normal chat turn is
           // byte-identical to what it was before skills existed.
           ...(skillId ? { skillId } : {}),
-          tier,
+          // Omitted rather than sent as null while the stored preference is
+          // still in flight: the server falls back to DEFAULT_TIER, which is
+          // the same answer, and a null in the body would read as a choice.
+          ...(tier ? { tier } : {}),
         }),
         signal: controller.signal,
       })
@@ -611,30 +721,189 @@ export function AiPanel({
               <span className="truncate max-w-[14rem]">{skillName ?? t('skills.title')}</span>
             </div>
           )}
-          {/* Her model selector. Two real tiers, not a menu of aliases — and it
-              is disabled mid-answer, because changing it then would look like
-              it applied to the reply already streaming. */}
-          <select
-            value={tier}
-            data-testid="ai-model-tier"
-            disabled={isStreaming}
-            title={modelTiers.find((m) => m.id === tier)?.hint ?? ''}
-            onChange={(e) => {
-              setTier(e.target.value)
-              try {
-                localStorage.setItem('rundesk.aiTier', e.target.value)
-              } catch {
-                // A browser refusing storage is not a reason to refuse the choice.
-              }
-            }}
-            className="ml-auto rounded-full border border-border/70 bg-transparent px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
-          >
-            {modelTiers.map((m) => (
-              <option key={m.id} value={m.id}>
-                {m.label}
-              </option>
-            ))}
-          </select>
+          {/*
+            §V2-S18, frame `[17:16]` — her model picker, built as the frame
+            draws it and NOT as the frame promises.
+
+            What it draws: a popover headed "Best models", rows with a provider
+            glyph, a tick on the current one, per-model Speed / Intelligence
+            bars, and a "Show more" disclosure under a rule.
+
+            What it promises, and this product cannot keep: routing to ChatGPT
+            or Gemini. There is no OpenAI or Google client anywhere in the API.
+            So they are listed — silence would be read as "not yet, soon" —
+            under the disclosure, unselectable, each saying why. The inversion
+            of the frame, where Claude was the hidden one, is deliberate: what
+            is hidden here is what cannot be done.
+
+            Disabled mid-answer, because changing it then would look like it
+            applied to the reply already streaming.
+          */}
+          <div className="relative ml-auto" ref={pickerRef}>
+            <button
+              type="button"
+              data-testid="ai-model-tier"
+              data-tier={tier ?? ''}
+              data-open={pickerOpen ? 'true' : 'false'}
+              aria-haspopup="listbox"
+              aria-expanded={pickerOpen}
+              disabled={isStreaming || !tier}
+              title={modelTiers.find((m) => m.id === tier)?.hint ?? ''}
+              onClick={() => setPickerOpen((o) => !o)}
+              className="inline-flex items-center gap-1 rounded-full border border-border/70 bg-transparent px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+            >
+              <Sparkles className="h-3 w-3" />
+              <span>{modelTiers.find((m) => m.id === tier)?.label ?? t('aiModels.loading')}</span>
+              {pickerOpen ? <ChevronDown className="h-3 w-3" /> : <ChevronUp className="h-3 w-3" />}
+            </button>
+
+            {pickerOpen && (
+              <div
+                data-testid="ai-model-menu"
+                role="listbox"
+                aria-label={t('aiModels.bestModels')}
+                className="absolute bottom-full right-0 z-[60] mb-2 w-[19rem] overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
+              >
+                <p
+                  data-testid="ai-model-group-best"
+                  className="px-3 pb-1 pt-2 text-[11px] font-medium text-muted-foreground"
+                >
+                  {t('aiModels.bestModels')}
+                </p>
+                {modelTiers.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="option"
+                    aria-selected={tier === m.id}
+                    data-testid={`ai-model-option-${m.id}`}
+                    data-available="true"
+                    data-selected={tier === m.id ? 'true' : 'false'}
+                    data-preferred={preferredTier === m.id ? 'true' : 'false'}
+                    onClick={() => {
+                      // Choosing changes THIS conversation. Persisting is the
+                      // separate, explicit act below — `[17:28]`–`[17:32]`
+                      // describes both, and conflating them means every idle
+                      // experiment silently rewrites your default.
+                      setTier(m.id)
+                      setPickerOpen(false)
+                    }}
+                    className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/60"
+                  >
+                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
+                    <span className="min-w-0 flex-1">
+                      <span className="flex items-center gap-1.5">
+                        <span className="text-xs font-medium text-foreground">{m.label}</span>
+                        {preferredTier === m.id && (
+                          <span
+                            data-testid={`ai-model-preferred-badge-${m.id}`}
+                            className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 py-px text-[10px] text-primary"
+                          >
+                            <Star className="h-2.5 w-2.5" />
+                            {t('aiModels.preferred')}
+                          </span>
+                        )}
+                      </span>
+                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{m.hint}</span>
+                      {/*
+                        The frame's hover card, rendered inline instead. The
+                        same two bars, always visible: a measurement you have to
+                        hover to see is one nobody compares, and comparing is
+                        the entire reason the bars are there.
+                      */}
+                      <span className="mt-1 block space-y-0.5">
+                        {(
+                          [
+                            ['speed', m.speed, t('aiModels.speed')],
+                            ['intelligence', m.intelligence, t('aiModels.intelligence')],
+                          ] as const
+                        ).map(([key, score, label]) => (
+                          <span key={key} className="flex items-center gap-1.5">
+                            <span className="w-16 shrink-0 text-[10px] text-muted-foreground">{label}</span>
+                            <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
+                              <span
+                                data-testid={`ai-model-bar-${key}-${m.id}`}
+                                data-score={score}
+                                className="block h-full rounded-full bg-primary"
+                                style={{ width: `${Math.min(Math.max(score, 0), 5) * 20}%` }}
+                              />
+                            </span>
+                          </span>
+                        ))}
+                      </span>
+                    </span>
+                    {tier === m.id && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />}
+                  </button>
+                ))}
+
+                <div className="border-t border-border">
+                  <button
+                    type="button"
+                    data-testid="ai-model-show-more"
+                    aria-expanded={showMoreModels}
+                    onClick={() => setShowMoreModels((s) => !s)}
+                    className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-xs text-muted-foreground hover:bg-muted/60"
+                  >
+                    {showMoreModels ? (
+                      <ChevronsUp className="h-3.5 w-3.5" />
+                    ) : (
+                      <ChevronsDown className="h-3.5 w-3.5" />
+                    )}
+                    {showMoreModels ? t('aiModels.showLess') : t('aiModels.showMore')}
+                  </button>
+                  {showMoreModels && (
+                    <div data-testid="ai-model-more" className="pb-1">
+                      {unavailableModels.map((m) => (
+                        <div
+                          key={m.id}
+                          data-testid={`ai-model-option-${m.id}`}
+                          data-available="false"
+                          aria-disabled="true"
+                          className="flex items-start gap-2 px-3 py-2 opacity-70"
+                        >
+                          <Ban className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="min-w-0 flex-1">
+                            <span className="block text-xs font-medium text-muted-foreground line-through">
+                              {m.label}
+                            </span>
+                            {/*
+                              The reason, in the person's language. Without it
+                              a greyed-out row says "broken"; with it, it says
+                              what would have to change.
+                            */}
+                            <span
+                              data-testid={`ai-model-reason-${m.id}`}
+                              className="mt-0.5 block text-[11px] text-muted-foreground"
+                            >
+                              {t(m.reasonKey as TranslationKey)}
+                            </span>
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {/*
+                  `[17:32]` "apna [preferred] AI bhi set down karna hai." The
+                  separate, explicit act — and the one that goes to the server,
+                  so the answer follows the person to another browser.
+                */}
+                <div className="border-t border-border p-2">
+                  <button
+                    type="button"
+                    data-testid="ai-model-set-preferred"
+                    data-preferred-tier={preferredTier ?? ''}
+                    disabled={!tier || preferredTier === tier || savePreference.isPending}
+                    onClick={() => tier && savePreference.mutate(tier)}
+                    className="w-full rounded-md bg-primary/10 px-2 py-1.5 text-[11px] font-medium text-primary hover:bg-primary/20 disabled:opacity-50"
+                  >
+                    {preferredTier === tier ? t('aiModels.isPreferred') : t('aiModels.setPreferred')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         </div>
         {/* relative z-50 lifts the composer above the fixed support-widget launcher
             (bottom-6 right-6 z-40), which otherwise intercepts clicks on the Send button. */}

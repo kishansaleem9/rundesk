@@ -86,12 +86,38 @@ export type PlannerSettings = {
   eventStyle?: 'subtle' | 'solid'
   /** "Default event duration", shown as `1 hour`. */
   defaultDurationMinutes?: number
-  /** "Color tasks by", shown as `None`. */
+  /**
+   * "Color tasks by", shown as `None`.
+   *
+   * FOUR VALUES, and the fourth is the one the pickers kept losing. The web
+   * dialog's own copy of this type listed `'none' | 'priority' | 'status'`
+   * while the controller accepted `'list'` and the service stored it — the
+   * duplicated-list defect, in the smallest possible form: a server that
+   * accepts a value no control can send and no reader could colour by.
+   */
   colorTasksBy?: 'none' | 'priority' | 'status' | 'list'
   showWeekends?: boolean
+  /**
+   * §V2-02e, frame `14:10`'s **Others** group — the five that were declared,
+   * stored, accepted by the controller, round-tripped through Postgres and
+   * READ BY NOTHING. Five dead keys sitting among six working siblings, which
+   * is exactly why nobody noticed: every neighbour worked.
+   *
+   * Each one now names the reader that honours it, so the next person can
+   * check the claim rather than trust it.
+   */
+  /** Week number beside the month in the planner header — WEEK VIEW ONLY.
+   *  Reader: `workspace-planner-page.tsx`, `planner-week-number`. */
   showWeekNumbers?: boolean
+  /** Opening the planner lands on the start of the week, not on today.
+   *  Reader: `workspace-planner-page.tsx`, the one-shot anchor effect. */
   alwaysOpenAtStartOfWeek?: boolean
+  /** Dim the hours outside the workspace's work schedule (`work_days` plus
+   *  `workspace_holidays`) on the grid.
+   *  Reader: `workspace-planner-page.tsx`, `planner-nonworking`. */
   darkenNonWorkingHours?: boolean
+  /** A typed personal event saves on Enter instead of asking to confirm.
+   *  Reader: `workspace-planner-page.tsx`, `planner-event-confirm`. */
   savePersonalEventsQuickly?: boolean
   /**
    * The Time-blocking page. `blockPrefix` is the "Work on" of frame `14:45` —
@@ -99,8 +125,24 @@ export type PlannerSettings = {
    */
   blockPrefix?: string
   showAssigned?: boolean
+  /** Future occurrences of a block whose task recurs, projected onto the grid.
+   *  Reader: `workspace-planner-page.tsx`, `planner-recurring-block`. */
   showRecurring?: boolean
   showOverdue?: boolean
+  /**
+   * §V2-02e, frame `14:10`'s **Upcoming meeting** page.
+   *
+   * The nav page that was left out because it was "mostly a desktop menubar".
+   * The countdown and the quick-join it configures are not a menubar: they are
+   * `workspace-meetings-page.tsx`'s Upcoming list, which has drawn both since
+   * §2.8 with nothing able to turn either off.
+   */
+  /** The "in 5m" badge on the Upcoming list. */
+  upcomingShowTimeLeft?: boolean
+  /** The Join pill on the Upcoming list. */
+  upcomingQuickJoin?: boolean
+  /** "Show in desktop" — a desktop notification when a meeting is joinable. */
+  upcomingDesktopNotify?: boolean
   /**
    * "Default list for new tasks — defaults to your personal list".
    *

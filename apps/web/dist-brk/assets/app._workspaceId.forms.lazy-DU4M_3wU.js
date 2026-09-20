@@ -1,0 +1,1 @@
+import{d as e}from"./vendor-react-core-BCFc4XZL.js";import{dz as o,az as r}from"./vendor-DsaCphQ1.js";import"./vendor-utils-D19diF5V.js";function s(){return e.jsxDEV(r,{},void 0,!1,{fileName:"/home/user/rundesk/apps/web/src/routes/app.$workspaceId.forms.lazy.tsx",lineNumber:4,columnNumber:10},this)}const p=o("/app/$workspaceId/forms")({component:s});export{p as Route};

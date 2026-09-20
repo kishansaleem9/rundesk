@@ -89,6 +89,10 @@ import { FreshnessControls, useRefreshInterval } from '../components/freshness-c
 import { ListStatusesManager } from '../components/list-statuses-manager'
 import { ListEmailAliasPanel } from '../components/list-email-alias-panel'
 import { SharePanel } from '../components/share-panel'
+// §V2-13 frames `09:26` / `10:42` — the one gate, reused. Not a second dialog:
+// the whole reason `feature-gate.tsx` exists is that every locked feature
+// should explain itself the same way.
+import { useFeatureGate, type GatedFeature } from '../components/feature-gate'
 import { getRealtimeSocket } from '../lib/realtime'
 import { DndContext, DragOverlay, PointerSensor, useSensor, useSensors, type DragEndEvent, type DragStartEvent, useDraggable, useDroppable } from '@dnd-kit/core'
 import { addDays, addMonths, differenceInCalendarDays, endOfMonth, endOfWeek, format, isSameMonth, isToday, startOfDay, startOfMonth, startOfWeek } from 'date-fns'
@@ -1211,6 +1215,31 @@ function ListDetail() {
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
   const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt' | 'team'>('list')
+  /*
+   * §V2-13, frames `09:26` and `10:42` — the two surfaces she NAMES as paid.
+   *
+   * `requireFeature` returns true and gets out of the way when the workspace's
+   * plan includes the capability; when it does not it opens the teaching
+   * paywall and returns false. `available` is the same question asked for
+   * RENDERING (a padlock on the tab) rather than for deciding.
+   *
+   * Neither of these is the gate. `tasks.controller.ts` refuses the rollup and
+   * the board-shaped download outright for a workspace whose plan lacks them;
+   * this is what a person sees instead of an unexplained 403.
+   */
+  const { requireFeature, available: featureAvailable, gateDialog } = useFeatureGate(workspaceId)
+  const TEAM_VIEW_GATE: GatedFeature = {
+    planFeature: 'teamView',
+    name: t('gate.teamView'),
+    blurb: t('gate.teamViewBlurb'),
+    highlights: [t('gate.teamViewPoint1'), t('gate.teamViewPoint2'), t('gate.teamViewPoint3')],
+  }
+  const BOARD_EXPORT_GATE: GatedFeature = {
+    planFeature: 'boardExport',
+    name: t('gate.boardExport'),
+    blurb: t('gate.boardExportBlurb'),
+    highlights: [t('gate.boardExportPoint1'), t('gate.boardExportPoint2'), t('gate.boardExportPoint3')],
+  }
   // §5 per-space view config (ClickUp "required views"): which task views this
   // space's lists expose + the default that opens. Reuses the ['spaces', ws]
   // cache, so it adds no fetch beyond what the sidebar/space page already do.
@@ -1956,6 +1985,13 @@ function ListDetail() {
         label: tb.label,
         active: !selectedSavedViewId && activeView === tb.id,
         onSelect: () => {
+          /*
+           * §V2-13 `[09:26]` "TEAM VIEW — yeh cheez ke liye humein of course
+           * BUY karna parega". Pressing the tab on a plan that does not
+           * include it opens the paywall and LEAVES YOU WHERE YOU WERE, which
+           * is what the frame shows: the modal is over the list she was on.
+           */
+          if (tb.id === 'team' && !requireFeature(TEAM_VIEW_GATE)) return
           setActiveView(tb.id)
           setSelectedSavedViewId('')
         },
@@ -2470,6 +2506,15 @@ function ListDetail() {
               listId={listId}
               includeClosed={showClosed}
               includeArchived={showArchived}
+              /*
+               * §V2-13 `[10:42]` — the download follows the view you are ON.
+               * Standing on Board asks for the board shape (and is the paid
+               * one); standing anywhere else asks for the list shape, which is
+               * free and always has been.
+               */
+              exportView={activeView === 'board' ? 'board' : 'list'}
+              requireBoardExport={() => requireFeature(BOARD_EXPORT_GATE)}
+              boardExportLocked={!featureAvailable(BOARD_EXPORT_GATE)}
               view={selectedSavedView}
               onPatch={patchSavedView}
               onAutosave={setViewAutosave}
@@ -2790,7 +2835,21 @@ function ListDetail() {
             onReschedule={rescheduleTaskSpan}
           />
         ) : activeView === 'team' ? (
-          <TeamView tasks={visibleTasks} onOpenTask={(id) => setSelectedTaskId(id)} />
+          <TeamView
+            listId={listId}
+            includeArchived={showArchived}
+            /*
+             * The list's own refresh stamp, in the rollup's cache key. The
+             * rollup is computed server-side now, so it no longer re-derives
+             * itself when a task changes under it — closing the detail sheet
+             * after ticking something off would leave the load counts saying
+             * what they said before. Keyed on the stamp, it refetches with
+             * everything else the list refetches.
+             */
+            stamp={dataUpdatedAt}
+            onOpenTask={(id) => setSelectedTaskId(id)}
+            onUnlock={() => requireFeature(TEAM_VIEW_GATE)}
+          />
         ) : (
           <Card className="p-4">
             <div className="flex items-center justify-between mb-3">
@@ -2974,6 +3033,8 @@ function ListDetail() {
           objectName={selectedSavedView.name}
         />
       )}
+      {/* §V2-13 frames `09:26` / `10:42` — one dialog, both gates. */}
+      {gateDialog}
     </div>
     </SpaceFeaturesContext.Provider>
     </ListStatusesContext.Provider>
@@ -4930,61 +4991,77 @@ function GanttBar({
  * PAYWALLS it and the paywall teaches what it would show — a member card, a
  * 16/8 load, a 25% donut, and Ready / In Progress / Review.
  *
- * IT IS NOT GATED HERE, and that is deliberate. The re-audit recorded this as
- * "the paywall is wired to one call site", but the paywall was never the ask:
- * ClickUp gates Team View because it is a paid tier there. Imitating the gate
- * would mean offering to unlock something Rundesk does not have — and having
- * built it, gating it would be inventing a tier to take it away again.
+ * IT IS GATED, and the rows are computed on the SERVER — see
+ * `tasks.controller.ts` `getTeamView`. The re-audit's earlier note here argued
+ * the opposite ("gating it would be inventing a tier to take it away"), and
+ * that note was a *stale reason*: `[09:26]` is not ambiguous — "yeh cheez ke
+ * liye humein of course BUY karna parega" — and the frame she is describing is
+ * a paywall with a price on it. The lesson banked with it is why the rollup
+ * moved: a paywall over arithmetic the browser does is not a paywall, because
+ * there is nothing on the other side of it for the server to refuse.
  *
  * ONE ROW PER PERSON, AND ONE FOR NOBODY. Unassigned work is the column most
  * worth seeing on a board about who is doing what: a view that silently
  * dropped it would report a team as fully allocated while work sat unowned.
  */
+type TeamRow = { id: string; name: string; done: number; total: number; pct: number; tasks: Array<{ id: string; title: string }> }
+
 function TeamView({
-  tasks,
+  listId,
+  includeArchived,
+  stamp,
   onOpenTask,
+  onUnlock,
 }: {
-  tasks: TaskItem[]
+  listId: string
+  includeArchived: boolean
+  /** The list's last refresh, so the rollup moves when the rows do. */
+  stamp: number
   onOpenTask: (id: string) => void
+  /** Re-opens the paywall when the server says this workspace cannot have it. */
+  onUnlock: () => void
 }) {
   const { t } = useTranslation()
 
-  const groups = useMemo(() => {
-    const by = new Map<string, { name: string; tasks: TaskItem[] }>()
-    for (const task of tasks) {
-      // A task with several assignees belongs on each of their rows — the
-      // question this view answers is "what is on this person's plate", and
-      // shared work is on both plates.
-      const owners = task.assignees?.length
-        ? task.assignees.map((a) => ({
-            id: a.userId,
-            name: a.user?.displayName || t('list.team.unassigned'),
-          }))
-        : [{ id: '__none__', name: t('list.team.unassigned') }]
-      for (const owner of owners) {
-        const row = by.get(owner.id) ?? { name: owner.name, tasks: [] }
-        row.tasks.push(task)
-        by.set(owner.id, row)
-      }
-    }
-    return [...by.entries()]
-      .map(([id, row]) => {
-        const done = row.tasks.filter((x) => x.statusCategory === 'closed').length
-        return {
-          id,
-          name: row.name,
-          tasks: row.tasks,
-          done,
-          // Rounded once, here, so the bar and the caption cannot disagree.
-          pct: row.tasks.length ? Math.round((done / row.tasks.length) * 100) : 0,
-        }
-      })
-      // Busiest first, but nobody-in-particular last whatever its size: it is
-      // a gap to close, not a person to compare against.
-      .sort((a, b) =>
-        a.id === '__none__' ? 1 : b.id === '__none__' ? -1 : b.tasks.length - a.tasks.length,
-      )
-  }, [tasks, t])
+  const rollup = useQuery({
+    queryKey: ['team-view', listId, includeArchived, stamp],
+    queryFn: () =>
+      api<TeamRow[]>(
+        `/tasks/list/${listId}/team?includeArchived=${includeArchived}` +
+          `&unassignedLabel=${encodeURIComponent(t('list.team.unassigned'))}`,
+      ),
+    // The stamp is part of the key, so every list refresh is a NEW key and
+    // would otherwise blank the view back to a spinner while somebody is
+    // reading it. Keep the previous rows until the next ones land.
+    placeholderData: (prev: TeamRow[] | undefined) => prev,
+    retry: false,
+  })
+
+  /*
+   * A 403 here is the plan refusing, not a bug. It is reachable without ever
+   * pressing the tab — a space whose DEFAULT view is Team opens straight onto
+   * it — so the locked state lives in the view rather than only on the tab.
+   */
+  if (rollup.error instanceof ApiError && rollup.error.status === 403) {
+    return (
+      <Card className="p-6 text-center space-y-3" data-testid="team-view-locked">
+        <p className="text-sm text-muted-foreground">{t('gate.notOnYourPlan')}</p>
+        <Button size="sm" onClick={onUnlock} data-testid="team-view-unlock">
+          {t('gate.unlock', { feature: t('gate.teamView') })}
+        </Button>
+      </Card>
+    )
+  }
+
+  const groups = rollup.data ?? []
+
+  if (rollup.isLoading) {
+    return (
+      <Card className="p-6 text-center" data-testid="team-view-loading">
+        <p className="text-sm text-muted-foreground">{t('common.loading')}</p>
+      </Card>
+    )
+  }
 
   if (groups.length === 0) {
     return (
@@ -5002,7 +5079,7 @@ function TeamView({
             <div className="min-w-0 flex-1">
               <div className="truncate text-sm font-medium" data-testid="team-view-name">{g.name}</div>
               <div className="text-[11px] text-muted-foreground" data-testid="team-view-load">
-                {t('list.team.load', { done: g.done, total: g.tasks.length })}
+                {t('list.team.load', { done: g.done, total: g.total })}
               </div>
             </div>
             <div className="w-28 shrink-0">
@@ -5663,6 +5740,9 @@ function CustomizeViewPanel({
   listId,
   includeClosed,
   includeArchived,
+  exportView,
+  requireBoardExport,
+  boardExportLocked,
   view,
   onPatch,
   onAutosave,
@@ -5670,6 +5750,15 @@ function CustomizeViewPanel({
   onShare,
 }: {
   listId: string
+  /**
+   * §V2-13 `[10:38]`–`[10:49]` — which shape the Download button asks for.
+   * `'board'` is the paid artifact; `'list'` is the free one.
+   */
+  exportView: 'list' | 'board'
+  /** Opens the paywall and returns false when the plan lacks the board export. */
+  requireBoardExport: () => boolean
+  /** Whether to say so up front, rather than only after the button is pressed. */
+  boardExportLocked: boolean
   /*
    * What the list is CURRENTLY showing. The export is meant to be the view you
    * are looking at, so the two toggles that change which rows are on screen
@@ -5695,6 +5784,16 @@ function CustomizeViewPanel({
   useDismissableDetails(ref)
 
   async function download() {
+    /*
+     * §V2-13 `[10:44]` "abhi [humare paas] nahi hai" — the board download is
+     * the one that stops here. Checked BEFORE the request so a blocked person
+     * gets the paywall rather than a failed download and a toast that does not
+     * say why; the server refuses it too, which is the half that counts.
+     */
+    if (exportView === 'board' && !requireBoardExport()) {
+      if (ref.current) ref.current.open = false
+      return
+    }
     setBusy(true)
     try {
       const query = new URLSearchParams({
@@ -5704,6 +5803,7 @@ function CustomizeViewPanel({
         timeFormat,
         includeClosed: String(includeClosed),
         includeArchived: String(includeArchived),
+        view: exportView,
       })
       // `downloadFile` already carries the Authorization header, refreshes an
       // expired token and revokes the object URL — an <a href> can do none of
@@ -5802,10 +5902,25 @@ function CustomizeViewPanel({
           </p>
         )}
 
-        <details data-testid="list-export-section">
+        {/*
+          `data-export-view` is what tells a check which artifact this panel is
+          about to ask for. A board download and a list download are the same
+          five controls and the same button, so nothing on screen distinguishes
+          them — and "the gate did not spread to the list export" is a claim
+          about exactly that distinction.
+        */}
+        <details
+          data-testid="list-export-section"
+          data-export-view={exportView}
+          data-export-locked={exportView === 'board' && boardExportLocked ? 'true' : 'false'}
+        >
           <summary className="list-none flex items-center justify-between gap-2 rounded px-2 py-1.5 text-[12px] cursor-pointer select-none hover:bg-muted/40">
             <span className="flex items-center gap-2">
-              <Download className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              {exportView === 'board' && boardExportLocked ? (
+                <Lock className="h-3.5 w-3.5 text-violet-500" aria-hidden data-testid="list-export-lock" />
+              ) : (
+                <Download className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+              )}
               {t('list.export.title')}
             </span>
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />

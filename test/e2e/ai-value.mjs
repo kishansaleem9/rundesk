@@ -300,9 +300,17 @@ try {
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  /*
+   * EXACT, not `<`. Hardened during the §V2-S18 re-audit, which added three
+   * suites next to this one under a rule this file predated: with `<`, a branch
+   * that silently SKIPPED turns into a shorter run that still passes, and only
+   * a run that stopped early is caught. All twenty checks here are
+   * unconditional, so anything but twenty means the shape of the suite changed
+   * without its count being reconsidered.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ${ran} of ${EXPECTED_CHECKS} checks ran — this run did not do what it says, ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)

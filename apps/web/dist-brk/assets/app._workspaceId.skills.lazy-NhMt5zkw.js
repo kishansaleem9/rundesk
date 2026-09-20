@@ -1,0 +1,1 @@
+import{d as e}from"./vendor-react-core-BCFc4XZL.js";import{dz as s,az as o}from"./vendor-DsaCphQ1.js";import"./vendor-utils-D19diF5V.js";function t(){return e.jsxDEV(o,{},void 0,!1,{fileName:"/home/user/rundesk/apps/web/src/routes/app.$workspaceId.skills.lazy.tsx",lineNumber:13,columnNumber:10},this)}const p=s("/app/$workspaceId/skills")({component:t});export{p as Route};

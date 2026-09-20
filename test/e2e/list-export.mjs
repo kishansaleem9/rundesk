@@ -27,14 +27,15 @@
  */
 import { signInApi } from './lib/signin.mjs'
 import { xlsxRows, unzip } from './lib/unzip.mjs'
+import { openDb } from './lib/db.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 22
+/** "0 failed" is not "it ran". Exact, so a skipped branch is a failure too. */
+const EXPECTED_CHECKS = 25
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -45,6 +46,8 @@ const ME = {
 
 let passed = 0
 let failed = 0
+let sql = null
+const TAG = `lxp-${Date.now()}`
 const chk = (cond, good, bad) => {
   if (cond) { passed += 1; console.log(`  \x1b[32mPASS\x1b[0m ${good}`) }
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${bad ?? good}`) }
@@ -258,16 +261,74 @@ try {
     'includeArchived=true did not reach the query — this is the parameter the web never used to send',
   )
 
+  /*
+   * §V2-13 `[10:42]`–`[10:49]` — WHAT IS PAID, AND WHAT MUST NOT BECOME PAID.
+   *
+   *   "agar aap ke paas woh hai PREMIUM ACCESS … board view download karne ka
+   *    bhi option hoga. Lekin agar aap ke paas premium nahi [hai] to aap LIST
+   *    VIEW download karo."
+   *
+   * Everything above this line is the free list export, and it has to keep
+   * working for somebody who cannot pay — this file is where that regression
+   * would show up first. So the section runs as a SECOND actor in a workspace
+   * on the Free plan, and asks for both downloads. The full matrix, including
+   * the browser, is `paywall-sites.mjs`.
+   */
+  console.log('\n▶ §V2-13 `[10:49]` — the list download stays free, the board one does not')
+  sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL — this section sets a workspace plan directly')
+  const lockedWs = (await A('/workspaces', { method: 'POST', body: { name: `Export locked ${TAG}` } })).data
+  if (!lockedWs?.id) throw new Error('could not create the Free-plan workspace this section is about')
+  const lockedSpace = ((await A(`/spaces/workspace/${lockedWs.id}`)).data ?? [])[0]
+  const lockedProject = lockedSpace ? ((await A(`/projects/space/${lockedSpace.id}`)).data ?? [])[0] : null
+  const lockedList = lockedProject
+    ? (await A('/lists', { method: 'POST', body: { projectId: lockedProject.id, name: `Locked list ${TAG}` } })).data
+    : null
+  if (!lockedList?.id) throw new Error('the Free-plan workspace came up without a list')
+  const lockedTaskTitle = `Locked row ${TAG}`
+  await A('/tasks', { method: 'POST', body: { listId: lockedList.id, title: lockedTaskTitle } })
+  await sql`update workspaces set plan = 'free' where id = ${lockedWs.id}`
+
+  const freeExport = await R(`/tasks/list/${lockedList.id}/export`)
+  chk(
+    freeExport.status === 200 && freeExport.text.includes(lockedTaskTitle),
+    'a Free plan still downloads the list it is looking at',
+    `the plain export returned ${freeExport.status} on a Free plan — the board gate has spread to the free export`,
+  )
+  const lockedBoard = await R(`/tasks/list/${lockedList.id}/export?view=board`)
+  chk(
+    lockedBoard.status === 403,
+    'and is refused the board-shaped one',
+    `view=board returned ${lockedBoard.status} on a Free plan`,
+  )
+  const paidBoard = await R(`/tasks/list/${list.id}/export?view=board`)
+  chk(
+    paidBoard.status === 200 && paidBoard.text.split('\r\n')[0].startsWith('"Board column",'),
+    'while an entitled plan gets it, and gets a different sheet — the column comes first',
+    `view=board returned ${paidBoard.status} with header ${JSON.stringify(paidBoard.text.split('\r\n')[0])}`,
+  )
+
   await A(`/lists/${list.id}`, { method: 'DELETE' }).catch(() => {})
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  if (sql) {
+    // Cascades to the space/project/list under it. A Free-plan workspace left
+    // lying around is one another suite's `pickWorkspace` can wander into.
+    await sql`delete from workspaces where name like ${'%' + TAG}`.catch(() => {})
+    await sql.end({ timeout: 5 }).catch(() => {})
+  }
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  /*
+   * EXACT, not `<`. With `<`, the paywall section quietly ceasing to run turns
+   * into a shorter green run rather than a failure — and that section is the
+   * one guarding a download that must never become paid.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ran ${ran} checks, expected exactly ${EXPECTED_CHECKS} — ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)

@@ -16,6 +16,17 @@ export const clickupImportJobs = pgTable(
   {
     id:            uuid('id').primaryKey().defaultRandom(),
     workspaceId:   uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
+    /*
+     * §V2-S13 frame `12:08` — which importer produced this job.
+     *
+     * 'clickup_csv' (the original path) | 'spreadsheet' (the generic delimited
+     * importer behind the frame's "Spreadsheet files" row and the per-source
+     * presets). NOT decoration: `listJobs` filters on this column, so the
+     * import page's history shows one importer's runs and not the other's.
+     */
+    source:        text('source').notNull().default('clickup_csv'),
+    /** Which column preset was used — 'trello', 'jira', … or 'generic'. */
+    sourcePreset:  text('source_preset'),
     // 'pending' | 'processing' | 'completed' | 'failed'
     status:        text('status').notNull().default('pending'),
     total:         integer('total').notNull().default(0),
@@ -23,6 +34,16 @@ export const clickupImportJobs = pgTable(
     createdCount:  integer('created_count').notNull().default(0),
     updatedCount:  integer('updated_count').notNull().default(0),
     skippedCount:  integer('skipped_count').notNull().default(0),
+    /**
+     * Rows the importer REFUSED — no name, an unparseable date, a misquoted
+     * row. Separate from `skipped_count`, which is a duplicate the person chose
+     * to skip. A rejected row is never written, and `rowErrors` says which line
+     * it was and why, so "imported 9 of 10" is answerable rather than alarming.
+     */
+    rejectedCount: integer('rejected_count').notNull().default(0),
+    rowErrors:     jsonb('row_errors').$type<
+      Array<{ row: number; code: string; message: string; column?: string; value?: string }>
+    >(),
     error:         text('error'),
     // Full ImportSummary once finished (per-entity totals, custom-field counts,
     // conflict tallies, notImported note).
@@ -33,6 +54,8 @@ export const clickupImportJobs = pgTable(
   },
   (t) => ({
     byWorkspace: index('clickup_import_jobs_workspace_idx').on(t.workspaceId),
+    // The index behind `listJobs(workspaceId, { source })`.
+    bySource: index('clickup_import_jobs_source_idx').on(t.workspaceId, t.source),
   }),
 )
 

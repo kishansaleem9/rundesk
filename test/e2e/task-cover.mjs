@@ -25,6 +25,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -32,8 +33,12 @@ const argOf = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 14
+/**
+ * "0 failed" is not "it ran", and `<` is not "it ran" either: with `<`, a
+ * branch that quietly skipped becomes a shorter run that still passes. Exact,
+ * so a skipped branch is a failure.
+ */
+const EXPECTED_CHECKS = 18
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -175,6 +180,29 @@ try {
     `the picker still offers: ${JSON.stringify(tabsText.replace(/\s+/g, ' '))}`,
   )
 
+  /*
+   * §V2-09 — THE RECORDED DECISION, kept honest.
+   *
+   * Frame `03:07` has five tabs and this picker has four. The fifth, Search,
+   * searches a stock photo library, and `cover-image-picker.tsx` says so in a
+   * comment that was RE-CHECKED rather than trusted: one grep across `apps`,
+   * `packages` and `.env*` for every provider name still finds nothing but the
+   * comment itself, and `modules/search/sources.ts` scopes search to rundesk /
+   * drive / gmail / sharepoint — none of which returns a photograph.
+   *
+   * So this is the absence, asserted as an absence: if a Search tab ever
+   * appears it is either backed by a provider (and this check is updated along
+   * with the comment) or it is the "Photos" box over nothing that this file
+   * deleted once already. Either way the suite should be the thing that asks.
+   */
+  chk(
+    !/search/i.test(tabsText),
+    'the Search tab stays absent, and the comment that says why has been re-checked',
+    `the picker now offers a Search tab (${JSON.stringify(tabsText.replace(/\s+/g, ' '))}) — ` +
+      'if it searches a real provider, update the decision in cover-image-picker.tsx; ' +
+      'if it does not, it is a search box over nothing',
+  )
+
   // Setting a colour from the Gallery has to actually reach the task.
   await page.getByTestId('cover-gallery-swatch').first().click()
   await page.waitForTimeout(1500)
@@ -185,7 +213,48 @@ try {
     `after clicking a swatch the task's coverColor is ${JSON.stringify(afterPick?.coverColor)}`,
   )
 
-  await A(`/tasks/${task.id}`, { method: 'DELETE' }).catch(() => {})
+  /*
+   * ── The Gallery's Custom swatch, frame `03:07` ───────────────────────────
+   *
+   * The frame's Gallery is "Colors" — eight fixed swatches — and then a
+   * bordered ninth cell with an eyedropper reading **Custom**. Eight colours
+   * is a palette; the ninth is the one that makes it a picker.
+   *
+   * THE CHECK THAT DECIDES IT IS THE VALUE, NOT THE CLICK. A Custom cell wired
+   * to a constant would open, look right, close, and set a cover — and pass
+   * any "the cover changed" assertion. So a colour is chosen that nothing else
+   * in this file or in the product uses, and the task is read back and
+   * required to hold exactly that colour.
+   */
+  console.log('\n▶ the Gallery has a Custom swatch, and it commits the colour you chose')
+  await page.getByTestId('cover-change').click()
+  chk(
+    await appears(page.getByTestId('cover-gallery-custom')),
+    'the Gallery offers Custom beside the fixed swatches',
+    'no Custom cell in the Gallery — the palette is eight colours and nothing else',
+  )
+  await page.getByTestId('cover-gallery-custom').click()
+  chk(
+    await appears(page.getByTestId('cover-custom-input'), 6000),
+    'and opening it reveals a colour chooser',
+    'clicking Custom revealed no colour input — the cell is a label with nothing behind it',
+  )
+
+  const chosen = '#1f9d55'
+  await page.getByTestId('cover-custom-input').fill(chosen)
+  await page.getByTestId('cover-custom-apply').click()
+  const landed = await waitUntil(async () => ((await T()).data?.coverColor ?? '') === chosen, {
+    timeoutMs: 8000,
+  })
+  const customRow = (await T()).data
+  chk(
+    landed && customRow?.coverColor === chosen,
+    `the chosen colour reaches the task byte for byte (${chosen})`,
+    `after choosing ${chosen} the task's coverColor is ${JSON.stringify(customRow?.coverColor)} — ` +
+      'a Custom cell that commits a constant passes every check but this one',
+  )
+
+  await A(`/tasks/${task.id}`, { method: 'DELETE' })
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
@@ -194,9 +263,9 @@ try {
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ${ran} of ${EXPECTED_CHECKS} checks ran — this run did not run the suite, ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)

@@ -19,6 +19,21 @@
  * single thing a person did can be several runs, so the word "actions" would
  * quietly inflate every figure on this page.
  *
+ * STILL TRUE AFTER §V2-S18's re-audit, and re-checked rather than assumed.
+ * `recordUsage` still fires once per `messages.create`, so the reason this note
+ * gives has not expired. Frames `18:53`/`18:56`/`18:59` head their grid
+ * "Actions completed" over EIGHT CATEGORIES, and the re-audit closed that row
+ * by building the categories — the grouping is the substance of the frame —
+ * while keeping the unit. So the tiles carry the frame's eight labels, the
+ * heading says what it is counting, and no string renames a run to an action.
+ * If image generation or connected-app actions ever land, a run and an action
+ * diverge further, not less.
+ *
+ * THREE OF THE EIGHT CANNOT BE FILLED, AND SAY SO. There is no image
+ * generation in `apps/api`, and no tool in `COMMAND_TOOLS` reaches a connected
+ * app. Those tiles print the reason rather than a zero, because a zero that
+ * means "impossible" and a zero that means "you did none" look identical.
+ *
  * CREDITS ARE DELIBERATELY ABSENT. The frames show a credit balance and "Add
  * credits"; Rundesk bills in dollars and has no credit concept. Minting an
  * in-app currency to mirror a competitor's packaging would invent a product
@@ -28,9 +43,47 @@
 import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
-import { Clock, DollarSign, Sparkles, SlidersHorizontal } from 'lucide-react'
+import {
+  AlertTriangle,
+  CheckCircle2,
+  CheckSquare,
+  Clock,
+  DollarSign,
+  FileText,
+  Globe,
+  Grid2x2,
+  // Aliased: the lucide export shadows the global `Image` constructor.
+  Image as ImageIcon,
+  MessageSquare,
+  Search,
+  Sparkles,
+  SlidersHorizontal,
+  TrendingUp,
+} from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { useAuthStore } from '../store/auth'
+
+/**
+ * §V2-11, frames `18:53`/`18:56`/`18:59` — one of the eight "Actions
+ * completed" tiles, as the SERVER computes it.
+ *
+ * The grouping is not done here. Twenty-four raw feature strings roll up into
+ * these eight in `ai-categories.ts`, so a second reader of the same numbers
+ * gets the same buckets by construction instead of by everybody agreeing to be
+ * careful — which is how the same list ends up written out in three places and
+ * two of them drift.
+ */
+type CategoryRow = {
+  category: string
+  /** Runs, not "actions". See the unit note at the top of this file. */
+  runs: number
+  costUsd: number
+  /** False when no feature in this product can contribute to this bucket. */
+  supported: boolean
+  reasonKey?: string
+  features: string[]
+}
 
 type ValueResponse = {
   runs: number
@@ -40,6 +93,8 @@ type ValueResponse = {
   laborValueUsd: number
   netValueUsd: number
   byFeature: Record<string, { calls: number; costUsd: number }>
+  byCategory: CategoryRow[]
+  uncategorisedFeatures: string[]
 }
 
 type RunRow = {
@@ -51,7 +106,14 @@ type RunRow = {
   createdAt: string
   userId: string | null
   costUsd: number
+  /** §V2-11, frame `19:05` — real as of migration 0150. */
+  status: 'succeeded' | 'failed'
+  errorCode: string | null
+  errorMessage: string | null
 }
+
+/** The frame's Status dropdown. `''` is "All", which sends no parameter. */
+type StatusFilter = '' | 'succeeded' | 'failed'
 
 const RANGES = [
   { days: 7, labelKey: 'settings.aiRange7' },
@@ -70,6 +132,29 @@ function formatMinutes(total: number): string {
 }
 
 const money = (n: number) => `$${(Number.isFinite(n) ? n : 0).toFixed(2)}`
+
+/**
+ * §V2-11 — a glyph and a label per category, in the frame's order.
+ *
+ * ORDER IS FIXED HERE, not derived from the response, and the server returns
+ * all eight every time. A grid that grows and shrinks with the data cannot be
+ * measured, and a tile that disappears when its count is zero reads as the
+ * feature having been removed.
+ */
+const CATEGORY_META: ReadonlyArray<{
+  id: string
+  icon: typeof Clock
+  labelKey: TranslationKey
+}> = [
+  { id: 'tasks',            icon: CheckSquare,    labelKey: 'aiValue.catTasks' },
+  { id: 'docs',             icon: FileText,       labelKey: 'aiValue.catDocs' },
+  { id: 'images',           icon: ImageIcon,      labelKey: 'aiValue.catImages' },
+  { id: 'comments',         icon: MessageSquare,  labelKey: 'aiValue.catComments' },
+  { id: 'summaries',        icon: TrendingUp,     labelKey: 'aiValue.catSummaries' },
+  { id: 'assets',           icon: Search,         labelKey: 'aiValue.catAssets' },
+  { id: 'externalActions',  icon: Grid2x2,        labelKey: 'aiValue.catExternalActions' },
+  { id: 'externalSearches', icon: Globe,          labelKey: 'aiValue.catExternalSearches' },
+]
 
 function Stat({
   icon: Icon,
@@ -117,6 +202,26 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
   const [minutes, setMinutes] = useState('')
   const [rate, setRate] = useState('')
   const [feature, setFeature] = useState('')
+  /*
+   * §V2-11, frame `19:05` — the filter row the frame draws is
+   * `Date run ▾ · Status ▾ · My agents · Agent ▾`.
+   *
+   * `status` could not exist before migration 0150: `recordUsage` fired only on
+   * the success path, so every row was a success and this dropdown would have
+   * had one reachable value.
+   *
+   * `mineOnly` is the live defect this row found. `GET /ai/activity` has
+   * ACCEPTED `userId` since it was written and the client never sent it, so a
+   * "mine" toggle would have re-rendered and asked the server for exactly the
+   * same rows. It is sent now, and `ai-activity-filters.mjs` captures the
+   * request to prove it left the browser rather than trusting the render.
+   *
+   * "My runs", not "My agents": Rundesk has no agents, and borrowing the word
+   * would promise one.
+   */
+  const [status, setStatus] = useState<StatusFilter>('')
+  const [mineOnly, setMineOnly] = useState(false)
+  const myUserId = useAuthStore((s) => s.user?.id ?? null)
 
   const from = useMemo(() => {
     const d = new Date()
@@ -130,14 +235,30 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
       api<ValueResponse>(`/ai/value?workspaceId=${workspaceId}&from=${encodeURIComponent(from)}`),
   })
 
+  /*
+   * §V2-11 — the query string, built from every filter rather than from one.
+   *
+   * THE PARAMETER THAT WAS NEVER SENT. `userId` has been a supported query
+   * parameter of `GET /ai/activity` since the endpoint was written, and no web
+   * code has ever put it in the URL. A "mine only" toggle on top of that
+   * re-renders and asks the server for exactly the same rows — the render is
+   * right and the reason is wrong, which is the commonest shape of a fake fix.
+   *
+   * The query KEY carries the same values, or React Query serves the previous
+   * answer from cache and the new filter appears to do nothing.
+   */
+  const activityParams = useMemo(() => {
+    const q = new URLSearchParams({ workspaceId, from })
+    if (feature) q.set('feature', feature)
+    if (status) q.set('status', status)
+    if (mineOnly && myUserId) q.set('userId', myUserId)
+    return q.toString()
+  }, [workspaceId, from, feature, status, mineOnly, myUserId])
+
   const activityQuery = useQuery({
     enabled: tab === 'activity',
-    queryKey: ['ai-activity', workspaceId, days, feature],
-    queryFn: () =>
-      api<RunRow[]>(
-        `/ai/activity?workspaceId=${workspaceId}&from=${encodeURIComponent(from)}` +
-          (feature ? `&feature=${encodeURIComponent(feature)}` : ''),
-      ),
+    queryKey: ['ai-activity', activityParams],
+    queryFn: () => api<RunRow[]>(`/ai/activity?${activityParams}`),
   })
 
   const saveBenchmark = useMutation({
@@ -313,6 +434,89 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
             )}
           </Card>
 
+          {/*
+            §V2-11, frames `18:53` / `18:56` / `18:59` — the grid the frame
+            heads "Actions completed": eight tiles in two rows of four.
+
+            THE HEADING IS NOT "ACTIONS", AND THAT IS DELIBERATE. The note at
+            the top of this file and of `ai-value.ts` both refuse the word,
+            with a reason that is still true: one row in `ai_usage` is ONE CALL
+            TO THE MODEL, a single thing a person did can be several calls, so
+            counting runs and calling them actions inflates every figure on the
+            page in a way nobody can see from the screen. What the frame is
+            really asking for is the GROUPING — twenty-four internal feature
+            strings shown as eight readable buckets — and the grouping is what
+            is built. The unit stays a run and every tile says so.
+
+            THREE TILES CANNOT BE FILLED AND SAY SO. Nothing in this product
+            generates an image, and nothing in `COMMAND_TOOLS` reaches a
+            connected app. A tile that can only ever render 0 is
+            indistinguishable on screen from a workspace that genuinely did
+            none — this audit's "confident zero" — so those three print the
+            reason instead of a number. A count of zero is a fact about your
+            workspace; "not available" is a fact about the product.
+          */}
+          <Card className="overflow-hidden">
+            <div className="border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold">{t('aiValue.byCategory')}</h3>
+              <p className="mt-0.5 text-[11px] text-muted-foreground">{t('aiValue.byCategoryUnit')}</p>
+            </div>
+            <div
+              className="grid grid-cols-1 gap-px bg-border sm:grid-cols-2 lg:grid-cols-4"
+              data-testid="ai-value-categories"
+            >
+              {CATEGORY_META.map((meta) => {
+                const row = (data?.byCategory ?? []).find((c) => c.category === meta.id)
+                const supported = row?.supported ?? false
+                const Icon = meta.icon
+                return (
+                  <div
+                    key={meta.id}
+                    className="bg-card p-3"
+                    data-testid={`ai-value-category-${meta.id}`}
+                    data-category={meta.id}
+                    data-supported={supported ? 'true' : 'false'}
+                    data-runs={supported ? String(row?.runs ?? 0) : ''}
+                  >
+                    <Icon className={cn('h-4 w-4', supported ? 'text-primary' : 'text-muted-foreground')} />
+                    {supported ? (
+                      <div className="mt-1.5 text-xl font-semibold tabular-nums">{row?.runs ?? 0}</div>
+                    ) : (
+                      <div
+                        className="mt-1.5 text-xs font-medium text-muted-foreground"
+                        data-testid={`ai-value-category-unavailable-${meta.id}`}
+                      >
+                        {t('aiValue.categoryUnavailable')}
+                      </div>
+                    )}
+                    <div className="mt-0.5 text-[11px] text-muted-foreground">{t(meta.labelKey)}</div>
+                    {!supported && row?.reasonKey && (
+                      <div
+                        className="mt-1 text-[11px] text-muted-foreground/80"
+                        data-testid={`ai-value-category-reason-${meta.id}`}
+                      >
+                        {t(row.reasonKey as TranslationKey)}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {/*
+              Runs that happened and appear in no tile. Normally absent; shown
+              when it is not, because a feature added without a category is a
+              silent under-count and the totals still add up.
+            */}
+            {(data?.uncategorisedFeatures?.length ?? 0) > 0 && (
+              <p
+                className="border-t border-border px-4 py-2 text-[11px] text-amber-600 dark:text-amber-500"
+                data-testid="ai-value-uncategorised"
+              >
+                {t('aiValue.uncategorised', { features: (data?.uncategorisedFeatures ?? []).join(', ') })}
+              </p>
+            )}
+          </Card>
+
           <Card className="overflow-hidden">
             <div className="border-b border-border px-4 py-3">
               <h3 className="text-sm font-semibold">{t('aiValue.byFeature')}</h3>
@@ -335,10 +539,54 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
         </>
       ) : (
         <Card className="overflow-hidden">
-          <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3">
+          {/*
+            §V2-11, frame `19:05` — the filter row, which the frame draws as
+            `Date run ▾ · Status ▾ · My agents · Agent ▾`.
+
+            The range buttons above are Date run. Status and "mine" are below.
+            "Agent" is still absent and still deliberate: Rundesk has no agents,
+            so a dropdown over them could only ever return everything.
+          */}
+          <div
+            className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-3"
+            data-testid="ai-activity-filters"
+          >
             <h3 className="text-sm font-semibold">{t('aiValue.tabActivity')}</h3>
             <select
               className="ml-auto h-7 rounded border border-border bg-background px-2 text-xs"
+              data-testid="ai-activity-status"
+              value={status}
+              onChange={(e) => setStatus(e.target.value as StatusFilter)}
+            >
+              <option value="">{t('aiValue.allStatuses')}</option>
+              <option value="succeeded">{t('aiValue.statusSucceeded')}</option>
+              <option value="failed">{t('aiValue.statusFailed')}</option>
+            </select>
+            {/*
+              A toggle that actually changes the request. `aria-pressed` and
+              `data-on` both carry the state, so a check can assert the state
+              rather than "a button is present" — and the suite separately
+              captures the outgoing URL, because a correct render for the wrong
+              reason is the commonest fake fix.
+            */}
+            <button
+              type="button"
+              data-testid="ai-activity-mine"
+              data-on={mineOnly ? 'true' : 'false'}
+              aria-pressed={mineOnly}
+              disabled={!myUserId}
+              onClick={() => setMineOnly((v) => !v)}
+              className={cn(
+                'h-7 rounded border px-2 text-xs disabled:opacity-50',
+                mineOnly
+                  ? 'border-primary bg-primary/10 text-primary'
+                  : 'border-border bg-background text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t('aiValue.myRuns')}
+            </button>
+            <select
+              className="h-7 rounded border border-border bg-background px-2 text-xs"
               data-testid="ai-activity-feature"
               value={feature}
               onChange={(e) => setFeature(e.target.value)}
@@ -365,13 +613,22 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
              */
             <div className="px-4 py-8 text-center" data-testid="ai-activity-empty">
               <p className="text-sm text-muted-foreground">{t('aiValue.noActivity')}</p>
-              {feature && (
+              {/*
+                Offered whenever ANY filter is on, and it clears all of them.
+                A "Clear filters" that clears one of three leaves you on an
+                empty list having just been told the filters were the reason.
+              */}
+              {(feature || status || mineOnly) && (
                 <Button
                   size="sm"
                   variant="outline"
                   className="mt-2"
                   data-testid="ai-activity-clear-filters"
-                  onClick={() => setFeature('')}
+                  onClick={() => {
+                    setFeature('')
+                    setStatus('')
+                    setMineOnly(false)
+                  }}
                 >
                   {t('aiValue.clearFilters')}
                 </Button>
@@ -380,7 +637,36 @@ export function AiValuePanel({ workspaceId }: { workspaceId: string }) {
           ) : (
             <ul className="divide-y divide-border">
               {runs.map((run) => (
-                <li key={run.id} className="flex items-center gap-3 px-4 py-2 text-sm" data-testid="ai-activity-row">
+                <li
+                  key={run.id}
+                  className="flex items-center gap-3 px-4 py-2 text-sm"
+                  data-testid="ai-activity-row"
+                  data-run-id={run.id}
+                  data-status={run.status}
+                >
+                  {/*
+                    The badge the Status filter filters on. `title` carries the
+                    failure's own sentence: "failed" alone tells somebody a
+                    thing went wrong and nothing they can act on.
+                  */}
+                  <span
+                    data-testid="ai-activity-row-status"
+                    data-status={run.status}
+                    title={run.errorMessage ?? ''}
+                    className={cn(
+                      'inline-flex w-24 shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[11px]',
+                      run.status === 'failed'
+                        ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400'
+                        : 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400',
+                    )}
+                  >
+                    {run.status === 'failed' ? (
+                      <AlertTriangle className="h-3 w-3" />
+                    ) : (
+                      <CheckCircle2 className="h-3 w-3" />
+                    )}
+                    {t(run.status === 'failed' ? 'aiValue.statusFailed' : 'aiValue.statusSucceeded')}
+                  </span>
                   <span className="w-40 shrink-0 truncate text-muted-foreground">{run.feature}</span>
                   <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{run.model}</span>
                   <span className="shrink-0 tabular-nums text-[11px] text-muted-foreground">

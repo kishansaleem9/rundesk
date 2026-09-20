@@ -1,0 +1,1 @@
+import{d as e}from"./vendor-react-core-BCFc4XZL.js";import{dz as t,az as s}from"./vendor-DsaCphQ1.js";import"./vendor-utils-D19diF5V.js";function o(){return e.jsxDEV(s,{},void 0,!1,{fileName:"/home/user/rundesk/apps/web/src/routes/app.$workspaceId.sprints.lazy.tsx",lineNumber:6,columnNumber:10},this)}const i=t("/app/$workspaceId/sprints")({component:o});export{i as Route};

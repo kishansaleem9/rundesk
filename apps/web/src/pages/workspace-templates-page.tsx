@@ -1,15 +1,40 @@
-import { useMemo, useState } from 'react'
+/**
+ * §V2-13 / frame `12:14` — the TEMPLATE CENTER.
+ *
+ * The re-audit row read "a page, not a modal; no type facet, complexity,
+ * use-cases or categories". The page half was already true and stays true —
+ * a modal would be a step backwards from a URL you can send somebody. What
+ * was missing is everything the frame's left rail does:
+ *
+ *   · **Template Types**  Space · Folder · List   (checkboxes, with counts)
+ *   · **Complexity**      Beginner · Intermediate · Advanced
+ *   · top bar **Use Cases** dropdown
+ *   · a body grouped into **categories**, each with a count and "See N more"
+ *
+ * Every one of those is a SERVER query. The page used to fetch the whole
+ * corpus and filter the array in the browser, which is the shape that makes a
+ * facet count worthless: it counts what the page was handed and says nothing
+ * about the corpus, so it is right about the grid and confidently wrong about
+ * the database. `GET …/project-templates/browse` returns the narrowed page AND
+ * the counts, grouped in SQL over everything visible.
+ *
+ * The vocabulary and its ORDER come from the server too. This file holds
+ * labels, not a second list — three copies of "space, folder, list" is how the
+ * third one ends up with four entries nobody notices.
+ */
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TaskTemplatesSection } from '../components/task-templates-section'
 import { api, ApiError } from '../lib/api'
-import { useTranslation } from '../lib/i18n'
+import { useTranslation, type TranslationKey } from '../lib/i18n'
 import {
   Card,
   Button,
   Badge,
   Input,
   Label,
+  Checkbox,
   Dialog,
   DialogContent,
   DialogDescription,
@@ -34,6 +59,10 @@ import {
   GraduationCap,
   Check,
   ListTree,
+  X,
+  FolderKanban,
+  Boxes,
+  List as ListIcon,
 } from 'lucide-react'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
@@ -51,8 +80,25 @@ type ProjectTemplate = {
   description: string | null
   icon: string | null
   isBuiltIn: boolean
+  targetType: string
+  complexity: string
+  category: string | null
+  useCase: string | null
   payload: { lists: TemplateList[] }
   createdAt: string
+}
+
+type FacetBucket = { value: string; count: number }
+type BrowseResult = {
+  templates: ProjectTemplate[]
+  total: number
+  facets: {
+    scope: FacetBucket[]
+    type: FacetBucket[]
+    complexity: FacetBucket[]
+    category: FacetBucket[]
+    useCase: FacetBucket[]
+  }
 }
 
 type NamedRow = { id: string; name: string }
@@ -67,8 +113,56 @@ const COVERS: Record<string, string> = {
   Rocket: 'linear-gradient(135deg, hsl(35 95% 60%), hsl(330 88% 60%))',
   ListChecks: 'linear-gradient(135deg, hsl(268 88% 60%), hsl(217 60% 55%))',
   Bug: 'linear-gradient(135deg, hsl(0 70% 55%), hsl(35 95% 60%))',
+  Briefcase: 'linear-gradient(135deg, hsl(190 60% 45%), hsl(160 70% 50%))',
+  Sparkles: 'linear-gradient(135deg, hsl(268 70% 58%), hsl(330 80% 60%))',
+  Calendar: 'linear-gradient(135deg, hsl(15 85% 60%), hsl(35 95% 60%))',
+  GraduationCap: 'linear-gradient(135deg, hsl(217 60% 55%), hsl(160 70% 50%))',
 }
 const FALLBACK_COVER = 'linear-gradient(135deg, hsl(217 30% 40%), hsl(268 40% 45%))'
+
+/*
+ * LABELS ONLY. The values and their order arrive from the server; a value with
+ * no entry here renders as itself rather than borrowing a neighbour's string,
+ * because a label that silently falls back is the `VIEW_LABEL` "team" defect —
+ * two rows reading "List" and every "a label is present" check passing.
+ */
+const TYPE_LABEL: Record<string, TranslationKey> = {
+  space: 'templates.type.space',
+  folder: 'templates.type.folder',
+  list: 'templates.type.list',
+}
+const TYPE_ICON: Record<string, React.ElementType> = {
+  space: Boxes,
+  folder: FolderKanban,
+  list: ListIcon,
+}
+const COMPLEXITY_LABEL: Record<string, TranslationKey> = {
+  beginner: 'templates.complexity.beginner',
+  intermediate: 'templates.complexity.intermediate',
+  advanced: 'templates.complexity.advanced',
+}
+const CATEGORY_LABEL: Record<string, TranslationKey> = {
+  engineering: 'templates.category.engineering',
+  marketing: 'templates.category.marketing',
+  operations: 'templates.category.operations',
+  product: 'templates.category.product',
+  other: 'templates.category.other',
+}
+const USE_CASE_LABEL: Record<string, TranslationKey> = {
+  planning: 'templates.useCase.planning',
+  launch: 'templates.useCase.launch',
+  onboarding: 'templates.useCase.onboarding',
+  support: 'templates.useCase.support',
+  other: 'templates.useCase.other',
+}
+const SCOPE_LABEL: Record<string, TranslationKey> = {
+  all: 'templates.filterAll',
+  builtin: 'templates.builtin',
+  custom: 'templates.custom',
+}
+
+/** How many cards a category section shows before it offers "See N more". */
+const SECTION_CAP = 6
 
 function iconFor(name: string | null): React.ElementType {
   return (name && ICONS[name]) || LayoutTemplate
@@ -84,35 +178,79 @@ export function TemplatesPage() {
   const { t, tCount } = useTranslation()
   const params = useParams({ from: '/app/$workspaceId/templates' }) as { workspaceId?: string }
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : null
+
   const [query, setQuery] = useState('')
-  const [filter, setFilter] = useState<'all' | 'builtin' | 'custom'>('all')
+  const [debouncedQuery, setDebouncedQuery] = useState('')
+  const [scope, setScope] = useState<'all' | 'builtin' | 'custom'>('all')
+  const [types, setTypes] = useState<string[]>([])
+  const [complexities, setComplexities] = useState<string[]>([])
+  const [useCase, setUseCase] = useState('')
+  const [category, setCategory] = useState('')
   const [applyTemplate, setApplyTemplate] = useState<ProjectTemplate | null>(null)
   const [saveOpen, setSaveOpen] = useState(false)
 
-  const templatesQuery = useQuery({
-    queryKey: ['project-templates', workspaceId],
-    queryFn: () => api<ProjectTemplate[]>(`/workspaces/${workspaceId}/project-templates`),
+  // One request per pause, not one per keystroke — but still a request: the
+  // search narrows the corpus the counts are taken over, so it cannot be a
+  // client-side pass over what happens to be loaded.
+  useEffect(() => {
+    const id = setTimeout(() => setDebouncedQuery(query), 250)
+    return () => clearTimeout(id)
+  }, [query])
+
+  const search = useMemo(() => {
+    const p = new URLSearchParams()
+    if (debouncedQuery.trim()) p.set('q', debouncedQuery.trim())
+    if (scope !== 'all') p.set('scope', scope)
+    if (types.length) p.set('type', types.join(','))
+    if (complexities.length) p.set('complexity', complexities.join(','))
+    if (useCase) p.set('useCase', useCase)
+    if (category) p.set('category', category)
+    return p.toString()
+  }, [debouncedQuery, scope, types, complexities, useCase, category])
+
+  const browseQuery = useQuery({
+    queryKey: ['project-templates', 'browse', workspaceId, search],
+    queryFn: () =>
+      api<BrowseResult>(`/workspaces/${workspaceId}/project-templates/browse${search ? `?${search}` : ''}`),
     enabled: Boolean(workspaceId),
+    placeholderData: (prev) => prev,
   })
 
-  const templates = templatesQuery.data ?? []
-  const counts = useMemo(
-    () => ({
-      all: templates.length,
-      builtin: templates.filter((tpl) => tpl.isBuiltIn).length,
-      custom: templates.filter((tpl) => !tpl.isBuiltIn).length,
-    }),
-    [templates],
-  )
-  const filtered = templates.filter((tpl) => {
-    if (filter === 'builtin' && !tpl.isBuiltIn) return false
-    if (filter === 'custom' && tpl.isBuiltIn) return false
-    const q = query.toLowerCase()
-    return tpl.name.toLowerCase().includes(q) || (tpl.description ?? '').toLowerCase().includes(q)
-  })
+  const templates = useMemo(() => browseQuery.data?.templates ?? [], [browseQuery.data])
+  const facets = browseQuery.data?.facets
+  const total = browseQuery.data?.total ?? 0
+  const anyFacet = types.length > 0 || complexities.length > 0 || Boolean(useCase) || Boolean(category)
+
+  const toggle = (list: string[], value: string, set: (v: string[]) => void) =>
+    set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value])
+
+  /*
+   * The frame's body: sections, in the server's canonical category order, each
+   * with its own heading and count. Only categories that HAVE something in the
+   * current result get a section — an empty "Marketing" heading would be a
+   * label with nothing behind it.
+   */
+  const sections = useMemo(() => {
+    const order = facets?.category.map((b) => b.value) ?? []
+    const byCategory = new Map<string, ProjectTemplate[]>()
+    for (const tpl of templates) {
+      const key = tpl.category ?? 'other'
+      const bucket = byCategory.get(key)
+      if (bucket) bucket.push(tpl)
+      else byCategory.set(key, [tpl])
+    }
+    return order
+      .filter((key) => (byCategory.get(key)?.length ?? 0) > 0)
+      .map((key) => ({ key, rows: byCategory.get(key) ?? [] }))
+  }, [templates, facets])
+
+  const labelOf = (map: Record<string, TranslationKey>, value: string) => {
+    const key = map[value]
+    return key ? t(key) : value
+  }
 
   return (
-    <div className="p-6 space-y-7 max-w-7xl mx-auto">
+    <div className="p-6 space-y-7 max-w-[100rem] mx-auto" data-testid="template-center">
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="text-[11px] uppercase tracking-widest text-muted-foreground mb-1">
@@ -128,60 +266,182 @@ export function TemplatesPage() {
             {t('templates.subtitle')}
           </p>
         </div>
-        <Button variant="gradient" size="lg" onClick={() => setSaveOpen(true)} disabled={!workspaceId}>
+        <Button
+          variant="gradient"
+          size="lg"
+          data-testid="templates-save-open"
+          onClick={() => setSaveOpen(true)}
+          disabled={!workspaceId}
+        >
           <LayoutTemplate className="h-4 w-4" /> {t('templates.saveAsTemplate')}
         </Button>
       </header>
 
+      {/* Search + the frame's top-bar Use Cases dropdown + the scope rail. */}
       <div className="flex flex-wrap items-center gap-3">
-        <Input
-          leadingIcon={<Search className="h-4 w-4" />}
-          placeholder={t('templates.searchPlaceholder')}
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          className="max-w-sm"
-        />
-        <div className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1">
-          {(['all', 'builtin', 'custom'] as const).map((f) => (
+        <div className="relative max-w-sm w-full">
+          <Input
+            leadingIcon={<Search className="h-4 w-4" />}
+            placeholder={t('templates.searchPlaceholder')}
+            value={query}
+            data-testid="templates-search"
+            onChange={(e) => setQuery(e.target.value)}
+          />
+          {query && (
             <button
-              key={f}
-              onClick={() => setFilter(f)}
+              type="button"
+              data-testid="templates-search-clear"
+              aria-label={t('templates.clearSearch')}
+              onClick={() => setQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 rounded p-1 text-muted-foreground hover:text-foreground"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
+        </div>
+
+        <label className="flex items-center gap-2 text-xs text-muted-foreground">
+          <span className="sr-only">{t('templates.useCases')}</span>
+          <select
+            data-testid="templates-facet-usecase"
+            value={useCase}
+            onChange={(e) => setUseCase(e.target.value)}
+            className="h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm text-foreground"
+          >
+            <option value="">{t('templates.useCasesAll')}</option>
+            {(facets?.useCase ?? [])
+              .filter((b) => b.count > 0 || b.value === useCase)
+              .map((b) => (
+                <option key={b.value} value={b.value}>
+                  {labelOf(USE_CASE_LABEL, b.value)} ({b.count})
+                </option>
+              ))}
+          </select>
+        </label>
+
+        <div
+          className="flex items-center gap-1 bg-card/40 border border-border/60 rounded-lg p-1"
+          data-testid="templates-scope-rail"
+        >
+          {(facets?.scope ?? [{ value: 'all', count: 0 }, { value: 'builtin', count: 0 }, { value: 'custom', count: 0 }]).map((b) => (
+            <button
+              key={b.value}
+              type="button"
+              data-testid={`templates-scope-${b.value}`}
+              data-count={b.count}
+              aria-pressed={scope === b.value}
+              onClick={() => setScope(b.value as 'all' | 'builtin' | 'custom')}
               className={cn(
-                'text-xs px-3 py-1.5 rounded-md font-medium transition-all capitalize',
-                filter === f
+                'text-xs px-3 py-1.5 rounded-md font-medium transition-all',
+                scope === b.value
                   ? 'bg-brand-gradient text-white shadow-sm'
                   : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
+                b.count === 0 && scope !== b.value && 'opacity-45',
               )}
             >
-              {f === 'all' ? t('templates.filterAll') : f === 'builtin' ? t('templates.builtin') : t('templates.custom')} ({counts[f]})
+              {labelOf(SCOPE_LABEL, b.value)} ({b.count})
             </button>
           ))}
         </div>
+
+        {anyFacet && (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            data-testid="templates-facet-clear"
+            onClick={() => { setTypes([]); setComplexities([]); setUseCase(''); setCategory('') }}
+          >
+            <X className="h-3 w-3" /> {t('templates.clearFilters')}
+          </Button>
+        )}
       </div>
 
       {workspaceId && <TaskTemplatesSection workspaceId={workspaceId} />}
 
-      <div className="space-y-3">
-        <div className="flex items-baseline justify-between">
-          <h2 className="font-display text-lg font-semibold">{t('templates.projectTemplates')}</h2>
-          <Badge variant="secondary" className="text-[10px]">{tCount('templates.available', templates.length)}</Badge>
-        </div>
+      <div className="flex flex-col lg:flex-row gap-6 items-start">
+        {/* The frame's left rail. Counts come from the server, over the corpus. */}
+        <aside className="w-full lg:w-60 shrink-0 space-y-6" data-testid="templates-facets">
+          <FacetGroup
+            name="type"
+            title={t('templates.templateTypes')}
+            buckets={facets?.type ?? []}
+            selected={types}
+            onToggle={(v) => toggle(types, v, setTypes)}
+            label={(v) => labelOf(TYPE_LABEL, v)}
+            icon={(v) => TYPE_ICON[v]}
+          />
+          <FacetGroup
+            name="complexity"
+            title={t('templates.complexityTitle')}
+            buckets={facets?.complexity ?? []}
+            selected={complexities}
+            onToggle={(v) => toggle(complexities, v, setComplexities)}
+            label={(v) => labelOf(COMPLEXITY_LABEL, v)}
+          />
+        </aside>
 
-        {templatesQuery.isLoading ? (
-          <Card variant="glass" className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
-        ) : filtered.length === 0 ? (
-          <Card variant="glass" className="p-6 text-sm text-muted-foreground">
-            {query || filter !== 'all'
-              ? t('templates.noMatch')
-              : t('templates.empty')}
-          </Card>
-        ) : (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-            {filtered.map((tpl) => (
-              <TemplateCard key={tpl.id} template={tpl} onUse={() => setApplyTemplate(tpl)} />
-            ))}
+        <div className="flex-1 min-w-0 space-y-6">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-display text-lg font-semibold">{t('templates.projectTemplates')}</h2>
+            <Badge variant="secondary" className="text-[10px]" data-testid="templates-total">
+              {tCount('templates.available', total)}
+            </Badge>
           </div>
-        )}
+
+          {browseQuery.isLoading ? (
+            <Card variant="glass" className="p-6 text-sm text-muted-foreground"><InlineSkeleton /></Card>
+          ) : templates.length === 0 ? (
+            <Card variant="glass" className="p-6 text-sm text-muted-foreground" data-testid="templates-empty">
+              {query || scope !== 'all' || anyFacet ? t('templates.noMatch') : t('templates.empty')}
+            </Card>
+          ) : (
+            sections.map(({ key, rows }) => {
+              const capped = category ? rows : rows.slice(0, SECTION_CAP)
+              const more = rows.length - capped.length
+              return (
+                <section key={key} className="space-y-3" data-testid={`templates-section-${key}`}>
+                  <div className="flex items-baseline justify-between gap-3">
+                    <button
+                      type="button"
+                      data-testid={`templates-category-${key}`}
+                      data-count={rows.length}
+                      aria-pressed={category === key}
+                      onClick={() => setCategory(category === key ? '' : key)}
+                      className={cn(
+                        'font-display text-base font-semibold hover:text-accent transition-colors',
+                        category === key && 'text-accent',
+                      )}
+                    >
+                      {labelOf(CATEGORY_LABEL, key)}
+                    </button>
+                    {more > 0 && (
+                      <button
+                        type="button"
+                        data-testid={`templates-category-more-${key}`}
+                        onClick={() => setCategory(key)}
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                      >
+                        {t('templates.seeMore', { count: more })}
+                      </button>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                    {capped.map((tpl) => (
+                      <TemplateCard
+                        key={tpl.id}
+                        template={tpl}
+                        typeLabel={labelOf(TYPE_LABEL, tpl.targetType)}
+                        complexityLabel={labelOf(COMPLEXITY_LABEL, tpl.complexity)}
+                        onUse={() => setApplyTemplate(tpl)}
+                      />
+                    ))}
+                  </div>
+                </section>
+              )
+            })
+          )}
+        </div>
       </div>
 
       {workspaceId && (
@@ -202,13 +462,104 @@ export function TemplatesPage() {
   )
 }
 
-function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: () => void }) {
+/**
+ * One checkbox facet. The buckets — values, order and counts — are whatever the
+ * server sent; this draws them.
+ *
+ * A zero bucket is drawn and DISABLED rather than hidden, which is the frame's
+ * own treatment (its "Workspace Templates  0" row is greyed, not removed).
+ * Hiding it would make the rail change shape as you search, and a checkbox
+ * that empties the grid the moment you tick it is worse than one that says so.
+ */
+function FacetGroup({
+  name,
+  title,
+  buckets,
+  selected,
+  onToggle,
+  label,
+  icon,
+}: {
+  name: string
+  title: string
+  buckets: FacetBucket[]
+  selected: string[]
+  onToggle: (value: string) => void
+  label: (value: string) => string
+  icon?: (value: string) => React.ElementType | undefined
+}) {
+  return (
+    <div className="space-y-2" data-testid={`templates-facet-${name}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+        {title}
+      </div>
+      <div className="space-y-1">
+        {buckets.map((b) => {
+          const Icon = icon?.(b.value)
+          const empty = b.count === 0 && !selected.includes(b.value)
+          return (
+            <div
+              key={b.value}
+              data-testid={`templates-facet-${name}-row-${b.value}`}
+              data-value={b.value}
+              data-count={b.count}
+              data-empty={empty ? 'true' : 'false'}
+              className={cn(
+                'flex items-center gap-2 rounded-md px-2 py-1.5 text-sm',
+                empty ? 'opacity-45' : 'hover:bg-card/60',
+              )}
+            >
+              <Checkbox
+                data-testid={`templates-facet-${name}-${b.value}`}
+                checked={selected.includes(b.value)}
+                disabled={empty}
+                onCheckedChange={() => onToggle(b.value)}
+                id={`facet-${name}-${b.value}`}
+              />
+              <label htmlFor={`facet-${name}-${b.value}`} className="flex-1 flex items-center gap-1.5 cursor-pointer">
+                {Icon && <Icon className="h-3.5 w-3.5 text-muted-foreground" />}
+                {label(b.value)}
+              </label>
+              <span
+                data-testid={`templates-facet-${name}-count-${b.value}`}
+                className="text-xs tabular-nums text-muted-foreground"
+              >
+                {b.count}
+              </span>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function TemplateCard({
+  template,
+  typeLabel,
+  complexityLabel,
+  onUse,
+}: {
+  template: ProjectTemplate
+  typeLabel: string
+  complexityLabel: string
+  onUse: () => void
+}) {
   const { t, tCount } = useTranslation()
   const Icon = iconFor(template.icon)
   const lists = template.payload?.lists?.length ?? 0
   const tasks = taskCount(template)
   return (
-    <Card variant="glass" className="overflow-hidden p-0 group transition-all hover:shadow-glow hover:border-accent/40">
+    <Card
+      variant="glass"
+      className="overflow-hidden p-0 group transition-all hover:shadow-glow hover:border-accent/40"
+      data-testid="templates-card"
+      data-template-id={template.id}
+      data-type={template.targetType}
+      data-complexity={template.complexity}
+      data-category={template.category ?? 'other'}
+      data-use-case={template.useCase ?? 'other'}
+    >
       <div className="relative h-32 overflow-hidden flex items-center justify-center" style={{ background: coverFor(template.icon) }}>
         <div className="absolute inset-0 bg-grid-dim opacity-40" />
         <Icon className="h-12 w-12 text-white/90" />
@@ -218,10 +569,17 @@ function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: (
         >
           {template.isBuiltIn ? t('templates.builtin') : t('templates.custom')}
         </Badge>
+        <Badge
+          variant="soft"
+          className="absolute top-2 left-2 text-[10px] backdrop-blur-sm bg-black/30 text-white border-transparent"
+        >
+          {typeLabel}
+        </Badge>
       </div>
       <div className="p-4">
         <div className="flex items-center gap-2 mb-1">
           <span className="font-medium truncate flex-1">{template.name}</span>
+          <Badge variant="outline" className="text-[10px] shrink-0">{complexityLabel}</Badge>
         </div>
         <p className="text-xs text-muted-foreground line-clamp-2 leading-relaxed min-h-[2rem]">
           {template.description}
@@ -230,7 +588,14 @@ function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: (
           <span className="text-[10px] text-muted-foreground inline-flex items-center gap-1">
             <ListTree className="h-3 w-3" /> {tCount('templates.listsCount', lists)} · {tCount('templates.tasksCount', tasks)}
           </span>
-          <Button variant="outline" size="sm" className="h-7 text-xs" onClick={onUse}>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-7 text-xs"
+            data-testid="templates-card-use"
+            data-template-id={template.id}
+            onClick={onUse}
+          >
             {t('templates.useTemplate')}
           </Button>
         </div>
@@ -239,6 +604,11 @@ function TemplateCard({ template, onUse }: { template: ProjectTemplate; onUse: (
   )
 }
 
+/**
+ * Apply. What the dialog asks for follows the template's own type, because the
+ * server does: a space template needs nowhere to go, a folder template needs a
+ * space, and a list template needs the project to drop the list into.
+ */
 function ApplyTemplateDialog({
   workspaceId,
   template,
@@ -250,34 +620,68 @@ function ApplyTemplateDialog({
 }) {
   const { t } = useTranslation()
   const navigate = useNavigate()
+  const qc = useQueryClient()
   const open = Boolean(template)
+  const targetType = template?.targetType ?? 'folder'
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<NamedRow[]>(`/spaces/workspace/${workspaceId}`),
-    enabled: open,
+    enabled: open && targetType !== 'space',
   })
   const spaces = spacesQuery.data ?? []
 
   const [projectName, setProjectName] = useState('')
   const [spaceId, setSpaceId] = useState('')
+  const [projectId, setProjectId] = useState('')
 
   // Seed defaults when the dialog opens / data arrives.
   const effectiveName = projectName || template?.name || ''
   const effectiveSpace = spaceId || spaces[0]?.id || ''
 
+  const projectsQuery = useQuery({
+    queryKey: ['projects', effectiveSpace],
+    queryFn: () => api<NamedRow[]>(`/projects/space/${effectiveSpace}`),
+    enabled: open && targetType === 'list' && Boolean(effectiveSpace),
+  })
+  const projects = projectsQuery.data ?? []
+  const effectiveProject = projectId || projects[0]?.id || ''
+
+  const ready =
+    Boolean(effectiveName.trim()) &&
+    (targetType === 'space' || (targetType === 'list' ? Boolean(effectiveProject) : Boolean(effectiveSpace)))
+
   const apply = useMutation({
     mutationFn: () =>
-      api<{ project: { id: string }; listsCreated: number; tasksCreated: number }>(
+      api<{
+        project: { id: string; spaceId: string }
+        space: { id: string } | null
+        targetType: string
+        listsCreated: number
+        tasksCreated: number
+      }>(
         `/workspaces/${workspaceId}/project-templates/apply`,
-        { method: 'POST', body: { templateId: template!.id, targetSpaceId: effectiveSpace, projectName: effectiveName } },
+        {
+          method: 'POST',
+          body: {
+            templateId: template!.id,
+            ...(targetType === 'folder' ? { targetSpaceId: effectiveSpace } : {}),
+            ...(targetType === 'list' ? { targetProjectId: effectiveProject } : {}),
+            projectName: effectiveName,
+          },
+        },
       ),
     onSuccess: (res) => {
       toast.success(t('templates.appliedToast', { name: effectiveName, lists: res.listsCreated, tasks: res.tasksCreated }))
+      qc.invalidateQueries({ queryKey: ['spaces', workspaceId] })
       handleClose()
       navigate({
         to: '/app/$workspaceId/$spaceId/$projectId',
-        params: { workspaceId, spaceId: effectiveSpace, projectId: res.project.id },
+        params: {
+          workspaceId,
+          spaceId: res.space?.id ?? res.project.spaceId ?? effectiveSpace,
+          projectId: res.project.id,
+        },
       })
     },
     onError: (e: unknown) => toast.error(e instanceof ApiError ? e.message : t('templates.applyError')),
@@ -286,51 +690,90 @@ function ApplyTemplateDialog({
   function handleClose() {
     setProjectName('')
     setSpaceId('')
+    setProjectId('')
     onClose()
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => !o && handleClose()}>
-      <DialogContent>
+      <DialogContent data-testid="templates-apply-dialog" data-target-type={targetType}>
         <DialogHeader>
           <DialogTitle>{t('templates.useTemplateTitle', { name: template?.name ?? '' })}</DialogTitle>
           <DialogDescription>
-            {t('templates.applyDescription')}
+            {targetType === 'space'
+              ? t('templates.applyDescriptionSpace')
+              : targetType === 'list'
+                ? t('templates.applyDescriptionList')
+                : t('templates.applyDescription')}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <div className="space-y-1.5">
-            <Label>{t('templates.projectName')}</Label>
+            <Label>
+              {targetType === 'space'
+                ? t('templates.spaceName')
+                : targetType === 'list'
+                  ? t('templates.listName')
+                  : t('templates.projectName')}
+            </Label>
             <Input
+              data-testid="templates-apply-name"
               placeholder={t('templates.projectNamePlaceholder')}
               value={effectiveName}
               onChange={(e) => setProjectName(e.target.value)}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label>{t('templates.targetSpace')}</Label>
-            {spacesQuery.isLoading ? (
-              <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
-            ) : spaces.length === 0 ? (
-              <p className="text-xs text-warning">{t('templates.noSpaces')}</p>
-            ) : (
-              <select
-                value={effectiveSpace}
-                onChange={(e) => setSpaceId(e.target.value)}
-                className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
-              >
-                {spaces.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-            )}
-          </div>
+          {targetType !== 'space' && (
+            <div className="space-y-1.5">
+              <Label>{t('templates.targetSpace')}</Label>
+              {spacesQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
+              ) : spaces.length === 0 ? (
+                <p className="text-xs text-warning">{t('templates.noSpaces')}</p>
+              ) : (
+                <select
+                  data-testid="templates-apply-space"
+                  value={effectiveSpace}
+                  onChange={(e) => { setSpaceId(e.target.value); setProjectId('') }}
+                  className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
+                >
+                  {spaces.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
+          {targetType === 'list' && (
+            <div className="space-y-1.5">
+              <Label>{t('templates.targetProject')}</Label>
+              {projectsQuery.isLoading ? (
+                <p className="text-xs text-muted-foreground"><InlineSkeleton /></p>
+              ) : projects.length === 0 ? (
+                <p className="text-xs text-warning">{t('templates.noProjects')}</p>
+              ) : (
+                <select
+                  data-testid="templates-apply-project"
+                  value={effectiveProject}
+                  onChange={(e) => setProjectId(e.target.value)}
+                  className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
+                >
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+              )}
+            </div>
+          )}
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>{t('common.cancel')}</Button>
+          <Button variant="outline" data-testid="templates-apply-cancel" onClick={handleClose}>
+            {t('common.cancel')}
+          </Button>
           <Button
+            data-testid="templates-apply-submit"
             onClick={() => apply.mutate()}
-            disabled={apply.isPending || !effectiveName.trim() || !effectiveSpace}
+            disabled={apply.isPending || !ready}
           >
             <Check className="h-3.5 w-3.5" /> {apply.isPending ? t('templates.applying') : t('templates.applyTemplate')}
           </Button>
@@ -355,6 +798,8 @@ function SaveTemplateDialog({
   const [projectId, setProjectId] = useState('')
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [category, setCategory] = useState('')
+  const [useCase, setUseCase] = useState('')
 
   const spacesQuery = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -372,15 +817,26 @@ function SaveTemplateDialog({
   const projects = projectsQuery.data ?? []
   const effectiveProject = projectId || projects[0]?.id || ''
 
+  /*
+   * Category and use-case are the two the person genuinely knows. Complexity
+   * is NOT asked for: the server reads it off the snapshot, because "is this
+   * advanced?" is a question about a thing that does not exist yet.
+   */
   const save = useMutation({
     mutationFn: () =>
       api(`/workspaces/${workspaceId}/project-templates/save-from-project`, {
         method: 'POST',
-        body: { projectId: effectiveProject, name: name.trim(), description: description.trim() || undefined },
+        body: {
+          projectId: effectiveProject,
+          name: name.trim(),
+          description: description.trim() || undefined,
+          category: category || undefined,
+          useCase: useCase || undefined,
+        },
       }),
     onSuccess: () => {
       toast.success(t('templates.savedToast'))
-      qc.invalidateQueries({ queryKey: ['project-templates', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['project-templates'] })
       reset()
       onOpenChange(false)
     },
@@ -393,11 +849,13 @@ function SaveTemplateDialog({
     setProjectId('')
     setName('')
     setDescription('')
+    setCategory('')
+    setUseCase('')
   }
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) reset(); onOpenChange(o) }}>
-      <DialogContent>
+      <DialogContent data-testid="templates-save-dialog">
         <DialogHeader>
           <DialogTitle>{t('templates.saveAsTemplate')}</DialogTitle>
           <DialogDescription>
@@ -411,6 +869,7 @@ function SaveTemplateDialog({
               <p className="text-xs text-muted-foreground">{spacesQuery.isLoading ? <InlineSkeleton width="6rem" /> : t('templates.noSpacesShort')}</p>
             ) : (
               <select
+                data-testid="templates-save-space"
                 value={effectiveSpace}
                 onChange={(e) => { setSpaceId(e.target.value); setProjectId('') }}
                 className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
@@ -427,6 +886,7 @@ function SaveTemplateDialog({
               <p className="text-xs text-warning">{t('templates.noProjects')}</p>
             ) : (
               <select
+                data-testid="templates-save-project"
                 value={effectiveProject}
                 onChange={(e) => setProjectId(e.target.value)}
                 className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
@@ -437,16 +897,63 @@ function SaveTemplateDialog({
           </div>
           <div className="space-y-1.5">
             <Label>{t('templates.templateName')}</Label>
-            <Input placeholder={t('templates.templateNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+            <Input
+              data-testid="templates-save-name"
+              placeholder={t('templates.templateNamePlaceholder')}
+              value={name}
+              onChange={(e) => setName(e.target.value)}
+            />
           </div>
           <div className="space-y-1.5">
             <Label>{t('templates.descriptionOptional')}</Label>
-            <Input placeholder={t('templates.descriptionPlaceholder')} value={description} onChange={(e) => setDescription(e.target.value)} />
+            <Input
+              data-testid="templates-save-description"
+              placeholder={t('templates.descriptionPlaceholder')}
+              value={description}
+              onChange={(e) => setDescription(e.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label>{t('templates.categoryTitle')}</Label>
+              <select
+                data-testid="templates-save-category"
+                value={category}
+                onChange={(e) => setCategory(e.target.value)}
+                className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
+              >
+                <option value="">{t('templates.categoryNone')}</option>
+                {(['engineering', 'marketing', 'operations', 'product'] as const).map((c) => (
+                  <option key={c} value={c}>{t(CATEGORY_LABEL[c])}</option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>{t('templates.useCases')}</Label>
+              <select
+                data-testid="templates-save-usecase"
+                value={useCase}
+                onChange={(e) => setUseCase(e.target.value)}
+                className="w-full h-9 rounded-md border border-border/60 bg-card/40 px-3 text-sm"
+              >
+                <option value="">{t('templates.categoryNone')}</option>
+                {(['planning', 'launch', 'onboarding', 'support'] as const).map((u) => (
+                  <option key={u} value={u}>{t(USE_CASE_LABEL[u])}</option>
+                ))}
+              </select>
+            </div>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => { reset(); onOpenChange(false) }}>{t('common.cancel')}</Button>
           <Button
+            variant="outline"
+            data-testid="templates-save-cancel"
+            onClick={() => { reset(); onOpenChange(false) }}
+          >
+            {t('common.cancel')}
+          </Button>
+          <Button
+            data-testid="templates-save-submit"
             onClick={() => save.mutate()}
             disabled={save.isPending || !effectiveProject || !name.trim()}
           >

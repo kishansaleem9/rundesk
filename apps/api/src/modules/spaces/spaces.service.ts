@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common'
 import { eq, and, or, ne, inArray } from 'drizzle-orm'
 import { spaces, spaceMembers, spaceStatuses, folders, projects, lists, workspaces } from '@rundesk/db'
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
@@ -7,12 +7,19 @@ import { assertCanManageContainer } from '../../common/permissions/container-acc
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { SecurityService } from '../security/security.service'
 import { ListsService } from '../lists/lists.service'
+import { PlansService } from '../plans/plans.service'
+import { PLAN_TIERS, type PlanId } from '../plans/plans.constants'
 import {
   SPACE_VIEW_KEYS,
   SPACE_FEATURE_KEYS,
+  CLICK_APP_MIN_PLAN,
+  clickAppsForPlan,
+  effectiveFeatures,
+  planRestrictsClickApps,
   findPreset,
   type SpacePreset,
   type SpaceViewKey,
+  type SpaceFeatureKey,
 } from './space-presets'
 
 // Re-exported from here because this module's callers have always imported it
@@ -60,7 +67,62 @@ export class SpacesService {
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
     private lists: ListsService,
+    private plans: PlansService,
   ) {}
+
+  /**
+   * §V2-06 `[07:20]` — the ClickApps gate, server side.
+   *
+   * A client-only gate is not a gate: the wizard can draw a padlock on Custom
+   * Fields and a `curl` can still post `features: ['customFields']`. This is
+   * the line that decides.
+   *
+   * TWO ANSWERS, ON PURPOSE.
+   *
+   *   · An EXPLICIT `features` array naming a ClickApp the plan does not reach
+   *     is REFUSED (403). Somebody asked for something they do not have, and
+   *     silently dropping it is the mirror defect — the request succeeds, the
+   *     toast is green, and the switch they set is off when they come back.
+   *
+   *   · A PRESET's features are FILTERED. The preset is a suggestion Rundesk
+   *     made, not a request the person typed; "Marketing Teams" must remain
+   *     choosable on a free plan, just with fewer switches on. Refusing here
+   *     would make three of the four cards un-clickable on free and blame the
+   *     person for picking one.
+   */
+  private assertClickAppsAllowed(planId: PlanId, requested: readonly string[]): void {
+    const allowed = new Set<string>(clickAppsForPlan(planId))
+    const refused = requested.filter(
+      (key) => (SPACE_FEATURE_KEYS as readonly string[]).includes(key) && !allowed.has(key),
+    ) as SpaceFeatureKey[]
+    if (!refused.length) return
+    const named = refused
+      .map((key) => `${key} (needs ${PLAN_TIERS[CLICK_APP_MIN_PLAN[key]].label})`)
+      .join(', ')
+    throw new ForbiddenException(
+      `Your ${PLAN_TIERS[planId].label} plan does not include ${named}. Upgrade your plan to enable ${refused.length === 1 ? 'it' : 'them'}.`,
+    )
+  }
+
+  /**
+   * Rows out of the `spaces` table with their ClickApps narrowed to the plan.
+   *
+   * A NO-OP on the tiers that withhold nothing (business, enterprise — and
+   * enterprise is every existing workspace), so the rows a workspace that is
+   * not being gated receives are byte-for-byte what they were. That matters:
+   * `features: null` means "predates the column, everything on", and
+   * materialising it into a map on a plan that changes nothing would rewrite
+   * the meaning of every existing space for no reason.
+   */
+  private async narrowToPlan<T extends { features?: unknown }>(workspaceId: string, rows: T[]): Promise<T[]> {
+    if (!rows.length) return rows
+    const plan = await this.plans.getWorkspacePlan(workspaceId)
+    if (!planRestrictsClickApps(plan.id)) return rows
+    return rows.map((row) => ({
+      ...row,
+      features: effectiveFeatures(row.features as Record<string, boolean> | null, plan.id),
+    }))
+  }
 
   /**
    * §V2-06 — "Create a Space", frames `06:52` and `07:06`.
@@ -113,7 +175,17 @@ export class SpacesService {
     const chosenViews =
       data.viewConfig ?? (preset ? { defaultView: preset.defaultView, enabledViews: preset.views } : null)
     const viewConfig = chosenViews === null ? null : normalizeViewConfig(chosenViews)
-    const features = data.features ?? preset?.features
+
+    /*
+     * §V2-06 `[07:20]` — the plan has its say before the row is written.
+     * Explicit choices are refused, the preset's are filtered; see
+     * `assertClickAppsAllowed`.
+     */
+    const plan = await this.plans.getWorkspacePlan(workspaceId)
+    const allowedClickApps = clickAppsForPlan(plan.id)
+    if (data.features) this.assertClickAppsAllowed(plan.id, data.features)
+    const features = data.features ?? preset?.features.filter((f) => allowedClickApps.includes(f))
+
     const permission: SpaceDefaultPermission = SPACE_PERMISSIONS.includes(
       data.defaultPermission as SpaceDefaultPermission,
     )
@@ -243,25 +315,35 @@ export class SpacesService {
   async getSpacesByWorkspace(workspaceId: string, actorId?: string) {
     const base = and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false))
     // Managers (and internal callers with no actor) see every space.
-    if (!actorId || (await isWorkspaceManager(this.db, workspaceId, actorId))) {
-      return this.db.select().from(spaces).where(base)
-    }
-    // Everyone else sees public spaces plus the private ones they belong to.
-    return this.db
-      .select()
-      .from(spaces)
-      .where(
-        and(
-          base,
-          or(
-            ne(spaces.visibility, 'private'),
-            inArray(
-              spaces.id,
-              this.db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId)),
-            ),
-          ),
-        ),
-      )
+    const rows =
+      !actorId || (await isWorkspaceManager(this.db, workspaceId, actorId))
+        ? await this.db.select().from(spaces).where(base)
+        : // Everyone else sees public spaces plus the private ones they belong to.
+          await this.db
+            .select()
+            .from(spaces)
+            .where(
+              and(
+                base,
+                or(
+                  ne(spaces.visibility, 'private'),
+                  inArray(
+                    spaces.id,
+                    this.db
+                      .select({ id: spaceMembers.spaceId })
+                      .from(spaceMembers)
+                      .where(eq(spaceMembers.userId, actorId)),
+                  ),
+                ),
+              ),
+            )
+    /*
+     * THE READ SITE THAT MAKES THE GATE REAL. `useSpaceFeatures` reads exactly
+     * these rows, so narrowing here means a downgrade takes the ClickApp away
+     * everywhere it is read — without a single change in the web, and without a
+     * second copy of the plan rules living in the front end.
+     */
+    return this.narrowToPlan(workspaceId, rows)
   }
 
   async getSpace(spaceId: string) {
@@ -269,9 +351,23 @@ export class SpacesService {
       .select()
       .from(spaces)
       .where(eq(spaces.id, spaceId))
-    return space ?? null
+    if (!space) return null
+    const [narrowed] = await this.narrowToPlan(space.workspaceId, [space])
+    return narrowed ?? null
   }
 
+  /**
+   * DEFECT FIXED HERE. `SpacesController.updateSpace` declares
+   * `defaultPermission` and `features` in its body type, with a comment saying
+   * they are "editable after creation too … a switch you can only ever set once
+   * is a decision the person is stuck with" — and neither ever reached the
+   * table, because this signature did not accept them and the whitelist below
+   * did not copy them. `PUT /spaces/:id {features}` returned 200 and changed
+   * nothing: a stored value no writer honours, which is the mirror of the
+   * mirror. Both are honoured now, and `features` goes through the same plan
+   * gate creation does — a gate that only fires on create is bypassed by
+   * creating on one plan and editing on another.
+   */
   async updateSpace(
     spaceId: string,
     data: Partial<{
@@ -280,6 +376,8 @@ export class SpacesService {
       color: string
       icon: string
       viewConfig: { defaultView?: string; enabledViews?: string[] } | null
+      defaultPermission: SpaceDefaultPermission
+      features: Record<string, boolean> | null
     }>,
     actorId?: string,
   ) {
@@ -291,6 +389,27 @@ export class SpacesService {
       if (data[key] !== undefined) set[key] = data[key]
     }
     if (data.viewConfig !== undefined) set.viewConfig = normalizeViewConfig(data.viewConfig)
+    if (data.defaultPermission !== undefined) {
+      if (!SPACE_PERMISSIONS.includes(data.defaultPermission)) {
+        throw new BadRequestException('invalid defaultPermission')
+      }
+      set.defaultPermission = data.defaultPermission
+    }
+    if (data.features !== undefined) {
+      if (data.features === null) {
+        set.features = null
+      } else {
+        if (typeof data.features !== 'object' || Array.isArray(data.features)) {
+          throw new BadRequestException('features must be an object or null')
+        }
+        const space = await this.getSpaceRow(spaceId)
+        if (!space) throw new NotFoundException('Space not found')
+        const plan = await this.plans.getWorkspacePlan(space.workspaceId)
+        const wanted = SPACE_FEATURE_KEYS.filter((key) => data.features?.[key] === true)
+        this.assertClickAppsAllowed(plan.id, wanted)
+        set.features = Object.fromEntries(SPACE_FEATURE_KEYS.map((k) => [k, wanted.includes(k)]))
+      }
+    }
     const result = await this.db
       .update(spaces)
       .set(set)
@@ -298,6 +417,12 @@ export class SpacesService {
       .returning()
 
     return result[0]
+  }
+
+  /** The raw row, un-narrowed — for the internal callers that need `workspaceId`. */
+  private async getSpaceRow(spaceId: string) {
+    const [space] = await this.db.select().from(spaces).where(eq(spaces.id, spaceId))
+    return space ?? null
   }
 
   async deleteSpace(spaceId: string, actorId?: string, ipAddress?: string) {
@@ -321,7 +446,9 @@ export class SpacesService {
   }
 
   private async assertManageable(spaceId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
-    const space = await this.getSpace(spaceId)
+    // The raw row: this is a permission check, and narrowing ClickApps to the
+    // plan on the way would be a plan lookup nobody here reads.
+    const space = await this.getSpaceRow(spaceId)
     if (!space) throw new NotFoundException('Space not found')
     await assertCanManageContainer(this.db, {
       workspaceId: space.workspaceId,

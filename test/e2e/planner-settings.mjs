@@ -10,19 +10,37 @@
  * check here is a BEFORE/AFTER on the calendar itself — turn the setting on,
  * reload, and look at the grid. None of them assert that the switch moved.
  *
- * FOUR PAGES, NOT SEVEN — and it was three until §V2-14.
+ * FIVE PAGES, NOT SEVEN — it was three until §V2-14, four until §V2-02e.
  *
- * Upcoming meeting, AI Notetaker and Automations are still deliberately absent;
- * the dialog's header says why each would be a page that does nothing. ACCOUNTS
- * has moved from that list to this one: it was excluded because a page here
- * "would be a read-only copy" of the workspace integration, and that reasoning
- * was wrong — the workspace connection was one for everybody, unique on
- * (workspace, provider), and a second Google account overwrote the first.
- * §V2-14 gives a person their own accounts with a default and a busy set, none
- * of which has an entry point anywhere else.
+ * AI Notetaker and Automations are still deliberately absent, and both are
+ * RECORDED DECISIONS rather than gaps: the notetaker needs a meeting bot the
+ * client has not decided whether to build or buy, and Automations is parked at
+ * the client's own instruction (`[14:32]` "yeh aap ko baad mein bataoongi, end
+ * mein" — and the video ends without coming back).
+ *
+ * TWO PAGES HAVE MOVED OFF THAT LIST, AND FOR THE SAME REASON BOTH TIMES: the
+ * recorded reason had gone stale, which the process doc lists as its own defect
+ * class because a stale reason suppresses exactly the investigation that would
+ * find the bug.
+ *
+ *   · ACCOUNTS was excluded because a page here "would be a read-only copy" of
+ *     the workspace integration. The workspace connection was one for
+ *     everybody, unique on (workspace, provider), and a second Google account
+ *     overwrote the first. §V2-14 gives a person their own accounts.
+ *   · UPCOMING MEETING was excluded because it is "mostly a desktop menubar"
+ *     and "two of its three switches would toggle nothing". The countdown and
+ *     the Join pill are not a menubar — they are on the Meetings page and have
+ *     been since §2.8, with nothing able to turn either off. §V2-02e gives all
+ *     three switches a reader; `planner-upcoming-meeting.mjs` proves it.
  *
  * The count is still asserted, because the rule has not changed: a nav page
- * that toggles nothing is a facade. Only the number of real ones has.
+ * that toggles nothing is a facade. Only the number of real ones has. THE
+ * ORDER is asserted too, now, because the frame lists them top to bottom and a
+ * nav is the one place a reordering goes unnoticed.
+ *
+ * AND THE FOOTER. Frame `14:10` draws What's new · Report a problem · Feature
+ * requests under the nav. Each of the three has to reach something that
+ * exists — the dead-control defect is not less dead for being in small type.
  *
  *   node test/e2e/planner-settings.mjs --dist apps/web/dist
  */
@@ -40,7 +58,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 20
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -132,6 +150,21 @@ const ASSIGNED = [
  */
 let settings = {}
 
+/*
+ * §V2-02e — what the footer's three links have to reach.
+ *
+ * "What's new" reads the workspace's own announcements, the same endpoint the
+ * app-shell banner reads. Two of them, with distinguishable titles, because a
+ * check that only counts rows passes on a pane that renders the same row
+ * twice.
+ */
+const NEWS = [
+  { id: 'a1', title: 'Planner settings', body: 'Five pages now.' },
+  { id: 'a2', title: 'Recurring blocks', body: 'Next occurrences on the grid.' },
+]
+/** Every ticket the dialog filed, in order, with the body it sent. */
+const tickets = []
+
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
 
@@ -165,6 +198,17 @@ try {
      * which also appears in the workspace-members list.
      */
     if (/\/tasks\/workspace\/[^/]+\/members\//.test(url)) return reply(ASSIGNED)
+    /* The footer's three destinations. */
+    if (url.includes('/announcements/active')) return reply(NEWS)
+    if (url.includes('/support/tickets')) {
+      if (req.method() === 'POST') {
+        let body = null
+        try { body = JSON.parse(req.postData() ?? '{}') } catch { body = { parseFailed: true } }
+        tickets.push(body)
+        return reply({ id: `tkt-${tickets.length}-abcdef` })
+      }
+      return reply([])
+    }
     return reply([])
   })
 
@@ -175,11 +219,31 @@ try {
   console.log('\n▶ the gear opens the settings `[frame 14:10]`')
   await page.locator('[data-testid="planner-settings"]').click()
   await page.waitForSelector('[data-testid="planner-settings-dialog"]', { timeout: 10_000 })
-  const navs = await page.locator('[data-testid^="planner-settings-nav-"]').count()
+  const navIds = await page
+    .locator('[data-testid^="planner-settings-nav-"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
   chk(
-    navs === 4,
-    'the nav offers exactly the four pages that do something',
-    `the nav had ${navs} pages — the frame shows seven, and three of them would toggle nothing here`,
+    navIds.length === 5,
+    'the nav offers exactly the five pages that do something',
+    `the nav had ${navIds.length} pages — the frame shows seven, and two of them are recorded ` +
+      'decisions rather than gaps (AI Notetaker needs a meeting bot; Automations is parked at `[14:32]`)',
+  )
+  /*
+   * THE ORDER, not just the count. The frame lists them top to bottom and a
+   * count alone passes on a nav that has been shuffled — which is a change
+   * nobody would notice and everybody would feel.
+   */
+  chk(
+    JSON.stringify(navIds) ===
+      JSON.stringify([
+        'planner-settings-nav-appearance',
+        'planner-settings-nav-accounts',
+        'planner-settings-nav-sidebar',
+        'planner-settings-nav-upcomingMeeting',
+        'planner-settings-nav-timeBlocking',
+      ]),
+    "and in the frame's own order, Appearance → Accounts → Sidebar → Upcoming meeting → Time blocking",
+    `the nav read ${JSON.stringify(navIds)}`,
   )
 
   console.log('\n▶ Appearance changes the grid, not just the switch')
@@ -343,6 +407,72 @@ try {
     chk(false, 'and choosing one sends it to the account', 'skipped — no control to choose from')
   }
 
+  /* ─────────────────────────────────────────────────────────────────────────
+   * §V2-02e — the footer of frame `14:10`.
+   *
+   * Three links under the nav. Each check below is about what the link REACHES
+   * — rows that came from the server, a request that went out — and not about
+   * the link being on screen, because a dead control is on screen too.
+   */
+  console.log("\n▶ the footer: What's new · Report a problem · Feature requests")
+  const footerIds = await page
+    .locator('[data-testid^="planner-settings-footer-"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+  chk(
+    JSON.stringify(footerIds) ===
+      JSON.stringify([
+        'planner-settings-footer-whatsNew',
+        'planner-settings-footer-reportProblem',
+        'planner-settings-footer-featureRequest',
+      ]),
+    'the footer draws the frame’s three links, in the frame’s order',
+    `the footer read ${JSON.stringify(footerIds)}`,
+  )
+
+  await page.locator('[data-testid="planner-settings-footer-whatsNew"]').click()
+  const newsArrived = await waitUntil(
+    async () => (await page.locator('[data-testid="planner-whats-new-item"]').count()) === NEWS.length,
+    { timeoutMs: 8000 },
+  )
+  const newsTitles = await page.locator('[data-testid="planner-whats-new-item"]').allInnerTexts()
+  chk(
+    newsArrived && NEWS.every((n) => newsTitles.some((text) => text.includes(n.title))),
+    "\"What's new\" lists what the workspace actually published, both of them",
+    `it listed ${JSON.stringify(newsTitles)} for ${NEWS.length} announcements — a link that ` +
+      'opens an empty pane is the dead control with an extra step',
+  )
+
+  /*
+   * The two tickets. Asserted on the REQUEST, not on the receipt: a pane that
+   * printed a ticket id it made up would look identical, and the subject and
+   * priority are the two fields that route a ticket to a human.
+   */
+  await page.locator('[data-testid="planner-settings-footer-reportProblem"]').click()
+  await page.locator('[data-testid="planner-support-body"]').fill('The grid stopped drawing blocks.')
+  await page.locator('[data-testid="planner-support-send"]').click()
+  const problemFiled = await waitUntil(() => tickets.length === 1, { timeoutMs: 8000 })
+  chk(
+    problemFiled &&
+      tickets[0]?.subject === 'Problem report: Planner' &&
+      tickets[0]?.priority === 'high' &&
+      tickets[0]?.body === 'The grid stopped drawing blocks.',
+    '"Report a problem" files a real support ticket, with what was typed in it',
+    `the dialog sent ${JSON.stringify(tickets[0] ?? null)}`,
+  )
+
+  await page.locator('[data-testid="planner-settings-footer-featureRequest"]').click()
+  await page.locator('[data-testid="planner-support-body"]').fill('Let me colour blocks by list.')
+  await page.locator('[data-testid="planner-support-send"]').click()
+  const featureFiled = await waitUntil(() => tickets.length === 2, { timeoutMs: 8000 })
+  chk(
+    featureFiled &&
+      tickets[1]?.subject === 'Feature request: Planner' &&
+      tickets[1]?.priority === 'low' &&
+      tickets[1]?.subject !== tickets[0]?.subject,
+    'and "Feature requests" files a DIFFERENT one — a wish is not an outage',
+    `the two tickets were ${JSON.stringify(tickets)}`,
+  )
+
   await ctx.close()
 } catch (e) {
   failed += 1
@@ -352,9 +482,15 @@ try {
   server.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
-  if (ran < EXPECTED_CHECKS) {
+  /*
+   * EXACT, not `>=`. With `<` a branch that silently stopped running turned
+   * into a shorter run that still passed; with `!==` a skipped branch and an
+   * accidentally duplicated one are both failures, which is what an expected
+   * count is for.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ${ran} checks ran, ${EXPECTED_CHECKS} expected — this run did not do what it says, ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)

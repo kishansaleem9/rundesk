@@ -73,6 +73,16 @@ function harness(opts: { available?: boolean; skillThrows?: boolean } = {}) {
   const timeline: string[] = []
   const ai = {
     isAvailable: () => opts.available !== false,
+    /*
+     * §V2-11 — "not configured" is a FAILED RUN and is written down as one
+     * (migration 0150), so the route records before it refuses. On the timeline
+     * because the ORDER matters: the row has to be written before the 503
+     * leaves, or the Activity log's Status filter comes up empty exactly when
+     * somebody is trying to find out why nothing works.
+     */
+    recordFailure: async (feature: string) => {
+      timeline.push(`record failure ${feature}`)
+    },
     buildWorkspaceContext: async () => {
       timeline.push('call buildWorkspaceContext')
       return 'Workspace: Acme'
@@ -240,7 +250,7 @@ describe('G13-10 — the assistant says what it is reading', () => {
     // This happens BEFORE the stream is opened, so it must stay a plain 503 —
     // opening a stream just to say "not configured" would leave every caller
     // parsing SSE to discover the feature is off.
-    const { controller } = harness({ available: false })
+    const { controller, timeline } = harness({ available: false })
     let status: number | undefined
     let body: unknown
     const res = {
@@ -252,5 +262,15 @@ describe('G13-10 — the assistant says what it is reading', () => {
     await controller.chat(USER as never, { messages: MESSAGES }, res as never)
     assert.equal(status, 503)
     assert.deepEqual(body, { error: 'AI features are not configured' })
+    /*
+     * §V2-11 — and it is RECORDED, before the refusal goes out. Until 0150 the
+     * commonest AI failure this product has left no trace at all, which is why
+     * the Activity log's Status filter could not exist.
+     */
+    assert.deepEqual(
+      timeline,
+      ['record failure chat'],
+      `a refused-because-unconfigured run was not written down — timeline: ${JSON.stringify(timeline)}`,
+    )
   })
 })

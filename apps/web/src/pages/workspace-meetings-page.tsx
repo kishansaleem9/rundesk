@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Link, useParams, useSearch } from '@tanstack/react-router'
+import { useQuery } from '@tanstack/react-query'
 import { Button, Input, Badge, cn } from '@rundesk/ui'
 import {
   CalendarClock,
@@ -13,6 +14,7 @@ import {
   Video,
 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
+import { api } from '../lib/api'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { useAuthStore } from '../store/auth'
 import {
@@ -177,6 +179,23 @@ export function MeetingsPage() {
 }
 
 /**
+ * §V2-02e — the three switches the "Upcoming meeting" settings page writes.
+ *
+ * SAME QUERY KEY as the planner's, deliberately: one cache entry for one
+ * person's planner settings, so changing a switch in the calendar dialog and
+ * coming back here shows the change rather than a stale copy of it. The
+ * meetings page is the only reader of these three, which is what makes that
+ * page real — the recorded reason for leaving it out said two of its three
+ * switches "would toggle nothing", and all three turn off something this list
+ * has drawn since §2.8 with no way to stop it.
+ */
+type UpcomingSettings = {
+  upcomingShowTimeLeft?: boolean
+  upcomingQuickJoin?: boolean
+  upcomingDesktopNotify?: boolean
+}
+
+/**
  * §2.8 — "Upcoming Meetings" with a Join pill and her proximity badge.
  *
  * When there is nothing upcoming it offers to connect a calendar, which is the
@@ -186,6 +205,56 @@ export function MeetingsPage() {
 function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId: string }
+
+  const { data: prefs } = useQuery({
+    queryKey: ['planner-settings', workspaceId],
+    queryFn: () => api<UpcomingSettings>(`/planner/${workspaceId}/settings`),
+    enabled: !!workspaceId,
+  })
+  const showTimeLeft = prefs?.upcomingShowTimeLeft !== false
+  const quickJoin = prefs?.upcomingQuickJoin !== false
+  const desktopNotify = prefs?.upcomingDesktopNotify === true
+
+  /*
+   * §V2-02e — "Show in desktop".
+   *
+   * The reason this page was kept out of the settings nav said Rundesk has no
+   * desktop app, and that is still true — but a desktop notification is not a
+   * desktop app. It is what the browser raises outside the tab, which is the
+   * thing the switch is actually for: knowing a call has started while you are
+   * looking at something else.
+   *
+   * Raised ONCE PER MEETING, tracked in a ref rather than in state, because
+   * this list refetches every minute and a notification that repeated every
+   * minute for an hour is the reason people turn notifications off for good.
+   * Nothing is requested unless the switch is on — permission is asked for at
+   * the moment it is needed and never on page load.
+   */
+  const notified = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    if (!desktopNotify) return
+    const Notif = typeof window === 'undefined' ? undefined : window.Notification
+    if (!Notif || Notif.permission === 'denied') return
+    const raise = () => {
+      for (const meeting of meetings) {
+        if (!isJoinable(meeting.startsAt) || notified.current.has(meeting.id)) continue
+        notified.current.add(meeting.id)
+        try {
+          // eslint-disable-next-line no-new
+          new Notif(t('meetings.desktopTitle'), {
+            body: meeting.title,
+            tag: `rundesk-meeting-${meeting.id}`,
+          })
+        } catch {
+          // A blocked or unsupported notification must not take the page with
+          // it; the badge and the Join pill are still on screen.
+        }
+      }
+    }
+    if (Notif.permission === 'granted') raise()
+    else void Promise.resolve(Notif.requestPermission()).then((p) => { if (p === 'granted') raise() })
+  }, [desktopNotify, meetings, t])
+
   return (
     <section className="space-y-2" data-testid="meetings-upcoming">
       <h2 className="text-sm font-medium flex items-center gap-1.5">
@@ -219,10 +288,13 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="font-medium truncate">{meeting.title}</span>
-                    {until && (
+                    {/* §V2-02e — the countdown the "Upcoming meeting" page's
+                        first switch turns off. */}
+                    {showTimeLeft && until && (
                       <Badge
                         variant={joinable ? 'default' : 'secondary'}
                         className="text-[10px] shrink-0"
+                        data-testid={`meeting-until-${meeting.id}`}
                       >
                         {until === 'now' ? t('meetings.now') : until}
                       </Badge>
@@ -239,8 +311,9 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
                   )}
                 </div>
                 {/* No join link means there is nothing to join — offering a
-                    dead button would be worse than offering none. */}
-                {meeting.joinUrl && (
+                    dead button would be worse than offering none. §V2-02e adds
+                    the second condition: the quick-join switch. */}
+                {quickJoin && meeting.joinUrl && (
                   <Button
                     asChild
                     size="sm"

@@ -5,6 +5,18 @@
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#080d1f" />
+    <!--
+      THE TITLE THE TAB RESTS AT.
+
+      Until §V2-02f nothing in the app ever wrote `document.title`, so this
+      string was the whole of what a tab could say: the same words while a time
+      block ran, while it ended, and on a page with no block at all.
+      `lib/use-focus-tab-title.ts` now owns the title while a block is running
+      ("Work on dbgdh · 2m 3s left", frames `15:20`–`16:20`) and puts THIS
+      string back the moment nothing is — it captures it at module load, so
+      changing the copy here changes what a finished countdown returns to, and
+      nothing else needs editing.
+    -->
     <title>Rundesk — modern work, run on Aura</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
