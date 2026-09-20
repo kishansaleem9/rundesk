@@ -29,17 +29,29 @@ Postgres and a real browser — never because the code was written.
 check from decoration. Of the patches that have been applied and observed:
 
 ```
-164 / 167 reddened the check they were aimed at
+174 / 179 reddened the check they were aimed at
 ```
 
-Three did not, all in `folder-create`, and each needs an answer rather than a
-shrug:
+**All five that did not are in `folder-create`, and they are a pattern rather
+than five accidents.** Five of that suite's twelve patches left it green, and
+four of them attack the same thing from different angles:
 
-| patch | note |
+| patch | what it breaks |
 | --- | --- |
-| `folder-create-12-toast-bottom-right` | edits `packages/ui/src/components/toaster.tsx`, outside the row's ownership. The only way to redden the measured-position check |
-| `folder-create-2-no-index` | did not redden — find out whether the check leans on the API's 409 rather than on the index |
-| `folder-create-3-case-sensitive` | same question for the `lower(name)` half |
+| `folder-create-2-no-index` | drops the unique index |
+| `folder-create-3-case-sensitive` | drops the `lower(name)` half |
+| `folder-create-6-rename-door-open` | removes the guard on rename |
+| `folder-create-8-move-door-open` | removes the guard on move |
+| `folder-create-12-toast-bottom-right` | moves the toast; edits `packages/ui`, outside the row's ownership |
+
+The suite claims twenty checks including "the INDEX refuses a direct SQL
+insert" and 409s on rename and on move. If removing the index, the
+case-folding, the rename guard and the move guard all leave it green, then
+those checks are very likely resting on the API's own 409 — which
+`assertFolderNameFree` raises before anything reaches the database — rather
+than on the constraint and the guards themselves. **Treat `folder-create` as
+unverified until this is settled**, and start here: it is the clearest live
+lead in the whole queue.
 
 **Not yet applied at all — about 66 patches across 8 suites:**
 
