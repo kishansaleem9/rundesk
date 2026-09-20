@@ -136,6 +136,14 @@ jobs:
       - name: Migration sequence guardrail
         run: node scripts/check-migration-order.mjs
 
+      # Step 6 of the re-audit applies deliberately-broken edits to the tree to
+      # prove a check can fail. On a shared tree, a `git add -A` eventually
+      # catches one — and one reached `43f7b57`, hiding the Add-fields button
+      # behind a testid renamed `-DISABLED`. Nothing failed; the diff read as a
+      # decision somebody had taken. Vigilance is not a control, so this is.
+      - name: No break patches in the tree
+        run: node scripts/check-no-break-patches.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
