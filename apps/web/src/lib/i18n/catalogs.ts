@@ -306,7 +306,7 @@ export const en = {
   'list.sortNewest': 'Newest',
   'list.sortDueDate': 'Due date',
   'list.sortPriority': 'Priority',
-  'list.groupByStatus': 'Status',
+  'list.groupByStatus': 'Group: Status',
   'list.groupByPriority': 'Group: Priority',
   'list.groupByAssignee': 'Group: Assignee',
   'list.saveView': "Save view",

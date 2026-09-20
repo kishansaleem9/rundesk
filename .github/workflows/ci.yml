@@ -984,6 +984,18 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/list-save-view.mjs --dist apps/web/dist
 
+      # §M `12:10` — the three chips over a List view: the Group chip naming its
+      # current value, the Subtasks chip, and the Columns panel. The check with
+      # teeth is the third Subtasks option: it asserts `includeSubtasks=true`
+      # actually leaves the browser. The parameter was read by the controller
+      # and honoured by the service, and no web code had ever sent it.
+      - name: List view controls
+        if: '!cancelled()'
+        run: node test/e2e/list-view-controls.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §G02-9 — the source strip, and an unconnected source saying so rather
       # than returning an empty list. The Gmail/SharePoint QUERIES are not
       # exercised: they need OAuth credentials no test environment holds.
