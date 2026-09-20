@@ -136,16 +136,39 @@ export class AuthService {
 
   async login(user: typeof users.$inferSelect, meta: SessionMeta = {}) {
     const memberships = await this.workspacesService.findByMember(user.id)
-    const primaryWorkspaceId = memberships[0]?.workspace.id ?? null
 
-    const settings = await this.securitySettings.get(primaryWorkspaceId)
+    /*
+     * WHICH WORKSPACE'S POLICY GOVERNS THIS SESSION.
+     *
+     * This used to be `memberships[0]` — the first row of a query that had no
+     * `ORDER BY`. That one arbitrary row decided four things: the
+     * `workspaceId` claim baked into the access token, the feature flags baked
+     * in beside it, the refresh-token TTL and concurrent-session cap, and
+     * whether the IP allowlist applied at all. For anyone in two workspaces,
+     * Postgres was choosing the security policy.
+     *
+     * `validateUser`, seventy lines above, already asked the right question —
+     * `getEffectiveForUser`, which orders by `joinedAt` and returns the role of
+     * THAT membership. So the password-lockout policy came from one workspace
+     * while the IP allowlist came from whichever one the planner put first, and
+     * they were not necessarily the same workspace in the same sign-in.
+     *
+     * Now both paths resolve identically. `findByMember` is ordered to match,
+     * so the switcher's first entry is the workspace being described here.
+     */
+    const { settings, isWorkspaceAdmin } = await this.securitySettings.getEffectiveForUser(user.id)
+    const primaryWorkspaceId = settings.workspaceId
 
     // IP allowlist: block credential/refresh logins from disallowed IPs. Fails
     // OPEN when the list is empty or the client IP can't be determined, and
     // exempts workspace admins unless the policy opts them in (emergency access).
     if (settings.ipAllowlistEnabled && settings.ipAllowlist.length > 0 && meta.ip) {
-      const isAdminHere = memberships[0]?.role === 'workspace_admin'
-      const exempt = isAdminHere && !settings.ipAllowlistIncludeAdmins
+      /*
+       * The exemption reads the role of the SAME membership the policy came
+       * from. It used to read `memberships[0]?.role`, so being an admin in any
+       * workspace could exempt you from a different workspace's allowlist.
+       */
+      const exempt = isWorkspaceAdmin && !settings.ipAllowlistIncludeAdmins
       if (!exempt && !isIpAllowed(meta.ip, settings.ipAllowlist)) {
         await this.security.logAuditEvent({
           workspaceId: primaryWorkspaceId ?? undefined,

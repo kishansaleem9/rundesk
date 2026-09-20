@@ -1,7 +1,7 @@
 import { Injectable, Inject } from '@nestjs/common'
 import { createHash } from 'node:crypto'
-import { asc, eq } from 'drizzle-orm'
-import { workspaceSecuritySettings, workspaceMembers } from '@rundesk/db'
+import { and, asc, eq } from 'drizzle-orm'
+import { workspaceSecuritySettings, workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from './security.service'
@@ -171,10 +171,20 @@ export class WorkspaceSecuritySettingsService {
    * the IP-allowlist admin exemption).
    */
   async getEffectiveForUser(userId: string): Promise<{ settings: SecuritySettings; isWorkspaceAdmin: boolean }> {
+    /*
+     * ARCHIVED WORKSPACES ARE NOT CANDIDATES. This selected straight from
+     * `workspace_members` with no join, so a person whose oldest membership
+     * was in a workspace they had since archived took their session policy —
+     * and, now that `login` resolves through here, their token's `workspaceId`
+     * claim — from a workspace that no longer appears in their own switcher.
+     * `WorkspacesService.findByMember` has always excluded archived ones; this
+     * now agrees with it, which is the point of resolving in one place.
+     */
     const [membership] = await this.db
       .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
       .from(workspaceMembers)
-      .where(eq(workspaceMembers.userId, userId))
+      .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
+      .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, false)))
       .orderBy(asc(workspaceMembers.joinedAt))
       .limit(1)
     if (!membership) return { settings: { workspaceId: null, ...SECURITY_DEFAULTS }, isWorkspaceAdmin: false }

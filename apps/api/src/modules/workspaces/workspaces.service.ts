@@ -167,12 +167,30 @@ export class WorkspacesService {
     }
   }
 
+  /**
+   * A member's own workspaces, oldest membership first.
+   *
+   * THE ORDER IS NOT COSMETIC. This query had no `ORDER BY` at all, and
+   * Postgres is free to return an unordered join in whatever order the plan
+   * produces — which changes as rows are updated, as the planner switches
+   * scan types, and after a vacuum. Eight surfaces render this list, so a
+   * person's workspace switcher could reshuffle between two page loads for
+   * no reason they could see.
+   *
+   * `joinedAt` ASC, deliberately matching
+   * `WorkspaceSecuritySettingsService.getEffectiveForUser`, which already
+   * ordered by it. Those two now agree on which workspace is "first", and
+   * "first in your switcher" is the same workspace as "the one whose
+   * security policy governs your session" — which is the only defensible
+   * reading of a list that a security decision is taken from.
+   */
   async findByMember(userId: string) {
     return this.db
       .select({ workspace: workspaces, role: workspaceMembers.role })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, false)))
+      .orderBy(asc(workspaceMembers.joinedAt))
   }
 
   /** Soft-delete (archive) a workspace so it disappears from members' lists. */
