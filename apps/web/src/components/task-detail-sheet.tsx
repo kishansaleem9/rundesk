@@ -2539,8 +2539,7 @@ function OverviewPanel({
         {onAddFields && (
           <button
             type="button"
-            data-testid="task-add-fields-DISABLED"
-            hidden
+            data-testid="task-add-fields"
             onClick={onAddFields}
             className="ml-auto inline-flex items-center gap-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-accent/10"
           >
@@ -6647,10 +6646,14 @@ function ActivityPanel({ taskId, listId }: { taskId: string; listId?: string | n
         </button>
       )}
       {/* The count is the number of rows THIS request came back with, so it
-          describes the server's answer rather than what fitted on screen. */}
+          describes the server's answer rather than what fitted on screen.
+          `data-pending` is here so a reader — or a check — can tell an answer
+          of nothing from a request still in flight: both draw as 0, and only
+          one of them means the search found nothing. */}
       <span
         data-testid="activity-match-count"
         data-count={entries.length}
+        data-pending={activityQuery.isFetching ? 'true' : 'false'}
         data-filtered={filtersOn ? 'true' : 'false'}
         className="text-[11px] tabular-nums text-muted-foreground"
       >

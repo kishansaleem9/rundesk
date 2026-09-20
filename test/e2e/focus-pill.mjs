@@ -192,11 +192,46 @@ try {
   // ── the browser ──────────────────────────────────────────────────────────
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 } })).newPage()
 
-  let blockCalls = []
+  /*
+   * TWO FEATURES SHARE THIS ENDPOINT, which is why what is counted below is a
+   * WINDOW and not a URL prefix.
+   *
+   *   · the countdown (`use-focus-tab-title.ts`) asks for local midnight minus
+   *     a day through local midnight plus two — a fixed three-day window, wide
+   *     on purpose so a block that began at 23:00 and is still running at 00:30
+   *     is inside it;
+   *   · the planner GRID (`workspace-planner-page.tsx:422`) asks for whatever
+   *     days it is drawing — one, seven or thirty, anchored on the view.
+   *
+   * The first version of this counted every `/planner/:ws/blocks?` request and
+   * reported two on the planner page, because the grid under the header is a
+   * different feature doing its own job. Matching the window exactly separates
+   * them: the grid can never ask for midnight-minus-one-day through
+   * midnight-plus-two, since `plannerRange` produces day, week and month spans
+   * that start on the view's own boundary.
+   */
+  const blockCalls = []
   page.on('request', (req) => {
     const url = req.url()
-    if (url.includes(`/planner/${workspaceId}/blocks?`)) blockCalls.push(url)
+    if (!url.includes(`/planner/${workspaceId}/blocks?`)) return
+    const params = new URL(url).searchParams
+    blockCalls.push({ from: params.get('from'), to: params.get('to') })
   })
+  /**
+   * The countdown's window, computed with the SAME arithmetic the hook uses
+   * (`startOfDayIso()` then ±`DAY_MS`) and in the BROWSER, so the local
+   * timezone and any DST offset are the ones the app actually applied.
+   */
+  const countdownWindow = () =>
+    page.evaluate(() => {
+      const DAY_MS = 86_400_000
+      const midnight = new Date()
+      midnight.setHours(0, 0, 0, 0)
+      return {
+        from: new Date(midnight.getTime() - DAY_MS).toISOString(),
+        to: new Date(midnight.getTime() + 2 * DAY_MS).toISOString(),
+      }
+    })
 
   const pill = () => page.getByTestId('focus-block-pill')
   const pillRemaining = () =>
@@ -227,10 +262,9 @@ try {
    */
   const askedForNow = await waitUntil(
     async () =>
-      blockCalls.some((url) => {
-        const params = new URL(url).searchParams
-        const from = Date.parse(params.get('from') ?? '')
-        const to = Date.parse(params.get('to') ?? '')
+      blockCalls.some((call) => {
+        const from = Date.parse(call.from ?? '')
+        const to = Date.parse(call.to ?? '')
         const now = Date.now()
         return Number.isFinite(from) && Number.isFinite(to) && from <= now && to > now
       }),
@@ -263,17 +297,23 @@ try {
   })
   // A FULL RELOAD, so the query cache is empty by construction rather than by
   // waiting out `staleTime: 30_000`. Timing is not a way to force a cache miss.
-  blockCalls = []
+  // Truncated in place, not reassigned: the request listener closed over this
+  // array, and a fresh one would leave it filling a list nobody reads.
+  blockCalls.length = 0
   await page.reload({ waitUntil: 'domcontentloaded' })
   const appeared = await waitUntil(async () => (await pill().count()) === 1, { timeoutMs: 25_000 })
   /*
    * Captured HERE, the moment the pill exists, and asserted further down.
-   * Reading `blockCalls.length` at the point of the assertion would put the
-   * 2.6-second wait and everything after it inside the window, and a slow
-   * machine would eventually cross the 30-second `refetchInterval` and fail
-   * for a reason that is not the bug.
+   * Reading these at the point of the assertion would put the 2.6-second wait
+   * and everything after it inside the window, and a slow machine would
+   * eventually cross the 30-second `refetchInterval` and fail for a reason
+   * that is not the bug.
    */
-  const fetchesForFirstPaint = blockCalls.length
+  const callsForFirstPaint = blockCalls.slice()
+  const window3Day = await countdownWindow()
+  const countdownFetches = callsForFirstPaint.filter(
+    (call) => call.from === window3Day.from && call.to === window3Day.to,
+  )
   const labelText = appeared
     ? await page.getByTestId('focus-block-pill-label').textContent().catch(() => null)
     : null
@@ -346,21 +386,60 @@ try {
   console.log('\n▶ one countdown, not two')
   /*
    * The pill and the tab title are two surfaces for the same fact. Given a
-   * fetch each they are two countdowns, and two countdowns drift. Counted from
-   * the reload above, before any wait long enough for the 30s refetch to fire.
+   * fetch each they are two countdowns, and two countdowns drift.
+   *
+   * COUNTED BY WINDOW, not by endpoint — see the listener above. The planner
+   * grid under this header fetches the same route for the days it is drawing,
+   * and folding its request into this number measures the page rather than the
+   * countdown. The countdown's window is the fixed three-day one; exactly one
+   * request may carry it however many surfaces read it, and a hook that stops
+   * sharing its query key shows up here as two requests for the same URL.
    */
   chk(
-    fetchesForFirstPaint === 1,
-    `the running blocks were fetched once for both surfaces (${fetchesForFirstPaint} request)`,
-    `${fetchesForFirstPaint} requests for /planner/${workspaceId}/blocks between the reload and the ` +
-      'pill appearing — a second fetch is a second countdown waiting to disagree with the first',
+    countdownFetches.length === 1,
+    `the countdown's own window was fetched once for both surfaces (${countdownFetches.length} request)`,
+    `${countdownFetches.length} requests carried the countdown window ` +
+      `${window3Day.from} → ${window3Day.to} between the reload and the pill appearing — ` +
+      'a second fetch is a second countdown waiting to disagree with the first. ' +
+      `Every block request seen: ${JSON.stringify(callsForFirstPaint)}`,
   )
-  const titleLeft = remainingSeconds(await page.title())
-  const pillLeft = remainingSeconds(await pillRemaining())
+
+  /*
+   * And the two surfaces say the same words. Not "within a second of each
+   * other": both are `formatRemaining` over the same block, so the pill's
+   * string must appear verbatim inside the title, which is
+   * `{{label}} · {{remaining}} left`.
+   *
+   * Read pill → title → pill. If the two pill reads match, no second boundary
+   * was crossed between them and the title read is inside the same second, so
+   * the comparison is exact rather than tolerant. Straddling a tick is retried,
+   * never forgiven.
+   */
+  let pillText = null
+  let titleText = null
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const before = await pillRemaining()
+    const title = await page.title()
+    const after = await pillRemaining()
+    if (before && after && before === after) {
+      pillText = before
+      titleText = title
+      break
+    }
+  }
+  /*
+   * `pillNumber !== null` is not decoration: `"anything".includes("")` is
+   * true, so an empty or wordless pill would satisfy the containment test on
+   * its own. The remainder has to be a number before the comparison means
+   * anything.
+   */
+  const pillNumber = remainingSeconds(pillText)
   chk(
-    titleLeft !== null && pillLeft !== null && Math.abs(titleLeft - pillLeft) <= 1,
-    `and the tab and the pill agree (${titleLeft}s vs ${pillLeft}s)`,
-    `the tab says ${titleLeft}s left and the pill says ${pillLeft}s — one fact, two answers`,
+    pillNumber !== null && !!titleText && titleText.includes(pillText),
+    `and the tab carries the pill's own remainder verbatim (${JSON.stringify(pillText)})`,
+    `the pill reads ${JSON.stringify(pillText)} and the tab reads ${JSON.stringify(titleText)} — ` +
+      'one fact, two answers' +
+      (pillText === null ? ' (or the pill never held still for two reads in a row)' : ''),
   )
 
   console.log('\n▶ frame `16:05` — it follows you off the planner')
