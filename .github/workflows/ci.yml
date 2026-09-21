@@ -174,6 +174,13 @@ jobs:
       - name: Break patches still name a check that exists
         run: node scripts/check-break-claims.mjs
 
+      # And the denominator, which this audit had never printed: 53 of 101
+      # suites have no break patch at all. A suite with none is not a suite
+      # that failed — it is one about which nothing is known, and green says
+      # nothing either way. Ratcheted, so a new suite arrives with a patch.
+      - name: No new suite arrives without a break patch
+        run: node scripts/check-break-coverage.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
