@@ -44,6 +44,14 @@ DIST="/tmp/claude-0/dist-$LANE"
 # seven lanes each firing their own `vite build` on four cores turns one
 # forgotten rebuild into a thundering herd. The rebuild is one line and the
 # message carries it.
+#
+# DELIBERATELY CONSERVATIVE: this compares mtimes, and `git checkout`, `git
+# add` and friends move an mtime without changing a byte — so it will sometimes
+# refuse over a file that is identical to what the bundle was built from. That
+# costs one rebuild. The opposite error costs a run that reports on code which
+# no longer exists, and an afternoon working out why. Hashing every source file
+# would be exact and would also read thousands of files before every suite;
+# when the two errors are that asymmetric, take the cheap one.
 if [ -f "$DIST/index.html" ]; then
   NEWER=$(find apps/web/src packages/ui/src packages/feature-flags/src \
             -name '*.ts' -o -name '*.tsx' -o -name '*.css' 2>/dev/null \

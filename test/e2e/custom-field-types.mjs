@@ -445,16 +445,15 @@ try {
       '— a uuid in a cell is a reference nobody can follow',
   )
 
-  await tasksRow.getByTestId(`cf-task-remove-${other.id}`).click()
-  chk(
-    await waitUntil(async () => {
-      const held = (await serverValues(subject.id)).Blockers
-      return Array.isArray(held) && held.length === 0
-    }, { timeoutMs: 20_000 }),
-    'and removing one writes through — the server holds no ids afterwards',
-    `the server still holds ${JSON.stringify((await serverValues(subject.id)).Blockers)}`,
-  )
-
+  /*
+   * THE SIGNATURE BLOCK RUNS BEFORE THE ONE MUTATION ABOVE IT, and the order is
+   * load-bearing rather than tidy. Removing the related task empties the row
+   * above the pad, the panel refetches, and everything below it moves up by
+   * one row — between reading the pad's box and drawing in it, which put the
+   * pointer outside the pad and lost the stroke. It showed up under a break
+   * patch that added a field, never on the unpatched tree, which is exactly the
+   * shape of a check that fails for a reason that is not the code.
+   */
   const signatureRow = page.getByTestId('custom-field-row').filter({ hasText: 'Sign here' })
   chk(
     Number(await signatureRow.getByTestId('cf-signature-pad').getAttribute('data-strokes')) === 2,
@@ -465,6 +464,7 @@ try {
   )
 
   /* Draw a third stroke with the mouse, and ask the SERVER what it got. */
+  await signatureRow.getByTestId('cf-signature-pad').scrollIntoViewIfNeeded()
   const pad = await signatureRow.getByTestId('cf-signature-pad').boundingBox()
   if (!pad) throw new Error('the signature pad has no box to draw in')
   await page.mouse.move(pad.x + 10, pad.y + pad.height - 10)
@@ -487,6 +487,17 @@ try {
       { timeoutMs: 20_000 }),
     'and Clear really clears it on the server, not only on screen',
     `the server still holds ${JSON.stringify((await serverValues(subject.id))['Sign here'])}`,
+  )
+
+  /* Last, because it is the mutation that moves everything below it. */
+  await tasksRow.getByTestId(`cf-task-remove-${other.id}`).click()
+  chk(
+    await waitUntil(async () => {
+      const held = (await serverValues(subject.id)).Blockers
+      return Array.isArray(held) && held.length === 0
+    }, { timeoutMs: 20_000 }),
+    'and removing a related task writes through — the server holds no ids afterwards',
+    `the server still holds ${JSON.stringify((await serverValues(subject.id)).Blockers)}`,
   )
 
   // =========================================================================
