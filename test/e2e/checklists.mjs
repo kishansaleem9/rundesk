@@ -243,6 +243,11 @@ try {
     'the checkbox click never reached the server',
   )
 
+  chk(
+    await waitUntil(async () => /\b1\b/.test(await countText()), { timeoutMs: 15_000 }),
+    'ticking one drops the count to 1 — it counts open, not total',
+    `after ticking an item the header still says "${await countText()}"`,
+  )
   /*
    * AND THE ORDER THE ITEMS WERE TYPED IN. `addChecklistItem` writes
    * `position: max + 1` and `getTask` reads `items` back
@@ -257,8 +262,14 @@ try {
    * sharing a position have no order to assert: the defect is that the
    * question stops having an answer, not that the answer is wrong.
    *
-   * Added here, AFTER the open-count checks, because a third item would make
-   * "2 open" read 3 — a new check must not move the ground under an old one.
+   * Added here, AFTER EVERY READER OF THE COUNT, because a third item moves
+   * it. The first placement was after "ticking an item is saved" and before
+   * "ticking one drops the count to 1", which then saw 2 and reddened — the
+   * suite's baseline refused and the set never ran. That is the trap written
+   * down in the process file one hour earlier, walked into by the person who
+   * wrote it: "a new check must not move the ground under an old one" means
+   * after the LAST check that reads the fixture, not merely after the one it
+   * reminded you of.
    */
   const SECOND_ITEM_B = `and then this one ${TAG}`
   await secondForm.getByTestId('checklist-item-input').fill(SECOND_ITEM_B)
@@ -280,11 +291,6 @@ try {
     `the positions are ${JSON.stringify(itemPositions.map((r) => [r.content, r.position]))} — ` +
       'equal positions mean the list has no order at all, and the reader sorts on exactly ' +
       'this column',
-  )
-  chk(
-    await waitUntil(async () => /\b1\b/.test(await countText()), { timeoutMs: 15_000 }),
-    'ticking one drops the count to 1 — it counts open, not total',
-    `after ticking an item the header still says "${await countText()}"`,
   )
 
   // -------------------------------------------------------------------------
