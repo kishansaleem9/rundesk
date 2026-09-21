@@ -487,10 +487,11 @@ function TaskForm({
    *
    * This was a bare native `<select>`, defended in a comment on the grounds
    * that nineteen types do not need search when the browser can type-to-jump.
-   * That reasoning ignored two things the frames and the re-audit both say: the
-   * frame's picker IS searchable, and ELEVEN more types are still to build, so
-   * the list is heading for thirty. A control that needs replacing at thirty
-   * may as well search at nineteen.
+   * That reasoning ignored what the frames say: the frame's picker IS
+   * searchable, and it lists thirty-two types against the nineteen there were.
+   * Twenty-two now, and the remaining ten are recorded as decisions rather
+   * than as work — so this list has stopped growing, and the search stays
+   * because twenty-two is already past what type-to-jump serves.
    */
   const [fieldTypeQuery, setFieldTypeQuery] = useState('')
   // Frame `00:25`'s expander, over the one real setting behind it.

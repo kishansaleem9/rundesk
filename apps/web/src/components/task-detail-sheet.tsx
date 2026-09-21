@@ -8004,9 +8004,11 @@ function CustomFieldsPanel({
  * THE TYPE LIST IS NOT WRITTEN OUT AGAIN HERE. It is derived from
  * `FIELD_TYPE_LABEL_KEYS`, the map this file already uses to name a field's
  * type on its row, so the picker and the label can never disagree about which
- * types exist. The list route's own picker offers six of the nineteen and
+ * types exist. The list route's own picker offers six of the twenty-two and
  * nobody noticed, because each picker is individually plausible — that is this
- * audit's *duplicated list*, and a fourth copy is how it happens again.
+ * audit's *duplicated list*, and a fourth copy is how it happens again. The
+ * six there are now a stated set rather than drift: see `INLINE_EDITABLE_TYPES`
+ * in that file, which is the set its grid can really edit in place.
  */
 const CREATABLE_TYPES_FROM_LABELS = Object.keys(FIELD_TYPE_LABEL_KEYS)
 /** Types that are a list of choices, and so need options before they mean anything. */
