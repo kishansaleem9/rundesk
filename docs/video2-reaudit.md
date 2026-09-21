@@ -74,6 +74,32 @@ went missing entirely. A list that is only written once stops being true.
   `INLINE_EDITABLE_TYPES` says out loud which types the grid can really edit —
   the money column stayed editable, and there is a check that it did, because
   "make it all read-only" is the feature removed rather than the bug fixed.
+- **A merge refusal that described the opposite merge, in five places at
+  once.** `mergeRefusal` had a rule keyed `target-is-descendant`, commented
+  *"merging into your own subtask: the survivor would be a child of the task
+  being binned"*, messaged *"A task cannot be merged into its own subtask"*, and
+  asserted by a unit test under that same title. Its condition is
+  `targetChildIds.has(source.id)` — the TARGET's children containing the SOURCE,
+  which is a subtask merged into its **parent**. Probed against a live API:
+
+  ```
+  subtask -> parent   400  "A task cannot be merged into its own subtask"
+  parent  -> subtask  400  "...Subtasks only nest one level deep."
+  ```
+
+  Nothing was ever unprotected: the case all five described is caught by
+  `would-nest-twice`, and always will be, because a target that is the source's
+  own child means the source has a subtask and the target has a parent. But the
+  refusal people actually hit has spent its whole life quoting a sentence about
+  a merge they had not attempted. Behaviour unchanged, words corrected, and the
+  open question — whether that merge should be refused at all, given the stated
+  reason never applied to it — recorded as a decision not taken.
+
+  **Found by a break patch that ran GREEN**, deleting the rule everybody
+  believed was doing the work. The unit test is the part worth sitting with: it
+  passed, it was specific, it named the right behaviour, and it encoded the
+  wrong relationship. A test can agree with a bug in exactly the words that
+  describe the fix.
 - ~~**A fourth duplicated-list bug**, found while adding Team View: the list
   route keeps its own `ALL_VIEWS` copy and silently filters out anything missing
   from it.~~ **CLOSED 21 September.** It was worse than this line said — the
