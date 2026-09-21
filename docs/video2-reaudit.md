@@ -2862,26 +2862,102 @@ worktree under a lock:
 | --- | --- | --- |
 | `imports` | 19 | 19 |
 | `task-delete` | 15 | 15 |
-| `gantt-controls` | 12 | 12 |
+| `app-catalogue` | 20 | **19** |
 | `paywall-sites` | 10 | 10 |
-| `template-center` | 10 | 9 |
-| `ai-model-picker` | 8 | 8 |
+| `template-center` | 10 | 10 |
 | `clickapps-plan-gating` | 8 | 8 |
-| `list-view-controls` | 8 | 8 |
-| `integration-error-card` | 7 | 7 |
 | `folder-dialog` (the 8 status-scope checks) | 8 | 8 |
 | `sidebar-sections` | 15 | 15 |
-| `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `space-create-menu` (the Form row) | 5 | 5 |
-| `sidebar-dms` | 10 | 10 |
 | `list-assignee-filter` | 15 | 15 |
 | `teams-empty-state` (the carousel) | 4 | 4 |
-| `template-center` | 10 | 10 |
+| `folder-create` | 12 | 12 |
+| `list-empty-states` | 7 | 7 |
+| `tab-title-countdown` | 7 | 7 |
+| `space-wizard-views` | 6 | 6 |
+| `teams-person-cards` | 5 | 5 |
+| `ai-action-categories` | 10 | 10 |
+| `ai-activity-filters` | 10 | 10 |
+| `ai-create-containers` | 13 | 13 |
+| `focus-pill` | 8 | 8 |
+| `task-activity-filter` | 8 | 8 |
+| `task-header-status` | 7 | 7 |
 | …and the rest of the session's suites | | all |
 
-THE LAST TWO ROWS WERE 13/15 AND 9/10 UNTIL THE PATCHES THEMSELVES WERE FIXED,
-and the three that were not proving anything are set out below. All three
-failures were in the patch, not in the check and not in the product.
+Every row above is a count `scripts/check-break-freshness.mjs` reads back out
+of the log on disk. **Six rows that used to be in this table are not, and the
+reason each one left is worth more than the row was.**
+
+| was | is | why |
+| --- | --- | --- |
+| `template-center` 10/9 **and** 10/10 | one row, 10/10 | listed TWICE — the fixed run was appended instead of replacing the broken one, so ten patches were counted twice. *The duplicated list*, in the table this audit keeps its own evidence in |
+| `gantt-controls` 12/12 | withdrawn | the log holds ONE patch and it `BUILD FAILED`. The twelve were run, but nothing on this machine says so any more |
+| `integration-error-card` 7/7 | withdrawn | its log is a refusal — `REFUSING TO BREAK-TEST — the unpatched suite is not green`. Whatever the seven proved, the most recent attempt measured nothing |
+| `ai-model-picker` 8/8 | withdrawn | the suite was edited at 16:15; the run is from the previous day at 22:06. A result about a file that has since changed is a result about a file that no longer exists |
+| `sidebar-dms` 10/10 | withdrawn | nine of the ten ran at 20:31–20:38. The fixture fix that gave the run a SECOND direct message landed at **20:43**, and their logs say so in their own words: *"the server now reports 1 direct message(s)"*. The suite went 13 checks → 14 in the same commit. **Fixing a fixture invalidates every result previously measured through it** — the nine were honest work against a suite that no longer exists, and one of them, `-7-count-is-a-constant`, is the only one re-run since |
+| `list-view-controls` 8/8 | withdrawn | the log holds 5 |
+
+**`app-catalogue` is the one that should have been caught by me and was caught
+by a script.** I reported it forty minutes ago as *"20 patches, 0 still green"*
+and it is **19**. `app-catalogue-20-gmail-source-removed` `BUILD FAILED`: it
+deleted `'gmail'` from an `as const` tuple that generates `SearchSource`, and
+two Records keyed by that union plus a `.includes('gmail')` stopped compiling.
+The patch never reached a check.
+
+And **"still green: 0" cannot see that**, which is the finding under the
+finding. A patch that fails to build prints no `N passed, M failed` line at
+all, so the metric I was summarising every set with — *count the runs that
+came back all-green* — counts it as **not still green**, which is exactly what
+a patch that reddened looks like. It is `0 failed is not it ran`, one level up
+and in my own reporting rather than in a suite. Five patches across five sets
+were in this state: `app-catalogue-20`, `ai-create-containers/acc-1`,
+`gantt-controls/gantt-29` (BUILD FAILED), `ai-action-categories/ac-10` and
+`command-palette/cp-43` (PATCH FAILED). The last two have since been fixed and
+need only a re-run; `app-catalogue-20` is rewritten to withdraw the tab where
+the tab list is produced, which breaks the behaviour without touching the type.
+
+### The two checkers, and the one that broke what it was measuring
+
+Six withdrawn rows and five unproven patches were all found in about a minute
+by two scripts, and none of them had been found by eight hours of reading the
+same table. Both scripts exist because the eye-version produced the numbers
+above.
+
+- **`scripts/check-break-patches.py`** dry-applies all 573 patches and reports
+  the anchors that would miss. Every patch already asserts `s.count(a) == 1`
+  before writing, so the assertion IS the test — it just had to be run without
+  the write. 567 apply; 6 do not.
+- **`scripts/check-break-freshness.mjs`** asks, per suite, whether the recorded
+  run postdates the suite's last change, and flags a log that refused or holds a
+  patch that never built.
+
+**The first one edited 62 source files while claiming to be a dry run.** It
+seeded a fake `io` into each patch's globals — and every patch begins
+`import io`, which rebinds that name to the real module on its first line, so
+the guard was gone before the first write. The patches then ran for real,
+each against a tree the previous ones had already modified, and its output was
+mostly an artefact of its own damage: it printed **57** anchor failures where
+the true number is **6**. Nothing was lost, because the work was committed and
+`git checkout -- .` restored all 62. It now patches the real `io.open`, restores
+it in `finally`, and **verifies `git status` before and after, aborting if a
+byte changed** — a check that cannot say what it did to the thing it measured is
+not a check, and this one was one `import` away from being believed.
+
+Both DOUBLE hits it found turned out to be correct code, which is the other half
+of why `== 1` is right. An anchor beginning with spaces cannot pin indentation —
+a more-deeply-indented copy of the same line contains it — and the two that
+matched twice were a loading skeleton repeating its card's header, and
+`ai-panel`'s two model lists (Best models, and the four behind Show more). The
+second mattered: `mp-4` has to conflate choosing-with-preferring in BOTH lists,
+because patching one leaves the check free to click the other and go green
+against a defect sitting in the same file.
+
+**A harness defect this exposed, not yet fixed:** `wt-break.sh` truncates
+`break-<suite>.txt` on every run, so a later single-patch re-run erases the
+full set's record. That is why `list-customize`, `command-palette`,
+`list-card-cover`, `custom-field-types`, `gantt-controls` and `sidebar-dms` each
+show one patch on disk. The runs happened; the evidence did not survive them.
+Per-run files, or an appended run header, would have cost nothing.
 
 THE ONE THAT DID NOT, AND HOW IT WAS FIXED. A `template-center` patch would
 not compile. `const targetType: TemplateTargetType = 'folder'` is narrowed by
