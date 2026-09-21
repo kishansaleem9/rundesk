@@ -2830,6 +2830,7 @@ worktree under a lock:
 | `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `space-create-menu` (the Form row) | 5 | 5 |
 | `sidebar-dms` | 10 | 10 |
+| `list-assignee-filter` | 15 | 15 |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
@@ -2871,7 +2872,7 @@ catch exactly it. `form-5-space-lists-endpoint` points the destination picker
 back at `GET /lists/space/:id` and reddens two: it is the defect as found,
 preserved so the endpoint's narrower meaning cannot quietly be re-adopted.
 
-### Three checks proved worthless while green, and all three were the check
+### Five checks proved worthless while green, and every one was the check
 
 `sidebar-dms` was 9 of 10 first. `sidebar-dms-7-count-is-a-constant` replaces
 the DM section's `data-count` with the literal `1` — a count that can only ever
@@ -2886,7 +2887,7 @@ the new fixture, and the same patch re-tested against the strengthened check
 reddens **13/1** — so the set is 10 of 10, and the check now proves what it
 always claimed to.
 
-Put beside the other two, the shape is the same every time and the mechanism
+Put beside the others, the shape is the same every time and the mechanism
 never is:
 
 | suite | why the broken build passed |
@@ -2894,10 +2895,21 @@ never is:
 | `folder-dialog` | the fixture made a space with no preset, so a list correctly fell back and the suite's own guard fired |
 | `list-customize` | the check read an un-invalidated `useMemo` — a cached correct answer |
 | `sidebar-dms` | one DM, so a hardcoded `1` matched the real count |
+| `teams-empty-state` | the check asserted the ABSENCE of what the frame draws, and cited the frame for it |
+| `list-assignee-filter` | one task had a checklist, so "its item is assigned to me" and "it has any item" were one set |
 
-In each the fixture made the wrong answer coincide with the right one. None
-could have been found by reading the suite, because each suite was green and
-each product was correct. **This is the argument for step 6 in three lines.**
+None could have been found by reading the suite: every suite was green and,
+except for the fourth, every product was correct. **This is the argument for
+step 6 in five lines.**
+
+THREE OF THE FIVE ARE ONE ROOT CAUSE. `folder-dialog`, `sidebar-dms` and
+`list-assignee-filter` all failed the same way — a fixture in which the right
+answer and the wrong answer are the same value. One preset, one DM, one
+checklist. The rule that falls out of it is now in the trap list: **seed two of
+anything a count or a set is asserted over, and make the fixture CREATE the
+second rather than hope one exists.** `sidebar-dms` needed a third workspace
+member registered to get there; `list-assignee-filter` needed a second
+checklist with an unassigned item. Neither was reachable by hoping.
 
 ### The patch that proved a CHECK wrong, which is what step 6 is for
 
