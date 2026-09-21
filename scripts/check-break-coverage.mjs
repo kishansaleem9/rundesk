@@ -35,6 +35,20 @@
  * several checks and most do; the honest thing a static reading can say is
  * whether a suite has ever been AIMED at, and it says that.
  *
+ * AND IT CANNOT TELL WHETHER THE AIM WAS ANY GOOD. `save-comment` counted as
+ * covered while both its patches edited `notifications.snoozedUntil` — the
+ * snooze that puts a NOTIFICATION in the Later tab — and the suite reads
+ * `task_comment_saves`, a different table behind a different endpoint. Their
+ * `# Reddens:` lines quoted real sentences from the suite, so
+ * `check-break-claims.mjs` verified them and this file attributed them; both
+ * ran green because they had nothing to do with the feature.
+ *
+ * No static reading can catch that: the claim was true and the code was wrong.
+ * Only the run distinguishes a patch aimed at a suite from a patch that
+ * reaches it. So this number means "somebody has tried", and the ledger's
+ * section 8 — which records what actually reddened — is where "it works" is
+ * written down.
+ *
  * Registered as a ratchet: the count of uncovered suites may fall and may not
  * rise, so a new suite arrives with a patch or fails the build that brings it.
  */
