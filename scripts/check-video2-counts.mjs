@@ -13,7 +13,7 @@
  * A count is the one thing in that file that gets quoted without being
  * checked. So it is checked here instead, mechanically, on every build.
  *
- * Seven assertions, each catching a different way the number goes wrong:
+ * Eight assertions, each catching a different way the number goes wrong:
  *
  *   1. the derivation adds up — the `consolidated` row is the arithmetic sum
  *      of the rows above it, column by column and in the total;
@@ -396,6 +396,54 @@ else if (five) {
   }
 }
 
+/*
+ * ASSERTION 8 — THE HANDOFF DOCUMENT COUNTS TOO.
+ *
+ * `docs/video2-resume.md` opens with the headline, and it is the FIRST thing
+ * the next session reads. It said `143 built · 16 partial · 15 missing` while
+ * §4 said 145 / 15 / 14, and nothing had ever compared them — the seven
+ * assertions above all read one file. A number in a handoff document is
+ * quoted more often than the ledger it came from and checked less, which is
+ * the same argument as assertion 7 one file over.
+ */
+const RESUME = 'docs/video2-resume.md'
+let resume = null
+try {
+  resume = readFileSync(RESUME, 'utf8')
+} catch (err) {
+  // ONLY a missing file is tolerated. The first version wrapped the whole
+  // assertion in `catch {}`, and the assertion referenced a block-scoped
+  // binding it could not see — so it threw on every run and the catch reported
+  // nothing. Setting the headline to 999 did not fail the build. A check that
+  // cannot fail, inside the check written to stop numbers going unchecked.
+  if ((err && err.code) !== 'ENOENT') throw err
+}
+if (resume !== null) {
+  if (!consolidated) {
+    problems.push(`${RESUME} could not be compared: §4's consolidated row was never parsed.`)
+  }
+  const m = resume.match(/\*\*174 rows — (\d+) built · (\d+) partial · (\d+) missing\.\*\*/)
+  if (!m) {
+    problems.push(
+      `${RESUME}: no "**174 rows — N built · N partial · N missing.**" headline. It is checked ` +
+        'here because it is the first number the next session reads; if it was removed on ' +
+        'purpose, remove this assertion with it.',
+    )
+  } else {
+    // Against §4's CONSOLIDATED row — §2 alone is 113/11/9 and the handoff
+    // document quotes the whole ledger, §2 plus §5.
+    const want = { B: consolidated?.[0], P: consolidated?.[1], M: consolidated?.[2] }
+    const got = { B: num(m[1]), P: num(m[2]), M: num(m[3]) }
+    if (consolidated && (want.B !== got.B || want.P !== got.P || want.M !== got.M)) {
+      problems.push(
+        `${RESUME} says ${got.B} built · ${got.P} partial · ${got.M} missing and §4 ` +
+          `consolidates to ${want.B} · ${want.P} · ${want.M}. The handoff document is read ` +
+          'before the ledger, and it is the first number the next session sees.',
+      )
+    }
+  }
+}
+
 if (problems.length) {
   console.error('[video2-counts] the ledger disagrees with itself:\n')
   for (const p of problems) console.error(`  · ${p}\n`)
@@ -404,6 +452,7 @@ if (problems.length) {
 }
 console.log(
   "[video2-counts] §4 adds up, its headline repeats it, §2 contributes the rows and split §4 " +
-    "credits, the paragraph under the table agrees with the table, §5's appendices add to its " +
-    "as-recovered headline, that reconciles to §4, and §5's rows add up to it",
+    "credits, the paragraph under the table agrees with the table, the handoff document agrees " +
+    "with §4, §5's appendices add to its as-recovered headline, that reconciles to §4, and " +
+    "§5's rows add up to it",
 )

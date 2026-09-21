@@ -12,7 +12,7 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**174 rows — 143 built · 16 partial · 15 missing.** `docs/video2-reaudit.md`
+**174 rows — 145 built · 15 partial · 14 missing.** `docs/video2-reaudit.md`
 §4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its
@@ -38,11 +38,15 @@ Postgres and a real browser — never because the code was written.
 
 ## 2. What is verified, and what is not
 
-**112 suites exist. 104 are registered in `ci.yml`.** The eight unregistered
-ones are unregistered on purpose: a suite goes into `ci.yml` when it has run
-green locally, never when the code is merely written. Registering a red suite
-is worse than leaving it out, because it turns the pipeline into something
-nobody reads.
+**113 suites exist and ALL 113 are registered in `ci.yml`.** This paragraph
+said "112 exist, 104 are registered, and the eight unregistered ones are
+unregistered on purpose" — true when it was written and not since. The rule it
+states still holds and is worth keeping: a suite goes into `ci.yml` when it has
+run green locally, never when the code is merely written, because registering a
+red suite turns the pipeline into something nobody reads. There is simply
+nothing waiting on it at the moment.
+
+101 of the 113 carry checks; the rest are fixtures and helpers.
 
 **Break-testing is the incomplete part**, and it is the step that separates a
 check from decoration.
@@ -59,14 +63,24 @@ meant nothing.
 Counted honestly, by whether the results file opens with a `== BASELINE (no
 patch) … 0 failed` line — recounted from the files, not carried forward:
 
+Recounted from the files on 21 September, of the **101 suites that carry
+checks**:
+
 ```
-113 suites exist
- 34 have a break set with a VERIFIED GREEN BASELINE
- 11 have a break run whose baseline is not green — most are results files
-    left over from before the suite or the patches were fixed, so the numbers
-    in them are unread rather than wrong
- 68 have no break run at all
+ 50 have a break run with a VERIFIED GREEN baseline
+  1 has a run that REFUSED — the baseline was not green, so nothing was measured
+  6 have a run with no readable baseline line (crashed or timed out)
+ 44 have no break run at all
 ```
+
+**AND THE NUMBER THAT MATTERS MORE IS THE OTHER ONE.** A run is not coverage: a
+suite can have a green baseline and a single patch aimed at one of its forty
+checks. `scripts/check-break-coverage.mjs` counts suites that have ever had a
+break patch WRITTEN for them, and when it was first run — the first time anyone
+had printed the denominator — **47 of 101 suites had none at all**, including
+`video-regression` (81 checks), `custom-field-progress` (58) and `task-menu`
+(33). It is a ratchet in CI now: the count may fall and may not rise, so a new
+suite arrives with a patch or fails the build that brings it.
 
 That last number is the honest size of the remaining work, and it has not been
 stated plainly before. The 34 are the ones whose checks are known to fail when
