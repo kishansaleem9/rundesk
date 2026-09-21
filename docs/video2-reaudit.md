@@ -678,7 +678,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
-| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing**, and it is why this row is `B*` rather than `B` |
+| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing, and its MENU has no frame behind it.** `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. Rundesk already has the primary button (`quick-create-submit`). What is absent is a menu whose contents nothing shows, so building it would mean inventing them — the same refusal the create-modal-placeholder row makes. **Blocked on the reference, which is a different thing from not done yet** |
 | — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
 | B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — the panel exists, **no drop handler** |
@@ -2719,11 +2719,19 @@ assumed so, and they divide cleanly: six are blocked rather than pending — the
 Brain² hub and the four rows that hang off it need an agent runtime Rundesk
 does not have and an `ANTHROPIC_API_KEY` that is empty here and in CI, and
 "add to a colleague's priorities" is a deliberate refusal recorded on its own
-row. The three that are buildable are `"Create Task ▾"`, **`"Add to ›"`** (one
-task in more than one list, which is a schema change and the largest thing
-left in this file), and the metered *"uses have expired"* state. One row —
-the create-modal placeholder — stays `M` because it has no frame behind it,
-which its own row explains.
+row. **TWO are buildable**: **`"Add to ›"`** (one task in more than one list,
+which is a schema change and the largest thing left in this file) and the
+metered *"uses have expired"* state.
+
+`"Create Task ▾"` was counted among the buildable until its frame was actually
+opened. `00:07` draws the split button in the create modal's footer and **no
+frame in the video ever opens the chevron** — the observations file names it
+once and never again — so there are no menu contents to build to, and
+inventing them is the thing this file refuses to do. Blocked on the reference.
+The create-modal placeholder stays `M` for the same reason, which its own row
+explains. That makes two rows now held back by what the frames do not show
+rather than by what Rundesk does not have, and the distinction is worth
+keeping: one is waiting on work, the other on a better reference.
 
 ### Voice notes and Required views were closable the whole time
 
@@ -2798,7 +2806,7 @@ worktree under a lock:
 | `sidebar-sections` | 15 | 15 |
 | `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `space-create-menu` (the Form row) | 5 | 5 |
-| `sidebar-dms` | 10 | 9 + 1 pending |
+| `sidebar-dms` | 10 | 10 |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
 
@@ -2849,10 +2857,10 @@ on the stated grounds that every check below would pass vacuously; one is the
 same problem a step along, and it is the single number a hardcoded count is
 most likely to be. Fixing it needed a second conversation, which needed a third
 workspace member, and the seed ships two users — so the fixture registers a
-peer and adds them, and the guard now demands two. **The suite is green again
-at 14/14 with the new fixture; the re-test of that patch against the
-strengthened check has not run yet, which is why the table above says
-`9 + 1 pending` rather than 10.**
+peer and adds them, and the guard now demands two. Suite green at 14/14 with
+the new fixture, and the same patch re-tested against the strengthened check
+reddens **13/1** — so the set is 10 of 10, and the check now proves what it
+always claimed to.
 
 Put beside the other two, the shape is the same every time and the mechanism
 never is:
