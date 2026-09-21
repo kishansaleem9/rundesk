@@ -13,19 +13,26 @@
  * A count is the one thing in that file that gets quoted without being
  * checked. So it is checked here instead, mechanically, on every build.
  *
- * Five assertions, each catching a different way the number goes wrong:
+ * Six assertions, each catching a different way the number goes wrong:
  *
  *   1. the derivation adds up — the `consolidated` row is the arithmetic sum
  *      of the rows above it, column by column and in the total;
  *   2. the headline sentence repeats the `consolidated` row exactly — this is
  *      the failure that actually happened;
- *   3. §2's live table holds as many rows as §4 says it contributes. The
- *      SPLIT moves every time a row closes and that is the point of the work,
- *      so the split is deliberately not checked; the ROW COUNT only moves when
- *      scope changes, and a scope change that does not reach §4 is drift.
+ *   3. §2's live table holds the rows AND the split §4 says it contributes.
+ *      This once checked only the row count, excused with "the split moves
+ *      every time a row closes, which is the work going well" — and the count
+ *      never moves when a row merely closes, so it passed through twenty-six
+ *      of them. A number that moves often is the one that most needs tying
+ *      down, not the one to excuse;
  *   4. §5's three appendices sum to §5's own as-recovered headline;
  *   5. §5's as-recovered headline, plus the closures its reconciliation table
- *      records, equals what §4 credits §5 with.
+ *      records, equals what §4 credits §5 with;
+ *   6. and §5's appendix ROWS — their own `- status:` lines — add up to that
+ *      live split. Added after a row was closed and every number in the file
+ *      stayed consistent and wrong, which is assertion 3's failure one
+ *      section along: numbers that agree with each other are not numbers
+ *      that agree with the rows.
  *
  * FOUR AND FIVE WERE ADDED AFTER THE SAME BUG CAME BACK. §4's table credited
  * §5 with `31 · 4 · 6` while §5's own heading read `15 · 5 · 21`. Both totalled
@@ -321,6 +328,50 @@ if (five && recovered && four) {
   }
 }
 
+// ── 6 · §5's appendix ROWS add up to §5's live split ───────────────────────
+/*
+ * THE SAME BLIND SPOT ASSERTION 3 WAS WRITTEN FOR, one section along.
+ *
+ * Assertions 4 and 5 relate §5's numbers to each other and to §4. None of them
+ * looks at the ROWS. So closing a row — changing its `- status: M` to
+ * `- status: B` and adding a `closed by:` line — left every number in the file
+ * consistent and every one of them wrong, and the build said nothing. That is
+ * exactly what happened to §2's split for twenty-six closures, and the fix
+ * there was to count. This counts.
+ *
+ * `- status:` is the row's own live word, the same field the appendices have
+ * carried from the start. `B*` counts as built, as it does in §2.
+ */
+const FIRST_APPENDIX = '# Recovered ledger rows — S01–S08'
+const AFTER_APPENDICES = '## 6. Rows in this file whose status is wrong'
+const rowsRegion = slice(FIRST_APPENDIX, AFTER_APPENDICES)
+if (!rowsRegion) problems.push('§5: the appendix range could not be sliced — the file has been restructured')
+else if (five) {
+  const counted = { B: 0, P: 0, M: 0 }
+  for (const [, word] of rowsRegion.matchAll(/^- status: (B\*?|P|M)$/gm)) {
+    counted[word === 'B*' ? 'B' : word] += 1
+  }
+  const total = counted.B + counted.P + counted.M
+  const rows = numericRows(five)
+  const live = rows.find((r) => /live/i.test(r[0]))
+  if (!live) problems.push('§5: no `live` row to count the appendix rows against')
+  else {
+    const label = ['B', 'P', 'M']
+    label.forEach((k, i) => {
+      if (counted[k] !== num(live[i + 1])) {
+        problems.push(
+          `§5's appendix rows carry ${counted[k]} \`- status: ${k}\` between them, but the ` +
+            `reconciliation table's live ${k} says ${num(live[i + 1])}. A row was closed (or opened) ` +
+            'without the split following — the failure assertion 3 exists for, one section along.',
+        )
+      }
+    })
+    if (total !== num(live[4])) {
+      problems.push(`§5 holds ${total} rows with a status, but its live total says ${num(live[4])}`)
+    }
+  }
+}
+
 if (problems.length) {
   console.error('[video2-counts] the ledger disagrees with itself:\n')
   for (const p of problems) console.error(`  · ${p}\n`)
@@ -328,6 +379,7 @@ if (problems.length) {
   process.exit(1)
 }
 console.log(
-  "[video2-counts] §4 adds up, its headline repeats it, §2 contributes what §4 credits, " +
-    "§5's appendices add to its as-recovered split, and that split reconciles to §4",
+  "[video2-counts] §4 adds up, its headline repeats it, §2 contributes the rows and split §4 " +
+    "credits, §5's appendices add to its as-recovered headline, that reconciles to §4, and §5's " +
+    'rows add up to it',
 )

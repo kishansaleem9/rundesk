@@ -846,7 +846,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 143 built · 16 partial · 15 missing.**
+**174 rows: 144 built · 16 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -883,8 +883,8 @@ rather than believed:
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | §2, the sections table | 112 | 12 | 9 | 133 |
-| §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
-| **consolidated** | **143** | **16** | **15** | **174** |
+| §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
+| **consolidated** | **144** | **16** | **14** | **174** |
 
 §2's 105 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
@@ -938,15 +938,15 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Sixteen closed after this
-section was written — fifteen that were missing and one that was partial — and
-sixteen is the whole difference:
+They are the same forty-one rows at two moments. Seventeen have closed since
+this section was written — sixteen that were missing and one that was partial —
+and seventeen is the whole difference:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +16 | −1 | −15 | 0 |
-| **live (what §4 credits §5 with)** | **31** | **4** | **6** | **41** |
+| closed since, each named on its own row by the suite that proves it | +17 | −1 | −16 | 0 |
+| **live (what §4 credits §5 with)** | **32** | **4** | **5** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -2322,13 +2322,25 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   People** with a count (**2**).
 - transcript: silent — `[20:58]` *"aap ko show nahi ho raha ke TEAM nahi hai?"*,
   then she cuts the section.
-- rundesk today: two static cards.
-  `apps/web/src/pages/workspace-teams-page.tsx:307-338` maps a literal
-  `[{id:'hub'…},{id:'management'…}]` into a `sm:grid-cols-2` grid — no third
-  card, no pager, no `data-index`. The tab strip (`:197-220`) carries no count
-  badge on People.
-- status: M
-- defect class: none
+- rundesk today: **built.** `EMPTY_CARDS` is one list of three that the
+  carousel and anything counting them both read, with the frame's `← →` pager
+  centred beneath and a `data-index` the check reads. It WRAPS: three cards and
+  two arrows cannot express an end state the frame never draws, and an arrow
+  that stops responding reads as broken rather than finished.
+  **The third card's prose is the one thing not taken off the pixels** —
+  `21:02` cuts it at the viewport after *"Stay focused with P…"* — so the suite
+  asserts the count, the pager, the advance and the wrap, and never that copy.
+  The People count badge named at the end of this row is NOT part of this
+  closure and stays open.
+- status: B
+- closed by: teams-empty-state 21/21, break set 4/4
+- defect class: **the check that enforced the absence of the feature.**
+  `teams-empty-state.mjs` asserted `cardCount === 2` and said *"the frame draws
+  exactly two"* in its failure message. It was green over the static pair and
+  **would have gone red the day anybody built this correctly** — the right
+  answer turned into a failure, with the frame's authority cited for it. Found
+  only because this row disagreed with that check and the frame was re-read to
+  settle which was wrong
 - why not already a row: `M | Teams empty-state headline; **Browse People /
   Create Team** buttons; two explainer cards` was closed this session and the
   build is good — but the row itself says *two*, and the frame shows three behind
@@ -2807,6 +2819,7 @@ worktree under a lock:
 | `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `space-create-menu` (the Form row) | 5 | 5 |
 | `sidebar-dms` | 10 | 10 |
+| `teams-empty-state` (the carousel) | 4 | 4 |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
 
