@@ -33,7 +33,12 @@ import { join } from 'node:path'
 const ROOT = new URL('..', import.meta.url).pathname
 const BREAKS = '/tmp/claude-0'
 
-const logs = readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f))
+// `break-<suite>-YYYYMMDD-HHMMSS.txt` is a per-run ARCHIVE, not a suite's
+// current log. Including them listed eleven imaginary suites as "no suite
+// file" — noise introduced by the archiving change itself, in the checker
+// written to read these files.
+const ARCHIVE = /-\d{8}-\d{6}\.txt$/
+const logs = readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f) && !ARCHIVE.test(f))
 if (logs.length === 0) {
   console.log('[break-freshness] no break logs on this machine — nothing to check')
   process.exit(0)
