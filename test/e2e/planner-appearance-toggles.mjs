@@ -172,28 +172,7 @@ const WORK_DAYS = [1, 2, 3]
 const HOLIDAY = dayKey(addDays(MONDAY, 1))
 const SCHEDULE = { workDays: WORK_DAYS, holidays: [{ day: HOLIDAY, name: `Break ${TAG}` }] }
 
-/*
- * THE HOLIDAYS CALENDAR STARTS OFF, and that is this suite's fixture rather
- * than an opinion about the product.
- *
- * `GET /workspaces/:id/work-schedule` has TWO readers on the planner: the
- * "Darken non-working hours" switch below, and frame `13:28`'s **Holidays**
- * calendar (§V2-14d), which draws the same `holidays` rows as chips and is on
- * by default. The page asks for the schedule when EITHER wants it — one query,
- * one condition, which is correct and is what the planner page says it does.
- *
- * The first check of the darkening group reads "the page has not even asked
- * for the work schedule", and that sentence is only evidence about THIS switch
- * while the other reader is quiet. With Holidays on, the request is the
- * Holidays calendar's and the check was measuring a feature it is not about.
- * Turning it off in the fixture is what keeps the clause meaning what it says:
- * a reader that never asks for the schedule cannot be honouring it.
- *
- * It costs the dimming nothing — `nonWorking()` reads `workSchedule.holidays`
- * whether or not the Holidays CALENDAR is drawn — so the Tuesday holiday below
- * is still expected to dim.
- */
-let settings = { weekStart: 'monday', hiddenCalendarIds: ['workspace:holidays'] }
+let settings = { weekStart: 'monday' }
 /** Every planner request the page made, so a reader can be proved to have read. */
 const calls = []
 /** Every POST /blocks body, for the personal-event half. */
@@ -322,14 +301,42 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ Darken non-working hours — the WORKSPACE schedule, not the weekend')
 
+  /*
+   * THE SCHEDULE IS ALREADY HERE, AND NOTHING IS DIMMED. Both halves, and the
+   * first one is the half this check used to get backwards.
+   *
+   * It read "the page has not even asked for the work schedule", on the
+   * reasoning that a reader which never asks cannot be honouring the setting.
+   * That was true while the switch was the schedule's only reader. It is not
+   * any more: frame `13:28`'s **Holidays** calendar (§V2-14d) draws the same
+   * `workspace_holidays` rows as all-day chips, is ON by default, and shares
+   * the one query — deliberately, and the planner page says so where the
+   * `enabled` flag is written. So the request the check was failing on is the
+   * Holidays calendar's, and the check had quietly become a statement about a
+   * feature it is not about.
+   *
+   * Asserting the OPPOSITE is strictly the stronger check, which is why this
+   * is a repair rather than a relaxation. "No request and no dimming" is
+   * satisfied by a planner where the whole feature is dead — nothing fetched,
+   * nothing drawn. "The schedule has arrived AND no column is dimmed" can only
+   * be satisfied by a reader that has the data in its hands and is declining
+   * to use it because the switch is off. That is the exact discrimination the
+   * §V2-02e group exists for: a setting nobody honours versus one nobody
+   * fetches for, told apart instead of conflated.
+   */
+  const scheduleArrived = await waitUntil(
+    async () => calls.some((c) => c.url.includes('/work-schedule')),
+    { timeoutMs: 10_000 },
+  )
   chk(
-    (await dims().count()) === 0 && !calls.some((c) => c.url.includes('/work-schedule')),
-    'nothing is dimmed, and the page has not even asked for the work schedule',
+    (await dims().count()) === 0 && scheduleArrived,
+    'the schedule is already on the page — the Holidays calendar reads it — and not one column ' +
+      'is dimmed, so the dimming below is the switch\'s doing and not the data\'s',
     `${await dims().count()} dimmed columns before the switch, and ` +
       `${calls.filter((c) => c.url.includes('/work-schedule')).length} schedule requests — ` +
-      'a dimmed column here means the reader ignores the switch and shades regardless; a request ' +
-      'here (with Holidays off in the fixture above) means the schedule is fetched whether anything ' +
-      'reads it, and the request can no longer be evidence that the setting was read at all',
+      'a dimmed column here means the reader shades whenever it has a schedule and never looks ' +
+      'at the switch; no request at all means nothing on this page reads the workspace schedule, ' +
+      'and the three checks below would then be measuring an empty grid',
   )
 
   await openSettings('appearance')
