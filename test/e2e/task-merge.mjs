@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 27
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -167,6 +167,21 @@ try {
     'and not into its own subtask',
     `merging into its own subtask returned ${intoOwnChild.status} — the survivor would be a child of a binned task`,
   )
+  /*
+   * AND BY THE RIGHT RULE. `target-is-descendant` is not the only thing that
+   * refuses this input: the source has a subtask and the target IS that
+   * subtask, so `would-nest-twice` catches it too. Asserting a 4xx alone means
+   * either rule can be deleted with this check still green, which is how
+   * `task-merge-2-into-own-subtask` ran green against a build with the
+   * descendant rule removed — two mechanisms that produce one status code have
+   * to be told apart by their message.
+   */
+  chk(
+    JSON.stringify(intoOwnChild).includes('A task cannot be merged into its own subtask'),
+    'and refuses it as a descendant, not by the nesting-depth rule that also catches it',
+    `it said ${JSON.stringify(intoOwnChild.error ?? null)} — if that is the subtasks-nest-once ` +
+      'sentence then the descendant rule is gone and something else happened to cover for it',
+  )
 
   const intoNothing = await A(`/tasks/${source.id}/merge`, {
     method: 'POST',
@@ -274,6 +289,20 @@ try {
     twice.status >= 400 && twice.status < 500,
     'a binned task cannot be merged again',
     `merging it a second time returned ${twice.status} — work could be pulled out of the bin unnoticed`,
+  )
+  /*
+   * AND BY THE MERGE RULE, not by the write-access check further down. A merged
+   * source is `isArchived`, and `assertTaskWriteAccess` refuses archived tasks
+   * on its own — so `already-binned` could be deleted outright and this stayed
+   * green, which is what `task-merge-3-binned-merged-again` demonstrated. Two
+   * guards for one condition is defence in depth and worth keeping; a check
+   * that cannot tell them apart means either may rot unnoticed.
+   */
+  chk(
+    JSON.stringify(twice).includes('A task in the bin cannot be merged'),
+    'and says so as a merge refusal, not as a write-access failure',
+    `it said ${JSON.stringify(twice.error ?? null)} — the merge rule for a binned source is gone ` +
+      'and the generic archived-write refusal is standing in for it',
   )
 
   // ── On screen ────────────────────────────────────────────────────────────
