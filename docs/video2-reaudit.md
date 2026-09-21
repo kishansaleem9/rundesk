@@ -2913,7 +2913,10 @@ worktree under a lock:
 | `task-menu` — **never covered before** | 4 | 4 |
 | `custom-field-progress` — **never covered before** | 5 | 5 |
 | `list-export` — **never covered before** | 3 | 3 |
-| `task-merge` — **never covered before** | 3 | 1, and two that were right to stay green |
+| `task-merge` — **never covered before** | 3 | 3, once the checks read the message |
+| `comment-recording` — **never covered before** | 4 | 4 |
+| `view-visibility` — **never covered before** | 3 | 3 |
+| `list-name-taken` — **never covered before** | 3 | 2, and one that found the third second-guard |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `folder-create` | 12 | 12 |
 | `list-empty-states` | 7 | 7 |
@@ -3012,6 +3015,29 @@ the accidental edit on purpose as the patch that covers that line. Re-run whole,
 because the suite had changed and by this file's own rule that stales every
 earlier result in the set: **baseline 23 green, 11 patches, 11 reddened, none
 unbuilt**, and patch 11 fails exactly its two checks and nothing else.
+
+### Three green patches, and the property they were all pointing at
+
+Three patches ran green today and not one of them was a worthless check. Read
+together they say something about this codebase rather than about three checks:
+
+| patch | the second guard | what only the message could tell you |
+| --- | --- | --- |
+| `task-merge-2` | `would-nest-twice` | which rule refused — and that the one everybody credited was catching the opposite relationship |
+| `task-merge-3` | `assertTaskWriteAccess`, which refuses archived tasks on its own | that the merge rule for a binned source had gone |
+| `list-name-taken-1` | the partial unique index on `lower(name)`, via `AllExceptionsFilter` | that the person now reads *"That resource already exists"* instead of frame `08:50`'s *"List name taken"* |
+
+**`AllExceptionsFilter` is why this keeps happening.** It maps `23502`, `23503`,
+`23505`, `23514`, `22P02`, `22001`, `22003` and `23P01` to 4xx on every
+endpoint — a good safety net, and it means **the database is a silent second
+guard behind every service-level validation in the product**. Wherever a
+service check exists to give a constraint a human sentence, the status code is
+the constraint's and only the sentence is the service's. A check asserting the
+status is therefore checking the database, whatever it says in its own words.
+
+The shape to grep for is any status-only assertion on a REFUSAL. The note first
+written here said `status >= 400 && status < 500` and was too narrow inside a
+day: `list-name-taken` uses `=== 409`.
 
 ### And a second one, where the check and the patch were both right
 
