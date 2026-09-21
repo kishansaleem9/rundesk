@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure too. */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -163,6 +163,44 @@ try {
     tabThere,
     'the list offers a Team view beside the others',
     'there is no Team tab — the frames show it three times and it was not a view type at all',
+  )
+
+  /*
+   * THE `v` SHORTCUT HAS TO REACH IT TOO, and it could not.
+   *
+   * The cycler at the list route's `:2204` held its own copy of the view keys
+   * — `['list','board','table','calendar','gantt']` — which is the same five
+   * `ALL_VIEWS` holds eight hundred lines above it, minus `team`. A fifth copy
+   * of one list, one key short. So Team View was drawn in the tab strip, was
+   * selectable by mouse, and `v` walked past it forever: present, reachable
+   * one way, unreachable the other, and nothing on screen to say so.
+   *
+   * Pressed enough times to come all the way round, because a cycler that
+   * merely MOVES proves nothing — it has to visit every enabled view. The
+   * count comes from the tabs the page itself draws, so adding a view type
+   * cannot leave this check quietly walking a shorter loop than the product.
+   */
+  const viewTabs = await page.locator('[data-testid^="work-view-tab-type-"]').evaluateAll((els) =>
+    els.map((e) => (e.getAttribute('data-testid') ?? '').replace('work-view-tab-type-', '')),
+  )
+  await page.locator('body').click({ position: { x: 4, y: 4 } })
+  const visited = new Set()
+  for (let i = 0; i < viewTabs.length + 1; i += 1) {
+    await page.keyboard.press('v')
+    await page.waitForTimeout(250)
+    const active = await page
+      .locator('[data-testid^="work-view-tab-type-"][data-active="true"]')
+      .first()
+      .getAttribute('data-testid')
+      .catch(() => null)
+    if (active) visited.add(active.replace('work-view-tab-type-', ''))
+  }
+  chk(
+    viewTabs.length > 1 && visited.has('team'),
+    `pressing \`v\` reaches every view the list offers, Team included`,
+    `the list draws ${JSON.stringify(viewTabs)} and ${viewTabs.length + 1} presses of \`v\` ` +
+      `visited ${JSON.stringify([...visited])} — a cycler keeping its own copy of the view keys ` +
+      'walks past whichever one that copy is missing, and the tab stays clickable so nothing looks wrong',
   )
 
   await page.getByTestId('work-view-tab-type-team').click()

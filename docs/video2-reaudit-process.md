@@ -187,9 +187,15 @@ irrelevant trains everyone to ignore it.
   controller.
 - **`@Post` answers 201, and a check written from an assumption about REST
   answers to nobody.** Nest returns **201** for a `@Post` with no `@HttpCode`.
-  Three checks were written against 200 in one day — two in `app-catalogue`,
-  one in `ai-assign` — and every one of them printed the right payload in its
-  own failure line while reporting the route broken. `ai-assign` is the
+  **Four** checks were written against 200 in one day, by three different
+  authors, in three suites — two in `app-catalogue`, one in `ai-assign`, one in
+  `calendar-accounts` — and every one printed the right payload in its own
+  failure line while reporting the route broken. The `calendar-accounts` one
+  was the worst of the four: its other branch expected a 400 the server does
+  not produce either, so **both branches were unreachable and the check could
+  only ever fail**. By then `app-catalogue` already carried a comment recording
+  the identical mistake against the same route, which is the argument for this
+  list existing at all. `ai-assign` is the
   instructive one: its six neighbouring assertions correctly use `=== 200`
   because they are GETs, so the file is consistent with itself and wrong in one
   place, which review will not catch. Read the route. Pin the number exactly

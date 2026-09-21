@@ -1586,6 +1586,38 @@ jobs:
           E2E_PASSWORD: Admin@123!
           DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
+      # §V2-15 `12:40`/`12:45` — the planner's onboarding panel and its
+      # carousel. The Connect check asserts the browser LANDS on the URL the
+      # server handed it, not merely that it asked: `window.location.href =
+      # authUrl` is the convention in all three OAuth surfaces, so "it
+      # requested" and "it went there" are different facts and only the second
+      # is the feature. The geometry check scrolls the grid home first — a day
+      # column is 24h tall inside a container the planner scrolls to the
+      # current hour, so comparing raw bounding boxes was measuring the clock
+      # and could only have held between midnight and 01:00.
+      - name: The planner onboarding panel and its carousel
+        if: '!cancelled()'
+        run: node test/e2e/planner-onboarding.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-15 — the planner's bottom command bar, which must open the SHARED
+      # palette rather than grow a second search surface beside it. ⌘K has to
+      # open exactly ONE: the shell keeps the hotkey because the palette is
+      # only mounted while open, and the component registers a toggling ⌘K of
+      # its own, so a stowaway second copy is invisible until a keypress —
+      # a break patch that mounted one permanently left the earlier version of
+      # this check green.
+      - name: The planner command bar opens the shared palette
+        if: '!cancelled()'
+        run: node test/e2e/planner-command-bar.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest

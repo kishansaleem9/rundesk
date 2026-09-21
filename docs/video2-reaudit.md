@@ -2406,6 +2406,58 @@ Three. None changes a count; all three are in code this session touched.
 
 ### Added 21 September
 
+- **The calendar picker trapped the planner, and there was no way out by
+  keyboard. FIXED.** Its popover uses a `fixed inset-0 z-40` click-catcher and
+  **nothing listened for Escape**. Until a click happened to land on the
+  catcher it was a full-screen sheet swallowing every press in the planner
+  header; a keyboard user had no exit at all. Proved by hit test rather than
+  inferred: after Escape the menu count is still 1 and
+  `document.elementFromPoint` over the Settings button returns the catcher.
+  `quick-create-modal.tsx:172` carries a note about this exact defect found the
+  same way — *"a suite pressed Escape and the backdrop went on swallowing every
+  click behind it"* — and `person-panel.tsx:580` states the convention:
+  *"Escape closes, like every other overlay in the app."* Fixed with a
+  document-level listener, because `onKeyDown` on a catcher that takes no focus
+  could never fire. `calendar-accounts.mjs` 33/33; the break patch reproduces
+  the original 30-second timeout exactly.
+
+- **`@Post` answers 201 — the FOURTH instance in one day.** `calendar-accounts`
+  check 33 accepted only 200 from `oauth/start`, and its other branch expected
+  a 400 the server does not produce, so **both branches were unreachable and
+  the check could only ever fail**. `app-catalogue.mjs:155` already records
+  making the identical mistake against the same route and concluding "the
+  product was never wrong". Four checks, three suites, one assumption about
+  REST. Recorded in the process doc's trap list.
+
+- **The planner's two Connect surfaces will hand you an empty consent URL.**
+  `getOAuthStartUrl` builds it from `process.env.X_CLIENT_ID ?? ''` without
+  consulting `getMissingProviderEnv`, which sits twelve lines above and already
+  answers the question — so on an unconfigured server it returns 201 and
+  `https://zoom.us/oauth/authorize?client_id=&…`. The App Center gates this
+  client-side and toasts the reason; `workspace-planner-page.tsx:805` and
+  `planner-settings-dialog.tsx:981` both POST and assign `window.location.href`
+  with no readiness check. The facade. **The server-side fix is the wrong one**
+  and was written and reverted: `app-catalogue.mjs` deliberately uses this
+  endpoint as a URL builder to verify Gmail's and SharePoint's scopes in this
+  same unconfigured environment, so refusing there is cross-lane damage. The
+  client-side check, in three surfaces, is the one to make. *Not fixed.*
+
+- **Two calendar toggles read ON before the server has answered.** The mirror
+  defect with a timing fuse: `holidayCalendarOn` / `timeOffCalendarOn` are
+  derived from a query that is `undefined` on first render, so both read ON and
+  both fire their fetches before the page knows the account switched them off.
+  The product's own comment promises "unticking Holidays stops the chip being
+  drawn AND stops the request that fetches it" — true for the rest of that
+  session, false again on every reload. *Not fixed*, and the fix was written
+  and reverted deliberately: no existing check reddens on it, and an
+  unprotected behaviour change in a file three agents were editing is not worth
+  the risk. It needs its own check first.
+
+- **`palette-more-types-menu` has the same untrapped catcher**
+  (`command-palette.tsx:872`) with no Escape handler. Lower impact — it sits
+  inside a Radix dialog whose own Escape closes the whole palette — but the
+  menu itself cannot be dismissed by keyboard. *Not fixed.*
+
 - **Every file staged on the create modal was silently dropped. FIXED.**
   `input.files` is a **live** `FileList` — the same object every time — and the
   change handler clears `e.target.value` the moment it returns, which it must,
@@ -2427,15 +2479,21 @@ Three. None changes a count; all three are in code this session touched.
   somebody dragged into place holds in the tree and nowhere else. *Not fixed* —
   it wants its own row and its own suite.
 
-- **A fifth copy of the view keys, one key short.** The six space view keys
-  exist four times over: `space-presets.ts:32` is the source of truth,
-  `lib/space-views.ts:51`, a local `ALL_VIEWS` at the list route's `:1367`, and
-  a **fifth** at `:2204` of that same file reading
-  `['list','board','table','calendar','gantt']` — **missing `team`** — which is
-  what the `v` keyboard view-cycler walks. So Team View, built this audit,
-  cannot be reached by the shortcut. The file's own comment at `:1360` warns
-  that a view missing from the list "is filtered out of the tabs silently".
-  *Not fixed* — two agents had that file open.
+- ~~**A fifth copy of the view keys, one key short.**~~ **FIXED 21 September** —
+  `team-view.mjs` 12 → **13 checks**. The `v` cycler at the list route's
+  `:2204` held `['list','board','table','calendar','gantt']`: the same five
+  names `ALL_VIEWS` holds eight hundred lines above it, minus `team`. So Team
+  View — built during this audit — was drawn in the tab strip, was selectable
+  by mouse, and the keyboard walked past it forever. Present, reachable one
+  way, unreachable the other, and nothing on screen to say so. The cycler now
+  reads `ALL_VIEWS`, which takes the keys from five copies down to four
+  (`space-presets.ts` is the source of truth; `lib/space-views.ts` and
+  `ALL_VIEWS` are the others).
+
+  The new check presses `v` **`tabs + 1` times** and requires it to have
+  visited every view, because a cycler that merely MOVES proves nothing — and
+  the count comes from the tabs the page itself draws, so adding a view type
+  cannot leave the check quietly walking a shorter loop than the product does.
 
 - **The create menu prints a refusal key where a sentence exists.**
   `quick-create-modal.tsx:399` renders `Set that up — skipped (no_permission)`.

@@ -221,9 +221,19 @@ type TaskItem = {
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
 
-// Offered when creating a field from the picker. Deliberately the same set this
-// view knows how to render — the API accepts more (money, rating, email, phone),
-// but creating one here that the List could not draw would be a trap.
+/*
+ * Offered when CREATING a field from this view's picker.
+ *
+ * The comment here used to read "deliberately the same set this view knows how
+ * to render". Half of that was true and the half that was not is 0146's find:
+ * the picker offers six, but the COLUMNS draw whatever the project has, and a
+ * definition made anywhere else — the create modal offers all twenty-two —
+ * lands in this grid all the same. Until 0146 every one of them rendered as
+ * `String(value)`, so a `people` field drew a comma-separated list of uuids,
+ * and clicking the cell opened a text box whose save the API answered 400.
+ * `customCellText` and `INLINE_EDITABLE_TYPES` below are what make the second
+ * half of the sentence true.
+ */
 const CUSTOM_FIELD_TYPES = ['text', 'number', 'date', 'checkbox', 'url', 'dropdown'] as const
 const CUSTOM_FIELD_TYPE_LABELS: Record<CustomFieldType, TranslationKey> = {
   text: 'list.table.fieldTypeText',
@@ -236,12 +246,88 @@ const CUSTOM_FIELD_TYPE_LABELS: Record<CustomFieldType, TranslationKey> = {
 type CustomFieldDef = {
   id: string
   name: string
-  type: CustomFieldType
+  /*
+   * WHATEVER THE SERVER HOLDS, not what this view's picker offers. Typing it
+   * as the six was a claim the data does not make: these come from
+   * `/projects/:id/custom-fields`, and a field created in the task modal is
+   * any of twenty-two. The narrow type is why every renderer here believed it
+   * was looking at a string.
+   */
+  type: CustomFieldType | (string & {})
   options?: Array<{ label: string; value: string }> | null
 }
 type CustomFieldValue = {
   definition: { id: string }
-  value: string | number | boolean | null
+  value: string | number | boolean | string[] | null
+}
+
+/**
+ * 0146 — the types a cell in this grid can really EDIT in place.
+ *
+ * Everything else is drawn read-only. The alternative, which is what this file
+ * did until now, is a text box over a `people` field: it accepts what you type,
+ * sends it, and the API answers 400 into a promise nobody reads. A control
+ * that cannot succeed is the dead control, and it is worse in a grid than
+ * anywhere else because the cell looks exactly like the ones that work.
+ *
+ * `rating` and `progress_manual` are deliberately absent although they are
+ * numbers: both are bounded (0–5, 0–100) and a bare number box makes the
+ * refusal a matter of what somebody happens to type. They have real editors on
+ * the task sheet.
+ */
+const INLINE_EDITABLE_TYPES: ReadonlySet<string> = new Set([
+  'text', 'long_text', 'location', 'url', 'email', 'phone',
+  'number', 'money', 'date', 'checkbox', 'dropdown', 'tshirt_size',
+])
+
+/** §V2-01c — the fixed set, the same one the task sheet and the API use. */
+const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
+
+/**
+ * What one custom-field cell says.
+ *
+ * Separate from the editor because a cell is read far more often than it is
+ * written, and because `String(value)` on an array is how `people` came to
+ * render `4d1f…,9ab2…` in a 9rem column.
+ */
+function customCellText(
+  field: CustomFieldDef,
+  value: unknown,
+  t: (key: TranslationKey, vars?: Record<string, string | number>) => string,
+): string {
+  const DASH = '—'
+  if (Array.isArray(value)) {
+    if (value.length === 0) return DASH
+    if (field.type === 'labels') {
+      // Labels have their names on the definition, so they are readable.
+      const opts = field.options ?? []
+      return value.map((v) => opts.find((o) => o.value === v)?.label ?? String(v)).join(', ')
+    }
+    /*
+     * People, files, voting and tasks are ids, and this view has nothing to
+     * resolve them against. THE COUNT IS WHAT IT HONESTLY KNOWS — drawing the
+     * ids would be a column of noise that looks like data.
+     */
+    return t('list.table.cellSelected', { n: value.length })
+  }
+  if (value === null || value === undefined || value === '') return DASH
+  switch (field.type) {
+    case 'checkbox':
+      return value ? '✓' : DASH
+    case 'signature':
+      return t('list.table.cellSigned')
+    case 'progress_auto':
+    case 'progress_manual':
+      return `${value}%`
+    case 'money':
+      return `$${value}`
+    case 'tshirt_size':
+      return String(value).toUpperCase()
+    case 'dropdown':
+      return (field.options ?? []).find((o) => o.value === value)?.label ?? String(value)
+    default:
+      return String(value)
+  }
 }
 
 export const Route = createFileRoute('/app/$workspaceId/$spaceId/$projectId/$listId')({
@@ -2200,9 +2286,17 @@ function ListDetail() {
         event.preventDefault()
         // Cycle only through the views this space enables (§5 per-space config),
         // so the shortcut can never land on a hidden view.
-        const order: Array<typeof activeView> = (
-          ['list', 'board', 'table', 'calendar', 'gantt'] as Array<typeof activeView>
-        ).filter((v) => enabledViewsRef.current.includes(v))
+        //
+        // `ALL_VIEWS`, NOT A SIXTH COPY OF THE VIEW KEYS. This read
+        // `['list', 'board', 'table', 'calendar', 'gantt']` — the same five
+        // names `ALL_VIEWS` holds eight hundred lines above, minus `team`. So
+        // Team View, built during this audit and drawn in the tab strip, could
+        // not be reached by the keyboard at all: `v` walked past it forever.
+        // The keys now exist four times rather than five (`space-presets.ts` is
+        // the source of truth, `lib/space-views.ts` and `ALL_VIEWS` are the
+        // other two), and this site holds none of its own.
+        const order: Array<typeof activeView> = (ALL_VIEWS as readonly string[] as Array<typeof activeView>)
+          .filter((v) => enabledViewsRef.current.includes(v))
         if (order.length === 0) return
         const idx = order.indexOf(activeView)
         setActiveView(order[(idx + 1) % order.length])
@@ -4951,16 +5045,32 @@ function TableView({
                   )}
 
                   {customColumns.map((field) => {
-                    const open = customOpen?.taskId === task.id && customOpen.fieldId === field.id
+                    const editable = INLINE_EDITABLE_TYPES.has(field.type)
+                    const open =
+                      editable && customOpen?.taskId === task.id && customOpen.fieldId === field.id
                     const current = taskCustom[field.id]
-                    const valueLabel =
-                      current === null || current === undefined || current === ''
-                        ? '—'
-                        : String(current)
+                    const valueLabel = customCellText(field, current, t)
 
                     return (
                       <div key={field.id} className="w-36 px-3 flex items-center relative">
-                        {open ? (
+                        {!editable ? (
+                          /*
+                           * 0146 — READ-ONLY, and it opens nothing.
+                           *
+                           * A `people`, `tasks`, `signature` or derived field
+                           * has no editor in this grid; until now clicking one
+                           * opened a text box that could only ever produce a
+                           * 400. The cell says what it holds and sends the
+                           * reader to the task sheet, where the real editor is.
+                           */
+                          <span
+                            data-testid={`custom-cell-readonly-${field.id}`}
+                            title={t('list.table.cellEditOnTask')}
+                            className="text-xs truncate text-left w-full text-muted-foreground"
+                          >
+                            {valueLabel}
+                          </span>
+                        ) : open ? (
                           <CustomFieldEditor
                             field={field}
                             currentValue={current}
@@ -4979,6 +5089,7 @@ function TableView({
                         ) : (
                           <button
                             type="button"
+                            data-testid={`custom-cell-open-${field.id}`}
                             onClick={(e) => {
                               e.stopPropagation()
                               setCustomOpen({ taskId: task.id, fieldId: field.id })
@@ -5093,7 +5204,35 @@ function CustomFieldEditor({
       </select>
     )
   }
-  const inputType = field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : 'text'
+  /*
+   * 0146 — T-shirt Size is a FIXED set, so it gets the set rather than a text
+   * box. A free-text cell over it accepts "Large", sends it, and the API
+   * refuses everything that is not one of the five.
+   */
+  if (field.type === 'tshirt_size') {
+    return (
+      <select
+        autoFocus
+        className="h-6 w-full text-xs bg-card border border-border rounded px-1"
+        value={draft}
+        onBlur={onCancel}
+        onChange={(e) => {
+          const next = e.target.value
+          setDraft(next)
+          void onSave(next || null)
+        }}
+      >
+        <option value="">{t('list.none')}</option>
+        {TSHIRT_SIZES.map((size) => (
+          <option key={size} value={size}>
+            {size.toUpperCase()}
+          </option>
+        ))}
+      </select>
+    )
+  }
+  const isNumeric = field.type === 'number' || field.type === 'money'
+  const inputType = isNumeric ? 'number' : field.type === 'date' ? 'date' : 'text'
   return (
     <input
       autoFocus
@@ -5101,7 +5240,7 @@ function CustomFieldEditor({
       value={draft}
       onChange={(e) => setDraft(e.target.value)}
       onBlur={() => {
-        if (field.type === 'number') {
+        if (isNumeric) {
           const asNum = draft.trim() ? Number(draft) : null
           void onSave(Number.isFinite(asNum as number) ? asNum : null)
         } else {
