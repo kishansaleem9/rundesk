@@ -678,7 +678,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
-| M | "Comment ▾" split button; "Create Task ▾" split button |
+| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing**, and it is why this row is `B*` rather than `B` |
 | — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
 | B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — the panel exists, **no drop handler** |
@@ -726,7 +726,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | ClickApps — gated by PLAN, server-side as well as client-side; 3 dead labels removed |
 | B | "Default View Templates" tab — closed by `space-wizard.mjs`, 23 checks (frame `07:06`). The check that covers it had to be rewritten before it meant anything: it pressed the Marketing card, which the panel had already correctly disabled as "Applied" because step two had chosen the Marketing workflow — and had the press landed, the state it asserted was already true beforehand, so **it could not have failed for any build**. It now presses Project, then Marketing, and verifies **every** switch the panel draws rather than two |
 | P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
-| M | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") |
+| B | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") — frame `07:50`, the bar in `create-space-wizard.tsx`, closed by `space-wizard.mjs`, 5 checks. Stale, not missing |
 | B | "+" on a space opens the Create menu, from one shared list both it and the quick-create tabs import — **8 create kinds above the rule and the frame's Imports/Templates footer below it**, and `space-create-menu.mjs` now asserts the two groups separately, 23 checks. It did not: it scraped every `space-create-*` item into one array and compared it to the create kinds, so on the day the footer shipped — which is frame `08:00`'s own bottom group — **the baseline went red for a menu that had just become more correct**, and stayed red through a whole break-test round, which refused to run against it. Its header also called that array "the eight of frame `08:00`" when the frame's eight are a different set (no Task, Reminder or Project; a **Form** Rundesk has none of, which is the `M` row above). Two new checks came out of the fix: the footer pair is named, and **neither may grow a creator tab** — `workspace-sidebar.tsx` argues in a comment that making them `CreateKind`s would be "the dead control, twice", and a comment is not a guarantee |
 | P | Create Folder — **private toggle and Use-Templates footer closed** by `folder-dialog.mjs`, 13 checks (frame `08:32`). Still open: **description**, and it is blocked rather than pending — `folders` has no such column and `FoldersService` whitelists `{name, color}` on create, so a description typed here would have nowhere to go. Left absent on purpose: a field that stores into nothing is the mirror defect, and the frames are not worth a column that lies |
 | B | Folder **"Use Space statuses"** inheritance — closed by `folder-dialog.mjs`, **21 checks, 8 of them new and all 8 break-tested** (frame `08:32`: Settings › Statuses over the value *"Use Space statuses"*, with a `›`). Built as **one column with a reader**, migration `0159`: `folders.status_scope ∈ 'space' \| 'list'` is the default handed to every list made in that folder, and `ListsService.createList` is the reader, so the setting shows up on the first list rather than being stored against a someday. Deliberately NOT a fourth status table — `resolveEffectiveStatuses` already honours `'space'` on the read path and the task write path, and folder-owned statuses nothing read would be the mirror defect this audit has found six times. The decisive check compares a list's **effective** statuses key-for-key with the space's own, not by count, so a list that seeded a same-sized default cannot pass. The confident zero is handled too: `applyPreset` seeds `space_statuses` inside a `try`, so a space can legitimately have none, and `createList` only scopes to `'space'` when the space actually has some — **this suite's own guard check caught that on its first run**, against a fixture that had created a space with no preset |
@@ -776,11 +776,11 @@ checks, not about a run.**
 | B | Planner bottom command bar — closed by `planner-command-bar.mjs`, 10 checks. It must open the SHARED palette rather than grow a second search surface beside it, and ⌘K has to open exactly ONE: the shell keeps the hotkey because the palette is only mounted while open, and the component registers a toggling ⌘K of its own — so a stowaway second copy is invisible until a keypress, and a break patch that mounted one permanently left the earlier version of this check green |
 | B | **Calendar picker grouped by account** (+ workspace calendars: Time off, Holidays) — closed by `calendar-accounts.mjs`, 33 checks. Building it found that the picker's popover used a `fixed inset-0 z-40` click-catcher with **nothing listening for Escape**: until a click happened to land on the catcher it was a full-screen sheet swallowing every press in the planner header, and a keyboard user had no way out at all. Proved by hit test — after Escape the menu count is still 1 and `elementFromPoint` over the Settings button returns the catcher — not inferred |
 | B | Calendar settings — 5 real pages plus two honestly recorded gaps (AI Notetaker needs a meeting bot; Automations parked at `14:29`) |
-| M | **Conferencing / Zoom** connect row |
+| B | **Conferencing / Zoom** connect row — frame `13:36`, the last section of the Accounts page: *"Connect other video conferencing providers"* over a Zoom row. `ConferencingRow` in `planner-settings-dialog.tsx`, closed by `calendar-accounts.mjs`. Stale, not missing |
 | B | Settings footer: What's new · Report a problem · Feature requests |
 | B | **View selector Day / 4 days / Week / Month** + shortcuts `d x w m` |
 | B | Show weekends; event style; default duration; colour tasks by; start week on |
-| M | Appearance: Grid size |
+| B | Appearance: **Grid size** — frame `14:05`'s first control, three swatches (Default · Large · XL) over *"Choose how large events and time slots appear in the grid"*. Closed by `planner-appearance-toggles.mjs`, 3 of its 20 checks, **re-run green at HEAD**. THIS ROW WAS STALE, not missing: the control, the API's validation and the reader all exist. `const hourPx = GRID_SIZES[gridSize]` is the reader and every block's `top` and `height` is computed from it, and `GRID_SIZES` is imported FROM the settings dialog rather than re-declared, so the swatch and the grid cannot disagree about what "Large" means |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
 | P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, 21 checks; `+ Add a new section` still open (it is on Calendar settings › Sidebar, over the planner rail, not on the tree). `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
@@ -846,7 +846,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 138 built · 15 partial · 21 missing.**
+**174 rows: 142 built · 15 partial · 17 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -882,9 +882,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 107 | 11 | 15 | 133 |
+| §2, the sections table | 111 | 11 | 11 | 133 |
 | §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
-| **consolidated** | **138** | **15** | **21** | **174** |
+| **consolidated** | **142** | **15** | **17** | **174** |
 
 §2's 105 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
@@ -2700,6 +2700,19 @@ cannot reveal and a schema comment actively conceals.
 | `M` Countdown in the browser tab title | **struck, not closed** | It is built, but it rests on a doc error: no frame shows a countdown in the tab. See §7 |
 | `M` Credits entirely | bundling warning | The usage-trend chart is in dollars and needs no currency; retiring it with the credits decision would lose a thing that is neither credits nor out of scope |
 | + six rows built this session | **B** | already moved in §2 |
+| `M` Appearance: Grid size | **B** | Stale, not missing. Control, API validation and reader all present — `const hourPx = GRID_SIZES[gridSize]`, with `GRID_SIZES` imported from the dialog so the swatch and the grid cannot disagree. `planner-appearance-toggles.mjs` covers it in 3 checks and was re-run green at HEAD |
+| `M` "Comment ▾" split button; "Create Task ▾" | **B\*** | The Comment half is built and checked (`task-mentions.mjs`), with Email listed-and-disabled and its reason on the row. "Create Task ▾" is genuinely absent, which is what the asterisk records |
+| `M` Conferencing / Zoom connect row | **B** | Stale. `ConferencingRow` in `planner-settings-dialog.tsx`, frame `13:36`, checked by `calendar-accounts.mjs` |
+| `M` Copy configuration from another space | **B** | Stale. The bar is in `create-space-wizard.tsx` at frame `07:50` and `space-wizard.mjs` spends 5 checks on it |
+
+**THOSE FOUR WERE FOUND BY LOOKING, NOT BY A GUARD, and that is the point of
+the row.** `scripts/check-video2-counts.mjs` can prove this file agrees with
+itself; it cannot prove a letter agrees with the product, because `M` is a
+claim about the world. The headline moved `138 → 142 built` with nothing built
+for it. Every remaining `M` in §2 has now been read against the code once —
+`"Create Task ▾"`, `"Add to ›"` (a task in more than one list) and the
+metered *"uses have expired"* state were each confirmed genuinely absent
+rather than assumed so.
 
 ### Voice notes and Required views were closable the whole time
 
@@ -2801,6 +2814,26 @@ appeared, so it matched twice and refused. Both reported PATCH FAILED against
 code they were still perfectly able to break. **A break patch that cannot find
 its line is a check with no baseline**, and it is indistinguishable, in a long
 log, from a check that was never worth writing.
+
+### The patch that proved a CHECK wrong, which is what step 6 is for
+
+`list-customize` was 7 of 8 first, and the eighth is the one worth reading.
+`list-trio-8-parent-from-visible-only` swaps `tasks` for `visibleTasks` when
+resolving a subtask's parent title — the exact one-line mistake check 8 exists
+to catch, the shorter version that looks right — and it came back **37 passed,
+0 failed**.
+
+The product was correct and the check was worthless. The annotations are a
+`useMemo` keyed on `[tasks, …the two switches…]`. Hiding the closed parent
+changes `visibleTasks`, which is **not one of those keys**, so the memo never
+re-ran and the broken build went on serving the map it had built while the
+parent was still on screen. The check was reading a cached correct answer and
+reporting it as evidence.
+
+It cycles the switch off and on now, which moves a key the memo watches, and
+the same patch reddens 36/1. **Nothing but break-testing could have found
+this**: the suite was green, the code was right, and the check proved nothing —
+which is indistinguishable from a good check right up until the day it matters.
 
 ### The set that proves the folder statuses column is real
 
