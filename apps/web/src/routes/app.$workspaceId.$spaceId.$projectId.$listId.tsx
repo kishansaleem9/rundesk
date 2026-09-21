@@ -6813,7 +6813,7 @@ function AssigneePicker({
             move while the grid does not is the exact shape of the dead
             control this audit keeps finding.
           */}
-          {false && (
+          {!assignedViaOn && (
             <p className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground" data-testid="list-assigned-via-hint">
               {t('list.assignedVia.hint')}
             </p>

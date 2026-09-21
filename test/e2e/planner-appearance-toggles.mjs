@@ -326,7 +326,10 @@ try {
     (await dims().count()) === 0 && !calls.some((c) => c.url.includes('/work-schedule')),
     'nothing is dimmed, and the page has not even asked for the work schedule',
     `${await dims().count()} dimmed columns before the switch, and ` +
-      `${calls.filter((c) => c.url.includes('/work-schedule')).length} schedule requests`,
+      `${calls.filter((c) => c.url.includes('/work-schedule')).length} schedule requests — ` +
+      'a dimmed column here means the reader ignores the switch and shades regardless; a request ' +
+      'here (with Holidays off in the fixture above) means the schedule is fetched whether anything ' +
+      'reads it, and the request can no longer be evidence that the setting was read at all',
   )
 
   await openSettings('appearance')

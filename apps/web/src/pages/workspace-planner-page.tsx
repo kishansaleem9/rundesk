@@ -444,6 +444,24 @@ export function PlannerPage() {
   const hiddenCalendars = new Set(settings?.hiddenCalendarIds ?? [])
   const holidayCalendarOn = !hiddenCalendars.has('workspace:holidays')
   const timeOffCalendarOn = !hiddenCalendars.has('workspace:timeOff')
+  /*
+   * NOTHING IS FETCHED ON A CALENDAR'S BEHALF UNTIL THIS ACCOUNT'S OWN ANSWER
+   * IS IN, and that is what makes the two flags above readers.
+   *
+   * `hiddenCalendarIds` lives in `settings`, which is a query: on the first
+   * render it is `undefined`, so `hiddenCalendars` is empty and BOTH workspace
+   * calendars read as ON. Holidays and Time off then fired their requests
+   * before the page had any idea whether this person had switched them off —
+   * so "unticking it stops the request that fetches it", which is the sentence
+   * both readers below are written around, was true for the rest of that
+   * session and false again on the next load. A stored value honoured only
+   * until you reload is the mirror defect with a delay on it.
+   *
+   * `settings === undefined` is the loading state specifically: an account
+   * that has never touched the planner has `{}`, which is defined and answers
+   * "on" for both, exactly as it should.
+   */
+  const settingsKnown = settings !== undefined
 
   /*
    * The account's own week start, not a hard-coded Monday. `users.weekStart`
@@ -559,7 +577,7 @@ export function PlannerPage() {
      * calendar. Asked for when either wants it, and — because each reader
      * checks its own flag below — turning one off does not take the other's
      * data away. */
-    enabled: !!workspaceId && (darkenNonWorking || holidayCalendarOn),
+    enabled: !!workspaceId && settingsKnown && (darkenNonWorking || holidayCalendarOn),
   })
 
   /** ISO weekday, 1 = Monday … 7 = Sunday, matching `workspaces.work_days`. */
@@ -681,7 +699,7 @@ export function PlannerPage() {
       api<Array<{ id: string; userId: string; startsOn: string; endsOn: string; note?: string | null }>>(
         `/workspaces/${workspaceId}/time-off?from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,
       ),
-    enabled: !!workspaceId && timeOffCalendarOn,
+    enabled: !!workspaceId && settingsKnown && timeOffCalendarOn,
   })
 
   const setCalendarHidden = useMutation({

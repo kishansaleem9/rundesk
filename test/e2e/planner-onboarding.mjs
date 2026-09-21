@@ -322,7 +322,30 @@ try {
    * all of which work with no calendar connected. So the panel is drawn ABOVE
    * the grid and the grid still works — and both halves are asserted, because
    * "the panel is present" alone would pass on a full-screen takeover.
+   *
+   * THE GRID IS BROUGHT HOME FIRST, and without that this check measures the
+   * clock instead of the layout.
+   *
+   * A day column is 24 hours tall and lives inside a scroll container the
+   * planner deliberately scrolls to the current hour on mount ("arrive at the
+   * current hour, not at midnight"). So `boundingBox()` reports where the
+   * column's 00:00 edge is, which at 16:00 is several hundred pixels ABOVE the
+   * container — measured cold, the calendar appears to start above a panel it
+   * is in fact entirely below. It read `panel ends at 266, first day column
+   * starts at 13` against a container whose own top is 266: the same number
+   * the panel ends on. The comparison would only have been true between
+   * midnight and 01:00, when there is nothing to scroll past.
+   *
+   * `planner-appearance-toggles.mjs` carries the same helper for the same
+   * reason. Scrolling changes nothing about what is being asserted — the panel
+   * is still above the grid, or it is not.
    */
+  await page.evaluate(() => {
+    let el = document.querySelector('[data-testid="planner-day-column"]')?.parentElement
+    while (el && el.scrollHeight <= el.clientHeight) el = el.parentElement
+    if (el) el.scrollTop = 0
+  })
+  await page.waitForTimeout(150)
   const box = await panel().boundingBox()
   const gridBox = await page.locator('[data-testid="planner-day-column"]').first().boundingBox()
   chk(
