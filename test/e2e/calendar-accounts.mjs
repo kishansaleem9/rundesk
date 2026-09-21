@@ -549,10 +549,32 @@ try {
    * integration somebody relies on is live. So the row's state is compared
    * against `integrations/connections`, which is what the App Center reads.
    *
-   * AND THE MESSAGE, NOT THE STATUS. `oauth/start` answers 400 both when the
-   * server has no Zoom credentials and when the caller may not connect apps —
-   * one status for two mechanisms, which cannot tell them apart. `.status` is
-   * checked explicitly because `apiAs` never throws: it returns
+   * AND WHERE THE CONNECT FLOW SENDS YOU, NOT JUST THAT IT ANSWERED.
+   *
+   * This used to accept `started.status === 200`, and 200 is a status this
+   * route cannot produce: `oauthStart` is a plain `@Post` with no `@HttpCode`,
+   * so Nest answers **201**. The other branch — a 400 for missing Zoom
+   * credentials — is not a thing the server does either; `getOAuthStartUrl`
+   * composes the consent URL out of `process.env.ZOOM_CLIENT_ID ?? ''` and
+   * hands it back regardless, and it is the App Center's own readiness check
+   * that keeps people away from an unconfigured provider. So BOTH branches
+   * were unreachable and the check could only ever fail, which is exactly what
+   * it did — printing a perfectly good Zoom consent URL in its failure line.
+   * `app-catalogue.mjs` carries a note about making the same mistake against
+   * the same route: the product was never wrong.
+   *
+   * 201 is pinned exactly rather than loosened to `< 300`, because "any
+   * success will do" is how a route that quietly starts answering 204 with no
+   * body keeps a green check — and the URL is asserted with it, because a 201
+   * pointing somewhere other than Zoom's own consent endpoint is a Connect
+   * button wired to nothing and the status alone cannot see it.
+   *
+   * The refusal branch is kept — a deployment MAY grow a readiness check here
+   * — but narrowed to a message about configuration. `/zoom/i` would have let
+   * `Unsupported provider: zoom` through, and that is this route not existing
+   * for Zoom at all: the dead-route defect the row is here to rule out.
+   *
+   * `.status` is checked explicitly because `apiAs` never throws: it returns
    * `{status, data, error}`, so a `.catch` here would be inert and a failed
    * call would read as success.
    */
@@ -567,16 +589,21 @@ try {
     { method: 'POST' },
   )
   const reason = String(started.error?.message ?? started.error ?? '')
+  const startedUrl = String(started.data?.authUrl ?? '')
+  const startsAtZoom =
+    started.status === 201 && /^https:\/\/zoom\.us\/oauth\/authorize\?/.test(startedUrl)
+  const refusedForSetup =
+    started.status === 400 && /not configured|missing backend configuration/i.test(reason)
   chk(
-    conns.status === 200 &&
-      rowSaysConnected === zoomLive &&
-      (started.status === 200 ||
-        (started.status === 400 && /zoom|not configured|client/i.test(reason))),
+    conns.status === 200 && rowSaysConnected === zoomLive && (startsAtZoom || refusedForSetup),
     `the row agrees with the App Center (connected: ${zoomLive}), and the connect flow either ` +
-      `starts or refuses for a Zoom reason — ${started.status}${reason ? ` ${JSON.stringify(reason)}` : ''}`,
+      `starts at Zoom's own consent endpoint or refuses because Zoom is not configured — ` +
+      `${started.status} ${JSON.stringify(reason || startedUrl.slice(0, 48))}`,
     `connections answered ${conns.status}, the row said connected=${rowSaysConnected} against ` +
-      `${zoomLive}, and oauth/start answered ${started.status} ${JSON.stringify(reason)} — a 400 ` +
-      'with a generic message could equally be a permission refusal, which is a different bug',
+      `${zoomLive}, and oauth/start answered ${started.status} ` +
+      `${JSON.stringify(reason || startedUrl.slice(0, 96))} — a success that does not point at ` +
+      'zoom.us is a Connect button wired to nothing, and a refusal whose message names no ' +
+      'configuration could equally be a permission refusal, which is a different bug',
   )
 
 } catch (e) {
