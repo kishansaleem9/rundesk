@@ -274,6 +274,23 @@ green "confirmations" that meant nothing until they were found.
   that first line before reading anything below it.**
 - **A patch that does not compile proves nothing**, and the harness must say
   so out loud rather than counting it among the confirmed.
+- **THE WORKTREE SYNCS TO `HEAD` WHEN THE RUN TAKES THE LOCK, NOT WHEN YOU
+  QUEUE IT.** Queue a patch, commit the fix it is meant to break, and the run
+  may still start against the tree *without* that fix — because it waited
+  behind another agent for twenty minutes first. This happened three times in
+  one afternoon and each time it looked like something else:
+
+  | what it printed | what it meant |
+  |---|---|
+  | `sdp-19-create-ungated PATCH FAILED` | the anchor was added by a commit the run predates |
+  | `BASELINE (no patch) 21 passed, 1 failed` then `REFUSING TO BREAK-TEST` | the baseline fix landed after the run started |
+  | four checks red on every patch | the worktree had never been synced at all |
+
+  The `== syncing /tmp/claude-0/wtN to <sha>` line at the top of the results
+  file is the record of which tree the numbers are about. **Read it, and check
+  it against the commit you meant to test**, before reading anything below it.
+  A `PATCH FAILED` from a run that predates the patch's own commit is not a bad
+  patch, and a refusal on a red baseline is not a broken suite.
 - **You cannot sandbox a patch script by stubbing `io` in its globals.** Each
   patch does its own `import io`, which rebinds the name to the real module —
   so a "dry run" verifier written this way silently applies every patch to the

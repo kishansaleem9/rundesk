@@ -640,7 +640,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | "More settings" — the field's SCOPE, which the API stored and no reader honoured |
 | — | …"and permissions" — deliberate: `custom_field_definitions` has no permission columns |
 | B | Toast "Created field `<name>`" |
-| P | Attach on create — uploads *after* the task exists, single file, no removable list |
+| B | Attach on create — closed by `attach-on-create.mjs`, 13 checks (frame `01:10`). Several files, listed by name, each removable, staged **before** the task exists. Building it found the feature was inert in a way no screenshot could show: `input.files` is a live `FileList` and the change handler clears `e.target.value` the moment it returns, so `Array.from(picked)` inside React's state updater — which runs later — always iterated an emptied list. **Every staged file was silently dropped, for any file**, and the paperclip stayed on "Attach a file" with nothing on screen to say so |
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
@@ -684,13 +684,13 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Related Items — one panel, Relationships \| References, single entry point |
 | B | Right-rail "Related Items" icon + tooltip — closed by `task-attachments.mjs`, 13 checks (frames `06:05`–`06:08`) |
 | B | Sidebar Direct Messages — closed by `sidebar-dms.mjs`, 14 checks. The data had been there the whole time and the surface was not: `chat_channels.is_dm` is a real column and `workspace-chat-page.tsx` has split `publicChannels` from `dmChannels` since it was written. The Channels section filters DMs out on purpose — `+ Add Channel` takes a name and `+ New message` takes a person, so one button cannot be both — and filtering them out without giving them a home left them reachable only from the page you had to already be on to know you had any |
-| M | Create-menu search "Describe anything to create"; Create with AI; Super Agent |
+| P | Create-menu search **"Describe anything to create" and Create with AI closed** by `create-menu-ai.mjs`, 23 checks (frame `06:40`). **Super Agent** stays open and is blocked, not pending: Rundesk has no agents, and the Brain²/Super Agents hub is recorded in §3. The check asserts the row in Postgres across BOTH doors — a list made from a space with no project lands in that space's hidden default container, which `getProjectsBySpace` excludes on purpose, so walking the visible projects could never find it |
 | M | "Form" absent from the create menu though the module exists |
 | B | Create-a-Space: icon+name, description, **Default permission**, Make Private |
-| M | Space dialog footer "Use Templates" |
+| B | Space dialog footer "Use Templates" — closed by `space-wizard.mjs`, 23 checks (frame `06:52`) |
 | B | Space wizard: 4 presets, default views, statuses, ClickApps grid, per-space gating |
 | B | ClickApps — gated by PLAN, server-side as well as client-side; 3 dead labels removed |
-| M | "Default View Templates" tab |
+| B | "Default View Templates" tab — closed by `space-wizard.mjs`, 23 checks (frame `07:06`). The check that covers it had to be rewritten before it meant anything: it pressed the Marketing card, which the panel had already correctly disabled as "Applied" because step two had chosen the Marketing workflow — and had the press landed, the state it asserted was already true beforehand, so **it could not have failed for any build**. It now presses Project, then Marketing, and verifies **every** switch the panel draws rather than two |
 | P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
 | M | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") |
 | B | "+" on a space opens the 8-item Create menu, from one shared list both it and the quick-create tabs import |
