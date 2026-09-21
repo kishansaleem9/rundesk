@@ -161,6 +161,40 @@ irrelevant trains everyone to ignore it.
   Playwright's default `state: 'visible'` needs a non-zero box, so waiting on
   a *collapsed* (0px) panel can never resolve. Poll the quantity the check
   itself measures.
+- **`page.route` cannot intercept what the SERVICE WORKER serves, and
+  `page.on('request')` will happily tell you it can.** `apps/web` is a PWA
+  (`vite-plugin-pwa`, `sw.js` in the bundle). `ai-answer-rendering` stubbed
+  `GET /ai/status`, the handler never ran, the composer stayed correctly
+  disabled, and the run died thirty seconds and one section later inside
+  `locator.fill`. The request URL was in the log, matched the glob exactly, and
+  was served past the stub. **Workbox handles GET and passes POST through**, so
+  the same suite's `/ai/chat` POST stub had worked since the day it was
+  written — internally consistent and wrong in one half. Pass
+  `serviceWorkers: 'block'` to `browser.newContext()` for anything that stubs a
+  GET; seven suites in this directory already do.
+- **A precondition you `await` and do not read is a failure that will surface
+  somewhere else.** The same block had a bare `await waitUntil(() =>
+  box.isEnabled())`, so a composer that never enabled carried on into the next
+  line and failed there — a timeout in the middle of the word-bar section,
+  pointing at the wrong thing. If a precondition can fail, it is a check. If it
+  is not worth a line, it is not worth waiting for.
+- **A stub's body is the ENVELOPE, not the handler's `return`.** Every response
+  here goes through a response interceptor: `status()` returns
+  `{available: true}` and the wire carries
+  `{"data":{"available":true},"error":null}`. A stub fulfilling the inner shape
+  unwraps to `undefined` in the client and the page behaves as though the call
+  failed. Copy the shape from the live route — `curl` it — never from the
+  controller.
+- **`@Post` answers 201, and a check written from an assumption about REST
+  answers to nobody.** Nest returns **201** for a `@Post` with no `@HttpCode`.
+  Three checks were written against 200 in one day — two in `app-catalogue`,
+  one in `ai-assign` — and every one of them printed the right payload in its
+  own failure line while reporting the route broken. `ai-assign` is the
+  instructive one: its six neighbouring assertions correctly use `=== 200`
+  because they are GETs, so the file is consistent with itself and wrong in one
+  place, which review will not catch. Read the route. Pin the number exactly
+  rather than loosening to `< 300`: "any success will do" is how a route that
+  starts answering 204 with no body keeps a green check.
 
 ### Selectors
 
@@ -182,9 +216,18 @@ irrelevant trains everyone to ignore it.
 - **Narrow to your own fixtures.** The e2e database is shared. A suite that
   asserts "the list has 3 rows" is asserting on everyone else's data too. Tag
   your rows and filter to the tag.
-- **One runner at a time.** There is a single Postgres, a single API on `:3011`,
-  and a single `apps/web/dist`. Two suites in parallel will interleave and the
-  failures will look like flakes.
+- **One runner per LANE, not one runner overall.** This used to read "one
+  runner at a time", and it described an environment that no longer exists:
+  `scripts/e2e-lanes/` gives each lane its own Postgres (`rundesk_v<k>`) and
+  its own API (`302k`), so N suites run at once without interleaving.
+  **The web bundle is the part that is still shared**, and it is the one that
+  bites: `vite build` empties the output directory before writing, so a run
+  that starts mid-build dies on `ENOENT …/index.html` — and a run that starts
+  just *after* somebody else's build finishes reports an ordinary pass or fail
+  about a tree that is not the one it is testing. With four agents working at
+  once this happened within the hour. Build your lane its own bundle
+  (`--outDir /tmp/claude-0/dist-<lane> --emptyOutDir`); `verify.sh` picks it up
+  automatically and names the bundle it measured on the result line.
 - **Prove the request, not just the render.** For anything that changes what the
   server is asked for, capture the request (`page.on('request', …)`) and assert
   the parameter went out. Rendering the right thing for the wrong reason is the
@@ -218,9 +261,17 @@ green "confirmations" that meant nothing until they were found.
   independent conditions hid the row, so removing one proved nothing. That is
   good code and a bad patch: rewrite the patch to remove both, rather than
   concluding the check is weak.
-- **A worktree is pinned at the commit you created it from.** Results are
-  about that commit, not about HEAD. Update it, or say which commit the
-  numbers describe.
+- **A worktree is pinned at the commit you created it from, AND THIS IS NOW
+  ENFORCED because advice was not enough.** `list-card-cover` was break-tested
+  in a worktree two commits stale: four of its checks failed on *every* patch,
+  including patches touching nothing near them, because those four were already
+  failing unpatched. At HEAD the suite was 26/26. Every line in that results
+  file looked like a result and meant nothing — with four checks already red,
+  no patch can be attributed. `wt-break.sh` now syncs the worktree to `HEAD`,
+  then runs the suite with **no patch at all** and writes
+  `== BASELINE (no patch) 26 passed, 0 failed` as the file's first line,
+  refusing outright (exit 4 and 5) rather than emit an unreadable run. **Read
+  that first line before reading anything below it.**
 - **A patch that does not compile proves nothing**, and the harness must say
   so out loud rather than counting it among the confirmed.
 - **You cannot sandbox a patch script by stubbing `io` in its globals.** Each

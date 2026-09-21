@@ -272,18 +272,41 @@ try {
       })
     : { status: 0, error: 'could not sign in as the peer' }
 
+  /*
+   * THE NOTIFICATION HAS TO BE ABOUT **THIS** TASK, and the first version of
+   * this check did not say so.
+   *
+   * It polled `notifs.length > 0`. Two break patches — one removing the
+   * announcement from `createTask` entirely, one removing the self-notification
+   * guard — both left the suite at 18 of 18 against a clean baseline. The
+   * reason is that the lane's database accumulates: every earlier run of this
+   * suite left its own `task_assigned` rows behind, so "the inbox is not empty"
+   * was already true before the seed was written and would stay true with the
+   * feature deleted. That is the same ambient-state defect this block was
+   * rewritten to remove, in a subtler form — and it is only visible because the
+   * patch was applied and the number did not move.
+   *
+   * So the seed is identified by the id it created. `notifications.target`
+   * carries `{entityType: 'task', entityId}`, which is the one field a stale
+   * row cannot coincidentally match.
+   */
+  const seedTaskId = seedTask.data?.id ?? null
   let notifs = []
+  let mine = null
   await waitUntil(async () => {
     notifs = (await A('/notifications')).data ?? []
-    return notifs.length > 0
+    mine = notifs.find((n) => n?.target?.entityId && n.target.entityId === seedTaskId) ?? null
+    return !!mine
   }, { timeoutMs: 15_000, stepMs: 250 }).catch(() => {})
 
   chk(
-    notifs.length > 0,
-    'the peer assigning a task puts something in this account\'s inbox',
-    `seed task answered ${seedTask.status} (${JSON.stringify(seedTask.error ?? null)}) and ` +
-      `GET /notifications returned ${notifs.length} row(s) after 15s — with nothing in the ` +
-      'inbox the check below would be measuring an empty page, which is what it used to do',
+    !!seedTaskId && !!mine,
+    'the peer assigning a task puts THAT task in this account\'s inbox',
+    `seed task answered ${seedTask.status} (${JSON.stringify(seedTask.error ?? null)}) as ` +
+      `${JSON.stringify(seedTaskId)}, and after 15s none of the ${notifs.length} row(s) in ` +
+      `GET /notifications named it — ${JSON.stringify(notifs.slice(0, 3).map((n) => n?.target?.entityId ?? null))}. ` +
+      'Being assigned a task at CREATION announced nothing until `announceAssignment`; a row ' +
+      'count alone would pass here on notifications an earlier run left behind',
   )
 
   await page.goto(`${stack.base}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
