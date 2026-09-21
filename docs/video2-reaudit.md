@@ -2945,6 +2945,8 @@ worktree under a lock:
 | `space-default-permission` | 1 | 1 |
 | `ai-value` | 1 | 1 |
 | `task-field-create` | 9 | 9, after two were re-aimed |
+| `space-presets` — **never covered before** | 3 | 3, one check each |
+| `doc-task-links` — **never covered before** | 2 | 2 |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `folder-create` | 12 | 12 |
 | `list-empty-states` | 7 | 7 |
