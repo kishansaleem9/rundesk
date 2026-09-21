@@ -46,10 +46,29 @@ import {
   Label,
   cn,
 } from '@rundesk/ui'
-import { Users, User, Network, Pencil, Plus, Search } from 'lucide-react'
+import { Users, User, Network, Pencil, Plus, Search, ArrowLeft, ArrowRight } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
+
+/**
+ * §V2-12 frames `20:57` and `21:02` — the empty state's explainer cards.
+ *
+ * THREE, NOT TWO, AND IN A CAROUSEL. `20:57` shows the second card clipped at
+ * the right edge with `←` `→` beneath; `21:02` shows the set advanced by one,
+ * with a third card entering. Declared here as one list so the carousel and
+ * anything that counts them read the same thing — a second hand-kept copy is
+ * the duplicated-list defect, which this audit has found five times.
+ *
+ * The third card's copy is the only part not read off the pixels: `21:02` cuts
+ * it at the viewport after "Stay focused with P…" / "Instantly know what e…
+ * and what's next on the…", and no later frame returns to it.
+ */
+const EMPTY_CARDS = [
+  { id: 'hub', titleKey: 'teams.cardHubTitle', bodyKey: 'teams.cardHubBody' },
+  { id: 'management', titleKey: 'teams.cardManageTitle', bodyKey: 'teams.cardManageBody' },
+  { id: 'focus', titleKey: 'teams.cardFocusTitle', bodyKey: 'teams.cardFocusBody' },
+] as const
 import { ReportingTree } from '../components/reporting-tree'
 
 type GroupRow = {
@@ -100,6 +119,8 @@ export function TeamsPage() {
   const me = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabId>('teams')
+  /* §V2-12 `20:57`/`21:02` — which card the explainer carousel is showing. */
+  const [cardIndex, setCardIndex] = useState(0)
   const [search, setSearch] = useState('')
   const [createOpen, setCreateOpen] = useState(false)
   const [createName, setCreateName] = useState('')
@@ -306,29 +327,79 @@ export function TeamsPage() {
                   )}
                 </div>
 
-                <div className="grid gap-4 sm:grid-cols-2">
-                  {(
-                    [
-                      { id: 'hub', titleKey: 'teams.cardHubTitle', bodyKey: 'teams.cardHubBody' },
-                      {
-                        id: 'management',
-                        titleKey: 'teams.cardManageTitle',
-                        bodyKey: 'teams.cardManageBody',
-                      },
-                    ] as const
-                  ).map((card) => (
-                    <Card key={card.id} className="p-4" data-testid="teams-empty-card" data-card={card.id}>
-                      <h3 className="text-sm font-semibold" data-testid="teams-empty-card-title">
-                        {t(card.titleKey)}
-                      </h3>
-                      <p
-                        className="mt-1.5 text-xs leading-relaxed text-muted-foreground"
-                        data-testid="teams-empty-card-body"
+                {/*
+                  §V2-12 frame `20:57` and `21:02` — THE EXPLAINER CARDS ARE A
+                  CAROUSEL OF THREE, and this was a static pair.
+
+                  `20:57` draws two cards with the second CLIPPED at the right
+                  edge and `←` `→` arrows centred beneath them — the clipping
+                  and the arrows are the whole claim, because a grid of two
+                  needs neither. `21:02` proves it: Teams Hub has slid off to
+                  the left, Member & team management is centre, and a third
+                  card is entering from the right.
+
+                  THE THIRD CARD'S COPY IS OURS AND THE REST IS THE FRAME'S.
+                  `21:02` cuts the third card at the viewport, so its title
+                  reads "Stay focused with P…" and its body "Instantly know
+                  what e… and what's next on the…" and no frame in the video
+                  ever shows the remainder. The COUNT, the pager and the
+                  advance are read off the pixels; the tail of that sentence is
+                  written here, which is why `teams-empty-state.mjs` asserts the
+                  mechanism and the count and never our prose.
+                */}
+                <div data-testid="teams-empty-carousel" data-index={cardIndex}>
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {EMPTY_CARDS.map((card, i) => (
+                      <Card
+                        key={card.id}
+                        className={cn('p-4', i === cardIndex ? '' : 'hidden sm:block', i < cardIndex && 'sm:hidden')}
+                        data-testid="teams-empty-card"
+                        data-card={card.id}
+                        data-visible={i === cardIndex || i === cardIndex + 1 ? 'true' : 'false'}
                       >
-                        {t(card.bodyKey)}
-                      </p>
-                    </Card>
-                  ))}
+                        <h3 className="text-sm font-semibold" data-testid="teams-empty-card-title">
+                          {t(card.titleKey)}
+                        </h3>
+                        <p
+                          className="mt-1.5 text-xs leading-relaxed text-muted-foreground"
+                          data-testid="teams-empty-card-body"
+                        >
+                          {t(card.bodyKey)}
+                        </p>
+                      </Card>
+                    ))}
+                  </div>
+                  {/*
+                    The pager, where the frame centres it. Both arrows always
+                    work: the frame shows the carousel advancing and gives no
+                    end state, and an arrow that stops responding at an edge is
+                    a control that looks broken rather than finished — so it
+                    wraps, which is also the only behaviour three cards and two
+                    arrows can express without inventing a disabled state
+                    nothing draws.
+                  */}
+                  <div className="mt-3 flex items-center justify-center gap-2">
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-testid="teams-empty-pager-prev"
+                      aria-label={t('teams.cardPrev')}
+                      onClick={() => setCardIndex((i) => (i - 1 + EMPTY_CARDS.length) % EMPTY_CARDS.length)}
+                    >
+                      <ArrowLeft className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="outline"
+                      data-testid="teams-empty-pager-next"
+                      aria-label={t('teams.cardNext')}
+                      onClick={() => setCardIndex((i) => (i + 1) % EMPTY_CARDS.length)}
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                    </Button>
+                  </div>
                 </div>
               </div>
             ) : (

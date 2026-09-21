@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, never `<`: a branch that silently skipped must fail, not shorten. */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 21
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -158,12 +158,76 @@ try {
     `it read ${JSON.stringify(body)}`,
   )
 
+  /*
+   * THIS CHECK ASSERTED `cardCount === 2`, AND SAID "the frame draws exactly
+   * two". IT DID NOT.
+   *
+   * `20:57` draws the second card CLIPPED at the right edge with `←` `→`
+   * centred beneath it — a grid of two needs neither — and `21:02` shows the
+   * set advanced by one, Teams Hub gone left, Member & team management centre,
+   * a third card entering from the right. The frame's number is three and its
+   * mechanism is a carousel.
+   *
+   * So the old check enforced the ABSENCE of what the frame asks for: it was
+   * green over a static pair and would have gone RED the day somebody built
+   * the carousel correctly. That is the worst kind of check there is, and it
+   * carried the frame's authority in its own failure message while doing it.
+   *
+   * THE COUNT AND THE PAGER ARE ASSERTED; THE THIRD CARD'S PROSE IS NOT.
+   * `21:02` cuts that card at the viewport after "Stay focused with P…", so
+   * its tail is ours — and a check comparing our own string to itself proves
+   * nothing. The first two cards' copy IS legible in full and is still checked
+   * below, by name.
+   */
   const cards = page.getByTestId('teams-empty-card')
   const cardCount = await cards.count()
   chk(
-    cardCount === 2,
-    'there are the frame’s two explainer cards',
-    `there are ${cardCount} — the frame draws exactly two`,
+    cardCount === 3,
+    'there are the frame’s three explainer cards',
+    `there are ${cardCount} — \`21:02\` advances the carousel and a third card enters from the right`,
+  )
+  const pagerPrev = await page.getByTestId('teams-empty-pager-prev').count()
+  const pagerNext = await page.getByTestId('teams-empty-pager-next').count()
+  chk(
+    pagerPrev === 1 && pagerNext === 1,
+    'and the pager the frame centres beneath them',
+    `prev ${pagerPrev}, next ${pagerNext} — \`20:57\` draws \`←\` \`→\` under the cards, which a ` +
+      'static grid of two would have no use for',
+  )
+  /*
+   * AND IT MOVES. A pager that renders and does nothing is the dead control,
+   * and `data-index` is the carousel's own claim about where it is — so the
+   * check reads the INDEX before and after, rather than asserting that a
+   * button exists.
+   */
+  const carousel = page.getByTestId('teams-empty-carousel')
+  const idxBefore = await carousel.getAttribute('data-index')
+  await page.getByTestId('teams-empty-pager-next').click()
+  const advanced = await waitUntil(
+    async () => (await carousel.getAttribute('data-index')) === '1',
+    { timeoutMs: 8000 },
+  )
+  const idxAfter = await carousel.getAttribute('data-index')
+  chk(
+    idxBefore === '0' && advanced,
+    'pressing → advances it, as it advances between `20:57` and `21:02`',
+    `the carousel went from ${idxBefore} to ${idxAfter}`,
+  )
+  /*
+   * WRAPPING, because three cards and two arrows cannot express an end state
+   * the frame never draws. Pressing → twice more from here has to come back to
+   * the first card rather than stop dead on a control that looks broken.
+   */
+  await page.getByTestId('teams-empty-pager-next').click()
+  await page.getByTestId('teams-empty-pager-next').click()
+  const wrapped = await waitUntil(
+    async () => (await carousel.getAttribute('data-index')) === '0',
+    { timeoutMs: 8000 },
+  )
+  chk(
+    wrapped,
+    'and it wraps rather than stopping dead on an arrow that still looks live',
+    `after three presses it sits at ${await carousel.getAttribute('data-index')}, not back at 0`,
   )
 
   const cardOne = flat(await readText(cards.nth(0)))
