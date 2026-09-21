@@ -6,7 +6,7 @@ import {
   ConflictException,
 } from '@nestjs/common'
 import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
-import { lists, listStatuses, projects, spaces } from '@rundesk/db'
+import { lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
@@ -160,6 +160,44 @@ export class ListsService {
       kind: 'list',
     })
     await this.assertListNameFree(projectId, data.name)
+
+    /*
+     * §V2-S09 frame `08:32` — the folder's Settings → Statuses, honoured.
+     *
+     * THIS IS THE READER THAT MAKES THAT SETTING REAL. A folder scoped to
+     * `'space'` — the dialog's own default, reading "Use Space statuses" —
+     * gives every list made inside it `status_scope: 'space'`, and
+     * `resolveEffectiveStatuses` already sends those lists to the owning
+     * space's `space_statuses` on the read path AND on the task write path. A
+     * column with a writer and no reader is the mirror defect, and this audit
+     * has found six of them; this is the other half.
+     *
+     * AND IT WILL NOT SCOPE A LIST TO AN EMPTY SET. `applyPreset` seeds
+     * `space_statuses` inside a `try`, so a space can exist with none — an
+     * older one, or one whose preset carried no statuses. A list scoped to
+     * that space would show no statuses at all and refuse every status a task
+     * tried to take: a confident zero that looks like a configuration choice.
+     * So the scope is only handed over when the space actually has statuses,
+     * and the list falls back to its own seeded set when it does not. Both
+     * branches are checked, because a fallback nobody exercises is a branch
+     * that is wrong the first time it runs.
+     */
+    let scope: 'list' | 'space' = 'list'
+    const [owningFolder] = await this.db
+      .select({ scope: folders.statusScope, spaceId: folders.spaceId })
+      .from(projects)
+      .innerJoin(folders, eq(folders.id, projects.folderId))
+      .where(eq(projects.id, projectId))
+      .limit(1)
+    if (owningFolder?.scope === 'space') {
+      const [seeded] = await this.db
+        .select({ key: spaceStatuses.key })
+        .from(spaceStatuses)
+        .where(eq(spaceStatuses.spaceId, owningFolder.spaceId))
+        .limit(1)
+      if (seeded) scope = 'space'
+    }
+
     const result = await this.db
       .insert(lists)
       .values({
@@ -167,12 +205,19 @@ export class ListsService {
         name: data.name,
         description: data.description,
         visibility: data.visibility ?? 'public',
+        statusScope: scope,
         createdById: actorId ?? null,
       })
       .returning()
 
     const list = result[0]
-    // Seed the default status pipeline so the list is immediately usable.
+    /*
+     * Seeded even when the scope is 'space'. The rows are what a later
+     * override falls back to — flipping the list to its own statuses must not
+     * leave it with none — and they cost one insert. `resolveEffectiveStatuses`
+     * reads the space while the scope says 'space', so they are inert until
+     * then rather than a second source of truth.
+     */
     await seedListStatuses(this.db, list.id)
 
     return list

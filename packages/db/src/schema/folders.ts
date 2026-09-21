@@ -19,6 +19,27 @@ export const folders = pgTable(
     name:        text('name').notNull(),
     color:       text('color').default('#354fb0'),
     position:    integer('position').notNull().default(0),
+    /**
+     * §V2-S09 frame `08:32` — the Create Folder dialog's **Settings →
+     * Statuses**, whose value reads *"Use Space statuses"* and which carries a
+     * `›` so it can be overridden.
+     *
+     * WHAT THIS DECIDES, and what it deliberately does not. It is the default
+     * `status_scope` handed to every list created inside this folder —
+     * `'space'` means those lists read the owning space's `space_statuses`,
+     * `'list'` means each gets its own seeded set. It is NOT a fourth status
+     * table: folders store no statuses of their own, because a folder that
+     * held a status set nothing read would be the mirror defect, and
+     * `resolveEffectiveStatuses` already honours `'space'` on both the read
+     * path and the task write path.
+     *
+     * So the reader is `ListsService.createList`, and the effect is visible on
+     * the first list made in the folder rather than stored against a someday.
+     */
+    statusScope: text('status_scope')
+      .$type<'space' | 'list'>()
+      .notNull()
+      .default('space'),
     createdById: uuid('created_by_id').references(() => users.id, { onDelete: 'set null' }),
     isArchived:  boolean('is_archived').notNull().default(false),
     // §13.4 Trash — when the item was deleted and by whom (null = unknown/legacy).

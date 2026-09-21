@@ -77,9 +77,28 @@ export class FoldersService {
     if (clash.length > 0) throw new ConflictException('Folder name taken')
   }
 
-  async create(spaceId: string, data: { name: string; color?: string }, actorId?: string) {
+  /**
+   * §V2-S09 frame `08:32` — Settings → Statuses, reading "Use Space statuses"
+   * with a `›` beside it.
+   *
+   * `statusScope` is the default every list created inside this folder is
+   * given: `'space'` sends them to the owning space's `space_statuses`,
+   * `'list'` gives each its own seeded set. Refused rather than coerced when
+   * it is neither, because a value silently rewritten to the default is a
+   * setting that appears to have been accepted and was not.
+   */
+  async create(
+    spaceId: string,
+    data: { name: string; color?: string; statusScope?: 'space' | 'list' },
+    actorId?: string,
+  ) {
     const name = (data.name ?? '').trim()
     if (!name) throw new BadRequestException('Folder name is required')
+    if (data.statusScope !== undefined && data.statusScope !== 'space' && data.statusScope !== 'list') {
+      throw new BadRequestException(
+        `statusScope must be "space" or "list", not ${JSON.stringify(data.statusScope)}`,
+      )
+    }
     // §V2-06 `06:52` — before the name check, so a refused actor is told they
     // may not add to this space rather than that the name is taken.
     await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'folder' })
@@ -90,6 +109,7 @@ export class FoldersService {
         spaceId,
         name,
         color: data.color || '#354fb0',
+        statusScope: data.statusScope ?? 'space',
         createdById: actorId ?? null,
       })
       .returning()

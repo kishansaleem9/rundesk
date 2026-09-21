@@ -1838,6 +1838,14 @@ function FolderForm({
    * failure names it and the dialog stays honest about what exists.
    */
   const [isPrivate, setIsPrivate] = useState(false)
+  /*
+   * §V2-S09 frame `08:32` — Settings → Statuses, whose value reads "Use Space
+   * statuses". `'space'` is the default because that is what the dialog shows
+   * before anybody touches it, and it is the whole point of the row: lists
+   * made in this folder read the space's statuses rather than each seeding
+   * their own.
+   */
+  const [statusScope, setStatusScope] = useState<'space' | 'list'>('space')
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -1848,7 +1856,10 @@ function FolderForm({
     // Folders have no page of their own — they render on their space, which is
     // also where a just-created one is easiest to see.
     mutationFn: async () => {
-      const folder = await api<{ id: string }>(`/spaces/${spaceId}/folders`, { method: 'POST', body: { name } })
+      const folder = await api<{ id: string }>(`/spaces/${spaceId}/folders`, {
+        method: 'POST',
+        body: { name, statusScope },
+      })
       if (isPrivate && folder?.id) {
         try {
           await api(`/spaces/${spaceId}/folders/${folder.id}`, {
@@ -1909,6 +1920,37 @@ function FolderForm({
           className="mt-0.5 h-4 w-4 shrink-0 accent-[var(--accent)]"
         />
       </label>
+      {/*
+        Frame `08:32` — **Settings** over a **Statuses** row reading "Use Space
+        statuses", with a `›` beside it. The chevron is what says the value is
+        changeable, so this is a control and not a caption: a row that named an
+        inheritance it could not alter would be the frame's own words on a dead
+        control.
+      */}
+      <div className="rounded-md border border-border/70 px-2.5 py-2">
+        <span className="text-[11px] uppercase tracking-wide text-muted-foreground">
+          {t('quickCreate.folderSettings')}
+        </span>
+        <label className="mt-1.5 flex items-center justify-between gap-3">
+          <span className="flex min-w-0 flex-col">
+            <span className="text-[13px]">{t('quickCreate.folderStatuses')}</span>
+            <span className="text-[11px] text-muted-foreground">
+              {statusScope === 'space'
+                ? t('quickCreate.folderStatusesSpaceHint')
+                : t('quickCreate.folderStatusesOwnHint')}
+            </span>
+          </span>
+          <select
+            data-testid="quick-create-folder-status-scope"
+            value={statusScope}
+            onChange={(e) => setStatusScope(e.target.value === 'list' ? 'list' : 'space')}
+            className="h-8 shrink-0 rounded-md border border-border bg-card px-2 text-[12px]"
+          >
+            <option value="space">{t('quickCreate.folderStatusesSpace')}</option>
+            <option value="list">{t('quickCreate.folderStatusesOwn')}</option>
+          </select>
+        </label>
+      </div>
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" data-testid="quick-create-folder-submit" disabled={!name.trim() || !spaceId || create.isPending}>{t('quickCreate.createFolder')}</Button>

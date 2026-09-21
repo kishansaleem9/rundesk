@@ -59,7 +59,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 21
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -244,6 +244,131 @@ try {
     await waitUntil(() => /\/templates\b/.test(page.url()), { timeoutMs: 15_000 }),
     'and it lands on the Template Center rather than being a label',
     `pressing it left the browser at ${page.url()}`,
+  )
+
+  // ── frame `08:32` — Settings › Statuses, "Use Space statuses" ─────────────
+  console.log('\n▶ frame `08:32` — Settings › Statuses, and what it actually does')
+  /*
+   * THE ROW IS A CONTROL, NOT A CAPTION. The frame draws `Statuses` over the
+   * value "Use Space statuses" with a `›` beside it, and the chevron is the
+   * whole claim: the inheritance is changeable. A row that named an
+   * inheritance it could not alter would be the frame's own words on a dead
+   * control.
+   *
+   * And the check that matters is the LAST one, not the first: a folder that
+   * stores `status_scope` and hands it to nobody is the mirror defect, which
+   * this audit has found six times. So this asserts the EFFECTIVE statuses of
+   * a list created inside the folder — the set `resolveEffectiveStatuses`
+   * returns, which is what the list page draws and what the task write path
+   * validates against — and it asserts them against the SPACE's own statuses
+   * rather than against a number, so a list that happened to seed the same
+   * count cannot pass.
+   */
+  await openFolderTab()
+  chk(
+    (await page.locator('[data-testid="quick-create-folder-status-scope"]').count()) === 1,
+    'the dialog carries a Statuses control, as the frame\'s Settings block draws',
+    'there is no Statuses row — frame `08:32` puts one under Settings with a chevron',
+  )
+  const scopeValue = await page
+    .locator('[data-testid="quick-create-folder-status-scope"]')
+    .inputValue()
+    .catch(() => null)
+  chk(
+    scopeValue === 'space',
+    'and it starts on Use Space statuses, which is the value the frame shows',
+    `it started on ${JSON.stringify(scopeValue)} — the frame's dialog reads "Use Space statuses" ` +
+      'before anybody touches it',
+  )
+
+  /*
+   * The space's own statuses, read from the server, so the comparison below is
+   * against the real set and not against a count this suite chose.
+   */
+  const spaceStatuses = await api(`/spaces/${SPACE}/statuses`)
+  const spaceKeys = (spaceStatuses.data ?? []).map((x) => x.key).sort()
+  chk(
+    spaceStatuses.status === 200 && spaceKeys.length > 0,
+    `this run's space has statuses of its own to inherit (${spaceKeys.length})`,
+    `GET /spaces/:id/statuses answered ${spaceStatuses.status} with ${spaceKeys.length} — with none, ` +
+      'a list scoped to the space would show an empty set and every check below would be vacuous',
+  )
+
+  const inherit = await api(`/spaces/${SPACE}/folders`, {
+    method: 'POST',
+    body: { name: `Inherit ${TAG}`, statusScope: 'space' },
+  })
+  const own = await api(`/spaces/${SPACE}/folders`, {
+    method: 'POST',
+    body: { name: `Own ${TAG}`, statusScope: 'list' },
+  })
+  chk(
+    inherit.status < 400 && own.status < 400 &&
+      inherit.data?.statusScope === 'space' && own.data?.statusScope === 'list',
+    'a folder stores the scope it was created with, both ways round',
+    `inherit ${inherit.status} → ${JSON.stringify(inherit.data?.statusScope)}, ` +
+      `own ${own.status} → ${JSON.stringify(own.data?.statusScope)}`,
+  )
+
+  const badScope = await api(`/spaces/${SPACE}/folders`, {
+    method: 'POST',
+    body: { name: `Bad ${TAG}`, statusScope: 'project' },
+  })
+  chk(
+    badScope.status === 400 && /statusScope/.test(String(badScope.error?.message ?? badScope.error ?? '')),
+    'and a scope it does not have is refused in words, not quietly defaulted',
+    `it answered ${badScope.status} ${JSON.stringify(badScope.error ?? null)} — a value rewritten to ` +
+      'the default is a setting that appears to have been accepted and was not',
+  )
+
+  /* A project in each folder, then a list in each project. */
+  const mkList = async (folderId, label) => {
+    const proj = await api('/projects', {
+      method: 'POST',
+      body: { spaceId: SPACE, name: `P-${label}-${TAG}`, folderId },
+    })
+    if (proj.status >= 400) return { proj, list: null }
+    const list = await api('/lists', {
+      method: 'POST',
+      body: { projectId: proj.data.id, name: `L-${label}-${TAG}` },
+    })
+    return { proj, list }
+  }
+  const inheriting = await mkList(inherit.data?.id, 'inherit')
+  const owning = await mkList(own.data?.id, 'own')
+  chk(
+    !!inheriting.list?.data?.id && !!owning.list?.data?.id,
+    'a list exists inside each folder to read the setting off',
+    `inherit list ${inheriting.list?.status}, own list ${owning.list?.status}`,
+  )
+
+  /*
+   * THE ONE THAT MAKES THE COLUMN REAL. Not "the list stored scope=space" —
+   * the EFFECTIVE set, which is what the page draws and what the task write
+   * path validates against. Compared key-for-key with the space's own, so a
+   * list that seeded a same-sized default cannot pass.
+   */
+  const effective = async (listId) => {
+    const r = await api(`/lists/${listId}/statuses`)
+    return { status: r.status, keys: (r.data ?? []).map((x) => x.key).sort() }
+  }
+  const inheritStatuses = await effective(inheriting.list.data.id)
+  chk(
+    inheritStatuses.status === 200 &&
+      inheritStatuses.keys.length === spaceKeys.length &&
+      inheritStatuses.keys.every((k, i) => k === spaceKeys[i]),
+    'a list in a "Use Space statuses" folder really reads the SPACE\'s statuses',
+    `it returned ${JSON.stringify(inheritStatuses.keys)} where the space has ` +
+      `${JSON.stringify(spaceKeys)} — a folder that stores the scope and hands it to nobody is ` +
+      'the mirror defect this row exists to avoid',
+  )
+
+  const ownStatuses = await effective(owning.list.data.id)
+  chk(
+    ownStatuses.status === 200 && ownStatuses.keys.length > 0,
+    'and a list in the other kind of folder has a usable set of its own',
+    `it returned ${JSON.stringify(ownStatuses.keys)} — the override must not leave a list with ` +
+      'no statuses at all, which would refuse every status a task tried to take',
   )
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)

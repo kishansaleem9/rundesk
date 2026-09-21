@@ -1114,6 +1114,13 @@
       "when": 1900000126029,
       "tag": "0158_formula_tasks_signature_fields",
       "breakpoints": true
+    },
+    {
+      "idx": 159,
+      "version": "7",
+      "when": 1900000127029,
+      "tag": "0159_folder_status_scope",
+      "breakpoints": true
     }
   ]
 }

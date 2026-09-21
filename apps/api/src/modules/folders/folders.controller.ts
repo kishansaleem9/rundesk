@@ -23,7 +23,10 @@ export class FoldersController {
   create(
     @Param('spaceId') spaceId: string,
     @CurrentUser() user: any,
-    @Body() body: { name: string; color?: string },
+    // §V2-S09 `08:32` — Settings → Statuses. Typed here as well as validated in
+    // the service, so a caller reading the route knows the two values without
+    // opening it.
+    @Body() body: { name: string; color?: string; statusScope?: 'space' | 'list' },
   ) {
     return this.folders.create(spaceId, body, user.id)
   }
