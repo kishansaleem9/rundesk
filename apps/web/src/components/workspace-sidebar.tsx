@@ -3690,9 +3690,19 @@ function DirectMessagesSection({ workspaceId }: { workspaceId: string }) {
             }}
           />
           <div className="max-h-44 overflow-y-auto space-y-0.5" data-testid="sidebar-new-message-results">
-            {membersQuery.isLoading && (
-              <div className="px-1 py-1 text-[11px] text-muted-foreground">{t('common.loading')}</div>
-            )}
+            {/*
+              §V2 — A WAIT IS A SHAPE, NOT THE WORD "LOADING".
+              This drew the `common.loading` string, and `loading-states.mjs` forbids
+              exactly that across the whole app: no locale string a person
+              would read as a waiting state may still be referenced by a
+              component. It had been green — seventy-nine such sites were
+              removed to get it there — and this row, added with the New
+              message picker, put the count back to one.
+              Three rows because the list it replaces is short, and
+              `ListSkeleton` is already imported two hundred lines up: the
+              idiom was here and this one spot did not use it.
+            */}
+            {membersQuery.isLoading && <ListSkeleton rows={3} rowClassName="h-6" className="px-1 py-1" />}
             {!membersQuery.isLoading && candidates.length === 0 && (
               <div className="px-1 py-1 text-[11px] text-muted-foreground" data-testid="sidebar-new-message-empty">
                 {t('nav.newMessageNoOne')}
