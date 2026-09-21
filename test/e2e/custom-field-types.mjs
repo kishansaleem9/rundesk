@@ -491,15 +491,30 @@ try {
     `the server still holds ${JSON.stringify((await serverValues(subject.id))['Sign here'])}`,
   )
 
-  /* Last, because it is the mutation that moves everything below it. */
-  await tasksRow.getByTestId(`cf-task-remove-${other.id}`).click()
+  /*
+   * Last, because it is the mutation that moves everything below it.
+   *
+   * The control is WAITED FOR rather than clicked blind. A bare `.click()`
+   * here spent Playwright's default thirty seconds and then threw, so a break
+   * patch that emptied the field killed the run three checks early and the
+   * log's last word was `locator.click: Timeout` — a death with no check name
+   * on it. A precondition that can fail is part of the check.
+   */
+  const removeRelated = tasksRow.getByTestId(`cf-task-remove-${other.id}`)
+  const canRemove = await waitUntil(
+    () => removeRelated.isVisible().catch(() => false),
+    { timeoutMs: 10_000 },
+  )
+  if (canRemove) await removeRelated.click()
   chk(
-    await waitUntil(async () => {
+    canRemove && await waitUntil(async () => {
       const held = (await serverValues(subject.id)).Blockers
       return Array.isArray(held) && held.length === 0
     }, { timeoutMs: 20_000 }),
     'and removing a related task writes through — the server holds no ids afterwards',
-    `the server still holds ${JSON.stringify((await serverValues(subject.id)).Blockers)}`,
+    canRemove
+      ? `the server still holds ${JSON.stringify((await serverValues(subject.id)).Blockers)}`
+      : 'the related task has no remove control at all, so nothing could be removed',
   )
 
   // =========================================================================
