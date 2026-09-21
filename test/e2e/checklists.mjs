@@ -44,7 +44,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 14
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -241,6 +241,45 @@ try {
     }, { timeoutMs: 15_000 }),
     'ticking an item is saved',
     'the checkbox click never reached the server',
+  )
+
+  /*
+   * AND THE ORDER THE ITEMS WERE TYPED IN. `addChecklistItem` writes
+   * `position: max + 1` and `getTask` reads `items` back
+   * `orderBy: asc(position)` — a writer and a reader, and nothing checked that
+   * they agree. A break patch that inserted every item at position 0 had no
+   * check to redden, which is how the hole was found: every item present,
+   * every count right, and the list reading back in whatever order the query
+   * plan produced — which changes after updates and after a vacuum. The same
+   * shape as the sidebar tree bug, one level down.
+   *
+   * Asserted on the POSITIONS, not on the rendered order, because two rows
+   * sharing a position have no order to assert: the defect is that the
+   * question stops having an answer, not that the answer is wrong.
+   *
+   * Added here, AFTER the open-count checks, because a third item would make
+   * "2 open" read 3 — a new check must not move the ground under an old one.
+   */
+  const SECOND_ITEM_B = `and then this one ${TAG}`
+  await secondForm.getByTestId('checklist-item-input').fill(SECOND_ITEM_B)
+  await secondForm.locator('button[type=submit]').click()
+  let itemPositions = []
+  await waitUntil(async () => {
+    itemPositions = await sql`
+      select i.content, i.position from task_checklist_items i
+      join task_checklists cl on cl.id = i.checklist_id
+      where cl.task_id = ${task.id} and cl.title = ${SECOND}
+      order by i.position asc, i.created_at asc`
+    return itemPositions.length === 2
+  }, { timeoutMs: 15_000 })
+  chk(
+    itemPositions.length === 2 &&
+      itemPositions[0].position !== itemPositions[1].position &&
+      itemPositions[0].content === SECOND_ITEM,
+    'two items in one checklist keep the order they were typed in',
+    `the positions are ${JSON.stringify(itemPositions.map((r) => [r.content, r.position]))} — ` +
+      'equal positions mean the list has no order at all, and the reader sorts on exactly ' +
+      'this column',
   )
   chk(
     await waitUntil(async () => /\b1\b/.test(await countText()), { timeoutMs: 15_000 }),
