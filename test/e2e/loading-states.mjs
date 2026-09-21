@@ -23,6 +23,14 @@ import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { waitUntil } from './lib/wait.mjs'
 
+/*
+ * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
+ * branch that silently skipped becomes a shorter run that still reports zero
+ * failures and exits 0. This suite had no such constant at all until the count
+ * was observed from a green run and written here.
+ */
+const EXPECTED_CHECKS = 26
+
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -484,4 +492,11 @@ await browser.close()
 server.close()
 
 console.log(`\n${passed} passed, ${failed} failed`)
+if (passed + failed !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${passed + failed} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped early, so ` +
+      'the count above describes the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
 process.exit(failed === 0 ? 0 : 1)
