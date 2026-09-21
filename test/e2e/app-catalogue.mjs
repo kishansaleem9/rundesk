@@ -152,6 +152,15 @@ try {
    * facade. The authorization URL is what a person is actually sent to, so the
    * check is that it is Google's, and that the consent it asks for is the one
    * that can read a mailbox.
+   *
+   * 201, NOT 200, AND THE NUMBER IS EXACT. `oauthStart` is a plain `@Post` with
+   * no `@HttpCode`, and Nest answers 201 for those — which is the route's real
+   * contract, not an accident to be tolerated. Both of these checks were
+   * written against 200 and failed on their first run with the *right* URL and
+   * the *right* scope printed in the failure line; the product was never wrong.
+   * Pinned exactly rather than loosened to `< 300`, because "any success will
+   * do" is how a route that quietly starts answering 204 with no body gets to
+   * keep a green check.
    */
   const gmailStart = await api(
     `/workspaces/${ws.id}/integrations/connections/gmail/oauth/start`,
@@ -160,7 +169,7 @@ try {
   const gmailUrl = gmailStart.data?.authUrl ?? ''
   const gmailScope = gmailUrl ? (new URL(gmailUrl).searchParams.get('scope') ?? '') : ''
   chk(
-    gmailStart.status === 200 &&
+    gmailStart.status === 201 &&
       /accounts\.google\.com/.test(gmailUrl) &&
       gmailScope.includes('gmail.readonly'),
     'pressing Connect on Gmail asks Google for the mailbox itself',
@@ -174,7 +183,7 @@ try {
   const spUrl = spStart.data?.authUrl ?? ''
   const spScope = spUrl ? (new URL(spUrl).searchParams.get('scope') ?? '') : ''
   chk(
-    spStart.status === 200 &&
+    spStart.status === 201 &&
       /login\.microsoftonline\.com/.test(spUrl) &&
       spScope.includes(SITES_SCOPE) &&
       !spScope.includes(FILES_SCOPE),

@@ -172,7 +172,28 @@ const WORK_DAYS = [1, 2, 3]
 const HOLIDAY = dayKey(addDays(MONDAY, 1))
 const SCHEDULE = { workDays: WORK_DAYS, holidays: [{ day: HOLIDAY, name: `Break ${TAG}` }] }
 
-let settings = { weekStart: 'monday' }
+/*
+ * THE HOLIDAYS CALENDAR STARTS OFF, and that is this suite's fixture rather
+ * than an opinion about the product.
+ *
+ * `GET /workspaces/:id/work-schedule` has TWO readers on the planner: the
+ * "Darken non-working hours" switch below, and frame `13:28`'s **Holidays**
+ * calendar (§V2-14d), which draws the same `holidays` rows as chips and is on
+ * by default. The page asks for the schedule when EITHER wants it — one query,
+ * one condition, which is correct and is what the planner page says it does.
+ *
+ * The first check of the darkening group reads "the page has not even asked
+ * for the work schedule", and that sentence is only evidence about THIS switch
+ * while the other reader is quiet. With Holidays on, the request is the
+ * Holidays calendar's and the check was measuring a feature it is not about.
+ * Turning it off in the fixture is what keeps the clause meaning what it says:
+ * a reader that never asks for the schedule cannot be honouring it.
+ *
+ * It costs the dimming nothing — `nonWorking()` reads `workSchedule.holidays`
+ * whether or not the Holidays CALENDAR is drawn — so the Tuesday holiday below
+ * is still expected to dim.
+ */
+let settings = { weekStart: 'monday', hiddenCalendarIds: ['workspace:holidays'] }
 /** Every planner request the page made, so a reader can be proved to have read. */
 const calls = []
 /** Every POST /blocks body, for the personal-event half. */

@@ -100,6 +100,20 @@ const CARD_TITLES = [
   'Team schedules',
 ]
 
+/**
+ * What the fixture's `oauth/start` answers with, and where the browser ends up.
+ *
+ * `about:blank` because it has no network and no origin worth landing on — NOT
+ * because the browser declines to follow it. IT FOLLOWS IT. This was written
+ * believing otherwise, and the belief cost the whole suite: the page assigns
+ * `window.location.href`, the browser began a real navigation to `about:blank`,
+ * and the `page.goto` on the next line was aborted by it — `net::ERR_ABORTED`,
+ * thrown out of the process with four checks run and eight never reached.
+ *
+ * Named here because check 4 now asserts the landing as well as the request.
+ */
+const AUTH_URL = 'about:blank#oauth'
+
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
 
@@ -131,11 +145,10 @@ try {
     const oauth = url.match(/\/integrations\/connections\/([^/]+)\/oauth\/start/)
     if (oauth && req.method() === 'POST') {
       oauthStarts.push(oauth[1])
-      /* Answered with a URL the browser will not actually follow — the page
-       * assigns `window.location`, and letting it navigate would end the run
-       * on an external origin. `about:blank#…` keeps the assertion about the
-       * REQUEST, which is the part this product controls. */
-      return reply({ authUrl: 'about:blank#oauth' })
+      /* An inert destination rather than an inert URL: the page assigns
+       * `window.location` and the browser really goes there, so this has to be
+       * somewhere harmless rather than somewhere unreachable. See `AUTH_URL`. */
+      return reply({ authUrl: AUTH_URL })
     }
     if (url.includes('/calendar-sync/accounts')) return reply(accounts)
     if (url.includes('/planner/') && url.includes('/settings')) {
@@ -201,13 +214,31 @@ try {
   console.log('\n▶ the buttons reach the OAuth flow the rest of the product uses')
 
   await page.locator('[data-testid="planner-onboarding-connect-gcal"]').click()
+  /*
+   * BOTH HALVES OF PRESSING IT, and the second half is not decoration.
+   *
+   * `oauthStarts` is pushed by the ROUTE HANDLER — before the answer has even
+   * reached the page, let alone before the page has done anything with it. So
+   * waiting on it alone returns in the middle of the behaviour, with the
+   * redirect still in flight; that is what aborted the navigation below.
+   *
+   * Waiting for the landing waits for the whole behaviour, and asserting it
+   * closes a gap the request-only version left wide open: a button that fires
+   * `oauth/start` and then DROPS the `authUrl` it is handed leaves the person
+   * on the planner with nothing happening, which is the dead-control defect
+   * arriving one step later than expected — and it too photographs exactly
+   * like a working one.
+   */
   const started = await waitUntil(async () => oauthStarts.length > 0, { timeoutMs: 8000 })
+  const landed = await waitUntil(async () => page.url() === AUTH_URL, { timeoutMs: 8000 })
   chk(
-    started && oauthStarts.length === 1 && oauthStarts[0] === 'gcal',
-    `pressing Google Calendar asks the server to start OAuth for ${JSON.stringify(oauthStarts[0])}`,
-    `the page made ${oauthStarts.length} OAuth start request(s) ${JSON.stringify(oauthStarts)} — ` +
-      'a connect button that renders and requests nothing is the dead-control defect, and it ' +
-      'photographs exactly like a working one',
+    started && oauthStarts.length === 1 && oauthStarts[0] === 'gcal' && landed,
+    `pressing Google Calendar asks the server to start OAuth for ${JSON.stringify(oauthStarts[0])}, ` +
+      'and sends the browser to the URL it answers with',
+    `the page made ${oauthStarts.length} OAuth start request(s) ${JSON.stringify(oauthStarts)} and ` +
+      `ended on ${JSON.stringify(page.url())} rather than ${JSON.stringify(AUTH_URL)} — a connect ` +
+      'button that renders and requests nothing, or requests and then never follows the URL it was ' +
+      'given, is the dead-control defect, and it photographs exactly like a working one',
   )
 
   // ───────────────────────────────────────────────────────────────────────────

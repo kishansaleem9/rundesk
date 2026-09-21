@@ -250,12 +250,43 @@ try {
       : `the picker is on "${await tabNow()}" after the Locations prefix`,
   )
 
-  const locationCalls = requests.filter((u) => u.includes('/search/') && u.includes('types=space%2Cfolder%2Clist'))
+  /*
+   * READ THE REQUEST, DO NOT PATTERN-MATCH ITS SPELLING.
+   *
+   * This row used to be `u.includes('types=space%2Cfolder%2Clist')` and could
+   * not pass however right the product was: a comma is a sub-delim (RFC 3986
+   * §2.2), so a browser leaves it alone in a query string and `request.url()`
+   * reports the real wire form `types=space,folder,list`. The percent-encoded
+   * spelling is what `URLSearchParams` happens to emit — one of two legal ways
+   * to write the same filter — so the check was asserting a STRING-BUILDING
+   * STYLE rather than the protection. It would also have gone green for a
+   * client-side filter the day someone switched the fetch to `URLSearchParams`
+   * for unrelated reasons, which is the worse half of the mistake.
+   *
+   * So the URL is PARSED, and the invariant is stated whole: a request left the
+   * page for `/search/`, carrying THE WORD JUST TYPED, narrowed to exactly the
+   * three location types. That is "the browser cannot hold the space tree, so
+   * the server has to narrow it" in the only form the wire can show it, and it
+   * holds in either encoding because `searchParams` decodes before comparing.
+   */
+  const LOCATION_TYPES = 'folder,list,space' // sorted, so the order sent is not the assertion
+  const searchCalls = requests.filter((u) => {
+    try { return new URL(u).pathname.includes('/search/') } catch { return false }
+  })
+  const locationCalls = searchCalls.filter((u) => {
+    const q = new URL(u).searchParams
+    const sent = [...new Set((q.get('types') ?? '').split(',').map((t) => t.trim()).filter(Boolean))]
+    return sent.sort().join(',') === LOCATION_TYPES
+      && (q.get('q') ?? '').toLowerCase() === TAG.toLowerCase()
+  })
   chk(
     locationCalls.length > 0,
-    'and the narrowing went to the SERVER carrying `types=space,folder,list`',
-    'no request carried the location types, so whatever narrowed was a list already in the browser — which is ' +
-      'the whole space tree, and cannot be one',
+    'and the narrowing went to the SERVER carrying `types=space,folder,list` and this run\'s own word',
+    searchCalls.length === 0
+      ? 'no request carried the location types, so whatever narrowed was a list already in the browser — which is ' +
+        'the whole space tree, and cannot be one'
+      : `the only search that went out was \`${new URL(searchCalls[0]).search}\` — it reached the server but not as ` +
+        `q=${TAG} over space,folder,list, so the rows on screen are not a location search for what was typed`,
   )
 
   await input.fill(`@#${TAG}`)

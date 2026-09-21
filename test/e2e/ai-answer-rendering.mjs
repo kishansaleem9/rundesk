@@ -550,6 +550,12 @@ try {
     return waitUntil(() => page.getByTestId('ai-starters').isVisible().catch(() => false), { timeoutMs: 25_000 })
   }
   chk(await openEmptyPanel(), 'the empty panel draws a row of starter cards', 'no starter cards appeared')
+  /*
+   * `ai-starter-` does not match the container `ai-starters` — the character
+   * after `ai-starter` is `s`, not `-` — and the exact count below is what
+   * would catch it if that ever stopped being true. A testid prefix is a
+   * namespace, and this one is separated from its container by one byte.
+   */
   const cards = page.locator('[data-testid^="ai-starter-"]')
   chk(
     (await cards.count()) === 4,

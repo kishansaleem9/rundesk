@@ -532,13 +532,27 @@ function TaskForm({
   const [attachments, setAttachments] = useState<File[]>([])
   const addAttachments = (picked: FileList | null) => {
     if (!picked?.length) return
+    /*
+     * READ THE FILES NOW, not inside the updater.
+     *
+     * `input.files` is a LIVE FileList — the same object every time, tied to
+     * the input — and the change handler clears `input.value` the instant this
+     * returns, because it must: picking the same file again after removing it
+     * fires no change event otherwise. Clearing the value empties that very
+     * FileList. React runs the `setAttachments` updater below LATER, so an
+     * `Array.from(picked)` in there iterated an emptied list and every pick was
+     * dropped — the Attachments section never drew a row, for any file, and the
+     * paperclip stayed on "Attach a file" with nothing on screen to say a file
+     * had been lost. Snapshotting here is what makes the staging real.
+     */
+    const chosen = Array.from(picked)
     setAttachments((prev) => {
       // Same name AND same size is the same file picked twice; the browser
       // gives no id, and a duplicate row you cannot tell apart is worse than
       // dropping the second pick.
       const seen = new Set(prev.map((f) => `${f.name}:${f.size}`))
       const next = [...prev]
-      for (const file of Array.from(picked)) {
+      for (const file of chosen) {
         if (seen.has(`${file.name}:${file.size}`)) continue
         seen.add(`${file.name}:${file.size}`)
         next.push(file)

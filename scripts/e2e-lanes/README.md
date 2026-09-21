@@ -42,6 +42,43 @@ from an API you never rebuilt, against a database you never touched. That is
 what `fleet-sync.sh` is for. Run it after any schema change, before concluding
 anything is broken.
 
+## Break tests: `wt-break.sh`
+
+```bash
+bash scripts/e2e-lanes/wt-break.sh 3 focus-pill fp-1-... fp-2-...   # worktree 3, lane 3
+```
+
+Lane *k* here also means the git worktree `/tmp/claude-0/wt<k>` — a detached
+checkout with `node_modules` symlinked in, so three break runs go at once
+without patching over each other. Patch scripts hardcode `/home/user/rundesk`,
+so each is rewritten into the worktree path before it runs; the tree the agents
+work in is never touched.
+
+**The script refuses to run rather than produce an unreadable result**, which
+is the only useful behaviour once you have been burned by one:
+
+| exit | meaning |
+|---|---|
+| 3 | that worktree is already break-testing — retry, do not switch lanes |
+| 4 | the worktree cannot be moved to `HEAD`, so results would be about the wrong tree |
+| 5 | the **unpatched** suite is not green, so no patch below could be told apart from what is already broken |
+
+Exits 4 and 5 exist because of one concrete failure. The worktrees are detached
+checkouts made once and never moved, so they drift behind the branch as work
+lands. `list-card-cover` was break-tested against a tree two commits old: four
+of its checks failed on **every** patch, including patches touching nothing near
+them, because those four were already failing unpatched. Every result in that
+file looked like a result and meant nothing. The script now syncs the worktree
+to `HEAD` first, then runs the suite with **no patch at all** and writes
+
+```
+== BASELINE (no patch) 26 passed, 0 failed
+```
+
+as the first line of `/tmp/claude-0/break-<suite>.txt`. A patch that reddens a
+check which was already red is not evidence, and the baseline is what lets you
+see that at a glance instead of inferring it from a pattern across runs.
+
 ## Why the dump rather than `CREATE DATABASE ... TEMPLATE`
 
 `TEMPLATE` refuses while anything is connected to the source, and the API holds

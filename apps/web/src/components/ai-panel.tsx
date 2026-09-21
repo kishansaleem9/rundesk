@@ -1348,6 +1348,15 @@ export function AiPanel({
             */}
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground px-8">{t('aiPanel.tryAsking')}</p>
+              {/*
+                A NEAR-MISS ON PURPOSE, and it needs saying: the container is
+                `ai-starters` and each card is `ai-starter-<id>`, so a prefix
+                query for `ai-starter-` does NOT match the container — the
+                character after `ai-starter` is `s`, not `-`. One rename to
+                `ai-starter-row` and every count of the cards is off by one, in
+                the direction that still looks plausible. A testid prefix is a
+                namespace; this one has a wall in it exactly one byte thick.
+              */}
               <div
                 className="ml-8 grid grid-cols-2 gap-2"
                 data-testid="ai-starters"
@@ -1691,6 +1700,10 @@ export function AiPanel({
         */}
         {wordSuggestions.length > 0 && aiAvailable && !isStreaming && (
           <div
+            /* The same one-byte wall as `ai-starters` above: the bar is
+               `ai-word-suggestions`, each word is `ai-word-suggestion-<word>`,
+               and the prefix query misses the bar only because `s` follows.
+               Do not rename this to `ai-word-suggestion-bar`. */
             data-testid="ai-word-suggestions"
             data-count={wordSuggestions.length}
             className="relative z-50 mb-1 inline-flex items-center gap-1 rounded-lg bg-foreground px-2 py-1 shadow-lg"

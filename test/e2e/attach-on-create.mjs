@@ -151,13 +151,38 @@ try {
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
   await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
-  await page.waitForSelector('[data-testid="quick-create-attach"]', { timeout: 20_000 })
+  /*
+   * `state: 'attached'`, NOT the default `'visible'`.
+   *
+   * `quick-create-attach` is the `<input type=file>` itself, and it is
+   * `className="hidden"` inside the paperclip `<label>` that wraps it — the
+   * ordinary way to put a styled control over a file picker, and the thing the
+   * frame actually draws. `display: none` means the default `waitForSelector`
+   * can NEVER resolve, so this line was a gate no build could pass; the two
+   * things the suite then does with the input — `evaluate(el => el.multiple)`
+   * and `setInputFiles` — both work on a hidden input by design.
+   *
+   * It is still a gate: remove the input from the task tab and nothing is
+   * attached, so this throws exactly as it did before. What it no longer
+   * demands is that a raw file input be painted on screen, which no frame asks
+   * for and which the visible half of the control is checked for below.
+   */
+  await page.waitForSelector('[data-testid="quick-create-attach"]', { state: 'attached', timeout: 20_000 })
 
   console.log('\n▶ the picker takes more than one file `[frame 01:10]`')
   chk(
-    await page.locator('[data-testid="quick-create-attach"]').evaluate((el) => el.multiple === true),
-    'the file input accepts several files at once',
-    'the input is single-file — picking a second one replaced the first, with nothing on screen to say so',
+    await page.locator('[data-testid="quick-create-attach"]').evaluate((el) => el.multiple === true) &&
+      // …and it is REACHABLE: the hidden input is only a control if the label
+      // wrapping it is on screen to be pressed. A `display:none` input with no
+      // visible label is a picker nobody can open.
+      (await page
+        .locator('label:has([data-testid="quick-create-attach"])')
+        .first()
+        .isVisible()
+        .catch(() => false)),
+    'the file input accepts several files at once, behind a paperclip a person can press',
+    'the input is single-file — picking a second one replaced the first, with nothing on screen to say so — ' +
+      'or it is hidden behind nothing pressable',
   )
 
   console.log('\n▶ and lists them, one row each, by name')

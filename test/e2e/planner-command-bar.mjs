@@ -91,6 +91,19 @@ const PLACEHOLDER = 'Search events, teammates, commands…'
 /** This run's own row, so the search assertion is about a person we seeded. */
 const TAG = `cmd-${Date.now().toString(36)}`
 const MATE = { userId: 'u-mate', displayName: `Sara ${TAG}`, email: `sara.${TAG}@rundesk.test` }
+/**
+ * What `GET /search/sources/:workspaceId` really answers with: the four
+ * `SEARCH_SOURCES` with their connection state, as a workspace with no
+ * integrations linked would see them.
+ *
+ * An ARRAY, which is the whole point of writing it out. See the route handler.
+ */
+const SOURCES = [
+  { id: 'rundesk', connected: true, provider: null },
+  { id: 'google-drive', connected: false, provider: 'google-drive' },
+  { id: 'gmail', connected: false, provider: 'gmail' },
+  { id: 'sharepoint', connected: false, provider: 'sharepoint' },
+]
 
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
@@ -110,16 +123,36 @@ try {
     const url = req.url()
     const reply = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: envelope(data) })
     if (url.includes('/users/me')) return reply(USER)
+    /*
+     * THE PALETTE'S OTHER `/search` ROUTES, ANSWERED IN THEIR OWN SHAPES, and
+     * matched BEFORE the query catch-all below rather than after.
+     *
+     * They used to fall into it and be answered `{hits, total}`. Every one of
+     * them returns an ARRAY — `listSources`, `custom-fields` and `saved` are
+     * all `Promise<Array<…>>` in `search.service.ts` — and the palette reads
+     * the first of them with `sourcesQuery.data?.find(...)`. So a few hundred
+     * milliseconds after the palette opened, `find is not a function` threw
+     * mid-render and the route error boundary took the entire palette down.
+     *
+     * The suite caught it in the window before that and then found none of its
+     * controls, and reported "a second search surface built beside the existing
+     * one" — the exact opposite of what had happened. A fixture answering a
+     * shape the server never sends does not test the product, it tests the
+     * fixture; hence writing the real shapes out.
+     */
+    if (/\/search\/sources\//.test(url)) return reply(SOURCES)
+    if (/\/search\/[^/?]+\/(custom-fields|saved)/.test(url)) return reply([])
     if (url.includes('/search')) {
       searches.push(url)
       const q = new URL(url).searchParams.get('q') ?? ''
       /* Answers only when the query actually reached the server, so a palette
        * that rendered a stale list would show nothing and the check would
-       * fail rather than pass on somebody else's results. */
+       * fail rather than pass on somebody else's results. In `SearchHit`'s own
+       * field names, because `search()` returns these rows and not a page. */
       const hits = q && MATE.displayName.toLowerCase().includes(q.toLowerCase())
-        ? [{ id: MATE.userId, type: 'user', title: MATE.displayName, subtitle: MATE.email, url: '/' }]
+        ? [{ id: MATE.userId, entityType: 'user', title: MATE.displayName, content: MATE.email, url: '/' }]
         : []
-      return reply({ hits, total: hits.length })
+      return reply(hits)
     }
     if (url.includes('/calendar-sync/accounts')) {
       /* Connected, so §V2-15c's onboarding panel stays away and the geometry

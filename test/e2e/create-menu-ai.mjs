@@ -325,17 +325,38 @@ try {
       `${await page.locator('[data-testid="create-ai-result-0"]').getAttribute('data-status').catch(() => null)}`,
   )
 
+  /*
+   * BOTH DOORS INTO THE SPACE, because a list can legitimately arrive through
+   * either one and "it exists in this run's space" must not depend on which.
+   *
+   * §G15-10: a list created by naming a SPACE and stopping — which is what
+   * `create_list {spaceId, name}` is — lands in that space's hidden default
+   * container (`ListsService.defaultContainerForSpace`), and
+   * `getProjectsBySpace` excludes `isDefaultContainer` rows on purpose so the
+   * container never shows up as a project in any of the fourteen surfaces that
+   * render a space's projects. So walking `/projects/space` alone answers `[]`
+   * for a list that genuinely exists — the endpoint the tree reads for those is
+   * `/lists/space/:id`, which is exactly what `workspace-sidebar.tsx` calls
+   * beside `/projects/space` for this reason.
+   *
+   * Counting across both and demanding EXACTLY ONE keeps the claim sharp in
+   * both directions: nothing created, created in the wrong space, or created
+   * twice all redden it.
+   */
+  const spaceLists = await api(`/lists/space/${SPACE}`)
   const projects = await api(`/projects/space/${SPACE}`)
   const found = []
+  for (const list of spaceLists.data ?? []) if (list.name === LIST_NAME) found.push(list)
   for (const project of projects.data ?? []) {
     const lists = await api(`/lists/project/${project.id}`)
     for (const list of lists.data ?? []) if (list.name === LIST_NAME) found.push(list)
   }
   chk(
-    projects.status < 300 && found.length === 1,
+    spaceLists.status < 300 && projects.status < 300 && found.length === 1,
     `"${LIST_NAME}" really exists in this run's own space — the button created something`,
     `this run's space holds ${found.length} list(s) by that name ` +
-      `(GET /projects/space/${SPACE} answered ${projects.status})`,
+      `(GET /lists/space/${SPACE} answered ${spaceLists.status}, ` +
+      `GET /projects/space/${SPACE} answered ${projects.status})`,
   )
   chk(
     // `${SPACE_NAME} > ${LIST_NAME}` is the server's `container.path`; the plan's

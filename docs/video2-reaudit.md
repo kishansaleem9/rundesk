@@ -546,6 +546,16 @@ went missing entirely. A list that is only written once stops being true.
   risk were compiled; none was run against a live stack. Writing "B" here
   would have made a claim about a run that did not happen, which is the same
   move as a check that cannot fail.
+  **Compiling them found a new break-testing trap, and it is worth the line.**
+  The obvious way for a patch to delete a JSX block is to turn its condition
+  into `{false && (…)}` — and TypeScript runs NO control-flow analysis through
+  code it has decided is unreachable, so a variable that was narrowed inside
+  the block stops being narrowed and the patch stops compiling. `{true && (…)}`
+  is fine for the same reason it is useless as a test: the code stays
+  reachable. The failure is silent unless the harness typechecks each patch,
+  because a patch that does not compile still *runs*, still prints its
+  confirmation line, and is then counted among the confirmed. The patch removes
+  the whole block instead.
 
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
@@ -631,7 +641,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | — | …"and permissions" — deliberate: `custom_field_definitions` has no permission columns |
 | B | Toast "Created field `<name>`" |
 | P | Attach on create — uploads *after* the task exists, single file, no removable list |
-| M | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") |
+| B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
 | M | "Comment ▾" split button; "Create Task ▾" split button |
@@ -641,10 +651,10 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | "Add checklist" — several named checklists, each with its own "Add item" |
 | B | Checklist header open-item count ("Checklists 2 open") |
 | B | Activity names the item and the checklist it went into (frame `02:47`) |
-| M | Attachment thumbnail hover actions; attachments header view-toggle |
+| B | Attachment thumbnail hover actions; attachments header ~~view-toggle~~ **count** — closed by `task-attachments.mjs`, 13 checks. The frames moved this row: at `01:55` the magnifier / expand / `+` cluster is on the **Fields** header, and the Attachments header three rows below carries a disclosure triangle and the count `1` and nothing else. Building a toggle would have been building to a summary of the frame instead of to the frame |
 | B | Cover: Gallery / Upload / Link / Attachments / Remove, Reposition, Change cover |
 | P | Cover: Gallery "Custom" swatch built. Search tab still absent — the recorded reason was re-checked against the tree rather than trusted, and still holds: one grep finds no image provider anywhere |
-| M | Task type "Fill with AI" |
+| B | Task type "✦ Fill with AI" — closed by `task-ai-bar.mjs`, 18 checks (frame `03:25`, the foot of the Task Types popover) |
 | B | **Activity panel toggles to a rail** beside the fields; the tab drops out while it is up |
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
 | M | Task header "Brain²" button — deliberate: the hub does not exist |
@@ -673,7 +683,7 @@ Legend: **B** built · **P** partial · **M** missing.
 |---|---|
 | B | Related Items — one panel, Relationships \| References, single entry point |
 | M | Right-rail "Related Items" icon + tooltip |
-| P | Sidebar Direct Messages — exists on the chat page, not the workspace tree |
+| B | Sidebar Direct Messages — closed by `sidebar-dms.mjs`, 14 checks. The data had been there the whole time and the surface was not: `chat_channels.is_dm` is a real column and `workspace-chat-page.tsx` has split `publicChannels` from `dmChannels` since it was written. The Channels section filters DMs out on purpose — `+ Add Channel` takes a name and `+ New message` takes a person, so one button cannot be both — and filtering them out without giving them a home left them reachable only from the page you had to already be on to know you had any |
 | M | Create-menu search "Describe anything to create"; Create with AI; Super Agent |
 | M | "Form" absent from the create menu though the module exists |
 | B | Create-a-Space: icon+name, description, **Default permission**, Make Private |
@@ -684,7 +694,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
 | M | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") |
 | B | "+" on a space opens the 8-item Create menu, from one shared list both it and the quick-create tabs import |
-| P | Create Folder — no description column, no private toggle in the dialog, no templates |
+| P | Create Folder — **private toggle and Use-Templates footer closed** by `folder-dialog.mjs`, 13 checks (frame `08:32`). Still open: **description**, and it is blocked rather than pending — `folders` has no such column and `FoldersService` whitelists `{name, color}` on create, so a description typed here would have nowhere to go. Left absent on purpose: a field that stores into nothing is the mirror defect, and the frames are not worth a column that lies |
 | M | Folder "Use Space statuses" inheritance |
 | B | Skeletons on load; sidebar hierarchy; breadcrumb |
 | B | Error toasts bottom-left; **list names unique per project**; both create paths report failure |
@@ -725,7 +735,7 @@ checks, not about a run.**
 | B | Template Center — faceted browse with type, complexity, use-cases and categories, counted in SQL over the corpus rather than over the loaded page |
 | M | Planner onboarding screen |
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
-| P | "Team schedules" — one person at a time, no side-by-side grid |
+| B | "Team schedules" — closed by `team-schedules.mjs`, 13 checks (frame `12:48`). Not reachable by raising a number: the planner's "Meet with" hatches ONE person's busy time over your own week, and four people overlaid on one column is a picture of nobody's schedule. The fixture is two people busy at different times of day and in different counts, so a grid that draws `columns[0]` four times fails on the numbers AND on the geometry. Check 13 holds the old overlay in place, because deleting the feature you already have is the cheapest way to green and the worst outcome for the product |
 | B | Planner: Priorities rail, Meet with, Backlog, day columns, all-day row, 24h gutter, live now-line |
 | B | "+ Add priority" in the planner rail — add, tick and remove, one shared hook |
 | B | Rail sections **Assigned to me** and **Today & overdue** |
@@ -739,7 +749,7 @@ checks, not about a run.**
 | M | Appearance: Grid size |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
-| M | Sidebar: drag-reorder, "+ Add a new section" |
+| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, 21 checks; `+ Add a new section` still open (it is on Calendar settings › Sidebar, over the planner rail, not on the tree). `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
 | B | **Upcoming meeting page** — time left, quick-join, and desktop notification |
 | B | Time blocking + the five settings that were STORED AND READ BY NOTHING — showWeekNumbers, alwaysOpenAtStartOfWeek, darkenNonWorkingHours, savePersonalEventsQuickly, showRecurring — each now has a reader that changes the grid |
 | B | `showOverdue` — now read by the backlog |
@@ -778,7 +788,7 @@ checks, not about a run.**
 | M | Image generation |
 | B | App Center with categories, per-app descriptions, connection health |
 | P | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail absent |
-| M | "+ Suggest an app"; "Connect Custom MCP Servers" banner |
+| B | "Suggest an app" (the `+` is inside the glyph, not a literal prefix) and the "Connect Custom MCP Servers" banner — closed by `app-catalogue.mjs`, 25 checks (frame `19:07`). Both are live controls that record a real request. The MCP **capability** is recorded as a decision, not built: no AI tool in this product reaches outside the workspace, so registering a server would store a value no reader honours |
 | B | Activity log — Status and My-runs filters, both reaching the server. `userId` had been accepted by the endpoint and sent by nothing; Status needed a column AND a failure-recording path, because `recordUsage` only ever fired on success |
 | B | Teams Hub reachable by a plain member; All Teams / All People / Org Chart; My Teams; search; org-chart empty state |
 | B | Teams empty-state headline; **Browse People / Create Team** buttons; two explainer cards |
@@ -802,7 +812,16 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 88 built · 21 partial · 64 missing.**
+**173 rows: 104 built · 20 partial · 49 missing.**
+
+THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
+table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
+at a glance and the disagreement survived several passes: the total had been
+carried forward when §5's forty-one rows were recovered, and the split had not.
+The table is the derivation — it shows where every row comes from — so the table
+is what this line now repeats. Recorded rather than quietly corrected, because a
+count is the one thing in this file that gets quoted without being checked, and
+the next person to find two numbers should know which one moved.
 
 How that is made up, so the number can be checked rather than believed:
 

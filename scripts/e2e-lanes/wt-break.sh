@@ -81,6 +81,54 @@ trap 'rmdir "$LOCK" 2>/dev/null' EXIT
 # run that legitimately holds it.
 : > "$OUT"
 
+# ── THE WORKTREE HAS TO BE AT HEAD, AND THE SUITE HAS TO BE GREEN WITHOUT A
+#    PATCH, OR EVERYTHING BELOW IS UNREADABLE. ──────────────────────────────
+#
+# This cost a whole suite's evidence before it was written. The worktrees are
+# DETACHED checkouts made once and never moved, so they drift behind the branch
+# as agents land work. `list-card-cover` was run here against a tree two commits
+# old: four of its checks failed on EVERY patch, including patches that touch
+# nothing near them, and the same four failed on the unpatched tree. With four
+# checks already red you cannot tell what any patch reddened — the whole run
+# says nothing, and it says it in the shape of a result.
+#
+# Two guards, because they catch different things. Syncing to HEAD fixes drift.
+# The baseline catches everything else drift is not: a suite that is genuinely
+# red right now, a lane whose database is behind, a fixture another run left
+# lying around. A patch that reddens a check which was ALREADY red is not
+# evidence, and the baseline line at the top of the file is what lets the next
+# reader see that at a glance instead of inferring it from a pattern.
+REV=$(git -C /home/user/rundesk rev-parse HEAD)
+if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
+  echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
+  git -C "$WT" checkout -- . 2>/dev/null
+  if ! git -C "$WT" checkout --detach "$REV" > /dev/null 2>&1; then
+    echo "== CANNOT SYNC WORKTREE — refusing to run, results would be about the wrong tree" >> "$OUT"
+    exit 4
+  fi
+  ( cd "$WT/packages/db"
+    export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
+    yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 )
+  pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1
+  pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1
+  restart
+fi
+
+timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
+  > "/tmp/claude-0/brk-$SUITE-baseline.log" 2>&1
+BASE=$(grep -E 'passed,' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+echo "== BASELINE (no patch) $BASE" >> "$OUT"
+case "$BASE" in
+  *' 0 failed'*) ;;
+  *)
+    { echo "== REFUSING TO BREAK-TEST — the unpatched suite is not green, so no patch below"
+      echo "   could be told apart from what is already broken. Fix the baseline first."
+      grep -E 'FAIL' "/tmp/claude-0/brk-$SUITE-baseline.log" | sed 's/\x1b\[[0-9;]*m//g' | head -6
+    } >> "$OUT"
+    exit 5
+  ;;
+esac
+
 # Was the PREVIOUS patch a web one? If so its bundle is still on disk, and an
 # API-only patch that follows would run against it — so every later check would
 # be measuring the last web patch's breakage rather than its own.

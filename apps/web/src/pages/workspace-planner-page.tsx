@@ -368,6 +368,31 @@ export function PlannerPage() {
   const [meetWith, setMeetWith] = useState<{ id: string; name: string } | null>(null)
   /* §V2-14d, frame `13:28` — the calendar picker popover. */
   const [calendarsOpen, setCalendarsOpen] = useState(false)
+  /*
+   * ESCAPE CLOSES IT, on the document — like every other overlay in the app.
+   *
+   * The popover below covers the page with a `fixed inset-0` catcher so that a
+   * click anywhere else dismisses it. That catcher is the whole problem when
+   * the only way to dismiss it is a click: until one lands ON the catcher, it
+   * is a full-screen sheet swallowing every press in the planner header —
+   * Settings, the view switcher, the arrows. A keyboard user has no way out of
+   * it at all, and a mouse user's first press does nothing and looks like the
+   * button is broken.
+   *
+   * This is the same defect `quick-create-modal.tsx` carries a note about,
+   * found the same way: a suite pressed Escape and the backdrop went on
+   * swallowing every click behind it. On the DOCUMENT rather than on the
+   * catcher div, because a plain `<div>` takes no focus and so receives no key
+   * events — an `onKeyDown` there is a handler that can never fire.
+   */
+  useEffect(() => {
+    if (!calendarsOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setCalendarsOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [calendarsOpen])
   /* §V2-15d, frame `14:45` — the bottom bar opens the shared palette. */
   const [paletteOpen, setPaletteOpen] = useState(false)
   /* §V2-15b, frame `12:48` — the side-by-side grid's own people search. */

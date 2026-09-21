@@ -380,19 +380,64 @@ try {
       `"${await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]'))}"`,
   )
 
-  await page.locator('[data-testid="space-wizard-viewtplgo-marketing"]').click()
+  /*
+   * PRESS A SET THAT IS NOT ALREADY IN EFFECT, or the check proves nothing.
+   *
+   * Step two chose the Marketing workflow card, so the switches underneath
+   * already ARE Marketing's. The panel reads "applied" off those switches
+   * rather than latching a flag when the button is pressed, so it draws the
+   * Marketing card `data-applied="true"`, labels its button "Applied" and
+   * disables it. Pressing it there is a no-op the product correctly refuses —
+   * `locator.click()` waits for an enabled element and times out — and had the
+   * press gone through, `calendar=on, gantt=off` was ALREADY true before it, so
+   * the assertion it fed could not have failed for any build.
+   *
+   * So the presses are made against sets that genuinely differ: Project, which
+   * carries Gantt and no Calendar, and then back to Marketing. Each one is
+   * asserted across EVERY switch the panel draws, not just two of them, and
+   * both moves feed the one check — the switches have to leave Marketing and
+   * come back, which stops being true the moment `onClick` stops calling
+   * `setViews`.
+   */
+  const markedApplied =
+    (await page.locator('[data-testid="space-wizard-viewtplcard-marketing"]').getAttribute('data-applied')) === 'true'
+
+  /**
+   * Press ONE view set and answer whether the switches underneath moved to
+   * exactly it. A set that is already in effect answers false rather than
+   * being pressed: that press would be the vacuous one.
+   */
+  const applyViewTemplate = async (key) => {
+    const preset = PRESETS.presets.find((p) => p.key === key)
+    await page.locator('[data-testid="space-wizard-viewstab-templates"]').click()
+    const already = await page
+      .locator(`[data-testid="space-wizard-viewtplcard-${key}"]`)
+      .getAttribute('data-applied')
+      .catch(() => null)
+    if (already !== 'false') return false
+    await page.locator(`[data-testid="space-wizard-viewtplgo-${key}"]`).click()
+    await page.locator('[data-testid="space-wizard-viewstab-required"]').click()
+    return waitUntil(async () => {
+      for (const view of PRESETS.views) {
+        const on =
+          (await page.locator(`[data-testid="space-wizard-view-${view}"]`).getAttribute('aria-checked')) === 'true'
+        if (on !== preset.views.includes(view)) return false
+      }
+      return true
+    }, { timeoutMs: 8000 })
+  }
+
+  const wentToProject = await applyViewTemplate('project')
+  const cameBackToMarketing = await applyViewTemplate('marketing')
   await page.locator('[data-testid="space-wizard-viewstab-required"]').click()
   chk(
-    await waitUntil(
-      async () =>
-        (await page.locator('[data-testid="space-wizard-view-calendar"]').getAttribute('aria-checked')) === 'true' &&
-        (await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked')) === 'false',
-      { timeoutMs: 8000 },
-    ),
-    'applying a view set moves the switches underneath it — Marketing brings Calendar on and leaves Gantt off',
+    markedApplied && wentToProject && cameBackToMarketing,
+    'applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them ' +
+      'back to Calendar on and Gantt off',
     'the switches did not follow the template, so the tab would be a set of buttons over nothing: ' +
-      `calendar=${await page.locator('[data-testid="space-wizard-view-calendar"]').getAttribute('aria-checked')} ` +
-      `gantt=${await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked')}`,
+      `marketing-already-applied=${markedApplied} project=${wentToProject} marketing=${cameBackToMarketing}, ` +
+      `calendar=${await page.locator('[data-testid="space-wizard-view-calendar"]').getAttribute('aria-checked').catch(() => null)} ` +
+      `gantt=${await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked').catch(() => null)}`,
   )
 
   chk(

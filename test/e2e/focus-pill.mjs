@@ -335,7 +335,25 @@ try {
    * immediately right of the workspace switcher — not with the tools on the
    * right, and not somewhere on the page below. `topbar-breadcrumbs` is
    * Rundesk's workspace identity in that row.
+   *
+   * ADJACENCY, NOT "SOMEWHERE IN THE LEFT 60%". This check used to end in
+   * `p.right <= h.left + width * 0.6`, and break patch `fp-9-pill-on-the-right`
+   * — which moves the pill past the `flex-1` spacer, into the tool rail beside
+   * the search box — left the suite at 15 of 15. The threshold was loose enough
+   * that both positions satisfied it: the right-hand tools are wide, so a pill
+   * shoved against their left edge still ended inside the first 60% of a
+   * 1280px header. A check that passes in the arrangement it was written to
+   * forbid is the "check that cannot fail" trap, and it had been green here
+   * since the row was built.
+   *
+   * The header is `flex items-center gap-2`, so a pill that really is the next
+   * sibling of the breadcrumbs sits one 8px gap away. `MAX_GAP` is 24 — three
+   * gaps of slack for a margin or a hidden element between them — and the
+   * spacer that `fp-9` relies on opens a gap of several hundred. The measured
+   * distance goes into the failure line so the next reader sees the number
+   * rather than re-deriving it.
    */
+  const MAX_GAP = 24
   const geometry = await page.evaluate(() => {
     const el = document.querySelector('[data-testid="focus-block-pill"]')
     const crumbs = document.querySelector('[data-testid="topbar-breadcrumbs"]')
@@ -346,17 +364,20 @@ try {
     const h = header.getBoundingClientRect()
     return { p: { left: p.left, right: p.right, top: p.top, bottom: p.bottom },
              c: { right: c.right },
-             h: { left: h.left, right: h.right, top: h.top, bottom: h.bottom } }
+             h: { left: h.left, right: h.right, top: h.top, bottom: h.bottom },
+             gap: Math.round(p.left - c.right) }
   })
   chk(
     !!geometry &&
       geometry.p.top >= geometry.h.top - 1 &&
       geometry.p.bottom <= geometry.h.bottom + 1 &&
       geometry.p.left >= geometry.c.right - 1 &&
+      geometry.gap <= MAX_GAP &&
       geometry.p.right <= geometry.h.left + (geometry.h.right - geometry.h.left) * 0.6,
-    'it sits in the app header, right of the workspace identity and in its left half',
+    'it sits in the app header, immediately right of the workspace identity',
     `geometry was ${JSON.stringify(geometry)} — frame 15:20 puts it immediately right of the ` +
-      'workspace switcher, not among the tools on the right',
+      `workspace switcher, not among the tools on the right. A gap over ${MAX_GAP}px means ` +
+      'something is between them, and in this header that something is the flex spacer',
   )
 
   chk(

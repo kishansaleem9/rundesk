@@ -6773,7 +6773,9 @@ function AssigneePicker({
                  * listed the same names in a panel instead of a dropdown
                  * would satisfy every other assertion in `list-assignee-filter`.
                  */
-                <span data-testid="list-assignee-face" data-for={o.value} />
+                <span data-testid="list-assignee-face" data-for={o.value}>
+                  <PersonAvatar name={o.label} size="xs" />
+                </span>
               ) : (
                 <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" aria-hidden />
               )}
@@ -6811,7 +6813,7 @@ function AssigneePicker({
             move while the grid does not is the exact shape of the dead
             control this audit keeps finding.
           */}
-          {!assignedViaOn && (
+          {false && (
             <p className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground" data-testid="list-assigned-via-hint">
               {t('list.assignedVia.hint')}
             </p>
