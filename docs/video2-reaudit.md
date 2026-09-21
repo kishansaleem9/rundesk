@@ -2786,6 +2786,7 @@ worktree under a lock:
 | `folder-dialog` (the 8 status-scope checks) | 8 | 8 |
 | `sidebar-sections` | 15 | 15 |
 | `list-customize` (the 8 List-trio checks) | 8 | 8 |
+| `space-create-menu` (the Form row) | 5 | 5 |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
 
@@ -2814,6 +2815,17 @@ appeared, so it matched twice and refused. Both reported PATCH FAILED against
 code they were still perfectly able to break. **A break patch that cannot find
 its line is a check with no baseline**, and it is indistinguishable, in a long
 log, from a check that was never worth writing.
+
+### The Form set, and the two patches that are really about the checks
+
+Baseline 28/28, five patches, five reddened. `form-2-rule-by-index` puts the
+menu's group rule back on a literal index — the regression that had already
+shipped unnoticed, where inserting Form at position five moved the rule from
+above List to above Form with every item still present, in order, correctly
+labelled. It reddens one check, which is the check written after the fact to
+catch exactly it. `form-5-space-lists-endpoint` points the destination picker
+back at `GET /lists/space/:id` and reddens two: it is the defect as found,
+preserved so the endpoint's narrower meaning cannot quietly be re-adopted.
 
 ### The patch that proved a CHECK wrong, which is what step 6 is for
 
