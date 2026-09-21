@@ -2,8 +2,8 @@
 # Reddens: ai-model-picker: "the Fast tier’s Speed bar is visibly longer than the Deep tier’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/model-tiers.ts'
-a = '    speed: 5,\n    intelligence: 3,'
-b = '    speed: 3,\n    intelligence: 3,'
+a = '    speed: 5,\n    intelligence: 2,'
+b = '    speed: 3,\n    intelligence: 2,'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

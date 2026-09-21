@@ -12,7 +12,7 @@ pairs = [
 """,
    """const FACETS = FRAME_FACETS.filter(() => true)
 """),
-  ("""  { id: 'toggl', name: 'Toggl Track', descKey: 'integrations.desc.toggl', category: 'timeTracking', comingSoon: true, brandColor: '#E57CD8', logo: 'T' },
+  ("""  { id: 'toggl', name: 'Toggl Track', descKey: 'integrations.desc.toggl', category: 'timeTracking', brandColor: '#E57CD8', logo: 'T' },
 """,
    """"""),
 ]
