@@ -189,21 +189,28 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND FOUR. At the same 1.1 minutes each that
-    # is about 114 minutes plus setup — so 120 no longer fits, and the margin
-    # under 150 is down to about half an hour. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 in two days.
+    # The job now runs ONE HUNDRED AND SEVEN — every suite in the repo, with
+    # none unregistered. At the measured 1.1 minutes each that is about 118
+    # minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 in two days.
     #
-    # **SPLIT THIS JOB.** Two suites are still written and waiting on a green
-    # run (`planner-command-bar`, `planner-onboarding`) and a third is being
-    # built, which puts it at 107 and ~118 minutes. That is the point at which
-    # a slow runner starts being killed with the answer half-written, and a
-    # pipeline that is merely old reads as a flaky one — which is a pipeline
-    # nobody looks at.
+    # The limit is 180 rather than 150, and that is a stopgap, not the fix.
+    # Raising it costs nothing — GitHub bills the runtime, not the limit, and
+    # the limit only decides whether a slow run finishes or is killed with the
+    # answer half-written. At 118 estimated against 150 the margin was about
+    # twenty percent, which is thinner than the variance between a warm runner
+    # and a cold one.
+    #
+    # **THE FIX IS TO SPLIT THIS JOB**, and it is deliberately not being done
+    # here. Splitting means duplicating the Postgres + Meilisearch + build
+    # setup into a second job and dividing 107 steps between them, and CI
+    # cannot run until October, so it could not be validated — a restructure
+    # that is wrong is worse on the first green day than a job that is merely
+    # long. Whoever has a working pipeline should do it, and will be able to
+    # see it work.
     #
     # Splitting shortens the WALL CLOCK and not the bill: the minutes are the
-    # same either way, plus a second setup. It is worth doing now because the
-    # limit is about to start costing runs, not to save money.
+    # same either way, plus one more setup.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -217,7 +224,7 @@ jobs:
     # Splitting across parallel jobs shortens the WALL CLOCK and not the bill —
     # the minutes are the same either way, plus a second setup — so it is worth
     # doing when somebody is waiting on the result, not to save the budget.
-    timeout-minutes: 150
+    timeout-minutes: 180
 
     services:
       postgres:
