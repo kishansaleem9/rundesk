@@ -944,5 +944,20 @@ if (failed.length) {
   console.log('═'.repeat(66))
 }
 console.log(`\n\x1b[1m${results.length - failed.length} passed, ${failed.length} failed\x1b[0m`)
+/*
+ * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
+ * branch that silently skipped becomes a shorter run that still reports zero
+ * failures and exits 0. Ninety-two checks walking the whole product is a lot
+ * of places to stop quietly. Observed from a green run, not guessed — the
+ * ninth and last suite in this directory to get one.
+ */
+const EXPECTED_CHECKS = 92
+if (results.length !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${results.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +
+      'early, so the count above describes the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
 await stack?.close?.()
 process.exit(failed.length ? 1 : 0)
