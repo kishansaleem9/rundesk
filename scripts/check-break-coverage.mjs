@@ -17,9 +17,9 @@
  * patches were counted as having none. The pile of unattributed patches was
  * sitting in the output the whole time as a number in brackets.
  *
- * Five have been closed since — `task-menu`, `custom-field-progress`,
- * `list-export`, `task-merge` and `comment-recording` — so the ratchet stands
- * at 42. The count printed is always the current one; the paragraph above is
+ * Six have been closed since — `task-menu`, `custom-field-progress`,
+ * `list-export`, `task-merge`, `comment-recording` and `view-visibility` — so
+ * the ratchet stands at 41. The count printed is always the current one; the paragraph above is
  * what it was when anybody first looked.
  *
  * A suite with no patch is not a suite that failed. It is a suite about which
@@ -150,7 +150,7 @@ if (unattributedNames.length) {
 }
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 42
+const BASELINE_UNCOVERED = 41
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
