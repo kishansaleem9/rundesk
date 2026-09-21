@@ -32,12 +32,35 @@ export interface CommandDialogProps extends React.ComponentProps<typeof Dialog> 
    * would be noise. Radix requires a title on every dialog regardless.
    */
   title?: string
+  /**
+   * Forwarded to Radix's `DialogContent`, and the only way to get at Escape
+   * before the dialog acts on it.
+   *
+   * WHY THIS EXISTS. The palette's ⋯ menu wanted Escape to dismiss the menu
+   * and leave the palette — and the query — alone. A `document` keydown
+   * listener cannot do it: Radix registers its own on `document` when the
+   * dialog MOUNTS, so it is always earlier than one registered when a menu
+   * OPENS, and listeners on the same node in the same phase run in
+   * registration order. `stopPropagation` from the later one cannot un-run the
+   * earlier one; the menu closed and the whole palette went with it.
+   *
+   * `onEscapeKeyDown` fires before the close, and `preventDefault()` on it
+   * cancels the close. That is Radix's own seam for this, and it is the one
+   * that works.
+   */
+  onEscapeKeyDown?: React.ComponentPropsWithoutRef<typeof DialogContent>['onEscapeKeyDown']
 }
 
-export function CommandDialog({ children, commandProps, title = 'Search', ...props }: CommandDialogProps) {
+export function CommandDialog({
+  children,
+  commandProps,
+  title = 'Search',
+  onEscapeKeyDown,
+  ...props
+}: CommandDialogProps) {
   return (
     <Dialog {...props}>
-      <DialogContent className="overflow-hidden p-0 sm:max-w-2xl" hideClose>
+      <DialogContent className="overflow-hidden p-0 sm:max-w-2xl" hideClose onEscapeKeyDown={onEscapeKeyDown}>
         <DialogTitle className="sr-only">{title}</DialogTitle>
         <Command
           {...commandProps}

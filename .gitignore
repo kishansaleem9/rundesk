@@ -37,3 +37,9 @@ packages/*/src/**/*.js.map
 # chunks a build emitted, read by the next deploy to know which files on disk
 # belong to the outgoing release and are worth keeping.
 apps/web/.build-assets
+
+# Vite writes this beside the config while a build resolves it and removes it
+# afterwards. With several builds running at once, an unlucky `git add -A`
+# commits one; it is machine-specific and meaningless to anybody else.
+vite.config.ts.timestamp-*.mjs
+*.timestamp-*.mjs

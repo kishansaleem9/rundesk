@@ -241,6 +241,17 @@ try {
     `it answered ${rename.status} "${said(rename)}" — a rename that goes through leaves the ` +
       'formula silently drawing a dash where a number was',
   )
+  /*
+   * Put the fixture back if the refusal did not hold. Without this a patch
+   * that removes the guard reddens this check AND every later one that reads
+   * `Remaining`, because a rename that goes through is exactly what orphans
+   * the formula — and a patch whose damage spreads cannot be attributed.
+   */
+  if (rename.status !== 400) {
+    await A(`/workspaces/${W}/custom-fields/${budget.data.id}`, {
+      method: 'PATCH', body: { name: 'Budget' },
+    })
+  }
 
   // =========================================================================
   console.log('\n▶ TASKS — a reference that cannot point at something unreachable')
@@ -360,13 +371,22 @@ try {
       `"${await page.getByTestId('quick-create-new-field-type').inputValue()}"`,
   )
 
+  /*
+   * The type is chosen again explicitly, from the FULL list, so the next two
+   * checks stand on their own. Leaning on the search having selected it would
+   * make one patch — a search that stops matching — redden three checks, and a
+   * patch whose damage spreads cannot be attributed to the check it broke.
+   */
+  await page.getByTestId('quick-create-new-field-type-search').fill('')
+  await page.getByTestId('quick-create-new-field-type').selectOption('formula')
+
   const expressionBox = page.getByTestId('quick-create-new-field-expression')
   chk(
     await waitUntil(() => expressionBox.isVisible().catch(() => false), { timeoutMs: 10_000 }),
     'choosing Formula asks for the expression, rather than letting the save 400',
     'no expression input appeared — a picker entry whose only answer is a refusal is a dead control',
   )
-  await page.getByTestId('quick-create-new-field-type-search').fill('text')
+  await page.getByTestId('quick-create-new-field-type-search').fill('')
   await page.getByTestId('quick-create-new-field-type').selectOption('text')
   chk(
     await waitUntil(
