@@ -259,9 +259,12 @@ export class CustomFieldsService {
   /**
    * 0146 — the expression, checked against the fields it claims to read.
    *
-   * Three separate refusals, and each one names the thing that is wrong,
-   * because "invalid formula" tells the person typing it nothing they can act
-   * on. `excludeFieldId` is the field being edited: a formula that refers to
+   * Four separate refusals — the expression will not parse, it names a field
+   * that is not here, it names two fields at once, or it names one a formula
+   * cannot read — and every one of them says WHICH, because "invalid formula"
+   * tells the person typing it nothing they can act on.
+   *
+   * `excludeFieldId` is the field being edited: a formula that refers to
    * itself would recurse, and a formula that refers to another formula would
    * make the answer depend on the order the definitions came back in.
    */

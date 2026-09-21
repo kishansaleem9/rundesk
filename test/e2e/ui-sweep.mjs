@@ -787,4 +787,19 @@ const p = results.filter(([s]) => s === 'PASS').length
 const sk = results.filter(([s]) => s === 'SKIP').length
 console.log(`\n\x1b[1m${p} passed, ${failed.length} failed, ${sk} skipped\x1b[0m`)
 await stack?.close?.()
+/*
+ * "0 failed" is not "it ran", and this is the widest suite in the repo — the
+ * one most able to stop early and still look fine. `results.length` counts
+ * PASS, FAIL and SKIP together, because a section that skips is a section that
+ * ran and declined; a section that never executed adds nothing and is exactly
+ * what this catches. Observed at 107 from a green run, not guessed.
+ */
+const EXPECTED_CHECKS = 107
+if (results.length !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${results.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +
+      'early, so the counts above describe the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
 process.exit(failed.length ? 1 : 0)
