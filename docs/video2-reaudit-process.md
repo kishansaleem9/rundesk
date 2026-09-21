@@ -487,6 +487,69 @@ green "confirmations" that meant nothing until they were found.
   that did happen, and six ledger rows had to be withdrawn because nothing could
   support them any more. Per-run files, or an appended run header, cost nothing.
 
+### When a patch runs GREEN, read the code before you blame the check
+
+Three still-green patches this session and not one of them was a worthless
+check. The rule that came out of it: **a green patch is a question, not a
+verdict**, and the answer is one of four things.
+
+1. **The patch does not model its own defect.** `sidebar-reorder-6` described a
+   folder falling THROUGH a rule and implemented DELETING that rule, so nothing
+   was left to fall through into. Fix the patch.
+2. **Another guard covers the same input.** Both `task-merge` greens were this:
+   merging into your own subtask is caught by `would-nest-twice` as well as by
+   the descendant rule, and an already-binned source is caught by
+   `assertTaskWriteAccess` as well as by `already-binned`. Defence in depth is
+   worth keeping; **a check that cannot see which guard fired is not**. Assert
+   the message.
+3. **There is no check for what the patch breaks.** `checklists-3` inserted
+   every item at position 0 and nothing compared `position: max + 1` against
+   `orderBy: asc(position)`. Write the check.
+4. **The code is not what everybody thinks it is** — below.
+
+### The guard that disagreed with its own name, comment, message and test
+
+`mergeRefusal` had a rule keyed `target-is-descendant`, commented *"merging
+into your own subtask: the survivor would be a child of the task being
+binned"*, messaged *"A task cannot be merged into its own subtask"*, and
+asserted by a unit test titled the same way. Its condition is
+`targetChildIds.has(source.id)` — the TARGET's children containing the SOURCE,
+which is a subtask merged into its PARENT. The opposite relationship.
+
+Probed against a live API rather than reasoned about:
+
+```
+subtask → parent   400  "A task cannot be merged into its own subtask"
+parent  → subtask  400  "…Subtasks only nest one level deep."
+```
+
+Five things agreed with each other and none of them agreed with the code. **The
+unit test is the part worth sitting with**: it passed, it was specific, it named
+the right behaviour, and it encoded the wrong relationship — a test can agree
+with a bug in exactly the words that describe the fix.
+
+Two general rules:
+
+- **Probe, do not reason, about which branch fires.** Two minutes against a
+  running API settled what half an hour of reading the condition had not.
+- **A refusal's message is part of its contract.** The behaviour here was never
+  unsafe; a person merging a subtask into its parent was simply told about a
+  merge they had not attempted, for as long as the rule has existed.
+
+### Two more ways a number lies
+
+- **A new check must not move the ground under an old one.** The item-order
+  check for `checklists` adds a third item, and the check above it reads *"two
+  unticked items across two lists read as 2 open"*. Placed before it, the new
+  check would have turned an existing one red for a reason that has nothing to
+  do with the product. Append where the fixture is already spent.
+- **TWO WRITERS, ONE FILENAME.** `break-queue.sh` logged to
+  `break-queue-$LANE.log` and truncated it on startup, so arming a second queue
+  on the same lane erased the first one's log while it was still writing — the
+  same defect as `wt-break.sh` truncating per run, introduced in the script
+  written to work around that one. Nothing was lost, because the per-run
+  archives added that morning already held the results.
+
 ### Checking the checkers
 
 The two scripts that check the break patches were each wrong in a way the
@@ -571,6 +634,15 @@ as the same defects one level up.
   without one, and it must not quietly become "built".
 - **Re-check a recorded reason before trusting it.** See *the stale reason*
   above. Two rows in this audit were closable the whole time.
+- **A CLAIM CHOSEN BECAUSE IT VERIFIES IS WORSE THAN ONE THAT HAS ROTTED.**
+  `check-break-claims.mjs` rejects a patch whose `# Reddens:` sentence is not in
+  its suite, and the obvious way to satisfy it is to go and find a sentence that
+  is. That happened twice in one session: once for a patch removing a clamp no
+  fixture exercises, once for a patch about item ORDER given a sentence about
+  which checklist an item lands in. Both verified. Neither was true. The right
+  answers were to delete the first patch and to write the missing check for the
+  second — the checker cannot tell the difference, and it is the one place where
+  passing it is trivially easy and completely hollow.
 - **A row's GLOSS must quote a frame or admit it cannot.** The parenthetical
   that says what a row *means* is where knowledge from outside the reference
   gets in, because it reads as description and is never re-derived. `"Add to ›"`
