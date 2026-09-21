@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 27
+const EXPECTED_CHECKS = 28
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -168,19 +168,34 @@ try {
     `merging into its own subtask returned ${intoOwnChild.status} — the survivor would be a child of a binned task`,
   )
   /*
-   * AND BY THE RIGHT RULE. `target-is-descendant` is not the only thing that
-   * refuses this input: the source has a subtask and the target IS that
-   * subtask, so `would-nest-twice` catches it too. Asserting a 4xx alone means
-   * either rule can be deleted with this check still green, which is how
-   * `task-merge-2-into-own-subtask` ran green against a build with the
-   * descendant rule removed — two mechanisms that produce one status code have
-   * to be told apart by their message.
+   * AND BY THE RULE THAT REALLY DOES IT. Asserting a 4xx and nothing more is
+   * what let this go unnoticed: a break patch deleted the rule everyone
+   * believed was refusing this, and the suite stayed green.
+   *
+   * The rule that actually fires is `would-nest-twice`, and it always will —
+   * a target that is the source's own child means the source has a subtask and
+   * the target has a parent. The other rule, once called
+   * `target-is-descendant`, catches the OPPOSITE relationship and said so to
+   * nobody: merging a subtask into its parent answered "A task cannot be
+   * merged into its own subtask" until 21 September.
    */
   chk(
-    JSON.stringify(intoOwnChild).includes('A task cannot be merged into its own subtask'),
-    'and refuses it as a descendant, not by the nesting-depth rule that also catches it',
-    `it said ${JSON.stringify(intoOwnChild.error ?? null)} — if that is the subtasks-nest-once ` +
-      'sentence then the descendant rule is gone and something else happened to cover for it',
+    JSON.stringify(intoOwnChild).includes('Subtasks only nest one level deep'),
+    'and by the nesting rule, which is the one that really refuses it',
+    `it said ${JSON.stringify(intoOwnChild.error ?? null)} — if the nesting rule stopped firing ` +
+      'here then nothing else is covering this case, whatever the status code says',
+  )
+
+  /*
+   * AND THE OTHER DIRECTION, which had no check at all and the wrong sentence.
+   */
+  const childIntoParent = await A(`/tasks/${child.id}/merge`, { method: 'POST', body: { targetTaskId: source.id } })
+  chk(
+    JSON.stringify(childIntoParent).includes('A subtask cannot be merged into its own parent'),
+    'and a subtask merged into its parent is refused in those words',
+    `it said ${JSON.stringify(childIntoParent.error ?? null)} — this refusal spent its whole life ` +
+      'describing the opposite merge, because its condition reads the TARGET\'s children and its ' +
+      'name, comment, message and unit test all described the source\'s',
   )
 
   const intoNothing = await A(`/tasks/${source.id}/merge`, {

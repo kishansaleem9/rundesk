@@ -72,7 +72,7 @@ export type MergeRefusal =
   | 'same-task'
   | 'source-missing'
   | 'target-missing'
-  | 'target-is-descendant'
+  | 'source-is-descendant'
   | 'would-nest-twice'
   | 'already-binned'
 
@@ -98,9 +98,39 @@ export function mergeRefusal(
   if (!target) return 'target-missing'
   if (source.id === target.id) return 'same-task'
   if (source.isArchived) return 'already-binned'
-  // Merging into your own subtask: the survivor would be a child of the task
-  // being binned, and the parent chain would point into the bin.
-  if (targetChildIds.has(source.id)) return 'target-is-descendant'
+  /*
+   * MERGING A SUBTASK INTO ITS OWN PARENT.
+   *
+   * `targetChildIds` is the TARGET's children, so this fires when the SOURCE is
+   * one of them — the source is the descendant, not the target.
+   *
+   * It was called `target-is-descendant` and its comment read "merging into
+   * your own subtask: the survivor would be a child of the task being binned,
+   * and the parent chain would point into the bin." That is the opposite
+   * relationship, and the message a person got said so: merging a subtask into
+   * its parent answered *"A task cannot be merged into its own subtask"*.
+   * Probed against a live API on 21 September:
+   *
+   *   subtask → parent   400  "A task cannot be merged into its own subtask"
+   *   parent  → subtask  400  "…Subtasks only nest one level deep."
+   *
+   * So the case the comment described is caught by `would-nest-twice` below —
+   * always, because a target that is the source's child means the source has a
+   * subtask and the target has a parent — and this rule has only ever caught
+   * the other direction while describing this one. The unit test agreed with
+   * it, under a title naming the case it does not test.
+   *
+   * Found by a break patch deleting this line and the suite staying green:
+   * `would-nest-twice` was quietly covering for it, and the e2e check asserted
+   * a 4xx without reading the sentence.
+   *
+   * THE BEHAVIOUR IS UNCHANGED AND THE WORDS NOW MATCH IT. Whether a subtask
+   * SHOULD be refused a merge into its parent is a product question nobody has
+   * asked: nothing points into the bin when it happens, so the stated reason
+   * never applied to it. Recorded as a decision not taken rather than settled
+   * quietly here.
+   */
+  if (targetChildIds.has(source.id)) return 'source-is-descendant'
   /*
    * Subtasks nest one level only — the rule `updateTask` already enforces. If
    * the source has children and the target is itself a subtask, moving those
@@ -116,7 +146,7 @@ export const MERGE_REFUSAL_MESSAGE: Record<MergeRefusal, string> = {
   'same-task': 'A task cannot be merged into itself',
   'source-missing': 'Task not found',
   'target-missing': 'The task to merge into was not found',
-  'target-is-descendant': 'A task cannot be merged into its own subtask',
+  'source-is-descendant': 'A subtask cannot be merged into its own parent',
   'would-nest-twice': 'This task has subtasks, and the task you picked is itself a subtask. Subtasks only nest one level deep.',
   'already-binned': 'A task in the bin cannot be merged',
 }

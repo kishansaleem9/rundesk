@@ -34,10 +34,22 @@ test('a missing task on either side is a not-found, not a bad request', () => {
   assert.equal(mergeRefusal(A, null, false, none), 'target-missing')
 })
 
-test('a task cannot be merged into its own subtask', () => {
-  // The survivor would become a child of the task being binned, and the parent
-  // chain would point into the bin.
-  assert.equal(mergeRefusal(A, B, false, new Set(['a'])), 'target-is-descendant')
+test('a subtask cannot be merged into its own parent', () => {
+  // `new Set(['a'])` is the TARGET's children containing the SOURCE — so the
+  // source is the descendant. This test was titled "a task cannot be merged
+  // into its own subtask", which is the opposite relationship, and it passed:
+  // the name, the comment, the message and the assertion all described a case
+  // none of them tested. The case they described is the one below.
+  assert.equal(mergeRefusal(A, B, false, new Set(['a'])), 'source-is-descendant')
+})
+
+test('and merging a task INTO its own subtask is the nesting rule, not that one', () => {
+  // A target that is the source's child means the source has a subtask and the
+  // target has a parent, so `would-nest-twice` always catches it first. Pinned
+  // because the rule above was believed to be doing this for a long time, and
+  // a break patch deleting it left every check green.
+  const ownSubtask = task({ id: 'b', parentTaskId: 'a' })
+  assert.equal(mergeRefusal(A, ownSubtask, true, none), 'would-nest-twice')
 })
 
 test('a task with subtasks cannot be merged into a subtask', () => {
