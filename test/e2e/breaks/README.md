@@ -56,6 +56,18 @@ Both scripts exist because of specific failures, written in their headers.
 while claiming to be a dry run, and now verifies `git status` before and after
 and aborts if a byte changed.
 
+An earlier attempt at the same idea was already sitting in `/tmp/claude-0/breaks`
+as a hidden `.check.py`, opening with *"Anchor check that CANNOT apply anything:
+the patch files are parsed, never run."* It used `ast` — strictly safer, since
+nothing executes and no guard is needed. The version here executes each patch
+with writes sunk instead, and that is a deliberate trade rather than an
+improvement: running the patch's own `assert` tests exactly what `wt-break.sh`
+will do, and covers every shape a patch takes — a bare `a`/`b` pair, a `pairs`
+list, a loop, an anchor built at run time. A parser has to model each of those
+and quietly skips what it cannot read, which is a check that cannot fail. The
+cost of the faithful version is that it must be trusted not to write, so it
+proves it instead, twice, against `git status`.
+
 ## Two hazards worth knowing before you write one
 
 **An anchor that begins with spaces cannot pin indentation.** A more-deeply
