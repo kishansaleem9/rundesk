@@ -346,7 +346,20 @@ try {
 }
 
 const ran = passed + failed
-console.log(`\n${passed}/${ran} passed`)
+/*
+ * `N passed, M failed`, the form every other suite prints.
+ *
+ * This said `${passed}/${ran} passed` — the only one of 101 suites that did —
+ * and `wt-break.sh` reads a baseline with `grep -E 'passed,'`. So the baseline
+ * never parsed, every run of this suite REFUSED, and it reported "the unpatched
+ * suite is not green" about a suite that was passing 14 of 14. checklists has
+ * never been break-testable and could not have been, whatever patches were
+ * written for it.
+ *
+ * One format, not a tolerant parser: a harness that accepts several ways of
+ * saying the same thing is a harness where the next new way fails silently.
+ */
+console.log(`\n${passed} passed, ${failed} failed`)
 if (ran !== EXPECTED_CHECKS) {
   console.error(`\x1b[31monly ${ran} of ${EXPECTED_CHECKS} checks ran — the suite stopped early\x1b[0m`)
   process.exit(1)

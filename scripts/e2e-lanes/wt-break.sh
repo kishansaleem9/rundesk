@@ -155,6 +155,23 @@ timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/di
   > "/tmp/claude-0/brk-$SUITE-baseline.log" 2>&1
 BASE=$(grep -E 'passed,' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
 echo "== BASELINE (no patch) $BASE" >> "$OUT"
+# AN UNREADABLE BASELINE IS NOT A RED ONE, and saying so is the difference
+# between fixing a suite and fixing a print statement.
+#
+# `checklists` printed `14/14 passed` where every other suite prints
+# `N passed, M failed`, so this grep found nothing, `$BASE` was empty, and the
+# refusal below announced "the unpatched suite is not green" about a suite
+# passing fourteen of fourteen. It had never been break-testable and the
+# message pointed at the wrong thing every single time.
+if [ -z "$BASE" ]; then
+  { echo "== REFUSING TO BREAK-TEST — the baseline run printed NO summary line this harness"
+    echo "   can read. That is not the same as the suite being red: it may have crashed, timed"
+    echo "   out, or printed its total in a form other than 'N passed, M failed'. Look at"
+    echo "   /tmp/claude-0/brk-$SUITE-baseline.log before changing any product code."
+    tail -3 "/tmp/claude-0/brk-$SUITE-baseline.log" | sed 's/\x1b\[[0-9;]*m//g'
+  } >> "$OUT"
+  exit 5
+fi
 case "$BASE" in
   *' 0 failed'*) ;;
   *)
