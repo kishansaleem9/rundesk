@@ -77,26 +77,45 @@ Still to re-run: `ai-action-categories`, `ai-activity-filters`,
 `task-header-status`, `teams-empty-state`, `teams-person-cards`,
 `template-center`.
 
-**All five that did not are in `folder-create`, and they are a pattern rather
-than five accidents.** Five of that suite's twelve patches left it green, and
-four of them attack the same thing from different angles:
+**`folder-create` IS SETTLED, AND IT WAS THE HARNESS.** This section used to
+say five of its twelve patches left the suite green, reason that those checks
+were "very likely resting on the API's own 409 — which `assertFolderNameFree`
+raises before anything reaches the database — rather than on the constraint
+and the guards themselves", and tell the next session to start here because it
+was "the clearest live lead in the whole queue".
 
-| patch | what it breaks |
-| --- | --- |
-| `folder-create-2-no-index` | drops the unique index |
-| `folder-create-3-case-sensitive` | drops the `lower(name)` half |
-| `folder-create-6-rename-door-open` | removes the guard on rename |
-| `folder-create-8-move-door-open` | removes the guard on move |
-| `folder-create-12-toast-bottom-right` | moves the toast; edits `packages/ui`, outside the row's ownership |
+Re-run against a worktree synced to `HEAD`, with a real baseline:
 
-The suite claims twenty checks including "the INDEX refuses a direct SQL
-insert" and 409s on rename and on move. If removing the index, the
-case-folding, the rename guard and the move guard all leave it green, then
-those checks are very likely resting on the API's own 409 — which
-`assertFolderNameFree` raises before anything reaches the database — rather
-than on the constraint and the guards themselves. **Treat `folder-create` as
-unverified until this is settled**, and start here: it is the clearest live
-lead in the whole queue.
+```
+== BASELINE (no patch) 20 passed, 0 failed
+
+folder-create-2-no-index              was green → 19 / 1   reddens
+folder-create-3-case-sensitive        was green → 18 / 2   reddens
+folder-create-6-rename-door-open      was green → 18 / 2   reddens
+folder-create-8-move-door-open        was green → 18 / 2   reddens
+folder-create-12-toast-bottom-right   was green → 16 / 4   reddens
+```
+
+**Five for five.** Dropping the unique index reddens a check. Dropping the
+`lower(name)` half reddens two. Removing the rename guard reddens two, and the
+move guard two. The suite was never weak.
+
+What it was: the old results file restores `wt2`, carries no baseline line,
+and shows **two checks failing on every patch** — including patches touching
+nothing near them. The tree was stale, those two were failing before anything
+was applied, and with two already red nothing below could be attributed. One
+of the pair says in its own words *"a schema declared without a migration
+behind it is a constraint that exists on one machine"*, and
+`0157_folder_name_unique_per_space.sql` does create
+`uq_folders_space_name_active` — so the schema was backed all along and the
+worktree simply predated the migration.
+
+**The lesson is not about `folder-create`.** Four separate "product problems"
+in one day were the verification environment lying: this, `list-card-cover`'s
+four always-red checks, `a39-dm-tabs` reporting 18/1 on a three-hour-old
+bundle, and the four lanes a full regression was stopped over. In every case
+the result looked exactly like a result. Read the `== syncing … to <sha>` and
+`== BASELINE (no patch) …` lines before anything below them.
 
 **Not yet applied at all — about 66 patches across 8 suites:**
 
