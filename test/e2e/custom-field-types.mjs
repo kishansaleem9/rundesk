@@ -452,12 +452,24 @@ try {
       'over a value the server will not accept',
   )
 
+  /*
+   * WAITED FOR, not sampled. The chip renders as soon as the field has a value
+   * and only gains its TITLE when the workspace task list resolves, so
+   * `textContent()` a moment too early reads the placeholder — `textContent`
+   * is one of the reads Playwright does not auto-wait past. It lost that race
+   * under a break patch that touched nothing near it, and then printed the
+   * right title in its own failure message, because the message is built after
+   * the check.
+   */
   const tasksRow = page.getByTestId('custom-field-row').filter({ hasText: 'Blockers' })
+  const relatedChip = tasksRow.getByTestId(`cf-task-${other.id}`)
   chk(
-    (await tasksRow.getByTestId(`cf-task-${other.id}`).textContent().catch(() => '') || '')
-      .includes(`Other ${TAG}`),
+    await waitUntil(
+      async () => ((await relatedChip.textContent().catch(() => '')) || '').includes(`Other ${TAG}`),
+      { timeoutMs: 15_000 },
+    ),
     'the tasks row draws the related task by TITLE, not by id',
-    `it drew ${JSON.stringify(await tasksRow.getByTestId(`cf-task-${other.id}`).textContent().catch(() => null))} ` +
+    `it drew ${JSON.stringify(await relatedChip.textContent().catch(() => null))} ` +
       '— a uuid in a cell is a reference nobody can follow',
   )
 

@@ -1539,6 +1539,30 @@ jobs:
           E2E_PASSWORD: Admin@123!
           DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
+      # §V2-S01 `00:20`/`00:42` — the field-type picker, counted off the frame
+      # rather than off the ledger row: 32 types, not "~30", and the row's
+      # "11 absent" was 13 (it had dropped Custom Text and Custom Dropdown,
+      # which the frame draws as rows of their own).
+      #
+      # `formula` is the one worth knowing about. It was the obvious candidate
+      # for "build the shell, leave the compute unrouted", and a formula over a
+      # task's own numeric fields turns out to be arithmetic — so it is
+      # evaluated for real, derived on read like `progress_auto` and refusing
+      # the write for the same reason. Three rules have their own checks: a
+      # reference to a field that does not exist is refused at CREATE naming
+      # what it could not find, because a typo that saves is indistinguishable
+      # from an empty field afterwards; an unfilled input makes the result NULL
+      # rather than zero, because zero in a percent box is a measurement; and
+      # renaming a field a formula reads is refused naming the formula, because
+      # a rename that goes through orphans it silently.
+      - name: The field types the frame lists, and the ten that are decisions
+        if: '!cancelled()'
+        run: node test/e2e/custom-field-types.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
       # §V2-S02 `01:10` — files staged on the CREATE modal, before the task
       # exists. `input.files` is a LIVE FileList and the change handler clears
       # `e.target.value` the moment it returns (it must, or re-picking the same
