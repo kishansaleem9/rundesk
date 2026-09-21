@@ -183,7 +183,16 @@ try {
   const viewTabs = await page.locator('[data-testid^="work-view-tab-type-"]').evaluateAll((els) =>
     els.map((e) => (e.getAttribute('data-testid') ?? '').replace('work-view-tab-type-', '')),
   )
-  await page.locator('body').click({ position: { x: 4, y: 4 } })
+  /*
+   * BLUR, DO NOT CLICK. The cycler ignores keys typed into an input, so focus
+   * has to leave one — but the first version of this did it with
+   * `body.click({position: {x: 4, y: 4}})`, and the top-left corner of this
+   * page is the sidebar. The click navigated off the list route entirely, so
+   * there were no view tabs left to read and `visited` came back **empty**:
+   * the check failed against a correct build and blamed the cycler. Blurring
+   * moves focus without moving the page.
+   */
+  await page.evaluate(() => document.activeElement?.blur?.())
   const visited = new Set()
   for (let i = 0; i < viewTabs.length + 1; i += 1) {
     await page.keyboard.press('v')

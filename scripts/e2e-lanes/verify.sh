@@ -28,6 +28,36 @@ SUITE="$1"; LANE="${2:-1}"
 PORT=$((3020 + LANE))
 DIST="/tmp/claude-0/dist-$LANE"
 [ -f "$DIST/index.html" ] || DIST="apps/web/dist"
+
+# ── A PER-LANE BUNDLE IS ONLY AS FRESH AS ITS LAST BUILD. ────────────────────
+#
+# Giving each lane its own `dist` removed one hazard and introduced a quieter
+# one: nothing ages it out. A full sweep was started here against `dist-1`…`-4`
+# that had been built three hours and six source files earlier, so four of the
+# seven lanes were reporting on a tree that no longer existed. Exactly the
+# staleness the break worktrees had, in the fix written that morning to avoid
+# it — a shared thing made private is still stale, it is just stale privately,
+# and a private staleness is harder to notice because nothing else trips over
+# it.
+#
+# It refuses rather than rebuilding, for the same reason `wt-break.sh` refuses:
+# seven lanes each firing their own `vite build` on four cores turns one
+# forgotten rebuild into a thundering herd. The rebuild is one line and the
+# message carries it.
+if [ -f "$DIST/index.html" ]; then
+  NEWER=$(find apps/web/src packages/ui/src packages/feature-flags/src \
+            -name '*.ts' -o -name '*.tsx' -o -name '*.css' 2>/dev/null \
+          | xargs -r -I{} sh -c '[ {} -nt "'"$DIST"'/index.html" ] && echo {}' 2>/dev/null | head -3)
+  if [ -n "$NEWER" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — $DIST is older than the source it is built from"
+    echo "   newer, among others:"
+    echo "$NEWER" | sed 's/^/     /'
+    echo "   rebuild it:  pnpm -C apps/web exec vite build --outDir $DIST --emptyOutDir"
+    echo "   or all of them:  bash scripts/e2e-lanes/refresh-dists.sh \"1 2 3 4\""
+    exit 6
+  fi
+fi
+
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 export E2E_EMAIL=admin@rundesk.internal
