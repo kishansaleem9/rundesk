@@ -5064,7 +5064,7 @@ function TableView({
                            * reader to the task sheet, where the real editor is.
                            */
                           <span
-                            data-testid={`custom-cell-readonly-${field.id}`}
+                            data-testid={`custom-cell-readonly-${task.id}-${field.id}`}
                             title={t('list.table.cellEditOnTask')}
                             className="text-xs truncate text-left w-full text-muted-foreground"
                           >
@@ -5089,7 +5089,7 @@ function TableView({
                         ) : (
                           <button
                             type="button"
-                            data-testid={`custom-cell-open-${field.id}`}
+                            data-testid={`custom-cell-open-${task.id}-${field.id}`}
                             onClick={(e) => {
                               e.stopPropagation()
                               setCustomOpen({ taskId: task.id, fieldId: field.id })

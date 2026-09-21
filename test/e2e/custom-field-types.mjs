@@ -480,26 +480,43 @@ try {
   )
   await settleCookies()
   await page.getByTestId('work-view-tab-type-table').click({ timeout: 25_000 })
-  const blockerCell = page.getByTestId(`custom-cell-readonly-${blockers.data.id}`).first()
+  /* The subject's own row, by id: `.first()` would be whichever task the grid
+   * happened to sort to the top, and the other one has no blockers at all. */
+  const blockerCell = page.getByTestId(`custom-cell-readonly-${subject.id}-${blockers.data.id}`)
+  const blockerOpener = page.getByTestId(`custom-cell-open-${subject.id}-${blockers.data.id}`)
   chk(
-    await waitUntil(async () => (await blockerCell.textContent().catch(() => '') || '') !== '—'
-      && (await blockerCell.count()) > 0, { timeoutMs: 20_000 }),
-    'a tasks column renders as a read-only cell rather than a clickable text box',
-    'there is no read-only cell for the tasks field — clicking one opens a text input whose ' +
-      'save the API answers 400, which is the dead control',
+    await waitUntil(
+      async () => (await blockerCell.count()) === 1 && (await blockerOpener.count()) === 0,
+      { timeoutMs: 20_000 },
+    ),
+    'a tasks column draws a read-only cell and nothing that opens an editor',
+    `read-only cells: ${await blockerCell.count()}, cells that open an editor: ` +
+      `${await blockerOpener.count()} — a text box over a list of ids can only ever produce a ` +
+      '400, which is the dead control',
+  )
+  /* `waitUntil` answers whether it converged, not with what it saw, so the
+   * text is read again afterwards — reading it only inside the predicate would
+   * be asserting on a value this check never holds. */
+  await waitUntil(
+    async () => {
+      const text = (await blockerCell.textContent().catch(() => '')) ?? ''
+      return text !== '' && text !== '—'
+    },
+    { timeoutMs: 20_000 },
   )
   const cellText = (await blockerCell.textContent().catch(() => '')) ?? ''
   chk(
-    !cellText.includes(other.id) && /1/.test(cellText),
+    cellText !== '' && cellText !== '—' && !cellText.includes(other.id) && cellText.includes('1'),
     'and it says how many, never the ids',
     `the cell reads ${JSON.stringify(cellText)}; a column of uuids looks like data and is not`,
   )
+  const moneyOpener = page.getByTestId(`custom-cell-open-${subject.id}-${budget.data.id}`)
   chk(
-    (await page.getByTestId(`custom-cell-open-${blockers.data.id}`).count()) === 0
-      && (await page.getByTestId(`custom-cell-open-${budget.data.id}`).count()) > 0,
-    'while a money column is still editable in place, so this narrowed rather than disabled the grid',
-    `tasks cells that open an editor: ${await page.getByTestId(`custom-cell-open-${blockers.data.id}`).count()}; ` +
-      `money cells that do: ${await page.getByTestId(`custom-cell-open-${budget.data.id}`).count()}`,
+    (await moneyOpener.count()) === 1,
+    'while the money column in the same row is still editable in place, so this narrowed the ' +
+      'grid rather than disabling it',
+    `the money cell offers ${await moneyOpener.count()} editors — 0 would mean every custom ` +
+      'column had just been made read-only, which is not the fix',
   )
 } catch (err) {
   failed += 1
