@@ -1,4 +1,5 @@
 # The three loose in the toolbar again — the state the wrap came from.
+# Reddens: list-view-controls: "all three are in one cluster, as the frame groups them"
 import io
 p='/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s=io.open(p,encoding='utf-8').read()

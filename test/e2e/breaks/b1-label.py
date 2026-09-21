@@ -1,3 +1,4 @@
+# Reddens: list-view-controls: "it reads \"Group: Status\" on arrival"
 import io
 p='/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 s=io.open(p,encoding='utf-8').read()

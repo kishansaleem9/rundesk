@@ -1,3 +1,4 @@
+# Reddens: login-workspace-binding: "the older membership comes first"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/workspaces/workspaces.service.ts'
 s = io.open(p, encoding='utf-8').read()

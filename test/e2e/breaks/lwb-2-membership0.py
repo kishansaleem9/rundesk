@@ -1,3 +1,4 @@
+# Reddens: login-workspace-binding: "the access token is bound to the workspace the switcher lists first"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/auth/auth.service.ts'
 s = io.open(p, encoding='utf-8').read()
