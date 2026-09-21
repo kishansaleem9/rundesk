@@ -17,7 +17,15 @@
 //
 // For every suite with a break log: compare the log's mtime against the commit
 // date of the last change to the suite file. Later suite than run = STALE.
-// Exit 1 if any set is stale, so it can be wired into preflight.
+//
+// THIS IS A LOCAL CHECK AND BELONGS IN PREFLIGHT, NOT IN CI. Its evidence is
+// the run logs under /tmp on the machine that did the running, and a CI box has
+// none — so there it would print "no break logs on this machine" and exit 0
+// every time, which is a check that cannot fail dressed as a passing one. The
+// two checks that ARE in CI (check-break-patches.py, check-break-claims.mjs)
+// read only files in the repository, which is why they can be.
+//
+// Exit 1 if any set is stale.
 import { execFileSync } from 'node:child_process'
 import { readdirSync, statSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
