@@ -104,6 +104,16 @@ for b in "$@"; do
   [ -z "$CHANGED" ] && { echo "== $b PATCH CHANGED NOTHING" >> "$OUT"; continue; }
 
   OK=yes
+  # A SCHEMA PATCH HAS TO REACH THE DATABASE, or it proves nothing. Dropping an
+  # index from `packages/db/src/schema` and rebuilding leaves the index sitting
+  # in the lane's Postgres, so "the index refuses a direct insert" stayed green
+  # with the index deleted from the source. The schema is pushed whenever
+  # packages/** changed, which is also how a real deployment gets it.
+  case "$CHANGED" in *packages/db/*)
+    ( cd packages/db
+      export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
+      yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 ) || OK=no
+  ;; esac
   [ "$NEEDS_API" = yes ] && { pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1 || OK=no; }
   # Rebuild the bundle when this patch touches web, AND when the previous one
   # did — otherwise this patch runs against the previous patch's breakage.
@@ -127,6 +137,10 @@ done
 
 git -C "$WT" checkout -- . 2>/dev/null
 echo "== restoring $WT" >> "$OUT"
+# The lane's database may be carrying a patched schema; put it back.
+( cd "$WT/packages/db"
+  export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
+  yes | pnpm exec drizzle-kit push --force > /dev/null 2>&1 )
 pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
 pnpm -C apps/web exec vite build > /dev/null 2>&1
 restart

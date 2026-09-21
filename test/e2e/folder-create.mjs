@@ -141,10 +141,19 @@ try {
     method: 'POST',
     body: { name: NAME.toUpperCase() },
   })
+  /*
+   * The SERVICE has to fold case, not just the index. Both refuse with a 409 —
+   * the filter maps 23505 to the same status — so a status-only check passes
+   * even with `lower()` taken out of the service query, and the person gets
+   * "That resource already exists" where they should get "Folder name taken".
+   */
+  const casedMsg = String(cased.error?.message ?? cased.error ?? '')
   chk(
-    cased.status === 409,
-    'and case does not get around it',
-    `"${NAME.toUpperCase()}" was accepted alongside "${NAME}" (${cased.status})`,
+    cased.status === 409 && /folder name taken/i.test(casedMsg),
+    'and case does not get around it — the service folds it, not only the index',
+    `"${NAME.toUpperCase()}" alongside "${NAME}" gave ${cased.status} "${casedMsg}" — ` +
+      'a 409 in the filter\'s words means the service compared the names verbatim and the ' +
+      'database caught what it missed',
   )
 
   // ---------------------------------------------------------------------------
@@ -209,11 +218,27 @@ try {
     method: 'PATCH',
     body: { name: NAME },
   })
+  /*
+   * THE STATUS IS NOT ENOUGH, and this check used to be only the status.
+   *
+   * Its own failure message said "500 means the index answered instead of the
+   * service" — but `all-exceptions.filter.ts:11` maps Postgres 23505 to 409,
+   * so an UNGUARDED rename that reaches the index answers 409 as well. Two
+   * different mechanisms, one status code, and a check that cannot tell them
+   * apart: deleting `assertFolderNameFree` from the rename path left this
+   * suite entirely green.
+   *
+   * The message is what distinguishes them. The service says "Folder name
+   * taken"; the filter says "That resource already exists", which is what a
+   * person would see out of an ordinary rename if the guard went away.
+   */
+  const renamedMsg = String(renamed.error?.message ?? renamed.error ?? '')
   chk(
-    renamed.status === 409,
-    'renaming a folder onto a taken name is refused with a 409',
-    `PATCH answered ${renamed.status} — 500 means the index answered instead of the service, ` +
-      '200 means the rule has a second door standing open',
+    renamed.status === 409 && /folder name taken/i.test(renamedMsg),
+    'renaming a folder onto a taken name is refused by the SERVICE, in its own words',
+    `PATCH answered ${renamed.status} with "${renamedMsg}" — 200 means the rule has a second ` +
+      'door standing open; a 409 reading "That resource already exists" means the guard is gone ' +
+      'and the database is answering a question the service never asked',
   )
   // ...and renaming a folder to the name it already has is not a clash with itself.
   const noop = await api(`/spaces/${SPACE_A}/folders/${spare.data.id}`, {
@@ -238,11 +263,15 @@ try {
     method: 'POST',
     body: { targetSpaceId: SPACE_A },
   })
+  // Same reasoning as the rename check above: the status alone cannot tell the
+  // guard from the index, because the filter gives both of them a 409.
+  const movedMsg = String(moved.error?.message ?? moved.error ?? '')
   chk(
-    moved.status === 409,
-    'and moving a folder into a space that already has that name is refused with a 409',
-    `the move answered ${moved.status} — 500 is the index answering a question the service ` +
-      'never asked, and 200 means two folders now share a name in one space',
+    moved.status === 409 && /folder name taken/i.test(movedMsg),
+    'and moving a folder into a space that already has that name is refused by the SERVICE',
+    `the move answered ${moved.status} with "${movedMsg}" — 200 means two folders now share a ` +
+      'name in one space; a 409 reading "That resource already exists" means the third door is ' +
+      'open and the index caught what the service should have',
   )
 
   // ---------------------------------------------------------------------------
