@@ -96,9 +96,20 @@ folder-create-8-move-door-open        was green → 18 / 2   reddens
 folder-create-12-toast-bottom-right   was green → 16 / 4   reddens
 ```
 
-**Five for five.** Dropping the unique index reddens a check. Dropping the
-`lower(name)` half reddens two. Removing the rename guard reddens two, and the
-move guard two. The suite was never weak.
+**Twelve for twelve.** Not five of twelve leaving it green — none.
+
+```
+folder-create-1-no-service-check         16 / 4    folder-create-5-scoped-to-workspace  17 / 3
+folder-create-2-no-index                 19 / 1    folder-create-6-rename-door-open     18 / 2
+folder-create-3-case-sensitive           18 / 2    folder-create-7-selfclash-on-rename  18 / 2
+folder-create-4-archived-holds-name      18 / 2    folder-create-8-move-door-open       18 / 2
+folder-create-9-silent-again             10 / 6    folder-create-10-sidebar-silent      16 / 4
+folder-create-11-dialog-closes-on-error  13 / 7    folder-create-12-toast-bottom-right  16 / 4
+```
+
+Dropping the unique index reddens a check. Dropping the `lower(name)` half
+reddens two. Removing the rename guard reddens two, the move guard two. The
+suite was never weak.
 
 What it was: the old results file restores `wt2`, carries no baseline line,
 and shows **two checks failing on every patch** — including patches touching
