@@ -2899,7 +2899,7 @@ worktree under a lock:
 | --- | --- | --- |
 | `imports` | 19 | 19 |
 | `task-delete` | 15 | 15 |
-| `app-catalogue` | 20 | **19** |
+| `app-catalogue` | 20 | 20 — **19 until the twentieth patch was made to compile** |
 | `paywall-sites` | 10 | 10 |
 | `template-center` | 10 | 10 |
 | `clickapps-plan-gating` | 8 | 8 |
@@ -2945,8 +2945,9 @@ reason each one left is worth more than the row was.**
 | `list-view-controls` 8/8 | withdrawn | the log holds 5 |
 
 **`app-catalogue` is the one that should have been caught by me and was caught
-by a script.** I reported it forty minutes ago as *"20 patches, 0 still green"*
-and it is **19**. `app-catalogue-20-gmail-source-removed` `BUILD FAILED`: it
+by a script.** I reported it as *"20 patches, 0 still green"* and it was
+**19** — and it is 20 now, because the patch was fixed and re-run, which is the
+only thing that turns a number in this table back into a fact. `app-catalogue-20-gmail-source-removed` `BUILD FAILED`: it
 deleted `'gmail'` from an `as const` tuple that generates `SearchSource`, and
 two Records keyed by that union plus a `.includes('gmail')` stopped compiling.
 The patch never reached a check.
