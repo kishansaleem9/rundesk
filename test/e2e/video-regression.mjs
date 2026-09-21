@@ -672,8 +672,35 @@ try {
     'trash says what was deleted and who deleted it', `no deleted-on/by columns: ${trash.slice(0, 200)}`)
   chk(/deleted forever after \d+ days/i.test(trash),
     'and how long it keeps things', 'the retention notice is missing')
-  chk(/Nothing in the trash/i.test(trash) || /\bRestore\b/i.test(trash) || /⋯|More/i.test(trash),
-    'with rows to act on, or an honest empty state', `the trash tab reads: ${trash.slice(0, 200)}`)
+  /*
+   * TESTIDS, NOT GLYPHS — and this one failed on a tree with nothing wrong.
+   *
+   * It read `/Nothing in the trash/ || /\bRestore\b/ || /⋯|More/` over the
+   * page text, and passed for months because the lane's trash was EMPTY, so
+   * the first branch matched. Once other suites had created and deleted their
+   * own fixtures the empty state went away, and with rows present none of the
+   * three matched: the row's action is a lucide icon, so `innerText` carries
+   * no `⋯` and no "More", and Restore lives inside the menu that icon opens.
+   *
+   * So the check reported "no rows to act on" about a tab full of rows with
+   * actions — a check failing for a reason that is not the code, and one that
+   * would have gone on passing forever on a lane nobody else used.
+   * `trash-empty` and `trash-row` are both already in `trash-tab.tsx`; the
+   * claim is "one of these two states is on screen", and that is what it now
+   * asks.
+   */
+  const trashRows = await page.locator('[data-testid="trash-row"]').count()
+  const trashEmpty = await page.locator('[data-testid="trash-empty"]').count()
+  const rowActions = trashRows
+    ? await page.locator('[data-testid^="trash-actions-"]').count()
+    : 0
+  chk(
+    (trashRows > 0 && rowActions === trashRows) || (trashRows === 0 && trashEmpty === 1),
+    'with rows to act on, or an honest empty state',
+    `${trashRows} row(s) carrying ${rowActions} action control(s), and ${trashEmpty} empty-state ` +
+      'cell — a row you cannot act on is the dead control, and no rows with no empty state is a ' +
+      'table that rendered nothing and said nothing',
+  )
 
   ref('A4.11', 'Reports-to is set where members are managed')
   await go(`/app/${WS}/settings`, 3500)
