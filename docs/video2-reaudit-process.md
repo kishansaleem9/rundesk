@@ -489,9 +489,23 @@ green "confirmations" that meant nothing until they were found.
 
 ### When a patch runs GREEN, read the code before you blame the check
 
-Three still-green patches this session and not one of them was a worthless
+**SEVEN** still-green patches this session and not one of them was a worthless
 check. The rule that came out of it: **a green patch is a question, not a
 verdict**, and the answer is one of four things.
+
+| patch | answer |
+| --- | --- |
+| `sidebar-reorder-6` | the patch modelled the wrong thing — and exposed a rule with NO check |
+| `mp-7-flat-bars` | the patch aimed at a comparison the suite does not make |
+| `task-merge-2`, `-3` | the check could not see which of two guards refused |
+| `list-name-taken-1` | same, with a unique index behind the service |
+| `tfc-7-no-type-validation` | same, with an enum column behind it — and the check's own words said *"not a cast error"* |
+| `tfc-6-menu-switches-tab-only` | **a product bug the check was accidentally measuring** |
+
+Two of seven were the patch's fault, four were checks too weak to tell two
+mechanisms apart, and one was a defect in the product that had been satisfying
+the assertion all along. **None was a check not worth having.** A green patch
+has never once, in this audit, meant "delete the check".
 
 1. **The patch does not model its own defect.** `sidebar-reorder-6` described a
    folder falling THROUGH a rule and implemented DELETING that rule, so nothing
