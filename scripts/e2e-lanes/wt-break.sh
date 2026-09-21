@@ -99,8 +99,14 @@ for b in "$@"; do
 
   CHANGED=$(git -C "$WT" diff --name-only)
   NEEDS_API=no; NEEDS_WEB=no
-  case "$CHANGED" in *apps/api/*|*packages/*) NEEDS_API=yes ;; esac
-  case "$CHANGED" in *apps/web/*) NEEDS_WEB=yes ;; esac
+  # WHICH SIDE CONSUMES THE CHANGED PACKAGE, not just "it is a package".
+  # `packages/*` all went to the API rebuild, so a patch to `packages/ui` —
+  # which only the WEB bundle consumes — rebuilt the server and left the
+  # bundle untouched. Its check stayed green with the component broken.
+  case "$CHANGED" in *apps/api/*|*packages/db/*) NEEDS_API=yes ;; esac
+  case "$CHANGED" in *apps/web/*|*packages/ui/*|*packages/feature-flags/*) NEEDS_WEB=yes ;; esac
+  # `packages/db` is read by the web typecheck too, and `feature-flags` by both.
+  case "$CHANGED" in *packages/feature-flags/*) NEEDS_API=yes ;; esac
   [ -z "$CHANGED" ] && { echo "== $b PATCH CHANGED NOTHING" >> "$OUT"; continue; }
 
   OK=yes
