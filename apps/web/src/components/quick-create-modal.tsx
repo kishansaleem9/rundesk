@@ -1094,6 +1094,17 @@ function TaskForm({
                 value={newFieldType}
                 onChange={(e) => setNewFieldType(e.target.value)}
                 data-testid="quick-create-new-field-type"
+                /*
+                 * THE CHOSEN TYPE, SAID OUT LOUD, because the `<select>` cannot
+                 * be trusted to say it. When the search narrows the options and
+                 * the chosen type is not among them, a browser reports the
+                 * FIRST OPTION as the value — so "did typing select the right
+                 * type" read as true even with the selection left behind on
+                 * `text`. A break patch that stopped the search reaching the
+                 * new types changed nothing the check could see. This attribute
+                 * is the state itself.
+                 */
+                data-selected-type={newFieldType}
                 className="h-7 rounded-md border border-border bg-card px-1.5 text-[11px]"
               >
                 {fieldTypeMatches.map((ft) => (

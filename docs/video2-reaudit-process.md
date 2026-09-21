@@ -282,6 +282,23 @@ green "confirmations" that meant nothing until they were found.
   After a web patch, the built bundle stays patched. An API-only patch that
   follows runs against it, so its checks measure the *previous* patch's
   breakage.
+- **AND THE SAME THING IN THE OTHER DIRECTION, which `wt-break.sh` still does.**
+  The rule above is written for the bundle and implemented for the bundle:
+  `WEB_DIRTY` carries a web patch's breakage forward one step and forces a
+  rebuild. There is no `API_DIRTY`. `git checkout -- .` reverts the SOURCE
+  before the next patch, but `apps/api/dist` is only rebuilt when the new patch
+  itself touches the API — and the server is only restarted then too. So a web
+  patch that follows an API patch runs against the API patch's compiled
+  binary, still serving. In `custom-field-types` this was visible because the
+  patches sorted into eighteen API ones and then fourteen web ones: patch 18
+  prepended a space to every stored signature, and **patches 19 through 32
+  each reported that same defect**, two extra red checks on every run, because
+  nothing ever put the server back. The patch list is what gives it away —
+  every run after a boundary carrying the same two failures that have nothing
+  to do with it. Until the harness grows an `API_DIRTY`, run the API patches
+  and the web patches as **two separate invocations**: the restore block at the
+  end of a run rebuilds both sides and restarts, so the second batch starts
+  clean.
 - **One runner per worktree, enforced.** Two break runs sharing a checkout
   check out, patch and build over each other, and every result afterwards is
   about whichever wrote last. Take a lock.

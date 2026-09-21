@@ -365,12 +365,26 @@ try {
       'lags the column is this audit\'s duplicated list',
   )
 
+  /*
+   * READ THE STATE, NOT THE `<select>`. `inputValue()` on a select whose value
+   * is not among its options answers with the FIRST OPTION — and the search
+   * narrows the options to the match, so this check passed while the selection
+   * was still on `text`. A break patch that cut the search off from the new
+   * types changed nothing it could see. `data-selected-type` is the component's
+   * own answer to "which type is chosen".
+   */
   await page.getByTestId('quick-create-new-field-type-search').fill('formula')
+  const selectedType = await waitUntil(
+    async () =>
+      (await page.getByTestId('quick-create-new-field-type')
+        .getAttribute('data-selected-type').catch(() => null)) === 'formula',
+    { timeoutMs: 10_000 },
+  )
   chk(
-    (await page.getByTestId('quick-create-new-field-type').inputValue()) === 'formula',
+    selectedType,
     'and the search box reaches the new types in one gesture',
     `searching "formula" left the picker on ` +
-      `"${await page.getByTestId('quick-create-new-field-type').inputValue()}"`,
+      `"${await page.getByTestId('quick-create-new-field-type').getAttribute('data-selected-type').catch(() => null)}"`,
   )
 
   /*
