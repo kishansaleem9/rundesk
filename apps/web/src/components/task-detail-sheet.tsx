@@ -8052,10 +8052,25 @@ function CustomFieldsPanelInner({
   /* 0158 — the formula's expression, e.g. `{Budget} - {Spent}`. */
   const [newExpression, setNewExpression] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
-  // Keyed on the stamp, so pressing "Add fields" again re-opens a form the
-  // reader had closed. See the stamp's declaration in the sheet.
+  /*
+   * Keyed on the stamp CHANGING, so pressing "Add fields" again re-opens a form
+   * the reader had closed — and a plain revisit to the tab does not.
+   *
+   * This read `if (openCreateStamp) setCreating(true)`, which fires on MOUNT as
+   * well as on a bump. The panel is rendered behind `activeTab === 'fields'`,
+   * so leaving the tab unmounts it and coming back mounts it again: once the
+   * stamp had ever been bumped it stayed truthy, and every later visit to
+   * Fields opened the create form unasked. Nothing failed and nothing said so.
+   *
+   * Found by a break patch that ran GREEN. `tfc-6` removes the bump from the
+   * `···` menu's Custom Fields row, and the suite still saw the form — because
+   * the remount was opening it, not the menu. The check could not tell the two
+   * apart, and neither could anybody reading it.
+   */
+  const lastCreateStamp = useRef(openCreateStamp)
   useEffect(() => {
-    if (openCreateStamp) setCreating(true)
+    if (openCreateStamp && openCreateStamp !== lastCreateStamp.current) setCreating(true)
+    lastCreateStamp.current = openCreateStamp
   }, [openCreateStamp])
 
   const fieldsQuery = useQuery({

@@ -42,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 17
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -312,6 +312,35 @@ try {
     reopened,
     'and choosing it opens the same create form — it is an action, not a submenu',
     'the menu item moved tabs without opening the form, so the second route to the gap is a different feature',
+  )
+
+  /*
+   * AND A PLAIN REVISIT TO THE TAB DOES NOT OPEN IT.
+   *
+   * The panel lives behind `activeTab === 'fields'`, so leaving the tab
+   * unmounts it and returning mounts it again. The open-on-stamp effect used to
+   * read `if (openCreateStamp) setCreating(true)` — true on every mount once the
+   * stamp had ever been bumped — so after one press of "Add fields" the create
+   * form appeared on every later visit to Fields, unasked.
+   *
+   * That is also why the check above could not fail: `tfc-6` removes the bump
+   * from the menu row and the form still appeared, because the REMOUNT was
+   * opening it. Two ways of arriving at a visible form, one assertion, and the
+   * wrong one was doing the work.
+   */
+  await page.getByTestId('task-field-create-cancel').click().catch(() => {})
+  await page.getByTestId('task-tab-overview').click()
+  await waitUntil(() => page.getByTestId('task-add-fields').isVisible().catch(() => false), { timeoutMs: 15_000 })
+  await page.getByTestId('task-tab-fields').click()
+  const quiet = await waitUntil(
+    async () => !(await page.getByTestId('task-field-create-form').isVisible().catch(() => false)),
+    { timeoutMs: 8_000 },
+  )
+  chk(
+    quiet,
+    'and coming back to the tab later does not reopen it unasked',
+    'the create form was open on a plain revisit — the stamp is being read on mount rather ' +
+      'than on a change, so every return to Fields opens a form nobody asked for',
   )
 } catch (err) {
   failed += 1
