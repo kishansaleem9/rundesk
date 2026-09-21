@@ -127,10 +127,12 @@ try {
   await newTask('viaSubtask', { title: `subtask ${TAG}` })
   await newTask('viaChecklist', { title: `checklist ${TAG}` })
   /*
-   * THE DISCRIMINATOR. This one has a comment I WROTE, assigned to nobody. A
-   * query that matched "tasks with a comment on them" — or "tasks I have
-   * commented on" — instead of "tasks with a comment assigned to me" would
-   * pull it in, and every other check here would still pass.
+   * THE DISCRIMINATOR. This one has a comment I WROTE, assigned to nobody,
+   * AND (seeded further down) a checklist item assigned to nobody. A query
+   * that matched "tasks with a comment on them" — or "tasks I have commented
+   * on" — instead of "tasks with a comment assigned to me" would pull it in,
+   * and every other check here would still pass. The checklist half was
+   * missing until a break patch walked straight through the gap.
    */
   await newTask('noise', { title: `noise ${TAG}` })
 
@@ -166,6 +168,39 @@ try {
     body: { content: `do the thing ${TAG}`, assigneeId: ME },
   })
   if (item.status >= 300) throw new Error(`seeding the checklist item returned ${item.status}`)
+
+  /*
+   * AND THE CHECKLIST DISCRIMINATOR, which this fixture did not have.
+   *
+   * `noise` was built to catch a comment query that matched "tasks with a
+   * comment" instead of "tasks with a comment assigned to me" — and nothing
+   * did the same job for checklists. With exactly ONE task carrying a
+   * checklist, and its only item assigned to me, "tasks whose checklist item
+   * is assigned to me" and "tasks with any checklist item at all" return the
+   * identical set, so the check below passed either way.
+   *
+   * That is not hypothetical: `list-assignee-filter-15-checklists-any-item`
+   * drops `eq(taskChecklistItems.assigneeId, opts.userId)` from the query and
+   * came back 29 passed, 0 failed.
+   *
+   * An UNASSIGNED item rather than one assigned to somebody else, because it
+   * is the stricter of the two — a query that forgot the condition entirely
+   * and a query that compared against the wrong person both pull this in.
+   */
+  const noiseList = await api(`/tasks/${made.noise}/checklists`, {
+    method: 'POST',
+    body: { title: `Noise steps ${TAG}` },
+  })
+  if (noiseList.status >= 300 || !noiseList.data?.id) {
+    throw new Error(`seeding the discriminator checklist returned ${noiseList.status}`)
+  }
+  const noiseItem = await api(`/tasks/${made.noise}/checklists/${noiseList.data.id}/items`, {
+    method: 'POST',
+    body: { content: `nobody's job ${TAG}` },
+  })
+  if (noiseItem.status >= 300) {
+    throw new Error(`seeding the discriminator checklist item returned ${noiseItem.status}`)
+  }
 
   // ── the API, where two of the three switches actually live ────────────────
   console.log('\n▶ `GET /tasks/list/:id/assigned-via` answers per SOURCE')

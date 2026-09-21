@@ -305,6 +305,28 @@ green "confirmations" that meant nothing until they were found.
 - **One runner per worktree, enforced.** Two break runs sharing a checkout
   check out, patch and build over each other, and every result afterwards is
   about whichever wrote last. Take a lock.
+- **AND NOTHING OUTSIDE THE RUN MAY TOUCH ITS LANE'S SERVER.** The lock stops
+  two break runs colliding; it does not stop YOU. `fleet-restart.sh "9"`,
+  typed meaning *lane nine*, restarted lanes ONE THROUGH NINE — because the
+  argument was parsed as a count, exactly as `fleet-up.sh` does and warns
+  about in its own header — and replaced the worktree APIs three break sets
+  were driving on ports 3022–3024 with main-tree ones. Every patch applied
+  after that measured UNPATCHED code. Twenty-nine results were discarded: not
+  because they were wrong, but because they could no longer be attributed,
+  which is precisely why `list-card-cover`'s first run was worthless. A script
+  that restarts servers takes a LIST, validates every element, and prints
+  which lanes it is about to touch.
+- **A DATABASE THAT EXISTS IS NOT A DATABASE THAT IS CURRENT.** A container
+  restart rolled Postgres back behind that day's migration. All ten lane
+  databases were still there, an existence check passed every one, and the
+  first list create in each answered `column folders.status_scope does not
+  exist` as a 500 — which the suite reported as *"could not make this suite's
+  own list"*, blaming its own fixture for the environment's fault. The lanes
+  are built by restoring a DUMP, so `drizzle.__drizzle_migrations` is empty
+  and `drizzle-kit migrate` cannot answer either: it would try to apply all
+  160 migrations against a populated schema. The SCHEMA is the only honest
+  witness — look for the newest migration's column and refuse the lane when it
+  is missing.
 - **A break patch goes stale when the code gets more robust.** One patch
   removed the `isArchived` filter from a list query and the check still
   passed — because a later fix had added `isNull(deletedAt)` *beside* it. Two
