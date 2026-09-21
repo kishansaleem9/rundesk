@@ -188,7 +188,28 @@ try {
   // ── On screen ──────────────────────────────────────────────────────────────
   console.log('\n▶ `20:10` — the answer renders as marks, not as asterisks')
   browser = await chromium.launch(launchOptions())
-  ctx = await browser.newContext({ viewport: VIEWPORT })
+  /*
+   * `serviceWorkers: 'block'`, AND IT IS LOAD-BEARING — this suite has two
+   * `page.route` stubs and one of them silently did nothing without it.
+   *
+   * `apps/web` is a PWA (`vite-plugin-pwa`; `sw.js` ships in the bundle), and
+   * Playwright's `page.route` cannot intercept a request the service worker
+   * serves. `page.on('request')` still REPORTS that request, which is what
+   * makes this so hard to see from the outside: the URL appears in the log,
+   * looks exactly like the glob, and the handler never runs.
+   *
+   * The reason only one stub was affected is worth keeping, because it is the
+   * shape of the trap: Workbox handles **GET** and passes **POST** straight
+   * through. So the `/ai/chat` interception in phase B worked from the day it
+   * was written, and the `/ai/status` interception — a GET — did not. The
+   * suite was internally consistent and wrong in one half. It surfaced as
+   * `locator.fill: Timeout 30000ms exceeded` on a composer that was correctly
+   * disabled, thirty seconds and one section away from the cause.
+   *
+   * Seven other suites in this directory already pass this. It is not optional
+   * for anything that stubs a GET.
+   */
+  ctx = await browser.newContext({ viewport: VIEWPORT, serviceWorkers: 'block' })
   const page = await ctx.newPage()
 
   /*

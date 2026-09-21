@@ -1729,6 +1729,33 @@ export function AiPanel({
           <Input
             ref={inputRef}
             value={input}
+            /*
+             * THE COMPOSER HAD NO `onChange`, AND SO COULD NOT BE TYPED INTO.
+             *
+             * `value={input}` with no handler is a fully controlled input:
+             * React writes `input` back into the DOM node on every render, so
+             * each keystroke was reverted before it could be seen. Measured,
+             * not inferred — with the composer enabled, editable and visible:
+             *
+             *     FILL OK; inputValue after fill: ""
+             *     inputValue after TYPING:        ""
+             *     word bar count:                 0
+             *
+             * React does not warn here, because it only warns for `value`
+             * without `onChange` when `readOnly` is absent AND the input is not
+             * `disabled` at first render — and this one mounts disabled while
+             * `/ai/status` is in flight. So the one signal that would have
+             * caught it was suppressed by an unrelated correct behaviour.
+             *
+             * It survived because nothing that worked went through this box:
+             * the starter cards call `sendMessage` with their own prompt, and
+             * the mic button writes the transcript into `input` directly. The
+             * dead control was the one the placeholder invites you to use.
+             *
+             * `nextWordSuggestions` is pure and was always right; it had simply
+             * never been called with anything but `''`.
+             */
+            onChange={(e) => setInput(e.target.value)}
             data-testid="ai-composer-input"
             /*
              * §V2-S16 frames `18:45` / `20:10` — the composer reads **"Working
