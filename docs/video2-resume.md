@@ -38,11 +38,44 @@ is worse than leaving it out, because it turns the pipeline into something
 nobody reads.
 
 **Break-testing is the incomplete part**, and it is the step that separates a
-check from decoration. Of the patches that have been applied and observed:
+check from decoration.
+
+**THE HEADLINE NUMBER THAT USED TO BE HERE — `193 / 198 reddened` — WAS NOT
+SAFE TO QUOTE, and this is the correction.** Those runs happened before
+`wt-break.sh` grew its two guards, so none of them verified that the worktree
+was at `HEAD` or that the suite was green **unpatched**. `list-card-cover` is
+what exposed the class: four of its checks failed on every patch, including
+patches touching nothing near them, because those four were already failing on
+a tree two commits stale. Every line in that file looked like a result and
+meant nothing.
+
+Counted honestly, by whether the results file opens with a `== BASELINE (no
+patch) …` line:
 
 ```
-193 / 198 reddened the check they were aimed at
+16 sets have a verified baseline and a synced worktree
+25 sets do not — their numbers are unread, not wrong
 ```
+
+The 25 are not known to be bad. They are **unverified in the specific way that
+produced the one known-bad result**, and until each is re-run against a synced
+tree with a green baseline, "193/198" is a number about an environment rather
+than about the checks.
+
+Sets with a verified baseline, complete: `focus-pill` 9/9 · `tab-title-countdown`
+7/7 · `task-cover` 3/3 · `task-mentions` 3/3 · `space-default-permission` 4/4 ·
+`list-card-cover` 8/8 · `ai-answer-rendering` 1/1 · plus the create-menu and
+planner agents' seventeen.
+
+Still to re-run: `ai-action-categories`, `ai-activity-filters`,
+`ai-create-containers`, `ai-model-picker`, `clickapps-plan-gating`,
+`folder-create`, `gantt-controls`, `imports`, `integration-error-card`,
+`list-empty-states`, `list-view-controls`, `login-workspace-binding`,
+`paywall-sites`, `planner-settings`, `planner-upcoming-meeting`,
+`sidebar-sections`, `space-create-menu`, `space-wizard-views`,
+`task-activity-filter`, `task-delete`, `task-field-create`,
+`task-header-status`, `teams-empty-state`, `teams-person-cards`,
+`template-center`.
 
 **All five that did not are in `folder-create`, and they are a pattern rather
 than five accidents.** Five of that suite's twelve patches left it green, and
