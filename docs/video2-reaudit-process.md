@@ -532,6 +532,14 @@ Two general rules:
 
 - **Probe, do not reason, about which branch fires.** Two minutes against a
   running API settled what half an hour of reading the condition had not.
+- **`status >= 400 && status < 500` is the shape to look for.** It asserts that
+  SOMETHING refused and never which thing, so any second guard over the same
+  input hides the first one rotting. Four suites use it:
+  `task-merge` (fixed — it now reads the sentence), and `ai-model-picker`,
+  `ai-value` and `comment-recording`, which are candidates and not yet
+  examined. Listed rather than corrected, because whether each is vulnerable
+  depends on whether more than one guard can refuse that input, and that is a
+  question to answer with a break patch rather than by eye.
 - **A refusal's message is part of its contract.** The behaviour here was never
   unsafe; a person merging a subtask into its parent was simply told about a
   merge they had not attempted, for as long as the rule has existed.
