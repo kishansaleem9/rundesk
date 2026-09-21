@@ -559,11 +559,20 @@ Two general rules:
 
 ### Two more ways a number lies
 
-- **A new check must not move the ground under an old one.** The item-order
-  check for `checklists` adds a third item, and the check above it reads *"two
-  unticked items across two lists read as 2 open"*. Placed before it, the new
-  check would have turned an existing one red for a reason that has nothing to
-  do with the product. Append where the fixture is already spent.
+- **A new check must not move the ground under an old one — and "old one"
+  means EVERY later reader of the fixture, not the one you happened to think
+  of.** The item-order check for `checklists` adds a third item. It was placed
+  after *"two unticked items across two lists read as 2 open"*, which was the
+  reader that came to mind, and before *"ticking one drops the count to 1"*,
+  which then saw 2. The suite's baseline refused and the whole set was
+  cancelled.
+
+  This paragraph existed, in these words, one hour before it happened. Writing
+  the rule down is not the same as applying it, and the reason is that the rule
+  as first written pointed at a check rather than at a property: the property
+  is *how many items the fixture has*, and every later assertion that reads it
+  is in scope. Append where the fixture is spent, and grep for the thing you
+  are about to change — here, `countText`.
 - **TWO WRITERS, ONE FILENAME.** `break-queue.sh` logged to
   `break-queue-$LANE.log` and truncated it on startup, so arming a second queue
   on the same lane erased the first one's log while it was still writing — the
