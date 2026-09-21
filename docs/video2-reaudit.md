@@ -2952,6 +2952,12 @@ deleted `'gmail'` from an `as const` tuple that generates `SearchSource`, and
 two Records keyed by that union plus a `.includes('gmail')` stopped compiling.
 The patch never reached a check.
 
+**ALL FIVE HAVE SINCE BEEN FIXED AND RE-RUN**, which is the only thing that
+turns any of these numbers back into a fact: `ac-10` (ai-action-categories
+29/0), `acc-1` (ai-create-containers 33/0), `app-catalogue-20` (25/0), `cp-43`
+(command-palette 43/0) and `gantt-29` (gantt-controls 29/0). Every one reddens.
+`check-break-freshness.mjs` raises no unbuilt patch anywhere now.
+
 And **"still green: 0" cannot see that**, which is the finding under the
 finding. A patch that fails to build prints no `N passed, M failed` line at
 all, so the metric I was summarising every set with — *count the runs that
