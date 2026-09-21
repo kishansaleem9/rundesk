@@ -101,7 +101,25 @@ try {
   const WS = ((wsRes.data ?? [])[0]?.workspace ?? (wsRes.data ?? [])[0])?.id
   if (!WS) throw new Error('this account can see no workspace')
 
-  const spaceRes = await api('/spaces', { method: 'POST', body: { workspaceId: WS, name: `Folders ${TAG}` } })
+  /*
+   * `presetKey`, and the Statuses checks below are why.
+   *
+   * `POST /spaces` seeds `space_statuses` only through `applyPreset`, so a
+   * space created without a preset has **none** — and the run that added those
+   * checks reported exactly that: `GET /spaces/:id/statuses answered 200 with
+   * 0`. The product was right (the list correctly fell back to its own seeded
+   * set rather than showing an empty one); the fixture was not, because a
+   * space with no statuses makes "a list in this folder reads the SPACE's
+   * statuses" unprovable either way.
+   *
+   * The guard check that caught it is deliberately the third of the eight, so
+   * the failure named the fixture rather than letting the two real checks
+   * below fail for a reason that is not the code.
+   */
+  const spaceRes = await api('/spaces', {
+    method: 'POST',
+    body: { workspaceId: WS, name: `Folders ${TAG}`, presetKey: 'starter' },
+  })
   if (spaceRes.status >= 300 || !spaceRes.data?.id) throw new Error(`could not make a space: ${spaceRes.status}`)
   SPACE = spaceRes.data.id
 
