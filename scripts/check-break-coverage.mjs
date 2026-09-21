@@ -3,12 +3,16 @@
  * How many suites have ever had a break patch written for them at all.
  *
  * THE AUDIT HAS BEEN REPORTING "N break-tested" PER ROW AND NEVER THE
- * DENOMINATOR. Counted properly, on 21 September: 101 suites carry 1961 checks
- * between them, 509 patches are attributable to a suite, and **53 suites have
- * no break patch at all** — including the largest ones in the repository:
- * `video-regression` (81 checks), `custom-field-progress` (58), `task-menu`
- * (33), `comment-recording` (32), `a61-meeting-record` (28), `task-merge` (25),
- * `list-export` (25).
+ * DENOMINATOR. Counted for the first time on 21 September: 101 suites carry
+ * 1961 checks between them, 509 patches were attributable to a suite, and
+ * **53 suites had no break patch at all** — including the largest ones in the
+ * repository: `video-regression` (81 checks), `custom-field-progress` (58),
+ * `task-menu` (33), `comment-recording` (32), `a61-meeting-record` (28),
+ * `task-merge` and `list-export` (25 each).
+ *
+ * `task-menu` was the first one closed, so the ratchet stands at 52. The run
+ * this file prints is always the current count; the paragraph above is what it
+ * was when anybody first looked.
  *
  * A suite with no patch is not a suite that failed. It is a suite about which
  * nothing is known: every one of its checks may be a facade, and being green
@@ -76,7 +80,7 @@ console.log(`[break-coverage] ${uncovered.length} suites have NO break patch at 
 for (const n of uncovered) console.log(`    ${String(checksIn[n]).padStart(3)} checks  ${n}`)
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 53
+const BASELINE_UNCOVERED = 52
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
