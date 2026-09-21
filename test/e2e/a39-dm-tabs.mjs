@@ -4,6 +4,14 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureShared } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+
+/*
+ * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
+ * branch that silently skipped becomes a shorter run that still reports zero
+ * failures and exits 0. This suite had no such constant at all until the count
+ * was observed from a green run and written here.
+ */
+const EXPECTED_CHECKS = 19
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -157,5 +165,13 @@ try {
 } finally { await br.close() }
 const f = r.filter((x) => !x).length
 console.log(`\n${r.length - f} passed, ${f} failed`)
+if (r.length !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${r.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped early, so ` +
+      'the count above describes the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
+
 await stack?.close?.()
 process.exit(f ? 1 : 0)
