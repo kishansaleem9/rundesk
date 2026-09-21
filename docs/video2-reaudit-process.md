@@ -549,10 +549,21 @@ Two general rules:
   exists to give a constraint a human sentence, the status is the constraint's
   and only the sentence is the service's.
 
-  Four suites use the `>= 400 && < 500` form: `task-merge` (fixed), and
-  `ai-model-picker`, `ai-value` and `comment-recording`, unexamined. `===` on a
-  single refusal code is commoner still. Each is a question to answer with a
-  break patch rather than by eye.
+  **AND NOT EVERY STATUS-ONLY ASSERTION IS VULNERABLE**, which is worth saying
+  as plainly as the rest: the hole needs a SECOND guard to hide behind. Every
+  candidate from the `>= 400 && < 500` sweep, checked:
+
+  | suite | second guard | verdict |
+  | --- | --- | --- |
+  | `task-merge` | `would-nest-twice`, `assertTaskWriteAccess` | vulnerable — fixed |
+  | `ai-value` | CHECK on both benchmark columns → 23514 | vulnerable — fixed |
+  | `comment-recording` | none; no constraint on comments | **safe as written** |
+  | `ai-model-picker` | none; no constraint on the preference column | **safe as written** |
+
+  Plus `list-name-taken` (`=== 409`, vulnerable, fixed) and `view-visibility`
+  (`CHECK (visibility IN …)`, untested at all, now covered), which the `>= 400`
+  grep never saw. The form is the thing to grep for; the second guard is what
+  decides, and it is answered by reading the migrations, not the suite.
 - **A refusal's message is part of its contract.** The behaviour here was never
   unsafe; a person merging a subtask into its parent was simply told about a
   merge they had not attempted, for as long as the rule has existed.
