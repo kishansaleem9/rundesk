@@ -92,10 +92,20 @@ const SESSION = {
 
 /** The frame's own words, so a re-worded headline fails rather than passes. */
 const HEADLINE = 'You, but better organized'
-/** In the frames' order. The fourth is the one §V2-15b actually builds. */
+/*
+ * In the frames' order. The fourth is the one §V2-15b actually builds.
+ *
+ * THE SECOND ONE WAS WRONG, and this list's own comment is what makes that
+ * worth recording: it said "the frame's own words, so a re-worded headline
+ * fails rather than passes". The frame at `12:40` and `12:45` draws
+ * **"Automate your meeting notes"**. This read "Keep your meeting notes", and
+ * so did the product — so the check was green against copy the specification
+ * does not contain, which is the one thing this constant exists to prevent.
+ * Found by extracting the two frames and reading them, which is step 1.
+ */
 const CARD_TITLES = [
   'Join your next meeting',
-  'Keep your meeting notes',
+  'Automate your meeting notes',
   'Block time for your tasks',
   'Team schedules',
 ]

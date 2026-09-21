@@ -5,6 +5,14 @@
 # been run locally, lint had not, and two no-fallthrough errors from comments
 # placed between `case` labels took the whole job down — with every later step
 # skipped, so the run said nothing about anything else.
+#
+# IT HAPPENED AGAIN, AND THE SCRIPT WAS ALREADY HERE. A `react-hooks/
+# rules-of-hooks` **error** — a `useEffect` below an early return, so the hook
+# order changed between renders — shipped in `666f15f` and survived a whole
+# afternoon. Typecheck was run constantly, this was not run once. It was found
+# by an agent mentioning it in passing, and the failing unit test beside it the
+# same way. A preflight nobody runs is not a preflight; run this before every
+# commit, not before every push.
 cd /home/user/rundesk
 fail=0
 step () {
@@ -16,6 +24,8 @@ step "typecheck (turbo run typecheck)"  bash -c 'pnpm exec turbo run typecheck >
 step "api unit tests"                   bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts") > /tmp/preflight-api.log 2>&1'
 step "web unit tests"                   bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ") > /tmp/preflight-web.log 2>&1'
 step "migration guardrail"              node scripts/check-migration-order.mjs
+step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
+step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"
