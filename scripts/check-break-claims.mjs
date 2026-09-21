@@ -82,7 +82,21 @@ const norm = (s) =>
  * Five consecutive words is the rule instead, because it is a statement about
  * how specific the evidence is rather than a number picked to make today's
  * failures go away: five words of a check's own sentence do not appear by
- * accident in a different check. What is left over after this is reported, and
+ * accident in a different check.
+ *
+ * AND IT STILL MATCHES THE WRONG CHECK WHERE TWO DIFFER BY ONE WORD.
+ * `mp-7-flat-bars` claimed "the Fast tier's Speed bar is visibly longer than
+ * the DEEP tier's" and the suite compares Fast against MAX. The shared
+ * fragment — "Speed bar is visibly longer than the" — is six words, so the
+ * claim verified and the patch was aimed at a comparison that does not exist.
+ * It ran green, correctly, and only running it told anyone.
+ *
+ * A FRAGMENT LONG ENOUGH NOT TO APPEAR BY ACCIDENT IS NOT THE SAME AS A
+ * FRAGMENT THAT PINS THE MEANING. This is a real limit of matching on text and
+ * not one to tune away: requiring the whole sentence would reject every
+ * template literal, which is where this started. Where a suite holds two
+ * checks of the same shape over different subjects, the claim can only be
+ * confirmed by the run. What is left over after this is reported, and
  * some of it is a patch paraphrasing where it should have quoted — which is a
  * real defect in the patch, and not one the matcher should be bent to hide.
  */
