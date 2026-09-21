@@ -197,8 +197,18 @@ try {
   for (let i = 0; i < viewTabs.length + 1; i += 1) {
     await page.keyboard.press('v')
     await page.waitForTimeout(250)
+    /*
+     * `aria-current`, NOT `data-active`. The first version of this read
+     * `[data-active="true"]` and found nothing on any press, so it reported
+     * `visited []` against a cycler that works — twice. The `data-active`
+     * attribute exists, on a DIFFERENT tab strip inside the list route; the
+     * strip this page draws comes from `work-ui.tsx`, which marks the current
+     * tab with `aria-current` and nothing else. `paywall-sites.mjs` reads the
+     * same attribute on the same testid, which is where this should have been
+     * checked before guessing a second time.
+     */
     const active = await page
-      .locator('[data-testid^="work-view-tab-type-"][data-active="true"]')
+      .locator('[data-testid^="work-view-tab-type-"][aria-current="true"]')
       .first()
       .getAttribute('data-testid')
       .catch(() => null)
