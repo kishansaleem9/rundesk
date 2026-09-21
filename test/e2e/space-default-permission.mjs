@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
  * with `<`, a branch that silently skipped turns into a shorter run that still
  * reports "0 failed".
  */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 25
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -154,6 +154,48 @@ try {
       editSpace.defaultPermission === 'edit',
     'the wizard\'s three answers are on the three spaces `[frame 06:52]`',
     `got ${JSON.stringify([viewSpace.defaultPermission, commentSpace.defaultPermission, editSpace.defaultPermission])}`,
+  )
+
+  /*
+   * AND A FOURTH ANSWER IS REFUSED RATHER THAN ROUNDED UP.
+   *
+   * `createSpace` used to fall back to `'edit'` for any value outside the four,
+   * so a typo granted the most permissive of the three the wizard offers and
+   * answered 201 with a valid-looking row. The UPDATE path refused the same
+   * value with `invalid defaultPermission` — one value, two answers, and the
+   * widening one was the silent one. Probed both ways before it was changed.
+   *
+   * Absent still defaults: a space created from a preset names no permission
+   * and gets `'edit'`, which is the documented behaviour. What is refused is a
+   * value that was SENT and is not one of the four.
+   */
+  const bogusPerm = await A('/spaces', {
+    method: 'POST',
+    body: { workspaceId, name: `${TAG} bogus`, defaultPermission: 'nonsense' },
+  })
+  if (bogusPerm.data?.id) cleanup.push(() => A(`/spaces/${bogusPerm.data.id}`, { method: 'DELETE' }))
+  chk(
+    bogusPerm.status >= 400 && bogusPerm.status < 500,
+    'a default permission that is not one of the four is refused on CREATE',
+    `it answered ${bogusPerm.status} and stored ${JSON.stringify(bogusPerm.data?.defaultPermission)} — ` +
+      'falling back to a valid value means a typo silently widens the space, and 201 with a ' +
+      'sensible-looking row is indistinguishable from having asked for it',
+  )
+  chk(
+    bogusPerm.data?.defaultPermission === undefined,
+    'and no space is created with the value rounded up to edit',
+    `a space came back with defaultPermission ${JSON.stringify(bogusPerm.data?.defaultPermission)}`,
+  )
+  const bogusUpdate = await A(`/spaces/${viewSpace.id}`, {
+    method: 'PUT',
+    body: { defaultPermission: 'nonsense' },
+  })
+  chk(
+    bogusUpdate.status >= 400 &&
+      /invalid defaultPermission/i.test(JSON.stringify(bogusUpdate.error ?? '')),
+    'and the update path refuses it in the same words',
+    `it answered ${bogusUpdate.status}: ${JSON.stringify(bogusUpdate.error)} — the two paths ` +
+      'disagreeing about one value is how the create side went unnoticed',
   )
 
   // ── the member makes a list in each, so the CREATOR branch is in play ──────

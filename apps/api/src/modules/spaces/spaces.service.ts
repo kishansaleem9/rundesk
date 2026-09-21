@@ -190,11 +190,34 @@ export class SpacesService {
     if (data.features) this.assertClickAppsAllowed(plan.id, data.features)
     const features = data.features ?? preset?.features.filter((f) => allowedClickApps.includes(f))
 
-    const permission: SpaceDefaultPermission = SPACE_PERMISSIONS.includes(
-      data.defaultPermission as SpaceDefaultPermission,
-    )
-      ? (data.defaultPermission as SpaceDefaultPermission)
-      : 'edit'
+    /*
+     * §V2-06 frame `06:52` — AN UNKNOWN PERMISSION IS REFUSED, NOT ROUNDED UP.
+     *
+     * This used to fall back to `'edit'` for ANY value that was not one of the
+     * four, which silently granted the most permissive of the three the wizard
+     * offers. Probed against a live API before it was changed:
+     *
+     *   CREATE defaultPermission:"nonsense"  201, stored as "edit"
+     *   PUT    defaultPermission:"nonsense"  400, "invalid defaultPermission"
+     *
+     * The same value, refused on one path and widened on the other. A typo in
+     * any client, or a constant renamed on one side of the wire, quietly opened
+     * a space up — and nothing said so, because 201 with a valid-looking row is
+     * indistinguishable from having asked for `edit`.
+     *
+     * ABSENT still defaults. That is the preset path and it is not a mistake:
+     * a space created from a preset does not name a permission, and `'edit'`
+     * is the documented default. What is refused is a value that was SENT and
+     * is not one of the four.
+     */
+    if (
+      data.defaultPermission !== undefined &&
+      !SPACE_PERMISSIONS.includes(data.defaultPermission as SpaceDefaultPermission)
+    ) {
+      throw new BadRequestException('invalid defaultPermission')
+    }
+    const permission: SpaceDefaultPermission =
+      (data.defaultPermission as SpaceDefaultPermission | undefined) ?? 'edit'
 
     const result = await this.db
       .insert(spaces)
