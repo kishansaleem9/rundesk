@@ -825,11 +825,11 @@ checks, not about a run.**
 | M | **Credits entirely**: tab, category→credits table, usage-trend chart with limit line, Add credits, My Agent Performance |
 | M | Image generation |
 | B | App Center with categories, per-app descriptions, connection health |
-| P | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail absent |
+| B | Apps — Box, Confluence, Jira, Gmail, SharePoint, Outlook Mail. **THIS ROW WAS STALE**: all six are in `INTEGRATIONS` and have been, among 48 tiles. The work was done and the row was never re-read — the stale reason again, this time hiding a closure rather than a gap. They are built as TWO features, because "what happens when somebody presses it" has two honest answers. **Gmail and SharePoint are connectable**: `listSupportedProviders()` holds a provider for each and `search.service.ts` a query path, so Connect starts a real grant and the palette tab it feeds can answer. **Box, Confluence, Jira and Outlook Mail are not, and say so** — nothing in this product reads a Box or an Atlassian token, so a grant stored for one is the mirror defect, and worse than the gap because the gap is visible. Those tiles carry the plain sentence and the one action that is real: telling the admins you want it. `comingSoon` is gone with them: it was a hand-kept second opinion about connectability that had drifted from the server's, drawing OneDrive, Linear and Salesforce as "Soon" over three working connectors |
 | B | "Suggest an app" (the `+` is inside the glyph, not a literal prefix) and the "Connect Custom MCP Servers" banner — closed by `app-catalogue.mjs`, 25 checks (frame `19:07`). Both are live controls that record a real request. The MCP **capability** is recorded as a decision, not built: no AI tool in this product reaches outside the workspace, so registering a server would store a value no reader honours |
 | B | Activity log — Status and My-runs filters, both reaching the server. `userId` had been accepted by the endpoint and sent by nothing; Status needed a column AND a failure-recording path, because `recordUsage` only ever fired on success |
 | B | Teams Hub reachable by a plain member; All Teams / All People / Org Chart; My Teams; search; org-chart empty state |
-| B | Teams empty-state headline; **Browse People / Create Team** buttons; two explainer cards |
+| B | Teams empty-state headline; **Browse People / Create Team** buttons; **three** explainer cards in a carousel with a pager — closed by `teams-empty-state.mjs`, 21 checks, break set 4/4. This row said "two" until `21:02` was re-extracted: the frame advances the carousel and a third card enters from the right, and the check that asserted TWO would have reddened the correct build. See §7 |
 | B | Per-person work preview cards — each showing its own person's work, asserted by seeding two people differently |
 | B | Contextual starter cards that change with context — closed by `ai-answer-rendering.mjs`, 51 checks (frames `16:32` / `21:15`, four cards each and not one in common). Asserted as a DELTA, not an absolute: the suite creates two overdue tasks and requires "Find Blockers" to name exactly two more than before, because the e2e database is shared |
 
@@ -850,7 +850,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 144 built · 16 partial · 14 missing.**
+**174 rows: 145 built · 15 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -886,11 +886,11 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 112 | 12 | 9 | 133 |
+| §2, the sections table | 113 | 11 | 9 | 133 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **144** | **16** | **14** | **174** |
+| **consolidated** | **145** | **15** | **14** | **174** |
 
-§2's 105 built includes the four marked `B*` — built, but the row also records
+§2's 113 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.

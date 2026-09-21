@@ -13,7 +13,7 @@
  * A count is the one thing in that file that gets quoted without being
  * checked. So it is checked here instead, mechanically, on every build.
  *
- * Six assertions, each catching a different way the number goes wrong:
+ * Seven assertions, each catching a different way the number goes wrong:
  *
  *   1. the derivation adds up — the `consolidated` row is the arithmetic sum
  *      of the rows above it, column by column and in the total;
@@ -193,6 +193,30 @@ else if (four) {
         `§2 holds ${counted} status rows (B / B* / P / M; \`—\` rows are out of scope and not ` +
           `counted), but §4 credits it with ${claimed.total}. A row was added to or removed from ` +
           'the sections table without §4 following.',
+      )
+    }
+    /*
+     * ASSERTION 7 — THE PROSE UNDER THE TABLE COUNTS TOO.
+     *
+     * The paragraph below §4's table reads "§2's N built includes the four
+     * marked `B*`". It said 105 while the table said 112, and had done for
+     * long enough that nobody knows when it stopped being true: the six
+     * assertions above all check numbers that live in TABLES, and a number in
+     * a sentence is quoted exactly as often and checked never. It is the same
+     * defect as the headline that disagreed with its own derivation, which is
+     * what assertion 2 exists for — one paragraph lower down.
+     */
+    const prose = four.match(/§2's\s+(\d+)\s+built includes/)
+    if (!prose) {
+      problems.push(
+        "§4: the paragraph naming §2's built count (\"§2's N built includes the four marked `B*`\") " +
+          'is gone. It is checked here because it is quoted as fact; if it was deleted on purpose, ' +
+          'delete this assertion with it.',
+      )
+    } else if (num(prose[1]) !== claimed.B) {
+      problems.push(
+        `§4's table credits §2 with ${claimed.B} built and the paragraph under it says ` +
+          `${num(prose[1])}. A sentence is quoted as often as a table and checked far less.`,
       )
     }
     for (const k of ['B', 'P', 'M']) {
@@ -380,6 +404,6 @@ if (problems.length) {
 }
 console.log(
   "[video2-counts] §4 adds up, its headline repeats it, §2 contributes the rows and split §4 " +
-    "credits, §5's appendices add to its as-recovered headline, that reconciles to §4, and §5's " +
-    'rows add up to it',
+    "credits, the paragraph under the table agrees with the table, §5's appendices add to its " +
+    "as-recovered headline, that reconciles to §4, and §5's rows add up to it",
 )
