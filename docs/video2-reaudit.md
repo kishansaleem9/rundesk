@@ -3046,6 +3046,42 @@ The shape to grep for is any status-only assertion on a REFUSAL. The note first
 written here said `status >= 400 && status < 500` and was too narrow inside a
 day: `list-name-taken` uses `=== 409`.
 
+**THE SWEEP, DONE PROPERLY.** Every `CHECK (` in `packages/db/src/migrations`
+— sixteen distinct constraints — paired with the service check that exists to
+give it a human sentence, and then with the suite that was supposed to be
+watching:
+
+| the pairing | what was there | done |
+| --- | --- | --- |
+| `task-merge` · `would-nest-twice`, `assertTaskWriteAccess` | two guards, status-only checks | message checks added, 25 → 28 |
+| `list-name-taken` · unique index on `lower(name)` → 23505 | frame `08:50`'s sentence replaceable by a generic conflict | message check added, 13 → 14 |
+| `ai-value` · CHECK on both benchmark columns → 23514 | the RANGE is the useful half of the message, and nothing read it | two checks added, 20 → 22 |
+| `view-visibility` · CHECK `visibility IN (…)` | the service check, the constraint AND the message — none exercised | two checks added, 19 → 21 |
+| `person-panel` · CHECK `ends_on >= starts_on` | same: nothing asked which of the two dates was wrong | two checks added, 57 → 59 |
+| `space-default-permission` · CHECK `default_permission IN (…)` | **a product bug** — see below | three checks added, 22 → 25 |
+| `planner-blocks` · CHECK `ends_at > starts_at` | **already correct**, and never break-tested | patch written, the check proven |
+| `comment-recording`, `ai-model-picker` | no constraint behind either | **safe as written** |
+
+Two of the nine were safe, and saying so is part of the result: the hole needs
+a second guard, and a sweep that reported eight vulnerabilities where six exist
+would be the same defect one level up.
+
+**AND ONE OF THEM WAS NOT A CHECK PROBLEM AT ALL.** Following
+`CHECK (default_permission IN ('view','comment','edit','admin'))` to the suite
+that exercised it found that none did — and then that the two write paths
+disagree. Probed:
+
+```
+CREATE defaultPermission:"nonsense"   201, stored as "edit"
+PUT    defaultPermission:"nonsense"   400, "invalid defaultPermission"
+```
+
+The same value, refused on one path and **silently widened to the most
+permissive of the three the wizard offers** on the other, answering 201 with a
+valid-looking row. A typo in any client, or a constant renamed on one side of
+the wire, quietly opened a space up. Create refuses it now in the update path's
+words; ABSENT still defaults, because that is the preset path.
+
 ### And a second one, where the check and the patch were both right
 
 `task-merge` was one of the four uncovered suites closed, and two of its three
