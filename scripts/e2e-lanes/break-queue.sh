@@ -23,7 +23,18 @@ LANE="${1:?usage: break-queue.sh <lane> <queue-file>}"
 QUEUE="${2:?usage: break-queue.sh <lane> <queue-file>}"
 R=/home/user/rundesk
 LOCK="/tmp/claude-0/wt$LANE.lock"
-OUT="/tmp/claude-0/break-queue-$LANE.log"
+# ONE LOG PER RUN, NOT PER LANE.
+#
+# This was `break-queue-$LANE.log`, truncated at startup — so arming a second
+# queue on the same lane erased the first one's log while it was still writing
+# to it. Nothing of substance was lost, because the authoritative results are
+# the per-suite `break-<suite>.txt` files and the timestamped archives
+# `wt-break.sh` now takes on exit; the summary was the only casualty. That is
+# the archive change earning its keep about two hours after it was written.
+#
+# Two queues on one lane still interleave at SET granularity and that is fine —
+# each set holds the lock alone, which is the property that matters.
+OUT="/tmp/claude-0/break-queue-$LANE-$(date +%Y%m%d-%H%M%S).log"
 
 : > "$OUT"
 while IFS= read -r line; do
