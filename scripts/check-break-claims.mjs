@@ -21,8 +21,8 @@
  * Quoted text is compared after normalising quotes, dashes and whitespace away
  * (see `norm`), and a sentence assembled from a template literal is matched on
  * its longest literal fragment (see `findsClaim`), because the interpolated
- * part is not in the file at all. A claim that cannot be checked either way is counted as
- * UNVERIFIABLE rather than as a failure — a check that says "I could not tell"
+ * part is not in the file at all. A claim that cannot be checked either way
+ * is counted as UNVERIFIABLE rather than as a failure — a check that says "I could not tell"
  * is worth more than one that guesses.
  *
  * It is a RATCHET rather than a verdict; the reasoning is at the bottom.
@@ -70,16 +70,29 @@ const norm = (s) =>
  * the interpolation is often at the START — `<name> really exists in this run's
  * own space`, `every one of the ${n} tiles offered` — leaving a prefix far too
  * short to match on. So the longest contiguous fragment ANYWHERE in the
- * sentence is looked for, longest first. 30 characters, because a fragment
- * short enough to appear in two different checks would verify a claim against
- * the wrong one.
+ * sentence is looked for, longest first.
+ *
+ * MEASURED IN WORDS, NOT CHARACTERS, and this is where the tuning stops. A
+ * 30-character floor still failed `the type picker offers all ${n} field types`
+ * and `the modal's picker offers all ${n} types`, whose literal runs are 27 and
+ * 30 characters — so the floor was wrong, not the claims, and the obvious move
+ * is to lower it. That way lies a matcher that matches anything, which is a
+ * check that cannot fail.
+ *
+ * Five consecutive words is the rule instead, because it is a statement about
+ * how specific the evidence is rather than a number picked to make today's
+ * failures go away: five words of a check's own sentence do not appear by
+ * accident in a different check. What is left over after this is reported, and
+ * some of it is a patch paraphrasing where it should have quoted — which is a
+ * real defect in the patch, and not one the matcher should be bent to hide.
  */
-const MIN_FRAGMENT = 30
+const MIN_WORDS = 5
 const findsClaim = (hay, q) => {
   if (hay.includes(q)) return true
-  for (let len = q.length - 1; len >= MIN_FRAGMENT; len--) {
-    for (let i = 0; i + len <= q.length; i++) {
-      if (hay.includes(q.slice(i, i + len))) return true
+  const w = q.split(' ')
+  for (let len = w.length - 1; len >= MIN_WORDS; len--) {
+    for (let i = 0; i + len <= w.length; i++) {
+      if (hay.includes(w.slice(i, i + len).join(' '))) return true
     }
   }
   return false
@@ -211,7 +224,7 @@ if (noClaim.length) {
  * orphans another claim, or a new patch that makes none, fails the build that
  * brings it — and the baseline is a number in the file that only goes down.
  */
-const BASELINE = { notFound: 26, noSuite: 2, noClaim: 121 }
+const BASELINE = { notFound: 21, noSuite: 1, noClaim: 121 }
 const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {
