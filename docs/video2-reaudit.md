@@ -727,9 +727,9 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | "Default View Templates" tab — closed by `space-wizard.mjs`, 23 checks (frame `07:06`). The check that covers it had to be rewritten before it meant anything: it pressed the Marketing card, which the panel had already correctly disabled as "Applied" because step two had chosen the Marketing workflow — and had the press landed, the state it asserted was already true beforehand, so **it could not have failed for any build**. It now presses Project, then Marketing, and verifies **every** switch the panel draws rather than two |
 | P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
 | M | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") |
-| B | "+" on a space opens the 8-item Create menu, from one shared list both it and the quick-create tabs import |
+| B | "+" on a space opens the Create menu, from one shared list both it and the quick-create tabs import — **8 create kinds above the rule and the frame's Imports/Templates footer below it**, and `space-create-menu.mjs` now asserts the two groups separately, 23 checks. It did not: it scraped every `space-create-*` item into one array and compared it to the create kinds, so on the day the footer shipped — which is frame `08:00`'s own bottom group — **the baseline went red for a menu that had just become more correct**, and stayed red through a whole break-test round, which refused to run against it. Its header also called that array "the eight of frame `08:00`" when the frame's eight are a different set (no Task, Reminder or Project; a **Form** Rundesk has none of, which is the `M` row above). Two new checks came out of the fix: the footer pair is named, and **neither may grow a creator tab** — `workspace-sidebar.tsx` argues in a comment that making them `CreateKind`s would be "the dead control, twice", and a comment is not a guarantee |
 | P | Create Folder — **private toggle and Use-Templates footer closed** by `folder-dialog.mjs`, 13 checks (frame `08:32`). Still open: **description**, and it is blocked rather than pending — `folders` has no such column and `FoldersService` whitelists `{name, color}` on create, so a description typed here would have nowhere to go. Left absent on purpose: a field that stores into nothing is the mirror defect, and the frames are not worth a column that lies |
-| M | Folder "Use Space statuses" inheritance |
+| B | Folder **"Use Space statuses"** inheritance — closed by `folder-dialog.mjs`, **21 checks, 8 of them new and all 8 break-tested** (frame `08:32`: Settings › Statuses over the value *"Use Space statuses"*, with a `›`). Built as **one column with a reader**, migration `0159`: `folders.status_scope ∈ 'space' \| 'list'` is the default handed to every list made in that folder, and `ListsService.createList` is the reader, so the setting shows up on the first list rather than being stored against a someday. Deliberately NOT a fourth status table — `resolveEffectiveStatuses` already honours `'space'` on the read path and the task write path, and folder-owned statuses nothing read would be the mirror defect this audit has found six times. The decisive check compares a list's **effective** statuses key-for-key with the space's own, not by count, so a list that seeded a same-sized default cannot pass. The confident zero is handled too: `applyPreset` seeds `space_statuses` inside a `try`, so a space can legitimately have none, and `createList` only scopes to `'space'` when the space actually has some — **this suite's own guard check caught that on its first run**, against a fixture that had created a space with no preset |
 | B | Skeletons on load; sidebar hierarchy; breadcrumb |
 | B | Error toasts bottom-left; **list names unique per project**; both create paths report failure |
 | B | **Delete → trash + Undo + Ctrl+Z** |
@@ -846,7 +846,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 104 built · 20 partial · 50 missing.**
+**174 rows: 136 built · 15 partial · 23 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -857,14 +857,39 @@ is what this line now repeats. Recorded rather than quietly corrected, because a
 count is the one thing in this file that gets quoted without being checked, and
 the next person to find two numbers should know which one moved.
 
-How that is made up, so the number can be checked rather than believed:
+AND THEN IT HAPPENED AGAIN, ONE LEVEL UP, WHICH IS WHY THE SPLIT MOVED TO
+`136 · 15 · 23`. The table below used to credit §2 with `79 · 12 · 42` — the
+split §2 had **when this table was written**. §2 has closed twenty-six rows
+since, and none of them reached here. Worse, the §5 row beside it was being
+kept LIVE, so the table was adding a stale number to a fresh one and
+consolidating the result as though both meant the same thing. Nothing caught
+it, because the guard checked that §2 contributed the right NUMBER OF ROWS —
+133, which never moves when a row merely closes — and deliberately did not
+check the split, on the reasoning that the split moves whenever work goes well.
+That reasoning was the error: the split moves in §2 **and here**, together, so
+checking it is exactly what keeps the two attached. It is now checked.
+
+The `§6` row is gone from the arithmetic for the same reason, and its absence
+is not a lost correction. §6's own last row says *"+ six rows built this
+session — already moved in §2"*: the corrections were applied to §2's rows in
+place, so they are inside the live §2 split already and adding them a second
+time would double-count them. That is also why the old table never reconciled —
+`79 · 12 · 42` plus `−6 · +4 · +2` is `73 · 16 · 44`, which is not what §2 held
+at any moment.
+
+Where every row comes from, both parts now live, so the number can be checked
+rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 79 | 12 | 42 | 133 |
+| §2, the sections table | 105 | 11 | 17 | 133 |
 | §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
-| §6, corrections applied to the above | −6 | +4 | +2 | 0 |
-| **consolidated** | **104** | **20** | **50** | **174** |
+| **consolidated** | **136** | **15** | **23** | **174** |
+
+§2's 105 built includes the four marked `B*` — built, but the row also records
+something the frame asks for that is not there. They are counted as built
+because that is what they are; the asterisk is where the remainder is written
+down.
 
 Sixteen of §5's rows closed after it was written, each named with the suite
 that proves it — see the `closed by:` line on the row itself. A row is not
@@ -904,7 +929,30 @@ candidates that duplicate an existing row are named and rejected inside each
 range rather than silently dropped, so the count cannot be inflated by
 re-deriving the same thing twice.
 
-**41 rows recovered: 15 built · 5 partial · 21 missing.**
+**41 rows recovered: 15 built · 5 partial · 21 missing — AS RECOVERED, which is
+not the same number as §4's.**
+
+THIS SPLIT IS A SNAPSHOT AND §4's IS LIVE, and until now nothing on this page
+said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
+**15 · 5 · 21**. Both total 41, so the arithmetic guard passed and both
+survived several readings — which is precisely how the 173-that-was-two-numbers
+got as far as it did, recorded at the top of §4.
+
+They are the same forty-one rows at two moments. Sixteen closed after this
+section was written — fifteen that were missing and one that was partial — and
+sixteen is the whole difference:
+
+| | B | P | M | total |
+| --- | --- | --- | --- | --- |
+| as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
+| closed since, each named on its own row by the suite that proves it | +16 | −1 | −15 | 0 |
+| **live (what §4 credits §5 with)** | **31** | **4** | **6** | **41** |
+
+Both numbers are kept rather than one being overwritten, because the
+as-recovered split is what the three appendices below add up to, and a section
+whose own sub-totals no longer match its heading is unreadable. `scripts/
+check-video2-counts.mjs` now asserts every equality in that table, so the two
+cannot drift apart again without the build saying so.
 
 Read with §6 below: the same pass found eighteen rows already in this file
 whose status is wrong, and four of those are marked built while being the
@@ -1388,7 +1436,11 @@ Frames extracted and looked at for this pass: `00:05`, `00:50`, `00:52`,
 
 ## Counts
 
-**Recovered rows: 17** — **B 11 · P 1 · M 5**
+**Recovered rows: 17** — **B 11 · P 1 · M 5**, AS RECOVERED.
+
+This is what the pass found, not what is true today: rows in this range have
+closed since, and §4's table is the live count. The three appendix blocks sum
+to §5's as-recovered 15 · 5 · 21, which is the only thing they are meant to do.
 
 | | rows |
 |---|---|
@@ -1944,7 +1996,11 @@ file never transcribed (`Card size`, `Card cover`).
 
 ## Counts
 
-**15 recovered rows — 4 B · 2 P · 9 M.**
+**15 recovered rows — 4 B · 2 P · 9 M, AS RECOVERED.**
+
+Same caveat as the S01–S08 block above: several of these have closed — the
+space "+" footer and Create Folder's error path among them — and §4's table is
+where the live count lives.
 
 | | row |
 |---|---|
@@ -2579,7 +2635,7 @@ Three. None changes a count; all three are in code this session touched.
 
 ## Counts
 
-**Recovered rows: 9** — B 0 · P 2 · M 7.
+**Recovered rows: 9** — B 0 · P 2 · M 7, AS RECOVERED. §4's table is live.
 
 | # | row | status |
 |---|---|---|
@@ -2714,11 +2770,52 @@ worktree under a lock:
 | `clickapps-plan-gating` | 8 | 8 |
 | `list-view-controls` | 8 | 8 |
 | `integration-error-card` | 7 | 7 |
+| `folder-dialog` (the 8 status-scope checks) | 8 | 8 |
 | …and the rest of the session's suites | | all |
 
-The one that did not: a `template-center` patch that does not compile. A patch
-that cannot build proves nothing about the check it was aimed at, and is
-counted as unproven rather than quietly folded into the total.
+THE ONE THAT DID NOT, AND HOW IT WAS FIXED. A `template-center` patch would
+not compile. `const targetType: TemplateTargetType = 'folder'` is narrowed by
+TypeScript to the literal `'folder'` despite the union annotation, so the five
+`=== 'list'` and `=== 'space'` comparisons downstream all became TS2367 "no
+overlap" and the patch reported BUILD FAILED without ever reaching a check. It
+is written `(['folder'] as TemplateTargetType[])[0]` now: same value, same
+break, and the union survives. This is the third time the same narrowing trap
+has cost a break patch, so it is written down in the process file rather than
+rediscovered a fourth time. A patch that cannot build proves nothing about the
+check it was aimed at, and is counted as unproven rather than quietly folded
+into the total.
+
+TWO MORE PATCHES WERE NOT PROVING ANYTHING EITHER, and neither said so
+usefully. `sidebar-sections-12` anchored on `return target.kind === 'project'`
+as the last line of `canDropOn`; a `folder` branch was added below it and the
+function now ends `return false`, so the anchor matched nothing. `-15` anchored
+on the tree-invalidation loop, which is written twice since a second drop path
+appeared, so it matched twice and refused. Both reported PATCH FAILED against
+code they were still perfectly able to break. **A break patch that cannot find
+its line is a check with no baseline**, and it is indistinguishable, in a long
+log, from a check that was never worth writing.
+
+### The set that proves the folder statuses column is real
+
+Eight patches against the eight checks added for frame `08:32`, baseline 21/21.
+Each reddens the check it names, and three are worth reading:
+
+- **`20-stores-and-tells-nobody`** reads `folders.status_scope` and then
+  discards the answer. It is the mirror defect written out in four lines: the
+  column is there, the dialog writes it, Postgres holds the right value for
+  ever, and nothing changes. The check catches it because it compares a list's
+  effective statuses **key for key with the space's own** — the space had
+  `["complete","in_progress","todo"]` and the list came back with the six
+  seeded defaults. A count comparison would have read 3 against 6 and passed
+  for the wrong reason on the day those numbers matched.
+- **`16-preset-seeds-nothing`** makes a preset seed no space statuses at all.
+  This is not hypothetical: it is what the suite's own first run hit, on a
+  fixture that created a space without a preset, and the guard check placed
+  above the real assertions is what caught it.
+- **`19-new-reader-breaks-the-writer`** takes the join out from under the new
+  lookup. Every list create 500s, the suite aborts partway, and the exact-check
+  guard reports `ran 20 checks, expected 21` — which is the guard doing the
+  only job it has.
 
 ### The two that mattered
 

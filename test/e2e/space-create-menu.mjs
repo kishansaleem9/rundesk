@@ -7,11 +7,19 @@
  * The frame, zoomed: a panel headed **Create**, with List *(Track tasks,
  * projects, people & more)* and Folder *(Group Lists, Docs & more)* on top, a
  * rule, then Doc · Dashboard · Whiteboard · Form, a rule, then Imports › and
- * Templates. Eight items.
+ * Templates. Eight items in THREE groups, and the rules between them carry
+ * meaning: the last two do not create anything.
  *
  * Rundesk's "+" was ONE of them, chosen for you: `createProject(space.id)`
  * behind a `window.prompt`. Seven of the eight were unreachable from the point
  * where a person has just decided to create something inside this space.
+ *
+ * THE GROUPS ARE ASSERTED SEPARATELY, and that is a correction. This suite
+ * originally scraped every `space-create-*` item into one array and compared
+ * it to the create kinds, so when the Imports/Templates footer shipped — which
+ * is the frame's own bottom group — the baseline went red for a menu that had
+ * just become more correct, and stayed red. A test that reports a fix as a
+ * regression is worse than no test: it trains you to skip the red.
  *
  * WHAT THIS SUITE IS ACTUALLY WATCHING FOR, beyond "a menu appeared":
  *
@@ -46,7 +54,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 23
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -54,10 +62,38 @@ const REPO = path.resolve(import.meta.dirname, '../..')
 const TAG = `scm-${Date.now()}`
 
 /**
- * The eight of frame `08:00`, in `lib/create-types.ts` order — everything
- * creatable EXCEPT `space`, which does not nest inside a space.
+ * Everything creatable INSIDE a space, in `lib/create-types.ts` order —
+ * i.e. every `CreateKind` except `space`, which does not nest in a space.
+ *
+ * THIS IS NOT "THE EIGHT OF FRAME `08:00`", and the sentence that used to say
+ * so was this file's own stale reason: the frame's eight are List · Folder ·
+ * Doc · Dashboard · Whiteboard · **Form** · Imports · Templates, and these
+ * eight are a different set. Read against each other:
+ *
+ *   · `list`, `folder`, `doc`, `dashboard`, `whiteboard` — in both.
+ *   · `task`, `reminder`, `project` — Rundesk's, not the frame's. They are
+ *     things Rundesk can genuinely make in a space, so the menu offers them.
+ *   · `imports`, `templates` — the frame's, and Rundesk's, but NOT
+ *     `CreateKind`s: they navigate to something that already exists rather
+ *     than making a new empty one. They are asserted separately, below.
+ *   · **`form` — the frame's, and Rundesk has none.** Recorded as a gap in
+ *     the re-audit ledger rather than faked with a menu item that opens
+ *     nothing.
  */
 const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'list', 'folder', 'project']
+
+/**
+ * The frame's bottom group, under its own rule: `[12:04]` "IMPORT — kuch aur
+ * cheezein hum kahin aur se [la] sakte hain", `[12:10]` "TEMPLATES wali cheez
+ * hai … yahan aap use kar sakte hain."
+ *
+ * Held apart from `EXPECTED_KINDS` on purpose, because they are a different
+ * kind of thing and the product says so in `workspace-sidebar.tsx`: these two
+ * navigate, everything above creates. This suite used to scrape both groups
+ * into one array and compare it to the create kinds, so the day the footer
+ * shipped the baseline went red for a menu that had become MORE correct.
+ */
+const EXPECTED_NAV = ['imports', 'templates']
 /** One specific word per item. Written here so a drifted label names itself. */
 const EXPECTED_LABEL = {
   task: 'Task',
@@ -188,20 +224,35 @@ try {
       'Create, and the "+" used to be one action behind a window.prompt',
   )
 
-  const kinds = await page.locator('[data-testid^="space-create-"]').evaluateAll((els) =>
+  const offered = await page.locator('[data-testid^="space-create-"]').evaluateAll((els) =>
     els
       .map((e) => (e.getAttribute('data-testid') ?? '').replace('space-create-', ''))
       .filter((k) => k !== 'menu' && k !== 'menu-title' && !k.startsWith('open-') && !k.startsWith('label-')),
   )
+  /* The frame rules the menu into groups; so does this. */
+  const nav = offered.filter((k) => EXPECTED_NAV.includes(k))
+  const kinds = offered.filter((k) => !EXPECTED_NAV.includes(k))
   chk(
     kinds.length === EXPECTED_KINDS.length,
     `it offers ${EXPECTED_KINDS.length} things to create`,
-    `the menu offered ${kinds.length}: ${JSON.stringify(kinds)}`,
+    `the menu's create group offered ${kinds.length}: ${JSON.stringify(kinds)}`,
   )
   chk(
     JSON.stringify(kinds) === JSON.stringify(EXPECTED_KINDS),
-    'and they are the eight, in the shared module\'s order',
+    'and they are the create kinds, in the shared module\'s order',
     `the menu offered ${JSON.stringify(kinds)}, expected ${JSON.stringify(EXPECTED_KINDS)}`,
+  )
+  /*
+   * THE FOOTER IS ITS OWN CLAIM. Frame `08:00` rules Imports and Templates off
+   * below the creatable things, and `[12:04]`/`[12:10]` say what they are for.
+   * Asserted here rather than folded into the count above, so that a footer
+   * item that went missing is reported as a missing footer item and not as a
+   * create kind that vanished.
+   */
+  chk(
+    JSON.stringify(nav) === JSON.stringify(EXPECTED_NAV),
+    'and below the rule it offers Imports and Templates, as the frame\'s bottom group does',
+    `the menu's footer group offered ${JSON.stringify(nav)}, expected ${JSON.stringify(EXPECTED_NAV)}`,
   )
 
   /*
@@ -299,6 +350,42 @@ try {
     'every kind the space menu offers has a quick-create tab of the same name, plus Space',
     `the tab strip offered ${JSON.stringify(tabKinds)} — the menu and the strip are no longer one list`,
   )
+  /*
+   * AND THE FOOTER TWO MUST NOT HAVE GROWN ONE. `workspace-sidebar.tsx` says
+   * in so many words that putting Imports and Templates through
+   * `SPACE_CREATE_TYPES` "would mean inventing a creator for each that only
+   * ever navigates away — the dead control, twice". A comment saying that is
+   * not a guarantee; this is.
+   */
+  chk(
+    EXPECTED_NAV.every((k) => !tabKinds.includes(k)),
+    'and neither footer item has grown a creator tab it would have nothing to put in',
+    `the tab strip offered ${JSON.stringify(tabKinds)} — one of ${JSON.stringify(EXPECTED_NAV)} became a ` +
+      'CreateKind, which means a tab whose only behaviour can be to navigate away from itself',
+  )
+
+  /*
+   * THE FOOTER ITEMS GO SOMEWHERE. Last, because it leaves the space route.
+   * Two items, one check each, so a footer where both were wired to the same
+   * destination is not reported as a working menu.
+   */
+  console.log('\n▶ and the footer two actually go where they say')
+  for (const [kind, tail] of [['imports', '/import'], ['templates', '/templates']]) {
+    await dismissAll()
+    // Back to the space route each time: the previous iteration navigated away,
+    // and `openMenu` needs the space's row in the sidebar to hover.
+    await page.goto(`${B}/app/${WS}/${SPACE}`, { waitUntil: 'domcontentloaded' })
+    await page.waitForSelector(`[data-testid="space-link-${SPACE}"]`, { timeout: 15_000 })
+    await openMenu()
+    await page.getByTestId(`space-create-${kind}`).click({ timeout: 15_000 })
+    const landed = await waitUntil(() => page.url().endsWith(tail), { timeoutMs: 10_000 })
+    chk(
+      landed,
+      `"${kind}" goes to ${tail}`,
+      `"${kind}" left the page at ${page.url()}, which does not end ${tail} — an item that opens the ` +
+        'menu and then does nothing is the dead control the sidebar comment promises it is not',
+    )
+  }
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
   await page.screenshot({ path: '/tmp/claude-0/shots/space-create-menu-fail.png', fullPage: true }).catch(() => {})

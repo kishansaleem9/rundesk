@@ -12,11 +12,18 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**174 rows — 104 built · 20 partial · 50 missing.** `docs/video2-reaudit.md`
+**174 rows — 136 built · 15 partial · 23 missing.** `docs/video2-reaudit.md`
 §4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its
 check count.
+
+THIS READ `104 · 20 · 50` UNTIL THE SPLIT WAS CHECKED. Nothing regressed and
+nothing was inflated: §4's table was crediting §2 with the split §2 had when
+the table was written, while keeping the §5 figure beside it live, so it was
+adding a stale number to a fresh one. Twenty-six closures in §2 had never
+reached the headline. The guard now compares §4's §2 row against §2 itself,
+B, P and M each — see the note under §4.
 
 `scripts/check-video2-counts.mjs` now checks that arithmetic on every build,
 because it had already gone wrong: §4's headline read `88 built · 21 partial ·

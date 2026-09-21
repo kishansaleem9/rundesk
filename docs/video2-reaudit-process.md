@@ -282,10 +282,11 @@ green "confirmations" that meant nothing until they were found.
   After a web patch, the built bundle stays patched. An API-only patch that
   follows runs against it, so its checks measure the *previous* patch's
   breakage.
-- **AND THE SAME THING IN THE OTHER DIRECTION, which `wt-break.sh` still does.**
-  The rule above is written for the bundle and implemented for the bundle:
-  `WEB_DIRTY` carries a web patch's breakage forward one step and forces a
-  rebuild. There is no `API_DIRTY`. `git checkout -- .` reverts the SOURCE
+- **AND THE SAME THING IN THE OTHER DIRECTION — FIXED, and left written out
+  because the symptom is worth recognising.** The rule above was written for
+  the bundle and implemented only for the bundle: `WEB_DIRTY` carried a web
+  patch's breakage forward one step and forced a rebuild, and there was no
+  `API_DIRTY`. `git checkout -- .` reverts the SOURCE
   before the next patch, but `apps/api/dist` is only rebuilt when the new patch
   itself touches the API — and the server is only restarted then too. So a web
   patch that follows an API patch runs against the API patch's compiled
@@ -295,10 +296,12 @@ green "confirmations" that meant nothing until they were found.
   each reported that same defect**, two extra red checks on every run, because
   nothing ever put the server back. The patch list is what gives it away —
   every run after a boundary carrying the same two failures that have nothing
-  to do with it. Until the harness grows an `API_DIRTY`, run the API patches
-  and the web patches as **two separate invocations**: the restore block at the
-  end of a run rebuilds both sides and restarts, so the second batch starts
-  clean.
+  to do with it. `wt-break.sh` carries an `API_DIRTY` now, exactly mirroring
+  `WEB_DIRTY`, so mixed sets can be run in one invocation. If you are reading
+  a results file produced before that, or by anything else, split the API
+  patches from the web ones and run them as two invocations — the restore block
+  at the end of a run rebuilds both sides and restarts, so the second batch
+  starts clean.
 - **One runner per worktree, enforced.** Two break runs sharing a checkout
   check out, patch and build over each other, and every result afterwards is
   about whichever wrote last. Take a lock.
@@ -308,6 +311,23 @@ green "confirmations" that meant nothing until they were found.
   independent conditions hid the row, so removing one proved nothing. That is
   good code and a bad patch: rewrite the patch to remove both, rather than
   concluding the check is weak.
+- **A PATCH THAT CANNOT FIND ITS LINE IS A CHECK WITH NO BASELINE.** Two
+  `sidebar-sections` patches reported `PATCH FAILED` for a whole round.
+  `-12` anchored on `return target.kind === 'project'` as the last line of
+  `canDropOn`, and a `folder` branch was later added below it so the function
+  ends `return false` — anchor gone. `-15` anchored on the tree-invalidation
+  loop, which a second drop path duplicated, so it matched **twice** and the
+  `count == 1` assertion refused. Both were still perfectly able to break the
+  code they were aimed at. `PATCH FAILED` in a long results file reads like
+  housekeeping; it is a check whose proof has silently lapsed, so re-anchor it
+  the same day and say in the patch why the anchor moved.
+- **`const x: Union = 'literal'` does not compile, and the error is nowhere
+  near the patch.** TypeScript narrows a `const` initialised with a literal to
+  that literal *even when the annotation is the union*, so every `=== 'other'`
+  comparison downstream becomes TS2367 "no overlap" and the run reports
+  `BUILD FAILED` having reached no check at all. This is the `{false && …}`
+  narrowing trap in another costume and it has now eaten three patches. Write
+  `(['literal'] as Union[])[0]` — same value, same break, union preserved.
 - **A worktree is pinned at the commit you created it from, AND THIS IS NOW
   ENFORCED because advice was not enough.** `list-card-cover` was break-tested
   in a worktree two commits stale: four of its checks failed on *every* patch,
@@ -359,6 +379,15 @@ green "confirmations" that meant nothing until they were found.
   the shared-`dist` collision again, at a smaller scale and entirely
   self-inflicted: per-lane bundles stop *other agents* colliding with you and
   do nothing about you colliding with yourself.
+- **A WATCHER POLLING A LOG THE JOB HAS NOT REACHED YET READS THE LAST RUN.**
+  `until grep -q "passed" run.log; do sleep 5; done` returned instantly and
+  handed back a REFUSING message from twenty minutes earlier, because the job
+  it was watching was still in its `vite build` step and had not yet truncated
+  the file. The watcher was correct, the file was stale, and the two are
+  indistinguishable from the outside — this is the confident zero with a
+  timestamp on it. Truncate the log yourself before launching (`: > run.log`),
+  or poll on something the new run creates rather than something the old run
+  left behind.
 - **`VAR=x yes | cmd` sets `VAR` for `yes`, not for `cmd`.** The variable
   attaches to the first command in the pipeline. `export` it instead. This
   costs a confusing round trip every time, because the failure is `cmd`

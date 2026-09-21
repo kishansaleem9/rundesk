@@ -169,8 +169,17 @@ esac
 WEB_DIRTY=no
 API_DIRTY=no
 for b in "$@"; do
+  # NAME OR PATH, both accepted.
+  #
+  # This used to take only the bare name, and a caller who passed the path it
+  # had just written — which tab-completes, and which every other script in
+  # this directory takes — got eight lines of "MISSING" for eight files that
+  # were sitting right there. A whole break set reported as absent because the
+  # argument was spelled the obvious way is the stale-reason defect wearing a
+  # shell script: the message named a real condition and meant something else.
+  b="${b##*/}"; b="${b%.py}"
   SRC="/tmp/claude-0/breaks/$b.py"
-  [ -f "$SRC" ] || { echo "== $b MISSING" >> "$OUT"; continue; }
+  [ -f "$SRC" ] || { echo "== $b MISSING (no /tmp/claude-0/breaks/$b.py)" >> "$OUT"; continue; }
   P="/tmp/claude-0/wt$LANE-patch.py"
   sed "s#/home/user/rundesk#$WT#g" "$SRC" > "$P"
 
