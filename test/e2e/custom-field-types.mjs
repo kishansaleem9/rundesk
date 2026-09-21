@@ -40,6 +40,8 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+/* Teardown only — see the `finally` block. No check reads the database. */
+import { openDb } from './lib/db.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -556,13 +558,39 @@ try {
 } finally {
   await browser.close().catch(() => {})
   /*
-   * The e2e database is shared between lanes and runs. This workspace, its
-   * space, project, list, tasks and every definition under them cascade from
-   * one delete, so nothing this run made outlives it.
+   * OWN THE FIXTURE ALL THE WAY OUT. The e2e database is shared between lanes
+   * and runs, so this workspace — and the space, project, list, tasks and
+   * definitions cascading from it — has to go.
+   *
+   * `DELETE /workspaces/:id` IS AN ARCHIVE, and this block said "nothing this
+   * run made outlives it" until a count of `workspaces` said otherwise: seven
+   * of them, from seven runs, sitting archived in two lanes. The route's own
+   * summary says so — "Archive (soft-delete) a workspace" — and the comment
+   * here had been written from what the verb looked like. So both happen: the
+   * archive, because that is the path the product offers and it should work,
+   * and then a real delete when there is a database handle to do it with.
+   *
+   * The handle is optional on purpose. Cleanup is not a check, and a suite
+   * that refuses to run without `DATABASE_URL` over its teardown would be
+   * failing for a reason that is not the code.
    */
   if (ownWorkspaceId && A) {
-    const gone = await A(`/workspaces/${ownWorkspaceId}`, { method: 'DELETE' })
-    if (gone.status >= 400) console.log(`  (could not delete workspace ${ownWorkspaceId}: ${gone.status})`)
+    const archived = await A(`/workspaces/${ownWorkspaceId}`, { method: 'DELETE' })
+    if (archived.status >= 400) {
+      console.log(`  (could not archive workspace ${ownWorkspaceId}: ${archived.status})`)
+    }
+    const sql = await openDb().catch(() => null)
+    if (sql) {
+      try {
+        await sql`delete from workspaces where id = ${ownWorkspaceId}`
+      } catch (err) {
+        console.log(`  (could not delete workspace ${ownWorkspaceId}: ${err?.message ?? err})`)
+      } finally {
+        await sql.end({ timeout: 5 }).catch(() => {})
+      }
+    } else {
+      console.log(`  (no DATABASE_URL — workspace ${ownWorkspaceId} is archived, not deleted)`)
+    }
   }
   stack?.close()
   const ran = passed + failed
