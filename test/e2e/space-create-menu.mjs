@@ -23,15 +23,15 @@
  *
  * WHAT THIS SUITE IS ACTUALLY WATCHING FOR, beyond "a menu appeared":
  *
- *   · THE LABEL PER ITEM. Checked one at a time, by name. A menu of eight items
- *     all reading "List" would satisfy any count-and-presence check — that is
+ *   · THE LABEL PER ITEM. Checked one at a time, by name. A menu whose every
+ *     item read "List" would satisfy any count-and-presence check — that is
  *     not a hypothetical, it is precisely the bug the sibling views panel had.
  *
  *   · LANDING ON THE RIGHT THING. An item that opens the create modal on its
  *     own tab is the claim; an item that opens the modal at all is not. So each
- *     one is opened and the ACTIVE tab is read back, and for the four that
- *     belong to a space, the space selector is read back too — a menu item on
- *     THIS space that lands on a blank "which space?" has answered nothing.
+ *     one is opened and the ACTIVE tab is read back, and for the five whose
+ *     creator takes a space, the space selector is read back too — a menu item
+ *     on THIS space that lands on a blank "which space?" has answered nothing.
  *
  *   · ONE LIST, TWO SURFACES. Every kind the menu offers has a quick-create tab
  *     of the same name, because both render `lib/create-types.ts`. Two
@@ -54,7 +54,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 28
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -76,11 +76,15 @@ const TAG = `scm-${Date.now()}`
  *   · `imports`, `templates` — the frame's, and Rundesk's, but NOT
  *     `CreateKind`s: they navigate to something that already exists rather
  *     than making a new empty one. They are asserted separately, below.
- *   · **`form` — the frame's, and Rundesk has none.** Recorded as a gap in
- *     the re-audit ledger rather than faked with a menu item that opens
+ *   · `form` — the frame's, and now Rundesk's. The module had been complete
+ *     for a long time (builder, public submit page, uploads, routing) and was
+ *     reachable only from the Forms rail; it was absent from this menu, which
+ *     is the one place somebody has already decided to put something in this
+ *     space. Its creator asks which list submissions file into and refuses
+ *     without one, because a form with no destination takes replies and makes
  *     nothing.
  */
-const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'list', 'folder', 'project']
+const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'form', 'list', 'folder', 'project']
 
 /**
  * The frame's bottom group, under its own rule: `[12:04]` "IMPORT — kuch aur
@@ -101,16 +105,23 @@ const EXPECTED_LABEL = {
   reminder: 'Reminder',
   whiteboard: 'Whiteboard',
   dashboard: 'Dashboard',
+  form: 'Form',
   list: 'List',
   folder: 'Folder',
   project: 'Project',
 }
-/** The four whose creator takes a space, and the select that should be filled. */
+/** The five whose creator takes a space, and the select that should be filled. */
 const SPACE_SELECT = {
   list: 'quick-create-list-space',
   folder: 'quick-create-folder-space',
   project: 'quick-create-project-space',
   task: 'quick-create-space',
+  /*
+   * §V2-06 frame `08:00` — Form is `scopedToSpace` for a reason the other four
+   * do not have: a form's destination is a LIST, and the space picker is what
+   * narrows the list picker to the space the "+" was pressed on.
+   */
+  form: 'quick-create-form-space',
 }
 
 let stack = null
@@ -254,6 +265,31 @@ try {
     'and below the rule it offers Imports and Templates, as the frame\'s bottom group does',
     `the menu's footer group offered ${JSON.stringify(nav)}, expected ${JSON.stringify(EXPECTED_NAV)}`,
   )
+  /*
+   * THE RULE IS WHERE THE CONTAINERS START, and this check exists because the
+   * rule moved once without anybody noticing. It was drawn at a literal index
+   * into `SPACE_CREATE_TYPES` — `{i === 5 && <DropdownMenuSeparator />}` — so
+   * inserting Form at position five separated Dashboard from Form instead of
+   * Form from List. Every other check still passed: same items, same order,
+   * same labels. Asked of the DOM rather than of the array, because the array
+   * is what was wrong.
+   */
+  const ruleBeforeList = await page.evaluate(() => {
+    const first = document.querySelector('[data-testid="space-create-list"]')
+    const prev = first?.previousElementSibling
+    return {
+      found: !!first,
+      prevRole: prev?.getAttribute('role') ?? prev?.tagName ?? null,
+      prevTestId: prev?.getAttribute('data-testid') ?? null,
+    }
+  })
+  chk(
+    ruleBeforeList.found && ruleBeforeList.prevRole === 'separator',
+    'and the rule falls where the containers begin, immediately above List',
+    `the element before List was ${JSON.stringify(ruleBeforeList)} — the frame rules this menu into ` +
+      'groups, and a rule drawn at a hardcoded index moves to the wrong boundary the first time ' +
+      'anything is inserted above List',
+  )
 
   /*
    * ONE CHECK PER ITEM, NAMING THE WORD. The menu item carries its label and a
@@ -303,7 +339,7 @@ try {
     return { pressed, spaceValue }
   }
 
-  for (const kind of ['task', 'list', 'folder', 'project']) {
+  for (const kind of ['task', 'list', 'folder', 'project', 'form']) {
     const landed = await landOn(kind)
     chk(
       JSON.stringify(landed.pressed) === JSON.stringify([kind]) && landed.spaceValue === SPACE,
@@ -336,6 +372,108 @@ try {
     'a project created through the menu is in THIS space, on the server',
     `GET /projects/space/${SPACE} answered ${projects.status} with ` +
       `${JSON.stringify((projects.data ?? []).map((p) => p.name))}`,
+  )
+
+  /*
+   * §V2-06 frame `08:00` — AND THE NEW ONE, ALL THE WAY TO THE SERVER.
+   *
+   * `targetListId` is the whole difference between a form and a page that
+   * collects nothing: `FormsService.createTaskForSubmission` returns early
+   * when a form has neither that nor a routing field, so a form created
+   * without one accepts replies and produces nothing at all. The tab is
+   * therefore checked on the row it wrote, not on having opened — and on the
+   * target specifically, because a form that saved its title and dropped its
+   * destination is the mirror defect and looks identical in the Forms list.
+   *
+   * WHAT IS DELIBERATELY NOT RE-TESTED HERE: that a submission to a form with
+   * a `targetListId` becomes a task in that list. `task-provenance.mjs`
+   * already submits to a real slug and reads the task back. This row is the
+   * SURFACE that was missing — the menu item and a creator that fills in the
+   * one field which decides whether the form does anything — and re-proving
+   * the routing would be a second copy of a check that already exists.
+   */
+  console.log('\n▶ `08:00` — and the Form item makes a form that files somewhere')
+  const FORM_NAME = `Menu form ${TAG}`
+
+  /*
+   * FIRST, THE SPACE AS IT IS: no lists in it yet, because nothing above made
+   * one. This is the state a brand-new space is in, and it is the one that
+   * found a defect — the destination picker was empty, the button was
+   * disabled, and nothing said why. `[21:49]` is the same dead end the List
+   * tab had ("a space with no project … which is the extra level she does not
+   * have"), and a silently disabled button is the version of it that cannot
+   * even be complained about.
+   */
+  /*
+   * COUNTED THE WAY THE PICKER COUNTS. `/lists/space/:id` answers a narrower
+   * question — `getListsBySpace` returns the lists of the space's hidden
+   * default container, which is "lists directly under a space" — and asking
+   * it here would make this check agree with a picker that was wrong for
+   * exactly that reason.
+   */
+  const before = ((await api(`/lists/workspace/${WS}`)).data ?? []).filter((l) => l.spaceId === SPACE)
+  await openMenu()
+  await page.getByTestId('space-create-form').click()
+  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 })
+  await page.getByTestId('quick-create-form-space').selectOption(SPACE)
+  await page.waitForTimeout(900)
+  const noListNote = await page.getByTestId('quick-create-form-no-lists').count()
+  const disabledWhenEmpty = await page.getByTestId('quick-create-form-submit').isDisabled()
+  chk(
+    before.length === 0 && noListNote === 1 && disabledWhenEmpty,
+    'a Space with no Lists says so instead of leaving a disabled button unexplained',
+    `the space held ${before.length} list(s), the note was drawn ${noListNote} time(s) and the button ` +
+      `was ${disabledWhenEmpty ? '' : 'NOT '}disabled — a form filed nowhere makes nothing, so refusing ` +
+      'is right and refusing in silence is not',
+  )
+  await dismissAll()
+
+  /*
+   * THEN WITH SOMEWHERE TO FILE. Seeded through the API rather than through
+   * the UI: what is under test here is the Form tab, and driving three other
+   * dialogs to reach it would make every failure below ambiguous.
+   */
+  const projForList = (await api(`/projects/space/${SPACE}`)).data ?? []
+  const seeded = await api('/lists', {
+    method: 'POST',
+    body: { projectId: projForList[0]?.id, name: `Form target ${TAG}` },
+  })
+  const targetList = seeded.data?.id ?? null
+  /*
+   * RELOADED, because this list was made through the API and no invalidation
+   * can follow a write the page never saw. React Query holds the workspace's
+   * list result for 30 seconds, so reopening the modal serves the cached
+   * version — which is how the PRODUCT bug beside this was found: a list
+   * created through the List tab in the same modal was missing from this
+   * picker for the same reason, because `['lists', projectId]` is not a prefix
+   * of the other list keys. Those paths invalidate the bare `['lists']` prefix
+   * now; this one cannot invalidate anything, so it starts the page again.
+   */
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForSelector(`[data-testid="space-link-${SPACE}"]`, { timeout: 20_000 })
+  await openMenu()
+  await page.getByTestId('space-create-form').click()
+  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 })
+  await page.getByTestId('quick-create-form-title').fill(FORM_NAME)
+  await page.getByTestId('quick-create-form-space').selectOption(SPACE)
+  await waitUntil(
+    () => page.getByTestId('quick-create-form-list').locator('option').count().then((n) => n > 1),
+    { timeoutMs: 10_000 },
+  )
+  const submitDisabledWithNoList = await page.getByTestId('quick-create-form-submit').isDisabled()
+  if (targetList) await page.getByTestId('quick-create-form-list').selectOption(targetList)
+  await page.getByTestId('quick-create-form-submit').click()
+  await page.waitForTimeout(2500)
+
+  const forms = await api(`/workspaces/${WS}/forms`)
+  const made = (forms.data ?? []).find((f) => f.title === FORM_NAME)
+  chk(
+    !!targetList && submitDisabledWithNoList && !!made && made.targetListId === targetList,
+    'a form created through the menu exists and files into the list it was given',
+    `the seeded list answered ${seeded.status}; the button was ${submitDisabledWithNoList ? '' : 'NOT '}` +
+      `disabled before one was picked; GET /workspaces/:id/forms answered ${forms.status} and the row is ` +
+      `${JSON.stringify(made ? { title: made.title, targetListId: made.targetListId } : null)} (wanted ` +
+      `targetListId ${targetList})`,
   )
 
   console.log('\n▶ one list, two surfaces')

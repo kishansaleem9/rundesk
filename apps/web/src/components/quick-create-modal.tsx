@@ -155,6 +155,7 @@ export function QuickCreateModal({
         {mode === 'reminder' && <ReminderForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'whiteboard' && <WhiteboardForm workspaceId={workspaceId} onClose={onClose} />}
         {mode === 'dashboard' && <DashboardForm workspaceId={workspaceId} onClose={onClose} />}
+        {mode === 'form' && <FormForm workspaceId={workspaceId} onClose={onClose} initialSpaceId={initialSpaceId} />}
         <Footer workspaceId={workspaceId} onClose={onClose} />
       </Card>
     </Backdrop>
@@ -1635,6 +1636,20 @@ function ListForm({
       }),
     onSuccess: (list) => {
       qc.invalidateQueries({ queryKey: ['lists', projectId] })
+      /*
+       * AND THE SPACE-SCOPED KEY, which is not the same query.
+       *
+       * `['lists', projectId]`, `['lists', 'space', spaceId]` and
+       * `['lists', 'workspace', workspaceId]` share only the `'lists'`
+       * element, and React Query matches invalidation by key PREFIX — so
+       * invalidating the first does nothing to the others. With a
+       * 30-second `staleTime`, a list created here was then missing from the
+       * Form tab's destination picker in the same modal, for half a minute,
+       * with no way to tell that the list existed. Found by a check that
+       * timed out selecting an option that was never going to appear. The
+       * bare prefix is one line and covers every list query there is.
+       */
+      qc.invalidateQueries({ queryKey: ['lists'] })
       qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
       /*
        * §G15 [22:15] — "list mein aap ko VIEW kaisa chahiye … main filhaal
@@ -2232,6 +2247,145 @@ function DashboardForm({ workspaceId, onClose }: { workspaceId: string; onClose:
  * exist here; nothing linked to them from the point where you decide to create
  * something, which is the only moment they are useful.
  */
+/**
+ * §V2-06 frame `08:00` — Form, between Whiteboard and the rule.
+ *
+ * NAMED FOR THE CONVENTION, not for how it reads: every panel in this file is
+ * `<Kind>Form` and the kind is `form`.
+ *
+ * IT ASKS WHERE SUBMISSIONS GO, and will not create without an answer. The
+ * module behind this has been complete for a long time — builder, public
+ * submit page, file uploads, routing — and the one thing that decides whether
+ * a form DOES anything is `targetListId`: `FormsService.createTaskForSubmission`
+ * returns early when a form has neither that nor a field mapped to it, so a
+ * form created with no destination takes submissions and produces nothing,
+ * silently, on a page the author never revisits. `CreateFormDto` marks it
+ * optional because the builder can set it later; the point of creating a form
+ * from a SPACE's "+" is that you already know where it belongs, so this asks
+ * then rather than leaving a live form that swallows its first replies.
+ *
+ * Space then list, with no project picker in between: a third dropdown for a
+ * choice the person making an intake form is not thinking about.
+ *
+ * AND THE LISTS COME FROM `GET /lists/workspace/:id`, FILTERED, NOT FROM
+ * `/lists/space/:id`. The second one reads as the obvious choice and answers a
+ * different question: `getListsBySpace` resolves the space's hidden DEFAULT
+ * CONTAINER and returns that project's lists — the "lists directly under a
+ * space" the sidebar draws — so a space whose lists all live in real projects
+ * comes back empty. This picker said "This Space has no Lists yet" over a
+ * project page that was drawing one at the time, and the screenshot the suite
+ * takes on failure is what showed it. The workspace query carries `spaceId`
+ * on every row and is one request too.
+ */
+function FormForm({
+  workspaceId,
+  onClose,
+  initialSpaceId,
+}: { workspaceId: string; onClose: () => void; initialSpaceId?: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [title, setTitle] = useState('')
+  const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
+  const [targetListId, setTargetListId] = useState('')
+
+  const spaces = useQuery({
+    queryKey: ['spaces', workspaceId],
+    queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
+  }).data ?? []
+  const listsQuery = useQuery({
+    queryKey: ['lists', 'workspace', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; spaceId: string }>>(`/lists/workspace/${workspaceId}`),
+  })
+  const lists = (listsQuery.data ?? []).filter((l) => l.spaceId === spaceId)
+  /*
+   * §G15-10 `[21:49]` — THE DEAD END THIS FILE HAS ALREADY FIXED ONCE, and
+   * which this tab reintroduced.
+   *
+   * The List tab used to keep its own field disabled until you had invented a
+   * project, "which is the extra level she does not have". A space with no
+   * lists does the same thing here: the destination picker has nothing in it,
+   * the button is disabled, and NOTHING SAYS WHY. That is the silent-refusal
+   * shape — the person presses a button that does not respond and has no way
+   * to find out what is missing. It is also how this was found: the suite's
+   * own space had no lists and the check sat on a disabled button for thirty
+   * seconds before timing out.
+   *
+   * The button stays disabled, because a form filed nowhere is worse than no
+   * form. What changes is that the reason is on screen.
+   */
+  const noListsHere = !!spaceId && !listsQuery.isPending && lists.length === 0
+
+  const create = useMutation({
+    mutationFn: () =>
+      api<{ id: string }>(`/workspaces/${workspaceId}/forms`, {
+        method: 'POST',
+        body: JSON.stringify({ title: title.trim(), targetListId }),
+      }),
+    onSuccess: (form) => {
+      qc.invalidateQueries({ queryKey: ['forms', workspaceId] })
+      qc.invalidateQueries({ queryKey: ['list-forms', workspaceId, targetListId] })
+      onClose()
+      /*
+       * Into the BUILDER, not back to the index. A form with no fields cannot
+       * be submitted, so landing anywhere else would leave the one thing that
+       * still has to happen off screen.
+       */
+      navigate({ to: '/app/$workspaceId/forms/$formId', params: { workspaceId, formId: form.id } })
+    },
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.formFailed')),
+  })
+
+  const ready = !!title.trim() && !!targetListId
+  return (
+    <form
+      className="px-5 py-4 space-y-3"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (!ready) return
+        create.mutate()
+      }}
+    >
+      <Input
+        autoFocus
+        data-testid="quick-create-form-title"
+        placeholder={t('quickCreate.formTitlePlaceholder')}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <Select
+        data-testid="quick-create-form-space"
+        labelKey="quickCreate.selectSpace"
+        value={spaceId}
+        onChange={(v) => { setSpaceId(v); setTargetListId('') }}
+        options={spaces.map((sp) => ({ value: sp.id, label: sp.name }))}
+      />
+      <Select
+        data-testid="quick-create-form-list"
+        labelKey="quickCreate.formTarget"
+        value={targetListId}
+        onChange={setTargetListId}
+        options={lists.map((l) => ({ value: l.id, label: l.name }))}
+        disabled={!spaceId || noListsHere}
+      />
+      {noListsHere ? (
+        <p className="text-[11px] text-amber-600 dark:text-amber-500" data-testid="quick-create-form-no-lists">
+          {t('quickCreate.formNoLists')}
+        </p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">{t('quickCreate.formTargetHint')}</p>
+      )}
+      <div className="flex justify-end gap-2 pt-1">
+        <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+        <Button type="submit" size="sm" data-testid="quick-create-form-submit" disabled={!ready || create.isPending}>
+          {t('quickCreate.createForm')}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 function Footer({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation()
   const navigate = useNavigate()

@@ -311,6 +311,18 @@ green "confirmations" that meant nothing until they were found.
   independent conditions hid the row, so removing one proved nothing. That is
   good code and a bad patch: rewrite the patch to remove both, rather than
   concluding the check is weak.
+- **A CHECK THAT READS A STALE `useMemo` IS READING A CACHED CORRECT ANSWER.**
+  The claim was "a subtask still names its parent when the parent has been
+  filtered off the screen". The check hid the parent and looked — and passed
+  against the deliberately broken build too, because the annotation map is a
+  `useMemo` keyed on `[tasks, …the switches…]`, and hiding a row changes
+  `visibleTasks`, which is not one of those keys. The memo did not re-run, the
+  broken build kept serving the map it had built while the parent was still
+  visible, and the patch came back green on every check. **Break-testing is
+  what found it; nothing else could have.** When a claim is about state the
+  component derives, make the check move something the derivation actually
+  watches — here, cycling the switch off and on — or it is asserting that a
+  cache has not been invalidated yet.
 - **A FAILURE MESSAGE THAT CALLS A LOCATOR TURNS A CLEAN FAIL INTO AN ABORT.**
   `chk(cond, good, \`… ${await thing.getAttribute('x')} …\`)` builds that third
   string as an ARGUMENT — before `chk` runs, and whether the check passes or

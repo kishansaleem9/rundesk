@@ -719,7 +719,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Right-rail "Related Items" icon + tooltip — closed by `task-attachments.mjs`, 13 checks (frames `06:05`–`06:08`) |
 | B | Sidebar Direct Messages — closed by `sidebar-dms.mjs`, 14 checks. The data had been there the whole time and the surface was not: `chat_channels.is_dm` is a real column and `workspace-chat-page.tsx` has split `publicChannels` from `dmChannels` since it was written. The Channels section filters DMs out on purpose — `+ Add Channel` takes a name and `+ New message` takes a person, so one button cannot be both — and filtering them out without giving them a home left them reachable only from the page you had to already be on to know you had any |
 | P | Create-menu search **"Describe anything to create" and Create with AI closed** by `create-menu-ai.mjs`, 23 checks (frame `06:40`). **Super Agent** stays open and is blocked, not pending: Rundesk has no agents, and the Brain²/Super Agents hub is recorded in §3. The check asserts the row in Postgres across BOTH doors — a list made from a space with no project lands in that space's hidden default container, which `getProjectsBySpace` excludes on purpose, so walking the visible projects could never find it |
-| M | "Form" absent from the create menu though the module exists |
+| B | **Form in the create menu** — frame `08:00` puts it beside Doc · Dashboard · Whiteboard, and the module had been complete for a long time (builder, public submit page, uploads, routing) and reachable only from the Forms rail. Closed by `space-create-menu.mjs`, **28 checks**. `form` is a ninth `CreateKind`, so the menu and the quick-create strip both gain it from one list. Its creator asks which list submissions file into **and refuses without one**, because `FormsService.createTaskForSubmission` returns early when a form has neither a `targetListId` nor a routing field — a form made with no destination takes replies and produces nothing, on a page nobody revisits. **Three defects came out of building it.** `GET /lists/space/:id` does not return a space's lists: `getListsBySpace` resolves the space's hidden default container and returns that project's, so the picker said "This Space has no Lists yet" over a project page drawing one — the endpoint is left alone (the sidebar, `list-under-space` and `space-presets` all depend on the narrow meaning) and the picker reads `GET /lists/workspace/:id`, which carries `spaceId` per row. A space with no lists left the button **disabled in silence**, which is `[21:49]`'s dead end again; it still refuses and now says why. And `['lists', projectId]` is not a prefix of the other list keys, so a list created through the List tab was missing from this picker for thirty seconds — both create paths invalidate the bare `['lists']` prefix now |
 | B | Create-a-Space: icon+name, description, **Default permission**, Make Private |
 | B | Space dialog footer "Use Templates" — closed by `space-wizard.mjs`, 23 checks (frame `06:52`) |
 | B | Space wizard: 4 presets, default views, statuses, ClickApps grid, per-space gating |
@@ -742,7 +742,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | Create-modal placeholder "Add description, or write with ⚡AI" — **and it has no frame behind it.** `video2-frame-observations.md:250` cites `10:00`; `09:54` through `10:08` are all the Board view, and the other create modal it cites, `21:36`, is the Brain² hub. Every create modal that IS on screen (`00:08`, `00:14`, `00:20`) already has a description typed into it, so the placeholder is never drawn. Left `M` rather than built: a string with no frame is a summary, and building to a summary instead of to the frame is what step 1 exists to stop. See §7 |
 | B | Customize view: Autosave, Pin, Private, Protected, Set default, Copy link, Sharing |
 | B\* | **Customize: Stack fields, Show empty fields, Collapse empty columns** — board switches, each read by the grid. `list-customize` 29 |
-| M | Customize on the LIST view — frame `11:00` puts a DIFFERENT trio in that same place: Show task locations · Show subtask parent names · Show closed tasks. Two are absent from the tree entirely; the third exists as the toolbar's Closed chip and not in this panel |
+| B | Customize on the LIST view — **the frame `11:00` trio built**, closed by `list-customize.mjs`, **37 checks, 8 of them new and all 8 break-tested**. Show task locations · Show subtask parent names · Show closed tasks, drawn where frame `10:35` draws the board's own three, because two different trios in one slot is the reference being specific. **`showClosed` is passed down, not re-declared**: the toolbar's Closed chip already owned that state, and two controls for one question each with their own `useState` agree exactly until one is used — so it is checked in both directions, since either direction alone passes on a build that writes the shared value and reads back a private one. The two annotations are **maps, not booleans**: a row can only ask "is there a string for me", so a switch left on while the data says nothing draws nothing and the mirror defect has nowhere to happen. The parent title is resolved from **every row the page holds, not the visible ones** — a closed parent with an open child is the fixture — because a lookup against the filtered set draws no name at all, which is what a task with no parent draws. `showClosed` also joins `currentViewConfig` now: it had been a chip the view did not remember, and this file's own rule for Card size is that the panel configures the VIEW |
 | B | Export: CSV/Excel, three-way scope, date+time formats, honours the view |
 | B\* | **Export paywall** — the refusal was already built; the frame's "⚡ Business feature" caption inside the open dialog was not. `list-customize` 29 |
 | B | In-list search, Save-view chip, filter rules, nested groups, saved filter sets |
@@ -846,7 +846,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 136 built · 15 partial · 23 missing.**
+**174 rows: 138 built · 15 partial · 21 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -882,9 +882,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 105 | 11 | 17 | 133 |
+| §2, the sections table | 107 | 11 | 15 | 133 |
 | §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
-| **consolidated** | **136** | **15** | **23** | **174** |
+| **consolidated** | **138** | **15** | **21** | **174** |
 
 §2's 105 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
@@ -2772,6 +2772,7 @@ worktree under a lock:
 | `integration-error-card` | 7 | 7 |
 | `folder-dialog` (the 8 status-scope checks) | 8 | 8 |
 | `sidebar-sections` | 15 | 15 |
+| `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
 

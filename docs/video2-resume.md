@@ -12,7 +12,7 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**174 rows — 136 built · 15 partial · 23 missing.** `docs/video2-reaudit.md`
+**174 rows — 138 built · 15 partial · 21 missing.** `docs/video2-reaudit.md`
 §4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its
@@ -57,32 +57,39 @@ a tree two commits stale. Every line in that file looked like a result and
 meant nothing.
 
 Counted honestly, by whether the results file opens with a `== BASELINE (no
-patch) …` line:
+patch) … 0 failed` line — recounted from the files, not carried forward:
 
 ```
-16 sets have a verified baseline and a synced worktree
-25 sets do not — their numbers are unread, not wrong
+113 suites exist
+ 34 have a break set with a VERIFIED GREEN BASELINE
+ 11 have a break run whose baseline is not green — most are results files
+    left over from before the suite or the patches were fixed, so the numbers
+    in them are unread rather than wrong
+ 68 have no break run at all
 ```
 
-The 25 are not known to be bad. They are **unverified in the specific way that
-produced the one known-bad result**, and until each is re-run against a synced
-tree with a green baseline, "193/198" is a number about an environment rather
-than about the checks.
+That last number is the honest size of the remaining work, and it has not been
+stated plainly before. The 34 are the ones whose checks are known to fail when
+the thing they watch is broken. Everything else is a suite that passes, which
+is not the same claim.
 
-Sets with a verified baseline, complete: `focus-pill` 9/9 · `tab-title-countdown`
-7/7 · `task-cover` 3/3 · `task-mentions` 3/3 · `space-default-permission` 4/4 ·
-`list-card-cover` 8/8 · `ai-answer-rendering` 1/1 · plus the create-menu and
-planner agents' seventeen.
+Green baselines, complete: `ai-answer-rendering` · `attach-on-create` ·
+`calendar-accounts` · `clickapps-plan-gating` · `command-palette` ·
+`create-menu-ai` · `custom-field-types` · `focus-pill` · `folder-create` ·
+`folder-dialog` · `gantt-controls` · `imports` · `list-card-cover` ·
+`list-customize` · `list-empty-states` · `list-view-controls` ·
+`paywall-sites` · `planner-appearance-toggles` · `planner-command-bar` ·
+`planner-onboarding` · `planner-settings` · `planner-upcoming-meeting` ·
+`sidebar-sections` · `space-default-permission` · `space-wizard` ·
+`space-wizard-views` · `tab-title-countdown` · `task-cover` · `task-delete` ·
+`task-mentions` · `teams-empty-state` · `teams-person-cards` ·
+`template-center` · `video1-acceptance`.
 
-Still to re-run: `ai-action-categories`, `ai-activity-filters`,
-`ai-create-containers`, `ai-model-picker`, `clickapps-plan-gating`,
-`folder-create`, `gantt-controls`, `imports`, `integration-error-card`,
-`list-empty-states`, `list-view-controls`, `login-workspace-binding`,
-`paywall-sites`, `planner-settings`, `planner-upcoming-meeting`,
-`sidebar-sections`, `space-create-menu`, `space-wizard-views`,
-`task-activity-filter`, `task-delete`, `task-field-create`,
-`task-header-status`, `teams-empty-state`, `teams-person-cards`,
-`template-center`.
+Stale results files to re-run before their numbers mean anything:
+`ai-action-categories`, `ai-activity-filters`, `ai-create-containers`,
+`ai-model-picker`, `integration-error-card`, `login-workspace-binding`,
+`space-create-menu`, `task-activity-filter`, `task-field-create`,
+`task-header-status`, `team-view`.
 
 **`folder-create` IS SETTLED, AND IT WAS THE HARNESS.** This section used to
 say five of its twelve patches left the suite green, reason that those checks

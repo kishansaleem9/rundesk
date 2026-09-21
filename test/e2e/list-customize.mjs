@@ -389,9 +389,26 @@ try {
    * A build that resolved the title against the VISIBLE rows now draws nothing
    * — and nothing is what a row with no parent draws, so the bug would look
    * like correct behaviour on a task that has a parent.
+   *
+   * AND THE SWITCH IS CYCLED AFTERWARDS, WHICH IS THE ONLY REASON THIS CHECK
+   * WORKS. Written the obvious way — hide the closed tasks, then look — it
+   * passed against the broken build too, and the break patch that swaps
+   * `tasks` for `visibleTasks` came back 37/37. The annotations are a `useMemo`
+   * keyed on `[tasks, …the two switches…]`; hiding closed tasks changes
+   * `visibleTasks` and NOT one of those keys, so the memo does not re-run and
+   * the wrong build keeps serving the map it built while the parent was still
+   * visible. The check was reading a cached correct answer and calling it
+   * evidence.
+   *
+   * Turning the switch off and on again moves a key the memo is watching, so
+   * the map is rebuilt with the closed parent already off the screen — which
+   * is the state the claim is actually about. A check that only holds because
+   * a cache has not been invalidated is the confident zero in memo form.
    */
   await flip('list-show-closed')
   await waitUntil(() => closedGroup().count().then((n) => n === 0), { timeoutMs: 8000 })
+  await flip('list-show-subtask-parents')
+  await flip('list-show-subtask-parents')
   const orphanedText = (await parentChip(orphanId).count()) === 1
     ? ((await parentChip(orphanId).textContent()) ?? '').trim()
     : null

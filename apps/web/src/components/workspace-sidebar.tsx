@@ -2474,10 +2474,30 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         // A Fragment, not a <div>: a plain element between
                         // role="menu" and its items is not a menu any more.
                         <Fragment key={type.value}>
-                          {/* The frame rules its menu into groups; ours divides
-                              the things that go INSIDE a container from the
-                              containers themselves. */}
-                          {i === 5 && <DropdownMenuSeparator />}
+                          {/*
+                            The frame rules its menu into groups; ours divides
+                            the things that go INSIDE a container from the
+                            containers themselves.
+
+                            DRAWN WHERE `isContainer` FIRST TURNS TRUE, not at
+                            a literal index. This was `{i === 5 && …}`, and the
+                            day `form` was inserted at position five the rule
+                            moved onto the wrong boundary — separating Dashboard
+                            from Form rather than Form from List — with nothing
+                            to notice: the array still had every item, in order,
+                            with the right labels. A number that means "just
+                            before List" only while nothing is inserted above
+                            List is a comment pretending to be code.
+
+                            NOT NAMED `space-create-*`. That prefix is the
+                            namespace for things this menu can CREATE, and the
+                            suite scrapes it to list them — so a rule called
+                            `space-create-container-rule` was counted as a
+                            tenth menu item the first time this ran.
+                          */}
+                          {i > 0 && type.isContainer && !SPACE_CREATE_TYPES[i - 1].isContainer && (
+                            <DropdownMenuSeparator data-testid="create-menu-container-rule" />
+                          )}
                           <DropdownMenuItem
                             data-testid={`space-create-${type.value}`}
                             onClick={() => setSpaceCreate({ spaceId: space.id, kind: type.value })}

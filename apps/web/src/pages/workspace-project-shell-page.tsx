@@ -165,6 +165,10 @@ function ProjectHome() {
       setNewListName('')
       setNewListDescription('')
       qc.invalidateQueries({ queryKey: ['lists', projectId] })
+      // The space- and workspace-scoped list queries are different keys, not
+      // prefixes of this one — see the note in `quick-create-modal.tsx`'s
+      // ListForm. The bare prefix covers all of them.
+      qc.invalidateQueries({ queryKey: ['lists'] })
     },
   })
 
