@@ -6188,6 +6188,26 @@ function CommentsPanel({
     el?.scrollIntoView({ block: 'center' })
   }, [focusCommentId, commentsQuery.data?.length])
 
+  /*
+   * The prefix drives the tab. Written as an effect rather than folded into the
+   * textarea's `onChange` because the "+" menu's Mention-a-task item sets the
+   * text too, and two places deciding one thing is the bug this audit has found
+   * ten times.
+   *
+   * ABOVE THE EARLY RETURN, and that is not a style preference. It sat below
+   * it, so on any render where `commentsQuery.data === null` this hook was not
+   * called at all and the hook order changed between renders — which React
+   * does not tolerate. `react-hooks/rules-of-hooks` said so as an **error**,
+   * not a warning, and it shipped in `666f15f` because that commit was a
+   * `git add -A` of four agents' work and the lint was not re-run.
+   */
+  useEffect(() => {
+    if (mentionToken && mentionToken.tab !== mentionTab) {
+      setMentionTab(mentionToken.tab)
+      setMentionIndex(0)
+    }
+  }, [mentionToken?.tab])
+
   if (commentsQuery.data === null) {
     return <NotWiredNote>{t('taskDetail.commentsUnavailable')}</NotWiredNote>
   }
@@ -6252,19 +6272,6 @@ function CommentsPanel({
             : mentionTab === 'locations'
               ? locationMentionCandidates
               : channelMentionCandidates
-  /*
-   * The prefix drives the tab. Written as an effect rather than folded into the
-   * textarea's `onChange` because the "+" menu's Mention-a-task item sets the
-   * text too, and two places deciding one thing is the bug this audit has found
-   * ten times.
-   */
-  useEffect(() => {
-    if (mentionToken && mentionToken.tab !== mentionTab) {
-      setMentionTab(mentionToken.tab)
-      setMentionIndex(0)
-    }
-  }, [mentionToken?.tab])
-
   return (
     <div className="space-y-3" ref={commentListRef}>
       {comments.length === 0 ? (

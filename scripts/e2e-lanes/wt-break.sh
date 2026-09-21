@@ -157,7 +157,17 @@ esac
 # Was the PREVIOUS patch a web one? If so its bundle is still on disk, and an
 # API-only patch that follows would run against it — so every later check would
 # be measuring the last web patch's breakage rather than its own.
+#
+# AND THE SAME IN THE OTHER DIRECTION, which was missing for a long time. There
+# was a `WEB_DIRTY` and no `API_DIRTY`: after an API patch, `apps/api/dist`
+# holds the patched build and the lane is serving it, so the next web-only
+# patch sets `NEEDS_API=no`, skips the rebuild AND the restart, and runs its
+# checks against the previous patch's broken server. Found by the field-types
+# run, where patch 18 was an API one and every web patch after it — fourteen
+# of them — measured patch 18. The symptom is a block of patches that all
+# redden the same unrelated check, which reads like a real finding.
 WEB_DIRTY=no
+API_DIRTY=no
 for b in "$@"; do
   SRC="/tmp/claude-0/breaks/$b.py"
   [ -f "$SRC" ] || { echo "== $b MISSING" >> "$OUT"; continue; }
@@ -193,7 +203,11 @@ for b in "$@"; do
       export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
       yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 ) || OK=no
   ;; esac
-  [ "$NEEDS_API" = yes ] && { pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1 || OK=no; }
+  # Rebuild the API when this patch touches it, AND when the previous one did —
+  # the mirror of the bundle rule below, and for the same reason.
+  if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then
+    pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1 || OK=no
+  fi
   # Rebuild the bundle when this patch touches web, AND when the previous one
   # did — otherwise this patch runs against the previous patch's breakage.
   if [ "$NEEDS_WEB" = yes ] || [ "$WEB_DIRTY" = yes ]; then
@@ -202,7 +216,10 @@ for b in "$@"; do
   WEB_DIRTY="$NEEDS_WEB"
 
   if [ "$OK" = yes ]; then
-    [ "$NEEDS_API" = yes ] && restart
+    # Restart when this patch touched the API, or when the previous one did and
+    # the lane is therefore still serving that patch's binary.
+    if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then restart; fi
+    API_DIRTY="$NEEDS_API"
     timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
       > "/tmp/claude-0/brk-$b.log" 2>&1
     { echo "== $b"
