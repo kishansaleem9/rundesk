@@ -666,7 +666,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | | capability |
 |---|---|
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
-| B | `+ Create new field` on the create modal; 17 field types |
+| B | `+ Create new field` on the create modal. It said "17 field types", which was true when it was written and has been wrong twice since — the count lives in the row below, where the gap is, rather than in two places that drift apart |
 | P | **32** field types, counted off the frame rather than from this row — `00:20` opens the picker at the top and `00:42` reaches its foot, and the two shots overlap on Progress (Auto) · Email · Phone, so the list is continuous and complete. "~30" was close; **"11 absent" was 13** — it dropped **Custom Text** and **Custom Dropdown**, which the frame draws as rows of their own. Rundesk holds 22. **~~Formula~~ ~~Tasks~~ ~~Signature~~ built in `0146`** — closed by `custom-field-types.mjs`, 32 checks, 32 break patches. **The remaining 10 are not a build and are recorded as such:** eight need a language model — Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, and the picker's own **AI Fields** group names the first three — and `ANTHROPIC_API_KEY` is empty here and in CI; **Relationship** would be a second store for what `task_doc_links` already holds; **Button** stores no value at all, and `AutomationsService` has no manual trigger, so the only thing buildable today is a button wired to nothing. ~~Files~~ and ~~Voting~~ built in `0145` |
 | B | Searchable field-type picker — a search box that narrows the `<select>` and selects as you type |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
