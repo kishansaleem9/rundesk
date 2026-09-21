@@ -736,7 +736,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Board view: status lanes, colours, counts, per-lane add, drag between lanes, + Add group |
 | B | **Team view** — a view type, ungated; rows per person with their own load |
 | B | Paywall that teaches — at the two sites she names, Team view `09:26` and board export `10:42`. List export stays free, and a check asserts it. Refused server-side, not just hidden |
-| M | Plan-tier paywall UI; "uses have expired" metered state |
+| B\* | **Plan-tier paywall UI** — frame `09:26`'s modal, closed by `paywall-sites.mjs`, 30 checks, break set complete 10/10: the plain line, the heading naming the tier and the feature, the panel that describes and previews, the tier beside it, and one button. Stale, not missing. **The metered *"uses have expired"* state is the part still absent**, which is what the asterisk records |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
 | B | Gantt: Auto fit, week numbers, collapsible panels, local export |
 | M | Create-modal placeholder "Add description, or write with ⚡AI" — **and it has no frame behind it.** `video2-frame-observations.md:250` cites `10:00`; `09:54` through `10:08` are all the Board view, and the other create modal it cites, `21:36`, is the Brain² hub. Every create modal that IS on screen (`00:08`, `00:14`, `00:20`) already has a description typed into it, so the placeholder is never drawn. Left `M` rather than built: a string with no frame is a summary, and building to a summary instead of to the frame is what step 1 exists to stop. See §7 |
@@ -765,7 +765,7 @@ checks, not about a run.**
 | | capability |
 |---|---|
 | P | Import — a real delimited-file parser with per-source column presets covers 7 of the 10 named tools. Basecamp needs its API; Confluence exports pages not task rows; Slack exports conversation JSON. Monday and Wrike default to .xlsx, which is not read |
-| M | The ten named importers; spreadsheet/document import |
+| P | Importers — frame `12:08`'s submenu has twelve rows: Spreadsheet files, Document files and ten named tools. **Spreadsheet import is built** — a real delimited-file importer with explicit column mapping — closed by `imports.mjs`, 19 checks, **19/19 break-tested**. The ten named tools appear as column **PRESETS over that one importer**, which is a decision and is recorded as one: ten tiles opening a dialog that cannot import would be the facade defect at ten times scale, and `imports-1-ghosttile` exists to redden exactly that. The four rows with no preset are drawn as text with their reason and no control. **Document import is the part still open** |
 | B | Template Center — faceted browse with type, complexity, use-cases and categories, counted in SQL over the corpus rather than over the loaded page |
 | B | Planner onboarding screen — closed by `planner-onboarding.mjs`, 12 checks (frames `12:40`/`12:45`/`12:48`). The card titles are the frame's own words and one of them was not: the product shipped "Keep your meeting notes" in four locales where `12:45` draws **"Automate your meeting notes"**, so the check was green against copy the specification does not contain. Corrected. The Connect check asserts the browser LANDS on the URL the server hands back, not merely that it asked — `window.location.href = authUrl` is the convention in all three OAuth surfaces, so "it requested" and "it went there" are different facts and only the second is the feature |
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
@@ -846,7 +846,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 142 built · 15 partial · 17 missing.**
+**174 rows: 143 built · 16 partial · 15 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -882,9 +882,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 111 | 11 | 11 | 133 |
+| §2, the sections table | 112 | 12 | 9 | 133 |
 | §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
-| **consolidated** | **142** | **15** | **17** | **174** |
+| **consolidated** | **143** | **16** | **15** | **174** |
 
 §2's 105 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
@@ -2704,15 +2704,26 @@ cannot reveal and a schema comment actively conceals.
 | `M` "Comment ▾" split button; "Create Task ▾" | **B\*** | The Comment half is built and checked (`task-mentions.mjs`), with Email listed-and-disabled and its reason on the row. "Create Task ▾" is genuinely absent, which is what the asterisk records |
 | `M` Conferencing / Zoom connect row | **B** | Stale. `ConferencingRow` in `planner-settings-dialog.tsx`, frame `13:36`, checked by `calendar-accounts.mjs` |
 | `M` Copy configuration from another space | **B** | Stale. The bar is in `create-space-wizard.tsx` at frame `07:50` and `space-wizard.mjs` spends 5 checks on it |
+| `M` Plan-tier paywall UI; "uses have expired" | **B\*** | Frame `09:26`'s modal is built and closed by `paywall-sites.mjs`, 30 checks, break set 10/10. The metered state is genuinely absent — hence the asterisk |
+| `M` The ten named importers; spreadsheet/document import | **P** | Spreadsheet import is real and 19/19 break-tested. The ten tools are column PRESETS over it by explicit decision, because ten tiles over one importer is the facade at ten times scale — `imports-1-ghosttile` reddens exactly that. Document import is the open half |
 
-**THOSE FOUR WERE FOUND BY LOOKING, NOT BY A GUARD, and that is the point of
+**THOSE SIX WERE FOUND BY LOOKING, NOT BY A GUARD, and that is the point of
 the row.** `scripts/check-video2-counts.mjs` can prove this file agrees with
 itself; it cannot prove a letter agrees with the product, because `M` is a
-claim about the world. The headline moved `138 → 142 built` with nothing built
-for it. Every remaining `M` in §2 has now been read against the code once —
-`"Create Task ▾"`, `"Add to ›"` (a task in more than one list) and the
-metered *"uses have expired"* state were each confirmed genuinely absent
-rather than assumed so.
+claim about the world. The headline moved `138 → 143 built · 16 partial` with
+nothing built for it.
+
+**EVERY `M` IN §2 HAS NOW BEEN READ AGAINST THE CODE, one at a time.** Six were
+stale. The nine that remain were each confirmed genuinely absent rather than
+assumed so, and they divide cleanly: six are blocked rather than pending — the
+Brain² hub and the four rows that hang off it need an agent runtime Rundesk
+does not have and an `ANTHROPIC_API_KEY` that is empty here and in CI, and
+"add to a colleague's priorities" is a deliberate refusal recorded on its own
+row. The three that are buildable are `"Create Task ▾"`, **`"Add to ›"`** (one
+task in more than one list, which is a schema change and the largest thing
+left in this file), and the metered *"uses have expired"* state. One row —
+the create-modal placeholder — stays `M` because it has no frame behind it,
+which its own row explains.
 
 ### Voice notes and Required views were closable the whole time
 
