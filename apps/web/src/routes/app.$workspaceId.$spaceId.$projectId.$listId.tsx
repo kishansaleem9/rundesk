@@ -65,6 +65,12 @@ import {
   MessageSquare,
   // §V2-07 frame `11:00` — the "⚡ Business feature" caption under Download.
   Zap,
+  // §V2-07 frame `11:00` — the List view's Customize trio: a location pin for
+  // "Show task locations", a subtask elbow for "Show subtask parent names".
+  // The third of the three reuses `CheckCircle2`, which is already the glyph
+  // this file draws on anything closed.
+  MapPin,
+  CornerDownRight,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -196,6 +202,15 @@ type TaskItem = {
   // Both come back on every row already; the filter builder (A1.4) is the
   // first thing in this view to read them.
   createdById?: string | null
+  /*
+   * §V2-07 frame `11:00` — both already come back on every row (the endpoint
+   * selects the whole task), and the List view's Customize trio is the first
+   * thing here to read them: `parentTaskId` for "Show subtask parent names",
+   * `listId` for "Show task locations". Declared rather than cast at the point
+   * of use, so the day either stops being sent the typecheck says so.
+   */
+  parentTaskId?: string | null
+  listId?: string | null
   recurrence?: Record<string, unknown> | null
   assignees?: TaskAssignee[]
   // Sent on every list row already (tasks.service.ts attaches them); the board
@@ -217,6 +232,26 @@ type TaskItem = {
   coverUrl?: string | null
   coverColor?: string | null
   coverOffsetY?: number | null
+}
+
+/**
+ * §V2-07 frame `11:00` — what "Show task locations" and "Show subtask parent
+ * names" put on a row, already resolved to the string to draw.
+ *
+ * TWO MAPS RATHER THAN TWO BOOLEANS, and that is the whole design. A row
+ * cannot ask "is the switch on"; it can only ask "is there a string for me".
+ * So a switch that is on for data that says nothing draws nothing, and the
+ * defect where a control appears to work because its own state renders — the
+ * mirror defect, four instances of which are recorded in §1 of the re-audit
+ * ledger — has nowhere to happen. An empty map is a switch that is off and a
+ * switch whose data is missing, which are the same thing on screen and should
+ * be.
+ */
+type RowNotes = {
+  /** taskId -> "Space / Project / List", when Show task locations is on. */
+  location: Map<string, string>
+  /** taskId -> the parent task's title, when Show subtask parent names is on. */
+  parent: Map<string, string>
 }
 
 type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'url'
@@ -1506,6 +1541,20 @@ function ListDetail() {
   const [showClosed, setShowClosed] = useState(true)
   const [showArchived, setShowArchived] = useState(false)
   /*
+   * §V2-07 frame `11:00` — the other two of the List view's Customize trio.
+   *
+   * BOTH START OFF, and that IS the frame rather than a preference: `11:00`
+   * draws all three switches in the off position. The third of the three is
+   * `showClosed` above, which starts ON and stays ON, because its default is
+   * a statement about existing users' data — flipping it would hide every
+   * finished task in the product overnight — while these two start off
+   * because nothing was drawn before them and off is where the frame is. A
+   * default read off one person's screen is a state, not a specification; a
+   * default that changes what existing lists show is a migration.
+   */
+  const [showTaskLocations, setShowTaskLocations] = useState(false)
+  const [showSubtaskParentNames, setShowSubtaskParentNames] = useState(false)
+  /*
    * Declared here rather than beside the toolbar that also reads it: the
    * filtered empty state (§V2-S13 `11:30`) has to say WHO the assignee filter
    * is set to, and "Me" is the one value it cannot look up in the member list.
@@ -1905,6 +1954,50 @@ function ListDetail() {
   }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed, assignedViaIds])
 
   /*
+   * §V2-07 frame `11:00` — the strings the List view's two annotation switches
+   * put on a row, resolved once here rather than per row.
+   *
+   * BUILT FROM `tasks`, NOT FROM `visibleTasks`, and that is the whole reason
+   * this is a memo and not an inline lookup. A subtask's parent can be filtered
+   * out of the visible set by the search box, a status filter or the Closed
+   * chip while the subtask itself stays — and a parent name resolved against
+   * the filtered rows would then come back empty, so the annotation would
+   * disappear exactly when it is most needed, and it would look like the
+   * subtask had no parent rather than like the parent was hidden.
+   *
+   * A LIST THIS SCREEN CANNOT NAME GETS NO LOCATION. `listById` is built from
+   * this list and its siblings in the project; a row whose `listId` is not in
+   * it is left out of the map rather than labelled with the route's own list
+   * name. Naming a row after the URL it was fetched through is the confident
+   * zero: it would be right on every row today, because the endpoint filters
+   * `eq(tasks.listId, listId)`, and wrong and unfalsifiable on the first day
+   * that stops being true.
+   */
+  const rowNotes = useMemo<RowNotes>(() => {
+    const location = new Map<string, string>()
+    const parent = new Map<string, string>()
+    if (showTaskLocations) {
+      const listById = new Map<string, string>()
+      if (listMeta?.id && listMeta.name) listById.set(listMeta.id, listMeta.name)
+      for (const l of projectLists) listById.set(l.id, l.name)
+      for (const task of tasks) {
+        const name = task.listId ? listById.get(task.listId) : undefined
+        if (name) location.set(task.id, name)
+      }
+    }
+    if (showSubtaskParentNames) {
+      const titleById = new Map<string, string>()
+      for (const task of tasks) titleById.set(task.id, task.title)
+      for (const task of tasks) {
+        if (!task.parentTaskId) continue
+        const title = titleById.get(task.parentTaskId)
+        if (title) parent.set(task.id, title)
+      }
+    }
+    return { location, parent }
+  }, [tasks, showTaskLocations, showSubtaskParentNames, listMeta, projectLists])
+
+  /*
    * §V2-S13 frame `11:30` — THE CONFIDENT ZERO.
    *
    * The frame's empty body reads "You don't have any tasks assigned to you."
@@ -2091,6 +2184,20 @@ function ListDetail() {
     setStackFields(typeof cfg.stackFields === 'boolean' ? cfg.stackFields : false)
     setShowEmptyFields(typeof cfg.showEmptyFields === 'boolean' ? cfg.showEmptyFields : true)
     setCollapseEmptyColumns(typeof cfg.collapseEmptyColumns === 'boolean' ? cfg.collapseEmptyColumns : false)
+    /*
+     * §V2-07 `11:00` — the List trio, restored for the same reason as the
+     * board's three. `showClosed` is in here too, and it was not before: it is
+     * now a switch IN the panel that configures the view, and the rule this
+     * file already states for Card size is that "the panel configures the
+     * VIEW, so the view has to remember what the panel was set to". A view
+     * that came back with the closed tasks in a different place than they were
+     * left is a saved view that did not save.
+     */
+    setShowTaskLocations(typeof cfg.showTaskLocations === 'boolean' ? cfg.showTaskLocations : false)
+    setShowSubtaskParentNames(
+      typeof cfg.showSubtaskParentNames === 'boolean' ? cfg.showSubtaskParentNames : false,
+    )
+    setShowClosed(typeof cfg.showClosed === 'boolean' ? cfg.showClosed : true)
     const via = (cfg.assignedVia ?? {}) as Record<string, unknown>
     setAssignedViaComments(typeof via.comments === 'boolean' ? via.comments : true)
     setAssignedViaSubtasks(typeof via.subtasks === 'boolean' ? via.subtasks : true)
@@ -2121,6 +2228,13 @@ function ListDetail() {
     stackFields,
     showEmptyFields,
     collapseEmptyColumns,
+    // §V2-07 `11:00` — and the List view's three, which the same panel draws
+    // in the same slot. `showClosed` joins them here: it had been a toolbar
+    // chip the view did not remember, and a switch in the view's own panel
+    // that the view forgets is the half of a saved view that does not save.
+    showTaskLocations,
+    showSubtaskParentNames,
+    showClosed,
     // §V2-07 `11:30` — grouped, because they are three settings of one filter
     // rather than three independent ones, and a saved view that restored two
     // of them would be a filter that came back meaning something else.
@@ -3007,6 +3121,19 @@ function ListDetail() {
               onShowEmptyFields={setShowEmptyFields}
               collapseEmptyColumns={collapseEmptyColumns}
               onCollapseEmptyColumns={setCollapseEmptyColumns}
+              /*
+               * §V2-07 `11:00` — and the LIST's own three in that same slot.
+               * `showClosed` is the toolbar chip's state, handed down rather
+               * than duplicated: the chip at `list-toggle-closed` above and
+               * this switch are two doors onto one setting.
+               */
+              isList={activeView === 'list'}
+              showTaskLocations={showTaskLocations}
+              onShowTaskLocations={setShowTaskLocations}
+              showSubtaskParentNames={showSubtaskParentNames}
+              onShowSubtaskParentNames={setShowSubtaskParentNames}
+              showClosed={showClosed}
+              onShowClosed={setShowClosed}
             />
 
             {spaceFeatures.customFields && (activeView === 'table' || activeView === 'list') && (
@@ -3202,6 +3329,8 @@ function ListDetail() {
           <GroupedListView
             tasks={visibleTasks}
             groupBy={groupBy}
+            /* §V2-07 `11:00` — the List trio's two annotations. */
+            notes={rowNotes}
             subtaskMode={subtaskMode}
             subtaskStamp={subtaskStamp}
             hiddenCols={hiddenFields}
@@ -3647,6 +3776,7 @@ function GroupedListView({
   subtaskStamp,
   hiddenCols,
   onAddTask,
+  notes,
 }: {
   tasks: TaskItem[]
   groupBy: 'status' | 'priority' | 'assignee'
@@ -3672,6 +3802,13 @@ function GroupedListView({
     title: string,
     opts?: { priority?: TaskPriority; dueDate?: string; startDate?: string; assigneeId?: string },
   ) => Promise<void> | void
+  /**
+   * §V2-07 frame `11:00` — the List view's two annotation switches, already
+   * resolved to the string each row should draw. Passed straight through to
+   * every `TaskRow`: this component decides grouping, not what a row says
+   * about itself.
+   */
+  notes?: RowNotes
 }) {
   const { t } = useTranslation()
   const ordered = useOrderedStatuses()
@@ -3740,6 +3877,7 @@ function GroupedListView({
                   subtaskMode={subtaskMode}
                   subtaskStamp={subtaskStamp}
                   hiddenCols={hiddenCols}
+                  notes={notes}
                 />
               ) : (
                 group.tasks.map((task) => (
@@ -3753,6 +3891,7 @@ function GroupedListView({
                     subtaskMode={subtaskMode}
                     subtaskStamp={subtaskStamp}
                     hiddenCols={hiddenCols}
+                    notes={notes}
                   />
                 ))
               )}
@@ -3807,6 +3946,7 @@ function GroupedListView({
                     subtaskMode={subtaskMode}
                     subtaskStamp={subtaskStamp}
                     hiddenCols={hiddenCols}
+                    notes={notes}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -3821,6 +3961,7 @@ function GroupedListView({
                       subtaskMode={subtaskMode}
                       subtaskStamp={subtaskStamp}
                       hiddenCols={hiddenCols}
+                      notes={notes}
                     />
                   ))
                 )}
@@ -3900,6 +4041,7 @@ function GroupedListView({
                     subtaskMode={subtaskMode}
                     subtaskStamp={subtaskStamp}
                     hiddenCols={hiddenCols}
+                    notes={notes}
                   />
                 ) : (
                   groupTasks.map((task) => (
@@ -3914,6 +4056,7 @@ function GroupedListView({
                       subtaskMode={subtaskMode}
                       subtaskStamp={subtaskStamp}
                       hiddenCols={hiddenCols}
+                      notes={notes}
                     />
                   ))
                 )}
@@ -3944,6 +4087,7 @@ function VirtualizedTaskRows({
   subtaskMode,
   subtaskStamp,
   hiddenCols,
+  notes,
 }: {
   virtualKey: string
   tasks: TaskItem[]
@@ -3956,6 +4100,8 @@ function VirtualizedTaskRows({
   subtaskMode: SubtaskMode
   subtaskStamp: number
   hiddenCols: Set<string>
+  /** §V2-07 `11:00` — handed straight to each row; see `RowNotes`. */
+  notes?: RowNotes
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null)
   const rowVirtualizer = useVirtualizer({
@@ -3991,6 +4137,7 @@ function VirtualizedTaskRows({
                 subtaskMode={subtaskMode}
                 subtaskStamp={subtaskStamp}
                 hiddenCols={hiddenCols}
+                notes={notes}
               />
             </div>
           )
@@ -4010,6 +4157,7 @@ function TaskRow({
   subtaskMode = 'collapsed',
   subtaskStamp = 0,
   hiddenCols,
+  notes,
 }: {
   task: TaskItem
   selected: boolean
@@ -4028,6 +4176,8 @@ function TaskRow({
   subtaskStamp?: number
   /** Built-in columns the Columns panel has switched off, keyed `col:*`. */
   hiddenCols?: Set<string>
+  /** §V2-07 `11:00` — what the two annotation switches want on this row. */
+  notes?: RowNotes
 }) {
   const { t, locale } = useTranslation()
   // statusCategory ('closed') is the post-custom-statuses signal; falling
@@ -4138,6 +4288,37 @@ function TaskRow({
           >
             {task.title}
           </span>
+          {/*
+            §V2-07 frame `11:00` — "Show subtask parent names" and "Show task
+            locations", drawn beside the title because that is the thing they
+            qualify: which task this is, and where it lives.
+
+            NEITHER IS RENDERED FROM A TOGGLE'S STATE. `notes` carries a string
+            per row or carries nothing, and it is built from the task's own
+            `parentTaskId` and `listId` — so a switch that was on while the
+            data said nothing draws nothing, rather than an empty chip that
+            reads as "no parent" when it means "not looked up".
+          */}
+          {notes?.parent.get(task.id) && (
+            <span
+              data-testid={`task-row-parent-${task.id}`}
+              title={notes.parent.get(task.id)}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            >
+              <CornerDownRight className="h-2.5 w-2.5" aria-hidden />
+              <span className="max-w-[12rem] truncate">{notes.parent.get(task.id)}</span>
+            </span>
+          )}
+          {notes?.location.get(task.id) && (
+            <span
+              data-testid={`task-row-location-${task.id}`}
+              title={notes.location.get(task.id)}
+              className="inline-flex shrink-0 items-center gap-1 rounded border border-border/70 px-1.5 py-0.5 text-[10px] text-muted-foreground"
+            >
+              <MapPin className="h-2.5 w-2.5" aria-hidden />
+              <span className="max-w-[16rem] truncate">{notes.location.get(task.id)}</span>
+            </span>
+          )}
           {hasSubtasks && (
             <button
               type="button"
@@ -6996,6 +7177,13 @@ function CustomizeViewPanel({
   onShowEmptyFields,
   collapseEmptyColumns,
   onCollapseEmptyColumns,
+  isList,
+  showTaskLocations,
+  onShowTaskLocations,
+  showSubtaskParentNames,
+  onShowSubtaskParentNames,
+  showClosed,
+  onShowClosed,
 }: {
   listId: string
   /**
@@ -7056,6 +7244,37 @@ function CustomizeViewPanel({
   onShowEmptyFields: (next: boolean) => void
   collapseEmptyColumns: boolean
   onCollapseEmptyColumns: (next: boolean) => void
+  /**
+   * §V2-07 frame `11:00` — the LIST view's trio, in the same place the board's
+   * three sit, and a different three: Show task locations · Show subtask
+   * parent names · Show closed tasks.
+   *
+   * WHAT EACH ONE READS, because a switch whose only effect is the value it
+   * stores is the mirror defect this panel has already produced once:
+   *
+   *   · `showTaskLocations` — every row gains its own location, read from the
+   *     TASK's `listId` rather than from the route. On this screen the query
+   *     is `eq(tasks.listId, listId)`, so that is the same list on every row;
+   *     reading it off the row anyway is what makes the control correct by
+   *     construction instead of by coincidence, and the day a row arrives from
+   *     somewhere else it will say so rather than repeat the URL back.
+   *   · `showSubtaskParentNames` — a row that has a `parentTaskId` gains its
+   *     parent's title. It only has anywhere to show up when the Subtasks chip
+   *     is on `separate`, which is the mode that asks the server for subtasks
+   *     AS ROWS; in the other two modes a subtask is drawn under its parent
+   *     and the name is already on screen above it.
+   *   · `showClosed` — THE SAME STATE THE TOOLBAR CHIP OWNS, passed down, not
+   *     a second copy. Two controls for one setting, each with its own
+   *     `useState`, is the duplicated-list defect with a UI on it: they agree
+   *     until one is used, and then the screen holds two answers.
+   */
+  isList: boolean
+  showTaskLocations: boolean
+  onShowTaskLocations: (next: boolean) => void
+  showSubtaskParentNames: boolean
+  onShowSubtaskParentNames: (next: boolean) => void
+  showClosed: boolean
+  onShowClosed: (next: boolean) => void
 }) {
   const { t } = useTranslation()
   const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
@@ -7179,6 +7398,51 @@ function CustomizeViewPanel({
               hint={t('list.board.collapseEmptyColumnsHint')}
               checked={collapseEmptyColumns}
               onChange={onCollapseEmptyColumns}
+            />
+          </div>
+        )}
+        {/*
+          §V2-07 frame `11:00` — the LIST view's three, in the frame's order
+          and at the frame's position: directly under Card cover, above
+          `More options ›`, where the board draws its own three.
+
+          NOT drawn everywhere the panel opens. Frame `10:35` is the board and
+          carries Stack fields · Show empty fields · Collapse empty columns in
+          this exact slot; frame `11:00` is the list and carries these. Two
+          different trios in one place is the reference being specific, and
+          scattering all six across both views would lose the only thing the
+          two frames actually say.
+
+          "Show closed tasks" arrives as a prop rather than being declared
+          here, because the toolbar already owns that state — frame `11:41`
+          puts a Closed chip beside Filter. This panel is a second DOOR onto
+          one setting, not a second setting.
+        */}
+        {isList && (
+          <div className="border-b border-border/40 pb-1" data-testid="list-list-settings">
+            <PanelSwitch
+              testId="list-show-task-locations"
+              icon={<MapPin className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.list.showTaskLocations')}
+              hint={t('list.list.showTaskLocationsHint')}
+              checked={showTaskLocations}
+              onChange={onShowTaskLocations}
+            />
+            <PanelSwitch
+              testId="list-show-subtask-parents"
+              icon={<CornerDownRight className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.list.showSubtaskParentNames')}
+              hint={t('list.list.showSubtaskParentNamesHint')}
+              checked={showSubtaskParentNames}
+              onChange={onShowSubtaskParentNames}
+            />
+            <PanelSwitch
+              testId="list-show-closed"
+              icon={<CheckCircle2 className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.list.showClosedTasks')}
+              hint={t('list.list.showClosedTasksHint')}
+              checked={showClosed}
+              onChange={onShowClosed}
             />
           </div>
         )}

@@ -311,7 +311,16 @@ green "confirmations" that meant nothing until they were found.
   independent conditions hid the row, so removing one proved nothing. That is
   good code and a bad patch: rewrite the patch to remove both, rather than
   concluding the check is weak.
-- **A PATCH THAT CANNOT FIND ITS LINE IS A CHECK WITH NO BASELINE.** Two
+- **A FAILURE MESSAGE THAT CALLS A LOCATOR TURNS A CLEAN FAIL INTO AN ABORT.**
+  `chk(cond, good, \`… ${await thing.getAttribute('x')} …\`)` builds that third
+  string as an ARGUMENT — before `chk` runs, and whether the check passes or
+  fails. So a message that describes a locator queries it on every single run,
+  and on the run where that locator matches nothing it throws a thirty-second
+  timeout from inside a check that was about to report exactly what was wrong.
+  The suite then says `threw: locator.getAttribute: Timeout` and stops, which
+  names the tool instead of the product. Read the value into a variable, assert
+  the variable, describe the variable. `.count()` is the only locator call that
+  answers 0 instead of waiting, so it is the only one safe to put in a message. Two
   `sidebar-sections` patches reported `PATCH FAILED` for a whole round.
   `-12` anchored on `return target.kind === 'project'` as the last line of
   `canDropOn`, and a `folder` branch was later added below it so the function

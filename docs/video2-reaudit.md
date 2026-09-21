@@ -2771,7 +2771,13 @@ worktree under a lock:
 | `list-view-controls` | 8 | 8 |
 | `integration-error-card` | 7 | 7 |
 | `folder-dialog` (the 8 status-scope checks) | 8 | 8 |
+| `sidebar-sections` | 15 | 15 |
+| `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
+
+THE LAST TWO ROWS WERE 13/15 AND 9/10 UNTIL THE PATCHES THEMSELVES WERE FIXED,
+and the three that were not proving anything are set out below. All three
+failures were in the patch, not in the check and not in the product.
 
 THE ONE THAT DID NOT, AND HOW IT WAS FIXED. A `template-center` patch would
 not compile. `const targetType: TemplateTargetType = 'folder'` is narrowed by

@@ -56,7 +56,7 @@ const argOf = (name, fallback) => {
 }
 
 /** Exact, with `!==`: a branch that skipped must not read as a shorter pass. */
-const EXPECTED_CHECKS = 29
+const EXPECTED_CHECKS = 37
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -109,8 +109,22 @@ try {
   const listPath = `${spaceId}/${projectId}/${listId}`
   const statuses = (await api(`/lists/${listId}/statuses`)).data ?? []
   const fullLane = (statuses.find((s) => s.category === 'open') ?? statuses[0])?.key
-  const emptyLane = statuses.map((s) => s.key).find((k) => k && k !== fullLane)
+  /*
+   * §V2-07 `11:00` — the closed status this suite parks a task in, so "Show
+   * closed tasks" has something to remove.
+   *
+   * AND `emptyLane` NOW EXCLUDES IT, which is not fussiness. `emptyLane` was
+   * "the first key that is not `fullLane`", and the board's "Collapse empty
+   * columns" check requires that lane to be genuinely empty. Seeding a closed
+   * task without this would, on any list whose second status happens to be a
+   * closed one, put a card in the lane a later check asserts is empty — and
+   * that check would fail four sections away from the line that caused it,
+   * reading as a broken switch.
+   */
+  const closedLane = statuses.find((s) => s.category === 'closed')?.key
+  const emptyLane = statuses.map((s) => s.key).find((k) => k && k !== fullLane && k !== closedLane)
   if (!fullLane || !emptyLane) throw new Error(`the list came up with ${statuses.length} status(es); two are needed`)
+  if (!closedLane) throw new Error('the list came up with no closed status; "Show closed tasks" needs one')
 
   const me = auth.user?.id ?? auth.userId
   const newTask = async (body) => {
@@ -137,6 +151,20 @@ try {
   })
   await newTask({ title: `child ${TAG}`, status: fullLane, parentTaskId: fullId })
   const bareId = await newTask({ title: `bare ${TAG}`, status: fullLane })
+  /*
+   * §V2-07 `11:00` — A CLOSED PARENT WITH AN OPEN CHILD, and the pairing is
+   * the point rather than convenience.
+   *
+   * "Show subtask parent names" resolves a parent's title out of the rows this
+   * page has, and the temptation is to resolve it out of the VISIBLE rows,
+   * which is one line shorter and wrong: a parent can be filtered off the
+   * screen while its child stays. This pair is that case, made with controls
+   * the suite already drives — hide closed tasks, and the parent goes while
+   * the child remains. A build that read the filtered set would then draw no
+   * parent name, which looks exactly like "this row has no parent".
+   */
+  const shutId = await newTask({ title: `shut ${TAG}`, status: closedLane })
+  const orphanId = await newTask({ title: `orphan ${TAG}`, status: fullLane, parentTaskId: shutId })
 
   browser = await chromium.launch(launchOptions())
   const ctx = await browser.newContext({ viewport: { width: 1600, height: 1100 } })
@@ -232,6 +260,150 @@ try {
     'they are not offered on the list, where there are no cards or lanes to change',
     'the board switches are drawn on the List view — three labelled controls over a grid they cannot alter',
   )
+  /*
+   * AND THE LIST'S OWN THREE ARE IN THAT SLOT. The check above says the board's
+   * are absent; on its own that is satisfied by an empty gap, which is what
+   * this view had. Both halves or neither.
+   */
+  const listSwitch = (name) => page.getByTestId(`list-show-${name}`)
+  const listTrio = await Promise.all(
+    ['task-locations', 'subtask-parents', 'closed'].map((n) => listSwitch(n).count()),
+  )
+  const trioBlock = await page.getByTestId('list-list-settings').count()
+  chk(
+    trioBlock === 1 && listTrio.every((n) => n === 1),
+    'the List view carries its own trio there — task locations, subtask parent names, closed tasks',
+    `list-list-settings ${trioBlock}, switches ${JSON.stringify(listTrio)} ` +
+      '— frame `11:00` puts three switches where frame `10:35` puts the board\'s three',
+  )
+  /*
+   * READ ONCE INTO A VARIABLE, then assert the variable — and the failure
+   * message says the variable too.
+   *
+   * A `chk`'s third argument is an ARGUMENT: it is built before `chk` is
+   * called, whether the check passes or fails. A message that awaits a locator
+   * therefore runs on every pass, and on the run where that locator matches
+   * nothing it throws a 30-second timeout from inside a check that was about
+   * to report a clean FAIL — which is how the first run of this section ended
+   * with "threw" instead of a sentence naming what was wrong. `.count()` is
+   * the one locator call that answers 0 rather than waiting; everything else
+   * has to be read before it is described.
+   */
+  const checkedOf = async (name) =>
+    (await listSwitch(name).count()) === 1 ? await listSwitch(name).getAttribute('data-checked') : null
+  const locationsAtRest = await checkedOf('task-locations')
+  const parentsAtRest = await checkedOf('subtask-parents')
+  chk(
+    locationsAtRest === 'false' && parentsAtRest === 'false',
+    'and the two new ones start off, which is where the frame draws them',
+    `locations ${locationsAtRest}, parents ${parentsAtRest} — ` +
+      'frame `11:00` shows both switches in the off position',
+  )
+  await closePanel()
+
+  /*
+   * ONE SETTING, TWO DOORS. `showClosed` already had a toolbar chip; the panel
+   * is a second way to reach it, not a second copy of it. Two controls each
+   * holding their own `useState` agree right up until one of them is used, and
+   * then the screen holds two answers to one question — the duplicated-list
+   * defect with a UI on it, which this audit has found five times elsewhere.
+   * So it is checked in BOTH directions: either one alone passes on a build
+   * where the panel writes into the chip's state and never reads it back.
+   */
+  console.log('\n▶ `11:00` + `11:41` — the Closed switch and the Closed chip are one setting')
+  const chipActive = () => page.getByTestId('list-toggle-closed').getAttribute('data-active')
+  /*
+   * AN EMPTY CLOSED GROUP IS NOT DRAWN AT ALL, and the first version of this
+   * check did not know that. `GroupedListView` filters its groups with
+   * `length > 0 || category === 'open' || category === 'in_progress'`: an
+   * empty To-do lane stays so you can add to it, an empty Done lane goes. So
+   * the evidence that the closed task left is the GROUP leaving, not a count
+   * falling to zero — and asserting the count would have waited thirty seconds
+   * for an element the product is right not to render.
+   */
+  const closedGroup = () => page.locator(`[data-testid="list-group"][data-group="${closedLane}"]`)
+  const closedBefore = (await closedGroup().count()) === 1 ? await closedGroup().getAttribute('data-count') : null
+  await flip('list-show-closed')
+  const chipAfterPanel = await chipActive()
+  chk(
+    chipAfterPanel === 'true',
+    'turning the panel switch off moves the toolbar chip with it',
+    `the chip's data-active read ${chipAfterPanel} after the panel switch was turned off — ` +
+      'the panel is a second door onto one setting, not a second setting',
+  )
+  const closedGone = await waitUntil(() => closedGroup().count().then((n) => n === 0), { timeoutMs: 8000 })
+  chk(
+    closedBefore === '1' && closedGone,
+    'and the closed task really leaves the list, off the group that held it',
+    `the ${closedLane} group held data-count=${closedBefore} before and ${await closedGroup().count()} ` +
+      'group(s) remain after — a switch whose only effect is its own state is the mirror defect this ' +
+      'panel has produced once already',
+  )
+  await page.getByTestId('list-toggle-closed').click()
+  await page.waitForTimeout(500)
+  await openPanel()
+  const panelAfterChip = await checkedOf('closed')
+  chk(
+    panelAfterChip === 'true',
+    'and pressing the toolbar chip moves the panel switch back, which is the other direction',
+    `the panel switch read data-checked=${panelAfterChip} after the CHIP was pressed — ` +
+      'writing into one shared value and reading from a private one passes the first check and fails here',
+  )
+  await closePanel()
+
+  // ── the two annotations, which is where the switches become real ──────────
+  console.log('\n▶ `11:00` — "Show task locations" names the list a row lives in')
+  await flip('list-show-task-locations')
+  const locationChip = page.locator(`[data-testid="task-row-location-${bareId}"]`)
+  const locationText = await waitUntil(() => locationChip.count().then((n) => n === 1), { timeoutMs: 8000 })
+    ? ((await locationChip.textContent()) ?? '').trim()
+    : null
+  chk(
+    locationText === `Customize ${TAG}`,
+    'a row gains the name of the list it is in, read off the row rather than off the URL',
+    `the location chip read ${JSON.stringify(locationText)}, expected ${JSON.stringify(`Customize ${TAG}`)} — ` +
+      'resolved from the task\'s own listId, so it is right by construction rather than by the route agreeing',
+  )
+
+  console.log('\n▶ `11:00` — "Show subtask parent names", where a subtask is a row of its own')
+  await openDetails(page.getByTestId('list-subtasks'))
+  await page.getByTestId('list-subtasks-separate').click()
+  await waitUntil(
+    () => page.locator(`[data-testid="list-task-row"][data-task-id="${orphanId}"]`).count().then((n) => n === 1),
+    { timeoutMs: 15_000 },
+  )
+  await flip('list-show-subtask-parents')
+  const parentChip = (id) => page.locator(`[data-testid="task-row-parent-${id}"]`)
+  const parentText = await waitUntil(() => parentChip(orphanId).count().then((n) => n === 1), { timeoutMs: 8000 })
+    ? ((await parentChip(orphanId).textContent()) ?? '').trim()
+    : null
+  chk(
+    parentText === `shut ${TAG}`,
+    'a subtask row says which task it belongs to',
+    `the parent chip on the subtask read ${JSON.stringify(parentText)}, expected ${JSON.stringify(`shut ${TAG}`)}`,
+  )
+
+  /*
+   * THE ONE THAT DECIDES WHERE THE LOOKUP READS FROM. The parent is closed;
+   * hiding closed tasks takes it off the screen and leaves its child there.
+   * A build that resolved the title against the VISIBLE rows now draws nothing
+   * — and nothing is what a row with no parent draws, so the bug would look
+   * like correct behaviour on a task that has a parent.
+   */
+  await flip('list-show-closed')
+  await waitUntil(() => closedGroup().count().then((n) => n === 0), { timeoutMs: 8000 })
+  const orphanedText = (await parentChip(orphanId).count()) === 1
+    ? ((await parentChip(orphanId).textContent()) ?? '').trim()
+    : null
+  chk(
+    orphanedText === `shut ${TAG}`,
+    'and it still says so when the parent itself has been filtered off the screen',
+    `with closed tasks hidden the chip read ${JSON.stringify(orphanedText)} — the parent is resolved from ` +
+      'every row the page holds, not from the ones that survived the filter, because a hidden parent is ' +
+      'not an absent one',
+  )
+  await flip('list-show-closed')
+
   await closePanel()
   await page.getByTestId('work-view-tab-type-board').click()
   await waitUntil(() => card(fullId).count().then((n) => n === 1), { timeoutMs: 15_000 })
