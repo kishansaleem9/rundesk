@@ -143,6 +143,19 @@ const HITS = [
   },
 ]
 
+/*
+ * "0 FAILED" IS NOT "IT RAN", AND THIS SUITE HAD NO WAY TO TELL THE DIFFERENCE.
+ *
+ * It exited on `failed.length` alone. A run that stopped early — a throw
+ * swallowed somewhere, a branch skipped because an element was missing —
+ * reported the checks it had reached, called them all passes, and exited 0.
+ * Every other suite in this directory carries an exact `EXPECTED_CHECKS`
+ * compared with `!==` for exactly this reason, and the largest of them did
+ * not. Found while adding check 43, by noticing the file had no such constant
+ * to bump.
+ */
+const EXPECTED_CHECKS = 43
+
 const results = []
 const ok = (m) => { results.push([true, m]); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push([false, m]); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
@@ -661,6 +674,44 @@ try {
   )
   await page.getByTestId('palette-more-types').click()
   await page.waitForTimeout(600)
+
+  /*
+   * ESCAPE DISMISSES THE MENU WITHOUT TAKING THE PALETTE WITH IT.
+   *
+   * The menu ships a `fixed inset-0 z-40` click-catcher and nothing listened
+   * for Escape — the same defect found the same afternoon on the planner's
+   * calendar picker, where it left the header unusable. Here it is milder and
+   * still real: the menu sits inside a Radix dialog whose own Escape shuts the
+   * whole palette, so a keyboard user was never trapped, they were simply
+   * given no way to dismiss the menu **without losing the query they had
+   * typed**.
+   *
+   * BOTH HALVES ARE THE CHECK. "the menu closed" alone would pass on a handler
+   * that let the keypress through to the dialog and closed everything, which
+   * is the behaviour this replaces — so the palette still being open is what
+   * distinguishes a fix from the bug.
+   */
+  const typed = 'zzq-escape-probe'
+  await page.locator('[cmdk-input]').first().fill(typed)
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(500)
+  const menuGone = !(await page.getByTestId('palette-more-types-menu').isVisible().catch(() => false))
+  const paletteStill = await page.locator('[cmdk-input]').first().isVisible().catch(() => false)
+  const queryKept = paletteStill
+    ? await page.locator('[cmdk-input]').first().inputValue().catch(() => '')
+    : ''
+  chk(
+    menuGone && paletteStill && queryKept === typed,
+    'Escape closes the ⋯ menu and leaves the palette, and the query, alone',
+    `menu ${menuGone ? 'closed' : 'STAYED OPEN'}, palette ` +
+      `${paletteStill ? 'still open' : 'CLOSED TOO'}, query ${JSON.stringify(queryKept)} ` +
+      `(typed ${JSON.stringify(typed)}) — a catcher with no Escape handler leaves no way to ` +
+      'dismiss the menu except losing what you were searching for',
+  )
+  await page.locator('[cmdk-input]').first().fill('')
+  await page.getByTestId('palette-more-types').click()
+  await page.waitForTimeout(600)
+
   await page.getByTestId('palette-add-type-folder').click()
   await page.waitForTimeout(600)
   chk(
@@ -717,4 +768,11 @@ try {
 
 const failed = results.filter(([p]) => !p)
 console.log(`\n\x1b[1m${results.length - failed.length} passed, ${failed.length} failed\x1b[0m`)
+if (results.length !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${results.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +
+      'early, so the count above describes the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
 process.exit(failed.length ? 1 : 0)

@@ -153,6 +153,36 @@ export function CommandPalette({
    */
   const [revealedTypes, setRevealedTypes] = useState<Set<SearchEntityType>>(() => new Set())
   const [typeMenuOpen, setTypeMenuOpen] = useState(false)
+  /*
+   * ESCAPE CLOSES THE MORE-TYPES MENU, AND IT HAS TO CLOSE ONLY THAT.
+   *
+   * The menu ships a `fixed inset-0 z-40` click-catcher and nothing listened
+   * for Escape — the same defect found the same afternoon on the planner's
+   * calendar picker, and the same one `quick-create-modal.tsx:172` already
+   * carries a note about. `person-panel.tsx:580` states the convention in one
+   * line: "Escape closes, like every other overlay in the app."
+   *
+   * Milder here than on the planner, because this menu sits inside a Radix
+   * dialog whose own Escape shuts the whole palette — so a keyboard user was
+   * never trapped, they were just given no way to dismiss the menu **without**
+   * losing the search they had typed. That is the part worth fixing.
+   *
+   * `capture: true` and `stopPropagation`, so the keypress is spent on the
+   * menu and never reaches the dialog underneath. Without it, Escape would
+   * close both at once and the menu's own handler would be indistinguishable
+   * from not having one. Registered only while the menu is open, so the
+   * palette's Escape behaves exactly as before the rest of the time.
+   */
+  useEffect(() => {
+    if (!typeMenuOpen) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      e.stopPropagation()
+      setTypeMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey, true)
+    return () => document.removeEventListener('keydown', onKey, true)
+  }, [typeMenuOpen])
   /**
    * §G02-9 [01:12] — the source strip under the query.
    *
