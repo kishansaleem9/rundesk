@@ -43,6 +43,37 @@ went missing entirely. A list that is only written once stops being true.
   name. Both deferrals were answered rather than overruled — see the commit.
   Voting ignores the submitted body entirely and toggles only the caller's own
   vote, because a vote you can cast on somebody else's behalf is not a vote.
+- **Field types 19 → 22, and this row's own arithmetic corrected.** `0146` adds
+  `formula`, `tasks` and `signature`. The count came off the frame, not off the
+  row: the picker's `All` section holds **thirty-two**, and the row's "11
+  absent" had dropped **Custom Text** and **Custom Dropdown** — plausibly
+  because "Text" and "Dropdown" are also in the list, but the frame draws all
+  four separately. Thirteen were absent, three are now built, ten are recorded
+  as decisions in §2's row. **Formula is the one worth reading about.** It was
+  the obvious candidate for "build the shell, mark the compute unrouted", and
+  it turned out not to need that: a formula over the task's own numeric fields
+  is arithmetic, so it is evaluated for real, derived on read like
+  `progress_auto` and refusing the write for the same reason. Three rules came
+  out of building it and each has a break patch: a reference to a field that
+  does not exist is refused at CREATE time with the name it could not find,
+  because a typo that saves is indistinguishable from an empty field
+  afterwards; an unfilled input makes the whole result null rather than zero,
+  because zero in a percent box is a measurement; and **renaming a field a
+  formula reads is refused, naming the formula**, because a rename that goes
+  through orphans it silently.
+- **Three defects found while building it, all in the list route's grid.** The
+  columns draw whatever the project has, and a definition made in the create
+  modal — which offers every type — lands there. So `people`, `labels`, `files`
+  and `voting` rendered as `String(value)`, i.e. a comma-separated column of
+  uuids; and clicking one opened a free-text input whose save the API answers
+  400 into a promise nobody reads — **the dead control**, and for
+  `progress_auto` one that could never have succeeded at all. Both were held in
+  place by **a stale reason**: `CUSTOM_FIELD_TYPES` is commented "deliberately
+  the same set this view knows how to render", which is true of the PICKER and
+  was never true of the columns. `customCellText` formats by type now, and
+  `INLINE_EDITABLE_TYPES` says out loud which types the grid can really edit —
+  the money column stayed editable, and there is a check that it did, because
+  "make it all read-only" is the feature removed rather than the bug fixed.
 - **A fourth duplicated-list bug**, found while adding Team View: the list route
   keeps its own `ALL_VIEWS` copy and silently filters out anything missing from
   it. Four now: two planner settings types, two field-type lists, the API vs
@@ -557,8 +588,11 @@ went missing entirely. A list that is only written once stops being true.
   confirmation line, and is then counted among the confirmed. The patch removes
   the whole block instead.
 
-**Still open:** the AI four and the remaining ~9 field types, everything in §2
-still marked M or P, and V2-03.
+**Still open:** the AI four and the remaining **10** field types — and after
+`0146` that is no longer a backlog item but a decision: eight of the ten need a
+language model and `ANTHROPIC_API_KEY` is empty here and in CI, and the other
+two (Relationship, Button) are written up in §2's row as decisions rather than
+as work. Everything in §2 still marked M or P, and V2-03.
 
 **Known and left alone:** the Later chip's count comes from
 `/notifications/counts`, which counts snoozed notifications only — so Later can
@@ -633,7 +667,7 @@ Legend: **B** built · **P** partial · **M** missing.
 |---|---|
 | B | Create-modal tab strip; time estimate, dates+times, priority, tags-on-enter |
 | B | `+ Create new field` on the create modal; 17 field types |
-| P | ~30 field types — **11 absent**: Formula, Summary, Progress Updates, Relationship, Tasks, Categorize, Translation, Sentiment, Signature, Button, Action Items. ~~Files~~ and ~~Voting~~ built in `0145` |
+| P | **32** field types, counted off the frame rather than from this row — `00:20` opens the picker at the top and `00:42` reaches its foot, and the two shots overlap on Progress (Auto) · Email · Phone, so the list is continuous and complete. "~30" was close; **"11 absent" was 13** — it dropped **Custom Text** and **Custom Dropdown**, which the frame draws as rows of their own. Rundesk holds 22. **~~Formula~~ ~~Tasks~~ ~~Signature~~ built in `0146`** — closed by `custom-field-types.mjs`, 32 checks, 32 break patches. **The remaining 10 are not a build and are recorded as such:** eight need a language model — Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, and the picker's own **AI Fields** group names the first three — and `ANTHROPIC_API_KEY` is empty here and in CI; **Relationship** would be a second store for what `task_doc_links` already holds; **Button** stores no value at all, and `AutomationsService` has no manual trigger, so the only thing buildable today is a button wired to nothing. ~~Files~~ and ~~Voting~~ built in `0145` |
 | B | Searchable field-type picker — a search box that narrows the `<select>` and selects as you type |
 | B | Progress (Auto) config panel — engine *and* the panel frame `00:25` shows |
 | B | Field config: required flag and Cancel/Create |
