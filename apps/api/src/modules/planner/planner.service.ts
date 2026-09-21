@@ -1,8 +1,10 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { and, asc, eq, gte, lt } from 'drizzle-orm'
-import { taskTimeBlocks, tasks, users, lists } from '@rundesk/db'
+import { taskTimeBlocks, tasks, users, lists, workspaces } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { PeopleService } from '../people/people.service'
+import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
 
 /**
  * §V2-02 — the Planner.
@@ -21,6 +23,29 @@ const MAX_RANGE_DAYS = 62
 
 /** Frame `14:45` — dragging task `dbgdh` on makes a block "Work on dbgdh". */
 export const DEFAULT_BLOCK_PREFIX = 'Work on'
+
+/**
+ * §V2-14d, frame `13:28` — the picker's second group, headed with the
+ * WORKSPACE's name and holding exactly two calendars: **Time off** and
+ * **Holidays**.
+ *
+ * They are listed here, once, and the web picker imports its labels from its
+ * own catalogue keyed on these same ids. Two hand-written copies of "the
+ * workspace has these two calendars" is how the third picker in this ledger
+ * ended up offering ten of nineteen field types.
+ */
+export const WORKSPACE_CALENDAR_IDS = ['workspace:timeOff', 'workspace:holidays'] as const
+export type WorkspaceCalendarId = (typeof WORKSPACE_CALENDAR_IDS)[number]
+
+/**
+ * §V2-15b — how many people the side-by-side grid will draw at once.
+ *
+ * Not a performance limit: each column is a `getCalendar` call, and twelve
+ * columns on a laptop is already a grid nobody can read. The refusal names the
+ * number so a client can say why rather than silently dropping the tail, which
+ * is the shape of the confident-zero defect.
+ */
+export const MAX_TEAM_SCHEDULE_PEOPLE = 8
 
 /** The values `users.week_start` already accepts, unchanged. */
 const WEEK_STARTS = ['sunday', 'monday', 'saturday']
@@ -50,7 +75,157 @@ function parseInstant(value: unknown, field: string): Date {
 
 @Injectable()
 export class PlannerService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    /*
+     * §V2-15b — the side-by-side grid asks `PeopleService` for each column
+     * rather than reading meetings and free/busy itself.
+     *
+     * That is the point. `getCalendar` is where the privacy rule lives: a
+     * window carries a start, an end and a source and HAS NO TITLE FIELD, and
+     * `assertBothMembers` is what stops a non-member reading anybody. A team
+     * grid with its own query would be a second answer to "when is this person
+     * busy" — and the second one would be the one written by somebody who had
+     * not read the comment on the first.
+     */
+    private people: PeopleService,
+    /** §V2-14d — the picker's account groups are this service's rows, projected
+     *  through `PUBLIC_CALENDAR_ACCOUNT_COLUMNS` so no token can ride along. */
+    private accounts: CalendarAccountsService,
+  ) {}
+
+  /**
+   * §V2-14d, frame `13:28` — everything the calendar picker draws, in the
+   * order it draws it.
+   *
+   * ASSEMBLED HERE, NOT IN THE BROWSER. The frame's popover is two kinds of
+   * thing in one list — external accounts and calendars the workspace itself
+   * owns — and a client that built that list would have to know which
+   * workspace calendars exist. That knowledge would then live in two places,
+   * which is the duplicated-list defect this ledger has now found seven times.
+   * The labels stay in the web catalogue (they are translated); the SET, the
+   * grouping, the order and the hidden flag come from here.
+   *
+   * `checked` is the live answer, not a default: an account is checked when
+   * `counts_as_busy` is on — the column that already means "this calendar is
+   * read" — and a workspace calendar is checked when it is not in the person's
+   * hide-list. So the count chip beside the picker is a count of calendars
+   * that genuinely contribute, which is the difference between this and a
+   * badge that always says the number of rows.
+   */
+  async listCalendars(workspaceId: string, userId: string) {
+    const [accounts, settings, [workspace]] = await Promise.all([
+      this.accounts.list(userId, workspaceId),
+      this.getSettings(userId),
+      this.db
+        .select({ name: workspaces.name })
+        .from(workspaces)
+        .where(eq(workspaces.id, workspaceId))
+        .limit(1),
+    ])
+
+    const hidden = new Set(settings.hiddenCalendarIds ?? [])
+    const accountGroups = accounts.map((a: any) => ({
+      /* The group heading in the frame is the ADDRESS, not the provider —
+       * `hanixh343@gmail.com` — because somebody with two Google accounts gets
+       * two groups both headed "Google" otherwise. */
+      key: `account:${a.id}`,
+      title: a.externalAccountEmail || a.provider,
+      kind: 'account' as const,
+      calendars: [
+        {
+          id: `account:${a.id}`,
+          label: a.externalAccountEmail || a.provider,
+          checked: a.countsAsBusy === true,
+          isDefault: a.isDefault === true,
+          accountId: a.id,
+          kind: 'account' as const,
+        },
+      ],
+    }))
+
+    return {
+      groups: [
+        ...accountGroups,
+        {
+          key: 'workspace',
+          title: workspace?.name ?? '',
+          kind: 'workspace' as const,
+          calendars: WORKSPACE_CALENDAR_IDS.map((id) => ({
+            id,
+            /* No label: the web has the translated one, keyed on this id. A
+             * server-side English string here would be the thing four locales
+             * then failed to translate. */
+            label: null,
+            checked: !hidden.has(id),
+            isDefault: false,
+            accountId: null,
+            kind: 'workspace' as const,
+          })),
+        },
+      ],
+    }
+  }
+
+  /**
+   * §V2-15b, frame `12:48` — several people's calendars, side by side.
+   *
+   * ONE CALL PER PERSON, GATHERED HERE rather than N calls from the browser.
+   * The browser version was the obvious build and it is wrong twice: eight
+   * round trips against a shared `staleTime` make the grid fill in raggedly,
+   * and — worse — a column whose request failed would simply render empty,
+   * which is a person with no meetings and a person the server could not reach
+   * drawn identically. Here a failure is `error` ON THAT COLUMN, so the grid
+   * can say which person it could not answer for.
+   *
+   * Every column goes through `assertBothMembers` inside `getCalendar`, so
+   * passing a stranger's id refuses that column instead of widening the read.
+   */
+  async teamSchedules(
+    workspaceId: string,
+    requesterId: string,
+    userIds: string[],
+    opts: { from?: string; to?: string } = {},
+  ) {
+    /*
+     * De-duplicated BEFORE the cap, and the order the caller asked for is
+     * kept. Without the de-dupe, "Sara, Sara" draws two identical columns —
+     * which is the one failure mode a side-by-side grid cannot survive,
+     * because two columns of the same person look exactly like two people who
+     * happen to be busy at the same times.
+     */
+    const unique = [...new Set(userIds.filter(Boolean))]
+    if (unique.length === 0) return { people: [] }
+    if (unique.length > MAX_TEAM_SCHEDULE_PEOPLE) {
+      throw new BadRequestException(
+        `A team schedule can show at most ${MAX_TEAM_SCHEDULE_PEOPLE} people at once`,
+      )
+    }
+
+    const columns = await Promise.all(
+      unique.map(async (userId) => {
+        try {
+          const calendar = await this.people.getCalendar(workspaceId, requesterId, userId, opts)
+          return { userId, ...calendar, error: null as string | null }
+        } catch (err: any) {
+          /*
+           * A column that could not be read says so and the rest still draw.
+           * Throwing would mean one person leaving the workspace blanked the
+           * whole grid — and `busy: []` would mean the same thing as "free all
+           * week", which is the confidently-wrong state `free-busy.ts` exists
+           * to prevent.
+           */
+          return {
+            userId,
+            meetings: [],
+            busy: [],
+            error: typeof err?.message === 'string' ? err.message : 'Could not read that calendar',
+          }
+        }
+      }),
+    )
+    return { people: columns }
+  }
 
   /**
    * The blocks on one person's grid between two instants.
@@ -181,11 +356,53 @@ export class PlannerService {
       'upcomingShowTimeLeft',
       'upcomingQuickJoin',
       'upcomingDesktopNotify',
+      'plannerOnboardingDismissed',
     ] as const
     for (const key of BOOLEAN_KEYS) {
       const value = (plannerOnly as Record<string, unknown>)[key]
       if (value !== undefined && typeof value !== 'boolean') {
         throw new BadRequestException(`"${key}" must be true or false`)
+      }
+    }
+    /*
+     * §V2-15a, frame `14:05` — Grid size.
+     *
+     * Validated against the same three the swatches offer. An unknown value
+     * would fall through the reader's lookup to `undefined` and make the hour
+     * height `NaN`, which does not throw: it draws a grid with no rows at all.
+     */
+    if (patch.gridSize !== undefined) {
+      const allowed = ['default', 'large', 'xl']
+      if (!allowed.includes(patch.gridSize as string)) {
+        throw new BadRequestException(`Grid size must be one of ${allowed.join(', ')}`)
+      }
+    }
+    /*
+     * §V2-14d / §V2-15b — the two string-array settings.
+     *
+     * Rejected rather than coerced, for the reason the boolean block above
+     * gives: a blob that accepts anything makes two readers of one setting
+     * disagree instead of failing. `hiddenCalendarIds` is narrowed to the
+     * workspace calendar keys the picker can actually hide, so a client cannot
+     * park an account id in there and expect the grid to honour it — that half
+     * is the account's own `counts_as_busy` column.
+     */
+    for (const key of ['hiddenCalendarIds', 'teamScheduleUserIds'] as const) {
+      const value = (plannerOnly as Record<string, unknown>)[key]
+      if (value === undefined) continue
+      if (!Array.isArray(value) || value.some((v) => typeof v !== 'string' || !v)) {
+        throw new BadRequestException(`"${key}" must be an array of ids`)
+      }
+      if (value.length > 50) {
+        throw new BadRequestException(`"${key}" cannot hold more than 50 entries`)
+      }
+    }
+    if (patch.hiddenCalendarIds !== undefined) {
+      const unknown = patch.hiddenCalendarIds.filter(
+        (id) => !(WORKSPACE_CALENDAR_IDS as readonly string[]).includes(id),
+      )
+      if (unknown.length) {
+        throw new BadRequestException(`Not a calendar that can be hidden: ${unknown[0]}`)
       }
     }
     /* The fourth value is `list`, and the web dialog's own copy of this union

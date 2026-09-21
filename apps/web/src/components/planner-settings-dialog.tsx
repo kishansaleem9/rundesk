@@ -103,6 +103,8 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
  */
 type Settings = {
   eventStyle?: 'subtle' | 'solid'
+  /** §V2-15a, frame `14:05` — first on the Appearance page, above Event style. */
+  gridSize?: PlannerGridSize
   defaultDurationMinutes?: number
   colorTasksBy?: 'none' | 'priority' | 'status' | 'list'
   showWeekends?: boolean
@@ -200,6 +202,34 @@ const FOOTER: Array<{ key: FooterPane; icon: typeof Palette; labelKey: Translati
  * two names here while the page kept its own copy means two new sections that
  * the Sidebar page offers and the rail never draws.
  */
+/**
+ * §V2-15a, frame `14:05` — **Grid size**: "Choose how large events and time
+ * slots appear in the grid", offered as Default · Large · XL.
+ *
+ * ONE NUMBER, AND EVERYTHING ELSE IS DERIVED FROM IT. On the planner the hour
+ * gutter's rows, the hairlines, every block rectangle's `top` and `height`,
+ * the now-line's offset and the scroll-to-now on arrival are all computed from
+ * the hour height, so changing this moves all of them together and none can
+ * drift. 48 is kept as `default` so nobody's grid changes shape because a
+ * setting was added.
+ *
+ * 48 → 72 → 96 rather than 48 → 64 → 80: the frame's three previews differ at
+ * a glance, and two sizes six pixels apart are a control people cannot tell
+ * they have used.
+ *
+ * Declared HERE, beside `RAIL_SECTIONS`, and imported by the planner page for
+ * the same reason that one is — the control and the grid must agree about what
+ * "Large" means, and the only way to guarantee that is for there to be one
+ * copy of the number.
+ */
+export const GRID_SIZES = { default: 48, large: 72, xl: 96 } as const
+export type PlannerGridSize = keyof typeof GRID_SIZES
+/** The swatch row, in the frame's own order. */
+export const GRID_SIZE_PREVIEW_PX = (Object.keys(GRID_SIZES) as PlannerGridSize[]).map((key) => ({
+  key,
+  px: GRID_SIZES[key],
+}))
+
 export const RAIL_SECTIONS = [
   'priorities',
   'meetWith',
@@ -222,10 +252,15 @@ export function PlannerSettingsDialog({
   open,
   onOpenChange,
   workspaceId,
+  initialPage,
 }: {
   open: boolean
   onOpenChange: (next: boolean) => void
   workspaceId: string
+  /** §V2-14d — which page to land on. Frame `13:28`'s "Manage accounts" opens
+   *  this dialog on Accounts; the gear passes nothing and gets Appearance,
+   *  exactly as before. */
+  initialPage?: PageKey
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
@@ -264,7 +299,18 @@ export function PlannerSettingsDialog({
   })
   const set = (patch: Settings) => save.mutate(patch)
 
-  useEffect(() => { if (!open) { setPage('appearance'); setPane(null) } }, [open])
+  /*
+   * Reset on CLOSE, and choose the landing page on OPEN.
+   *
+   * Both halves in one effect because they are one rule: the dialog's page is
+   * decided by how it was opened. Resetting only on close and never setting on
+   * open would mean "Manage accounts" worked once and then re-opened on
+   * Appearance for the rest of the session.
+   */
+  useEffect(() => {
+    if (open) setPage(initialPage ?? 'appearance')
+    else { setPage('appearance'); setPane(null) }
+  }, [open, initialPage])
 
   /* The account's own zone is always offered, even if this browser's list
    * lacks it — otherwise opening the page on a different machine would show a
@@ -337,6 +383,52 @@ export function PlannerSettingsDialog({
 
             {pane === null && page === 'appearance' && (
               <div className="space-y-4" data-testid="planner-settings-appearance">
+                {/*
+                  §V2-15a, frame `14:05` — **Grid size**, and it sits FIRST,
+                  above Event style, because that is where the frame puts it.
+                  Order is part of what the frame specifies: a person told
+                  "it's the first thing on Appearance" should find it there.
+
+                  Each swatch previews the hour height it sets, so the control
+                  shows its own effect — the frame's three cards all draw the
+                  same "Team sync · 9 – 11am" at three sizes. `data-hour-px`
+                  carries the number the grid will use, which is what a suite
+                  can measure the real grid against; asserting the button is
+                  merely `aria-pressed` would pass on a picker that remembers a
+                  choice and changes nothing.
+                */}
+                <Row label={t('plannerSettings.gridSize')} hint={t('plannerSettings.gridSizeHint')}>
+                  <div className="grid grid-cols-3 gap-1 rounded-md border border-border/70 p-0.5">
+                    {GRID_SIZE_PREVIEW_PX.map(({ key, px }) => (
+                      <button
+                        key={key}
+                        type="button"
+                        data-testid={`planner-grid-size-${key}`}
+                        data-hour-px={px}
+                        aria-pressed={(settings?.gridSize ?? 'default') === key}
+                        onClick={() => set({ gridSize: key })}
+                        className={cn(
+                          'flex flex-col items-center gap-1 rounded px-2 py-1.5 text-[12px]',
+                          (settings?.gridSize ?? 'default') === key
+                            ? 'bg-accent/15 font-medium text-accent'
+                            : 'hover:bg-muted/50',
+                        )}
+                      >
+                        <span
+                          aria-hidden
+                          data-testid={`planner-grid-size-preview-${key}`}
+                          className="w-full rounded-sm border-l-2 border-accent/70 bg-accent/10"
+                          /* Scaled down so three previews fit the row; the
+                             RATIO is what the swatch is showing, and it is the
+                             same ratio the grid will use. */
+                          style={{ height: Math.round(px / 3) }}
+                        />
+                        {t(`plannerSettings.gridSize.${key}` as never)}
+                      </button>
+                    ))}
+                  </div>
+                </Row>
+
                 <Row label={t('plannerSettings.eventStyle')}>
                   <div className="grid grid-cols-2 gap-1 rounded-md border border-border/70 p-0.5">
                     {(['subtle', 'solid'] as const).map((style) => (
@@ -513,7 +605,12 @@ export function PlannerSettingsDialog({
               </div>
             )}
 
-            {pane === null && page === 'accounts' && <PlannerAccountsPage workspaceId={workspaceId} />}
+            {pane === null && page === 'accounts' && (
+              <div className="space-y-5">
+                <PlannerAccountsPage workspaceId={workspaceId} />
+                <ConferencingRow workspaceId={workspaceId} />
+              </div>
+            )}
 
             {pane === null && page === 'sidebar' && (
               <div className="space-y-1" data-testid="planner-settings-sidebar">
@@ -811,6 +908,148 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
         {hint && <div className="text-[11px] text-muted-foreground">{hint}</div>}
       </div>
       <div className="shrink-0">{children}</div>
+    </div>
+  )
+}
+
+/**
+ * §V2-14e, frame `13:36` — **Conferencing**, the last section of the Accounts
+ * page: *"Connect other video conferencing providers"* over a **Zoom** row
+ * reading *"Connect Zoom"* with a **Connect** button on the right.
+ *
+ * IT READS THE CONNECTION THE APP CENTER WRITES, and that is the whole design
+ * decision. Zoom is already a complete OAuth provider in this product —
+ * `integration-connections.service.ts` has its auth URL, its token exchange,
+ * its profile fetch and its `missingEnvKeys` check, and the App Center's grid
+ * connects it. A second "is Zoom connected?" answer kept beside the calendar
+ * settings would be the duplicated-list defect in its most damaging form: two
+ * surfaces disagreeing about whether an integration the user is relying on is
+ * live. So this row is a second DOOR to one fact, not a second fact — the same
+ * query key, the same `oauth/start`, the same `DELETE`.
+ *
+ * THE BUTTON IS DISABLED WHEN THE SERVER CANNOT DO IT. `providers/status`
+ * reports whether `ZOOM_CLIENT_ID`/`ZOOM_CLIENT_SECRET` are set; without them
+ * `oauth/start` answers 400 and the person gets an error for something they
+ * did not do wrong. An offer that cannot be honoured is the state this avoids,
+ * the same reasoning the assignee picker's invite-by-email is gated on.
+ */
+function ConferencingRow({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+
+  const connections = useQuery({
+    // The App Center's own key, so connecting there and opening this row shows
+    // the same answer without either surface knowing about the other.
+    queryKey: ['integration-connections', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; status: string }>>(
+        `/workspaces/${workspaceId}/integrations/connections`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const availability = useQuery({
+    queryKey: ['integration-provider-status', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; available: boolean; missingEnvKeys?: string[] }>>(
+        `/workspaces/${workspaceId}/integrations/connections/providers/status`,
+      ),
+    enabled: !!workspaceId,
+  })
+
+  const connected = (connections.data ?? []).some(
+    (c) => c.provider === 'zoom' && c.status === 'connected',
+  )
+  /*
+   * `?? true` while the availability query is in flight, NOT `?? false`. A
+   * button that starts disabled and enables a moment later is a button people
+   * click at nothing; and `ai-value-panel.tsx:459` is this ledger's record of
+   * what the other default costs — a page printing "not available" as a fact
+   * about the workspace while its own query was still loading.
+   */
+  const available =
+    availability.data === undefined
+      ? true
+      : (availability.data.find((p) => p.provider === 'zoom')?.available ?? false)
+
+  const startOAuth = useMutation({
+    mutationFn: () =>
+      api<{ authUrl: string }>(
+        `/workspaces/${workspaceId}/integrations/connections/zoom/oauth/start`,
+        { method: 'POST' },
+      ),
+    onSuccess: ({ authUrl }) => {
+      window.location.href = authUrl
+    },
+    onError: (err) => {
+      // The provider's own reason, not a generic one: "Zoom is not configured"
+      // and "you are not allowed to connect apps" send the person to two
+      // different places.
+      toast.error(err instanceof ApiError ? err.message : t('plannerSettings.conferencing.failed'))
+    },
+  })
+  const disconnect = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/integrations/connections/zoom`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['integration-connections', workspaceId] })
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('plannerSettings.conferencing.failed'))
+    },
+  })
+
+  return (
+    <div className="space-y-2 border-t border-border/60 pt-4" data-testid="planner-conferencing">
+      <div>
+        <div className="text-[13px] font-medium">{t('plannerSettings.conferencing')}</div>
+        <div className="text-[11px] text-muted-foreground">
+          {t('plannerSettings.conferencingHint')}
+        </div>
+      </div>
+      <div
+        className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2"
+        data-testid="planner-conferencing-zoom"
+        data-connected={connected ? 'true' : 'false'}
+      >
+        <span
+          aria-hidden
+          className="flex h-6 w-6 shrink-0 items-center justify-center rounded bg-[#2D8CFF] text-[11px] font-semibold text-white"
+        >
+          Z
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="text-[13px]">{t('plannerSettings.conferencing.zoom')}</div>
+          <div className="text-[11px] text-muted-foreground" data-testid="planner-conferencing-zoom-state">
+            {connected
+              ? t('plannerSettings.conferencing.connected')
+              : available
+                ? t('plannerSettings.conferencing.connectZoom')
+                : t('plannerSettings.conferencing.unavailable')}
+          </div>
+        </div>
+        {connected ? (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 text-[12px]"
+            data-testid="planner-conferencing-disconnect"
+            disabled={disconnect.isPending}
+            onClick={() => disconnect.mutate()}
+          >
+            {t('plannerSettings.conferencing.disconnect')}
+          </Button>
+        ) : (
+          <Button
+            size="sm"
+            className="h-7 text-[12px]"
+            data-testid="planner-conferencing-connect"
+            disabled={!available || startOAuth.isPending}
+            onClick={() => startOAuth.mutate()}
+          >
+            {t('plannerSettings.conferencing.connect')}
+          </Button>
+        )}
+      </div>
     </div>
   )
 }

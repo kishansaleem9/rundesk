@@ -4,7 +4,7 @@ import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, folders, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -1055,6 +1055,172 @@ export class WorkspacesService {
       }
       throw err
     }
+  }
+
+  /**
+   * §V2-S13 `| M | Sidebar: drag-reorder …` — put the tree's siblings in the
+   * order somebody chose, and keep them there.
+   *
+   * THE COLUMN WAS ALREADY THERE AND HAD NEITHER END. `projects.position` has
+   * existed since the table did; nothing wrote it (`updateProject` whitelists
+   * the updatable columns and deliberately excludes it) and nothing read it
+   * (`getProjectsBySpace` has no `orderBy` at all). A column with no writer and
+   * no reader is the mirror defect with the mirror missing too: the schema is
+   * evidence for an arrangement the product cannot store. This is its writer;
+   * the sidebar is its reader.
+   *
+   * LISTS ARE DELIBERATELY NOT HANDLED HERE. `POST /lists/project/:id/reorder`
+   * already writes `lists.position`, and `getListsByProject` already orders by
+   * it — the project shell page has used both for some time. A second route
+   * writing the same column would be two writers for one fact, which is how the
+   * duplicated-logic bug this audit keeps finding gets made. The sidebar calls
+   * that route for lists and this one for projects and folders.
+   *
+   * WHAT THE ORDER IS *OF* is stated by the caller rather than inferred, for
+   * the reason `canDropOn` in `workspace-sidebar.tsx` carries at length: a
+   * client's belief about where an item currently lives is a refetch behind the
+   * server and loses the race. The container is named; membership of it is then
+   * checked against the database, not against what the browser thought.
+   */
+  async reorderSidebarItems(
+    workspaceId: string,
+    actor: { id: string; role?: string | null },
+    input: {
+      kind?: 'project' | 'folder'
+      containerKind?: 'space' | 'folder'
+      containerId?: string
+      orderedIds?: string[]
+    },
+  ) {
+    const kind = input?.kind
+    const containerKind = input?.containerKind
+    const containerId = input?.containerId
+    const orderedIds = Array.isArray(input?.orderedIds) ? input.orderedIds : []
+
+    if (kind !== 'project' && kind !== 'folder') {
+      throw new BadRequestException('kind must be "project" or "folder"')
+    }
+    if (kind === 'folder' && containerKind !== 'space') {
+      throw new BadRequestException('a folder is ordered within its space, so containerKind must be "space"')
+    }
+    if (kind === 'project' && containerKind !== 'space' && containerKind !== 'folder') {
+      throw new BadRequestException('containerKind must be "space" or "folder"')
+    }
+    if (!containerId) throw new BadRequestException('containerId is required')
+
+    // Which space does the named container belong to, and is that space in the
+    // workspace the route is scoped to? The guard proves membership of the
+    // workspace; this proves the container is one of ITS containers, so a valid
+    // member of workspace A cannot reorder workspace B's tree.
+    let spaceId: string
+    if (containerKind === 'space') {
+      const [row] = await this.db
+        .select({ id: spaces.id, workspaceId: spaces.workspaceId })
+        .from(spaces)
+        .where(eq(spaces.id, containerId))
+        .limit(1)
+      if (!row) throw new NotFoundException('No such space')
+      if (row.workspaceId !== workspaceId) throw new ForbiddenException('That space is not in this workspace')
+      spaceId = row.id
+    } else {
+      const [row] = await this.db
+        .select({ id: folders.id, spaceId: folders.spaceId, workspaceId: spaces.workspaceId })
+        .from(folders)
+        .innerJoin(spaces, eq(spaces.id, folders.spaceId))
+        .where(eq(folders.id, containerId))
+        .limit(1)
+      if (!row) throw new NotFoundException('No such folder')
+      if (row.workspaceId !== workspaceId) throw new ForbiddenException('That folder is not in this workspace')
+      spaceId = row.spaceId
+    }
+
+    // The order is shared by everybody who opens the tree — `projects.position`
+    // is one column, not one per person — so it is a manager's arrangement, and
+    // the refusal says which of the two 403s this is.
+    if (!(await resolveIsManager(this.db, workspaceId, actor.id, actor.role))) {
+      throw new ForbiddenException('Only a workspace manager or admin can reorder the sidebar tree')
+    }
+
+    const siblings =
+      kind === 'folder'
+        ? await this.db
+            .select({ id: folders.id })
+            .from(folders)
+            // The same `isArchived` filter `getFoldersBySpace` applies, or the
+            // set the sidebar can see and the set this demands are different
+            // sets and every reorder 400s on a folder nobody drew.
+            .where(and(eq(folders.spaceId, spaceId), eq(folders.isArchived, false)))
+            .orderBy(asc(folders.position), asc(folders.name))
+        : await this.db
+            .select({ id: projects.id })
+            .from(projects)
+            .where(
+              and(
+                eq(projects.spaceId, spaceId),
+                eq(projects.isArchived, false),
+                eq(projects.isDefaultContainer, false),
+                containerKind === 'folder'
+                  ? eq(projects.folderId, containerId)
+                  : isNull(projects.folderId),
+              ),
+            )
+            .orderBy(asc(projects.position), asc(projects.createdAt))
+
+    const valid = new Set(siblings.map((s) => s.id))
+    const strays = orderedIds.filter((id) => !valid.has(id))
+    // Two different mistakes, two different sentences. "Wrong length" and "a
+    // stranger in the list" are the same 400 otherwise, and the caller cannot
+    // tell a stale tree from a mis-addressed container.
+    if (strays.length > 0) {
+      throw new BadRequestException(
+        `These ids are not ${kind}s of ${containerKind} ${containerId}: ${strays.join(', ')}`,
+      )
+    }
+    if (orderedIds.length !== siblings.length || new Set(orderedIds).size !== orderedIds.length) {
+      throw new BadRequestException(
+        `orderedIds must list every ${kind} in this ${containerKind} exactly once ` +
+          `(got ${orderedIds.length}, ${siblings.length} expected)`,
+      )
+    }
+
+    const now = new Date()
+    await Promise.all(
+      orderedIds.map((id, position) =>
+        kind === 'folder'
+          ? this.db.update(folders).set({ position }).where(eq(folders.id, id))
+          : this.db.update(projects).set({ position, updatedAt: now }).where(eq(projects.id, id)),
+      ),
+    )
+
+    // Read back from the database rather than echoing the request. The caller
+    // asked for an order; what it needs to know is the order that is now
+    // stored, and those are only the same thing when the write worked.
+    const stored =
+      kind === 'folder'
+        ? await this.db
+            .select({ id: folders.id })
+            .from(folders)
+            // The same `isArchived` filter `getFoldersBySpace` applies, or the
+            // set the sidebar can see and the set this demands are different
+            // sets and every reorder 400s on a folder nobody drew.
+            .where(and(eq(folders.spaceId, spaceId), eq(folders.isArchived, false)))
+            .orderBy(asc(folders.position), asc(folders.name))
+        : await this.db
+            .select({ id: projects.id })
+            .from(projects)
+            .where(
+              and(
+                eq(projects.spaceId, spaceId),
+                eq(projects.isArchived, false),
+                eq(projects.isDefaultContainer, false),
+                containerKind === 'folder'
+                  ? eq(projects.folderId, containerId)
+                  : isNull(projects.folderId),
+              ),
+            )
+            .orderBy(asc(projects.position), asc(projects.createdAt))
+
+    return { kind, containerKind, containerId, orderedIds: stored.map((s) => s.id) }
   }
 
   private async reserveUniqueSlug(base: string): Promise<string> {

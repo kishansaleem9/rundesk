@@ -12,7 +12,7 @@ import {
 import { ConfigService } from '@nestjs/config'
 import Anthropic from '@anthropic-ai/sdk'
 import type { Response } from '@nestjs/common'
-import { and, asc, desc, eq, gte, inArray, isNull, lte, ne, or, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, type SQL } from 'drizzle-orm'
 import { aiAnswerFeedback, aiModelPreferences, aiUsage, meetings, workspaces, workspaceMembers, spaces, spaceMembers, projects, projectMembers, lists, listStatuses, tasks, taskComments, taskAttachments, taskAssignees, taskActivity, docs, users, notifications, knowledgeEmbeddings, personalTasks, skills } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -62,6 +62,7 @@ import {
   REFERENCE_INSTRUCTION,
   containerPath,
   describeContainerResult,
+  enabledViewsFor,
   isContainerTool,
   refuse,
   resolveContainerSpace,
@@ -69,6 +70,30 @@ import {
   type ContainerSpace,
   type ContainerToolResult,
 } from './ai-containers'
+import {
+  contextualCardCount,
+  overdueBefore,
+  starterCards,
+  type StarterCard,
+  type StarterFacts,
+  type StarterSurface,
+} from './ai-starters'
+import {
+  ASSIGN_TOOLS,
+  describeAssignSuggestion,
+  isAssignTool,
+  rankAssignees,
+  refuseAssign,
+  type AssigneeCandidate,
+  type AssignResult,
+} from './ai-assign'
+/*
+ * The server's ONE list of view keys, imported rather than restated. Four
+ * copies of this set already exist in the tree and two of them had drifted
+ * (the wizard and the space-views dialog both lost `team`); a fifth written
+ * here would be the same bug with a new address.
+ */
+import { SPACE_VIEW_KEYS } from '../spaces/space-presets'
 import {
   COMMAND_TOOLS,
   planFromToolCalls,
@@ -1640,7 +1665,16 @@ Focus on the key goals, current status, and any blockers.`,
      * the model can call that cannot work is the worst version of this row.
      */
     const canAct = !!agent && !skillPrompt?.trim() && !!this.lists && !!this.folders
-    const tools = canAct ? CONTAINER_TOOLS : []
+    /*
+     * §V2-S17 `15:50` — and the one tool here that does NOT write.
+     *
+     * `suggest_assignee` reads three numbers per candidate and returns a
+     * recommendation; the assignment itself stays behind `assign_task` and the
+     * confirm step. Offered on the same gate as the writers rather than a
+     * looser one, because it reports one person's workload to another and that
+     * is not a thing a skill-shaped turn should be able to reach for either.
+     */
+    const tools = canAct ? [...CONTAINER_TOOLS, ...ASSIGN_TOOLS] : []
 
     const intro = skillPrompt?.trim()
       ? skillPrompt.trim()
@@ -1768,6 +1802,24 @@ ${FOLLOW_UP_INSTRUCTION}${agentPrompt}`
            * three retrieval steps already do.
            */
           raw.write(`data: ${JSON.stringify({ step: use.name })}\n\n`)
+          /*
+           * §V2-S17 `15:50` — the read-only one, answered from the database and
+           * handed back as the deterministic sentence.
+           *
+           * Branching here rather than inside `runContainerTool` because that
+           * method's whole contract is "this writes a container"; folding a
+           * read into it would make its refusal vocabulary mean two things.
+           */
+          if (isAssignTool(use.name)) {
+            const suggestion = await this.suggestAssignee(toolString(input.taskId), agent.userId)
+            toolResults.push({
+              type: 'tool_result',
+              tool_use_id: use.id,
+              is_error: !suggestion.ok,
+              content: JSON.stringify({ ...suggestion, say: describeAssignSuggestion(suggestion) }),
+            })
+            continue
+          }
           const result = await this.runContainerTool(use.name, input, agent, await spaceCatalog())
           /*
            * The tool result is the DETERMINISTIC sentence built from the row,
@@ -2052,7 +2104,14 @@ Current date: ${new Date().toISOString().split('T')[0]}`
     actorRole?: string | null,
   ): Promise<{
     tasks: Array<{ id: string; title: string; status: string; statusCategory: string; listId: string; listName: string }>
-    lists: Array<{ id: string; name: string; path: string }>
+    lists: Array<{
+      id: string
+      name: string
+      path: string
+      spaceId: string
+      projectId: string
+      views: string[]
+    }>
   }> {
     const taskIds = uniqueUuids(ids.taskIds)
     const listIds = uniqueUuids(ids.listIds)
@@ -2084,7 +2143,15 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         : Promise.resolve([]),
       listIds.length
         ? this.db
-            .select({ id: lists.id, name: lists.name, projectName: projects.name, spaceName: spaces.name })
+            .select({
+              id: lists.id,
+              name: lists.name,
+              projectId: lists.projectId,
+              projectName: projects.name,
+              spaceId: projects.spaceId,
+              spaceName: spaces.name,
+              viewConfig: spaces.viewConfig,
+            })
             .from(lists)
             .innerJoin(projects, eq(projects.id, lists.projectId))
             .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -2113,6 +2180,26 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         // The path the container tools compose, so a chip made by the AI and a
         // chip resolved afterwards read identically.
         path: containerPath(l.spaceName, l.name),
+        /*
+         * §V2-S16 `18:48` — WHERE THE CHIP GOES.
+         *
+         * The frame's path chips are pressed. A chip is a link, and a link
+         * needs the whole route: Rundesk addresses a list as
+         * `/app/:workspaceId/:spaceId/:projectId/:listId`. Sending only the id
+         * and the display path — which is all this returned before — left the
+         * browser able to draw the chip and unable to open it, which is how a
+         * label ends up pretending to be a control.
+         */
+        spaceId: l.spaceId,
+        projectId: l.projectId,
+        /*
+         * And WHICH TABS EXIST THERE, live. A `[[view:…:board]]` chip written
+         * into an answer last week must not still offer a Board that the space
+         * has since turned off: the status badge on a task chip is read from
+         * the database at render time for exactly this reason, and a view chip
+         * is the same promise about a different fact.
+         */
+        views: enabledViewsFor(l.viewConfig, SPACE_VIEW_KEYS),
       })),
     }
   }
@@ -2856,6 +2943,219 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
     }
   }
 
+  /**
+   * §V2-S17/S22 frames `16:32` / `21:15` — the four starter cards, for THIS
+   * caller, on THIS surface, right now.
+   *
+   * THREE COUNTS AND A SURFACE, and every one of them is read here rather than
+   * inferred in the browser. The two the cards actually turn on are personal —
+   * *your* overdue work and *your* open work — and the browser cannot compute
+   * either without shipping it the workspace's task table.
+   *
+   * Visibility is `taskVisibilityFilter`, the same filter the ref resolver and
+   * the command context use, so a private task you may not see cannot put
+   * "Find blockers" on your screen. The assigned counts are additionally joined
+   * through `task_assignees`, so they are your tasks and not the workspace's.
+   *
+   * `ne(statusCategory, 'closed')` rather than a status-key list: a workspace
+   * can rename "Done" to anything, and a count keyed on the word would start
+   * reporting finished work as open the day somebody did.
+   */
+  async starterCardsFor(
+    workspaceId: string,
+    userId: string,
+    surface: StarterSurface,
+    actorRole?: string | null,
+  ): Promise<{ facts: StarterFacts; cards: StarterCard[]; contextual: number }> {
+    const isManager = await resolveIsManager(this.db, workspaceId, userId, actorRole)
+    const visible = taskVisibilityFilter(this.db, userId, isManager)
+    const inWorkspace = and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), visible)
+    // `overdueBefore` rather than a local midnight: `suggestAssignee` counts
+    // late work too, and two definitions a day apart is how the starter card
+    // and the assignee reason start disagreeing about the same person.
+    const todayStart = overdueBefore()
+
+    const mine = (extra?: SQL) =>
+      this.db
+        .select({ count: sql<number>`count(distinct ${tasks.id})::int` })
+        .from(tasks)
+        .innerJoin(taskAssignees, eq(taskAssignees.taskId, tasks.id))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(inWorkspace, eq(taskAssignees.userId, userId), ne(tasks.statusCategory, 'closed'), extra))
+
+    const [overdueRows, assignedRows, openRows] = await Promise.all([
+      mine(lt(tasks.dueDate, todayStart)),
+      mine(),
+      this.db
+        .select({ count: sql<number>`count(*)::int` })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(inWorkspace, ne(tasks.statusCategory, 'closed'))),
+    ])
+
+    const facts: StarterFacts = {
+      surface,
+      overdue: overdueRows[0]?.count ?? 0,
+      assignedOpen: assignedRows[0]?.count ?? 0,
+      workspaceOpen: openRows[0]?.count ?? 0,
+    }
+    const cards = starterCards(facts)
+    // Returned beside the cards, not computed from them in the browser: the
+    // panel must be able to say "these four are a floor" without re-deriving
+    // the rule that decided so.
+    return { facts, cards, contextual: contextualCardCount(cards) }
+  }
+
+  /**
+   * §V2-S17 frame `15:50` — **"⚡ Assign with AI"**: who should take this.
+   *
+   * THE EVIDENCE, READ HERE. Three numbers per candidate, all from Postgres,
+   * all about the same workspace:
+   *
+   *   · `openTasks` — their open assigned load, from `collectWorkloadLoads`,
+   *     the SAME read the §7.12 workload panel uses. Not a second count: two
+   *     definitions of "how much is Ana carrying" is how the balance panel and
+   *     this feature end up recommending opposite things on the same day.
+   *   · `inList`   — their open tasks in THIS task's list. Context.
+   *   · `overdue`  — how much of their load is already late.
+   *
+   * WHO IS A CANDIDATE. Non-guest members of the workspace who can SEE the
+   * task (`taskVisibilityFilter`, as everywhere else), minus whoever is already
+   * on it — there is nothing to choose about someone who already has it.
+   *
+   * WHAT THIS DOES NOT DO: assign. It returns a suggestion and the argument for
+   * it. The write stays where it was, behind `assign_task` and the confirm
+   * step, because `[18:09]` is about being able to see what it is doing — and a
+   * tool that both chose and assigned would be one call between a question and
+   * somebody else's workload changing.
+   */
+  async suggestAssignee(taskId: string, actorId: string): Promise<AssignResult> {
+    if (!isUuid(taskId)) return refuseAssign('unknown_task')
+    const [row] = await this.db
+      .select({
+        id: tasks.id,
+        listId: tasks.listId,
+        workspaceId: spaces.workspaceId,
+      })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(tasks.id, taskId), eq(tasks.isArchived, false)))
+      .limit(1)
+    if (!row) return refuseAssign('unknown_task')
+
+    const actorRole = await this.memberRole(row.workspaceId, actorId)
+    if (!actorRole || actorRole === 'guest') return refuseAssign('no_permission')
+
+    const [members, loads, alreadyOn, inListRows, overdueRows] = await Promise.all([
+      this.db
+        .select({
+          userId: workspaceMembers.userId,
+          role: workspaceMembers.role,
+          email: users.email,
+          displayName: users.displayName,
+        })
+        .from(workspaceMembers)
+        .innerJoin(users, eq(users.id, workspaceMembers.userId))
+        .where(eq(workspaceMembers.workspaceId, row.workspaceId)),
+      this.collectWorkloadLoads(row.workspaceId),
+      this.db.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, taskId)),
+      this.db
+        .select({ userId: taskAssignees.userId, count: sql<number>`count(distinct ${tasks.id})::int` })
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .where(and(eq(tasks.listId, row.listId), eq(tasks.isArchived, false), ne(tasks.statusCategory, 'closed')))
+        .groupBy(taskAssignees.userId),
+      this.db
+        .select({ userId: taskAssignees.userId, count: sql<number>`count(distinct ${tasks.id})::int` })
+        .from(taskAssignees)
+        .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(
+          and(
+            eq(spaces.workspaceId, row.workspaceId),
+            eq(tasks.isArchived, false),
+            ne(tasks.statusCategory, 'closed'),
+            // The same boundary the starter cards use. See `overdueBefore`.
+            lt(tasks.dueDate, overdueBefore()),
+          ),
+        )
+        .groupBy(taskAssignees.userId),
+    ])
+
+    const openBy = new Map(loads.map((l) => [l.userId, l.open]))
+    const inListBy = new Map(inListRows.map((r) => [r.userId, r.count]))
+    const overdueBy = new Map(overdueRows.map((r) => [r.userId, r.count]))
+    const taken = new Set(alreadyOn.map((a) => a.userId))
+
+    /*
+     * CAN THEY SEE IT? Asked per candidate against the real filter rather than
+     * assumed from membership: a private space's task must not be suggested to
+     * somebody who cannot open it, and "is a member" is not the same question.
+     * `taskVisibilityFilter` is the filter the ref resolver and the command
+     * context use, so there is one answer to it in this product.
+     *
+     * IN PARALLEL, because it is two queries per member and a two-hundred
+     * person workspace would otherwise serialise four hundred round trips
+     * behind one menu press. Reimplementing the rule inline to make it one
+     * query would be a second copy of it, which is the trade this refuses.
+     */
+    const eligible = members.filter(
+      // A guest can be a workspace member and must not be handed work, the
+      // same rule `createContainer` and `executeOne` already apply.
+      (m) => m.role !== 'guest' && !taken.has(m.userId),
+    )
+    const visibility = await Promise.all(
+      eligible.map(async (m) => {
+        const isManager = await resolveIsManager(this.db, row.workspaceId, m.userId, m.role)
+        const [visible] = await this.db
+          .select({ id: tasks.id })
+          .from(tasks)
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(tasks.id, taskId), taskVisibilityFilter(this.db, m.userId, isManager)))
+          .limit(1)
+        return !!visible
+      }),
+    )
+    const candidates: AssigneeCandidate[] = eligible
+      .filter((_, i) => visibility[i])
+      .map((m) => ({
+        userId: m.userId,
+        email: m.email,
+        displayName: m.displayName ?? null,
+        openTasks: openBy.get(m.userId) ?? 0,
+        inList: inListBy.get(m.userId) ?? 0,
+        overdue: overdueBy.get(m.userId) ?? 0,
+      }))
+
+    if (candidates.length === 0) {
+      // Told apart on purpose: "everyone is already on it" and "nobody can be"
+      // are different answers, and a single "no suggestion" would hide which.
+      return refuseAssign(taken.size > 0 ? 'already_assigned' : 'no_candidates')
+    }
+
+    /*
+     * The capacity gate's source: the product's existing definition of
+     * overloaded, over the WHOLE team's loads rather than only the candidates',
+     * because "above the team average" means the team.
+     */
+    const overloaded = new Set(
+      findOverloadedAssignees(loads.map((l) => ({ userId: l.userId, name: l.name, open: l.open }))).map(
+        (o) => o.userId,
+      ),
+    )
+    return rankAssignees(candidates, taskId, overloaded)
+  }
+
   isAvailable(): boolean {
     return this.client !== null
   }
@@ -3579,6 +3879,7 @@ ${spaceCatalog || '(none)'}`
         name: spaces.name,
         visibility: spaces.visibility,
         workspaceId: spaces.workspaceId,
+        viewConfig: spaces.viewConfig,
       })
       .from(spaces)
       .where(eq(spaces.id, args.spaceId))
@@ -3630,6 +3931,8 @@ ${spaceCatalog || '(none)'}`
         spaceName: space.name,
         path: containerPath(space.name, row.name ?? name),
         statuses: [],
+        // A folder holds projects, not tasks: there is no task view to offer.
+        views: [],
       }
     }
 
@@ -3675,6 +3978,14 @@ ${spaceCatalog || '(none)'}`
       spaceName: space.name,
       path: containerPath(space.name, created.name),
       statuses: statusRows.map((s) => s.key),
+      /*
+       * READ THE VIEWS BACK TOO, from this space's own config. The sentence
+       * offers "use the Board to manage work by status", and a space that
+       * disabled Board does not have one — the offer would open a tab that is
+       * not there. Same discipline as the statuses above: the sentence states
+       * a fact about THIS row, not about what a list usually has.
+       */
+      views: enabledViewsFor(space.viewConfig, SPACE_VIEW_KEYS),
     }
   }
 

@@ -1,6 +1,12 @@
 import { Injectable, Inject, Optional, OnModuleInit, Logger } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE, grantCoversWholeDrive } from './drive-scope'
-import { SEARCH_SOURCES, SOURCE_PROVIDER, type SearchSource } from './sources'
+import {
+  SEARCH_SOURCES,
+  SOURCE_PROVIDER,
+  SOURCE_SCOPE,
+  grantCoversSource,
+  type SearchSource,
+} from './sources'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
 import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
@@ -33,6 +39,17 @@ export type SearchEntityType =
   // §4 [04:20] — "Agar hum Google Drive se search karenge to woh humari Google
   // Drive se bhi cheezein dhoond ke mila ke de sakta hai."
   | 'drive'
+  /*
+   * §V2-11 `19:07` / [19:18] — "Main is se kahoongi meri Gmail pe jaa ke…".
+   *
+   * These two names existed in `FEDERATED_ENTITY_TYPES` and in the palette's
+   * source strip, and in neither the accepted-type union nor any query path.
+   * A source that can be chosen and cannot be answered is the confident zero
+   * this audit is named after; a source that can be chosen and quietly answers
+   * with somebody's tasks is worse.
+   */
+  | 'gmail'
+  | 'sharepoint'
 /**
  * One search result. `sortedAt` is only present on the branches that carry a
  * timestamp (tasks, docs); files, people and messages leave it unset and sort
@@ -408,6 +425,12 @@ export class SearchService implements OnModuleInit {
     // §4 — Drive carries none of the task-specific filters, so a task-filtered
     // search excludes it, exactly as docs and files are excluded above.
     const wantDrive = (!filters.types || filters.types.includes('drive')) && !hasTaskFilter
+    // §V2-11 `19:07` — the other two federated sources, gated exactly as Drive
+    // is. Written as three sibling lines rather than a loop so that a source
+    // with a tab and no gate here is a compile error, not a silent omission.
+    const wantGmail = (!filters.types || filters.types.includes('gmail')) && !hasTaskFilter
+    const wantSharePoint =
+      (!filters.types || filters.types.includes('sharepoint')) && !hasTaskFilter
 
     // Nothing to match on at all → empty. (Filter-only searches are allowed.)
     if (!trimmed && !hasTaskFilter && !filters.types) return []
@@ -444,7 +467,16 @@ export class SearchService implements OnModuleInit {
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
       const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
-      return this.merge(filters.sort, limit, [...safeMeili, ...extras, ...clipHits, ...driveHits], trending)
+      const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit) : []
+      const sharePointHits = wantSharePoint
+        ? await this.searchSharePoint(workspaceId, trimmed, limit)
+        : []
+      return this.merge(
+        filters.sort,
+        limit,
+        [...safeMeili, ...extras, ...clipHits, ...driveHits, ...gmailHits, ...sharePointHits],
+        trending,
+      )
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
@@ -532,6 +564,10 @@ export class SearchService implements OnModuleInit {
     const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit) : []
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
     const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
+    const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit) : []
+    const sharePointHits = wantSharePoint
+      ? await this.searchSharePoint(workspaceId, trimmed, limit)
+      : []
 
     // Extras only for a general text search (no type/task-specific filter).
     const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
@@ -556,6 +592,8 @@ export class SearchService implements OnModuleInit {
       ...fileHits,
       ...clipHits,
       ...driveHits,
+      ...gmailHits,
+      ...sharePointHits,
       ...extras,
     ], trending)
   }
@@ -599,6 +637,17 @@ export class SearchService implements OnModuleInit {
    * a fact about this workspace's stored credentials and the client has no way
    * to know it. A tab that cannot answer must say so — an unconnected source
    * that returns nothing reads as "you have no matching files", which is false.
+   *
+   * §V2-11 — **"connected" now means "can answer", not "has a row".**
+   *
+   * Holding a live token was never sufficient and this is where that showed.
+   * `searchDrive` has refused since §G03 to spend a round trip on a
+   * `drive.file` grant, because such a grant sees only files this app created
+   * and an account-wide query against it comes back empty — but this method
+   * reported that same connection as CONNECTED, so the palette drew no notice
+   * and the person read the empty list as the truth about their Drive. The
+   * scope requirement is stated once in `SOURCE_SCOPE` and consulted here, so
+   * the strip and the query agree about what a credential is good for.
    */
   async listSources(
     workspaceId: string,
@@ -608,16 +657,21 @@ export class SearchService implements OnModuleInit {
         provider: workspaceIntegrationConnections.provider,
         status: workspaceIntegrationConnections.status,
         accessToken: workspaceIntegrationConnections.accessToken,
+        scopes: workspaceIntegrationConnections.scopes,
       })
       .from(workspaceIntegrationConnections)
       .where(eq(workspaceIntegrationConnections.workspaceId, workspaceId))
-    const live = new Set(
-      rows.filter((r) => r.status === 'connected' && !!r.accessToken).map((r) => r.provider as string),
-    )
+    const live = new Map<string, readonly string[]>()
+    for (const row of rows) {
+      if (row.status !== 'connected' || !row.accessToken) continue
+      live.set(row.provider as string, row.scopes ?? [])
+    }
     return SEARCH_SOURCES.map((id) => {
       const provider = SOURCE_PROVIDER[id]
       // Our own data needs no credential and is always available.
-      return { id, provider, connected: provider === null ? true : live.has(provider) }
+      if (provider === null) return { id, provider, connected: true }
+      const scopes = live.get(provider)
+      return { id, provider, connected: scopes !== undefined && grantCoversSource(id, scopes) }
     })
   }
 
@@ -862,8 +916,28 @@ export class SearchService implements OnModuleInit {
    * the real Google or, worse, quietly pass while never calling anything.
    */
   protected async driveRequest(url: string, token: string): Promise<{ status: number; text: string } | null> {
+    return this.federatedRequest(url, token)
+  }
+
+  /**
+   * The one outbound call every federated source makes.
+   *
+   * `driveRequest` above forwards to this and stays as its own override point
+   * only because `search.service.test.ts` names it; a seam per source would be
+   * the duplicated-list defect in miniature — three copies of one request, two
+   * of which eventually drift on a header or a timeout.
+   */
+  protected async federatedRequest(
+    url: string,
+    token: string,
+    init?: { method?: string; body?: string },
+  ): Promise<{ status: number; text: string } | null> {
     const res = await safeFetch(url, {
-      headers: { Authorization: `Bearer ${token}` },
+      method: init?.method,
+      body: init?.body,
+      headers: init?.body
+        ? { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' }
+        : { Authorization: `Bearer ${token}` },
       timeoutMs: 10_000,
     })
     return { status: res.status, text: res.text() }
@@ -953,6 +1027,200 @@ export class SearchService implements OnModuleInit {
           content: 'Google Drive',
           url: f.webViewLink ?? `https://drive.google.com/file/d/${f.id}/view`,
           sortedAt: f.modifiedTime ? new Date(f.modifiedTime) : null,
+        }))
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * The stored credential a federated source's query would use, or `null`.
+   *
+   * Returns nothing when there is no row, when the row is not connected, when
+   * it holds no token, or when the grant it holds cannot answer this source's
+   * question. That last clause is the point: a round trip that is guaranteed
+   * to come back empty is not worth making, and — with `listSources` reading
+   * the same predicate — the strip has already told the person why.
+   */
+  private async federatedCredential(
+    workspaceId: string,
+    source: SearchSource,
+  ): Promise<string | null> {
+    const provider = SOURCE_PROVIDER[source]
+    if (!provider) return null
+    const [conn] = await this.db
+      .select({
+        status: workspaceIntegrationConnections.status,
+        accessToken: workspaceIntegrationConnections.accessToken,
+        scopes: workspaceIntegrationConnections.scopes,
+      })
+      .from(workspaceIntegrationConnections)
+      .where(
+        and(
+          eq(workspaceIntegrationConnections.workspaceId, workspaceId),
+          eq(workspaceIntegrationConnections.provider, provider),
+        ),
+      )
+      .limit(1)
+    if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
+    if (!grantCoversSource(source, conn.scopes)) {
+      // Named from the table rather than from a ternary here: a log line that
+      // reports the wrong missing scope sends somebody to fix the wrong thing.
+      this.logger?.warn?.(
+        `${source} search skipped for workspace ${workspaceId}: the stored grant is missing ` +
+          `${SOURCE_SCOPE[source]}, so the query would return nothing. Reconnect the integration.`,
+      )
+      return null
+    }
+    return conn.accessToken
+  }
+
+  /**
+   * §V2-11 `19:07` / [19:18] — "Main is se kahoongi meri Gmail pe jaa ke…".
+   *
+   * The frame draws a Gmail tile reading "Search all your emails to get the
+   * latest updates…", the palette has shipped a **Gmail** tab since §G02-9, and
+   * behind both there was nothing at all — no provider to connect, no query to
+   * run. This is that query.
+   *
+   * Two round trips, because that is how Gmail works: the list endpoint returns
+   * ids and nothing else, and a subject has to be fetched per message. The
+   * fan-out is capped hard — a search box must not be able to spend twenty-five
+   * requests on one keystroke — so a wide query returns the first few with
+   * their real subjects rather than a page of "(no subject)".
+   */
+  private async searchGmail(workspaceId: string, query: string, limit: number): Promise<SearchHit[]> {
+    const trimmed = query.trim()
+    if (!trimmed) return []
+    const token = await this.federatedCredential(workspaceId, 'gmail')
+    if (!token) return []
+
+    /*
+     * Gmail's `q` is its own query language: `from:`, `-word` and `OR` are
+     * operators, so a term typed by a person changes the search rather than
+     * being the search. Wrapped as one quoted phrase, with the quote character
+     * removed first so it cannot close the phrase early — the same failure the
+     * Drive path escapes for, in a different grammar.
+     */
+    const phrase = trimmed.replace(/"/g, ' ').trim()
+    if (!phrase) return []
+    const base = process.env.GMAIL_API_URL ?? 'https://gmail.googleapis.com/gmail/v1'
+    const wanted = Math.min(Math.max(limit, 1), SearchService.MAX_GMAIL_MESSAGES)
+    const listParams = new URLSearchParams({ q: `"${phrase}"`, maxResults: String(wanted) })
+    try {
+      const listed = await this.federatedRequest(`${base}/users/me/messages?${listParams}`, token)
+      if (!listed || listed.status < 200 || listed.status >= 300) return []
+      const body = JSON.parse(listed.text) as { messages?: Array<{ id?: string; threadId?: string }> }
+      const ids = (body.messages ?? []).map((m) => m.id).filter((id): id is string => !!id)
+      const hits: SearchHit[] = []
+      for (const id of ids.slice(0, wanted)) {
+        const detailParams = new URLSearchParams({ format: 'metadata' })
+        detailParams.append('metadataHeaders', 'Subject')
+        detailParams.append('metadataHeaders', 'From')
+        detailParams.append('metadataHeaders', 'Date')
+        const detail = await this.federatedRequest(
+          `${base}/users/me/messages/${encodeURIComponent(id)}?${detailParams}`,
+          token,
+        )
+        if (!detail || detail.status < 200 || detail.status >= 300) continue
+        const msg = JSON.parse(detail.text) as {
+          id?: string
+          snippet?: string
+          internalDate?: string
+          payload?: { headers?: Array<{ name?: string; value?: string }> }
+        }
+        const header = (name: string) =>
+          msg.payload?.headers?.find((h) => (h.name ?? '').toLowerCase() === name)?.value ?? ''
+        const subject = header('subject').trim()
+        hits.push({
+          id: `gmail-${id}`,
+          entityType: 'gmail',
+          // A mail with no subject is a real mail. Named for its sender rather
+          // than dropped, because dropping it is another silent empty list.
+          title: subject || (header('from') ? `(no subject) — ${header('from')}` : '(no subject)'),
+          // Says it is not from here, exactly as a Drive hit does.
+          content: (msg.snippet ?? '').slice(0, 200) || 'Gmail',
+          url: `https://mail.google.com/mail/u/0/#all/${encodeURIComponent(id)}`,
+          sortedAt: msg.internalDate ? new Date(Number(msg.internalDate)) : null,
+        })
+      }
+      return hits
+    } catch {
+      return []
+    }
+  }
+
+  /** How many messages one Gmail search is allowed to fetch in full. */
+  private static readonly MAX_GMAIL_MESSAGES = 8
+
+  /**
+   * §V2-11 `19:07` — "Microsoft SharePoint · Easily attach, create, and search
+   * for SharePoint files…".
+   *
+   * One round trip, through Graph's search endpoint, which is the only Graph
+   * call that spans sites the caller has not named. `Sites.Read.All` is what
+   * makes it answerable — the OneDrive grant this source used to borrow carries
+   * `Files.ReadWrite`, which reaches the signed-in user's own drive and no
+   * SharePoint site at all, so the borrowed credential produced a permanently
+   * empty list that the strip reported as connected.
+   */
+  private async searchSharePoint(
+    workspaceId: string,
+    query: string,
+    limit: number,
+  ): Promise<SearchHit[]> {
+    const trimmed = query.trim()
+    if (!trimmed) return []
+    const token = await this.federatedCredential(workspaceId, 'sharepoint')
+    if (!token) return []
+
+    const base = process.env.MICROSOFT_GRAPH_API_URL ?? 'https://graph.microsoft.com/v1.0'
+    const payload = JSON.stringify({
+      requests: [
+        {
+          entityTypes: ['driveItem'],
+          // Sent as JSON rather than interpolated into a URL: Graph's KQL
+          // treats `:` and `"` as syntax, and a term carrying one would
+          // otherwise rewrite the query instead of being searched for.
+          query: { queryString: trimmed },
+          from: 0,
+          size: Math.min(Math.max(limit, 1), 25),
+        },
+      ],
+    })
+    try {
+      const res = await this.federatedRequest(`${base}/search/query`, token, {
+        method: 'POST',
+        body: payload,
+      })
+      if (!res || res.status < 200 || res.status >= 300) return []
+      const body = JSON.parse(res.text) as {
+        value?: Array<{
+          hitsContainers?: Array<{
+            hits?: Array<{
+              resource?: {
+                id?: string
+                name?: string
+                webUrl?: string
+                lastModifiedDateTime?: string
+              }
+            }>
+          }>
+        }>
+      }
+      const hits = (body.value ?? []).flatMap((v) => (v.hitsContainers ?? []).flatMap((c) => c.hits ?? []))
+      return hits
+        .map((h) => h.resource)
+        .filter((r): r is { id?: string; name?: string; webUrl?: string; lastModifiedDateTime?: string } =>
+          Boolean(r?.name && r?.webUrl),
+        )
+        .map((r) => ({
+          id: `sharepoint-${r.id ?? r.webUrl}`,
+          entityType: 'sharepoint',
+          title: r.name as string,
+          content: 'Microsoft SharePoint',
+          url: r.webUrl as string,
+          sortedAt: r.lastModifiedDateTime ? new Date(r.lastModifiedDateTime) : null,
         }))
     } catch {
       return []

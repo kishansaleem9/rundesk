@@ -54,6 +54,17 @@ import {
   // a card-density grid, and the cover's picture.
   LayoutGrid,
   Image as ImageIcon,
+  // §V2-S13 frame `10:35` — the three board switches: a stack, an empty
+  // outline, and two columns folding in.
+  AlignLeft,
+  SquareDashed,
+  FoldHorizontal,
+  // §V2-07 frame `11:30` — the `⚇ Assignee` chip's two-person glyph, and the
+  // three "Tasks where I have assigned" rows' own icons.
+  Users,
+  MessageSquare,
+  // §V2-07 frame `11:00` — the "⚡ Business feature" caption under Download.
+  Zap,
 } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { useAuthStore } from '../store/auth'
@@ -354,6 +365,12 @@ type SortField = 'title' | 'status' | 'priority' | 'due' | 'assignee' | 'created
 type SortState = { field: SortField; dir: SortDir }
 type ColumnFilters = { statuses: string[]; priorities: TaskPriority[]; assignees: string[] }
 const EMPTY_COLUMN_FILTERS: ColumnFilters = { statuses: [], priorities: [], assignees: [] }
+/**
+ * One frozen empty set, shared, so `filterTasks`'s default argument is the
+ * same object every call — a fresh `new Set()` would be a new identity on
+ * every render and would defeat the memo that wraps it.
+ */
+const EMPTY_TASK_ID_SET: ReadonlySet<string> = new Set<string>()
 
 /**
  * §M frame `12:10` — how the Subtasks chip is set.
@@ -413,6 +430,14 @@ function filterTasks(
    * existed, and is the same pair every other check in this file uses.
    */
   showClosed = true,
+  /*
+   * §V2-07 frame `11:30` — the task ids the three "Tasks where I have
+   * assigned" switches add, resolved by the server (the payload carries no
+   * comment or checklist assignment, so two of the three cannot be answered
+   * here). Empty means "nothing to add", which is exactly the behaviour
+   * before this existed.
+   */
+  alsoAssigned: ReadonlySet<string> = EMPTY_TASK_ID_SET,
 ): TaskItem[] {
   const needle = search.trim().toLowerCase()
   if (
@@ -435,7 +460,15 @@ function filterTasks(
       const ids = (task.assignees ?? []).map((a) => a.userId)
       const matchesUnassigned = filters.assignees.includes(UNASSIGNED_FILTER) && ids.length === 0
       const matchesSomeone = ids.some((id) => filters.assignees.includes(id))
-      if (!matchesUnassigned && !matchesSomeone) return false
+      /*
+       * §V2-07 `11:30` — a task with no assignee at all still belongs in
+       * "tasks where I have assigned" when the only thing assigned to me on it
+       * is a comment, a subtask or a checklist item. Deliberately NOT applied
+       * to the Unassigned option: a task that has something of mine on it is
+       * not unassigned in the sense that filter means.
+       */
+      const matchesVia = !matchesUnassigned && alsoAssigned.has(task.id)
+      if (!matchesUnassigned && !matchesSomeone && !matchesVia) return false
     }
     return true
   })
@@ -507,6 +540,12 @@ function sortTasks(
 const VIRTUALIZE_THRESHOLD = 120
 const TASK_ROW_ESTIMATE_PX = 46
 const BOARD_VIRTUALIZE_THRESHOLD = 80
+/**
+ * §V2-S13 frame `10:35` — what "Stack fields" adds to a virtualized card's
+ * estimated height: the two extra lines a three-field column takes over a
+ * one-line row, at the 11px type the meta block is set in.
+ */
+const BOARD_STACKED_FIELDS_PX = 36
 const TABLE_VIRTUALIZE_THRESHOLD = 120
 const TABLE_ROW_ESTIMATE_PX = 36
 
@@ -1274,7 +1313,23 @@ function ListDetail() {
    * the board-shaped download outright for a workspace whose plan lacks them;
    * this is what a person sees instead of an unexplained 403.
    */
-  const { requireFeature, available: featureAvailable, gateDialog } = useFeatureGate(workspaceId)
+  const { requireFeature, available: featureAvailable, gateDialog, plan } = useFeatureGate(workspaceId)
+  /*
+   * §V2-07 frame `11:00` — the tier named by the "⚡ Business feature" caption
+   * under the export dialog's Download button.
+   *
+   * Out of the catalog the SERVER sent, by the same rule the gate dialog uses:
+   * the lowest tier whose feature map has `boardExport`. `feature-gate.tsx`'s
+   * `upgradeTarget` is that rule's first reader and is not exported, and this
+   * file is not the one that can export it — so the caption and the dialog are
+   * two readers of one catalog, and `list-customize.mjs` asserts they name the
+   * same tier so a drift between them is a red suite rather than a wrong
+   * price on a label.
+   */
+  const boardExportPlan = useMemo(() => {
+    const tier = plan?.catalog?.find((row) => row.features?.boardExport === true)
+    return tier ? { id: tier.id, label: tier.label } : null
+  }, [plan])
   const TEAM_VIEW_GATE: GatedFeature = {
     planFeature: 'teamView',
     name: t('gate.teamView'),
@@ -1380,6 +1435,36 @@ function ListDetail() {
    */
   const [cardSize, setCardSize] = useState<CardSize>('medium')
   const [cardCover, setCardCover] = useState<CardCover>('image')
+  /*
+   * §V2-S13 frame `10:35` — the three switches under Card size and Card cover:
+   * `Stack fields` (off), `Show empty fields` (ON), `Collapse empty columns`
+   * (off). The defaults are the frame's own positions, read off the toggles.
+   *
+   * THEY ARE BOARD SWITCHES, and the frames say so rather than the reference
+   * documentation. Frame `10:35` is a Board view and offers exactly these
+   * three; frame `11:00` is the SAME panel on the List view and offers a
+   * different trio — Show task locations · Show subtask parent names · Show
+   * closed tasks. So the middle block of this panel depends on the view type,
+   * and putting these three on the list would be three labelled switches over
+   * a grid that has no cards to stack, no card fields to empty and no columns
+   * to collapse.
+   *
+   * In the saved view's config for the same reason Card size is: a switch held
+   * in component state alone resets on every reload, which is the quiet way a
+   * control becomes decoration.
+   */
+  const [stackFields, setStackFields] = useState(false)
+  const [showEmptyFields, setShowEmptyFields] = useState(true)
+  const [collapseEmptyColumns, setCollapseEmptyColumns] = useState(false)
+  /*
+   * §V2-07 frame `11:30` — "Tasks where I have assigned": Comments · Subtasks
+   * · Checklists, all three drawn ON. They EXTEND the assignee filter rather
+   * than being filters of their own, which is why they live beside it and why
+   * they do nothing at all while the filter is on "Anyone".
+   */
+  const [assignedViaComments, setAssignedViaComments] = useState(true)
+  const [assignedViaSubtasks, setAssignedViaSubtasks] = useState(true)
+  const [assignedViaChecklists, setAssignedViaChecklists] = useState(true)
   // Custom-field column visibility, persisted per saved view (Plan §4/§5).
   const boardSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }))
   const [hiddenFields, setHiddenFields] = useState<Set<string>>(() => new Set())
@@ -1410,6 +1495,9 @@ function ListDetail() {
   const subtaskDetailsRef = useRef<HTMLDetailsElement | null>(null)
   useDismissableDetails(fieldsDetailsRef)
   useDismissableDetails(subtaskDetailsRef)
+  // §V2-07 frame `11:30` — the `⚇ Assignee` picker.
+  const assigneeDetailsRef = useRef<HTMLDetailsElement | null>(null)
+  useDismissableDetails(assigneeDetailsRef)
   // Board: collapsed columns (ephemeral) + per-status WIP limits (persisted).
   const [collapsedColumns, setCollapsedColumns] = useState<Set<string>>(() => new Set())
   const [wipLimits, setWipLimits] = useState<Record<string, number>>({})
@@ -1664,6 +1752,56 @@ function ListDetail() {
     },
   })
 
+  /*
+   * §V2-07 frame `11:30` — the rows the three "Tasks where I have assigned"
+   * switches ADD to the assignee filter.
+   *
+   * Only asked when the filter names one real person: "Anyone" is not a
+   * narrowing and "Unassigned" is the opposite of an assignment, so in both
+   * cases the three switches have nothing to extend and there is nothing to
+   * fetch. And only when at least one of them is on, because all three off is
+   * the plain assignee filter the client has always done by itself.
+   *
+   * THE FLAGS ARE IN THE QUERY KEY, not just in the URL. `lib/query.ts` sets
+   * `staleTime: 30_000`, so a key that left them out would answer the second
+   * combination out of the first one's cache — the switches would appear to
+   * work once and then stop, for half a minute, which is the worst shape a bug
+   * can have. Each combination is its own key, so every new combination is a
+   * real request.
+   */
+  const assigneeSelected = columnFilters.assignees.length === 1 ? columnFilters.assignees[0] : null
+  const assignedViaPerson =
+    assigneeSelected && assigneeSelected !== UNASSIGNED_FILTER ? assigneeSelected : null
+  const assignedViaAny = assignedViaComments || assignedViaSubtasks || assignedViaChecklists
+  const { data: assignedVia } = useQuery({
+    queryKey: [
+      'list-assigned-via',
+      listId,
+      assignedViaPerson,
+      assignedViaComments,
+      assignedViaSubtasks,
+      assignedViaChecklists,
+    ],
+    enabled: !!assignedViaPerson && assignedViaAny,
+    queryFn: () =>
+      api<{ userId: string; comments: string[]; subtasks: string[]; checklists: string[]; taskIds: string[] }>(
+        `/tasks/list/${listId}/assigned-via?userId=${encodeURIComponent(assignedViaPerson ?? '')}` +
+          `&comments=${assignedViaComments}&subtasks=${assignedViaSubtasks}&checklists=${assignedViaChecklists}`,
+      ),
+  })
+  /*
+   * Rebuilt only when the answer changes, and scoped to the person it was
+   * asked about: a set left over from the previous selection would quietly
+   * widen the next one, and the rows it added would be somebody else's.
+   */
+  const assignedViaIds = useMemo(
+    () =>
+      new Set(
+        assignedViaPerson && assignedVia?.userId === assignedViaPerson ? assignedVia.taskIds : [],
+      ),
+    [assignedVia, assignedViaPerson],
+  )
+
   const visibleTasks = useMemo(() => {
     const filtered = filterTasks(
       tasks,
@@ -1673,11 +1811,12 @@ function ListDetail() {
       filterRules,
       { customFields: projectFields, customValues: customFieldByTask },
       showClosed,
+      assignedViaIds,
     )
     // Custom-field sort is resolved inside TableView (it owns the values); for
     // every other view a custom sort is a stable no-op here.
     return sortTasks(filtered, sort, statusOrder)
-  }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed])
+  }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed, assignedViaIds])
 
   /*
    * §V2-S13 frame `11:30` — THE CONFIDENT ZERO.
@@ -1856,6 +1995,20 @@ function ListDetail() {
     // falls back to the frame's defaults rather than to `undefined`.
     setCardSize(CARD_SIZES.includes(cfg.cardSize as CardSize) ? (cfg.cardSize as CardSize) : 'medium')
     setCardCover(CARD_COVERS.includes(cfg.cardCover as CardCover) ? (cfg.cardCover as CardCover) : 'image')
+    /*
+     * §V2-S13 `10:35` / §V2-07 `11:30` — restored, not left at the defaults.
+     * `viewDirty` compares the live config against the fingerprint taken right
+     * after this runs, so a key that is SAVED and not APPLIED would light the
+     * Save-view chip the instant a view was opened, on a view nobody had
+     * touched. `??` rather than `||`, because `false` is a real saved value.
+     */
+    setStackFields(typeof cfg.stackFields === 'boolean' ? cfg.stackFields : false)
+    setShowEmptyFields(typeof cfg.showEmptyFields === 'boolean' ? cfg.showEmptyFields : true)
+    setCollapseEmptyColumns(typeof cfg.collapseEmptyColumns === 'boolean' ? cfg.collapseEmptyColumns : false)
+    const via = (cfg.assignedVia ?? {}) as Record<string, unknown>
+    setAssignedViaComments(typeof via.comments === 'boolean' ? via.comments : true)
+    setAssignedViaSubtasks(typeof via.subtasks === 'boolean' ? via.subtasks : true)
+    setAssignedViaChecklists(typeof via.checklists === 'boolean' ? via.checklists : true)
     setViewStamp((n) => n + 1)
   }
 
@@ -1876,6 +2029,20 @@ function ListDetail() {
     // lights the Save-view chip and `updateSavedView` persists it.
     cardSize,
     cardCover,
+    // §V2-S13 `10:35` — the three board switches, for the same reason as the
+    // two rows above them: the panel configures the VIEW, so the view has to
+    // remember what the panel was set to.
+    stackFields,
+    showEmptyFields,
+    collapseEmptyColumns,
+    // §V2-07 `11:30` — grouped, because they are three settings of one filter
+    // rather than three independent ones, and a saved view that restored two
+    // of them would be a filter that came back meaning something else.
+    assignedVia: {
+      comments: assignedViaComments,
+      subtasks: assignedViaSubtasks,
+      checklists: assignedViaChecklists,
+    },
   })
 
   /*
@@ -2458,6 +2625,33 @@ function ListDetail() {
               controls for one filter is how they end up disagreeing about
               what is on screen.
             */}
+            <div className="flex shrink-0 items-center gap-1.5" data-testid="list-assignee-cluster">
+              <AssigneePicker
+                detailsRef={assigneeDetailsRef}
+                members={workspaceMembers}
+                currentUserId={currentUserId}
+                selected={columnFilters.assignees}
+                onSelect={(v) => setColumnFilters((f) => ({ ...f, assignees: v ? [v] : [] }))}
+                assignedViaOn={!!assignedViaPerson}
+                comments={assignedViaComments}
+                onComments={setAssignedViaComments}
+                subtasks={assignedViaSubtasks}
+                onSubtasks={setAssignedViaSubtasks}
+                checklists={assignedViaChecklists}
+                onChecklists={setAssignedViaChecklists}
+              />
+            {/*
+              THE NATIVE SELECT STAYS, beside the picker rather than under it.
+
+              Same argument the field-type picker settled on when its search
+              box went in: a `<select>` is what a screen reader announces, what
+              a phone renders as a full-height wheel, and what a suite can
+              drive with `selectOption`. The frame's control is the faces —
+              which is the half that was missing, because a collapsed select
+              cannot show you WHO — and the two are one filter, not two: both
+              read and write `columnFilters.assignees`, so there is no second
+              state for them to disagree about.
+            */}
             <WorkFilterSelect
               value={columnFilters.assignees.length === 1 ? columnFilters.assignees[0] : ''}
               onChange={(v) =>
@@ -2475,6 +2669,7 @@ function ListDetail() {
                   <option key={m.userId} value={m.userId}>{m.displayName || m.email}</option>
                 ))}
             </WorkFilterSelect>
+            </div>
             <WorkFilterSelect
               value={sort.field.startsWith('custom:') ? 'created' : sort.field}
               onChange={(v) => setSort((s) => ({ field: v as SortField, dir: s.field === v ? s.dir : defaultSortDir(v as SortField) }))}
@@ -2699,6 +2894,7 @@ function ListDetail() {
               exportView={activeView === 'board' ? 'board' : 'list'}
               requireBoardExport={() => requireFeature(BOARD_EXPORT_GATE)}
               boardExportLocked={!featureAvailable(BOARD_EXPORT_GATE)}
+              boardExportPlan={boardExportPlan}
               view={selectedSavedView}
               onPatch={patchSavedView}
               onAutosave={setViewAutosave}
@@ -2709,6 +2905,14 @@ function ListDetail() {
               onCardSize={setCardSize}
               cardCover={cardCover}
               onCardCover={setCardCover}
+              /* §V2-S13 `10:35` — and the three switches under them. */
+              isBoard={activeView === 'board'}
+              stackFields={stackFields}
+              onStackFields={setStackFields}
+              showEmptyFields={showEmptyFields}
+              onShowEmptyFields={setShowEmptyFields}
+              collapseEmptyColumns={collapseEmptyColumns}
+              onCollapseEmptyColumns={setCollapseEmptyColumns}
             />
 
             {spaceFeatures.customFields && (activeView === 'table' || activeView === 'list') && (
@@ -2981,9 +3185,27 @@ function ListDetail() {
                   // §V2-S13 `10:35` — the two Customize rows, reaching the card.
                   cardSize={cardSize}
                   cardCover={cardCover}
+                  stackFields={stackFields}
+                  showEmptyFields={showEmptyFields}
                   tasks={tasksByStatus[s.key] ?? []}
                   onOpenTask={(taskId) => setSelectedTaskId(taskId)}
-                  collapsed={collapsedColumns.has(s.key)}
+                  /*
+                   * §V2-S13 `10:35` — "Collapse empty columns", XOR'd with the
+                   * chevron rather than OR'd with it.
+                   *
+                   * `collapsedColumns` is the set of columns somebody pressed,
+                   * and with the switch off that is still exactly what it
+                   * means (`false !== x` is `x`). With the switch on, an empty
+                   * column starts collapsed AND its chevron still opens it —
+                   * the press records a difference from the default rather
+                   * than an absolute, so it works in both directions. OR'd,
+                   * the chevron on an auto-collapsed column would be a control
+                   * that visibly moves and changes nothing.
+                   */
+                  collapsed={
+                    collapsedColumns.has(s.key) !==
+                    (collapseEmptyColumns && (tasksByStatus[s.key] ?? []).length === 0)
+                  }
                   onToggleCollapse={() =>
                     setCollapsedColumns((prev) => {
                       const next = new Set(prev)
@@ -4970,6 +5192,8 @@ function BoardColumn({
   showWip = true,
   cardSize = 'medium',
   cardCover = 'image',
+  stackFields = false,
+  showEmptyFields = true,
 }: {
   status: TaskStatus
   tasks: TaskItem[]
@@ -4986,6 +5210,9 @@ function BoardColumn({
   /** §V2-S13 `10:35` — the Customize panel's Card size and Card cover. */
   cardSize?: CardSize
   cardCover?: CardCover
+  /** §V2-S13 `10:35` — "Stack fields" and "Show empty fields", for the cards. */
+  stackFields?: boolean
+  showEmptyFields?: boolean
 }) {
   const { t } = useTranslation()
   const [renaming, setRenaming] = useState(false)
@@ -5000,6 +5227,16 @@ function BoardColumn({
   return (
     <div
       ref={setNodeRef}
+      /*
+       * §V2-S13 `10:35` — the column states "Collapse empty columns" acts on.
+       * The board had no testid of its own at all, so "the empty lane is shut
+       * and the full one is not" had nothing to be asserted against except the
+       * cards inside it, which is the same measurement the collapse removes.
+       */
+      data-testid="board-column"
+      data-status={status}
+      data-collapsed={collapsed ? 'true' : 'false'}
+      data-count={tasks.length}
       className={cn(
         'rounded-lg border border-border bg-muted/30 flex flex-col min-h-40 transition-colors',
         isOver && 'ring-2 ring-brand-500 bg-accent/10',
@@ -5010,6 +5247,13 @@ function BoardColumn({
         <button
           type="button"
           onClick={onToggleCollapse}
+          /*
+           * §V2-S13 `10:35` — named, because "Collapse empty columns" has to
+           * leave THIS working. `.locator('button').first()` would have found
+           * it today and started pressing the WIP control the day the header's
+           * two buttons swapped order.
+           */
+          data-testid="board-column-toggle"
           className="text-muted-foreground hover:text-foreground"
           aria-label={collapsed ? t('list.board.expandColumnAria') : t('list.board.collapseColumnAria')}
         >
@@ -5085,12 +5329,38 @@ function BoardColumn({
       </div>
       {!collapsed && (
         <>
-          <div className="p-2 space-y-2 flex-1">
+          {/*
+            §V2-S13 `10:35` — the part "Collapse empty columns" actually
+            removes, named so a check can measure it.
+
+            THE COLUMN'S OWN BOX CANNOT BE THAT MEASUREMENT. The board is a
+            CSS grid, so every column stretches to the tallest in its row, and
+            the wrapper carries `min-h-40` on top of that — a collapsed lane
+            and an open one measure the same 160px either way. A height
+            comparison on the column would have failed on a correct build and
+            told the reader the collapse was broken.
+          */}
+          <div className="p-2 space-y-2 flex-1" data-testid="board-column-body">
             {tasks.length >= BOARD_VIRTUALIZE_THRESHOLD ? (
-              <VirtualizedBoardCards tasks={tasks} onOpenTask={onOpenTask} size={cardSize} cover={cardCover} />
+              <VirtualizedBoardCards
+                tasks={tasks}
+                onOpenTask={onOpenTask}
+                size={cardSize}
+                cover={cardCover}
+                stackFields={stackFields}
+                showEmptyFields={showEmptyFields}
+              />
             ) : (
               tasks.map((task) => (
-                <BoardTaskCard key={task.id} task={task} onOpenTask={onOpenTask} size={cardSize} cover={cardCover} />
+                <BoardTaskCard
+                  key={task.id}
+                  task={task}
+                  onOpenTask={onOpenTask}
+                  size={cardSize}
+                  cover={cardCover}
+                  stackFields={stackFields}
+                  showEmptyFields={showEmptyFields}
+                />
               ))
             )}
             {tasks.length === 0 && (
@@ -5125,6 +5395,8 @@ function BoardTaskCard({
   onOpenTask,
   size = 'medium',
   cover = 'image',
+  stackFields = false,
+  showEmptyFields = true,
 }: {
   task: TaskItem
   onOpenTask: (taskId: string) => void
@@ -5132,6 +5404,10 @@ function BoardTaskCard({
   size?: CardSize
   /** §V2-S13 `10:35` — "Card cover  Image ›". */
   cover?: CardCover
+  /** §V2-S13 `10:35` — "Stack fields": one field per line instead of one row. */
+  stackFields?: boolean
+  /** §V2-S13 `10:35` — "Show empty fields": draw the ones this task has no value for. */
+  showEmptyFields?: boolean
 }) {
   const features = useSpaceFeatureFlags()
   const { t, locale } = useTranslation()
@@ -5218,38 +5494,104 @@ function BoardTaskCard({
           )}
         </div>
       )}
-      {(due || subtasks.length > 0 || (task.openBlockerCount ?? 0) > 0 || assignees.length > 0) && (
-        <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[11px] text-muted-foreground">
-          {due && (
-            <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
-              <CalendarIcon className="h-3 w-3" />
-              {shortDate(due, locale)}
-            </span>
-          )}
-          {subtasks.length > 0 && (
-            <span className="inline-flex items-center gap-1" title={t('list.board.subtasksDoneTitle')}>
-              ☑ {subtasksDone}/{subtasks.length}
-            </span>
-          )}
-          {(task.openBlockerCount ?? 0) > 0 && (
-            <span className="text-amber-700 dark:text-amber-300">{t('list.blockedBy', { count: task.openBlockerCount ?? 0 })}</span>
-          )}
-          {assignees.length > 0 && (
-            <span className="ml-auto flex -space-x-1.5">
-              {assignees.slice(0, 3).map((a) => (
-                <span key={a.userId} className="ring-1 ring-card rounded-full">
-                  <PersonAvatar name={a.user?.displayName ?? '?'} size="xs" />
-                </span>
-              ))}
-              {assignees.length > 3 && (
-                <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] ring-1 ring-card">
-                  +{assignees.length - 3}
-                </span>
-              )}
-            </span>
-          )}
-        </div>
-      )}
+      {/*
+        §V2-S13 frame `10:35` — the card's FIELDS, which is what "Stack fields"
+        and "Show empty fields" are about.
+
+        The card's three fields are Due date, Assignees and Subtasks: the
+        things a task either has a value for or does not. The blocker warning
+        below is deliberately NOT one of them — it is a badge that appears when
+        something is wrong, and "no blockers" drawn as an empty field would be
+        a placeholder for the normal case on every card on the board.
+
+        Built as a list rather than four inline conditionals because both
+        switches need the same answer: Show empty fields decides which entries
+        survive, Stack fields decides how the survivors are laid out, and with
+        conditionals each one would have had to be written into every branch.
+      */}
+      {(() => {
+        const fields: { key: string; filled: boolean; node: ReactNode }[] = [
+          {
+            key: 'due',
+            filled: !!due,
+            node: due ? (
+              <span className={cn('inline-flex items-center gap-1', overdue && 'text-red-500 font-medium')}>
+                <CalendarIcon className="h-3 w-3" />
+                {shortDate(due, locale)}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 opacity-60">
+                <CalendarIcon className="h-3 w-3" />
+                {t('list.card.fieldEmptyDue')}
+              </span>
+            ),
+          },
+          {
+            key: 'subtasks',
+            filled: subtasks.length > 0,
+            node: subtasks.length > 0 ? (
+              <span className="inline-flex items-center gap-1" title={t('list.board.subtasksDoneTitle')}>
+                ☑ {subtasksDone}/{subtasks.length}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 opacity-60">☑ {t('list.card.fieldEmptySubtasks')}</span>
+            ),
+          },
+          {
+            key: 'assignees',
+            filled: assignees.length > 0,
+            node: assignees.length > 0 ? (
+              <span className="flex -space-x-1.5">
+                {assignees.slice(0, 3).map((a) => (
+                  <span key={a.userId} className="ring-1 ring-card rounded-full">
+                    <PersonAvatar name={a.user?.displayName ?? '?'} size="xs" />
+                  </span>
+                ))}
+                {assignees.length > 3 && (
+                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-muted text-[9px] ring-1 ring-card">
+                    +{assignees.length - 3}
+                  </span>
+                )}
+              </span>
+            ) : (
+              <span className="inline-flex items-center gap-1 opacity-60">
+                <Users className="h-3 w-3" />
+                {t('list.card.fieldEmptyAssignees')}
+              </span>
+            ),
+          },
+        ]
+        const shown = fields.filter((f) => f.filled || showEmptyFields)
+        const blocked = (task.openBlockerCount ?? 0) > 0
+        if (shown.length === 0 && !blocked) return null
+        return (
+          <div
+            data-testid="board-card-meta"
+            data-stacked={stackFields ? 'true' : 'false'}
+            data-fields={shown.map((f) => f.key).join(',')}
+            className={cn(
+              'mt-1.5 text-[11px] text-muted-foreground',
+              stackFields ? 'flex flex-col items-start gap-1' : 'flex items-center gap-2 flex-wrap',
+            )}
+          >
+            {shown.map((f) => (
+              <span
+                key={f.key}
+                data-testid={`board-card-field-${f.key}`}
+                data-filled={f.filled ? 'true' : 'false'}
+                className={cn(!stackFields && f.key === 'assignees' && 'ml-auto')}
+              >
+                {f.node}
+              </span>
+            ))}
+            {blocked && (
+              <span className="text-amber-700 dark:text-amber-300" data-testid="board-card-blocked">
+                {t('list.blockedBy', { count: task.openBlockerCount ?? 0 })}
+              </span>
+            )}
+          </div>
+        )
+      })()}
       </div>
     </button>
   )
@@ -5260,11 +5602,15 @@ function VirtualizedBoardCards({
   onOpenTask,
   size = 'medium',
   cover = 'image',
+  stackFields = false,
+  showEmptyFields = true,
 }: {
   tasks: TaskItem[]
   onOpenTask: (taskId: string) => void
   size?: CardSize
   cover?: CardCover
+  stackFields?: boolean
+  showEmptyFields?: boolean
 }) {
   const parentRef = useRef<HTMLDivElement | null>(null)
   const dims = CARD_SIZE_STYLE[size]
@@ -5276,8 +5622,14 @@ function VirtualizedBoardCards({
      * cover is drawn. A density control whose virtualizer kept one number
      * would scroll a long column to the wrong place at every size but Medium,
      * which reads as the board being broken rather than as the setting working.
+     *
+     * Stacking is in here for the same reason: three fields on three lines is
+     * roughly two lines taller than three fields on one, and an estimate that
+     * ignored it would leave a stacked column's scrollbar describing a board
+     * two thirds the height of the one on screen.
      */
-    estimateSize: () => dims.estimate + (cover === 'image' ? dims.coverPx : 0),
+    estimateSize: () =>
+      dims.estimate + (cover === 'image' ? dims.coverPx : 0) + (stackFields ? BOARD_STACKED_FIELDS_PX : 0),
     overscan: 8,
   })
 
@@ -5294,7 +5646,14 @@ function VirtualizedBoardCards({
               className="absolute left-0 top-0 w-full pb-2"
               style={{ transform: `translateY(${item.start}px)` }}
             >
-              <BoardTaskCard task={task} onOpenTask={onOpenTask} size={size} cover={cover} />
+              <BoardTaskCard
+                task={task}
+                onOpenTask={onOpenTask}
+                size={size}
+                cover={cover}
+                stackFields={stackFields}
+                showEmptyFields={showEmptyFields}
+              />
             </div>
           )
         })}
@@ -6273,6 +6632,196 @@ function PanelChoice<T extends string>({
   )
 }
 
+/**
+ * §V2-07 frame `11:30` — the toolbar's assignee control, as the frame draws
+ * it: `⚇ Assignee` followed by the chosen person's FACE with an `✕` on it, and
+ * a picker of faces behind the chip. Under the faces, the three switches the
+ * same frame's popover carries — "Tasks where I have assigned": Comments ·
+ * Subtasks · Checklists.
+ *
+ * WHY THE FACES AND THE THREE SWITCHES ARE ONE PANEL. The frame has two
+ * popovers off the same cluster — one to choose the person, one for the three
+ * switches — and they are settings of a single filter: with nobody chosen the
+ * switches have nothing to extend, and they are meaningless anywhere else in
+ * the product. One panel is one place to look; two would be a second door to
+ * the same state, which is how the two ended up disagreeing everywhere else
+ * this audit has looked.
+ *
+ * It owns NO state. `selected` and `onSelect` are the same
+ * `columnFilters.assignees` the native select and the table's column funnel
+ * write, and the three switches are the route's, because they go into the
+ * saved view's config.
+ */
+function AssigneePicker({
+  detailsRef,
+  members,
+  currentUserId,
+  selected,
+  onSelect,
+  assignedViaOn,
+  comments,
+  onComments,
+  subtasks,
+  onSubtasks,
+  checklists,
+  onChecklists,
+}: {
+  detailsRef: React.RefObject<HTMLDetailsElement | null>
+  members: WorkspaceMember[]
+  currentUserId: string
+  selected: string[]
+  onSelect: (value: string) => void
+  /** True when the filter names a real person — the only state the three switches change anything in. */
+  assignedViaOn: boolean
+  comments: boolean
+  onComments: (next: boolean) => void
+  subtasks: boolean
+  onSubtasks: (next: boolean) => void
+  checklists: boolean
+  onChecklists: (next: boolean) => void
+}) {
+  const { t } = useTranslation()
+  /*
+   * ONE list, built once, in the frame's order: Anyone, then Me, then
+   * Unassigned, then everybody else. It is the same order and the same
+   * membership as the native `<select>` beside it — written here once and
+   * mapped twice would have been the duplicated-list defect with two pickers
+   * that quietly offer different people.
+   */
+  const options = useMemo(() => {
+    const rows: { value: string; label: string; face: boolean }[] = [
+      { value: '', label: t('list.assigneeAnyone'), face: false },
+    ]
+    if (currentUserId) rows.push({ value: currentUserId, label: t('list.assigneeMe'), face: true })
+    rows.push({ value: UNASSIGNED_FILTER, label: t('list.group.unassigned'), face: false })
+    for (const m of members) {
+      if (m.userId === currentUserId) continue
+      rows.push({ value: m.userId, label: m.displayName || m.email, face: true })
+    }
+    return rows
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [members, currentUserId, t])
+
+  const current = selected.length === 1 ? selected[0] : ''
+  const chosen = current ? options.find((o) => o.value === current) ?? null : null
+
+  return (
+    <details ref={detailsRef} className="relative shrink-0" data-testid="list-assignee-picker" data-value={current}>
+      <summary className="list-none h-8 px-2.5 flex items-center gap-1.5 rounded-md border border-border/80 bg-card text-[12px] cursor-pointer select-none hover:bg-muted/40">
+        <Users className="h-3.5 w-3.5 text-muted-foreground" aria-hidden />
+        {t('list.assigneeLabel')}
+        {chosen && (
+          <span
+            className="ml-0.5 inline-flex items-center gap-1"
+            data-testid="list-assignee-selected"
+            data-user-id={chosen.value}
+          >
+            {chosen.face ? (
+              <span data-testid="list-assignee-face" data-for={chosen.value}>
+                <PersonAvatar name={chosen.label} size="xs" />
+              </span>
+            ) : (
+              <span className="rounded-full bg-muted px-1.5 text-[10px] leading-4">{chosen.label}</span>
+            )}
+            {/*
+              The frame's `✕` badge on the face. Inside a <summary>, so both
+              the default toggle AND the bubble have to be stopped: without
+              `preventDefault` clearing the filter would also open the panel,
+              which is a different thing happening than the one that was
+              pressed.
+            */}
+            <button
+              type="button"
+              aria-label={t('list.assigneeClear')}
+              title={t('list.assigneeClear')}
+              data-testid="list-assignee-clear"
+              onClick={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                onSelect('')
+              }}
+              className="rounded-full p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <XIcon className="h-3 w-3" aria-hidden />
+            </button>
+          </span>
+        )}
+      </summary>
+      <div className="absolute right-0 z-30 mt-1 w-64 rounded-md border border-border bg-card p-1 shadow-lg">
+        <div className="max-h-56 overflow-y-auto" role="radiogroup" aria-label={t('list.assigneeLabel')}>
+          {options.map((o) => (
+            <button
+              key={o.value || 'anyone'}
+              type="button"
+              role="radio"
+              aria-checked={current === o.value}
+              data-testid={`list-assignee-option-${o.value || 'anyone'}`}
+              data-face={o.face ? 'true' : 'false'}
+              onClick={() => {
+                onSelect(o.value)
+                if (detailsRef.current) detailsRef.current.open = false
+              }}
+              className={cn(
+                'flex w-full items-center gap-2 rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40',
+                current === o.value && 'text-accent',
+              )}
+            >
+              {o.face ? (
+                /*
+                 * Named, and the name is the point of the row: "an avatar
+                 * picker" is a claim about what is DRAWN, and a picker that
+                 * listed the same names in a panel instead of a dropdown
+                 * would satisfy every other assertion in `list-assignee-filter`.
+                 */
+                <span data-testid="list-assignee-face" data-for={o.value} />
+              ) : (
+                <span className="h-5 w-5 shrink-0 rounded-full border border-dashed border-border" aria-hidden />
+              )}
+              <span className="truncate">{o.label}</span>
+              <Check className={cn('ml-auto h-3.5 w-3.5 shrink-0', current === o.value ? 'opacity-100' : 'opacity-0')} aria-hidden />
+            </button>
+          ))}
+        </div>
+        <div className="mt-1 border-t border-border/40 pt-1" data-testid="list-assigned-via">
+          <p className="px-2 pb-0.5 text-[11px] text-muted-foreground">{t('list.assignedVia.title')}</p>
+          <PanelSwitch
+            testId="list-assigned-via-comments"
+            icon={<MessageSquare className="h-3.5 w-3.5" aria-hidden />}
+            label={t('list.assignedVia.comments')}
+            checked={comments}
+            onChange={onComments}
+          />
+          <PanelSwitch
+            testId="list-assigned-via-subtasks"
+            icon={<GitBranch className="h-3.5 w-3.5" aria-hidden />}
+            label={t('list.assignedVia.subtasks')}
+            checked={subtasks}
+            onChange={onSubtasks}
+          />
+          <PanelSwitch
+            testId="list-assigned-via-checklists"
+            icon={<ClipboardList className="h-3.5 w-3.5" aria-hidden />}
+            label={t('list.assignedVia.checklists')}
+            checked={checklists}
+            onChange={onChecklists}
+          />
+          {/*
+            Said out loud rather than left to be discovered: with "Anyone"
+            chosen these three extend nothing, and three switches that visibly
+            move while the grid does not is the exact shape of the dead
+            control this audit keeps finding.
+          */}
+          {!assignedViaOn && (
+            <p className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground" data-testid="list-assigned-via-hint">
+              {t('list.assignedVia.hint')}
+            </p>
+          )}
+        </div>
+      </div>
+    </details>
+  )
+}
+
 type SavedViewRow = {
   id: string
   name: string
@@ -6289,6 +6838,7 @@ function CustomizeViewPanel({
   exportView,
   requireBoardExport,
   boardExportLocked,
+  boardExportPlan,
   view,
   onPatch,
   onAutosave,
@@ -6298,6 +6848,13 @@ function CustomizeViewPanel({
   onCardSize,
   cardCover,
   onCardCover,
+  isBoard,
+  stackFields,
+  onStackFields,
+  showEmptyFields,
+  onShowEmptyFields,
+  collapseEmptyColumns,
+  onCollapseEmptyColumns,
 }: {
   listId: string
   /**
@@ -6333,6 +6890,31 @@ function CustomizeViewPanel({
   onCardSize: (next: CardSize) => void
   cardCover: CardCover
   onCardCover: (next: CardCover) => void
+  /**
+   * §V2-07 frame `11:00` — the tier the caption under Download names, or null
+   * when this download is not gated.
+   *
+   * Resolved by the caller out of `plan.catalog` — the SAME catalog
+   * `feature-gate.tsx`'s `upgradeTarget` reads, which is not exported and
+   * which this file may not edit. `list-customize.mjs`'s "the caption names
+   * the same tier the dialog offers" check exists for exactly that: two
+   * readers of one catalog is only safe while something fails when they
+   * disagree.
+   */
+  boardExportPlan: { id: string; label: string } | null
+  /**
+   * §V2-S13 frame `10:35` vs frame `11:00` — whether the panel's middle block
+   * is the BOARD's three switches. The same panel on the List view carries a
+   * different trio, so these are drawn where the frame draws them rather than
+   * everywhere the panel opens.
+   */
+  isBoard: boolean
+  stackFields: boolean
+  onStackFields: (next: boolean) => void
+  showEmptyFields: boolean
+  onShowEmptyFields: (next: boolean) => void
+  collapseEmptyColumns: boolean
+  onCollapseEmptyColumns: (next: boolean) => void
 }) {
   const { t } = useTranslation()
   const [columns, setColumns] = useState<'visible' | 'names' | 'all'>('visible')
@@ -6419,6 +7001,46 @@ function CustomizeViewPanel({
             onChange={onCardCover}
           />
         </div>
+        {/*
+          §V2-S13 frame `10:35` — the three switches the frame draws directly
+          under Card cover, in the frame's order and at the frame's positions:
+          Stack fields (off), Show empty fields (ON), Collapse empty columns
+          (off).
+
+          Each one reads somewhere. Stack fields and Show empty fields change
+          how a BOARD CARD lays out its fields; Collapse empty columns changes
+          which LANES are open. A switch here whose only effect was the value
+          it stores would be the mirror defect this ledger's §1 is made of, so
+          the suite that covers them measures the grid and never the toggle.
+        */}
+        {isBoard && (
+          <div className="border-b border-border/40 pb-1" data-testid="list-board-settings">
+            <PanelSwitch
+              testId="list-board-stack-fields"
+              icon={<AlignLeft className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.board.stackFields')}
+              hint={t('list.board.stackFieldsHint')}
+              checked={stackFields}
+              onChange={onStackFields}
+            />
+            <PanelSwitch
+              testId="list-board-show-empty-fields"
+              icon={<SquareDashed className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.board.showEmptyFields')}
+              hint={t('list.board.showEmptyFieldsHint')}
+              checked={showEmptyFields}
+              onChange={onShowEmptyFields}
+            />
+            <PanelSwitch
+              testId="list-board-collapse-empty"
+              icon={<FoldHorizontal className="h-3.5 w-3.5" aria-hidden />}
+              label={t('list.board.collapseEmptyColumns')}
+              hint={t('list.board.collapseEmptyColumnsHint')}
+              checked={collapseEmptyColumns}
+              onChange={onCollapseEmptyColumns}
+            />
+          </div>
+        )}
         {/*
           The half of the panel that belongs to the SAVED VIEW, in the order
           frames `10:36` and `11:14` list it: Autosave for me · Pin view ·
@@ -6601,6 +7223,39 @@ function CustomizeViewPanel({
             >
               <Download className="h-3.5 w-3.5" /> {t('list.export.download')}
             </Button>
+
+            {/*
+              §V2-07 frame `11:00` — "⚡ Business feature", set in small grey
+              type directly under the Download button.
+
+              THIS IS THE HALF OF THE EXPORT-PAYWALL ROW THAT WAS STILL OPEN.
+              The refusal has been built since `paywall-sites.mjs`: the server
+              403s `view=board` on a Free plan and the panel marks the section
+              locked. But the only thing that said so BEFORE the press was a
+              padlock on the section's own `<summary>` — and the summary is
+              scrolled away the moment the section is expanded, which is where
+              the person is standing when they choose a format, a scope and a
+              date style and then press a button that cannot work. The frame
+              puts the plan's name at the bottom of the open dialog, next to
+              the button, which is the one place it is read.
+
+              It is gated on exactly the same condition as the refusal, and
+              `[10:49]` is the reason that matters: "agar aap ke paas premium
+              nahi to aap LIST VIEW download karo". A caption on the free list
+              export would be this row's version of the gate spreading.
+            */}
+            {exportView === 'board' && boardExportLocked && (
+              <p
+                data-testid="list-export-plan-note"
+                data-plan={boardExportPlan?.id ?? ''}
+                className="mt-1.5 flex items-center justify-center gap-1 text-[11px] text-muted-foreground"
+              >
+                <Zap className="h-3 w-3 shrink-0 text-amber-500" aria-hidden />
+                {boardExportPlan
+                  ? t('list.export.planNote', { plan: boardExportPlan.label })
+                  : t('list.export.planNoteUnknown')}
+              </p>
+            )}
           </div>
         </details>
       </div>

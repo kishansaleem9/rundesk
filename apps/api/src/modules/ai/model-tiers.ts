@@ -12,7 +12,8 @@
  *
  * WHAT IS BUILT, AND THE ONE THING THAT IS NOT.
  *
- * The STRUCTURE is built: a grouped list, a disclosure, hover detail, and a
+ * The STRUCTURE is built: a bounded group of three, a disclosure holding the
+ * rest, a hover card per row carrying its one line and its two bars, and a
  * preferred model that is persisted server-side (`ai_model_preferences`, 0150)
  * instead of in one browser's `localStorage`.
  *
@@ -34,7 +35,7 @@
  * with a real `model`, and the picker needs no change at all.
  */
 export interface ModelTier {
-  id: 'fast' | 'deep'
+  id: 'fast' | 'deep' | 'max'
   /** The Anthropic model this actually resolves to. */
   model: string
   /** Shown in the picker. */
@@ -45,9 +46,9 @@ export interface ModelTier {
   provider: 'anthropic'
   /**
    * `best` is the frame's "Best models" group; `more` is what its **Show more**
-   * reveals. Rundesk has two tiers and both are worth offering, so both are
-   * `best` and the disclosure carries the providers it cannot route to — which
-   * is the honest inversion of the frame, where Claude was the hidden one.
+   * reveals. Every routable tier declares itself `best`; whether it is actually
+   * DRAWN there is decided by `splitPickerModels` below, because the frame
+   * bounds the visible list at three and a group flag on each row cannot.
    */
   group: 'best'
   /** 1–5, the frame's hover-card bars. Relative to each other, not absolute. */
@@ -74,16 +75,37 @@ export interface UnroutableProvider {
   reasonKey: 'aiModels.reasonNoOpenAiClient' | 'aiModels.reasonNoGoogleClient'
 }
 
+/**
+ * Ordered as the popover draws them: most capable first, which is the order
+ * `[17:16]` shows (`Brain² Max` on top) and the order the tick was on.
+ *
+ * THREE, because the frame's "Best models" holds three rows. The third is not
+ * padding: Opus is a model this server can genuinely reach, priced in
+ * `ai-cost.ts` like the other two, and `modelForTier('max')` returns it, so
+ * choosing it changes which model answers. A third LABEL over one of the two
+ * existing models would have been the facade — two names for one thing — and
+ * `ai-model-picker` asserts the models are distinct precisely to catch that.
+ */
 export const MODEL_TIERS: readonly ModelTier[] = [
+  {
+    id: 'max',
+    model: 'claude-opus-5',
+    label: 'Max',
+    hint: 'Deepest reasoning for long, multi-step work',
+    provider: 'anthropic',
+    group: 'best',
+    speed: 2,
+    intelligence: 5,
+  },
   {
     id: 'deep',
     model: 'claude-sonnet-4-6',
     label: 'Deep',
-    hint: 'Slower, better at reasoning through your workspace',
+    hint: 'Balanced — reasons through your workspace without the wait',
     provider: 'anthropic',
     group: 'best',
     speed: 3,
-    intelligence: 5,
+    intelligence: 4,
   },
   {
     id: 'fast',
@@ -93,9 +115,35 @@ export const MODEL_TIERS: readonly ModelTier[] = [
     provider: 'anthropic',
     group: 'best',
     speed: 5,
-    intelligence: 3,
+    intelligence: 2,
   },
 ] as const
+
+/**
+ * How many rows the frame's "Best models" group holds before **Show more**.
+ *
+ * `[17:16]` draws three and a disclosure; the earlier frame `17:15` shows the
+ * disclosure open with seven. So the bound is on the SURFACE, not on the
+ * catalogue — which is why it lives here beside the catalogue rather than in
+ * the component: a fourth tier added below must fall behind the disclosure
+ * automatically, and a component holding its own `slice(0, 3)` is the
+ * duplicated-list defect waiting for its second copy.
+ */
+export const BEST_MODELS_VISIBLE = 3
+
+/**
+ * Split the picker into what is drawn and what **Show more** reveals.
+ *
+ * Pure, and takes the list rather than reading the constant, so the boundary
+ * can be tested at four tiers without a fourth tier existing.
+ */
+export function splitPickerModels<T>(
+  tiers: readonly T[],
+  visible: number = BEST_MODELS_VISIBLE,
+): { best: T[]; more: T[] } {
+  const cut = Math.max(0, visible)
+  return { best: tiers.slice(0, cut), more: tiers.slice(cut) }
+}
 
 /**
  * The two the frame names that this product has no client for.

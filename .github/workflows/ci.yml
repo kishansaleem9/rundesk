@@ -1351,6 +1351,90 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S02 `01:55`/`02:00` and §V2-S07 `06:05`. The frames put the
+      # magnifier/expand/+ cluster on the FIELDS header, not Attachments — the
+      # Attachments header carries a disclosure triangle and a count, so the
+      # count is what is asserted. Link attachments, because R2 is not
+      # configured here and a suite that needs storage cannot pass on a clean
+      # machine.
+      - name: Attachment thumbnails and their hover actions
+        if: '!cancelled()'
+        run: node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S02/S04/S05d `01:20`, `03:25`, `04:00` — the three AI surfaces on a
+      # task. ANTHROPIC_API_KEY is empty here, so every one of them ends in
+      # "AI features are not configured". The suite asserts the MESSAGE, never
+      # the status alone: a control wired to a route that does not exist would
+      # refuse identically from the browser, and no check may pass on a 404.
+      - name: The three AI surfaces on a task
+        if: '!cancelled()'
+        run: node test/e2e/task-ai-bar.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S07 `00:05`/`06:25`. `chat_channels.is_dm` and the split in
+      # workspace-chat-page.tsx both predate this: the data was there and the
+      # surface was not. The Channels section filters DMs out on purpose —
+      # "+ Add Channel" takes a name and "+ New message" takes a person — so
+      # filtering them out without giving them a home left them reachable only
+      # from the page you had to already be on to know you had any.
+      - name: Direct Messages have a home in the tree
+        if: '!cancelled()'
+        run: node test/e2e/sidebar-dms.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S09 `08:32` — what the Create Folder dialog asks. The private
+      # toggle and the Use-Templates footer, both asserted against the server.
+      # Description is deliberately absent: `folders` has no such column and
+      # FoldersService whitelists {name, color}, so a field typed here would
+      # have nowhere to go — the mirror defect, written down instead of built.
+      - name: The Create Folder dialog asks what the frame asks
+        if: '!cancelled()'
+        run: node test/e2e/folder-dialog.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S13 `08:23`/`14:16`. `projects.position` existed since the table
+      # did with neither end attached: updateProject left it out of its
+      # whitelist, and getProjectsBySpace had no ORDER BY at all — so the tree
+      # drew whatever the query plan produced, which changes after a vacuum.
+      # A column with no writer and no reader is the mirror defect with the
+      # mirror missing too.
+      - name: The sidebar tree keeps the order you put it in
+        if: '!cancelled()'
+        run: node test/e2e/sidebar-reorder.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-15b `12:48` — "See calendars for anyone in your team, find a time".
+      # The planner's "Meet with" takes ONE person and hatches their busy time
+      # over your own week; four people overlaid on one column is a picture of
+      # nobody's schedule. The fixture is two people busy at different times of
+      # day and in different numbers, so a grid that draws columns[0] four
+      # times fails on the counts AND on the geometry. Check 13 holds the old
+      # overlay in place: deleting it is the cheapest way to green and the
+      # worst outcome for the product.
+      - name: Team schedules give everyone a column
+        if: '!cancelled()'
+        run: node test/e2e/team-schedules.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
   browser-suites:
     name: Browser suites
     runs-on: ubuntu-latest

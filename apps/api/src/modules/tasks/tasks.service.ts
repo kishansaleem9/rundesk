@@ -2103,6 +2103,148 @@ export class TasksService {
     return taskVisibilityFilter(this.db, actor.id, isManager)
   }
 
+  /**
+   * §V2-07 frame `11:30` — "Tasks where I have assigned": Comments · Subtasks ·
+   * Checklists.
+   *
+   * WHY THIS IS A SERVER QUESTION AT ALL. The three switches EXTEND the
+   * assignee filter: with "Me" chosen and Comments on, a task must also appear
+   * when the only thing assigned to you on it is a comment. `GET
+   * /tasks/list/:id` carries `assignees` and `subtasks` and nothing about
+   * comment or checklist assignment, so two of the three cannot be answered in
+   * the browser at all — a client-side version of this feature could only ever
+   * be two switches that work and one that is decoration.
+   *
+   * THE THREE SOURCES ARE RETURNED SEPARATELY, not merged into one array. A
+   * merged list cannot tell "Comments found it" from "Checklists found it"
+   * when both are on and both match the same task, so a check written against
+   * a merged list would pass with one of the three branches deleted. The
+   * caller unions them; the shape is what makes each switch falsifiable.
+   *
+   * EVERY MATCH IS RESOLVED TO THE ROW THE LIST ACTUALLY DRAWS. A comment or a
+   * checklist item can hang off a SUBTASK, and the list view draws top-level
+   * tasks, so a match on a child is reported as its parent. That is also the
+   * whole of the Subtasks source: an assignment on the child, surfaced as the
+   * parent it is nested under.
+   */
+  async assignedViaForList(
+    listId: string,
+    opts: { userId: string; comments: boolean; subtasks: boolean; checklists: boolean },
+    actor?: { id: string; role?: string },
+  ): Promise<{
+    userId: string
+    comments: string[]
+    subtasks: string[]
+    checklists: string[]
+    taskIds: string[]
+  }> {
+    const empty = { userId: opts.userId, comments: [], subtasks: [], checklists: [], taskIds: [] }
+    if (!opts.userId) throw new BadRequestException('userId is required')
+    /*
+     * The same visibility filter `getTasksByList` uses. Without it this
+     * endpoint would be a side door: "which tasks in this list have a comment
+     * assigned to X" is a fact about tasks the caller may not be allowed to
+     * see, and answering it by id is still answering it.
+     */
+    const visFilter = await this.taskVisibilityFilterForList(listId, actor)
+    const rows = await this.db
+      .select({ id: tasks.id, parentTaskId: tasks.parentTaskId })
+      .from(tasks)
+      .where(
+        and(
+          eq(tasks.listId, listId),
+          eq(tasks.isArchived, false),
+          isNull(tasks.deletedAt),
+          visFilter,
+        ),
+      )
+    if (rows.length === 0) return empty
+    const inList = rows.map((r) => r.id)
+    /** id → the top-level row that would be drawn for it. */
+    const topOf = new Map(rows.map((r) => [r.id, r.parentTaskId ?? r.id]))
+    const topLevel = new Set(rows.filter((r) => !r.parentTaskId).map((r) => r.id))
+    /*
+     * A match whose parent is in another list (or is itself hidden) has no row
+     * on this screen, so it is dropped rather than returned as an id nothing
+     * can draw — the caller would union it into a set that never matches and
+     * the switch would look as if it had found nothing.
+     */
+    const surface = (ids: string[]) => {
+      const out = new Set<string>()
+      for (const id of ids) {
+        const top = topOf.get(id)
+        if (top && topLevel.has(top)) out.add(top)
+      }
+      return [...out].sort()
+    }
+
+    const comments = opts.comments
+      ? surface(
+          (
+            await this.db
+              .selectDistinct({ taskId: taskComments.taskId })
+              .from(taskComments)
+              .where(
+                and(
+                  eq(taskComments.assignedToUserId, opts.userId),
+                  inArray(taskComments.taskId, inList),
+                ),
+              )
+          ).map((r) => r.taskId),
+        )
+      : []
+
+    /*
+     * A CHILD that is assigned to this person, reported as its parent. The
+     * `parentTaskId` test is what keeps this source distinct from the direct
+     * assignee match the client already does — without it every directly
+     * assigned task would come back here too, and the Subtasks switch would
+     * look as if it worked while changing nothing.
+     */
+    const subtasks = opts.subtasks
+      ? surface(
+          (
+            await this.db
+              .selectDistinct({ taskId: taskAssignees.taskId })
+              .from(taskAssignees)
+              .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
+              .where(
+                and(
+                  eq(taskAssignees.userId, opts.userId),
+                  inArray(taskAssignees.taskId, inList),
+                  sql`${tasks.parentTaskId} is not null`,
+                ),
+              )
+          ).map((r) => r.taskId),
+        )
+      : []
+
+    const checklists = opts.checklists
+      ? surface(
+          (
+            await this.db
+              .selectDistinct({ taskId: taskChecklists.taskId })
+              .from(taskChecklistItems)
+              .innerJoin(taskChecklists, eq(taskChecklists.id, taskChecklistItems.checklistId))
+              .where(
+                and(
+                  eq(taskChecklistItems.assigneeId, opts.userId),
+                  inArray(taskChecklists.taskId, inList),
+                ),
+              )
+          ).map((r) => r.taskId),
+        )
+      : []
+
+    return {
+      userId: opts.userId,
+      comments,
+      subtasks,
+      checklists,
+      taskIds: [...new Set([...comments, ...subtasks, ...checklists])].sort(),
+    }
+  }
+
   async getTasksByList(
     listId: string,
     opts: { includeSubtasks?: boolean; includeArchived?: boolean } = {},

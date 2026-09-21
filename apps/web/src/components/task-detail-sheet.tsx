@@ -78,6 +78,10 @@ import {
   // §V2-S17 `15:20` — the ▶ welded to the status pill, and the ✓ beside it.
   ChevronRight,
   Check as CheckIcon,
+  // §V2-S02 `01:55` — an attachment thumbnail's hover actions, and the
+  // `Comment ▾` split button of `04:11`.
+  Download,
+  ChevronDown,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { offerUndo } from '../lib/undoable-delete'
@@ -268,6 +272,76 @@ type WorkspaceMemberLite = { userId: string; displayName: string; email: string;
 type MentionCandidate = WorkspaceMemberLite & { hasAccess: boolean }
 type MentionTaskLite = { id: string; title: string; projectName?: string; listName?: string }
 type MentionDocLite = { id: string; title: string; updatedAt?: string }
+
+/**
+ * §V2-05 frame `04:00` — the @ picker's six tabs:
+ * **People | Tasks | Docs | Whiteboards | Locations | Channels**.
+ *
+ * Three of them existed. The other three are here because each one has
+ * something real behind it, which is the whole test a picker section has to
+ * pass: an offer with nothing to resolve is this audit's facade, and a tab that
+ * can only ever say "no matches" is the confident zero with a label on it.
+ *
+ *   · Whiteboards — `GET /workspaces/:ws/canvases?type=whiteboard`. Rundesk's
+ *                   whiteboards ARE canvases of that type; the "+" menu's
+ *                   New Whiteboard already creates one.
+ *   · Locations   — `GET /search/:ws?types=space,folder,list`. The search
+ *                   service already carries her own definition of the word, at
+ *                   `[02:35]`: *"LOCATION ka matlab yeh hota hai ke woh kis
+ *                   space mein para hai, ya kis list mein para hai."*
+ *   · Channels    — `GET /workspaces/:ws/chat/channels`.
+ *
+ * NOT offered: **Brain** and **Agents → + Create Agent**, both drawn in the same
+ * frame. The Brain² hub is a recorded decision, and the ledger already refused
+ * Agents on the grounds that Rundesk has none — `ai.service.ts` declines an
+ * Agent filter for exactly that reason. Adding either as a seventh row would be
+ * a picker section with nothing behind it.
+ */
+type MentionTab = 'people' | 'tasks' | 'docs' | 'whiteboards' | 'locations' | 'channels'
+type MentionSimpleLite = { id: string; title: string; hint?: string }
+
+/**
+ * The keyboard prefixes of frame `04:00`'s footer, and the ONE place that
+ * decides them.
+ *
+ * The footer prints these, the textarea detects them and the tab strip is
+ * driven by them, so a hint cannot advertise a keystroke the composer does not
+ * honour — which is the shape of every "printed on the surface but not
+ * followable on that surface" defect this audit has found (the Priorities rail
+ * said it most plainly).
+ *
+ * ONE DEVIATION FROM THE FRAME, DELIBERATE. ClickUp's footer ends `'#' Channels`
+ * and Rundesk cannot: `#` already IS a task mention in a posted comment body
+ * (`insertTaskMention` writes `#<title>`, and `mention-text.tsx` renders it), so
+ * a bare `#` would mean two things in one box. `@#` keeps the channel prefix
+ * inside the `@` family the composer already opens on. Longest first, because
+ * `@@` must not be read as `@` with an empty query.
+ */
+const MENTION_PREFIXES: Array<{ prefix: string; tab: MentionTab }> = [
+  { prefix: '@@@@', tab: 'whiteboards' },
+  { prefix: '@@@', tab: 'docs' },
+  { prefix: '@@', tab: 'tasks' },
+  { prefix: '@/', tab: 'locations' },
+  { prefix: '@#', tab: 'channels' },
+  { prefix: '@', tab: 'people' },
+]
+
+/**
+ * The trailing mention token, if the caret is in one: which prefix opened it and
+ * what has been typed since.
+ *
+ * Returns null when there is no open token at all, so "the picker is showing"
+ * and "the text happens to contain an @ somewhere" stop being the same
+ * question — they were, and a stray address in the middle of a sentence kept
+ * the picker up for the rest of the comment.
+ */
+function readMentionToken(text: string): { tab: MentionTab; query: string } | null {
+  const m = /(@+[/#]?)([^\s@/#]*)$/.exec(text)
+  if (!m) return null
+  const found = MENTION_PREFIXES.find((p) => p.prefix === m[1])
+  if (!found) return null
+  return { tab: found.tab, query: m[2] }
+}
 
 type Subtask = {
   id: string
@@ -489,6 +563,182 @@ function formatDuration(ms?: number | null): string {
 // ---------------------------------------------------------------------------
 
 /**
+ * §V2-S02 frame `01:20` — THE AI BAR UNDER THE TASK TITLE.
+ *
+ * The frame draws a full-width bar directly beneath the title reading *"Ask
+ * Brain² for a presentation, document or prototype"*, with the three nouns
+ * emphasised as three separate offers.
+ *
+ * WHAT IT CANNOT BE. The Brain² HUB is a recorded decision in this audit — it
+ * does not exist and is not being built — so a bar that navigates to `/ai/brain`
+ * would be a control named after a place that is not there. This bar therefore
+ * does its work HERE, against the endpoints this product actually has, and the
+ * word "Brain²" stays only in the sentence because that sentence is the frame's.
+ *
+ * WHY ONE OF THE THREE IS ENABLED AND TWO ARE NOT, rather than three buttons
+ * that all "work". Same rule the model picker settled on when it listed ChatGPT
+ * and Gemini and refused to make them selectable: an offer you cannot honour is
+ * worse than an offer you did not make, and an offer you never make is worse
+ * than one that says why.
+ *
+ *   · document   — real. `POST /ai/summarize` drafts from the task (the server
+ *                  assembles the input from `taskId`, so the draft sees the
+ *                  description, activity and comments), then
+ *                  `POST /workspaces/:ws/docs` + `PATCH /docs/:id` puts it in
+ *                  the workspace's own Docs. The AI call goes FIRST on purpose:
+ *                  a refusal must leave no empty doc behind, which is this
+ *                  audit's mirror defect wearing a friendly name.
+ *   · presentation — Rundesk has no slide-deck entity at all (the ledger's
+ *                  "generated artifacts / slide deck" row is still M). There is
+ *                  nothing for a generated deck to be saved AS.
+ *   · prototype  — and nothing generates a UI prototype either. Canvases are
+ *                  hand-drawn whiteboards, not generated ones.
+ *
+ * Both unavailable offers carry their OWN reason rather than a shared one,
+ * because "not built" and "not built for a different cause" send the reader to
+ * different places.
+ */
+function TaskAiBar({
+  taskId,
+  workspaceId,
+  title,
+}: {
+  taskId: string
+  workspaceId?: string
+  title: string
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [busy, setBusy] = useState(false)
+  /** The last thing that happened, in words. Never a spinner that ends silent. */
+  const [note, setNote] = useState<{ kind: 'ok' | 'error'; text: string; docId?: string } | null>(null)
+
+  /**
+   * The three offers, in the frame's order. `reasonKey` is what makes the row
+   * honest: present means "cannot be done here, and this is why".
+   */
+  const OFFERS = [
+    { id: 'presentation', labelKey: 'taskAiBar.presentation', reasonKey: 'taskAiBar.noPresentation' },
+    { id: 'document', labelKey: 'taskAiBar.document', reasonKey: null },
+    { id: 'prototype', labelKey: 'taskAiBar.prototype', reasonKey: 'taskAiBar.noPrototype' },
+  ] as const
+
+  async function makeDocument() {
+    if (busy || !workspaceId) return
+    setBusy(true)
+    setNote(null)
+    try {
+      /*
+       * THE DRAFT FIRST. If AI is unavailable this throws here, and the only
+       * thing that has happened is that nothing happened — no doc, no row, no
+       * evidence in the database for a feature that did not run.
+       */
+      const drafted = await api<{ summary: string }>('/ai/summarize', {
+        method: 'POST',
+        body: { taskId, type: 'task', workspaceId },
+      })
+      const body = (drafted?.summary ?? '').trim()
+      if (!body) throw new Error(t('taskAiBar.emptyDraft'))
+
+      const doc = await api<{ id: string }>(`/workspaces/${workspaceId}/docs`, {
+        method: 'POST',
+        body: { title: t('taskAiBar.docTitle', { title }) },
+      })
+      if (!doc?.id) throw new Error(t('taskAiBar.docFailed'))
+      await api(`/docs/${doc.id}`, {
+        method: 'PATCH',
+        body: {
+          content: {
+            type: 'doc',
+            content: body
+              .split(/\n{2,}/)
+              .map((para) => ({ type: 'paragraph', content: [{ type: 'text', text: para }] })),
+          },
+        },
+      })
+      // `['docs', workspaceId]` — the key the docs panel actually reads. An
+      // invalidation of a key nothing holds is a line that looks like a refresh
+      // and refreshes nothing.
+      await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
+      setNote({ kind: 'ok', text: t('taskAiBar.docReady'), docId: doc.id })
+      toast.success(t('taskAiBar.docReady'))
+    } catch (err) {
+      /*
+       * The SERVER'S own sentence, not a house one. "AI features are not
+       * configured" and "rate limited" are different problems with different
+       * answers, and flattening them into "Could not do that" is how an outage
+       * gets reported as a bug in the button.
+       */
+      const text = err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskAiBar.docFailed')
+      setNote({ kind: 'error', text })
+      toast.error(text)
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div
+      data-testid="task-ai-bar"
+      className="mt-2 rounded-md border border-border/70 bg-muted/30 px-3 py-2"
+    >
+      <div className="flex flex-wrap items-center gap-x-1.5 gap-y-1 text-[13px] text-muted-foreground">
+        <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
+        <span>{t('taskAiBar.lead')}</span>
+        {OFFERS.map((offer, i) => (
+          <span key={offer.id} className="inline-flex items-center gap-1.5">
+            <button
+              type="button"
+              data-testid={`task-ai-bar-${offer.id}`}
+              data-available={offer.reasonKey ? 'no' : 'yes'}
+              disabled={!!offer.reasonKey || busy || !workspaceId}
+              title={offer.reasonKey ? t(offer.reasonKey as TranslationKey) : t('taskAiBar.documentHint')}
+              onClick={offer.reasonKey ? undefined : () => void makeDocument()}
+              className={cn(
+                'rounded px-1 font-medium underline-offset-2',
+                offer.reasonKey
+                  ? 'cursor-not-allowed text-muted-foreground/60 line-through decoration-muted-foreground/40'
+                  : 'text-accent hover:underline disabled:opacity-60',
+              )}
+            >
+              {t(offer.labelKey as TranslationKey)}
+            </button>
+            {i < OFFERS.length - 1 ? <span>{i === 0 ? ',' : ''}</span> : null}
+            {i === OFFERS.length - 2 ? <span>{t('taskAiBar.or')}</span> : null}
+          </span>
+        ))}
+        {busy && <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />}
+      </div>
+      {/*
+        The two that cannot run say so on the surface, not only in a tooltip a
+        keyboard reader never opens. One line each, because they are two
+        different absences.
+      */}
+      <ul className="mt-1 space-y-0.5">
+        {OFFERS.filter((o) => o.reasonKey).map((o) => (
+          <li
+            key={o.id}
+            data-testid={`task-ai-bar-reason-${o.id}`}
+            className="text-[11px] text-muted-foreground/80"
+          >
+            {t(o.reasonKey as TranslationKey)}
+          </li>
+        ))}
+      </ul>
+      {note && (
+        <p
+          data-testid="task-ai-bar-note"
+          data-kind={note.kind}
+          className={cn('mt-1 text-[11px]', note.kind === 'error' ? 'text-rose-500' : 'text-emerald-600')}
+        >
+          {note.text}
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
  * What this task *is* — Task, Campaign, Invoice — beside the task id.
  *
  * Renders nothing at all until the workspace has defined at least one type, so
@@ -523,25 +773,95 @@ function TaskTypePicker({
   })
 
   const types = typesQuery.data ?? []
+
+  /*
+   * §V2-S04 frame `03:25` — "✦ Fill with AI", the full-width button under the
+   * four types in the Task Types popover.
+   *
+   * WHAT IT HAD TO NOT BE. The ledger already refused "⚡ Assign with AI" on the
+   * grounds that `assign_task` exists but CHOOSING the person does not, and "a
+   * button that returns an arbitrary colleague with a confident label is worse
+   * than no button". The same test applies here and this one passes it: picking
+   * among the workspace's own named types from the task's own words is a
+   * classification over a CLOSED, KNOWN set, and the answer is checkable.
+   *
+   * So it is checked. `POST /ai/task/generate` already accepts a caller-declared
+   * field with `options` and answers with a value for it — that is the existing
+   * endpoint whose contract is "map free text onto one of these" — and the
+   * answer is then resolved against the REAL types by name. A name that does not
+   * resolve is REPORTED, not rounded to the nearest type: silently landing on
+   * "Task" because the model said something else would make a wrong answer and a
+   * working answer look identical.
+   */
+  const FILL_FIELD = 'Task type'
+  const fill = useMutation({
+    mutationFn: async () => {
+      const detail = await api<{ title: string; description: string | null }>(`/tasks/${taskId}`)
+      const generated = await api<{ customFieldValues?: Array<{ fieldName: string; value: unknown }> }>(
+        '/ai/task/generate',
+        {
+          method: 'POST',
+          body: {
+            prompt: [detail?.title ?? '', detail?.description ?? ''].filter(Boolean).join('\n\n'),
+            workspaceId,
+            customFields: [{ name: FILL_FIELD, type: 'dropdown', options: types.map((tt) => tt.name) }],
+          },
+        },
+      )
+      const answer = generated?.customFieldValues?.find((v) => v.fieldName === FILL_FIELD)?.value
+      const picked = types.find(
+        (tt) => tt.name.toLowerCase() === String(answer ?? '').trim().toLowerCase(),
+      )
+      if (!picked) {
+        throw new Error(
+          t('taskTypes.fillUnresolved', { answer: String(answer ?? '').trim() || t('taskTypes.fillNothing') }),
+        )
+      }
+      await api(`/tasks/${taskId}/task-type`, { method: 'PATCH', body: { taskTypeId: picked.id } })
+      return picked
+    },
+    onSuccess: (picked) => {
+      qc.invalidateQueries({ queryKey: ['task', taskId] })
+      toast.success(t('taskTypes.filled', { name: picked.name }))
+    },
+    // The server's own sentence — "AI features are not configured" is a
+    // different problem from "the model did not name one of your types".
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : e instanceof Error ? e.message : t('taskTypes.failed')),
+  })
+
   if (types.length === 0) return null
 
   return (
-    <select
-      value={current?.id ?? ''}
-      onChange={(e) => apply.mutate(e.target.value || null)}
-      disabled={apply.isPending}
-      aria-label={t('taskTypes.pickerLabel')}
-      title={t('taskTypes.pickerLabel')}
-      className="h-[22px] rounded border border-border bg-card px-1.5 text-[10px] uppercase tracking-wider disabled:opacity-50"
-      style={current?.color ? { color: current.color, borderColor: current.color + '55' } : undefined}
-    >
-      <option value="">{t('taskTypes.noType')}</option>
-      {types.map((tt) => (
-        <option key={tt.id} value={tt.id}>
-          {tt.icon ? `${tt.icon} ${tt.name}` : tt.name}
-        </option>
-      ))}
-    </select>
+    <span className="inline-flex items-center gap-1">
+      <select
+        value={current?.id ?? ''}
+        onChange={(e) => apply.mutate(e.target.value || null)}
+        disabled={apply.isPending}
+        aria-label={t('taskTypes.pickerLabel')}
+        title={t('taskTypes.pickerLabel')}
+        data-testid="task-type-select"
+        className="h-[22px] rounded border border-border bg-card px-1.5 text-[10px] uppercase tracking-wider disabled:opacity-50"
+        style={current?.color ? { color: current.color, borderColor: current.color + '55' } : undefined}
+      >
+        <option value="">{t('taskTypes.noType')}</option>
+        {types.map((tt) => (
+          <option key={tt.id} value={tt.id}>
+            {tt.icon ? `${tt.icon} ${tt.name}` : tt.name}
+          </option>
+        ))}
+      </select>
+      <button
+        type="button"
+        data-testid="task-type-fill-ai"
+        disabled={fill.isPending}
+        title={t('taskTypes.fillWithAiHint')}
+        onClick={() => fill.mutate()}
+        className="inline-flex h-[22px] items-center gap-1 rounded border border-border bg-card px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+      >
+        {fill.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : <Sparkles className="h-3 w-3" />}
+        {t('taskTypes.fillWithAi')}
+      </button>
+    </span>
   )
 }
 
@@ -1142,6 +1462,37 @@ export function TaskDetailSheet({
                   >
                     <PanelRight className="h-4 w-4" />
                   </button>
+                  {/*
+                    §V2-S07 frames `06:05`–`06:08` — the rail icon whose tooltip
+                    reads "Related items", one press from the panel of `06:10`.
+
+                    NOT A VERTICAL RAIL. The frame's strip hangs off the right
+                    edge of a FULL-PAGE task; Rundesk's task is a 672px side
+                    sheet, and a second vertical strip inside it would take width
+                    from the only column there is. Same reasoning the activity
+                    rail was settled on, and this button sits beside that one —
+                    the row where every other panel toggle in this header
+                    already lives.
+
+                    It switches the EXISTING tab rather than opening a second
+                    Related Items surface. Two entry points to one panel; a
+                    second panel would be the duplicated-list bug with a new
+                    icon on it.
+                  */}
+                  <button
+                    type="button"
+                    title={t('taskDetail.relatedItemsTooltip')}
+                    aria-label={t('taskDetail.relatedItemsTooltip')}
+                    aria-pressed={activeTab === 'dependencies'}
+                    data-testid="task-related-items-rail"
+                    onClick={() => setActiveTab('dependencies')}
+                    className={cn(
+                      'h-8 w-8 inline-flex items-center justify-center rounded hover:text-foreground',
+                      activeTab === 'dependencies' ? 'text-accent' : 'text-muted-foreground',
+                    )}
+                  >
+                    <Link2 className="h-4 w-4" />
+                  </button>
                   <button
                     type="button"
                     title={t('taskDetail.moveTask')}
@@ -1425,6 +1776,16 @@ export function TaskDetailSheet({
                 </div>
               </div>
               <SheetDescription className="sr-only">{t('taskDetail.srDescription')}</SheetDescription>
+              {/*
+                Frame `01:20` puts this bar between the title and the field
+                grid, and it is the first thing under the title in every later
+                frame of the task too.
+              */}
+              <TaskAiBar
+                taskId={detailQuery.data.id}
+                workspaceId={fallbackWorkspaceId}
+                title={detailQuery.data.title}
+              />
               <div className="flex flex-wrap items-center gap-2 pt-2">
                 <Badge variant="secondary" className="capitalize">
                   {STATUS_LABEL_KEYS[detailQuery.data.status] ? t(STATUS_LABEL_KEYS[detailQuery.data.status]) : detailQuery.data.status.replace('_', ' ')}
@@ -4932,6 +5293,31 @@ function AttachmentsPanel({
   return (
     <div className="space-y-3">
       {/*
+        §V2-S02 frame `01:55` — the section header reads "▾ Attachments 1".
+
+        THE LEDGER ROW'S WORDING IS WRONG, TWICE, and the frame settles it. It
+        says "attachments header view-toggle"; a later correction said "not a
+        view-toggle — a magnifier, an expand arrow and a +". Both put that
+        cluster on the wrong header. At `01:55` the magnifier / expand / `+`
+        cluster is drawn on the **Fields** header at the top of the shot; the
+        Attachments header three rows below it carries a disclosure triangle and
+        a COUNT and nothing else. Frame `02:00`, where the section has scrolled
+        into the middle of the viewport, shows the same thing.
+
+        So the header control this row really asks for is the count, and that is
+        what is built. Inventing a grid/list toggle to satisfy the row's wording
+        would have been building to the summary instead of to the frame — which
+        is the failure the thirteen steps open by naming.
+      */}
+      <div
+        className="flex items-baseline gap-2 pt-1"
+        data-testid="task-attachments-header"
+        data-count={attachments.length}
+      >
+        <span className="text-sm font-medium">{t('taskDetail.tab.attachments')}</span>
+        <span className="text-xs text-muted-foreground tabular-nums">{attachments.length}</span>
+      </div>
+      {/*
         THIS ZONE USED TO BE A PICTURE OF A DROP ZONE.
         It rendered "Drag and drop files here to upload" over a dashed border
         with NO onDrop, onDragOver or onDragEnter anywhere in this file — and
@@ -5042,45 +5428,129 @@ function AttachmentsPanel({
       ) : (
         <div className="grid grid-cols-2 gap-2">
           {attachments.map((a) => (
+            /*
+              Frame `01:55`/`02:00` draws an attachment as a THUMBNAIL CARD, and
+              the frame observations record the actions that appear over it:
+              download, expand, more. Rundesk drew a 40px icon beside a filename
+              with "Open" and "Remove" spelled out in words, so the image you
+              attached could not be looked at without leaving the task.
+
+              `group` + `group-hover` so the actions appear on the card they
+              belong to. They are also `focus-within`-visible: a hover-only
+              control is unreachable from a keyboard, and "download" is not a
+              decoration.
+            */
             <div
               key={a.id}
-              className="flex items-center gap-3 rounded-md border border-border p-3 hover:bg-muted/40 transition-colors"
+              data-testid="attachment-card"
+              data-attachment-id={a.id}
+              className="group relative overflow-hidden rounded-md border border-border transition-colors hover:bg-muted/40 focus-within:bg-muted/40"
             >
-              {a.mimeType?.startsWith('image/') && a.url ? (
-                <a href={a.url} target="_blank" rel="noreferrer" className="shrink-0">
+              <div className="flex items-center gap-3 p-3">
+                {a.mimeType?.startsWith('image/') && a.url ? (
                   <img
                     src={a.url}
                     alt={a.fileName}
                     loading="lazy"
-                    className="h-10 w-10 rounded object-cover border border-border"
+                    data-testid="attachment-thumb"
+                    className="h-12 w-12 shrink-0 rounded object-cover border border-border"
                   />
-                </a>
-              ) : (
-                <div className="flex h-10 w-10 items-center justify-center rounded bg-brand-100 text-foreground text-xs font-medium">
-                  {(a.mimeType ?? a.fileName.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}
-                </div>
-              )}
-              <div className="min-w-0 flex-1">
-                <div className="text-sm font-medium truncate">{a.fileName}</div>
-                <div className="text-xs text-muted-foreground">
-                  {formatBytes(a.fileSize)}
-                  {a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
+                ) : (
+                  <div
+                    data-testid="attachment-thumb"
+                    className="flex h-12 w-12 shrink-0 items-center justify-center rounded bg-brand-100 text-foreground text-xs font-medium"
+                  >
+                    {(a.mimeType ?? a.fileName.split('.').pop() ?? 'FILE').slice(0, 4).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="text-sm font-medium truncate">{a.fileName}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {formatBytes(a.fileSize)}
+                    {a.uploadedBy ? ` · ${a.uploadedBy}` : ''}
+                  </div>
                 </div>
               </div>
-              {a.url ? (
-                <a href={a.url} target="_blank" rel="noreferrer" className="text-xs text-accent hover:underline">
-                  {t('taskDetail.open')}
-                </a>
-              ) : null}
-              {uploadWired && (
-                <button
-                  type="button"
-                  className="text-xs text-rose-500 hover:text-rose-600"
-                  onClick={() => removeAttachment.mutate(a.id)}
-                >
-                  {t('taskDetail.remove')}
-                </button>
-              )}
+              <div
+                data-testid="attachment-actions"
+                data-attachment-id={a.id}
+                className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md border border-border bg-card/95 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+              >
+                {/*
+                  DOWNLOAD is an anchor with `download`, not a button that
+                  fetches: the URL the API hands back is a signed one, and
+                  letting the browser follow it is the only path that works for
+                  a file this page never loaded into memory.
+
+                  An attachment with no resolved URL renders neither of the two
+                  link actions. `href="#"` on a file that is still arriving was
+                  a real defect in the comment player (§0) and there is no
+                  reason to reintroduce it here.
+                */}
+                {a.url ? (
+                  <a
+                    href={a.url}
+                    download={a.fileName}
+                    data-testid="attachment-download"
+                    data-attachment-id={a.id}
+                    title={t('taskDetail.attachmentDownload')}
+                    aria-label={t('taskDetail.attachmentDownload')}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Download className="h-3.5 w-3.5" />
+                  </a>
+                ) : null}
+                {a.url ? (
+                  <a
+                    href={a.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    data-testid="attachment-expand"
+                    data-attachment-id={a.id}
+                    title={t('taskDetail.attachmentExpand')}
+                    aria-label={t('taskDetail.attachmentExpand')}
+                    className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <Maximize2 className="h-3.5 w-3.5" />
+                  </a>
+                ) : null}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      data-testid="attachment-more"
+                      data-attachment-id={a.id}
+                      title={t('taskDetail.attachmentMore')}
+                      aria-label={t('taskDetail.attachmentMore')}
+                      className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-48">
+                    <DropdownMenuItem
+                      data-testid="attachment-copy-name"
+                      onSelect={() => {
+                        void navigator.clipboard?.writeText(a.fileName)
+                        toast.success(t('taskDetail.attachmentNameCopied'))
+                      }}
+                    >
+                      <Copy className="mr-2 h-4 w-4" />
+                      {t('taskDetail.attachmentCopyName')}
+                    </DropdownMenuItem>
+                    {uploadWired && (
+                      <DropdownMenuItem
+                        data-testid="attachment-remove"
+                        onSelect={() => removeAttachment.mutate(a.id)}
+                        className="text-red-600 focus:text-red-600"
+                      >
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        {t('taskDetail.remove')}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
             </div>
           ))}
         </div>
@@ -5345,7 +5815,7 @@ function CommentsPanel({
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
   const [selectedMentionUserIds, setSelectedMentionUserIds] = useState<string[]>([])
-  const [mentionTab, setMentionTab] = useState<'people' | 'tasks' | 'docs'>('people')
+  const [mentionTab, setMentionTab] = useState<MentionTab>('people')
   /*
    * §V2-S05b frame `04:50` — the composer's "+" menu.
    *
@@ -5368,13 +5838,49 @@ function CommentsPanel({
    */
   const [commentSlashOpen, setCommentSlashOpen] = useState(false)
   const [commentSlashQuery, setCommentSlashQuery] = useState('')
+  /*
+   * §V2-S05d frame `04:00` — THE OTHER HALF OF THE COMPOSER HINT.
+   *
+   * The placeholder in the frame reads "Comment, press 'space' for AI, '/' for
+   * commands", and the hint under the box at `05:35` says the same. Rundesk
+   * printed the `/` half only, under a comment in this file that read *"there
+   * is no space-for-AI hook on this composer"*.
+   *
+   * THAT REASON HAD STOPPED BEING TRUE. `POST /ai/writing/improve` is a real
+   * endpoint with four modes, and by the time the comment was written it had
+   * three web call sites — the description editor a few thousand lines UP THIS
+   * FILE (`aiImproveDescription`), the docs panel, and the chat composer. The
+   * hint was half a hint because of a reason that had expired, which is this
+   * audit's *stale reason* defect with the composer's own name on it. Re-read
+   * before trusting, every time.
+   *
+   * DUPLICATION, NAMED RATHER THAN HIDDEN: `chat-composer.tsx` already has this
+   * prompt-then-keep-or-discard shape and this is a second copy of it. It is
+   * not consolidated here because that file belongs to another lane in this
+   * pass; it should become one module, and the next person to touch either is
+   * the right person to do it.
+   */
+  const [aiOpen, setAiOpen] = useState(false)
+  const [aiPrompt, setAiPrompt] = useState('')
+  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format'>('expand')
+  const [aiDraft, setAiDraft] = useState<string | null>(null)
+  const [aiBusy, setAiBusy] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
+  const aiPromptRef = useRef<HTMLTextAreaElement | null>(null)
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [quickCreate, setQuickCreate] = useState<'task' | 'doc' | 'whiteboard' | null>(null)
   const commentFileInputRef = useRef<HTMLInputElement | null>(null)
   const commentTextRef = useRef<HTMLTextAreaElement | null>(null)
   const startRecordingRef = useRef<((kind: 'voice' | 'clip') => void) | null>(null)
   const [mentionIndex, setMentionIndex] = useState(0)
-  const mentionQuery = text.slice(text.lastIndexOf('@') + 1).toLowerCase()
+  /*
+   * The open token decides BOTH what is being searched and which tab is up, so
+   * typing `@@` cannot leave the strip on People while the list shows tasks.
+   * `mentionTab` is still state because the tabs are also clickable, and the
+   * token only overrides it while one is actually open.
+   */
+  const mentionToken = readMentionToken(text)
+  const mentionQuery = (mentionToken?.query ?? '').toLowerCase()
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
@@ -5389,6 +5895,42 @@ function CommentsPanel({
     queryKey: ['mention-docs', workspaceId],
     queryFn: () => api<MentionDocLite[]>(`/workspaces/${workspaceId}/docs`),
     enabled: !!workspaceId && mentionTab === 'docs',
+  })
+  /*
+   * The three new sections of frame `04:00`. Each is `enabled` only on its own
+   * tab, so opening the picker does not fire five queries at people who were
+   * only ever going to mention a colleague.
+   */
+  const mentionWhiteboardsQuery = useQuery({
+    queryKey: ['mention-whiteboards', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; title: string; updatedAt?: string }>>(
+        `/workspaces/${workspaceId}/canvases?type=whiteboard`,
+      ),
+    enabled: !!workspaceId && mentionTab === 'whiteboards',
+  })
+  /*
+   * Locations narrow on the SERVER, because the thing being searched is the
+   * whole space/folder/list tree and a workspace has more of it than a picker
+   * can hold. `q` is part of the query key, so each new word is a key this run
+   * has not fetched — the 30-second `staleTime` in `lib/query.ts` cannot serve
+   * a stale answer to a narrower search.
+   */
+  const mentionLocationsQuery = useQuery({
+    queryKey: ['mention-locations', workspaceId, mentionQuery],
+    queryFn: () =>
+      api<Array<{ id: string; entityType: string; title: string; url: string }>>(
+        `/search/${workspaceId}?q=${encodeURIComponent(mentionQuery)}&types=space,folder,list&limit=20`,
+      ),
+    enabled: !!workspaceId && mentionTab === 'locations',
+  })
+  const mentionChannelsQuery = useQuery({
+    queryKey: ['mention-channels', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; name: string; isPrivate?: boolean; kind?: string }>>(
+        `/workspaces/${workspaceId}/chat/channels`,
+      ),
+    enabled: !!workspaceId && mentionTab === 'channels',
   })
   /*
    * §V2-05 frame `04:00`. The picker's people come from the TASK, not the
@@ -5419,7 +5961,23 @@ function CommentsPanel({
   const docMentionCandidates = (mentionDocsQuery.data ?? []).filter((d) =>
     d.title.toLowerCase().includes(mentionQuery),
   )
-  const showMentions = text.includes('@') && text[text.length - 1] !== ' '
+  const whiteboardMentionCandidates: MentionSimpleLite[] = (mentionWhiteboardsQuery.data ?? [])
+    .filter((w) => (w.title ?? '').toLowerCase().includes(mentionQuery))
+    .map((w) => ({ id: w.id, title: w.title }))
+  /*
+   * Already narrowed by the server — filtering it again here would drop hits
+   * that matched on a parent's name rather than on their own, which is half of
+   * what makes a location search worth asking for.
+   */
+  const locationMentionCandidates: MentionSimpleLite[] = (mentionLocationsQuery.data ?? []).map((l) => ({
+    id: l.id,
+    title: l.title,
+    hint: l.entityType,
+  }))
+  const channelMentionCandidates: MentionSimpleLite[] = (mentionChannelsQuery.data ?? [])
+    .filter((c) => (c.name ?? '').toLowerCase().includes(mentionQuery))
+    .map((c) => ({ id: c.id, title: c.name, hint: c.isPrivate ? 'private' : undefined }))
+  const showMentions = mentionToken !== null
   const namesById = useMemo(
     () => Object.fromEntries((membersQuery.data ?? []).map((m) => [m.userId, m.displayName || m.email])),
     [membersQuery.data],
@@ -5662,12 +6220,46 @@ function CommentsPanel({
     setText(`${prefix}Doc:${doc.title} `)
     setMentionIndex(0)
   }
-  const activeCandidates =
+  /*
+   * The three new kinds insert the same way the three old ones do: a labelled
+   * plain-text token. It is what `MentionText` can already render and what the
+   * email and notification paths already carry, so a whiteboard mention is
+   * legible everywhere a doc mention is.
+   *
+   * Cutting back to the token's own start rather than to `lastIndexOf('@')`,
+   * because `@@@@` is four of them and cutting at the last one would leave
+   * three behind.
+   */
+  const insertLabelled = (label: string, name: string) => {
+    const cut = /(@+[/#]?)([^\s@/#]*)$/.exec(text)
+    const prefix = cut ? text.slice(0, cut.index) : text
+    setText(`${prefix}${label}:${name} `)
+    setMentionIndex(0)
+  }
+  const activeCandidates: Array<unknown> =
     mentionTab === 'people'
       ? mentionCandidates
       : mentionTab === 'tasks'
         ? taskMentionCandidates
-        : docMentionCandidates
+        : mentionTab === 'docs'
+          ? docMentionCandidates
+          : mentionTab === 'whiteboards'
+            ? whiteboardMentionCandidates
+            : mentionTab === 'locations'
+              ? locationMentionCandidates
+              : channelMentionCandidates
+  /*
+   * The prefix drives the tab. Written as an effect rather than folded into the
+   * textarea's `onChange` because the "+" menu's Mention-a-task item sets the
+   * text too, and two places deciding one thing is the bug this audit has found
+   * ten times.
+   */
+  useEffect(() => {
+    if (mentionToken && mentionToken.tab !== mentionTab) {
+      setMentionTab(mentionToken.tab)
+      setMentionIndex(0)
+    }
+  }, [mentionToken?.tab])
 
   return (
     <div className="space-y-3" ref={commentListRef}>
@@ -5943,6 +6535,21 @@ function CommentsPanel({
           data-testid="comment-input"
           rows={3}
           onKeyDown={(e) => {
+            /*
+             * SPACE, on an empty box, opens the AI panel — the hint's other
+             * half, and the one gesture that cannot collide with typing: a
+             * space is only swallowed when there is nothing to put it after.
+             * With any text at all it is an ordinary space, which is why this
+             * runs before the mention handling and returns.
+             */
+            if (e.key === ' ' && text === '' && !aiOpen) {
+              e.preventDefault()
+              setAiOpen(true)
+              setAiDraft(null)
+              setAiError(null)
+              requestAnimationFrame(() => aiPromptRef.current?.focus())
+              return
+            }
             if (!showMentions || activeCandidates.length === 0) return
             if (e.key === 'ArrowDown') {
               e.preventDefault()
@@ -5955,6 +6562,15 @@ function CommentsPanel({
               if (mentionTab === 'people' && activeMention) insertMention(activeMention)
               if (mentionTab === 'tasks' && taskMentionCandidates[mentionIndex]) insertTaskMention(taskMentionCandidates[mentionIndex])
               if (mentionTab === 'docs' && docMentionCandidates[mentionIndex]) insertDocMention(docMentionCandidates[mentionIndex])
+              if (mentionTab === 'whiteboards' && whiteboardMentionCandidates[mentionIndex]) {
+                insertLabelled(t('taskDetail.mentionWhiteboardLabel'), whiteboardMentionCandidates[mentionIndex].title)
+              }
+              if (mentionTab === 'locations' && locationMentionCandidates[mentionIndex]) {
+                insertLabelled(t('taskDetail.mentionLocationLabel'), locationMentionCandidates[mentionIndex].title)
+              }
+              if (mentionTab === 'channels' && channelMentionCandidates[mentionIndex]) {
+                insertLabelled(t('taskDetail.mentionChannelLabel'), channelMentionCandidates[mentionIndex].title)
+              }
             } else if (e.key === 'Escape') {
               e.preventDefault()
               setText((prev) => prev.replace(/@[^ ]*$/, ''))
@@ -5962,20 +6578,35 @@ function CommentsPanel({
             }
           }}
         />
-        {showMentions && mentionCandidates.length > 0 && (
+        {/*
+          A DEFECT FOUND WHILE ADDING THE THREE NEW SECTIONS: this read
+          `showMentions && mentionCandidates.length > 0`, so the whole picker —
+          tab strip and all — was gated on the PEOPLE list having a match,
+          whatever tab was up. Type `@`, switch to Tasks, narrow to a word no
+          colleague's name contains, and the picker vanished mid-search, taking
+          the tab you were using with it. It gates on the ACTIVE list now, and
+          the empty state belongs to whichever section is showing.
+        */}
+        {showMentions && (
           <div
             data-testid="comment-mention-picker"
+            data-tab={mentionTab}
             className="mt-2 rounded-lg border border-border bg-card shadow-lg overflow-hidden"
           >
-            <div className="px-2 pt-2 pb-1 border-b border-border/70 flex items-center gap-1">
+            <div className="px-2 pt-2 pb-1 border-b border-border/70 flex flex-wrap items-center gap-1">
               {([
                 ['people', 'taskDetail.mentionPeople'],
                 ['tasks', 'taskDetail.mentionTasks'],
                 ['docs', 'taskDetail.mentionDocs'],
+                ['whiteboards', 'taskDetail.mentionWhiteboards'],
+                ['locations', 'taskDetail.mentionLocations'],
+                ['channels', 'taskDetail.mentionChannels'],
               ] as const).map(([id, label]) => (
                 <button
                   key={id}
                   type="button"
+                  data-testid={`mention-tab-${id}`}
+                  aria-current={mentionTab === id}
                   onClick={() => {
                     setMentionTab(id)
                     setMentionIndex(0)
@@ -6085,6 +6716,97 @@ function CommentsPanel({
                 )}
               </div>
             )}
+            {/*
+              The three new sections. One list renderer rather than three
+              near-identical ones: they differ in where the rows come from and
+              what label goes into the comment, and nothing else. Three copies
+              would be the duplicated list this audit has found six times, in a
+              picker — which is exactly where it was found the first time.
+            */}
+            {(['whiteboards', 'locations', 'channels'] as const).map((section) => {
+              if (mentionTab !== section) return null
+              const rows =
+                section === 'whiteboards'
+                  ? whiteboardMentionCandidates
+                  : section === 'locations'
+                    ? locationMentionCandidates
+                    : channelMentionCandidates
+              const pending =
+                section === 'whiteboards'
+                  ? mentionWhiteboardsQuery.isPending
+                  : section === 'locations'
+                    ? mentionLocationsQuery.isPending
+                    : mentionChannelsQuery.isPending
+              const label =
+                section === 'whiteboards'
+                  ? t('taskDetail.mentionWhiteboardLabel')
+                  : section === 'locations'
+                    ? t('taskDetail.mentionLocationLabel')
+                    : t('taskDetail.mentionChannelLabel')
+              return (
+                <div key={section} className="max-h-40 overflow-auto" data-testid={`mention-list-${section}`}>
+                  {/*
+                    "Still loading" and "there is nothing" are different answers
+                    and must not print the same sentence — a picker that says
+                    "no matches" while the request is in flight is the confident
+                    zero in its smallest form.
+                  */}
+                  {pending ? (
+                    <div className="px-3 py-3 text-xs text-muted-foreground" data-testid={`mention-${section}-loading`}>
+                      {t('taskDetail.mentionLoading')}
+                    </div>
+                  ) : rows.length === 0 ? (
+                    <div className="px-3 py-3 text-xs text-muted-foreground" data-testid={`mention-${section}-empty`}>
+                      {t('taskDetail.mentionNoMatches')}
+                    </div>
+                  ) : (
+                    rows.slice(0, 8).map((row, idx) => (
+                      <button
+                        key={row.id}
+                        type="button"
+                        data-testid={`mention-${section}-row`}
+                        className={cn(
+                          'w-full px-2.5 py-2 text-left text-xs',
+                          idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
+                        )}
+                        onMouseEnter={() => setMentionIndex(idx)}
+                        onClick={() => insertLabelled(label, row.title)}
+                      >
+                        <div className="font-medium text-foreground truncate">
+                          {label}:{row.title}
+                        </div>
+                        {row.hint ? <div className="text-muted-foreground truncate">{row.hint}</div> : null}
+                      </button>
+                    ))
+                  )}
+                </div>
+              )
+            })}
+            {/*
+              §V2-05 frame `04:00` — THE FOOTER OF KEYBOARD HINTS, one per @ type:
+              `'@' People | '@@' Tasks | '@@@' Docs | '@@@@' Whiteboards |
+               '@/' Locations | '#' Channels`.
+
+              Printed from `MENTION_PREFIXES`, the same array the composer reads
+              to decide which section a prefix opens. A hint list kept beside the
+              behaviour it describes is how it stays true; a hand-written copy of
+              this line is how it stops being.
+            */}
+            <div
+              /* `mention-hints`, not `mention-hint-footer`: a testid prefix is a
+                 namespace, and a container sitting under `mention-hint-` would be
+                 counted by every query for the hints themselves. */
+              data-testid="mention-hints"
+              data-count={MENTION_PREFIXES.length}
+              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 border-t border-border/70 px-2.5 py-1.5 text-[10px] text-muted-foreground"
+            >
+              {MENTION_PREFIXES.map((p) => (
+                <span key={p.prefix} data-testid={`mention-hint-${p.tab}`} className="whitespace-nowrap">
+                  <code className="rounded bg-muted px-1 font-mono">{p.prefix}</code>{' '}
+                  {t(`taskDetail.mention${p.tab.charAt(0).toUpperCase()}${p.tab.slice(1)}` as TranslationKey)}
+                </span>
+              ))}
+            </div>
           </div>
         )}
         {commentFiles.length > 0 && (
@@ -6165,10 +6887,135 @@ function CommentsPanel({
           </div>
         )}
         {/*
-          The hint frame `04:50` prints under the box — the "/" half only.
-          ClickUp's reads "Press 'space' for AI or '/' for commands"; there is no
-          space-for-AI hook on this composer, and half a hint that works beats a
-          whole one that lies about the other half.
+          §V2-S05d — the AI panel the space bar opens.
+
+          It asks for an INSTRUCTION and hands back a DRAFT you have to keep.
+          The chat composer learned this the hard way: its sparkle used to
+          rewrite what you had written the moment it was pressed, with no way to
+          say what you wanted and no way back. Nothing here touches the comment
+          box until Keep is pressed.
+        */}
+        {aiOpen && (
+          <div
+            data-testid="comment-ai-panel"
+            className="mt-2 rounded-lg border border-border bg-card p-2 shadow-lg"
+          >
+            <div className="mb-1 flex items-center gap-1.5 text-[11px] font-medium">
+              <Sparkles className="h-3.5 w-3.5 text-accent" aria-hidden />
+              {t('taskDetail.aiComposerTitle')}
+            </div>
+            <Textarea
+              ref={aiPromptRef}
+              rows={2}
+              value={aiPrompt}
+              onChange={(e) => setAiPrompt(e.target.value)}
+              placeholder={t('taskDetail.aiComposerPlaceholder')}
+              data-testid="comment-ai-prompt"
+              className="text-xs"
+            />
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+              <select
+                value={aiMode}
+                onChange={(e) => setAiMode(e.target.value as typeof aiMode)}
+                data-testid="comment-ai-mode"
+                aria-label={t('taskDetail.aiComposerMode')}
+                className="h-7 rounded border border-border bg-card px-1.5 text-[11px]"
+              >
+                {/* Exactly the four `POST /ai/writing/improve` accepts. A fifth
+                    would fall through to `improve` server-side and read as a
+                    control that does nothing. */}
+                <option value="expand">{t('taskDetail.aiModeExpand')}</option>
+                <option value="improve">{t('taskDetail.aiModeImprove')}</option>
+                <option value="shorten">{t('taskDetail.aiModeShorten')}</option>
+                <option value="format">{t('taskDetail.aiModeFormat')}</option>
+              </select>
+              <Button
+                size="sm"
+                data-testid="comment-ai-run"
+                disabled={!aiPrompt.trim() || aiBusy}
+                onClick={async () => {
+                  setAiBusy(true)
+                  setAiError(null)
+                  setAiDraft(null)
+                  try {
+                    const r = await api<{ improved: string }>('/ai/writing/improve', {
+                      method: 'POST',
+                      body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },
+                    })
+                    const improved = (r?.improved ?? '').trim()
+                    if (!improved) throw new Error(t('taskDetail.aiComposerEmpty'))
+                    setAiDraft(improved)
+                  } catch (err) {
+                    // The server's own words. "AI features are not configured"
+                    // is a different answer from "the model returned nothing",
+                    // and one of them is somebody's to fix.
+                    setAiError(
+                      err instanceof ApiError ? err.message : err instanceof Error ? err.message : t('taskDetail.aiUnavailable'),
+                    )
+                  } finally {
+                    setAiBusy(false)
+                  }
+                }}
+              >
+                {aiBusy ? <Loader2 className="mr-1 h-3 w-3 animate-spin" /> : null}
+                {t('taskDetail.aiComposerRun')}
+              </Button>
+              <button
+                type="button"
+                data-testid="comment-ai-close"
+                onClick={() => {
+                  setAiOpen(false)
+                  setAiDraft(null)
+                  setAiError(null)
+                  commentTextRef.current?.focus()
+                }}
+                className="text-[11px] text-muted-foreground hover:text-foreground"
+              >
+                {t('taskDetail.aiComposerClose')}
+              </button>
+            </div>
+            {aiError && (
+              <p data-testid="comment-ai-error" className="mt-1.5 text-[11px] text-rose-500">
+                {aiError}
+              </p>
+            )}
+            {aiDraft && (
+              <div className="mt-1.5 rounded border border-border bg-muted/30 p-2">
+                <p data-testid="comment-ai-draft" className="whitespace-pre-wrap text-xs">
+                  {aiDraft}
+                </p>
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <Button
+                    size="sm"
+                    data-testid="comment-ai-keep"
+                    onClick={() => {
+                      setText((prev) => (prev.trim() ? `${prev.trimEnd()}\n\n${aiDraft}` : aiDraft))
+                      setAiOpen(false)
+                      setAiDraft(null)
+                      setAiPrompt('')
+                      commentTextRef.current?.focus()
+                    }}
+                  >
+                    {t('taskDetail.aiComposerKeep')}
+                  </Button>
+                  <button
+                    type="button"
+                    data-testid="comment-ai-discard"
+                    onClick={() => setAiDraft(null)}
+                    className="text-[11px] text-muted-foreground hover:text-foreground"
+                  >
+                    {t('taskDetail.aiComposerDiscard')}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {/*
+          The hint frame `04:00` prints INSIDE the box and frame `05:35` under
+          it: "press 'space' for AI, '/' for commands". BOTH halves now, because
+          both halves now do something — see the space handler on the textarea
+          and the panel above.
         */}
         <p className="mt-1 text-[10px] text-muted-foreground" data-testid="comment-composer-hint">
           {t('taskDetail.composerHint')}
@@ -6236,8 +7083,15 @@ function CommentsPanel({
               onAddFile={() => commentFileInputRef.current?.click()}
               onRecordClip={() => startRecordingRef.current?.('clip')}
               onMentionTask={() => {
+                /*
+                 * `@@` rather than `@`, now that the prefix is what selects the
+                 * tab. Appending a single `@` and setting the tab by hand would
+                 * be two sources for one fact, and the token would win on the
+                 * next keystroke — the menu item would land on Tasks and then
+                 * slide back to People as soon as anybody typed.
+                 */
                 setMentionTab('tasks')
-                setText((prev) => (prev.endsWith('@') ? prev : `${prev}@`))
+                setText((prev) => (prev.endsWith('@@') ? prev : `${prev.replace(/@+$/, '')}@@`))
                 commentTextRef.current?.focus()
               }}
               onEmoji={() => setEmojiOpen((v) => !v)}
@@ -6251,20 +7105,81 @@ function CommentsPanel({
               onQuickCreate={setQuickCreate}
             />
           </div>
-          <Button
-            size="sm"
-            data-testid="comment-post"
-            onClick={() => create.mutate()}
-            /*
-             * A voice note or a clip with no words typed beside it is a whole
-             * comment on its own — frame `04:45` is exactly that. Requiring
-             * text would make the mic a control that cannot post what it
-             * records.
-             */
-            disabled={(!text.trim() && commentFiles.length === 0) || create.isPending}
-          >
-            {create.isPending ? t('taskDetail.posting') : t('taskDetail.comment')}
-          </Button>
+          <div className="flex items-center gap-1">
+            {/*
+              §V2-S05 frame `04:11` — the `Comment ▾` split button, OPEN.
+
+              IT IS A MODE SWITCH, NOT TWO ACTIONS. The menu draws **Comment**
+              with a tick beside it and **Email** under it: the tick says which
+              mode the composer is in, and `[04:11]` names what the other one is
+              for — *"main is ko EMAIL bhi kar sakti hoon."*
+
+              AND THE OTHER MODE CANNOT SEND. Rundesk's mail goes the opposite
+              way: `email-to-task.ts` turns mail sent to a task's address INTO a
+              comment, and the task menu's "Send email" shows you that INBOUND
+              address. There is no endpoint anywhere that posts a composed body
+              out to a recipient, so an Email mode you could select would be a
+              dead control wearing a tick.
+
+              So the menu SAYS SO. Email is listed, because the frame lists it
+              and because a reader who came looking for it deserves an answer
+              rather than an absence; it is disabled, and it carries its reason
+              on the row. Choosing it cannot move the mode — `onSelect` is not
+              even wired, so there is no path by which the composer ends up in a
+              state it cannot post from.
+            */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  data-testid="comment-mode-trigger"
+                  data-mode="comment"
+                  title={t('taskDetail.commentModeLabel')}
+                  className="inline-flex h-8 items-center gap-1 rounded-md border border-border bg-card px-2 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  {t('taskDetail.comment')}
+                  <ChevronDown className="h-3 w-3" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuItem data-testid="comment-mode-item-comment" data-selected="yes" onSelect={() => {}}>
+                  <CheckIcon className="mr-2 h-4 w-4 text-accent" />
+                  {t('taskDetail.commentModeComment')}
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  data-testid="comment-mode-item-email"
+                  data-available="no"
+                  disabled
+                  className="flex-col items-start gap-0.5"
+                >
+                  <span className="inline-flex items-center">
+                    <Mail className="mr-2 h-4 w-4" />
+                    {t('taskDetail.commentModeEmail')}
+                  </span>
+                  <span
+                    data-testid="comment-mode-reason-email"
+                    className="pl-6 text-[10px] leading-snug text-muted-foreground"
+                  >
+                    {t('taskDetail.commentModeEmailReason')}
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+            <Button
+              size="sm"
+              data-testid="comment-post"
+              onClick={() => create.mutate()}
+              /*
+               * A voice note or a clip with no words typed beside it is a whole
+               * comment on its own — frame `04:45` is exactly that. Requiring
+               * text would make the mic a control that cannot post what it
+               * records.
+               */
+              disabled={(!text.trim() && commentFiles.length === 0) || create.isPending}
+            >
+              {create.isPending ? t('taskDetail.posting') : t('taskDetail.comment')}
+            </Button>
+          </div>
         </div>
       </div>
     </div>

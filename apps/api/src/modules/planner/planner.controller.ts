@@ -56,6 +56,40 @@ export class PlannerController {
     return this.planner.deleteBlock(blockId, user.id)
   }
 
+  /** §V2-14d, frame `13:28` — the calendar picker's groups, in order. */
+  @Get('calendars')
+  listCalendars(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.planner.listCalendars(workspaceId, user.id)
+  }
+
+  /**
+   * §V2-15b, frame `12:48` — several colleagues' calendars, side by side.
+   *
+   * A DIFFERENT PATH FROM `blocks`, deliberately. `focus-pill` asserts that one
+   * `/planner/:ws/blocks` request serves both the tab title and the header
+   * pill, and a team grid hanging off that endpoint would have made it three
+   * consumers of a request whose whole check is that there is one of it.
+   * Nothing here reads `task_time_blocks`: a colleague's blocks are their plan
+   * for their own day and stay unreadable, exactly as this controller's header
+   * says. What crosses is free/busy, which carries no titles.
+   */
+  @Get('team-schedules')
+  teamSchedules(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: any,
+    @Query('userIds') userIds: string,
+    @Query('from') from?: string,
+    @Query('to') to?: string,
+  ) {
+    /*
+     * Comma-separated in the query string rather than repeated `userIds=`
+     * params, because the browser has to build one cache key from it and a
+     * repeated param has two orderings for one set.
+     */
+    const ids = (userIds ?? '').split(',').map((s) => s.trim()).filter(Boolean)
+    return this.planner.teamSchedules(workspaceId, user.id, ids, { from, to })
+  }
+
   /** Frame `14:10` — Appearance and Time blocking. Per person, not per space. */
   @Get('settings')
   getSettings(@CurrentUser() user: any) {

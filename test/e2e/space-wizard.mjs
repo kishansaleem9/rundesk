@@ -23,15 +23,20 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
-import { readText } from './lib/wait.mjs'
+import { readText, waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
   return i === -1 ? fallback : process.argv[i + 1]
 }
 
-/** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+/**
+ * "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure.
+ *
+ * 11 → 23 in §V2-S08: frame `06:45`'s Use-Templates footer (4), frame `07:50`'s
+ * copy-configuration bar (5) and frame `07:12`'s Default View Templates tab (3).
+ */
+const EXPECTED_CHECKS = 23
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -72,6 +77,8 @@ const BASE = `http://127.0.0.1:${server.address().port}`
 
 const WS = '5a842aa9-cede-423a-ae26-bb4ba074849f'
 const SPACE = '11111111-1111-4111-8111-111111111111'
+/** The space frame `07:50`'s bar copies FROM. */
+const SOURCE = '44444444-4444-4444-8444-444444444444'
 const PROJECT = '22222222-2222-4222-8222-222222222222'
 const LIST = '33333333-3333-4333-8333-333333333333'
 const USER = { id: 'u1', email: 'admin@rundesk.test', displayName: 'Admin', role: 'owner', avatarUrl: null }
@@ -121,6 +128,17 @@ const PRESETS = {
   views: ['list', 'board', 'table', 'calendar', 'gantt', 'team'],
 }
 
+/**
+ * `GET /workspaces/:id/project-templates`, trimmed to the columns the wizard
+ * reads. Two of the real built-in `targetType: 'space'` rows, plus one folder
+ * row the panel must leave out.
+ */
+const TEMPLATES = [
+  { id: 'tpl-space-1', name: 'Agency client space', description: 'A space per client.', targetType: 'space', isBuiltIn: true },
+  { id: 'tpl-space-2', name: 'Product team space', description: 'Discovery, delivery, release log.', targetType: 'space', isBuiltIn: true },
+  { id: 'tpl-folder-1', name: 'Software sprint', description: 'Backlog → done.', targetType: 'folder', isBuiltIn: true },
+]
+
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
 const calls = []
@@ -141,8 +159,39 @@ try {
     if (req.method() === 'POST' && /\/spaces(\?|$)/.test(url)) {
       return reply({ id: 'new-space-1', name: 'Rundex' })
     }
+    /*
+     * §V2-S08 frame `06:45` — the Use-Templates footer, and what it offers.
+     * A FOLDER-targeted row is included on purpose: the panel must show the
+     * two space templates and not the third, so "it lists templates" cannot
+     * pass for "it lists the ones that make a Space".
+     */
+    if (url.includes('/project-templates/apply')) {
+      return reply({
+        space: { id: 'tpl-space-made', name: 'Agency client space' },
+        project: { id: 'tpl-project-made', name: 'Agency client space' },
+        targetType: 'space',
+        listsCreated: 3,
+        tasksCreated: 5,
+      })
+    }
+    if (url.includes('/project-templates')) return reply(TEMPLATES)
     if (url.includes('/spaces/workspace/')) {
-      return reply([{ id: SPACE, name: 'Space', workspaceId: WS, viewConfig: null }])
+      /*
+       * §V2-S08 frame `07:50` — the `from: Personal Space ▾` dropdown. A
+       * SECOND space, carrying a real `viewConfig` and `features`, because the
+       * copy bar has nothing to copy from a workspace with one blank space.
+       * The original row keeps `viewConfig: null` so nothing else here moves.
+       */
+      return reply([
+        { id: SPACE, name: 'Space', workspaceId: WS, viewConfig: null, features: null },
+        {
+          id: SOURCE,
+          name: 'Personal Space',
+          workspaceId: WS,
+          viewConfig: { enabledViews: ['list', 'board', 'gantt', 'team'], defaultView: 'gantt' },
+          features: { priority: true, customFields: true, tags: false },
+        },
+      ])
     }
     if (url.match(new RegExp(`/lists/${LIST}(\\?|$)`))) {
       return reply({ id: LIST, name: 'Backlog', projectId: PROJECT, spaceId: SPACE })
@@ -159,12 +208,62 @@ try {
    * already stubs successfully.
    */
   const page = await ctx.newPage()
-  await page.goto(`${BASE}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'networkidle' })
+  const openWizard = async () => {
+    await page.goto(`${BASE}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'networkidle' })
+    // Reached the way a person reaches it: the topbar "+".
+    await page.locator('[data-testid="quick-create-open"]').click()
+    await page.locator('[data-testid="create-tab-space"]').click()
+    await page.waitForSelector('[data-testid="space-wizard-step1"]', { timeout: 20_000 })
+  }
 
-  // Reached the way a person reaches it: the topbar "+".
-  await page.locator('[data-testid="quick-create-open"]').click()
-  await page.locator('[data-testid="create-tab-space"]').click()
-  await page.waitForSelector('[data-testid="space-wizard-step1"]', { timeout: 20_000 })
+  /*
+   * §V2-S08 frame `06:45` FIRST, because applying a template CLOSES the wizard
+   * — which is itself one of the claims. The main flow below reopens it.
+   */
+  await openWizard()
+  console.log('\n▶ step one has the frame\'s Use-Templates footer `[frame 06:45]`')
+  chk(
+    (await page.locator('[data-testid="space-wizard-use-templates"]').count()) === 1,
+    'the Create-a-Space dialog offers Use Templates beside Continue',
+    'the footer was Continue alone — the one dialog where a template is obviously worth ' +
+      'offering was the one place that did not offer it',
+  )
+
+  await page.locator('[data-testid="space-wizard-use-templates"]').click()
+  await page.waitForSelector('[data-testid="space-wizard-templates"]', { timeout: 15_000 })
+  const offered = await page.locator('[data-testid^="space-wizard-tplcard-"]').evaluateAll((els) =>
+    els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-tplcard-', '')),
+  )
+  chk(
+    JSON.stringify(offered) === JSON.stringify(['tpl-space-1', 'tpl-space-2']),
+    'and lists ONLY the templates that make a Space — the folder one is left out',
+    `it offered ${JSON.stringify(offered)}; a folder template applied from here would create a ` +
+      'container of a different kind than the button beside it',
+  )
+
+  const applyBefore = calls.length
+  await page.locator('[data-testid="space-wizard-tplgo-tpl-space-2"]').click()
+  const applied = await waitUntil(
+    () => calls.slice(applyBefore).some((c) => c.method === 'POST' && c.url.includes('/project-templates/apply')),
+    { timeoutMs: 15_000 },
+  )
+  const applyCall = calls.slice(applyBefore).filter((c) => c.method === 'POST' && c.url.includes('/project-templates/apply')).at(-1)
+  let appliedBody = null
+  try { appliedBody = JSON.parse(applyCall?.body ?? '{}') } catch { /* reported below */ }
+  chk(
+    // NON-EMPTY FIRST, in the same check: "no apply carried the wrong id" is
+    // vacuously true when nothing was applied.
+    applied && appliedBody?.templateId === 'tpl-space-2',
+    'pressing Use applies THAT template, by id',
+    `the apply body was ${JSON.stringify(appliedBody)}`,
+  )
+  chk(
+    await waitUntil(async () => (await page.locator('[data-testid="space-wizard-templates"]').count()) === 0, { timeoutMs: 15_000 }),
+    'and the wizard closes on success rather than sitting there over a Space that now exists',
+    'the templates panel was still on screen after a successful apply',
+  )
+
+  await openWizard()
 
   console.log('\n▶ step one asks more than a name `[frame 06:52]`')
   for (const [testId, label] of [
@@ -195,11 +294,107 @@ try {
     'nothing warned that the Space arrives with lists nobody made',
   )
 
+  /*
+   * §V2-S08 frame `07:50` — the copy bar, BEFORE the preset card is chosen,
+   * because choosing one is supposed to drop what was copied and the last
+   * check here is exactly that.
+   */
+  console.log('\n▶ copy configuration from another Space `[frame 07:50]`')
+  const copyChips = await page.locator('[data-testid^="space-wizard-copypart-"]').evaluateAll((els) =>
+    els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-copypart-', '')),
+  )
+  chk(
+    JSON.stringify(copyChips) === JSON.stringify(['views', 'features']) &&
+      (await page.locator('[data-testid="space-wizard-copy-source"]').count()) === 1,
+    'the bar offers the two parts Rundesk can really copy, and a Space to copy them from',
+    `it drew chips ${JSON.stringify(copyChips)} and ` +
+      `${await page.locator('[data-testid="space-wizard-copy-source"]').count()} source picker(s)`,
+  )
+
+  await page.locator('[data-testid="space-wizard-copy-hide"]').click()
+  const wentAway = await waitUntil(
+    async () =>
+      (await page.locator('[data-testid="space-wizard-copy"]').count()) === 0 &&
+      (await page.locator('[data-testid="space-wizard-copy-show"]').count()) === 1,
+    { timeoutMs: 8000 },
+  )
+  await page.locator('[data-testid="space-wizard-copy-show"]').click().catch(() => {})
+  const cameBack = await waitUntil(
+    async () => (await page.locator('[data-testid="space-wizard-copy"]').count()) === 1,
+    { timeoutMs: 8000 },
+  )
+  chk(
+    wentAway && cameBack,
+    'Hide puts the bar away and there is a way back — it is not a one-way dismissal',
+    `Hide ${wentAway ? 'worked but could not be undone' : 'did nothing'}`,
+  )
+
+  await page.locator('[data-testid="space-wizard-copy-source"]').selectOption(SOURCE)
+  await page.locator('[data-testid="space-wizard-copy-apply"]').click()
+  chk(
+    await waitUntil(async () => {
+      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
+      return /Gantt/.test(row) && /Team/.test(row)
+    }, { timeoutMs: 10_000 }),
+    'Apply puts the source Space\'s own views into this wizard — Gantt and Team, which no preset here has together',
+    `the Default views row read "${(await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')}"`,
+  )
+  chk(
+    (await readText(page.locator('[data-testid="space-wizard-copy-note"]'))).includes('Personal Space'),
+    'and says where they came from, by name',
+    'nothing on screen named the Space the configuration was taken from',
+  )
+
   await page.locator('[data-testid="space-wizard-preset-marketing"]').click()
+  chk(
+    await waitUntil(async () => {
+      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
+      return !/Gantt/.test(row) && (await page.locator('[data-testid="space-wizard-copy-note"]').count()) === 0
+    }, { timeoutMs: 10_000 }),
+    'and choosing a workflow card drops the copy — it was a customisation OF the old card',
+    'the copied views survived a preset change, so the space would be built from a mixture ' +
+      'nobody chose and the note would still name a Space that no longer decides anything',
+  )
 
   // The Required-views panel: List cannot be turned off.
   await page.locator('[data-testid="space-wizard-row-views"]').click()
   await page.waitForSelector('[data-testid="space-wizard-views"]', { timeout: 10_000 })
+
+  console.log('\n▶ the views panel has the frame\'s TWO tabs `[frame 07:12]`')
+  chk(
+    (await readText(page.locator('[data-testid="space-wizard-viewstab-required"]'))).trim().toLowerCase() === 'required views' &&
+      (await readText(page.locator('[data-testid="space-wizard-viewstab-templates"]'))).trim().toLowerCase() === 'default view templates',
+    'the panel is tabbed Required views | Default View Templates, as the frame draws',
+    'the second tab is missing or misnamed — Rundesk drew only the switch list',
+  )
+
+  await page.locator('[data-testid="space-wizard-viewstab-templates"]').click()
+  const tplKeys = await page.locator('[data-testid^="space-wizard-viewtplcard-"]').evaluateAll((els) =>
+    els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-viewtplcard-', '')),
+  )
+  chk(
+    JSON.stringify(tplKeys) === JSON.stringify(PRESETS.presets.map((p) => p.key)) &&
+      (await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]'))).includes('Gantt'),
+    'the tab offers one named view set per workflow, each naming the views it carries',
+    `it offered ${JSON.stringify(tplKeys)} and the project set read ` +
+      `"${await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]'))}"`,
+  )
+
+  await page.locator('[data-testid="space-wizard-viewtplgo-marketing"]').click()
+  await page.locator('[data-testid="space-wizard-viewstab-required"]').click()
+  chk(
+    await waitUntil(
+      async () =>
+        (await page.locator('[data-testid="space-wizard-view-calendar"]').getAttribute('aria-checked')) === 'true' &&
+        (await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked')) === 'false',
+      { timeoutMs: 8000 },
+    ),
+    'applying a view set moves the switches underneath it — Marketing brings Calendar on and leaves Gantt off',
+    'the switches did not follow the template, so the tab would be a set of buttons over nothing: ' +
+      `calendar=${await page.locator('[data-testid="space-wizard-view-calendar"]').getAttribute('aria-checked')} ` +
+      `gantt=${await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked')}`,
+  )
+
   chk(
     await page.locator('[data-testid="space-wizard-view-list"]').isDisabled(),
     'List is Required and cannot be switched off `[frame 07:12]`',

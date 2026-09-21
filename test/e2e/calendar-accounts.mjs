@@ -44,7 +44,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 33
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -459,6 +459,126 @@ try {
     'no block carried a source',
   )
 
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n▶ §V2-14d the calendar picker, frame `13:28` — grouped by account')
+
+  /*
+   * The frame: a group headed with the ACCOUNT'S ADDRESS holding its
+   * calendars, then a group headed with the WORKSPACE'S NAME holding exactly
+   * **Time off** and **Holidays**, then **Manage accounts**. The chip beside
+   * it reads `1` over four rows with one ticked — a count of what is ON.
+   */
+  await page.getByTestId('planner-calendars-toggle').click()
+  await page.waitForSelector('[data-testid="planner-calendars-menu"]', { timeout: 10_000 })
+
+  const groupKinds = await page
+    .locator('[data-testid="planner-calendar-group"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-group-kind')))
+  const workspaceRows = await page
+    .locator('[data-testid="planner-calendar-group"][data-group-kind="workspace"] [data-testid="planner-calendar-row"]')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-calendar-id')))
+  chk(
+    groupKinds.filter((k) => k === 'account').length >= 1 &&
+      groupKinds.at(-1) === 'workspace' &&
+      JSON.stringify(workspaceRows) ===
+        JSON.stringify(['workspace:timeOff', 'workspace:holidays']),
+    'the picker groups the connected accounts first and the workspace calendars last, ' +
+      'and the workspace group holds exactly Time off and Holidays',
+    `the groups were ${JSON.stringify(groupKinds)} and the workspace group held ` +
+      `${JSON.stringify(workspaceRows)} — frame \`13:28\` puts the workspace's own two beneath ` +
+      'the external ones, and a picker missing them is the row this closes',
+  )
+
+  /*
+   * THE CHIP IS A COUNT OF WHAT IS ON. Counted against the ticked rows the
+   * popover itself is showing, which is the only comparison that can fail: a
+   * badge rendering the NUMBER OF ROWS is the facade class — correct-looking,
+   * and incapable of ever saying anything else.
+   */
+  const chipBefore = Number((await page.getByTestId('planner-calendars-count').textContent())?.trim())
+  const tickedBefore = await page
+    .locator('[data-testid="planner-calendar-row"][data-checked="true"]')
+    .count()
+  const totalRows = await page.locator('[data-testid="planner-calendar-row"]').count()
+  chk(
+    Number.isFinite(chipBefore) && chipBefore === tickedBefore && totalRows > tickedBefore,
+    `the chip counts the calendars that are ON — ${chipBefore} of ${totalRows} rows`,
+    `the chip read ${chipBefore} against ${tickedBefore} ticked of ${totalRows} rows; equal to the ` +
+      'row count would mean it is rendering the list length and can never say anything else',
+  )
+
+  /* Unticking one has to STICK and has to move the chip — a checkbox whose
+   * only effect is local state is the dead control, and one whose only effect
+   * is a stored row is its mirror. */
+  await page.getByTestId('planner-calendar-check-workspace:holidays').click()
+  const chipFell = await waitUntil(
+    async () =>
+      Number((await page.getByTestId('planner-calendars-count').textContent())?.trim()) ===
+      chipBefore - 1,
+    { timeoutMs: 10_000 },
+  )
+  const stored = (await A(`/planner/${workspaceId}/settings`)).data ?? {}
+  chk(
+    chipFell && (stored.hiddenCalendarIds ?? []).includes('workspace:holidays'),
+    'unticking Holidays drops the chip by one and is remembered on the account',
+    `the chip read ${(await page.getByTestId('planner-calendars-count').textContent())?.trim()} and the ` +
+      `stored settings were ${JSON.stringify(stored.hiddenCalendarIds ?? null)}`,
+  )
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n▶ §V2-14e Conferencing, frame `13:36` — the Zoom row')
+
+  await page.keyboard.press('Escape')
+  await page.getByTestId('planner-settings').click()
+  await page.getByTestId('planner-settings-nav-accounts').click({ timeout: 10_000 })
+  await page.waitForSelector('[data-testid="planner-conferencing"]', { timeout: 10_000 })
+
+  chk(
+    (await page.getByTestId('planner-conferencing-zoom').count()) === 1 &&
+      ((await page.getByTestId('planner-conferencing-connect').count()) +
+        (await page.getByTestId('planner-conferencing-disconnect').count())) === 1,
+    'the Accounts page ends in a Conferencing section with a Zoom row and exactly one action',
+    'the Conferencing row frame `13:36` draws was missing, or offered Connect and Disconnect at once',
+  )
+
+  /*
+   * IT IS THE SAME FACT THE APP CENTER HOLDS, asked of the server directly.
+   *
+   * The risk this row carried was a second "is Zoom connected?" answer kept
+   * beside the calendar settings — two surfaces disagreeing about whether an
+   * integration somebody relies on is live. So the row's state is compared
+   * against `integrations/connections`, which is what the App Center reads.
+   *
+   * AND THE MESSAGE, NOT THE STATUS. `oauth/start` answers 400 both when the
+   * server has no Zoom credentials and when the caller may not connect apps —
+   * one status for two mechanisms, which cannot tell them apart. `.status` is
+   * checked explicitly because `apiAs` never throws: it returns
+   * `{status, data, error}`, so a `.catch` here would be inert and a failed
+   * call would read as success.
+   */
+  const conns = await A(`/workspaces/${workspaceId}/integrations/connections`)
+  const zoomLive =
+    conns.status === 200 &&
+    (conns.data ?? []).some((c) => c.provider === 'zoom' && c.status === 'connected')
+  const rowSaysConnected =
+    (await page.getByTestId('planner-conferencing-zoom').getAttribute('data-connected')) === 'true'
+  const started = await A(
+    `/workspaces/${workspaceId}/integrations/connections/zoom/oauth/start`,
+    { method: 'POST' },
+  )
+  const reason = String(started.error?.message ?? started.error ?? '')
+  chk(
+    conns.status === 200 &&
+      rowSaysConnected === zoomLive &&
+      (started.status === 200 ||
+        (started.status === 400 && /zoom|not configured|client/i.test(reason))),
+    `the row agrees with the App Center (connected: ${zoomLive}), and the connect flow either ` +
+      `starts or refuses for a Zoom reason — ${started.status}${reason ? ` ${JSON.stringify(reason)}` : ''}`,
+    `connections answered ${conns.status}, the row said connected=${rowSaysConnected} against ` +
+      `${zoomLive}, and oauth/start answered ${started.status} ${JSON.stringify(reason)} — a 400 ` +
+      'with a generic message could equally be a permission refusal, which is a different bug',
+  )
+
 } catch (e) {
   const lines = e.message.split('\n')
   failed += 1
@@ -474,6 +594,22 @@ try {
        where meeting_id in (select id from meetings where ${TAG} = any(tags))
     `.catch(() => {})
     await sql`delete from meetings where ${TAG} = any(tags)`.catch(() => {})
+    /*
+     * §V2-14d — put the calendar picker back.
+     *
+     * This suite unticks Holidays, and `plannerSettings` is a column on the
+     * SHARED fixture user rather than a tagged row that can be deleted. Left
+     * behind, every later run of every planner suite would start with a
+     * workspace calendar switched off — a fixture that quietly changes the
+     * product for the next suite is the "one runner at a time" trap arriving
+     * by a different door. Only this key is touched, so a setting some other
+     * suite left is not disturbed.
+     */
+    await sql`
+      update users
+         set planner_settings = coalesce(planner_settings, '{}'::jsonb) - 'hiddenCalendarIds'
+       where email = ${ME.email}
+    `.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
   await browser.close().catch(() => {})

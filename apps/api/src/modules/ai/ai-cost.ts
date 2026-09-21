@@ -7,6 +7,11 @@
  * exactly one pricing table + math. Unknown models fall back to { in: 1, out: 5 }.
  */
 export const MODEL_PRICING: Record<string, { in: number; out: number }> = {
+  // §V2-S18 `[17:16]` — one row per routable `MODEL_TIERS` entry. A tier whose
+  // model is missing here does not fail; it silently falls back to the Haiku
+  // price below and under-reports its own cost by 5×, which is the confident
+  // zero in a currency. `model-tiers.test.ts` asserts every tier is priced.
+  'claude-opus-5': { in: 5, out: 25 },
   'claude-sonnet-4-6': { in: 3, out: 15 },
   'claude-haiku-4-5': { in: 1, out: 5 },
 }

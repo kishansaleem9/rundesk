@@ -644,3 +644,181 @@ describe('SearchService pages Meili past hits the caller cannot see', () => {
     assert.equal(res.length, 1, `a repeated document was returned twice: ${JSON.stringify(res)}`)
   })
 })
+
+/**
+ * §V2-11 frame `19:07` — the two federated sources that had a tab and no query.
+ *
+ * `gmail` and `sharepoint` were named in `SEARCH_SOURCES`, drawn as tabs in the
+ * command palette, and reached no code at all. These tests are the only place
+ * either query can be exercised: both need an OAuth credential no test
+ * environment holds, so the e2e suite stops at the credential and this one goes
+ * past it through the `federatedRequest` seam.
+ *
+ * What is checked is the part that is easy to get wrong and impossible to see:
+ * the QUERY. Gmail's `q` and Graph's KQL are both languages, and a term a
+ * person typed goes straight into each — so `from:boss` has to be searched for
+ * rather than obeyed. And a grant that cannot answer must cost no round trip,
+ * because a request that is guaranteed to come back empty teaches a person that
+ * their mailbox is empty.
+ */
+describe('§V2-11 Gmail and SharePoint in search', () => {
+  const GMAIL_SCOPE = 'https://www.googleapis.com/auth/gmail.readonly'
+  const SITES_SCOPE = 'Sites.Read.All'
+
+  /** A service whose one outbound call is answered locally, per URL. */
+  class FakeFederated extends SearchService {
+    seen: Array<{ url: string; body?: string }> = []
+    constructor(
+      db: never,
+      private readonly reply: (url: string) => { status: number; body: unknown },
+    ) {
+      super(db, config)
+    }
+    protected override async federatedRequest(
+      url: string,
+      _token: string,
+      init?: { method?: string; body?: string },
+    ) {
+      this.seen.push({ url, body: init?.body })
+      const { status, body } = this.reply(url)
+      return { status, text: JSON.stringify(body) }
+    }
+  }
+
+  const withGrant = (provider: string, scopes: string[]) => ({
+    workspace_integration_connections: [
+      { provider, status: 'connected', accessToken: 'tok', scopes },
+    ],
+    tasks: [],
+    docs: [],
+  })
+
+  it('returns Gmail messages as their own kind, linking out to Gmail', async () => {
+    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+    const svc = new FakeFederated(db as never, (url) =>
+      url.includes('/messages/')
+        ? {
+            status: 200,
+            body: {
+              id: 'M1',
+              snippet: 'the numbers for Q3',
+              internalDate: '1700000000000',
+              payload: { headers: [{ name: 'Subject', value: 'Q3 budget' }] },
+            },
+          }
+        : { status: 200, body: { messages: [{ id: 'M1' }] } },
+    )
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['gmail'] })
+    const hit = res.find((h) => h.entityType === 'gmail')
+    assert.ok(hit, `no gmail hit: ${JSON.stringify(res)}`)
+    assert.equal(hit.title, 'Q3 budget')
+    assert.match(hit.url, /^https:\/\/mail\.google\.com\//, 'a mail opens in Gmail')
+  })
+
+  it('names a subject-less mail by its sender rather than dropping it', async () => {
+    // Dropping it would be another silent empty list, on a message that exists.
+    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+    const svc = new FakeFederated(db as never, (url) =>
+      url.includes('/messages/')
+        ? {
+            status: 200,
+            body: {
+              id: 'M2',
+              payload: { headers: [{ name: 'From', value: 'ali@example.com' }] },
+            },
+          }
+        : { status: 200, body: { messages: [{ id: 'M2' }] } },
+    )
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['gmail'] })
+    const hit = res.find((h) => h.entityType === 'gmail')
+    assert.ok(hit, `no gmail hit: ${JSON.stringify(res)}`)
+    assert.match(hit.title, /ali@example\.com/, `subject-less mail read ${JSON.stringify(hit.title)}`)
+  })
+
+  it('searches for the words rather than obeying them', async () => {
+    /*
+     * `from:`, `-word` and `OR` are Gmail operators. Unquoted, "from:boss"
+     * silently becomes a different search — one that answers confidently and
+     * about something else.
+     */
+    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+    const svc = new FakeFederated(db as never, () => ({ status: 200, body: { messages: [] } }))
+    await svc.search('w1', 'u1', 'from:boss', 10, { types: ['gmail'] })
+    assert.equal(svc.seen.length, 1, 'Gmail was not called exactly once')
+    const q = new URL(svc.seen[0].url).searchParams.get('q') ?? ''
+    assert.equal(q, '"from:boss"', `the term was not quoted as a phrase: ${JSON.stringify(q)}`)
+  })
+
+  it('asks Gmail for nothing on a grant that cannot read mail', async () => {
+    /*
+     * Asserted as "no request was sent", not "no results came back": the thing
+     * being prevented is a round trip that cannot succeed and explains nothing.
+     */
+    const { db } = makeDb(withGrant('gmail', ['https://www.googleapis.com/auth/drive.readonly']))
+    const svc = new FakeFederated(db as never, () => ({ status: 200, body: { messages: [] } }))
+    const res = await svc.search('w1', 'u1', 'budget', 10, { types: ['gmail'] })
+    assert.equal(svc.seen.length, 0, 'queried Gmail with a Drive grant')
+    assert.equal(res.length, 0)
+  })
+
+  it('returns SharePoint files as their own kind, from the Graph search endpoint', async () => {
+    const { db } = makeDb(withGrant('sharepoint', [SITES_SCOPE]))
+    const svc = new FakeFederated(db as never, () => ({
+      status: 200,
+      body: {
+        value: [
+          {
+            hitsContainers: [
+              {
+                hits: [
+                  {
+                    resource: {
+                      id: 'S1',
+                      name: 'Q3 plan.docx',
+                      webUrl: 'https://contoso.sharepoint.com/sites/x/Q3%20plan.docx',
+                      lastModifiedDateTime: '2026-08-01T10:00:00Z',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    }))
+    const res = await svc.search('w1', 'u1', 'plan', 10, { types: ['sharepoint'] })
+    const hit = res.find((h) => h.entityType === 'sharepoint')
+    assert.ok(hit, `no sharepoint hit: ${JSON.stringify(res)}`)
+    assert.equal(hit.title, 'Q3 plan.docx')
+    assert.match(hit.url, /contoso\.sharepoint\.com/, 'a SharePoint file opens in SharePoint')
+    // The term travels in a JSON body, not interpolated into a URL: Graph's KQL
+    // treats `:` and `"` as syntax.
+    assert.equal(svc.seen.length, 1, 'Graph was not called exactly once')
+    assert.ok(svc.seen[0].body?.includes('"queryString":"plan"'), `body was ${svc.seen[0].body}`)
+  })
+
+  it('asks SharePoint for nothing on the OneDrive file grant it used to borrow', async () => {
+    /*
+     * THE CONFIDENT ZERO THIS ROW WAS OPENED OVER. `Files.ReadWrite` reaches
+     * the signed-in user's own drive and no SharePoint site, so the borrowed
+     * credential connected successfully and answered "nothing" forever.
+     */
+    const { db } = makeDb(withGrant('sharepoint', ['Files.ReadWrite']))
+    const svc = new FakeFederated(db as never, () => ({ status: 200, body: { value: [] } }))
+    const res = await svc.search('w1', 'u1', 'plan', 10, { types: ['sharepoint'] })
+    assert.equal(svc.seen.length, 0, 'queried Graph with a grant that cannot see a site')
+    assert.equal(res.length, 0)
+  })
+
+  it('accepts both names as ?types= values, so the tab is not silently dropped', async () => {
+    /*
+     * The whitelist drops what it does not recognise, and `filters.types` is
+     * only assigned when something survives it — so a missing name is not a
+     * missing filter, it is an UNFILTERED search wearing the tab's name.
+     */
+    const { ENTITY_TYPES } = await import('./entity-types')
+    for (const type of ['drive', 'gmail', 'sharepoint']) {
+      assert.ok(ENTITY_TYPES.includes(type as never), `${type} is not accepted by the controller`)
+    }
+  })
+})

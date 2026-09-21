@@ -1,12 +1,17 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, cn, toast } from '@rundesk/ui'
-import { ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
+import { CalendarDays, ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
-import { PlannerSettingsDialog, RAIL_SECTIONS } from '../components/planner-settings-dialog'
+import {
+  PlannerSettingsDialog,
+  RAIL_SECTIONS,
+  GRID_SIZES,
+  type PlannerGridSize,
+} from '../components/planner-settings-dialog'
 import { usePriorities, usePriorityActions } from '../lib/use-priorities'
 import {
   plannerRange,
@@ -17,6 +22,17 @@ import {
   PLANNER_VIEW_KEYS,
   type PlannerView,
 } from '../lib/planner-view'
+
+/*
+ * §V2-15d — the palette is lazy, exactly as `routes/app.tsx` loads it. The
+ * planner is a page most people open every morning and the palette is a large
+ * chunk; making the calendar wait for a search box nobody has pressed yet
+ * would be paying for the bar on every visit.
+ */
+const CommandPalette = lazy(async () => {
+  const mod = await import('../components/command-palette')
+  return { default: mod.CommandPalette }
+})
 
 /**
  * §V2-02 — the Planner, frame `13:08`.
@@ -111,6 +127,23 @@ type PlannerSettings = {
    */
   showAssigned?: boolean
   showOverdue?: boolean
+  /*
+   * §V2-15a / §V2-14d / §V2-15b / §V2-15c — the four added this pass, each
+   * listed here BECAUSE of the paragraph above: a key the page cannot see is a
+   * key the page cannot honour, and nothing fails to compile when it is
+   * missing. Every one names its reader.
+   */
+  /** Frame `14:05` — hour-row height. Reader: `hourPx`, below. */
+  gridSize?: PlannerGridSize
+  /** Frame `13:28` — workspace calendars turned off in the picker.
+   *  Readers: `planner-holiday-chip`, `planner-timeoff-chip`. */
+  hiddenCalendarIds?: string[]
+  /** Frame `12:48` — whose columns the side-by-side grid draws.
+   *  Reader: the `planner-team-column` grid. */
+  teamScheduleUserIds?: string[]
+  /** Frames `12:40`–`12:50` — the onboarding panel has been dismissed.
+   *  Reader: `planner-onboarding`. */
+  plannerOnboardingDismissed?: boolean
 }
 
 type PriorityRow = { id: string; taskId: string | null; title: string; doneAt: string | null }
@@ -159,7 +192,15 @@ type TaskRow = {
  */
 const FIRST_HOUR = 0
 const LAST_HOUR = 23
-const HOUR_PX = 48
+
+/*
+ * §V2-15a — `GRID_SIZES` is imported from the settings dialog rather than
+ * declared here, the same direction `RAIL_SECTIONS` already travels. The
+ * control and its reader agreeing about what "Large" means is the whole
+ * requirement; two hand-written copies of `{ default: 48, large: 72 }` is the
+ * duplicated-list defect with numbers instead of strings, and it would show up
+ * as a picker that visibly sets a size the grid does not draw.
+ */
 
 const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate())
 
@@ -309,6 +350,15 @@ export function PlannerPage() {
   const [anchor, setAnchor] = useState(() => new Date())
   const [settingsOpen, setSettingsOpen] = useState(false)
   /*
+   * §V2-14d — which page the settings dialog should land on.
+   *
+   * `undefined` means "wherever it normally opens", which is Appearance and is
+   * what the gear has always done. Frame `13:28`'s **Manage accounts** has to
+   * arrive on Accounts, and sending somebody to Appearance and asking them to
+   * find it is most of the way to not having the link.
+   */
+  const [settingsPage, setSettingsPage] = useState<'accounts' | undefined>(undefined)
+  /*
    * §V2-02 `[14:41]` — "yahan se main SEARCH kar sakti hoon [ke] mujhe kis
    * person ke saath milna hai." Until now this was an input with nothing
    * behind it: you could type into it and the page did not so much as read
@@ -316,6 +366,12 @@ export function PlannerPage() {
    */
   const [meetQuery, setMeetQuery] = useState('')
   const [meetWith, setMeetWith] = useState<{ id: string; name: string } | null>(null)
+  /* §V2-14d, frame `13:28` — the calendar picker popover. */
+  const [calendarsOpen, setCalendarsOpen] = useState(false)
+  /* §V2-15d, frame `14:45` — the bottom bar opens the shared palette. */
+  const [paletteOpen, setPaletteOpen] = useState(false)
+  /* §V2-15b, frame `12:48` — the side-by-side grid's own people search. */
+  const [teamQuery, setTeamQuery] = useState('')
 
   const { data: settings } = useQuery({
     queryKey: ['planner-settings', workspaceId],
@@ -338,6 +394,31 @@ export function PlannerPage() {
   const darkenNonWorking = settings?.darkenNonWorkingHours === true
   const saveQuickly = settings?.savePersonalEventsQuickly !== false
   const showRecurring = settings?.showRecurring !== false
+  /*
+   * §V2-15a, frame `14:05` — Grid size, read here and nowhere else.
+   *
+   * `GRID_SIZES[...] ?? GRID_SIZES.default` rather than a bare lookup: a blob
+   * written before this setting existed has no `gridSize` at all, and an
+   * undefined hour height does not throw — it makes every `top` and `height`
+   * on the grid `NaN`, which React renders as no style at all. The grid would
+   * come up with every block stacked at the top and nothing in the console.
+   */
+  const gridSize: PlannerGridSize =
+    settings?.gridSize && settings.gridSize in GRID_SIZES ? settings.gridSize : 'default'
+  const hourPx = GRID_SIZES[gridSize]
+  /*
+   * §V2-14d, frame `13:28` — the two workspace calendars' on/off state.
+   *
+   * Declared up here with the other settings readers because the work-schedule
+   * query below is shared with `darkenNonWorkingHours` and needs to know
+   * whether EITHER reader wants it. Two `useQuery` calls on one key with
+   * different `enabled` flags is a trap: they share a cache entry, so the
+   * effective condition becomes the union anyway, decided by whichever
+   * rendered last. One query, one condition, stated.
+   */
+  const hiddenCalendars = new Set(settings?.hiddenCalendarIds ?? [])
+  const holidayCalendarOn = !hiddenCalendars.has('workspace:holidays')
+  const timeOffCalendarOn = !hiddenCalendars.has('workspace:timeOff')
 
   /*
    * The account's own week start, not a hard-coded Monday. `users.weekStart`
@@ -449,7 +530,11 @@ export function PlannerPage() {
       api<{ workDays: number[]; holidays: Array<{ day: string; name: string }> }>(
         `/workspaces/${workspaceId}/work-schedule`,
       ),
-    enabled: !!workspaceId && darkenNonWorking,
+    /* TWO readers now: the dimming switch, and frame `13:28`'s **Holidays**
+     * calendar. Asked for when either wants it, and — because each reader
+     * checks its own flag below — turning one off does not take the other's
+     * data away. */
+    enabled: !!workspaceId && (darkenNonWorking || holidayCalendarOn),
   })
 
   /** ISO weekday, 1 = Monday … 7 = Sunday, matching `workspaces.work_days`. */
@@ -520,6 +605,209 @@ export function PlannerPage() {
     const who = meetWith?.name ?? ''
     return named.length ? `${who}: ${named.join(', ')}` : t('planner.busyPrivate', { name: who })
   }
+
+  /*
+   * §V2-14d, frame `13:28` — the picker's contents, assembled by the server.
+   *
+   * See `planner.service.ts#listCalendars` for why the SET comes from there
+   * and only the labels come from here: the workspace's two built-in calendars
+   * would otherwise be written out in both places and drift.
+   */
+  type PickerCalendar = {
+    id: string
+    label: string | null
+    checked: boolean
+    isDefault: boolean
+    accountId: string | null
+    kind: 'account' | 'workspace'
+  }
+  const { data: calendarPicker } = useQuery({
+    queryKey: ['planner-calendars', workspaceId],
+    queryFn: () =>
+      api<{ groups: Array<{ key: string; title: string; kind: string; calendars: PickerCalendar[] }> }>(
+        `/planner/${workspaceId}/calendars`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const calendarGroups = calendarPicker?.groups ?? []
+  /*
+   * The number on the header chip, and it is COUNTED rather than stated.
+   *
+   * Frame `13:28` has the chip reading `1` beside a popover with four rows, one
+   * of them ticked — so it is a count of what is ON, not of what exists. A
+   * badge rendering `calendars.length` would show `4` there and would be the
+   * facade class exactly: a number that can only ever say one thing.
+   */
+  const visibleCalendarCount = calendarGroups.reduce(
+    (n, g) => n + g.calendars.filter((c) => c.checked).length,
+    0,
+  )
+  /*
+   * §V2-14d — the **Time off** calendar's reader.
+   *
+   * Fetched only while the calendar is ON, so the REQUEST is itself evidence
+   * the checkbox was honoured — the same trick `darkenNonWorkingHours` uses,
+   * and the thing that makes this a reader rather than a stored value nobody
+   * consults.
+   */
+  const { data: timeOff = [] } = useQuery({
+    queryKey: ['planner-time-off', workspaceId, rangeFrom.toISOString(), rangeTo.toISOString()],
+    queryFn: () =>
+      api<Array<{ id: string; userId: string; startsOn: string; endsOn: string; note?: string | null }>>(
+        `/workspaces/${workspaceId}/time-off?from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,
+      ),
+    enabled: !!workspaceId && timeOffCalendarOn,
+  })
+
+  const setCalendarHidden = useMutation({
+    mutationFn: (next: string[]) =>
+      api<PlannerSettings>(`/planner/${workspaceId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ hiddenCalendarIds: next }),
+      }),
+    onSuccess: async () => {
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] }),
+        qc.invalidateQueries({ queryKey: ['planner-calendars', workspaceId] }),
+      ])
+    },
+  })
+  const setAccountBusy = useMutation({
+    /* The account half of the picker writes `counts_as_busy` — the column that
+     * already means "this calendar is read" — rather than a second per-user
+     * flag saying the same thing. One fact, two doors, like "Show weekends". */
+    mutationFn: ({ accountId, checked }: { accountId: string; checked: boolean }) =>
+      api(`/workspaces/${workspaceId}/calendar-sync/accounts/${accountId}/busy`, {
+        method: 'PATCH',
+        body: JSON.stringify({ countsAsBusy: checked }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['planner-calendars', workspaceId] })
+    },
+  })
+
+  /*
+   * §V2-15b, frame `12:48` — **Team schedules**: "See calendars for anyone in
+   * your team, [find a] time, and schedule a call in seconds", over a preview
+   * with a ROW OF AVATARS, several of them ticked.
+   *
+   * THIS IS NOT "MEET WITH" WITH A BIGGER NUMBER. Meet-with overlays ONE
+   * person's busy time on YOUR week, and answers "is Sara free on Thursday".
+   * The avatars answer a different question — "when are the four of us free" —
+   * and it cannot be answered by overlaying four people on one column, because
+   * four sets of hatching stacked on each other is a picture of nobody's
+   * schedule. Hence a column each, side by side, which is what the card draws.
+   *
+   * ONE REQUEST FOR ALL THE COLUMNS. See `planner.service.ts#teamSchedules`:
+   * a column whose read failed comes back with `error` set rather than an
+   * empty `busy`, because "no meetings" and "could not be read" drawn the same
+   * way is the confident-zero defect on a calendar.
+   */
+  const teamUserIds = settings?.teamScheduleUserIds ?? []
+  type TeamColumn = {
+    userId: string
+    meetings: Array<{ id: string; title: string; startsAt: string; endsAt: string }>
+    busy?: BusyWindow[]
+    error: string | null
+  }
+  const { data: teamSchedules } = useQuery({
+    queryKey: [
+      'planner-team-schedules',
+      workspaceId,
+      /* The ids JOINED, not the array: a fresh array with the same contents is
+       * a new key by reference and would refetch on every render. */
+      teamUserIds.join(','),
+      rangeFrom.toISOString(),
+      rangeTo.toISOString(),
+    ],
+    queryFn: () =>
+      api<{ people: TeamColumn[] }>(
+        `/planner/${workspaceId}/team-schedules` +
+          `?userIds=${encodeURIComponent(teamUserIds.join(','))}` +
+          `&from=${rangeFrom.toISOString()}&to=${rangeTo.toISOString()}`,
+      ),
+    enabled: !!workspaceId && teamUserIds.length > 0,
+  })
+  const teamColumns = teamSchedules?.people ?? []
+  const setTeamPeople = useMutation({
+    mutationFn: (next: string[]) =>
+      api<PlannerSettings>(`/planner/${workspaceId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ teamScheduleUserIds: next }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
+    },
+  })
+  const toggleTeamPerson = (userId: string) => {
+    const next = teamUserIds.includes(userId)
+      ? teamUserIds.filter((id) => id !== userId)
+      : [...teamUserIds, userId]
+    setTeamPeople.mutate(next)
+  }
+  const nameOf = (userId: string) => {
+    const m = members.find((x) => x.userId === userId)
+    return m ? m.displayName || m.email : userId
+  }
+  const teamMatches = useMemo(() => {
+    const needle = teamQuery.trim().toLowerCase()
+    if (!needle) return []
+    return members
+      .filter((m) => (m.displayName || m.email).toLowerCase().includes(needle))
+      .slice(0, 6)
+  }, [teamQuery, members])
+
+  /*
+   * §V2-15c, frames `12:40`–`12:50` — the onboarding panel.
+   *
+   * Shown when this person has connected NO calendar account and has not
+   * dismissed it. Both halves matter: it is an invitation to connect, so it
+   * has no reason to exist once one is connected, and a permanent panel
+   * nobody can close is an advertisement.
+   *
+   * IT DOES NOT REPLACE THE GRID, and that is a deliberate departure from
+   * ClickUp, whose planner has nothing to show before a calendar is connected.
+   * Rundesk's does: time blocks, priorities, the backlog and the whole
+   * `task_time_blocks` feature work with no external calendar at all. Hiding a
+   * working calendar behind a connect screen would take a feature away to
+   * advertise a different one. So it sits above the grid, and goes when it is
+   * answered or dismissed.
+   */
+  const { data: calendarAccounts = [] } = useQuery({
+    queryKey: ['calendar-accounts', workspaceId],
+    queryFn: () =>
+      api<Array<{ id: string; status: string }>>(
+        `/workspaces/${workspaceId}/calendar-sync/accounts`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const showOnboarding =
+    settings !== undefined &&
+    settings.plannerOnboardingDismissed !== true &&
+    calendarAccounts.length === 0
+  const dismissOnboarding = useMutation({
+    mutationFn: () =>
+      api<PlannerSettings>(`/planner/${workspaceId}/settings`, {
+        method: 'PATCH',
+        body: JSON.stringify({ plannerOnboardingDismissed: true }),
+      }),
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
+    },
+  })
+  const connectCalendar = useMutation({
+    mutationFn: (provider: 'gcal' | 'outlook') =>
+      api<{ authUrl: string }>(
+        `/workspaces/${workspaceId}/integrations/connections/${provider}/oauth/start`,
+        { method: 'POST' },
+      ),
+    onSuccess: ({ authUrl }) => {
+      window.location.href = authUrl
+    },
+    onError: (err) => {
+      toast.error(err instanceof ApiError ? err.message : t('planner.onboarding.connectFailed'))
+    },
+  })
 
   const meetMatches = useMemo(() => {
     const needle = meetQuery.trim().toLowerCase()
@@ -794,7 +1082,7 @@ export function PlannerPage() {
    * rather than intent.
    */
   const dropTime = (day: Date, offsetY: number) => {
-    const hoursIn = offsetY / HOUR_PX + FIRST_HOUR
+    const hoursIn = offsetY / hourPx + FIRST_HOUR
     const quarter = Math.round(hoursIn * 4) / 4
     const clamped = Math.min(Math.max(quarter, FIRST_HOUR), LAST_HOUR)
     const out = new Date(day)
@@ -871,13 +1159,13 @@ export function PlannerPage() {
   const dayName = (d: Date) => new Intl.DateTimeFormat(locale, { weekday: 'short' }).format(d)
 
   const hours = Array.from({ length: LAST_HOUR - FIRST_HOUR + 1 }, (_, i) => FIRST_HOUR + i)
-  const gridHeight = hours.length * HOUR_PX
+  const gridHeight = hours.length * hourPx
 
   /** Where the red line sits, or null when now is outside the drawn hours. */
   const nowOffset = useMemo(() => {
     const h = now.getHours() + now.getMinutes() / 60
     if (h < FIRST_HOUR || h > LAST_HOUR + 1) return null
-    return (h - FIRST_HOUR) * HOUR_PX
+    return (h - FIRST_HOUR) * hourPx
   }, [now])
   const gridScrollRef = useRef<HTMLDivElement | null>(null)
   const nowColumn = days.findIndex((d) => sameDay(d, now))
@@ -894,7 +1182,7 @@ export function PlannerPage() {
   useEffect(() => {
     const el = gridScrollRef.current
     if (!el || nowOffset === null) return
-    el.scrollTop = Math.max(0, nowOffset - HOUR_PX)
+    el.scrollTop = Math.max(0, nowOffset - hourPx)
     // Mount only, deliberately: `nowOffset` changes every minute.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -910,6 +1198,7 @@ export function PlannerPage() {
         open={settingsOpen}
         onOpenChange={setSettingsOpen}
         workspaceId={workspaceId}
+        initialPage={settingsPage}
       />
 
       {dragging && ghost && (
@@ -1085,6 +1374,85 @@ export function PlannerPage() {
         </section>
         )}
 
+        {/*
+          §V2-15b, frame `12:48` — **Team schedules**, the picker half.
+
+          A SEPARATE SECTION FROM "MEET WITH", deliberately. They look similar
+          and are not: Meet with overlays one person on your own week to answer
+          "is Sara free on Thursday"; this picks several and gives each their
+          own column, to answer "when are the four of us free". Folding them
+          into one control would have meant either losing the overlay or
+          drawing four people's hatching on top of each other, which is a
+          picture of nobody's schedule. `planner-grid.mjs` asserts the overlay
+          still works, and it does, untouched.
+        */}
+        <section data-testid="planner-team-schedules">
+          <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+            {t('planner.teamSchedules')}
+          </h2>
+          {teamUserIds.length > 0 && (
+            <ul className="mb-1.5 space-y-0.5" data-testid="planner-team-chips">
+              {teamUserIds.map((id) => (
+                <li
+                  key={id}
+                  data-testid="planner-team-chip"
+                  data-user-id={id}
+                  className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1 text-[12px]"
+                >
+                  <span className="truncate">{nameOf(id)}</span>
+                  <button
+                    type="button"
+                    aria-label={t('planner.teamRemovePerson')}
+                    data-testid={`planner-team-remove-${id}`}
+                    disabled={setTeamPeople.isPending}
+                    onClick={() => toggleTeamPerson(id)}
+                    className="rounded px-1 text-muted-foreground hover:text-foreground"
+                  >
+                    ×
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
+          <div className="relative">
+            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <input
+              value={teamQuery}
+              onChange={(e) => setTeamQuery(e.target.value)}
+              placeholder={t('planner.teamSearchPeople')}
+              aria-label={t('planner.teamSearchPeople')}
+              data-testid="planner-team-search"
+              className="h-8 w-full rounded-md border border-border/80 bg-card pl-7 pr-2 text-[12px]"
+            />
+            {teamQuery.trim() !== '' && (
+              <div className="mt-1 space-y-0.5">
+                {teamMatches.length === 0 ? (
+                  <p className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="planner-team-none">
+                    {t('planner.noPeople')}
+                  </p>
+                ) : (
+                  teamMatches.map((m) => (
+                    <button
+                      key={m.userId}
+                      type="button"
+                      data-testid="planner-team-result"
+                      data-user-id={m.userId}
+                      disabled={setTeamPeople.isPending}
+                      onClick={() => {
+                        toggleTeamPerson(m.userId)
+                        setTeamQuery('')
+                      }}
+                      className="block w-full truncate rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40"
+                    >
+                      {m.displayName || m.email}
+                    </button>
+                  ))
+                )}
+              </div>
+            )}
+          </div>
+        </section>
+
         {/* Frame `13:05` puts these two between "Meet with" and "Backlog". */}
         {railOn('assignedToMe') && (
         <section data-testid="planner-assigned">
@@ -1189,7 +1557,10 @@ export function PlannerPage() {
       </aside>
 
       {/* ── the grid ──────────────────────────────────────────────────── */}
-      <div className="flex min-w-0 flex-1 flex-col">
+      {/* `relative` so frame `14:45`'s command bar can float over the grid
+          rather than over the whole viewport — it belongs to the calendar
+          column, and the rail must stay clickable behind it. */}
+      <div className="relative flex min-w-0 flex-1 flex-col">
         <header className="flex items-center gap-2 border-b border-border/60 px-3 py-2">
           <button
             type="button"
@@ -1304,13 +1675,121 @@ export function PlannerPage() {
             </span>
           )}
           <span className="flex-1" />
+          {/*
+            §V2-14d, frame `13:28` — the calendar chip and its picker.
+
+            The chip reads a COUNT OF WHAT IS ON (the frame shows `1` over a
+            popover of four rows with one ticked), not a count of rows. A badge
+            that rendered the number of calendars would be the facade class:
+            correct-looking, and unable to ever say anything else.
+          */}
+          <div className="relative">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 gap-1 text-[12px]"
+              data-testid="planner-calendars-toggle"
+              aria-expanded={calendarsOpen}
+              aria-label={t('planner.calendars')}
+              onClick={() => setCalendarsOpen((v) => !v)}
+            >
+              <CalendarDays className="h-3.5 w-3.5" />
+              <span data-testid="planner-calendars-count">{visibleCalendarCount}</span>
+            </Button>
+            {calendarsOpen && (
+              <>
+                {/* A click anywhere else closes it. Without this the popover
+                    stays up behind the next thing you press, which on a
+                    calendar means it covers the day you were aiming for. */}
+                <div
+                  className="fixed inset-0 z-40"
+                  aria-hidden
+                  onClick={() => setCalendarsOpen(false)}
+                />
+                <div
+                  className="absolute right-0 top-8 z-50 w-72 rounded-md border border-border/70 bg-popover p-1 shadow-md"
+                  data-testid="planner-calendars-menu"
+                >
+                  {calendarGroups.map((group) => (
+                    <div key={group.key} data-testid="planner-calendar-group" data-group-kind={group.kind}>
+                      <div
+                        className="px-2 pb-0.5 pt-1.5 text-[11px] text-muted-foreground"
+                        data-testid="planner-calendar-group-title"
+                      >
+                        {group.title}
+                      </div>
+                      {group.calendars.map((cal) => (
+                        <label
+                          key={cal.id}
+                          data-testid="planner-calendar-row"
+                          data-calendar-id={cal.id}
+                          data-checked={cal.checked ? 'true' : 'false'}
+                          className="flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-[12px] hover:bg-muted/40"
+                        >
+                          <input
+                            type="checkbox"
+                            checked={cal.checked}
+                            data-testid={`planner-calendar-check-${cal.id}`}
+                            disabled={setCalendarHidden.isPending || setAccountBusy.isPending}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                              if (cal.kind === 'account' && cal.accountId) {
+                                setAccountBusy.mutate({ accountId: cal.accountId, checked: next })
+                                return
+                              }
+                              const hidden = new Set(settings?.hiddenCalendarIds ?? [])
+                              if (next) hidden.delete(cal.id)
+                              else hidden.add(cal.id)
+                              setCalendarHidden.mutate([...hidden])
+                            }}
+                            className="h-3.5 w-3.5"
+                          />
+                          <span className="flex-1 truncate">
+                            {/* A workspace calendar's name is translated and
+                                keyed on its id; an account's name is the
+                                address the provider gave and is not. */}
+                            {cal.label ?? t(`planner.calendar.${cal.id}` as never)}
+                          </span>
+                          {cal.isDefault && (
+                            <span
+                              className="shrink-0 rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground"
+                              data-testid="planner-calendar-default"
+                            >
+                              {t('planner.calendarDefault')}
+                            </span>
+                          )}
+                        </label>
+                      ))}
+                    </div>
+                  ))}
+                  <div className="mt-1 border-t border-border/60 pt-1">
+                    <button
+                      type="button"
+                      data-testid="planner-calendars-manage"
+                      onClick={() => {
+                        setCalendarsOpen(false)
+                        /* Frame `13:28`'s footer goes to the page frame `13:36`
+                           draws — the same Accounts page, not a second one. */
+                        setSettingsPage('accounts')
+                        setSettingsOpen(true)
+                      }}
+                      className="flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-[12px] hover:bg-muted/40"
+                    >
+                      <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
+                      {t('planner.manageAccounts')}
+                    </button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
           <Button
             size="sm"
             variant="outline"
             className="h-7 text-[12px]"
             data-testid="planner-settings"
             aria-label={t('plannerSettings.title')}
-            onClick={() => setSettingsOpen(true)}
+            onClick={() => { setSettingsPage(undefined); setSettingsOpen(true) }}
           >
             <Settings2 className="h-3.5 w-3.5" />
           </Button>
@@ -1323,6 +1802,29 @@ export function PlannerPage() {
           week view nobody can read — a month is a grid of day cells with what is
           on each one.
         */}
+        {showOnboarding && (
+          <PlannerOnboarding
+            onConnect={(p) => connectCalendar.mutate(p)}
+            connecting={connectCalendar.isPending}
+            onDismiss={() => dismissOnboarding.mutate()}
+            dismissing={dismissOnboarding.isPending}
+          />
+        )}
+
+        {teamUserIds.length > 0 && (
+          <TeamSchedules
+            day={days[0] ?? now}
+            columns={teamColumns}
+            order={teamUserIds}
+            nameOf={nameOf}
+            hours={hours}
+            hourPx={hourPx}
+            firstHour={FIRST_HOUR}
+            locale={locale}
+            emptyLabel={t('planner.teamNoBusy')}
+          />
+        )}
+
         {view === 'month' ? (
           <MonthGrid
             days={days}
@@ -1378,6 +1880,46 @@ export function PlannerPage() {
             <div />
             {days.map((d) => (
               <div key={d.toISOString()} className="min-h-[28px] border-l border-border/40 p-1">
+                {/*
+                  §V2-14d, frame `13:28` — the two WORKSPACE calendars, drawn.
+                  These are the readers that make the picker's checkboxes mean
+                  something: unticking "Holidays" stops the chip being drawn AND
+                  stops the request that fetches it, so the setting is honoured
+                  rather than merely stored. A checkbox whose only effect is a
+                  row in `plannerSettings` is this ledger's mirror defect, and
+                  it is the reason this row was worth more than a popover.
+                */}
+                {holidayCalendarOn &&
+                  (workSchedule?.holidays ?? [])
+                    .filter((h) => h.day.slice(0, 10) === localDayKey(d))
+                    .map((h) => (
+                      <div
+                        key={`holiday-${h.day}`}
+                        data-testid="planner-holiday-chip"
+                        data-day={localDayKey(d)}
+                        title={h.name}
+                        className="truncate rounded bg-emerald-500/15 px-1.5 py-0.5 text-[11px] text-emerald-700 dark:text-emerald-300"
+                      >
+                        {h.name}
+                      </div>
+                    ))}
+                {timeOffCalendarOn &&
+                  timeOff
+                    .filter((o) => {
+                      const key = localDayKey(d)
+                      return o.startsOn.slice(0, 10) <= key && key <= o.endsOn.slice(0, 10)
+                    })
+                    .map((o) => (
+                      <div
+                        key={`timeoff-${o.id}-${localDayKey(d)}`}
+                        data-testid="planner-timeoff-chip"
+                        data-day={localDayKey(d)}
+                        data-user-id={o.userId}
+                        className="truncate rounded bg-violet-500/15 px-1.5 py-0.5 text-[11px] text-violet-700 dark:text-violet-300"
+                      >
+                        {t('planner.timeOffChip', { name: nameOf(o.userId) })}
+                      </div>
+                    ))}
                 {allDay
                   .filter((b) => sameDay(new Date(b.startsAt), d))
                   .map((b) => (
@@ -1424,7 +1966,7 @@ export function PlannerPage() {
                   key={h}
                   data-testid="planner-hour-label"
                   className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground"
-                  style={{ top: i * HOUR_PX }}
+                  style={{ top: i * hourPx }}
                 >
                   {new Intl.DateTimeFormat(locale, { hour: 'numeric' }).format(new Date(2026, 0, 1, h))}
                 </div>
@@ -1460,7 +2002,7 @@ export function PlannerPage() {
                     <div
                       key={h}
                       className="absolute inset-x-0 border-t border-border/25"
-                      style={{ top: i * HOUR_PX, height: HOUR_PX }}
+                      style={{ top: i * hourPx, height: hourPx }}
                     />
                   ))}
                   {/*
@@ -1489,8 +2031,8 @@ export function PlannerPage() {
                     .map((b) => {
                       const s = new Date(b.startsAt)
                       const e = new Date(b.endsAt)
-                      const top = (s.getHours() + s.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
-                      const height = Math.max(18, ((e.getTime() - s.getTime()) / 3_600_000) * HOUR_PX)
+                      const top = (s.getHours() + s.getMinutes() / 60 - FIRST_HOUR) * hourPx
+                      const height = Math.max(18, ((e.getTime() - s.getTime()) / 3_600_000) * hourPx)
                       return (
                         <div
                           key={b.id}
@@ -1518,8 +2060,8 @@ export function PlannerPage() {
                     .map((w) => {
                       const s2 = new Date(w.startsAt)
                       const e2 = new Date(w.endsAt)
-                      const top = (s2.getHours() + s2.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
-                      const height = Math.max(14, ((e2.getTime() - s2.getTime()) / 3_600_000) * HOUR_PX)
+                      const top = (s2.getHours() + s2.getMinutes() / 60 - FIRST_HOUR) * hourPx
+                      const height = Math.max(14, ((e2.getTime() - s2.getTime()) / 3_600_000) * hourPx)
                       return (
                         <div
                           /* Merged windows never overlap, so the pair is unique. */
@@ -1546,8 +2088,8 @@ export function PlannerPage() {
                   {projections
                     .filter((p) => sameDay(p.startsAt, d))
                     .map((p) => {
-                      const top = (p.startsAt.getHours() + p.startsAt.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX
-                      const height = Math.max(18, ((p.endsAt.getTime() - p.startsAt.getTime()) / 3_600_000) * HOUR_PX)
+                      const top = (p.startsAt.getHours() + p.startsAt.getMinutes() / 60 - FIRST_HOUR) * hourPx
+                      const height = Math.max(18, ((p.endsAt.getTime() - p.startsAt.getTime()) / 3_600_000) * hourPx)
                       return (
                         <div
                           key={p.key}
@@ -1572,7 +2114,7 @@ export function PlannerPage() {
                       data-testid="planner-event-draft"
                       className="absolute inset-x-1 z-20 rounded border border-accent bg-card p-1 shadow"
                       style={{
-                        top: (draft.startsAt.getHours() + draft.startsAt.getMinutes() / 60 - FIRST_HOUR) * HOUR_PX,
+                        top: (draft.startsAt.getHours() + draft.startsAt.getMinutes() / 60 - FIRST_HOUR) * hourPx,
                       }}
                     >
                       <input
@@ -1636,6 +2178,44 @@ export function PlannerPage() {
             })}
           </div>
         </div>
+        )}
+
+        {/*
+          §V2-15d, frame `14:45` — the bottom command bar, floating over the
+          grid and reading "Search events, teammates, commands…".
+
+          IT IS A LAUNCHER, NOT A SECOND PALETTE, and that decision is the
+          whole row. Rundesk already has a command palette that searches tasks,
+          docs, files, PEOPLE and MEETINGS and takes `/` commands — every one
+          of the three things this placeholder promises. Writing a planner-local
+          search box beside it would have produced two search surfaces with two
+          result lists, two sets of filters and two ideas of what a command is,
+          which is the duplicated-list defect at its largest scale: the bug
+          that gave this codebase three field-type pickers offering different
+          types. So the bar opens the same component the ⌘K palette opens, and
+          anything taught to one is true of the other on the same day.
+
+          Mounted only while open, mirroring `routes/app.tsx`: the palette
+          registers a window-level ⌘K listener of its own, so an always-mounted
+          second copy would make one keypress toggle two palettes.
+        */}
+        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">
+          <button
+            type="button"
+            data-testid="planner-command-bar"
+            onClick={() => setPaletteOpen(true)}
+            className="pointer-events-auto flex w-full max-w-xl items-center gap-2 rounded-full border border-border/70 bg-popover px-4 py-2.5 text-left text-[13px] text-muted-foreground shadow-lg hover:bg-muted/40"
+          >
+            <Search className="h-4 w-4 shrink-0" />
+            <span className="flex-1 truncate" data-testid="planner-command-bar-placeholder">
+              {t('planner.commandBar')}
+            </span>
+          </button>
+        </div>
+        {paletteOpen && (
+          <Suspense fallback={null}>
+            <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />
+          </Suspense>
         )}
       </div>
     </div>
@@ -1742,5 +2322,307 @@ function MonthGrid({
         })}
       </div>
     </div>
+  )
+}
+
+/**
+ * §V2-15c, frames `12:40`–`12:50` — the planner onboarding screen.
+ *
+ * What the frames draw, in order: the headline **"You, but better organized"**,
+ * a line of explanation, **"Get started with"** over **Google Calendar** and
+ * **Microsoft Outlook**, and to the right a CAROUSEL of feature cards with
+ * `←` `→` paging underneath. The carousel visibly advances between `12:40`
+ * and `12:45`, which is how we know the arrows are real rather than decoration.
+ *
+ * FOUR CARDS, because four is what the frames show: Join your next meeting
+ * (`12:40`), Automate your meeting notes (`12:40`/`12:45`), Block time for your
+ * tasks (`12:45`/`12:48`) and Team schedules (`12:48`/`12:50`). The last one is
+ * the card §V2-15b builds, so the panel is not promising anything this product
+ * does not do — which was the risk worth checking before writing it, because a
+ * carousel of things you cannot have is worse than no carousel.
+ */
+function PlannerOnboarding({
+  onConnect,
+  connecting,
+  onDismiss,
+  dismissing,
+}: {
+  onConnect: (provider: 'gcal' | 'outlook') => void
+  connecting: boolean
+  onDismiss: () => void
+  dismissing: boolean
+}) {
+  const { t } = useTranslation()
+  const [card, setCard] = useState(0)
+  /*
+   * The keys, not the strings. Each card is a title and a body in four
+   * locales; holding English here would be the i18n version of the hard-coded
+   * list, and the fallback would quietly serve English to Arabic and Urdu
+   * readers — which is the defect the ledger's `relativeTime` entry describes.
+   */
+  const CARDS = ['joinMeeting', 'meetingNotes', 'blockTime', 'teamSchedules'] as const
+  /* Wraps both ways: an arrow that stops at the end is an arrow people press
+   * twice and conclude is broken. */
+  const step = (delta: number) => setCard((c) => (c + delta + CARDS.length) % CARDS.length)
+  const key = CARDS[card]
+
+  return (
+    <section
+      data-testid="planner-onboarding"
+      className="border-b border-border/60 bg-muted/20 px-5 py-4"
+    >
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div className="min-w-0 max-w-md">
+          <h2 className="text-[19px] font-semibold leading-tight" data-testid="planner-onboarding-title">
+            {t('planner.onboarding.title')}
+          </h2>
+          <p className="mt-1.5 text-[12px] text-muted-foreground" data-testid="planner-onboarding-subtitle">
+            {t('planner.onboarding.subtitle')}
+          </p>
+          <div className="mt-3 text-[11px] uppercase tracking-wide text-muted-foreground">
+            {t('planner.onboarding.getStartedWith')}
+          </div>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {/*
+              The SAME `oauth/start` the App Center and the Accounts page use.
+              A connect button on a third surface with its own idea of the flow
+              is how one of them ends up pointing at a provider key nobody set.
+            */}
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-[12px]"
+              data-testid="planner-onboarding-connect-gcal"
+              disabled={connecting}
+              onClick={() => onConnect('gcal')}
+            >
+              {t('planner.onboarding.google')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 text-[12px]"
+              data-testid="planner-onboarding-connect-outlook"
+              disabled={connecting}
+              onClick={() => onConnect('outlook')}
+            >
+              {t('planner.onboarding.outlook')}
+            </Button>
+          </div>
+        </div>
+
+        {/* The carousel. One card at a time, with the frame's own pager. */}
+        <div className="w-full max-w-md shrink-0">
+          <div
+            className="rounded-lg border border-border/70 bg-card p-3"
+            data-testid="planner-onboarding-card"
+            data-card={key}
+            data-card-index={card}
+          >
+            <div className="text-[13px] font-medium" data-testid="planner-onboarding-card-title">
+              {t(`planner.onboarding.card.${key}.title` as never)}
+            </div>
+            <p className="mt-1 text-[12px] text-muted-foreground" data-testid="planner-onboarding-card-body">
+              {t(`planner.onboarding.card.${key}.body` as never)}
+            </p>
+          </div>
+          <div className="mt-2 flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <button
+                type="button"
+                aria-label={t('planner.onboarding.previous')}
+                data-testid="planner-onboarding-prev"
+                onClick={() => step(-1)}
+                className="rounded border border-border/70 p-1 hover:bg-muted/60"
+              >
+                <ChevronLeft className="h-3.5 w-3.5" />
+              </button>
+              <button
+                type="button"
+                aria-label={t('planner.onboarding.next')}
+                data-testid="planner-onboarding-next"
+                onClick={() => step(1)}
+                className="rounded border border-border/70 p-1 hover:bg-muted/60"
+              >
+                <ChevronRight className="h-3.5 w-3.5" />
+              </button>
+              <span className="ml-1 text-[11px] text-muted-foreground" data-testid="planner-onboarding-position">
+                {card + 1}/{CARDS.length}
+              </span>
+            </div>
+            {/*
+              A way out. The panel exists to ask for something; a request you
+              cannot decline is an advertisement, and it would sit on top of
+              this person's calendar for as long as they chose not to connect
+              a Google account — which some people never will.
+            */}
+            <button
+              type="button"
+              data-testid="planner-onboarding-dismiss"
+              disabled={dismissing}
+              onClick={onDismiss}
+              className="rounded px-2 py-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {t('planner.onboarding.dismiss')}
+            </button>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+/**
+ * §V2-15b, frame `12:48` — several people's calendars SIDE BY SIDE.
+ *
+ * ONE DAY, ONE COLUMN PER PERSON. That shape is forced by the question the
+ * card asks — "see calendars for anyone in your team, find a time, and
+ * schedule a call in seconds" — which is about a moment, not about a fortnight:
+ * you are looking for the gap all of you share. A week per person would be
+ * seven sub-columns times N people, and at four people that is twenty-eight
+ * columns nobody can compare across.
+ *
+ * EACH COLUMN DRAWS ITS OWN PERSON'S WINDOWS, and the suite asserts exactly
+ * that, because the failure worth guarding is the cheap one: a grid that maps
+ * every column to `columns[0]` looks completely right until two people have
+ * different schedules. `byUser` is keyed rather than indexed so a column can
+ * never fall back to a neighbour when the server returns them in another
+ * order.
+ *
+ * Titles are NEVER read here. A window is a start, an end and a source — see
+ * `free-busy.ts`, where the absence of a title field is the privacy rule
+ * rather than a line somebody has to remember to write.
+ */
+function TeamSchedules({
+  day,
+  columns,
+  order,
+  nameOf,
+  hours,
+  hourPx,
+  firstHour,
+  locale,
+  emptyLabel,
+}: {
+  day: Date
+  columns: Array<{ userId: string; busy?: BusyWindow[]; error: string | null }>
+  order: string[]
+  nameOf: (userId: string) => string
+  hours: number[]
+  hourPx: number
+  firstHour: number
+  locale: string
+  emptyLabel: string
+}) {
+  const { t } = useTranslation()
+  const byUser = new Map(columns.map((c) => [c.userId, c]))
+  /*
+   * A WINDOW OF HOURS, not the whole 24. The band shares the page with the
+   * personal grid below it, and a full day at even the Default hour height is
+   * taller than the viewport on its own. Centred on the working day, which is
+   * where the gap you are hunting for actually is.
+   */
+  const shown = hours.filter((h) => h >= 7 && h <= 20)
+  const bandHeight = shown.length * Math.round(hourPx / 2)
+  const rowPx = Math.round(hourPx / 2)
+  const topFor = (iso: string) => {
+    const d = new Date(iso)
+    return (d.getHours() + d.getMinutes() / 60 - shown[0]) * rowPx
+  }
+
+  return (
+    <section
+      className="border-b border-border/60 px-3 py-2"
+      data-testid="planner-team-grid"
+      data-people={order.length}
+    >
+      <div className="mb-1 flex items-baseline gap-2">
+        <h2 className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+          {t('planner.teamSchedules')}
+        </h2>
+        <span className="text-[11px] text-muted-foreground" data-testid="planner-team-day">
+          {new Intl.DateTimeFormat(locale, { weekday: 'short', day: 'numeric', month: 'short' }).format(day)}
+        </span>
+      </div>
+      <div
+        className="grid overflow-hidden rounded-md border border-border/60"
+        style={{ gridTemplateColumns: `48px repeat(${order.length}, minmax(0, 1fr))` }}
+      >
+        {/* The shared gutter — one set of hours for every column, which is what
+            makes two columns comparable by eye. */}
+        <div className="relative border-r border-border/40" style={{ height: bandHeight + 22 }}>
+          <div className="h-[22px] border-b border-border/40" />
+          {shown.map((h, i) => (
+            <div
+              key={h}
+              data-testid="planner-team-hour"
+              className="absolute right-1 -translate-y-1/2 text-[10px] text-muted-foreground"
+              style={{ top: 22 + i * rowPx }}
+            >
+              {new Intl.DateTimeFormat(locale, { hour: 'numeric' }).format(new Date(2026, 0, 1, h))}
+            </div>
+          ))}
+        </div>
+
+        {order.map((userId) => {
+          const col = byUser.get(userId)
+          const windows = (col?.busy ?? []).filter((w) => sameDay(new Date(w.startsAt), day))
+          return (
+            <div
+              key={userId}
+              data-testid="planner-team-column"
+              data-user-id={userId}
+              data-busy-count={windows.length}
+              className="relative border-l border-border/40"
+              style={{ height: bandHeight + 22 }}
+            >
+              <div
+                className="flex h-[22px] items-center truncate border-b border-border/40 px-1.5 text-[11px] font-medium"
+                data-testid="planner-team-column-name"
+              >
+                {nameOf(userId)}
+              </div>
+              {col?.error ? (
+                /*
+                 * A column that could not be read SAYS SO. Rendering it empty
+                 * would draw "could not reach this person's calendar" and "this
+                 * person is free all day" identically — the confident zero, on
+                 * the one screen where it would get a meeting booked over
+                 * somebody's morning.
+                 */
+                <p className="px-1.5 py-2 text-[10px] text-muted-foreground" data-testid="planner-team-error">
+                  {t('planner.teamColumnError')}
+                </p>
+              ) : windows.length === 0 ? (
+                <p className="px-1.5 py-2 text-[10px] text-muted-foreground" data-testid="planner-team-free">
+                  {emptyLabel}
+                </p>
+              ) : (
+                windows.map((w) => {
+                  const s = new Date(w.startsAt)
+                  const e = new Date(w.endsAt)
+                  const top = 22 + Math.max(0, topFor(w.startsAt))
+                  const height = Math.max(10, ((e.getTime() - s.getTime()) / 3_600_000) * rowPx)
+                  return (
+                    <div
+                      key={`${userId}-${w.startsAt}-${w.endsAt}`}
+                      data-testid="planner-team-busy"
+                      /* The owning person is on the ELEMENT, so a check can ask
+                         "is this window in the right column" rather than
+                         inferring it from where the element happens to sit. */
+                      data-user-id={userId}
+                      data-starts-at={w.startsAt}
+                      data-busy-source={w.source}
+                      className="absolute inset-x-1 rounded border border-border/60 bg-foreground/10"
+                      style={{ top, height }}
+                    />
+                  )
+                })
+              )}
+            </div>
+          )
+        })}
+      </div>
+    </section>
   )
 }

@@ -76,6 +76,54 @@ export class TasksController {
     )
   }
 
+  /**
+   * §V2-07 frame `11:30` — "Tasks where I have assigned": Comments · Subtasks ·
+   * Checklists, the three switches under the list's assignee picker.
+   *
+   * A SEPARATE ROUTE RATHER THAN THREE MORE PARAMETERS ON `GET /tasks/list/:id`.
+   * The list read is what every other surface in the product uses; widening it
+   * with an assignee argument would make every one of them a caller of this
+   * filter, and the three switches are a narrowing the LIST TOOLBAR applies on
+   * top of a payload it already has. This answers only "which rows would these
+   * switches add", per source, and the toolbar unions it with what it already
+   * drew.
+   *
+   * `ResourceMemberGuard`, the same guard as the list read, and the service
+   * applies the same per-task visibility filter on top: a task id is still a
+   * fact about a task.
+   */
+  @Get('list/:listId/assigned-via')
+  @UseGuards(ResourceMemberGuard)
+  async getAssignedVia(
+    @Param('listId') listId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('userId') userId?: string,
+    @Query('comments') comments?: string,
+    @Query('subtasks') subtasks?: string,
+    @Query('checklists') checklists?: string,
+  ) {
+    return this.tasks.assignedViaForList(
+      listId,
+      {
+        /*
+         * `me` resolves to the caller and any other value is taken literally.
+         * Reading a colleague's indirect assignments in a list you can already
+         * read gives away nothing their rows on that list do not already say,
+         * and the frame's picker offers every member — so the narrow rule the
+         * workspace listing uses would make the control lie about who it can
+         * filter by.
+         */
+        userId: userId === 'me' ? user.id : (userId ?? ''),
+        // Absent means off. An omitted switch that defaulted to ON would make
+        // a bare call return more rows than any state of the three toggles.
+        comments: comments === 'true',
+        subtasks: subtasks === 'true',
+        checklists: checklists === 'true',
+      },
+      { id: user.id, role: user.role },
+    )
+  }
+
   @Get('workspace/:workspaceId/timeline')
   @UseGuards(WorkspaceMemberGuard)
   async getTimeline(

@@ -461,6 +461,92 @@ went missing entirely. A list that is only written once stops being true.
   `chk(true, …)` — a check that cannot fail — which is the exact thing this
   audit exists to remove. It drives the real modal now.
 
+- **The Customize panel's three switches, frame `10:35`.** Absent entirely —
+  `grep -rn "stackFields\|showEmptyFields\|collapseEmptyColumns"` over `apps/`
+  returned nothing. Built as three BOARD switches, and the frames are what
+  decided that: `10:35` is a Board view and carries exactly this trio, while
+  `11:00` is the SAME panel on the List view and carries a different one —
+  Show task locations · Show subtask parent names · Show closed tasks. So the
+  panel's middle block depends on the view type, and putting these three on
+  the list would have been three labelled controls over a grid with no cards
+  to stack, no card fields to empty and no lanes to fold. Defaults are the
+  frame's own toggle positions: off / ON / off.
+  Each one reads somewhere: Stack fields and Show empty fields change how a
+  board card lays out its Due date, Assignees and Subtasks; Collapse empty
+  columns folds a lane whose count is 0. **"Collapse empty columns" is XOR'd
+  with the chevron, not OR'd**, and that is the whole difference between a
+  working control and a dead one: OR'd, the chevron on an auto-collapsed lane
+  moves and changes nothing, because the switch wins every press for ever.
+  XOR'd, a press records a difference from the default and still opens it —
+  and with the switch off, `false !== x` is `x`, so today's behaviour is
+  untouched. The blocker badge is deliberately NOT one of the card's "fields":
+  it is a warning that appears when something is wrong, and "no blockers"
+  drawn as an empty field would be a placeholder for the normal case on every
+  card on the board. 28 checks, thirteen break-tests — three of which leave
+  the switch working perfectly and revert only its reader.
+
+- **The export paywall, frames `10:34`–`11:00` — a row that was half closed
+  and read as fully open.** The recorded reason, "open by design here", was
+  the *stale reason* defect class: it stopped being true at the commit that
+  built `paywall-sites.mjs`, where `tasks.controller.ts:158-159` refuses
+  `view=board` server-side on a Free plan and the panel marks the section
+  locked. What was still missing is what frame `11:00` actually draws, and it
+  is not a refusal: under the Download button, in small grey type,
+  **"⚡ Business feature"** — with `[11:04]` *"abhi filhaal, of course, premium
+  nahi hai to yeh download nahi kar raha"* over it. Rundesk's only pre-press
+  signal was a padlock on the export section's own `<summary>`, which is not
+  on screen once the section is expanded — which is exactly where a person is
+  standing when they choose a format, a scope and a date style and then press
+  a button that cannot work. The caption is gated on the same condition as the
+  refusal, because `[10:49]` makes the free list download part of the same
+  sentence and a caption on it would be this row's version of the gate
+  spreading.
+  **A second reader of the plan catalog, and it is pinned rather than
+  duplicated.** `feature-gate.tsx`'s `upgradeTarget` is the first and is not
+  exported; the list route resolves the tier itself, and the check "the
+  caption names the same tier the gate offers" is what makes a drift between
+  them a red suite rather than a wrong price on a label.
+
+- **The assignee filter and its three switches, frame `11:30` — two rows, one
+  control.** The toolbar reads `⧩ Filter · ⊘ Closed · ⚇ Assignee <face ✕>`,
+  and behind the face a popover headed **"Tasks where I have assigned"** over
+  **Comments · Subtasks · Checklists**, all three ON. The ledger had these as
+  two rows (`P | … a <select>, not an avatar picker` and `M | "assigned to me"
+  toggles`); they are the same cluster in the same frame, and the switches are
+  settings of the assignee filter that do nothing whatever anywhere else.
+  **Two of the three could not have been built in the browser at all.** The
+  list payload carries `assignees` and `subtasks` and says nothing about who a
+  COMMENT or a CHECKLIST ITEM is assigned to, so a client-side version would
+  have been one switch that works and two that cannot — the facade, in
+  triplicate. `GET /tasks/list/:id/assigned-via` answers it and **returns the
+  three sources separately**, because a merged list cannot tell "Comments
+  found it" from "Checklists found it" and a check written against one would
+  pass with a branch deleted. Every match is resolved to the row the list
+  actually draws: a comment on a subtask is reported as its parent.
+  **The native `<select>` stays, beside the faces rather than instead of
+  them**, on the argument this file already accepted for the field-type
+  picker — it is what a screen reader announces, what a phone renders as a
+  wheel, and what a suite can `selectOption`. They are one filter with two
+  surfaces and no second state, and a check drives each one and reads the
+  other. 29 checks, fifteen break-tests.
+  **Not built, deliberately: multi-select.** `columnFilters.assignees` is an
+  array and `filterTasks` already ORs over it, so the model would carry it —
+  but `[11:28]` is "aap ko ya aap ke alawa [kisi aur ko]" and the frame draws
+  one face with one `✕`. Recorded here rather than guessed at.
+
+- **The three items above carry `B*`, not `B`, and the star is the whole
+  point.** The session that built them could not start Postgres, the API or a
+  browser, so `list-customize` (29) and `list-assignee-filter` (29) are written
+  and typechecked and **have never been run**, and neither is registered in
+  `ci.yml` — step 7 says to register a suite only once it is locally green, and
+  a suite that goes red on somebody else's commit is what that rule exists to
+  prevent. The twenty-eight break patches — thirteen for `list-customize`,
+  fifteen for `list-assignee-filter` — were each verified by parsing and by
+  applying them to a COPY of the target file, and the fourteen with any type
+  risk were compiled; none was run against a live stack. Writing "B" here
+  would have made a claim about a run that did not happen, which is the same
+  move as a check that cannot fail.
+
 **Still open:** the AI four and the remaining ~9 field types, everything in §2
 still marked M or P, and V2-03.
 
@@ -611,12 +697,24 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Gantt: Auto fit, week numbers, collapsible panels, local export |
 | M | Create-modal placeholder "Add description, or write with ⚡AI" |
 | B | Customize view: Autosave, Pin, Private, Protected, Set default, Copy link, Sharing |
-| M | Customize: Stack fields, Show empty fields, Collapse empty columns |
+| B\* | **Customize: Stack fields, Show empty fields, Collapse empty columns** — board switches, each read by the grid. `list-customize` 29 |
+| M | Customize on the LIST view — frame `11:00` puts a DIFFERENT trio in that same place: Show task locations · Show subtask parent names · Show closed tasks. Two are absent from the tree entirely; the third exists as the toolbar's Closed chip and not in this panel |
 | B | Export: CSV/Excel, three-way scope, date+time formats, honours the view |
-| M | Export paywall (open by design here) |
+| B\* | **Export paywall** — the refusal was already built; the frame's "⚡ Business feature" caption inside the open dialog was not. `list-customize` 29 |
 | B | In-list search, Save-view chip, filter rules, nested groups, saved filter sets |
-| P | Assignee filter is a `<select>`, not an avatar picker |
-| M | "assigned to me" toggles — Comments · Subtasks · Checklists |
+| B\* | **Assignee filter is an avatar picker** — faces, Me above the roster, the frame's ✕; the native `<select>` stays beside it, one state. `list-assignee-filter` 29 |
+| B\* | **"Tasks where I have assigned" — Comments · Subtasks · Checklists** — a server source each, unioned into the filter. `list-assignee-filter` 29 |
+
+**B\*** — built end to end, with a suite written against a real API and a real
+browser, and **the suite has not been run**: the session that wrote these
+four rows was not allowed to start Postgres or the API, so the number beside
+each one is its `EXPECTED_CHECKS`, not a green run. They are not registered in
+`ci.yml` for the same reason — the process file's step 7 says to register a
+suite only once it is locally green, and going red on somebody else's commit is
+the failure that rule exists to prevent. Twenty-eight break patches are written
+and every one was verified by parsing and by applying it to a COPY; none was
+run against a live stack either. **A `B*` is a claim about the code and the
+checks, not about a run.**
 
 ### S13–S17 · imports, templates, planner, planner settings, task menu, AI hub
 

@@ -30,6 +30,24 @@
  *   4. THE BUSY STATE IS A REPORT. Observed while a real request is genuinely
  *      in flight, and the composer's placeholder with it.
  *
+ *   5. §V2-S16 `18:48` — THE PATH CHIPS ARE DESTINATIONS. *"Use the `rundesk >
+ *      ddddd > List` for task details or the `rundesk > ddddd > Board` to
+ *      manage work by status."* Both halves of that sentence tell you to go
+ *      somewhere, and until `0163` the chip was a `<span>`: a path that looked
+ *      like a link, could not be pressed, could not be middle-clicked and did
+ *      not exist to a keyboard. The dead control, in the one place the answer
+ *      is telling you to act. A view the space does not have is not offered.
+ *
+ *   6. §V2-S17/S22 `16:32` / `21:15` — THE STARTER CARDS CHANGE. Four cards
+ *      both times and not one card in common. What was here was five `const`
+ *      translation keys with no input that could have changed them, so this
+ *      asserts the set moves WITH A NUMBER: the overdue count in the card's own
+ *      `data-because` must track the overdue tasks this run creates.
+ *
+ *   7. §V2-S18 `17:42`–`17:50` — THE WORD BAR CHANGES TOO. Three words above
+ *      the composer, and the three frames show three different sets. A fixed
+ *      three would photograph identically at `17:42`.
+ *
  * NO PROVIDER KEY EXISTS HERE, so `/ai/chat` 503s (checked in
  * `ai-create-containers.mjs`, where it belongs). Phase A below is entirely real
  * — real API, real Postgres, real browser — because the panel renders STORED
@@ -54,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 30
+const EXPECTED_CHECKS = 50
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -89,11 +107,21 @@ let ctx = null
 let threadId = null
 let taskA = null
 let taskB = null
+/**
+ * The overdue tasks the starter-card block creates.
+ *
+ * Declared out here and cleaned up in `finally`: they sit on this account's own
+ * overdue count, which every other suite's starter cards and workload figures
+ * read, and a run that threw halfway would otherwise leave them there for good.
+ */
+const lateTasks = []
 
 try {
   console.log('\n▶ two tasks with DIFFERENT statuses, so a chip cannot be a constant')
   const fixture = await ensureSweepFixture(api, WS, { minTasks: 1 })
   const listId = fixture.listId
+  // The route a chip has to address: `/app/:workspaceId/:spaceId/:projectId/:listId`.
+  const listRoute = `/app/${WS}/${fixture.spaceId}/${fixture.projectId}/${listId}`
   const mk = async (title, status) => {
     const res = await api('/tasks', { method: 'POST', body: { listId, title, status } })
     return res.status < 400 ? res.data : null
@@ -123,6 +151,15 @@ try {
     `- [[task:${GHOST_ID}]] is a reference to nothing`,
     '',
     `They all live in [[list:${listId}]].`,
+    '',
+    /*
+     * §V2-S16 `18:48`'s own sentence, in the shape `describeContainerResult`
+     * writes it. `mindmap` is deliberate: it is a view key this build cannot
+     * render at all, so it exercises the degrade path without touching the
+     * space's shared view config — which every other suite reads.
+     */
+    `Use [[view:${listId}:list]] for task details or [[view:${listId}:board]] to manage work by status.`,
+    `[[view:${listId}:mindmap]] is a view this build does not draw.`,
   ].join('\n')
   const QUESTION = 'What is my **project status** right now?'
 
@@ -213,8 +250,8 @@ try {
     `the answer reads ${JSON.stringify(answerText.slice(0, 180))}`,
   )
   chk(
-    !/\[\[task:/.test(answerText) && !/\[\[list:/.test(answerText),
-    'and no raw reference token on screen',
+    !/\[\[(task|list|view):/.test(answerText),
+    'and no raw reference token on screen, of any of the three kinds',
     `a reference token is still visible in ${JSON.stringify(answerText.slice(0, 180))}`,
   )
   /*
@@ -288,6 +325,72 @@ try {
     'the list reference became a chip too',
     'the list reference did not resolve',
   )
+
+  // ── `18:48` — the path chips are destinations ──────────────────────────────
+  console.log('\n▶ `18:48` — "Use the rundesk > ddddd > List … or the Board …"')
+  const listChip = page.getByTestId(`ai-ref-list-${listId}`)
+  /*
+   * A REAL `href`, not an onClick. The browser's own affordances — middle
+   * click, copy link, focus — all come from the attribute, and the attribute is
+   * also the only thing a check can read without navigating. It has to carry
+   * the WHOLE route: a chip holding just the list id can be drawn and not
+   * opened, which is how a label starts pretending to be a control.
+   */
+  chk(
+    (await listChip.getAttribute('href')) === listRoute,
+    'the list chip is a link to that list’s real route, space and project included',
+    `its href was ${JSON.stringify(await listChip.getAttribute('href'))}, expected ${JSON.stringify(listRoute)}`,
+  )
+  const viewList = page.getByTestId(`ai-ref-view-${listId}-list`)
+  const viewBoard = page.getByTestId(`ai-ref-view-${listId}-board`)
+  chk(
+    (await viewList.count()) === 1 && (await viewBoard.count()) === 1,
+    'and the sentence’s two VIEW chips resolved as well',
+    `list-view chips: ${await viewList.count()}, board-view chips: ${await viewBoard.count()}`,
+  )
+  const boardHref = await viewBoard.getAttribute('href')
+  chk(
+    (await viewList.getAttribute('href')) === `${listRoute}?view=list` && boardHref === `${listRoute}?view=board`,
+    'each opening its OWN tab of that list — two chips, two different links',
+    `they pointed at ${JSON.stringify([await viewList.getAttribute('href'), boardHref])}`,
+  )
+  const boardText = (await viewBoard.innerText()).trim()
+  chk(
+    boardText.startsWith(await listChip.innerText().then((s) => s.trim())) && boardText.split('>').length === 3,
+    'and reading as the frame reads them — the list’s path with the view’s name on the end',
+    `the board chip read ${JSON.stringify(boardText)} against a list path of ` +
+      `${JSON.stringify((await listChip.innerText()).trim())}`,
+  )
+  /*
+   * THE VIEW THIS BUILD CANNOT DRAW. `enabledViewsFor` filters unknown keys
+   * out, so the chip degrades to the list it belongs to rather than linking to
+   * a tab the page will not render. Both halves are asserted: that it did NOT
+   * become a mindmap link, and that it still goes somewhere real.
+   */
+  const ghostView = page.getByTestId(`ai-ref-view-${listId}-mindmap`)
+  chk(
+    (await ghostView.getAttribute('data-view-enabled')) === 'false' &&
+      (await ghostView.getAttribute('href')) === listRoute,
+    'a view this build does not draw degrades to the list instead of linking to a missing tab',
+    `it reported data-view-enabled=${JSON.stringify(await ghostView.getAttribute('data-view-enabled'))} ` +
+      `with href ${JSON.stringify(await ghostView.getAttribute('href'))}`,
+  )
+  /*
+   * AND IT ACTUALLY GOES. An `href` proves the attribute; only a click proves
+   * the router accepts it. Done last in this block, because it leaves the page.
+   */
+  await viewBoard.click()
+  const landed = await waitUntil(
+    () => Promise.resolve(page.url().includes(listId) && page.url().includes('view=board')),
+    { timeoutMs: 15_000 },
+  )
+  chk(
+    landed,
+    'and pressing one opens that view of that list',
+    `the browser ended up at ${JSON.stringify(page.url())}`,
+  )
+  chk(await openThread(), 'the thread reopens after following a chip', 'the answer did not come back')
+  await awaitHydration()
   chk(
     (await page.getByTestId(`ai-ref-unresolved-${GHOST_ID}`).count()) === 1 &&
       (await page.getByTestId(`ai-ref-task-${GHOST_ID}`).count()) === 0,
@@ -431,6 +534,170 @@ try {
     'the busy state goes away once the answer has landed',
     'the assistant still says it is busy after the answer arrived',
   )
+
+  // ── `16:32` / `21:15` — the starter cards ──────────────────────────────────
+  console.log('\n▶ `16:32` → `21:15` — four starter cards, and they CHANGE')
+  /*
+   * A THREAD-LESS PANEL, which is the only state the cards are drawn in. The
+   * `?thread=` above put a conversation on screen; dropping it is what gets
+   * back to the empty state, and a full navigation is also what forces the
+   * cache miss BY CONSTRUCTION — the query client is a module-level instance
+   * created on load, so a fresh document starts with nothing cached. Waiting
+   * out the 30s `staleTime` would be a bet on a clock.
+   */
+  const openEmptyPanel = async () => {
+    await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
+    return waitUntil(() => page.getByTestId('ai-starters').isVisible().catch(() => false), { timeoutMs: 25_000 })
+  }
+  chk(await openEmptyPanel(), 'the empty panel draws a row of starter cards', 'no starter cards appeared')
+  const cards = page.locator('[data-testid^="ai-starter-"]')
+  chk(
+    (await cards.count()) === 4,
+    'four of them, as both frames draw four',
+    `${await cards.count()} card(s) were drawn`,
+  )
+  const titles = await cards.evaluateAll((els) =>
+    els.map((el) => ({
+      testid: el.getAttribute('data-testid'),
+      because: el.getAttribute('data-because'),
+      lines: [...el.querySelectorAll('span')].map((s) => s.textContent?.trim() ?? ''),
+    })),
+  )
+  chk(
+    titles.every((c) => c.lines.length === 2 && c.lines[0].length > 0 && c.lines[1].length > 0 && c.lines[0] !== c.lines[1]),
+    'each a title over its own one line, as `16:32` draws them',
+    `the cards read ${JSON.stringify(titles.map((c) => c.lines))}`,
+  )
+  chk(
+    new Set(titles.map((c) => c.testid)).size === 4 && titles.every((c) => !!c.because),
+    'four distinct cards, each carrying the fact that put it there',
+    `the cards were ${JSON.stringify(titles.map((c) => [c.testid, c.because]))}`,
+  )
+  /*
+   * THE SET MOVES WITH A NUMBER, and the number is this run's.
+   *
+   * The e2e database is shared, so "Find Blockers is on screen" is not this
+   * suite's to assert — somebody else's overdue task could have put it there.
+   * What IS this suite's is the DELTA: read the count the card names, create two
+   * overdue tasks assigned to this account, and require the card to name
+   * exactly two more. A card that is always present fails this; so does one
+   * whose `because` is a constant.
+   */
+  const overdueBefore = Number(
+    (await page.getByTestId('ai-starter-findBlockers').getAttribute('data-because').catch(() => null))
+      ?.split(':')[1] ?? 0,
+  )
+  const yesterday = new Date(Date.now() - 36 * 60 * 60 * 1000).toISOString()
+  const me = (await api('/users/me')).data?.id
+  for (let i = 0; i < 2; i++) {
+    const res = await api('/tasks', {
+      method: 'POST',
+      body: { listId, title: `${TAG}-late-${i}`, dueDate: yesterday },
+    })
+    if (res.status < 400 && res.data?.id) {
+      lateTasks.push(res.data.id)
+      if (me) await api(`/tasks/${res.data.id}/assignees`, { method: 'POST', body: { userId: me } })
+    }
+  }
+  chk(
+    lateTasks.length === 2 && !!me,
+    'the suite puts two overdue tasks of its own on this account',
+    `it created ${lateTasks.length} and resolved its own user id as ${JSON.stringify(me ?? null)}`,
+  )
+  await openEmptyPanel()
+  const blockers = page.getByTestId('ai-starter-findBlockers')
+  const overdueAfter = Number((await blockers.getAttribute('data-because').catch(() => null))?.split(':')[1] ?? -1)
+  chk(
+    (await blockers.count()) === 1 && overdueAfter === overdueBefore + 2,
+    'and "Find Blockers" now names exactly two more overdue tasks than before',
+    `the card reported overdue:${overdueAfter} where overdue:${overdueBefore + 2} was owed ` +
+      `(${await blockers.count()} card(s) present) — a set that does not move with the number is a fixed list`,
+  )
+  /*
+   * THE SURFACE MOVES IT TOO, asked of the API directly: the cards for a list
+   * and the cards for the workspace are different sets, and this is a pure
+   * function of facts plus surface, so it needs no browser.
+   */
+  const wsCards = await api(`/ai/starters?workspaceId=${WS}&surface=workspace`)
+  const listCards = await api(`/ai/starters?workspaceId=${WS}&surface=list`)
+  const idsOf = (r) => (r.data?.cards ?? []).map((c) => c.id).join(',')
+  chk(
+    wsCards.status === 200 && listCards.status === 200 && idsOf(wsCards) !== idsOf(listCards),
+    'and asking from a list gives a different four than asking from the workspace',
+    `workspace gave ${idsOf(wsCards)} and list gave ${idsOf(listCards)}`,
+  )
+  /*
+   * A CARD IS A CONTROL. Pressing it must send ITS OWN prompt — not its title,
+   * which is a label and would ask the assistant "Project Status".
+   */
+  const pressed = page.getByTestId('ai-starter-projectStatus')
+  const pressedTitle = (await pressed.innerText()).split('\n')[0].trim()
+  await pressed.click()
+  const asked = await waitUntil(
+    async () => (await page.locator('[data-testid^="ai-question-"]').count()) > 0,
+    { timeoutMs: 15_000 },
+  )
+  const askedText = asked ? (await page.locator('[data-testid^="ai-question-"]').first().innerText()).trim() : ''
+  chk(
+    asked && askedText.length > pressedTitle.length && askedText !== pressedTitle,
+    'pressing a card asks its prompt, which is a sentence and not the card’s label',
+    `pressing ${JSON.stringify(pressedTitle)} asked ${JSON.stringify(askedText)}`,
+  )
+
+  // ── `17:42`–`17:50` — the word bar ─────────────────────────────────────────
+  console.log('\n▶ `17:42`–`17:50` — three words above the composer, and they change')
+  /*
+   * ONE ENDPOINT INTERCEPTED, and it is the one that cannot answer honestly
+   * here: with no provider key `GET /ai/status` reports `available: false` and
+   * the composer is correctly disabled, so there is no way to type. Everything
+   * the bar does is client-side and real; this only opens the door.
+   */
+  await page.route('**/api/v1/ai/status', (route) =>
+    route.fulfill({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"available":true}' }),
+  )
+  await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
+  const box = page.getByTestId('ai-composer-input')
+  await waitUntil(() => box.isEnabled().catch(() => false), { timeoutMs: 25_000 })
+  chk(
+    (await page.getByTestId('ai-word-suggestions').count()) === 0,
+    'an empty composer offers nothing — the frames show no bar before anything is typed',
+    'the word bar was up over an empty composer',
+  )
+  const wordsNow = async () =>
+    page.locator('[data-testid^="ai-word-suggestion-"]').evaluateAll((els) =>
+      els.map((el) => el.textContent?.trim() ?? ''),
+    )
+  await box.fill('create a ')
+  const barUp = await waitUntil(async () => (await wordsNow()).length === 3, { timeoutMs: 8_000 })
+  const afterA = await wordsNow()
+  chk(
+    barUp && afterA.join('|') === 'new|list|list of',
+    'after "create a " it offers the frame’s own three: new · list · list of',
+    `it offered ${JSON.stringify(afterA)} — \`17:42\` draws new, list, list of`,
+  )
+  await box.fill('create a folder name as ')
+  const afterAs = await waitUntil(async () => (await wordsNow()).join('|') === 'the|a|you', { timeoutMs: 8_000 })
+  chk(
+    afterAs,
+    'and after "…name as " it offers the frame’s other three: the · a · you',
+    `it offered ${JSON.stringify(await wordsNow())} — \`17:46\` draws the, a, you; three words that never ` +
+      'change would have photographed identically at both timecodes',
+  )
+  await box.fill('create a fol')
+  const mid = await waitUntil(async () => (await wordsNow()).includes('folder'), { timeoutMs: 8_000 })
+  chk(
+    mid,
+    'a half-typed word is COMPLETED from what the product can be asked to do',
+    `mid-word it offered ${JSON.stringify(await wordsNow())}`,
+  )
+  await page.getByTestId('ai-word-suggestion-folder').click()
+  const filled = await waitUntil(async () => (await box.inputValue()) === 'create a folder ', { timeoutMs: 8_000 })
+  chk(
+    filled,
+    'and pressing it REPLACES the stem rather than appending after it',
+    `the composer read ${JSON.stringify(await box.inputValue())}, not "create a folder " — ` +
+      '"create a fol folder" is the version of this that looks right in a screenshot',
+  )
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
@@ -440,6 +707,7 @@ try {
   for (const t of [taskA, taskB]) {
     if (t?.id) await api(`/tasks/${t.id}`, { method: 'DELETE' }).catch(() => {})
   }
+  for (const id of lateTasks) await api(`/tasks/${id}`, { method: 'DELETE' }).catch(() => {})
   if (threadId) await api(`/workspaces/${WS}/ai-chats/${threadId}`, { method: 'DELETE' }).catch(() => {})
 }
 

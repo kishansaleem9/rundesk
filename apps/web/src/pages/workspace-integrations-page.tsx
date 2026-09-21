@@ -23,6 +23,12 @@ import {
   Calendar,
   XCircle,
   BookOpen,
+  // §V2-11 frame `19:07` — the MCP banner's glyph and chevron, and the icon on
+  // the rail's "Suggest an app" (a message box with a plus in it).
+  Server,
+  ChevronRight,
+  MessageSquarePlus,
+  Info,
 } from 'lucide-react'
 import { CalendarSyncWizard } from '../components/calendar-sync-wizard'
 import { useTranslation } from '../lib/i18n'
@@ -48,7 +54,6 @@ type Integration = {
   descKey: TranslationKey
   category: IntegrationCategory
   popular?: boolean
-  comingSoon?: boolean
   /**
    * §V2-11, frame `19:07` — this app is one of the sources federated search can
    * actually reach. Not a taste judgement: it mirrors `SEARCH_SOURCES` /
@@ -91,64 +96,124 @@ type ConnectionState = {
   lastErrorAt?: string | null
 }
 
+/*
+ * §V2-11, frame `19:07` — THE SIX APPS THE FRAME DRAWS AND THIS PAGE DID NOT.
+ *
+ * Box · Confluence · Jira · Gmail · Microsoft SharePoint · Outlook Mail. The
+ * question a new tile has to answer first is not "what should it say" but
+ * "what happens when somebody presses it", and the two honest answers are
+ * different features:
+ *
+ *   CONNECTABLE — Gmail and SharePoint. Both were already federated search
+ *   sources with a tab in the command palette and a "Connect" link beside it;
+ *   `listSupportedProviders()` now holds a provider for each and
+ *   `search.service.ts` a query path, so pressing Connect starts a real grant
+ *   and the tab it feeds can answer. See `search/sources.ts` for the whole
+ *   story, including why SharePoint stopped borrowing OneDrive's credential.
+ *
+ *   NOT CONNECTABLE, AND SAYING SO — Box, Confluence, Jira, and the Outlook
+ *   Mail tile that was already here. Writing four more OAuth flows is a
+ *   morning's work and would have been the WRONG morning: nothing in this
+ *   product reads a Box or an Atlassian token. `tasks.service.ts` and
+ *   `external-link-refresh.service.ts` refresh github / gitlab / google_drive /
+ *   dropbox links, `search.service.ts` queries the three federated sources, and
+ *   that is the complete list of readers. A grant stored for anything else is
+ *   the mirror defect — the database standing as evidence for a feature that
+ *   does not exist — and it is worse than the gap, because the gap is visible.
+ *   So these tiles carry the plain sentence that Rundesk has no connector for
+ *   them yet, and the one action that is real: telling the admins you want it.
+ *
+ * `comingSoon` is gone from this file. It was a hand-maintained second opinion
+ * about connectability that had drifted from the server's: OneDrive, Linear and
+ * Salesforce are all in `listSupportedProviders()` and all three were drawn
+ * with a "Soon" badge over a disabled switch — three working connectors the
+ * product told you it did not have. Connectability is now one fact, read from
+ * the server, and no flag here can contradict it.
+ */
 const INTEGRATIONS: Integration[] = [
   { id: 'slack', name: 'Slack', descKey: 'integrations.desc.slack', category: 'comms', popular: true, brandColor: '#4A154B', logo: 'S' },
-  { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', comingSoon: true, brandColor: '#5865F2', logo: 'D' },
-  { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', comingSoon: true, brandColor: '#5059C9', logo: 'T' },
+  { id: 'discord', name: 'Discord', descKey: 'integrations.desc.discord', category: 'comms', brandColor: '#5865F2', logo: 'D' },
+  { id: 'teams', name: 'Microsoft Teams', descKey: 'integrations.desc.teams', category: 'comms', brandColor: '#5059C9', logo: 'T' },
   { id: 'zoom', name: 'Zoom', descKey: 'integrations.desc.zoom', category: 'comms', popular: true, brandColor: '#2D8CFF', logo: 'Z' },
 
   { id: 'google-drive', name: 'Google Drive', descKey: 'integrations.desc.googleDrive', category: 'storage', popular: true, connectedSearch: true, brandColor: '#1FA463', logo: 'G' },
   { id: 'dropbox', name: 'Dropbox', descKey: 'integrations.desc.dropbox', category: 'storage', brandColor: '#0061FF', logo: 'D' },
-  // `onedrive` is also the credential SharePoint search borrows — see
-  // `SOURCE_PROVIDER.sharepoint` in the API's `search/sources.ts`.
-  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', comingSoon: true, connectedSearch: true, brandColor: '#0078D4', logo: 'O' },
+  // No longer `connectedSearch`. It carried that flag only because SharePoint
+  // search borrowed this credential; SharePoint now has its own, and OneDrive
+  // is not a member of `SEARCH_SOURCES`.
+  { id: 'onedrive', name: 'OneDrive', descKey: 'integrations.desc.onedrive', category: 'storage', brandColor: '#0078D4', logo: 'O' },
+  /*
+   * Frame `19:07`, tile 10: "Microsoft SharePoint · Easily attach, create, and
+   * search for SharePoint files dir…". A federated search source with its own
+   * palette tab, its own Microsoft provider, and `Sites.Read.All` — the scope
+   * that can actually answer a site-wide query.
+   */
+  { id: 'sharepoint', name: 'Microsoft SharePoint', descKey: 'integrations.desc.sharepoint', category: 'storage', connectedSearch: true, brandColor: '#038387', logo: 'S' },
+  /*
+   * Frame `19:07`, tile 1: "Box · Attach Box files to tasks, comments and
+   * search for Box…". Not connectable: no reader anywhere consumes a Box
+   * token, and an OAuth flow that stores one would be evidence for a feature
+   * that does not exist.
+   */
+  { id: 'box', name: 'Box', descKey: 'integrations.desc.box', category: 'storage', brandColor: '#0061D5', logo: 'B' },
   // Moved out of Cloud Storage into Design (frame `19:07` lists both): Figma is
   // not a file store here, it is the thing the Design facet is about, and it
   // was the only reason that facet would otherwise have nothing behind it.
-  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'design', comingSoon: true, brandColor: '#F24E1E', logo: 'F' },
+  { id: 'figma', name: 'Figma', descKey: 'integrations.desc.figma', category: 'design', brandColor: '#F24E1E', logo: 'F' },
 
   { id: 'github', name: 'GitHub', descKey: 'integrations.desc.github', category: 'dev', popular: true, brandColor: '#181717', logo: 'G' },
   { id: 'gitlab', name: 'GitLab', descKey: 'integrations.desc.gitlab', category: 'dev', brandColor: '#FC6D26', logo: 'G' },
-  { id: 'sentry', name: 'Sentry', descKey: 'integrations.desc.sentry', category: 'dev', comingSoon: true, brandColor: '#362D59', logo: 'S' },
-  { id: 'linear', name: 'Linear', descKey: 'integrations.desc.linear', category: 'dev', comingSoon: true, brandColor: '#5E6AD2', logo: 'L' },
+  { id: 'sentry', name: 'Sentry', descKey: 'integrations.desc.sentry', category: 'dev', brandColor: '#362D59', logo: 'S' },
+  { id: 'linear', name: 'Linear', descKey: 'integrations.desc.linear', category: 'dev', brandColor: '#5E6AD2', logo: 'L' },
+  // Frame `19:07`, tile 8: "Jira · Preview, create, and search Jira issues all
+  // within ClickUp." Atlassian, and nothing here reads an Atlassian token.
+  { id: 'jira', name: 'Jira', descKey: 'integrations.desc.jira', category: 'dev', brandColor: '#0052CC', logo: 'J' },
 
   { id: 'gcal', name: 'Google Calendar', descKey: 'integrations.desc.gcal', category: 'calendar', popular: true, brandColor: '#4285F4', logo: 'C' },
   { id: 'outlook', name: 'Outlook Calendar', descKey: 'integrations.desc.outlook', category: 'calendar', brandColor: '#0078D4', logo: 'O' },
-  { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', comingSoon: true, brandColor: '#000', logo: 'C' },
+  { id: 'cal', name: 'Cal.com', descKey: 'integrations.desc.cal', category: 'calendar', brandColor: '#000', logo: 'C' },
 
   /*
-   * Gmail is not padding for the Email facet: `SEARCH_SOURCES` in the API
-   * already names `gmail` as a federated search source with its own tab in the
-   * search UI, so the product talks about it and had no card for it. Listed as
-   * "coming soon" because `listSupportedProviders()` has no `gmail` OAuth
-   * provider to connect one with — which is a defect recorded separately, not
-   * a thing this card should pretend away.
+   * Frame `19:07`, tile 5, and enlisted out loud at [19:18] — "Main is se
+   * kahoongi meri Gmail pe jaa ke EMAIL kar do". `SEARCH_SOURCES` named `gmail`
+   * from the start and there was no provider to connect it with; there is one
+   * now, and a query behind it.
    */
-  { id: 'gmail', name: 'Gmail', descKey: 'integrations.desc.gmail', category: 'email', comingSoon: true, connectedSearch: true, brandColor: '#EA4335', logo: 'M' },
-  { id: 'outlook-mail', name: 'Outlook Mail', descKey: 'integrations.desc.outlookMail', category: 'email', comingSoon: true, brandColor: '#0F6CBD', logo: 'O' },
+  { id: 'gmail', name: 'Gmail', descKey: 'integrations.desc.gmail', category: 'email', connectedSearch: true, brandColor: '#EA4335', logo: 'M' },
+  { id: 'outlook-mail', name: 'Outlook Mail', descKey: 'integrations.desc.outlookMail', category: 'email', brandColor: '#0F6CBD', logo: 'O' },
 
-  { id: 'notion', name: 'Notion', descKey: 'integrations.desc.notion', category: 'knowledge', comingSoon: true, brandColor: '#111', logo: 'N' },
+  { id: 'notion', name: 'Notion', descKey: 'integrations.desc.notion', category: 'knowledge', brandColor: '#111', logo: 'N' },
+  // Frame `19:07`, tile 2: "Confluence · Search Confluence inside ClickUp."
+  { id: 'confluence', name: 'Confluence', descKey: 'integrations.desc.confluence', category: 'knowledge', brandColor: '#172B4D', logo: 'C' },
 
-  { id: 'toggl', name: 'Toggl Track', descKey: 'integrations.desc.toggl', category: 'timeTracking', comingSoon: true, brandColor: '#E57CD8', logo: 'T' },
+  { id: 'toggl', name: 'Toggl Track', descKey: 'integrations.desc.toggl', category: 'timeTracking', brandColor: '#E57CD8', logo: 'T' },
 
-  { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', comingSoon: true, brandColor: '#1F71F4', logo: 'A' },
-  { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', comingSoon: true, brandColor: '#7856FF', logo: 'M' },
-  { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', comingSoon: true, brandColor: '#1D4AFF', logo: 'P' },
+  { id: 'amplitude', name: 'Amplitude', descKey: 'integrations.desc.amplitude', category: 'analytics', brandColor: '#1F71F4', logo: 'A' },
+  { id: 'mixpanel', name: 'Mixpanel', descKey: 'integrations.desc.mixpanel', category: 'analytics', brandColor: '#7856FF', logo: 'M' },
+  { id: 'posthog', name: 'PostHog', descKey: 'integrations.desc.posthog', category: 'analytics', brandColor: '#1D4AFF', logo: 'P' },
 
   // Stripe pays for things; it is not a CRM. Moved into Finance & Accounting,
   // which the frame lists and which its own description already describes
   // ("track billable client work and create invoices from time logs").
   { id: 'stripe', name: 'Stripe', descKey: 'integrations.desc.stripe', category: 'finance', brandColor: '#635BFF', logo: 'S' },
-  { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', comingSoon: true, brandColor: '#FF7A59', logo: 'H' },
-  { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', comingSoon: true, brandColor: '#00A1E0', logo: 'S' },
+  { id: 'hubspot', name: 'HubSpot', descKey: 'integrations.desc.hubspot', category: 'crm', brandColor: '#FF7A59', logo: 'H' },
+  { id: 'salesforce', name: 'Salesforce', descKey: 'integrations.desc.salesforce', category: 'crm', brandColor: '#00A1E0', logo: 'S' },
 
   { id: 'zapier', name: 'Zapier', descKey: 'integrations.desc.zapier', category: 'dev', popular: true, brandColor: '#FF4F00', logo: 'Z' },
-  { id: 'make', name: 'Make (Integromat)', descKey: 'integrations.desc.make', category: 'dev', comingSoon: true, brandColor: '#6D00CC', logo: 'M' },
+  { id: 'make', name: 'Make (Integromat)', descKey: 'integrations.desc.make', category: 'dev', brandColor: '#6D00CC', logo: 'M' },
   { id: 'webhook', name: 'Custom webhooks', descKey: 'integrations.desc.webhook', category: 'dev', brandColor: '#0c215d', logo: 'W' },
 
   { id: 'openai', name: 'OpenAI', descKey: 'integrations.desc.openai', category: 'ai', brandColor: '#10A37F', logo: 'A' },
-  { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', comingSoon: true, brandColor: '#1F71F4', logo: 'G' },
+  { id: 'gemini', name: 'Google Gemini', descKey: 'integrations.desc.gemini', category: 'ai', brandColor: '#1F71F4', logo: 'G' },
 ]
+
+/**
+ * §V2-11, frame `19:07` — the banner above the grid, and the rail item below
+ * the facets. Both write through the access-request path, which is why they
+ * are named here: the value reaches Postgres, a notification title and a badge,
+ * and `custom-mcp` must not collide with a real provider id.
+ */
+const CUSTOM_MCP_PROVIDER = 'custom-mcp'
 
 /**
  * §V2-11, frame `19:07` — the App Center's facet rail, all FOURTEEN of it.
@@ -253,6 +318,19 @@ export function IntegrationsMarketplacePage() {
   const [ruleSpaceId, setRuleSpaceId] = useState('')
   const [ruleProjectId, setRuleProjectId] = useState('')
   const [calendarSyncOpen, setCalendarSyncOpen] = useState(false)
+  /**
+   * §V2-11 frame `19:07` — the two controls the rail and the banner open.
+   *
+   * Both are dialogs rather than links: there is nowhere for either to navigate
+   * to, and a chevron that goes nowhere is the dead control this audit keeps
+   * finding. What each one can honestly do is recorded against this workspace
+   * and put in front of the people who can act on it.
+   */
+  const [mcpOpen, setMcpOpen] = useState(false)
+  const [suggestOpen, setSuggestOpen] = useState(false)
+  const [suggestName, setSuggestName] = useState('')
+  const [suggestNote, setSuggestNote] = useState('')
+  const [suggestError, setSuggestError] = useState<string | null>(null)
   const providersQuery = useQuery({
     queryKey: ['integration-provider-catalog', workspaceId],
     queryFn: () =>
@@ -267,8 +345,19 @@ export function IntegrationsMarketplacePage() {
         `/workspaces/${workspaceId}/integrations/connections/providers/status`,
       ),
   })
+  /*
+   * §V2-11 — WHICH APPS CAN BE CONNECTED IS THE SERVER'S ANSWER, NOT OURS.
+   *
+   * This used to fall back to a ten-name list written out here when the request
+   * had not answered. That is the duplicated-list defect with a timer on it:
+   * the copy went stale the moment `listSupportedProviders()` grew, and for as
+   * long as the page was loading it drew every tile according to last year's
+   * idea of what exists. The fallback is gone — before the answer arrives no
+   * app is connectable, which is the truthful thing to say about a question
+   * nobody has answered yet.
+   */
   const oauthProviders = useMemo(
-    () => new Set(providersQuery.data ?? ['github', 'gitlab', 'gcal', 'google-drive', 'outlook', 'onedrive', 'linear', 'salesforce', 'dropbox', 'zoom']),
+    () => new Set(providersQuery.data ?? []),
     [providersQuery.data],
   )
   const providerAvailability = useMemo(() => {
@@ -415,6 +504,40 @@ export function IntegrationsMarketplacePage() {
       toast.success(t('integrations.toastAccessRequested'))
     },
   })
+  /**
+   * §V2-11 frame `19:07` — "Suggest an app" and the MCP banner, written down.
+   *
+   * The same endpoint the tiles use, because it is the same act: telling the
+   * people who can add an integration that somebody wants it. The difference is
+   * only that the name is typed rather than picked, which is exactly why the
+   * SERVER now bounds it — see `MAX_PROVIDER_LENGTH` in the connections
+   * service. The refusal is surfaced here verbatim instead of being swallowed:
+   * a suggestion that vanishes is worse than one that is declined.
+   */
+  const suggestApp = useMutation({
+    mutationFn: async ({ name, note }: { name: string; note: string }) => {
+      const qs = new URLSearchParams({ provider: name })
+      if (note.trim()) qs.set('note', note.trim())
+      const res = await api<unknown>(
+        `/workspaces/${workspaceId}/integrations/connections/access-requests?${qs.toString()}`,
+        { method: 'POST' },
+      )
+      return res
+    },
+    onSuccess: async () => {
+      await qc.invalidateQueries({ queryKey: ['integration-access-requests', workspaceId] })
+      setSuggestName('')
+      setSuggestNote('')
+      setSuggestError(null)
+      setSuggestOpen(false)
+      toast.success(t('integrations.toastAccessRequested'))
+    },
+    onError: (error: unknown) => {
+      setSuggestError(
+        error instanceof Error && error.message ? error.message : t('integrations.suggestFailed'),
+      )
+    },
+  })
   const serverConnected = useMemo(() => {
     const map = new Map<string, boolean>()
     for (const row of connectionsQuery.data ?? []) {
@@ -445,6 +568,13 @@ export function IntegrationsMarketplacePage() {
     return map
   }, [accessRequestsQuery.data])
 
+  /**
+   * The banner's own request row, if this workspace has already asked. Read
+   * from the same list the tiles read, so the banner cannot disagree with them
+   * about whether something was submitted.
+   */
+  const mcpRequest = accessRequestByProvider.get(CUSTOM_MCP_PROVIDER)
+
   const filtered = INTEGRATIONS.filter((i) => {
     if (!matchesFacet(i, filter)) return false
     return (
@@ -458,8 +588,14 @@ export function IntegrationsMarketplacePage() {
     if (oauthProviders.has(i.id)) return Boolean(serverConnected.get(i.id))
     return false
   })
+  /**
+   * One fact, one source: an app is connectable when the server holds a way to
+   * connect it. Slack is the one non-OAuth connector and is named explicitly
+   * rather than folded into the provider list, because its credential is a
+   * webhook URL somebody pastes and not a grant.
+   */
   const isSupportedIntegration = (integration: Integration) =>
-    integration.id === 'slack' || oauthProviders.has(integration.id) || Boolean(integration.comingSoon)
+    integration.id === 'slack' || oauthProviders.has(integration.id)
   const isProviderReady = (integration: Integration) =>
     integration.id === 'slack' || !oauthProviders.has(integration.id)
       ? true
@@ -548,25 +684,133 @@ export function IntegrationsMarketplacePage() {
           className="max-w-sm"
           data-testid="integrations-search"
         />
-        <div className="flex items-center gap-1 overflow-x-auto scrollbar-none bg-card/40 border border-border/60 rounded-lg p-1">
-          {FACETS.map((c) => (
-            <button
-              key={c.id}
-              onClick={() => setFilter(c.id)}
-              data-testid={`integrations-category-${c.id}`}
-              aria-pressed={filter === c.id}
-              className={cn(
-                'text-xs px-3 py-1.5 rounded-md font-medium transition-all whitespace-nowrap',
-                filter === c.id
-                  ? 'bg-brand-gradient text-white shadow-sm'
-                  : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
-              )}
-            >
-              {t(c.labelKey)}
-            </button>
-          ))}
+        {/*
+          §V2-11 frame `19:07` — the rail's own heading.
+
+          The frame groups the fourteen facets under INTEGRATIONS and puts one
+          item under a SECOND heading, AI. Reproduced as two labelled groups
+          rather than fifteen chips in a row, because the grouping is the
+          information: "Suggest an app" does not filter anything, and a person
+          who reads it as a fifteenth filter presses it expecting the grid to
+          change.
+        */}
+        <div className="flex items-center gap-2 min-w-0">
+          <span
+            className="text-[10px] uppercase tracking-widest text-muted-foreground shrink-0"
+            data-testid="integrations-rail-heading-integrations"
+          >
+            {t('integrations.railIntegrations')}
+          </span>
+          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none bg-card/40 border border-border/60 rounded-lg p-1">
+            {FACETS.map((c) => (
+              <button
+                key={c.id}
+                onClick={() => setFilter(c.id)}
+                data-testid={`integrations-category-${c.id}`}
+                aria-pressed={filter === c.id}
+                className={cn(
+                  'text-xs px-3 py-1.5 rounded-md font-medium transition-all whitespace-nowrap',
+                  filter === c.id
+                    ? 'bg-brand-gradient text-white shadow-sm'
+                    : 'hover:bg-card/60 text-muted-foreground hover:text-foreground',
+                )}
+              >
+                {t(c.labelKey)}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/*
+          The AI group. One item, exactly as the frame draws it — and outside
+          the `integrations-category-` namespace on purpose: a testid prefix is
+          a namespace, and the suite that counts the frame's fourteen facets
+          counts every element under that prefix.
+        */}
+        <div className="flex items-center gap-2 shrink-0">
+          <span
+            className="text-[10px] uppercase tracking-widest text-muted-foreground"
+            data-testid="integrations-rail-heading-ai"
+          >
+            {t('integrations.railAi')}
+          </span>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 text-xs"
+            data-testid="integrations-suggest-app"
+            onClick={() => {
+              setSuggestError(null)
+              setSuggestOpen(true)
+            }}
+          >
+            <MessageSquarePlus className="h-3.5 w-3.5 mr-1" />
+            {t('integrations.suggestApp')}
+          </Button>
         </div>
       </div>
+
+      {/*
+        §V2-11 frame `19:07` — the full-width banner above the grid:
+
+          [icon] Connect Custom MCP Servers                              ›
+                 Give AI access to any tool or data source.
+
+        WHAT IT DOES NOT DO, and why that is the honest build. Registering an
+        MCP server means storing a URL and a credential for the AI to call, and
+        `COMMAND_TOOLS` in `apps/api/src/modules/ai/ai-command.ts` has no tool
+        that reaches outside this product at all — `ai-categories.ts` says so
+        itself, marking `externalActions` and `externalSearches` unsupported.
+        A form that stored a server nobody would ever call is the mirror defect:
+        rows in Postgres standing as evidence for a feature that does not exist,
+        and a person who pointed their AI at a tool and watched it be ignored.
+
+        So the banner is a live control that says what the product can and
+        cannot do today, and records the ask against this workspace where the
+        admins will see it. It is not a link with nowhere to go.
+      */}
+      <button
+        type="button"
+        onClick={() => setMcpOpen(true)}
+        data-testid="integrations-mcp-banner"
+        className="w-full flex items-center gap-3 rounded-lg border border-border/60 bg-card/50 px-4 py-3 text-left transition-colors hover:bg-card/80"
+      >
+        <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-foreground text-background">
+          <Server className="h-4 w-4" />
+        </span>
+        <span className="min-w-0 flex-1">
+          <span className="block text-sm font-medium" data-testid="integrations-mcp-title">
+            {t('integrations.mcpTitle')}
+          </span>
+          <span className="block text-xs text-muted-foreground" data-testid="integrations-mcp-subtitle">
+            {t('integrations.mcpSubtitle')}
+          </span>
+        </span>
+        {/*
+          A `<span>`, not the shared `Badge`: that component renders a `<div>`,
+          and a `<div>` inside a `<button>` is not phrasing content. It renders
+          anyway, which is how this sort of thing survives.
+        */}
+        {mcpRequest ? (
+          <span
+            className={cn(
+              'shrink-0 rounded-full border px-2 py-0.5 text-[9px] font-medium uppercase tracking-wide',
+              mcpRequest.status === 'rejected'
+                ? 'border-rose-500/40 text-rose-600 dark:text-rose-400'
+                : mcpRequest.status === 'approved'
+                ? 'border-emerald-500/40 text-emerald-600 dark:text-emerald-400'
+                : 'border-sky-500/40 text-sky-600 dark:text-sky-400',
+            )}
+            data-testid="integrations-mcp-status"
+          >
+            {mcpRequest.status === 'rejected'
+              ? t('integrations.rejected')
+              : mcpRequest.status === 'approved'
+              ? t('integrations.approved')
+              : t('integrations.requested')}
+          </span>
+        ) : null}
+        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden />
+      </button>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3" data-testid="integrations-grid">
         {filtered.map((integration) => (
@@ -772,6 +1016,119 @@ export function IntegrationsMarketplacePage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/*
+        §V2-11 frame `19:07` — behind the banner.
+
+        It states the limit in the product's own terms and then offers the one
+        action that is real. The alternative — a URL field and a "Save" — would
+        photograph better and would be a lie told in a database.
+      */}
+      <Dialog open={mcpOpen} onOpenChange={setMcpOpen}>
+        <DialogContent data-testid="integrations-mcp-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('integrations.mcpTitle')}</DialogTitle>
+            <DialogDescription>{t('integrations.mcpSubtitle')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div
+              className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/5 p-3 text-xs leading-relaxed"
+              data-testid="integrations-mcp-limitation"
+            >
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600 dark:text-amber-400" aria-hidden />
+              <span>{t('integrations.mcpNotYet')}</span>
+            </div>
+            {mcpRequest?.note ? (
+              <p className="text-[11px] text-muted-foreground" data-testid="integrations-mcp-note">
+                {t('integrations.adminNote')} {mcpRequest.note}
+              </p>
+            ) : null}
+            <div className="flex items-center justify-end gap-2">
+              <Button variant="outline" onClick={() => setMcpOpen(false)} data-testid="integrations-mcp-cancel">
+                {t('common.cancel')}
+              </Button>
+              <Button
+                data-testid="integrations-mcp-request"
+                disabled={
+                  requestAccess.isPending ||
+                  mcpRequest?.status === 'pending' ||
+                  mcpRequest?.status === 'approved'
+                }
+                onClick={() => requestAccess.mutate(CUSTOM_MCP_PROVIDER)}
+              >
+                {mcpRequest?.status === 'pending'
+                  ? t('integrations.requested')
+                  : mcpRequest?.status === 'approved'
+                  ? t('integrations.approved')
+                  : mcpRequest?.status === 'rejected'
+                  ? t('integrations.requestAgain')
+                  : t('integrations.mcpRequest')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/*
+        §V2-11 frame `19:07` — the rail's AI group: "Suggest an app".
+
+        A typed name goes through the same access-request endpoint the tiles
+        use, because it is the same act. The server bounds the name; the
+        refusal is shown here rather than swallowed, so a suggestion that is
+        too long is declined out loud instead of disappearing.
+      */}
+      <Dialog
+        open={suggestOpen}
+        onOpenChange={(open) => {
+          setSuggestOpen(open)
+          if (!open) setSuggestError(null)
+        }}
+      >
+        <DialogContent data-testid="integrations-suggest-dialog">
+          <DialogHeader>
+            <DialogTitle>{t('integrations.suggestApp')}</DialogTitle>
+            <DialogDescription>{t('integrations.suggestDesc')}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <Input
+              placeholder={t('integrations.suggestNamePlaceholder')}
+              value={suggestName}
+              onChange={(e) => setSuggestName(e.target.value)}
+              data-testid="integrations-suggest-name"
+            />
+            <Input
+              placeholder={t('integrations.suggestNotePlaceholder')}
+              value={suggestNote}
+              onChange={(e) => setSuggestNote(e.target.value)}
+              data-testid="integrations-suggest-note"
+            />
+            {suggestError ? (
+              <p className="text-[11px] text-rose-600 dark:text-rose-400" data-testid="integrations-suggest-error">
+                {suggestError}
+              </p>
+            ) : null}
+            <div className="flex items-center justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setSuggestOpen(false)}
+                data-testid="integrations-suggest-cancel"
+              >
+                {t('common.cancel')}
+              </Button>
+              <Button
+                data-testid="integrations-suggest-submit"
+                disabled={!suggestName.trim() || suggestApp.isPending}
+                onClick={() => {
+                  setSuggestError(null)
+                  suggestApp.mutate({ name: suggestName.trim(), note: suggestNote })
+                }}
+              >
+                {suggestApp.isPending ? t('integrations.connecting') : t('integrations.suggestSubmit')}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -824,9 +1181,7 @@ function IntegrationCard({
               {integration.popular && !connected && (
                 <Badge variant="info" className="text-[9px] uppercase">{t('integrations.popular')}</Badge>
               )}
-              {integration.comingSoon ? (
-                <Badge variant="soft" className="text-[9px] uppercase">{t('integrations.soon')}</Badge>
-              ) : !supported && accessRequest?.status === 'rejected' ? (
+              {!supported && accessRequest?.status === 'rejected' ? (
                 <Badge variant="destructive" className="text-[9px] uppercase">{t('integrations.rejected')}</Badge>
               ) : !supported && accessRequest?.status === 'approved' ? (
                 <Badge variant="success" className="text-[9px] uppercase">{t('integrations.approved')}</Badge>
@@ -850,6 +1205,26 @@ function IntegrationCard({
           <p className="text-xs text-muted-foreground mt-1 line-clamp-2 leading-relaxed">
             {t(integration.descKey)}
           </p>
+          {/*
+            §V2-11 frame `19:07` — A TILE THAT CANNOT CONNECT SAYS SO, IN WORDS.
+
+            A badge reading "Soon" over a greyed switch is not an explanation:
+            it looks like a schedule and it is actually a statement about what
+            this product does not have. This is the sentence, on the tile, next
+            to the only button that does anything — and it is driven by the
+            server's provider list, so it appears on exactly the apps Rundesk
+            genuinely cannot connect and cannot be left behind on one that has
+            since become connectable.
+          */}
+          {!supported && (
+            <p
+              className="text-[11px] text-muted-foreground mt-1 leading-relaxed"
+              data-testid="integration-not-connectable"
+              data-provider={integration.id}
+            >
+              {t('integrations.notConnectable')}
+            </p>
+          )}
           {supported && !providerReady && setupReason && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
               {setupReason}
@@ -908,31 +1283,44 @@ function IntegrationCard({
             <Switch
               checked={connected}
               onCheckedChange={onToggle}
-              disabled={integration.comingSoon || isLoading || !supported || !providerReady}
+              disabled={isLoading || !supported || !providerReady}
               data-testid="integration-toggle"
             />
+            {/*
+              EVERY TILE CAN BE ACTED ON. That is the deliverable, and it is
+              why there is no longer a branch here that renders a disabled
+              button labelled "Not available yet". A tile you cannot connect
+              offers the one thing that is real — telling the admins you want
+              it — and reports what came back. Only a request already pending
+              or already granted disables it, because pressing it again would
+              do nothing and the label says which.
+            */}
             <Button
               variant="ghost"
               size="sm"
               className="h-7 text-xs"
               data-testid="integration-action"
+              data-actionable={
+                isLoading ||
+                (!supported &&
+                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+                  ? 'no'
+                  : 'yes'
+              }
               disabled={
-                integration.comingSoon ||
                 isLoading ||
                 (!supported &&
                   (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
               }
               onClick={() => {
-                if (!supported && !integration.comingSoon) {
+                if (!supported) {
                   onRequestAccess()
                   return
                 }
                 onOpenConnect()
               }}
             >
-              {integration.comingSoon
-                ? t('integrations.notAvailableYet')
-                : !supported
+              {!supported
                 ? accessRequest?.status === 'rejected'
                   ? t('integrations.requestAgain')
                   : accessRequest?.status === 'approved'

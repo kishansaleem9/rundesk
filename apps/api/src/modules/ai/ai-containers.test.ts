@@ -3,6 +3,7 @@ import { describe, it } from 'node:test'
 import {
   CONTAINER_TOOLS,
   describeContainerResult,
+  enabledViewsFor,
   refuse,
   resolveContainerSpace,
   type ContainerSpace,
@@ -86,6 +87,7 @@ describe('§V2-S16 the sentence describes the row, not the request', () => {
       spaceName: 'rundesk',
       path: 'rundesk > ddddd',
       statuses: ['todo', 'done'],
+      views: ['list', 'board'],
     })
     assert.match(said, /\[\[list:44444444-4444-4444-8444-444444444444\]\]/)
     assert.match(said, /standard task statuses/)
@@ -108,9 +110,98 @@ describe('§V2-S16 the sentence describes the row, not the request', () => {
       spaceName: 'rundesk',
       path: 'rundesk > ddddd',
       statuses: [],
+      views: ['list', 'board'],
     })
     assert.doesNotMatch(said, /standard task statuses/)
     assert.match(said, /bug worth reporting/)
+  })
+
+  /*
+   * §V2-S16 `18:48` — *"Use the `rundesk > ddddd > List` for task details or
+   * the `rundesk > ddddd > Board` to manage work by status."*
+   *
+   * Two chips, each naming a view AND what it is for. The views come from the
+   * created row's own space, so this pins the same discipline the statuses
+   * clause has: the sentence is a fact about this list, not about what a list
+   * usually offers.
+   */
+  const created = (views: string[]) =>
+    describeContainerResult({
+      ok: true,
+      kind: 'list',
+      id: '44444444-4444-4444-8444-444444444444',
+      name: 'ddddd',
+      spaceId: SPACES[0].id,
+      spaceName: 'rundesk',
+      path: 'rundesk > ddddd',
+      statuses: ['todo', 'done'],
+      views,
+    })
+
+  it('offers the frame’s two view chips, each with the reason to press it', () => {
+    const said = created(['list', 'board'])
+    assert.match(said, /\[\[view:44444444-4444-4444-8444-444444444444:list\]\] for task details/)
+    assert.match(said, /\[\[view:44444444-4444-4444-8444-444444444444:board\]\] to manage work by status/)
+  })
+
+  it('does NOT offer a view the space does not enable', () => {
+    /*
+     * The chip is an instruction to go somewhere. A space with Board turned
+     * off has no Board tab, so naming it sends somebody to a page that will not
+     * draw it — the dead control, inside the sentence that is telling them to
+     * act. `describeContainerViews` composes from the row, so the Board clause
+     * simply is not there.
+     */
+    const said = created(['list'])
+    assert.match(said, /\[\[view:44444444-4444-4444-8444-444444444444:list\]\] for task details/)
+    assert.doesNotMatch(said, /board/)
+    assert.doesNotMatch(said, / or /)
+  })
+
+  it('says nothing about views when the list exposes none this build can draw', () => {
+    // Not a defensive branch: a space can enable a set of views a future
+    // server knows and this one does not, and "Use the  for" is worse than
+    // silence.
+    const said = created(['mindmap', 'timeline'])
+    assert.doesNotMatch(said, /\[\[view:/)
+    assert.doesNotMatch(said, /Use /)
+    assert.match(said, /standard task statuses/)
+  })
+
+  it('a folder gets no view chips, because a folder holds no tasks', () => {
+    const said = describeContainerResult({
+      ok: true,
+      kind: 'folder',
+      id: '55555555-5555-4555-8555-555555555555',
+      name: 'ddddd',
+      spaceId: SPACES[0].id,
+      spaceName: 'rundesk',
+      path: 'rundesk > ddddd',
+      statuses: [],
+      views: [],
+    })
+    assert.doesNotMatch(said, /\[\[view:/)
+  })
+})
+
+describe('§V2-S16 which views a list exposes is the space’s answer, not a guess', () => {
+  const ALL = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
+
+  it('an absent or empty config means EVERY view, as the list route reads it', () => {
+    // Getting this backwards is the expensive direction: every chip would
+    // vanish on every default space, which is most of them.
+    assert.deepEqual(enabledViewsFor(null, ALL), [...ALL])
+    assert.deepEqual(enabledViewsFor(undefined, ALL), [...ALL])
+    assert.deepEqual(enabledViewsFor({ enabledViews: [] }, ALL), [...ALL])
+  })
+
+  it('a configured set is honoured, in its own order', () => {
+    assert.deepEqual(enabledViewsFor({ enabledViews: ['board', 'list'] }, ALL), ['board', 'list'])
+  })
+
+  it('drops keys this build cannot render, and falls back when that empties it', () => {
+    assert.deepEqual(enabledViewsFor({ enabledViews: ['board', 'mindmap'] }, ALL), ['board'])
+    assert.deepEqual(enabledViewsFor({ enabledViews: ['mindmap'] }, ALL), [...ALL])
   })
 
   it('a refusal says nothing was created', () => {

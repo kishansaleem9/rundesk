@@ -117,9 +117,16 @@ try {
     'the catalogue answers with `models` and `unavailable`',
     `it returned ${catalog.status} ${JSON.stringify(catalog.data).slice(0, 140)}`,
   )
+  /*
+   * THREE, since `0163`. The frame heads three rows "Best models" and puts the
+   * rest behind Show more, and the third is a real tier resolving to its own
+   * model — `claude-opus-5` — not a third label over one of the other two. The
+   * duplicate-model check below is what keeps that honest, and it is the check
+   * that would have caught a padded catalogue.
+   */
   chk(
-    models.length === 2,
-    'two routable tiers, as `MODEL_TIERS` declares',
+    models.length === 3,
+    'three routable tiers, as `MODEL_TIERS` declares and `[17:16]` draws',
     `it offered ${models.length}: ${models.map((m) => m.id).join(', ')}`,
   )
   /*
@@ -240,8 +247,8 @@ try {
 
   const selectable = page.locator('[data-testid^="ai-model-option-"][data-available="true"]')
   chk(
-    (await selectable.count()) === 2,
-    'with exactly the two pickable tiers',
+    (await selectable.count()) === 3,
+    'with exactly the three pickable tiers the frame draws before the disclosure',
     `${await selectable.count()} rows were pickable`,
   )
   chk(
@@ -251,25 +258,39 @@ try {
   )
 
   /*
-   * THE BARS, MEASURED. The frame's hover card draws Speed and Intelligence;
-   * bars that are all the same width carry no information at all, and nothing
-   * on screen would look wrong. So the comparison is the check: the fast tier
-   * must be faster and the deep tier must be smarter, in pixels.
+   * THE BARS, MEASURED — NOW BEHIND A HOVER.
+   *
+   * `[17:16]` draws them in a card that opens when a row is hovered, and since
+   * `0163` that is where they are; the previous build rendered them inline in
+   * every row. The measurement is unchanged and is still the point: bars that
+   * are all the same width carry no information at all, and nothing on screen
+   * would look wrong. One card is open at a time, so each row is hovered and
+   * measured in turn rather than read together.
+   *
+   * `ai-model-cards.mjs` owns the card ITSELF — that it is absent until hover,
+   * that it carries the one line, that a row's own two bars differ. What is
+   * asserted here is narrower and belongs with the catalogue: the claim
+   * `MODEL_TIERS` makes about its tiers reaches the screen.
    */
-  const widthOf = async (id) => (await page.getByTestId(id).boundingBox())?.width ?? 0
-  const fastSpeed = await widthOf('ai-model-bar-speed-fast')
-  const deepSpeed = await widthOf('ai-model-bar-speed-deep')
-  const fastIq = await widthOf('ai-model-bar-intelligence-fast')
-  const deepIq = await widthOf('ai-model-bar-intelligence-deep')
+  const widthAfterHover = async (tierId, metric) => {
+    await page.getByTestId(`ai-model-option-${tierId}`).hover()
+    const bar = page.getByTestId(`ai-model-bar-${metric}-${tierId}`)
+    const up = await waitUntil(() => bar.isVisible().catch(() => false), { timeoutMs: 5_000 })
+    return up ? ((await bar.boundingBox())?.width ?? 0) : 0
+  }
+  const fastSpeed = await widthAfterHover('fast', 'speed')
+  const fastIq = await widthAfterHover('fast', 'intelligence')
+  const maxSpeed = await widthAfterHover('max', 'speed')
+  const maxIq = await widthAfterHover('max', 'intelligence')
   chk(
-    fastSpeed > deepSpeed + 2,
-    'the Fast tier’s Speed bar is visibly longer than the Deep tier’s',
-    `speed measured fast=${Math.round(fastSpeed)}px deep=${Math.round(deepSpeed)}px`,
+    fastSpeed > maxSpeed + 2,
+    'the Fast tier’s Speed bar is visibly longer than the Max tier’s',
+    `speed measured fast=${Math.round(fastSpeed)}px max=${Math.round(maxSpeed)}px`,
   )
   chk(
-    deepIq > fastIq + 2,
-    'and the Deep tier’s Intelligence bar is visibly longer than the Fast tier’s',
-    `intelligence measured deep=${Math.round(deepIq)}px fast=${Math.round(fastIq)}px`,
+    maxIq > fastIq + 2,
+    'and the Max tier’s Intelligence bar is visibly longer than the Fast tier’s',
+    `intelligence measured max=${Math.round(maxIq)}px fast=${Math.round(fastIq)}px`,
   )
 
   console.log('\n▶ "Show more" `[17:20]`, and what it reveals here')

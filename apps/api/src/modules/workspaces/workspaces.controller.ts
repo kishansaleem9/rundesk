@@ -162,6 +162,36 @@ export class WorkspacesController {
     return this.workspacesService.dismissOnboarding(user.id)
   }
 
+  /**
+   * §V2-S13 `| M | Sidebar: drag-reorder …` — the sidebar tree's own order.
+   *
+   * One route for projects and folders, because one gesture produces both and
+   * the validation is the same question asked of two tables. Lists keep their
+   * existing `POST /lists/project/:id/reorder`: that route already writes
+   * `lists.position` and `getListsByProject` already orders by it, so a second
+   * writer here would be two owners of one column.
+   */
+  @Post(':workspaceId/sidebar/reorder')
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Reorder the projects or folders of one sidebar container (§V2-S13)' })
+  async reorderSidebar(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: any,
+    @Body()
+    body: {
+      kind?: 'project' | 'folder'
+      containerKind?: 'space' | 'folder'
+      containerId?: string
+      orderedIds?: string[]
+    },
+  ) {
+    return this.workspacesService.reorderSidebarItems(
+      workspaceId,
+      { id: user.id, role: user.role },
+      body ?? {},
+    )
+  }
+
   @Get(':workspaceId/members')
   @UseGuards(WorkspaceMemberGuard)
   async listMembers(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {

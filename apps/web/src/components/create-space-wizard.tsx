@@ -13,7 +13,7 @@ import {
   Badge,
   cn,
 } from '@rundesk/ui'
-import { ChevronLeft, ChevronRight, Lock, Layers, Circle, ToggleRight } from 'lucide-react'
+import { ChevronLeft, ChevronRight, Lock, Layers, Circle, ToggleRight, Copy } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { CONTAINER_COLORS, CONTAINER_ICONS } from './container-edit-dialog'
@@ -129,7 +129,49 @@ const PRESET_LABEL: Record<string, { name: TranslationKey; blurb: TranslationKey
   product: { name: 'spaceWizard.presetProduct', blurb: 'spaceWizard.presetProductBlurb' },
 }
 
-type Panel = 'none' | 'views' | 'statuses' | 'features'
+type Panel = 'none' | 'views' | 'statuses' | 'features' | 'templates'
+
+/** `GET /workspaces/:id/project-templates` — only the columns this dialog reads. */
+type SpaceTemplate = {
+  id: string
+  name: string
+  description: string | null
+  targetType: string | null
+  isBuiltIn?: boolean
+}
+
+/** A space this workspace already has, as `GET /spaces/workspace/:id` returns it. */
+type ExistingSpace = {
+  id: string
+  name: string
+  viewConfig: { defaultView?: string; enabledViews?: string[] } | null
+  features: Record<string, boolean> | null
+}
+
+/**
+ * §V2-S08 frame `07:50` — **copy configuration from another space**.
+ *
+ * The frame's bar reads `Import: [Statuses] [Views] [Automations] [Custom
+ * Fields] from [Personal Space ▾] … Hide | Apply`. The chips are WHAT to copy.
+ *
+ * Two of the four are copyable at create time in Rundesk and two are not, and
+ * the honest thing is to offer the two and say why the others are absent
+ * rather than draw four chips where two do nothing:
+ *
+ *   · **Views** — `spaces.viewConfig` is on every row `GET /spaces/workspace/:id`
+ *     returns, and `POST /spaces` takes `viewConfig`. Round trip closed.
+ *   · **ClickApps** — `spaces.features`, likewise, and the create body takes
+ *     `features`. Plan-locked ones are dropped on the way in, because copying
+ *     a Business space's Custom Fields onto a Free space would preview a
+ *     switch the server then refuses.
+ *   · Statuses come from the PRESET (`SpacesService.createSpace` seeds them
+ *     from `presetKey`); `POST /spaces` has no statuses parameter, so a
+ *     Statuses chip here could only ever be a value nobody reads.
+ *   · Custom fields are defined per PROJECT, not per space, so there is no
+ *     space-level set to copy.
+ */
+const COPYABLE = ['views', 'features'] as const
+type CopyablePart = (typeof COPYABLE)[number]
 
 export function CreateSpaceWizard({
   open,
@@ -159,6 +201,13 @@ export function CreateSpaceWizard({
   const [views, setViews] = useState<string[] | null>(null)
   const [defaultView, setDefaultView] = useState<string | null>(null)
   const [features, setFeatures] = useState<string[] | null>(null)
+  /** §V2-S08 frame `07:12` — which of the panel's two tabs is showing. */
+  const [viewsTab, setViewsTab] = useState<'required' | 'templates'>('required')
+  /** §V2-S08 frame `07:50` — the copy-configuration bar, and its `Hide`. */
+  const [copyOpen, setCopyOpen] = useState(true)
+  const [copyFrom, setCopyFrom] = useState('')
+  const [copyParts, setCopyParts] = useState<CopyablePart[]>([...COPYABLE])
+  const [copiedFrom, setCopiedFrom] = useState<string | null>(null)
 
   /*
    * §V2-06 `[07:20]` — "ClickUp Apps is also dependent on that — ke aap ke paas
@@ -195,6 +244,40 @@ export function CreateSpaceWizard({
     [payload, allFeatures, locked],
   )
 
+  /**
+   * §V2-S08 frames `06:45` and `08:32` — the **Use Templates** footer.
+   *
+   * Rundesk has had a template corpus with `targetType: 'space'` rows and a
+   * `POST …/project-templates/apply` that creates the space, its projects, its
+   * lists, their statuses and their tasks — reachable only by navigating to the
+   * Template Center, i.e. from everywhere except the dialog where somebody has
+   * just decided to make a space.
+   *
+   * Fetched once the dialog is open, and only the space-targeted rows are
+   * offered: a folder or list template applied from here would create a
+   * container of a different kind than the button beside it, which is worse
+   * than not offering it.
+   */
+  const { data: templateRows } = useQuery({
+    queryKey: ['space-wizard-templates', workspaceId],
+    queryFn: () => api<SpaceTemplate[]>(`/workspaces/${workspaceId}/project-templates`),
+    enabled: open && !!workspaceId,
+    staleTime: 5 * 60 * 1000,
+  })
+  const spaceTemplates = useMemo(
+    () => (templateRows ?? []).filter((tpl) => tpl.targetType === 'space'),
+    [templateRows],
+  )
+
+  /** The spaces this account can already see — the `from:` dropdown of `07:50`. */
+  const { data: existingSpaces } = useQuery({
+    queryKey: ['space-wizard-sources', workspaceId],
+    queryFn: () => api<ExistingSpace[]>(`/spaces/workspace/${workspaceId}`),
+    enabled: open && !!workspaceId && step === 2,
+    staleTime: 60 * 1000,
+  })
+  const sourceSpaces = existingSpaces ?? []
+
   // A fresh dialog should not show the last visit's answers.
   useEffect(() => {
     if (open) return
@@ -202,6 +285,8 @@ export function CreateSpaceWizard({
     setName(''); setDescription(''); setIcon('🚀'); setColor(CONTAINER_COLORS[0])
     setPermission('edit'); setIsPrivate(false); setPresetKey('starter')
     setViews(null); setDefaultView(null); setFeatures(null)
+    setViewsTab('required')
+    setCopyOpen(true); setCopyFrom(''); setCopyParts([...COPYABLE]); setCopiedFrom(null)
   }, [open])
 
   /*
@@ -212,6 +297,10 @@ export function CreateSpaceWizard({
   const choosePreset = (key: string) => {
     setPresetKey(key)
     setViews(null); setDefaultView(null); setFeatures(null)
+    // A copied configuration IS a customisation of the old card, so it goes
+    // with the rest. Leaving the note up over values the preset has just taken
+    // back is the stale reason, on screen.
+    setCopiedFrom(null)
   }
 
   const effectiveViews = views ?? preset?.views ?? ['list']
@@ -254,6 +343,71 @@ export function CreateSpaceWizard({
     onError: (err) => toast.error(err instanceof ApiError ? err.message : t('spaceWizard.createFailed')),
   })
 
+  /**
+   * Apply a space template. The SAME `onCreated` path a hand-built space
+   * takes, so the two cannot end up in different places.
+   */
+  const applyTemplate = useMutation({
+    mutationFn: (templateId: string) =>
+      api<{ space: { id: string; name: string } | null; listsCreated: number; tasksCreated: number }>(
+        `/workspaces/${workspaceId}/project-templates/apply`,
+        { method: 'POST', body: { templateId } },
+      ),
+    onSuccess: async (made) => {
+      if (!made?.space?.id) {
+        // A template whose targetType is not `space` answers 200 with
+        // `space: null` — reported rather than closing the dialog on nothing.
+        toast.error(t('spaceWizard.templateNoSpace'))
+        return
+      }
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ['spaces', workspaceId] }),
+        qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] }),
+      ])
+      toast.success(
+        t('spaceWizard.templateApplied', { name: made.space.name, lists: String(made.listsCreated) }),
+      )
+      onOpenChange(false)
+      onCreated?.(made.space)
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('spaceWizard.templateFailed')),
+  })
+
+  /**
+   * §V2-S08 frame `07:50` — **Apply**. Reads the chosen space's own stored
+   * configuration and writes it into this wizard's answers, so the next thing
+   * that happens is the ordinary create POST carrying them.
+   *
+   * It does NOT touch `presetKey`: the statuses and seed lists stay the ones
+   * the card names, because those are not among the parts this can copy and
+   * silently swapping them would make "copy Views" mean something else.
+   */
+  const applyCopy = () => {
+    const source = sourceSpaces.find((s) => s.id === copyFrom)
+    if (!source) return
+    if (copyParts.includes('views')) {
+      const enabled = (source.viewConfig?.enabledViews ?? []).filter(Boolean)
+      // `list` is Required, so a source space that somehow lacks it must not
+      // hand this one a set the views panel would immediately contradict.
+      const next = enabled.includes('list') ? enabled : ['list', ...enabled]
+      if (next.length) {
+        setViews(next)
+        const wanted = source.viewConfig?.defaultView
+        setDefaultView(wanted && next.includes(wanted) ? wanted : next[0])
+      }
+    }
+    if (copyParts.includes('features')) {
+      // `features` is stored as a map; the create body wants the on ones, and
+      // anything this plan cannot reach is dropped rather than previewed.
+      const on = Object.entries(source.features ?? {})
+        .filter(([, value]) => value === true)
+        .map(([key]) => key)
+        .filter((key) => !locked.has(key))
+      setFeatures(on)
+    }
+    setCopiedFrom(source.name)
+  }
+
   /* ── the panels behind the three `›` rows of frame 07:06 ─────────────── */
 
   if (panel === 'views') {
@@ -268,12 +422,107 @@ export function CreateSpaceWizard({
         testId="space-wizard-views"
       >
         {/*
+          §V2-S08 frame `07:12` — the panel has TWO tabs, **Required views** and
+          **Default View Templates**, and Rundesk drew only the first.
+
+          What the second one is FOR: the Required-views list is eleven
+          switches, and the thing people actually want from it is a set — "the
+          views a project space opens with". That set already exists, four times
+          over, inside the presets the server sends; it was reachable only by
+          going back a step and changing the whole card, which also swaps the
+          statuses and the ClickApps. This tab applies the VIEWS of a preset and
+          nothing else, and says so on every card.
+
+          It is not a second copy of the view sets: `payload.presets` is the
+          same object the server applies, already fetched for step two.
+        */}
+        <div className="mb-2 flex gap-1 border-b border-border/70" role="tablist">
+          {(['required', 'templates'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              role="tab"
+              aria-selected={viewsTab === tab}
+              data-testid={`space-wizard-viewstab-${tab}`}
+              onClick={() => setViewsTab(tab)}
+              className={cn(
+                'px-2.5 py-1.5 text-[12px] font-medium border-b-2 -mb-px',
+                viewsTab === tab
+                  ? 'border-accent text-foreground'
+                  : 'border-transparent text-muted-foreground hover:text-foreground',
+              )}
+            >
+              {t(tab === 'required' ? 'spaceWizard.tabRequiredViews' : 'spaceWizard.tabViewTemplates')}
+            </button>
+          ))}
+        </div>
+
+        {viewsTab === 'templates' && (
+          <div className="space-y-2" data-testid="space-wizard-viewtemplates">
+            <p className="text-[12px] text-muted-foreground">{t('spaceWizard.viewTemplatesBlurb')}</p>
+            {presets.map((p) => {
+              /*
+                "Applied" is read off the ANSWER, not off a flag set when the
+                button was pressed — a latch would keep saying Applied after the
+                switches underneath had been changed away from it.
+              */
+              const applied =
+                p.views.length === effectiveViews.length &&
+                p.views.every((v) => effectiveViews.includes(v)) &&
+                effectiveDefaultView === p.defaultView
+              return (
+                <div
+                  key={p.key}
+                  /*
+                    TESTID NAMESPACES again: `space-wizard-viewtplcard-` is one
+                    element per template and nothing else, so counting it counts
+                    templates. The view list and the Apply button get their own
+                    prefixes rather than nesting under it.
+                  */
+                  data-testid={`space-wizard-viewtplcard-${p.key}`}
+                  data-applied={applied ? 'true' : 'false'}
+                  className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5"
+                >
+                  <span className="flex min-w-0 flex-col">
+                    <span className="truncate text-[13px]">
+                      {t(PRESET_LABEL[p.key]?.name ?? 'spaceWizard.presetStarter')}
+                    </span>
+                    <span
+                      className="truncate text-[11px] text-muted-foreground"
+                      data-testid={`space-wizard-viewtplset-${p.key}`}
+                    >
+                      {p.views.map(viewLabel).join(', ')}
+                    </span>
+                  </span>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={applied ? 'secondary' : 'outline'}
+                    disabled={applied}
+                    data-testid={`space-wizard-viewtplgo-${p.key}`}
+                    onClick={() => {
+                      setViews([...p.views])
+                      setDefaultView(p.defaultView)
+                    }}
+                  >
+                    {t(applied ? 'spaceWizard.viewTemplateApplied' : 'spaceWizard.viewTemplateApply')}
+                  </Button>
+                </div>
+              )
+            })}
+            <p className="text-[11px] text-muted-foreground" data-testid="space-wizard-viewtemplates-note">
+              {t('spaceWizard.viewTemplatesNote')}
+            </p>
+          </div>
+        )}
+
+        {/*
           Same namespace rule as the ClickApps grid below:
           `space-wizard-view-${view}` is ONE SWITCH PER VIEW and the key is
           arbitrary, so the row and its label sit outside that prefix rather
           than tripling anything that counts it.
         */}
-        {(payload?.views ?? []).map((view) => {
+        {viewsTab === 'required' && (payload?.views ?? []).map((view) => {
           // §V2-06 frame 07:12 — List is marked "Required" and cannot be turned
           // off. Everything on a list falls back to it, so a space without it
           // has lists that cannot render.
@@ -318,6 +567,58 @@ export function CreateSpaceWizard({
             </div>
           )
         })}
+      </PanelShell>
+    )
+  }
+
+  if (panel === 'templates') {
+    return (
+      <PanelShell
+        open={open}
+        onOpenChange={onOpenChange}
+        title={t('spaceWizard.templatesTitle')}
+        blurb={t('spaceWizard.templatesBlurb')}
+        onBack={() => setPanel('none')}
+        onDone={() => setPanel('none')}
+        testId="space-wizard-templates"
+      >
+        {spaceTemplates.length === 0 ? (
+          /*
+            Said, not left blank. An empty panel and a panel that failed to
+            load are the same picture, and the corpus genuinely can be empty
+            for a workspace whose admin deleted the built-ins.
+          */
+          <p className="px-1 py-3 text-[12px] text-muted-foreground" data-testid="space-wizard-templates-empty">
+            {t('spaceWizard.templatesEmpty')}
+          </p>
+        ) : (
+          <div className="space-y-2">
+            {spaceTemplates.map((tpl) => (
+              <div
+                key={tpl.id}
+                data-testid={`space-wizard-tplcard-${tpl.id}`}
+                className="flex items-center justify-between gap-3 rounded-lg border border-border/70 px-3 py-2.5"
+              >
+                <span className="flex min-w-0 flex-col">
+                  <span className="truncate text-[13px]">{tpl.name}</span>
+                  {tpl.description && (
+                    <span className="truncate text-[11px] text-muted-foreground">{tpl.description}</span>
+                  )}
+                </span>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={applyTemplate.isPending}
+                  data-testid={`space-wizard-tplgo-${tpl.id}`}
+                  onClick={() => applyTemplate.mutate(tpl.id)}
+                >
+                  {applyTemplate.isPending ? t('common.saving') : t('spaceWizard.templateUse')}
+                </Button>
+              </div>
+            ))}
+          </div>
+        )}
       </PanelShell>
     )
   }
@@ -529,6 +830,86 @@ export function CreateSpaceWizard({
           </div>
 
           {/*
+            §V2-S08 frame `07:50` — the copy-configuration bar.
+            `Import: [Views] [ClickApps] from [<Space> ▾] … Hide | Apply`.
+          */}
+          {copyOpen ? (
+            <div
+              className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-border/70 px-3 py-2"
+              data-testid="space-wizard-copy"
+            >
+              <span className="text-[12px] text-muted-foreground">{t('spaceWizard.copyImport')}</span>
+              {COPYABLE.map((part) => {
+                const on = copyParts.includes(part)
+                return (
+                  <button
+                    key={part}
+                    type="button"
+                    aria-pressed={on}
+                    data-testid={`space-wizard-copypart-${part}`}
+                    onClick={() =>
+                      setCopyParts((prev) => (on ? prev.filter((p) => p !== part) : [...prev, part]))
+                    }
+                    className={cn(
+                      'rounded-full border px-2.5 py-1 text-[11px]',
+                      on ? 'border-accent/60 bg-accent/10 text-foreground' : 'border-border/70 text-muted-foreground',
+                    )}
+                  >
+                    {t(part === 'views' ? 'spaceWizard.defaultViews' : 'spaceWizard.clickApps')}
+                  </button>
+                )
+              })}
+              <span className="text-[12px] text-muted-foreground">{t('spaceWizard.copyFrom')}</span>
+              <select
+                value={copyFrom}
+                onChange={(e) => setCopyFrom(e.target.value)}
+                data-testid="space-wizard-copy-source"
+                aria-label={t('spaceWizard.copyFrom')}
+                className="h-7 rounded-md border border-border bg-background px-1.5 text-[11px]"
+              >
+                <option value="">{t('spaceWizard.copyPick')}</option>
+                {sourceSpaces.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <span className="ml-auto flex items-center gap-2">
+                <button
+                  type="button"
+                  data-testid="space-wizard-copy-hide"
+                  onClick={() => setCopyOpen(false)}
+                  className="text-[11px] text-muted-foreground hover:text-foreground"
+                >
+                  {t('spaceWizard.copyHide')}
+                </button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  disabled={!copyFrom || copyParts.length === 0}
+                  data-testid="space-wizard-copy-apply"
+                  onClick={applyCopy}
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden /> {t('spaceWizard.copyApply')}
+                </Button>
+              </span>
+              {copiedFrom && (
+                <p className="w-full text-[11px] text-muted-foreground" data-testid="space-wizard-copy-note">
+                  {t('spaceWizard.copyNote', { name: copiedFrom })}
+                </p>
+              )}
+            </div>
+          ) : (
+            <button
+              type="button"
+              data-testid="space-wizard-copy-show"
+              onClick={() => setCopyOpen(true)}
+              className="mt-3 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              {t('spaceWizard.copyShow')}
+            </button>
+          )}
+
+          {/*
             `[07:46]` — "yeh LIST automatically generate kar deta hai". Said out
             loud before the button, because a space that arrives with two lists
             you did not make is confusing unless you were told.
@@ -662,7 +1043,25 @@ export function CreateSpaceWizard({
           </div>
         </div>
 
-        <div className="mt-4 flex items-center justify-end">
+        {/*
+          §V2-S08 frame `06:45` — the dialog's footer is **Use Templates** on
+          the left and **Continue** on the right. Rundesk had Continue alone,
+          so the one place a template is obviously worth offering was the one
+          place that did not offer it.
+
+          Not gated on the name: starting from a template is the alternative to
+          filling this form, not a step after it.
+        */}
+        <div className="mt-4 flex items-center justify-between gap-3 border-t border-border/60 pt-3">
+          <button
+            type="button"
+            onClick={() => setPanel('templates')}
+            data-testid="space-wizard-use-templates"
+            className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
+          >
+            <Layers className="h-3.5 w-3.5" aria-hidden />
+            {t('spaceWizard.useTemplates')}
+          </button>
           <Button
             variant="gradient"
             size="sm"

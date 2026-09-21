@@ -255,6 +255,13 @@ try {
    * `+ New message`. Folding them in here would make `+ Add Channel` the
    * button that also makes a DM. Proven against a DM that really exists, so
    * the check cannot pass by there being none.
+   *
+   * THAT SIBLING SECTION NOW EXISTS (§V2-S07, `sidebar-dms.mjs`), which makes
+   * this check sharper rather than redundant: "a DM is not under Channels" and
+   * "a DM is under Direct Messages" are two different facts, and a day when
+   * somebody folds the two lists back together has to redden both suites
+   * rather than one. `sidebar-dms.mjs` asserts this same exclusion from the
+   * other side, against the same real DM, for exactly that reason.
    */
   const dmAbsent = dmIds.length > 0 && (await Promise.all(
     dmIds.map((id) => page.getByTestId(`sidebar-channel-${id}`).count()),

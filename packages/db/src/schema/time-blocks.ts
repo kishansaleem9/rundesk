@@ -84,6 +84,63 @@ export const taskTimeBlocksRelations = relations(taskTimeBlocks, ({ one }) => ({
 export type PlannerSettings = {
   /** Frame `14:10`: Subtle | Solid. */
   eventStyle?: 'subtle' | 'solid'
+  /**
+   * §V2-15a, frame `14:05` — **Grid size**, the FIRST control on the Appearance
+   * page: "Choose how large events and time slots appear in the grid", with
+   * three previews labelled Default · Large · XL.
+   *
+   * It is the hour-row height, not a font size. The frame's three swatches all
+   * draw the same event ("Team sync · 9 – 11am") at three heights, which is
+   * what a grid-size control means on a calendar: the same day, more room.
+   *
+   * Reader: `workspace-planner-page.tsx` — `HOUR_PX` is chosen from this, and
+   * the now-line, the block rectangles and the hour gutter all derive from that
+   * one number, so there is no second place that could disagree about how tall
+   * an hour is.
+   */
+  gridSize?: 'default' | 'large' | 'xl'
+  /**
+   * §V2-14d, frame `13:28` — the calendars NOT drawn on the grid.
+   *
+   * A HIDE-LIST, NOT A SHOW-LIST, and the direction is the whole design. With a
+   * show-list, a calendar connected tomorrow is absent from it and therefore
+   * invisible — a person connects Google, nothing appears, and there is no way
+   * to tell that from the sync being broken. With a hide-list, a new calendar
+   * is visible until somebody says otherwise, and "I turned this off" is the
+   * only state that has to be remembered.
+   *
+   * Ids are the workspace calendar keys (`workspace:timeOff`, `workspace:holidays`)
+   * only. An ACCOUNT's row in the picker is not stored here: it writes the
+   * account's own `countsAsBusy` column, because that column already means
+   * "this calendar is read", and a second per-user flag saying the same thing
+   * is the one-fact-two-copies bug this ledger keeps finding.
+   *
+   * Readers: `workspace-planner-page.tsx` — `planner-holiday-chip` and
+   * `planner-timeoff-chip` are not drawn for a hidden calendar.
+   */
+  hiddenCalendarIds?: string[]
+  /**
+   * §V2-15b, frame `12:48`'s **Team schedules** card — whose columns the
+   * side-by-side grid draws.
+   *
+   * Separate from "Meet with", which is one person overlaid on YOUR week. This
+   * is several people beside each other, each in their own column, and the two
+   * answer different questions: "when is Sara free" versus "when are all four
+   * of us free". Persisted because the set of people you schedule around is
+   * stable, and re-picking them on every visit is the thing that makes a
+   * feature not get used.
+   */
+  teamScheduleUserIds?: string[]
+  /**
+   * §V2-15c, frames `12:40`–`12:50` — the planner onboarding panel has been
+   * dismissed.
+   *
+   * Dismissal is remembered SERVER-SIDE rather than in `localStorage`, because
+   * the panel is about an account-level fact (no calendar is connected) and a
+   * person who dismissed it on their laptop has not asked to see it again on
+   * their phone.
+   */
+  plannerOnboardingDismissed?: boolean
   /** "Default event duration", shown as `1 hour`. */
   defaultDurationMinutes?: number
   /**

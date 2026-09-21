@@ -2,7 +2,8 @@ import { Body, Controller, Get, HttpCode, Patch, Post, Put, Query, Res, UseGuard
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AiService, openSseStream, type AiRunStatus } from './ai.service'
 import { SkillsService } from '../skills/skills.service'
-import { MODEL_TIERS, UNROUTABLE_PROVIDERS } from './model-tiers'
+import { BEST_MODELS_VISIBLE, MODEL_TIERS, UNROUTABLE_PROVIDERS, splitPickerModels } from './model-tiers'
+import { isStarterSurface } from './ai-starters'
 import { BriefingService } from './briefing.service'
 import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -39,11 +40,23 @@ export class AiController {
    *
    * The unavailable entries carry a translation KEY, not a sentence: this is
    * read by a person in four locales.
+   *
+   * `models` stays the WHOLE routable catalogue, because it is also what the
+   * preference write is validated against. `best` / `more` is the same list cut
+   * where `[17:16]` cuts it — served rather than re-derived in the browser, so
+   * the bound on the visible group has exactly one definition.
    */
   @Get('models')
   @ApiOperation({ summary: '§15 — the tiers the composer offers, and the ones it cannot' })
   models() {
-    return { models: MODEL_TIERS, unavailable: UNROUTABLE_PROVIDERS }
+    const { best, more } = splitPickerModels(MODEL_TIERS)
+    return {
+      models: MODEL_TIERS,
+      best,
+      more,
+      visible: BEST_MODELS_VISIBLE,
+      unavailable: UNROUTABLE_PROVIDERS,
+    }
   }
 
   /**
@@ -471,6 +484,72 @@ export class AiController {
    * not see simply does not come back, so the panel renders the reference as
    * plain text instead of as a chip that leaks a title.
    */
+  /**
+   * §V2-S17/S22 frames `16:32` / `21:15` — the four starter cards.
+   *
+   * A READ, and one whose answer is allowed to be different every time it is
+   * asked: the cards turn on how much of your own work is overdue, which is a
+   * fact that moves. `facts` and each card's `because` come back with the cards
+   * so the caller — and a check — can see WHAT chose them rather than only
+   * THAT something did. A row of four buttons is exactly the shape a facade
+   * takes here; the reasons are what make the difference observable.
+   */
+  @Get('starters')
+  @ApiOperation({ summary: '§V2-S17 — starter cards for this person, on this surface, now' })
+  async starters(
+    @CurrentUser() user: any,
+    @Query('workspaceId') workspaceId: string,
+    @Query('surface') surface?: string,
+  ) {
+    if (!workspaceId) {
+      throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
+    }
+    await this.ai.assertWorkspaceMember(workspaceId, user.id)
+    // An unknown surface falls back to the workspace one rather than 400ing: a
+    // stale client asking for a surface a newer server renamed should still get
+    // four usable cards, and the surface only ever ADDS a card.
+    return this.ai.starterCardsFor(
+      workspaceId,
+      user.id,
+      isStarterSurface(surface) ? surface : 'workspace',
+      user.role,
+    )
+  }
+
+  /**
+   * §V2-S17 frame `15:50` — **"⚡ Assign with AI"**, as an answerable question.
+   *
+   * A READ that recommends and does not write: the assignment still goes
+   * through `assign_task`. Exposed on its own route rather than only through
+   * the chat tool because the assignee picker is a menu, not a conversation —
+   * pressing the frame's item should not have to open a chat to get an answer
+   * — and because a recommendation whose reasoning can only be seen by reading
+   * a model's prose is not checkable.
+   *
+   * NO PROVIDER KEY IS INVOLVED. This is three SQL reads and a sort, so it
+   * answers on a server with no AI configured at all — which is also the only
+   * reason it can be exercised end to end here.
+   */
+  @Get('assignee-suggestion')
+  @ApiOperation({ summary: '§V2-S17 — who should take this task, and the numbers behind it' })
+  async assigneeSuggestion(@CurrentUser() user: any, @Query('taskId') taskId: string) {
+    if (!taskId) {
+      throw new HttpException('taskId is required', HttpStatus.BAD_REQUEST)
+    }
+    const result = await this.ai.suggestAssignee(taskId, user.id)
+    /*
+     * A REFUSAL IS A 200 WITH A REASON, not a bare 404.
+     *
+     * "that task does not exist", "you may not assign it" and "there is nobody
+     * to choose between" are three different answers, and `taskId` is
+     * caller-supplied so a 404 for the first two would also be a membership
+     * oracle. The reason code is in the body, where the caller can branch on
+     * it; `ai-assign.mjs` asserts on the code, because a status two mechanisms
+     * both produce cannot tell them apart.
+     */
+    return result
+  }
+
   @Post('refs')
   /*
    * 200, NOT NEST'S DEFAULT 201 FOR A POST. This route creates nothing — it is

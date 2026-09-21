@@ -26,12 +26,15 @@ import {
   Ban,
   FolderPlus,
   ListTree,
+  LayoutGrid,
   Brain,
 } from 'lucide-react'
+import { useNavigate } from '@tanstack/react-router'
 import { renderInlineMarkdown, renderMarkdownBlocks } from './markdown'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { viewLabelKey } from '../lib/space-views'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useAiChatActions, useAiChatThread, useAiMessageActions } from '../lib/skills-api'
 
@@ -64,10 +67,39 @@ type UnavailableModel = {
   reasonKey: string
 }
 
-type ModelCatalog = { models: ModelTier[]; unavailable: UnavailableModel[] }
+type ModelCatalog = {
+  /** Every routable tier. The trigger's label is looked up here. */
+  models: ModelTier[]
+  /** `[17:16]`'s three rows, and what its **Show more** reveals. Server-cut. */
+  best: ModelTier[]
+  more: ModelTier[]
+  unavailable: UnavailableModel[]
+}
 
 /** §V2-S18 `[17:32]` — the preferred AI, stored per person per workspace. */
 type ModelPreference = { preferredTier: string; isSet: boolean; updatedAt: string | null }
+
+/**
+ * §V2-S17/S22 frames `16:32` / `21:15` — what `GET /ai/starters` answers with.
+ *
+ * Keys rather than sentences, the same reason `UnavailableModel` carries a
+ * `reasonKey`: this is read by a person in four locales. `because` is not for
+ * reading — it is the fact that selected the card, carried onto the DOM so the
+ * change in the set is attributable rather than merely visible.
+ */
+type StarterCard = {
+  id: string
+  titleKey: string
+  subtitleKey: string
+  promptKey: string
+  because: string
+}
+type StarterResponse = {
+  cards: StarterCard[]
+  /** How many of the four something other than the floor rule chose. */
+  contextual: number
+  facts: { surface: string; overdue: number; assignedOpen: number; workspaceOpen: number }
+}
 
 type Message = {
   role: 'user' | 'assistant'
@@ -121,7 +153,7 @@ type CreatedContainer = { kind: 'list' | 'folder'; id: string; name: string; pat
  * every chip is hydrated from the database at render time.
  */
 const REF_TOKEN =
-  /\[\[(task|list):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})\]\]/g
+  /\[\[(task|list|view):([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})(?::([a-z]+))?\]\]/g
 
 type ResolvedTask = {
   id: string
@@ -131,7 +163,23 @@ type ResolvedTask = {
   listId: string
   listName: string
 }
-type ResolvedList = { id: string; name: string; path: string }
+/**
+ * §V2-S16 `18:48` — a list, with enough to OPEN it.
+ *
+ * `path` is what the chip reads; `spaceId` / `projectId` are what makes it a
+ * link, because Rundesk addresses a list as
+ * `/app/:workspaceId/:spaceId/:projectId/:listId` and a chip holding only the
+ * list id can be drawn but not pressed. `views` is which tabs that page
+ * actually has, read live — the same reason a task chip's badge is read live.
+ */
+type ResolvedList = {
+  id: string
+  name: string
+  path: string
+  spaceId: string
+  projectId: string
+  views: string[]
+}
 type RefResponse = { tasks: ResolvedTask[]; lists: ResolvedList[] }
 
 type RefIndex = {
@@ -139,12 +187,21 @@ type RefIndex = {
   lists: Map<string, ResolvedList>
   /** True while the batch is in flight, so a chip can be a skeleton not a gap. */
   pending: boolean
+  /** The workspace the chips' links are built in. '' outside a panel. */
+  workspaceId: string
 }
 
-const EMPTY_REFS: RefIndex = { tasks: new Map(), lists: new Map(), pending: false }
+const EMPTY_REFS: RefIndex = { tasks: new Map(), lists: new Map(), pending: false, workspaceId: '' }
 const AiRefs = createContext<RefIndex>(EMPTY_REFS)
 
-/** Every distinct id an answer refers to, by kind. Pure, and cheap to re-run. */
+/**
+ * Every distinct id an answer refers to, by kind. Pure, and cheap to re-run.
+ *
+ * A `view` reference resolves THROUGH ITS LIST — there is no view row to fetch,
+ * a view is a tab on the list's page — so its id joins the list ids. Sending it
+ * as its own kind would ask the server for something that does not exist and
+ * get an empty answer back, which draws as a permanent skeleton.
+ */
 function collectRefs(texts: string[]): { taskIds: string[]; listIds: string[] } {
   const taskIds = new Set<string>()
   const listIds = new Set<string>()
@@ -159,6 +216,21 @@ function collectRefs(texts: string[]): { taskIds: string[]; listIds: string[] } 
     }
   }
   return { taskIds: [...taskIds].sort(), listIds: [...listIds].sort() }
+}
+
+/**
+ * §V2-06 — the view's name, from the module that owns the view vocabulary.
+ *
+ * Imported rather than restated. The `team` defect is what this avoids: two
+ * hand-kept copies of the view map were missing that key and rendered the word
+ * "List" on a Team row, and every check of the form "the row has a label"
+ * passed on it. `viewLabelKey` returns `null` for a key this build does not
+ * know, and the raw key is rendered instead — ugly, visible, and impossible to
+ * mistake for a working chip.
+ */
+function viewLabel(view: string, t: (k: TranslationKey) => string): string {
+  const key = viewLabelKey(view)
+  return key ? t(key) : view
 }
 
 /**
@@ -184,10 +256,14 @@ const STATUS_TONE: Record<string, string> = {
  * id the reader may not see, or one the model invented, must not become a chip
  * that asserts a title, so it degrades to something visibly inert.
  */
-function AiRefChip({ kind, id }: { kind: 'task' | 'list'; id: string }) {
+function AiRefChip({ kind, id, view }: { kind: 'task' | 'list' | 'view'; id: string; view?: string }) {
   const refs = useContext(AiRefs)
+  // `translate`, not `t`: the resolved task below is already bound to `t`, and
+  // shadowing it here would be a rename away from a very quiet bug.
+  const { t: translate } = useTranslation()
+  const navigate = useNavigate()
   const task = kind === 'task' ? refs.tasks.get(id) : undefined
-  const list = kind === 'list' ? refs.lists.get(id) : undefined
+  const list = kind === 'task' ? undefined : refs.lists.get(id)
 
   if (!task && !list) {
     if (refs.pending) {
@@ -212,16 +288,72 @@ function AiRefChip({ kind, id }: { kind: 'task' | 'list'; id: string }) {
   }
 
   if (list) {
+    /*
+     * §V2-S16 `18:48` — THE CHIP IS A DESTINATION.
+     *
+     * *"Use the `rundesk > ddddd > List` for task details or the `rundesk >
+     * ddddd > Board` to manage work by status."* Both halves of that sentence
+     * are instructions to go somewhere, and until this it drew a `<span>`: a
+     * path that looked like a link, could not be pressed, could not be
+     * middle-clicked and did not appear to a keyboard at all. The dead control,
+     * in the one place the answer is telling you to act.
+     *
+     * A real `href` rather than an `onClick` alone, so the browser's own
+     * affordances work; the click is intercepted for client-side routing.
+     */
+    const viewEnabled = !view || list.views.includes(view)
+    const href = refs.workspaceId
+      ? `/app/${refs.workspaceId}/${list.spaceId}/${list.projectId}/${list.id}` +
+        (view && viewEnabled ? `?view=${view}` : '')
+      : ''
+    /*
+     * A view the space no longer enables is NOT offered as that view. The chip
+     * degrades to the list it belongs to — a place that does exist — rather
+     * than linking to a tab the page will not draw. `data-view-enabled` says
+     * which happened, because "the chip is there" must not be the only
+     * observable, and the tab set is read at render time exactly so this can
+     * change after the answer was written.
+     */
+    const label = view && viewEnabled ? `${list.path} > ${viewLabel(view, translate)}` : list.path
+    const testId = view ? `ai-ref-view-${id}-${view}` : `ai-ref-list-${id}`
+    const className =
+      'mx-0.5 inline-flex max-w-full items-center gap-1 rounded border border-border/70 bg-muted/40 px-1.5 py-px align-middle text-[11px] hover:bg-muted hover:border-border'
+    const body = (
+      <>
+        {view ? (
+          <LayoutGrid className="h-3 w-3 shrink-0 text-muted-foreground" />
+        ) : (
+          <ListTree className="h-3 w-3 shrink-0 text-muted-foreground" />
+        )}
+        <span className="truncate">{label}</span>
+      </>
+    )
+    if (!href) {
+      // No workspace in context means no route can be built. Inert and saying
+      // so beats an anchor to "" that reloads the page onto itself.
+      return (
+        <span data-testid={testId} data-ref-kind={view ? 'view' : 'list'} data-ref-path={label} className={className}>
+          {body}
+        </span>
+      )
+    }
     return (
-      <span
-        data-testid={`ai-ref-list-${id}`}
-        data-ref-kind="list"
-        data-ref-path={list.path}
-        className="mx-0.5 inline-flex max-w-full items-center gap-1 rounded border border-border/70 bg-muted/40 px-1.5 py-px align-middle text-[11px]"
+      <a
+        href={href}
+        data-testid={testId}
+        data-ref-kind={view ? 'view' : 'list'}
+        data-ref-path={label}
+        data-ref-view={view ?? ''}
+        data-view-enabled={view ? String(viewEnabled) : ''}
+        onClick={(e) => {
+          if (e.metaKey || e.ctrlKey || e.shiftKey || e.button !== 0) return
+          e.preventDefault()
+          void navigate({ to: href })
+        }}
+        className={className}
       >
-        <ListTree className="h-3 w-3 shrink-0 text-muted-foreground" />
-        <span className="truncate">{list.path}</span>
-      </span>
+        {body}
+      </a>
     )
   }
 
@@ -268,8 +400,9 @@ function renderAiInline(text: string, keyPrefix: string): ReactNode[] {
     nodes.push(
       <AiRefChip
         key={`${keyPrefix}-r${k++}`}
-        kind={m[1] === 'task' ? 'task' : 'list'}
+        kind={m[1] === 'task' ? 'task' : m[1] === 'view' ? 'view' : 'list'}
         id={m[2].toLowerCase()}
+        view={m[1] === 'view' ? m[3] : undefined}
       />,
     )
     cursor = at + m[0].length
@@ -435,13 +568,243 @@ function AiBusyState({ state, t }: { state: BusyState; t: (k: TranslationKey) =>
   )
 }
 
-const SUGGESTED_PROMPT_KEYS = [
-  'aiPanel.suggestion.dueThisWeek',
-  'aiPanel.suggestion.summarizeProjects',
-  'aiPanel.suggestion.writeDescription',
-  'aiPanel.suggestion.createTasks',
-  'aiPanel.suggestion.whatsBlocking',
-] as const
+/**
+ * §V2-S18 frames `17:42` / `17:46` / `17:50` — INLINE WORD SUGGESTIONS.
+ *
+ * WHAT THE THREE FRAMES DRAW, read rather than remembered. A small dark pill
+ * bar floats just above the composer, holding exactly THREE words, and it moves
+ * with the caret:
+ *
+ *   `create a `                      → **new** · **list** · **list of**
+ *   `create a folder name as `       → **the** · **a**   · **you**
+ *   `create a folder name as ddddd on ` → **the** · **a** · **this**
+ *
+ * Two things follow from reading all three rather than one. The suggestions
+ * CHANGE with what is typed — a fixed three would have photographed identically
+ * at `17:42` and is the facade — and the first set is DOMAIN-AWARE: "list" is
+ * offered after "create a" because a list is a thing this product makes, and
+ * "list of" shows the offer is a phrase and not a token.
+ *
+ * SO THE TABLE IS TWO TABLES. `NEXT_WORD` is what the product can be asked to
+ * do, keyed on the word before; `GENERIC_NEXT` is ordinary English for
+ * everything else. The frames' own three sets are the entries for `a`, `as` and
+ * `on`, because the frame is the specification.
+ *
+ * AND THE THIRD BEHAVIOUR, which the frames of video 1 show (`020_0124`: a
+ * bubble offering "vn" and "vnjf" while "vnjfv" is being typed): a HALF-TYPED
+ * word completes from the vocabulary instead of predicting the next one.
+ * Completing what somebody is in the middle of is worth more than guessing
+ * what comes after it.
+ */
+const AI_VOCAB: readonly string[] = [
+  // The nouns the AI's own tools accept, so a completion is a thing it can do.
+  'assignee',
+  'board',
+  'calendar',
+  'checklist',
+  'comment',
+  'description',
+  'doc',
+  'folder',
+  'gantt',
+  'list',
+  'overdue',
+  'priority',
+  'space',
+  'status',
+  'subtask',
+  'summarize',
+  'table',
+  'task',
+  'template',
+  'timeline',
+  'workspace',
+]
+
+const NEXT_WORD: Record<string, readonly string[]> = {
+  // `17:42`, exactly as drawn.
+  a: ['new', 'list', 'list of'],
+  // `17:46` and `17:50`, exactly as drawn.
+  as: ['the', 'a', 'you'],
+  on: ['the', 'a', 'this'],
+  create: ['a', 'the', 'a new'],
+  make: ['a', 'the', 'a new'],
+  add: ['a', 'the', 'a new'],
+  new: ['list', 'task', 'folder'],
+  show: ['me', 'all', 'the'],
+  find: ['all', 'the', 'every'],
+  all: ['tasks', 'lists', 'my'],
+  my: ['tasks', 'lists', 'overdue'],
+  the: ['list', 'task', 'space'],
+  in: ['the', 'my', 'this'],
+  to: ['the', 'me', 'a'],
+  for: ['the', 'me', 'this'],
+  this: ['list', 'task', 'week'],
+  summarize: ['my', 'this', 'all'],
+  assign: ['this', 'the', 'it'],
+  move: ['this', 'all', 'the'],
+}
+
+const GENERIC_NEXT: readonly string[] = ['the', 'a', 'this']
+
+/** The frame draws three. Three is the contract. */
+const WORD_SUGGESTION_COUNT = 3
+
+/**
+ * Up to three continuations for what has been typed so far. PURE.
+ *
+ * Returns `[]` for an empty composer: a bar of guesses over an empty box is
+ * noise, and neither frame shows one before anything has been typed.
+ */
+export function nextWordSuggestions(text: string): string[] {
+  if (!text) return []
+  const endsMidWord = !/\s$/.test(text)
+  const tokens = text.trim().split(/\s+/).filter(Boolean)
+  if (tokens.length === 0) return []
+  const last = tokens[tokens.length - 1].toLowerCase()
+
+  if (endsMidWord) {
+    // Mid-word: complete it. A single-letter stem matches most of the
+    // vocabulary and would offer three arbitrary words, so it waits for two.
+    if (last.length < 2) return []
+    return AI_VOCAB.filter((w) => w.startsWith(last) && w !== last).slice(0, WORD_SUGGESTION_COUNT)
+  }
+
+  const next = NEXT_WORD[last] ?? GENERIC_NEXT
+  // Never offer the word that was just typed — pressing it would produce
+  // "the the", which is the one suggestion guaranteed to be wrong.
+  return next.filter((w) => w.toLowerCase() !== last).slice(0, WORD_SUGGESTION_COUNT)
+}
+
+/**
+ * Apply a suggestion to the composer's text.
+ *
+ * Two cases, and they are not the same edit: mid-word REPLACES the stem
+ * ("fol" + "folder" → "folder", not "fol folder"), while after a space it
+ * APPENDS. Getting that wrong is invisible in a screenshot and obvious the
+ * first time anybody uses it.
+ */
+export function applyWordSuggestion(text: string, word: string): string {
+  if (/\s$/.test(text) || text === '') return `${text}${word} `
+  const cut = text.replace(/\S+$/, '')
+  return `${cut}${word} `
+}
+
+/**
+ * §V2-S18 frame `[17:16]` — ONE ROW OF THE MODEL PICKER, AND ITS HOVER CARD.
+ *
+ * WHAT THE FRAME DRAWS, zoomed rather than remembered: the row itself is just a
+ * glyph, a name, a badge and a tick. Hovering it opens a dark card to the RIGHT
+ * of the popover carrying the model's name, ONE LINE saying what it is for
+ * (*"Fast, lightweight GPT-5.6 model"*), a rule, and two labelled meters —
+ * **Speed** at full track, **Intelligence** at about three quarters. The two
+ * bars are different lengths, and that is the whole point of drawing them: two
+ * bars at the same length are a decoration with a label on it.
+ *
+ * WHY THIS REPLACED AN INLINE COPY. The previous build put the line and the
+ * bars inside every row, always visible, reasoning that a measurement you have
+ * to hover to see is one nobody compares. That reason is real and it is also
+ * not what `[21:43]` asks for — the frame is the specification. It also made
+ * the rows three lines tall each, so three of them plus a disclosure could not
+ * fit the popover the frame draws. The card keeps the comparison possible: it
+ * opens on FOCUS as well as hover, so tabbing down the list walks the cards.
+ *
+ * The card is rendered inside the row's own wrapper and positioned `left-full`,
+ * exactly where the frame puts it.
+ */
+function ModelPickerRow({
+  model,
+  selected,
+  preferred,
+  hovered,
+  onHover,
+  onPick,
+  t,
+}: {
+  model: ModelTier
+  selected: boolean
+  preferred: boolean
+  hovered: boolean
+  onHover: (id: string | null) => void
+  onPick: () => void
+  t: (k: TranslationKey) => string
+}) {
+  return (
+    <div
+      className="relative"
+      onMouseEnter={() => onHover(model.id)}
+      onMouseLeave={() => onHover(null)}
+    >
+      <button
+        type="button"
+        role="option"
+        aria-selected={selected}
+        data-testid={`ai-model-option-${model.id}`}
+        data-available="true"
+        data-selected={selected ? 'true' : 'false'}
+        data-preferred={preferred ? 'true' : 'false'}
+        onFocus={() => onHover(model.id)}
+        onBlur={() => onHover(null)}
+        onClick={onPick}
+        className="flex w-full items-center gap-2 px-3 py-2 text-left hover:bg-muted/60"
+      >
+        <Sparkles className="h-3.5 w-3.5 shrink-0 text-primary" />
+        <span className="flex min-w-0 flex-1 items-center gap-1.5">
+          <span className="text-xs font-medium text-foreground">{model.label}</span>
+          {preferred && (
+            <span
+              data-testid={`ai-model-preferred-badge-${model.id}`}
+              className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 py-px text-[10px] text-primary"
+            >
+              <Star className="h-2.5 w-2.5" />
+              {t('aiModels.preferred')}
+            </span>
+          )}
+        </span>
+        {selected && <Check className="h-3.5 w-3.5 shrink-0 text-primary" />}
+      </button>
+      {hovered && (
+        <div
+          data-testid={`ai-model-card-${model.id}`}
+          role="tooltip"
+          className="pointer-events-none absolute left-full top-0 z-[70] ml-2 w-56 rounded-lg border border-border bg-popover p-3 shadow-xl"
+        >
+          <p className="text-xs font-semibold text-foreground">{model.label}</p>
+          <p data-testid={`ai-model-hint-${model.id}`} className="mt-0.5 text-[11px] text-muted-foreground">
+            {model.hint}
+          </p>
+          <div className="mt-2 space-y-1 border-t border-border pt-2">
+            {(
+              [
+                ['speed', model.speed, t('aiModels.speed')],
+                ['intelligence', model.intelligence, t('aiModels.intelligence')],
+              ] as const
+            ).map(([key, score, label]) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="w-16 shrink-0 text-[10px] text-muted-foreground">{label}</span>
+                {/*
+                  A TRACK AND A FILL, as the frame draws them: the unfilled
+                  remainder is visible, so "Intelligence 4" reads as four out of
+                  five rather than as a bar of unknown scale. The fill is what
+                  carries the testid, because the track is the same width on
+                  every row and measuring it would measure nothing.
+                */}
+                <span className="h-1 w-24 shrink-0 overflow-hidden rounded-full bg-muted">
+                  <span
+                    data-testid={`ai-model-bar-${key}-${model.id}`}
+                    data-score={score}
+                    className="block h-full rounded-full bg-primary"
+                    style={{ width: `${Math.min(Math.max(score, 0), 5) * 20}%` }}
+                  />
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
 
 export function AiPanel({
   workspaceId,
@@ -480,6 +843,14 @@ export function AiPanel({
   // replaces the conversation instead of appending to it.
   const loadedThreadRef = useRef<string | null>(null)
   const [input, setInput] = useState('')
+  /*
+   * §V2-S18 `17:42`–`17:50` — the three words above the composer.
+   *
+   * Derived from the input rather than held in state: there is no version of
+   * this that can be stale, and a `useState` mirror of a `useState` is how a
+   * suggestion bar ends up a keystroke behind the text it is suggesting for.
+   */
+  const wordSuggestions = useMemo(() => nextWordSuggestions(input), [input])
   /*
    * §15 / §V2-S18 — her composer's "Max ▴", frames `296_1817` / `301_1836` and
    * the one this row is about, `[17:16]`.
@@ -537,6 +908,57 @@ export function AiPanel({
   })
   const modelTiers = modelCatalog?.models ?? []
   const unavailableModels = modelCatalog?.unavailable ?? []
+  /*
+   * §V2-S18 `[17:16]` — WHERE THE POPOVER IS CUT, decided on the server.
+   *
+   * The frame heads three rows "Best models" and puts the rest behind **Show
+   * more**. The bound is `BEST_MODELS_VISIBLE`, and it is served rather than
+   * re-derived here on purpose: a `slice(0, 3)` in this component plus a 3 in
+   * `model-tiers.ts` is one fact with two copies, and the copies drift the day
+   * a fourth tier lands. `models` is still the whole catalogue — the trigger's
+   * label is looked up in it, and a tier hidden behind the disclosure is still
+   * a tier you may already have chosen.
+   */
+  const bestModels = modelCatalog?.best ?? []
+  const moreModels = modelCatalog?.more ?? []
+  /**
+   * §V2-S18 `[17:16]` — which row's HOVER CARD is open.
+   *
+   * One at a time, held here rather than in each row, because two cards up at
+   * once is not a state the frame has and would overlap illegibly.
+   */
+  const [hoveredModel, setHoveredModel] = useState<string | null>(null)
+  /** The composer, so a word suggestion can put focus back where it was. */
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  /*
+   * §V2-S17/S22 frames `16:32` / `21:15` — the starter cards, for this surface.
+   *
+   * THE SURFACE IS PART OF THE KEY, and so is the workspace, because the cards
+   * differ by both and a shared key would serve a list's cards on the
+   * workspace page. `currentView` is the hint the panel is already given about
+   * where it was opened — `describeCurrentView(routeId)` in the app shell — and
+   * it is mapped to the server's two surfaces here rather than sent raw, so a
+   * new view string cannot silently become a surface the server does not know.
+   *
+   * TWO surfaces, because two is what the shell can produce. The list route's
+   * segments are all parameters, so the hint there is the literal `'list'`; the
+   * /ai page passes no hint at all. A task is a sheet over the list route, not
+   * a route, so there is no task hint to map — and a third surface nothing
+   * could send would be a branch that exists only to be listed.
+   *
+   * `staleTime` is the global 30s. That is right for this: the overdue count
+   * moves over a day, not over a keystroke, and a starter row that re-fetched
+   * on every render would flicker between two sets while somebody read it.
+   */
+  const starterSurface: 'workspace' | 'list' = currentView === 'list' ? 'list' : 'workspace'
+  const { data: starters } = useQuery({
+    queryKey: ['ai-starters', workspaceId, starterSurface],
+    queryFn: () =>
+      api<StarterResponse>(`/ai/starters?workspaceId=${workspaceId}&surface=${starterSurface}`),
+    enabled: !!workspaceId,
+    retry: false,
+  })
 
   /** §V2-S18 `[17:32]` — the preferred AI, read from the server, not the browser. */
   const preferenceQuery = useQuery({
@@ -627,8 +1049,9 @@ export function AiPanel({
       // `isFetching` rather than `isPending`: a disabled query is "pending"
       // forever, and every chip would be a skeleton that never resolves.
       pending: refsQuery.isFetching,
+      workspaceId,
     }),
-    [refsQuery.data, refsQuery.isFetching],
+    [refsQuery.data, refsQuery.isFetching, workspaceId],
   )
 
   useEffect(() => {
@@ -905,17 +1328,49 @@ export function AiPanel({
                 {t('aiPanel.greeting')}
               </div>
             </div>
+            {/*
+              §V2-S17/S22 frames `16:32` and `21:15` — THE STARTER CARDS.
+
+              Four cards, each a title over one line, in a grid — and, between
+              those two frames, four DIFFERENT cards on the same surface in the
+              same session. The set is the feature; the wording is not.
+
+              What was here was `SUGGESTED_PROMPT_KEYS`: five translation keys
+              in a `const` array, the same five in every workspace, for every
+              person, for ever. There was no input that could have changed
+              them. Now the set comes from `GET /ai/starters`, which reads how
+              much of YOUR work is overdue, how much is open, and which surface
+              asked — and each card arrives with the fact that put it there.
+
+              `data-because` carries that fact onto the DOM. Without it, "the
+              cards changed" is only ever two different lists of ids, which is
+              also exactly what a set rotating on a timer would look like.
+            */}
             <div className="space-y-2">
               <p className="text-xs text-muted-foreground px-8">{t('aiPanel.tryAsking')}</p>
-              {SUGGESTED_PROMPT_KEYS.map((promptKey) => (
-                <button
-                  key={promptKey}
-                  onClick={() => sendMessage(t(promptKey))}
-                  className="w-full text-left text-xs px-3 py-2 rounded-lg border border-border hover:bg-muted/50 transition-colors ml-8"
-                >
-                  {t(promptKey)}
-                </button>
-              ))}
+              <div
+                className="ml-8 grid grid-cols-2 gap-2"
+                data-testid="ai-starters"
+                data-contextual={starters?.contextual ?? 0}
+                data-surface={starterSurface}
+              >
+                {(starters?.cards ?? []).map((card) => (
+                  <button
+                    key={card.id}
+                    data-testid={`ai-starter-${card.id}`}
+                    data-because={card.because}
+                    onClick={() => sendMessage(t(card.promptKey as TranslationKey))}
+                    className="rounded-lg border border-border px-3 py-2 text-left transition-colors hover:bg-muted/50"
+                  >
+                    <span className="block text-xs font-medium text-foreground">
+                      {t(card.titleKey as TranslationKey)}
+                    </span>
+                    <span className="mt-0.5 block text-[11px] text-muted-foreground">
+                      {t(card.subtitleKey as TranslationKey)}
+                    </span>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         )}
@@ -1106,17 +1561,15 @@ export function AiPanel({
                 >
                   {t('aiModels.bestModels')}
                 </p>
-                {modelTiers.map((m) => (
-                  <button
+                {bestModels.map((m) => (
+                  <ModelPickerRow
                     key={m.id}
-                    type="button"
-                    role="option"
-                    aria-selected={tier === m.id}
-                    data-testid={`ai-model-option-${m.id}`}
-                    data-available="true"
-                    data-selected={tier === m.id ? 'true' : 'false'}
-                    data-preferred={preferredTier === m.id ? 'true' : 'false'}
-                    onClick={() => {
+                    model={m}
+                    selected={tier === m.id}
+                    preferred={preferredTier === m.id}
+                    hovered={hoveredModel === m.id}
+                    onHover={setHoveredModel}
+                    onPick={() => {
                       // Choosing changes THIS conversation. Persisting is the
                       // separate, explicit act below — `[17:28]`–`[17:32]`
                       // describes both, and conflating them means every idle
@@ -1124,52 +1577,8 @@ export function AiPanel({
                       setTier(m.id)
                       setPickerOpen(false)
                     }}
-                    className="flex w-full items-start gap-2 px-3 py-2 text-left hover:bg-muted/60"
-                  >
-                    <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />
-                    <span className="min-w-0 flex-1">
-                      <span className="flex items-center gap-1.5">
-                        <span className="text-xs font-medium text-foreground">{m.label}</span>
-                        {preferredTier === m.id && (
-                          <span
-                            data-testid={`ai-model-preferred-badge-${m.id}`}
-                            className="inline-flex items-center gap-0.5 rounded bg-primary/10 px-1 py-px text-[10px] text-primary"
-                          >
-                            <Star className="h-2.5 w-2.5" />
-                            {t('aiModels.preferred')}
-                          </span>
-                        )}
-                      </span>
-                      <span className="mt-0.5 block text-[11px] text-muted-foreground">{m.hint}</span>
-                      {/*
-                        The frame's hover card, rendered inline instead. The
-                        same two bars, always visible: a measurement you have to
-                        hover to see is one nobody compares, and comparing is
-                        the entire reason the bars are there.
-                      */}
-                      <span className="mt-1 block space-y-0.5">
-                        {(
-                          [
-                            ['speed', m.speed, t('aiModels.speed')],
-                            ['intelligence', m.intelligence, t('aiModels.intelligence')],
-                          ] as const
-                        ).map(([key, score, label]) => (
-                          <span key={key} className="flex items-center gap-1.5">
-                            <span className="w-16 shrink-0 text-[10px] text-muted-foreground">{label}</span>
-                            <span className="h-1 flex-1 overflow-hidden rounded-full bg-muted">
-                              <span
-                                data-testid={`ai-model-bar-${key}-${m.id}`}
-                                data-score={score}
-                                className="block h-full rounded-full bg-primary"
-                                style={{ width: `${Math.min(Math.max(score, 0), 5) * 20}%` }}
-                              />
-                            </span>
-                          </span>
-                        ))}
-                      </span>
-                    </span>
-                    {tier === m.id && <Check className="mt-0.5 h-3.5 w-3.5 shrink-0 text-primary" />}
-                  </button>
+                    t={t}
+                  />
                 ))}
 
                 <div className="border-t border-border">
@@ -1189,6 +1598,29 @@ export function AiPanel({
                   </button>
                   {showMoreModels && (
                     <div data-testid="ai-model-more" className="pb-1">
+                      {/*
+                        `[17:20]` — what the disclosure reveals. In ClickUp it
+                        is more MODELS; here it is both, and in that order: any
+                        routable tier past the frame's three, then the two
+                        providers this product has no client for. The same row
+                        component draws the routable ones, so a tier cannot
+                        behave differently for having been hidden.
+                      */}
+                      {moreModels.map((m) => (
+                        <ModelPickerRow
+                          key={m.id}
+                          model={m}
+                          selected={tier === m.id}
+                          preferred={preferredTier === m.id}
+                          hovered={hoveredModel === m.id}
+                          onHover={setHoveredModel}
+                          onPick={() => {
+                            setTier(m.id)
+                            setPickerOpen(false)
+                          }}
+                          t={t}
+                        />
+                      ))}
                       {unavailableModels.map((m) => (
                         <div
                           key={m.id}
@@ -1243,8 +1675,46 @@ export function AiPanel({
         </div>
         {/* relative z-50 lifts the composer above the fixed support-widget launcher
             (bottom-6 right-6 z-40), which otherwise intercepts clicks on the Send button. */}
+        {/*
+          §V2-S18 `17:42`–`17:50` — the word bar, above the input as the frames
+          put it.
+
+          Three words, and they change as you type. Rendered only while there is
+          something to continue and while the composer can be typed in at all: a
+          bar of suggestions over a disabled input is a control that cannot be
+          used, floating above the one place that already says so.
+
+          `onMouseDown` with `preventDefault` rather than `onClick`, because a
+          click steals focus from the input first and the caret would jump to
+          the end of the text — which is the wrong place when the suggestion is
+          completing a half-typed word.
+        */}
+        {wordSuggestions.length > 0 && aiAvailable && !isStreaming && (
+          <div
+            data-testid="ai-word-suggestions"
+            data-count={wordSuggestions.length}
+            className="relative z-50 mb-1 inline-flex items-center gap-1 rounded-lg bg-foreground px-2 py-1 shadow-lg"
+          >
+            {wordSuggestions.map((word) => (
+              <button
+                key={word}
+                type="button"
+                data-testid={`ai-word-suggestion-${word.replace(/\s+/g, '-')}`}
+                onMouseDown={(e) => {
+                  e.preventDefault()
+                  setInput((prev) => applyWordSuggestion(prev, word))
+                  inputRef.current?.focus()
+                }}
+                className="rounded px-2 py-0.5 text-xs text-background hover:bg-background/20"
+              >
+                {word}
+              </button>
+            ))}
+          </div>
+        )}
         <div className="relative z-50 flex gap-2">
           <Input
+            ref={inputRef}
             value={input}
             data-testid="ai-composer-input"
             /*

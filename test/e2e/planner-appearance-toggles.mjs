@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 20
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -465,6 +465,81 @@ try {
     confirmedSave && posted.at(-1)?.title === `School run ${TAG}`,
     'and confirming it posts the same event the draft was holding',
     `the page sent ${JSON.stringify(posted.at(-1) ?? null)}`,
+  )
+
+  // ───────────────────────────────────────────────────────────────────────────
+  console.log('\n▶ §V2-15a Grid size, frame `14:05` — the first control on this page')
+
+  /*
+   * The ledger had `M | Appearance: Grid size`. Frame `14:05` puts it ABOVE
+   * Event style with three previews — Default · Large · XL — under "Choose how
+   * large events and time slots appear in the grid".
+   *
+   * IT IS MEASURED ON THE GRID, not on the button. A three-way picker that
+   * remembers its choice and changes nothing is the easiest facade in this
+   * audit to build, and the one the clip-setup panel's fourteen checks were
+   * written to avoid; the same rule applies here.
+   */
+  await openSettings('appearance')
+  const sizeIds = await page
+    .locator('[data-testid="planner-settings-appearance"] [data-testid^="planner-grid-size-"]:not([data-testid*="preview"])')
+    .evaluateAll((els) =>
+      els.map((el) => ({
+        id: el.getAttribute('data-testid'),
+        px: Number(el.getAttribute('data-hour-px')),
+        pressed: el.getAttribute('aria-pressed') === 'true',
+      })),
+    )
+  chk(
+    JSON.stringify(sizeIds.map((s) => s.id)) ===
+      JSON.stringify(['planner-grid-size-default', 'planner-grid-size-large', 'planner-grid-size-xl']) &&
+      sizeIds.filter((s) => s.pressed).length === 1 &&
+      sizeIds[0].pressed,
+    'it offers the frame\'s three sizes in the frame\'s order, with exactly one chosen',
+    `the row held ${JSON.stringify(sizeIds)} — frame \`14:05\` draws Default, Large, XL`,
+  )
+
+  /*
+   * The hour row's real height, taken from the GAP BETWEEN TWO CONSECUTIVE
+   * hour labels rather than from a style attribute. A style says what was
+   * asked for; the gap says what was drawn.
+   */
+  const hourGap = async () => {
+    const tops = await page
+      .locator('[data-testid="planner-hour-label"]')
+      .evaluateAll((els) => els.slice(0, 3).map((el) => el.getBoundingClientRect().y))
+    return tops.length >= 2 ? Math.round(tops[1] - tops[0]) : 0
+  }
+  await closeSettings()
+  const defaultGap = await hourGap()
+
+  await openSettings('appearance')
+  await page.locator('[data-testid="planner-grid-size-large"]').click()
+  await closeSettings()
+  const grew = await waitUntil(async () => (await hourGap()) > defaultGap, { timeoutMs: 8000 })
+  const largeGap = await hourGap()
+  chk(
+    grew && largeGap > defaultGap,
+    `choosing Large makes an hour taller on the real grid — ${defaultGap}px became ${largeGap}px`,
+    `the hour row measured ${defaultGap}px before and ${largeGap}px after; a size picker that ` +
+      'changes no pixel is the mirror defect with a preview drawn on it',
+  )
+
+  /*
+   * AND THE NUMBER THE SWATCH ADVERTISES IS THE NUMBER THE GRID USED.
+   *
+   * `data-hour-px` comes from `GRID_SIZES`, which the control and the planner
+   * both import from one declaration. If somebody ever gives the page its own
+   * copy of those numbers — the duplicated-list defect, with integers instead
+   * of strings — the picker would go on looking right while setting a size the
+   * grid does not draw, and only this comparison would notice.
+   */
+  const largeDeclared = sizeIds.find((s) => s.id === 'planner-grid-size-large')?.px
+  chk(
+    Number.isFinite(largeDeclared) && largeGap === largeDeclared,
+    `and it is the size the swatch advertises — ${largeDeclared}px declared, ${largeGap}px drawn`,
+    `the swatch declared ${largeDeclared}px and the grid drew ${largeGap}px — the control and its ` +
+      'reader are meant to share one definition of what "Large" means',
   )
 
   await ctx.close()

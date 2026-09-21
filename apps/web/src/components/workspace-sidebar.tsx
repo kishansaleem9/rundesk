@@ -501,7 +501,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
    * and once that stopped being consulted both were values written on every
    * drag that no reader honoured.
    */
-  type DragPayload = { kind: 'project' | 'list'; id: string }
+  type DragPayload = { kind: 'project' | 'list' | 'folder'; id: string }
   const [dragItem, setDragItem] = useState<DragPayload | null>(null)
   const [dropTarget, setDropTarget] = useState<string | null>(null)
 
@@ -531,8 +531,152 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const canDropOn = (target: { kind: 'folder' | 'space' | 'project'; id: string }) => {
     if (!dragItem) return false
     if (dragItem.kind === 'project') return target.kind === 'folder' || target.kind === 'space'
-    return target.kind === 'project'
+    if (dragItem.kind === 'list') return target.kind === 'project'
+    /*
+     * A FOLDER HAS NOWHERE ELSE TO LIVE. It is draggable only so it can be
+     * reordered among its siblings (the gaps below), and Rundesk has no route
+     * that moves one between spaces.
+     *
+     * Written as an explicit `false` rather than left to fall through the
+     * `list` branch, which is what it used to do the moment `folder` joined
+     * this union: `return target.kind === 'project'` would have accepted a
+     * folder dropped on a project, and `dropOn`'s else-branch would then have
+     * posted it to `/lists/<folderId>/move`. A 404 on a route that does exist,
+     * for an id that is not a list.
+     */
+    return false
   }
+
+  /*
+   * §V2-S13 `| M | Sidebar: drag-reorder …` — the OTHER gesture.
+   *
+   * Dropping ON a row asks "put this inside that" and is the move above.
+   * Dropping BETWEEN two rows asks "put this here in the order", which is a
+   * different question with a different write — `position`, not `folderId` —
+   * so it gets its own targets: a thin strip rendered between siblings, armed
+   * only while something of the right kind is in flight.
+   *
+   * THE PREDICATE ASKS ABOUT THE KIND AND NOTHING ELSE, which is the lesson
+   * `canDropOn` above is written out at length for. "Is this item already a
+   * sibling of this container" is answerable only from tree data that is a
+   * refetch behind every move, and the version of this that asked it refused
+   * the drop from the client and sent no request at all. So the gap accepts
+   * any project at a project gap, and `dropAtGap` deals with where it came
+   * from by MOVING it first — a gesture that lands rather than one that
+   * quietly does nothing because the browser is one request behind.
+   */
+  type Gap = {
+    itemKind: 'project' | 'list' | 'folder'
+    containerKind: 'space' | 'folder' | 'project'
+    containerId: string
+    /** The space the container belongs to — needed by `/projects/:id/move`. */
+    spaceId: string
+    /** Where in the container's current sibling list the item should land. */
+    index: number
+    /** The sibling ids as this render drew them, in the order it drew them. */
+    siblingIds: string[]
+  }
+  const gapId = (gap: Pick<Gap, 'itemKind' | 'containerId' | 'index'>) =>
+    `tree-gap-${gap.itemKind}-${gap.containerId}-${gap.index}`
+  const canDropAtGap = (gap: Pick<Gap, 'itemKind'>) => !!dragItem && dragItem.kind === gap.itemKind
+
+  const reorderSiblings = async (
+    kind: 'project' | 'list' | 'folder',
+    gap: Pick<Gap, 'containerKind' | 'containerId'>,
+    orderedIds: string[],
+  ) => {
+    if (kind === 'list') {
+      /*
+       * Lists keep the route they already had. `POST /lists/project/:id/reorder`
+       * writes `lists.position` and `getListsByProject` orders by it — the
+       * project shell page has used both since it was written. A second writer
+       * for one column is the duplicated-logic defect, so the sidebar borrows
+       * the existing one rather than routing lists through the new endpoint.
+       */
+      await api(`/lists/project/${gap.containerId}/reorder`, { method: 'POST', body: { orderedIds } })
+      return
+    }
+    await api(`/workspaces/${workspaceId}/sidebar/reorder`, {
+      method: 'POST',
+      body: {
+        kind,
+        containerKind: gap.containerKind as 'space' | 'folder',
+        containerId: gap.containerId,
+        orderedIds,
+      },
+    })
+  }
+
+  const dropAtGap = async (gap: Gap) => {
+    const item = dragItem
+    setDragItem(null)
+    setDropTarget(null)
+    if (!item || !canDropAtGap(gap)) return
+    try {
+      const current = gap.siblingIds
+      if (!current.includes(item.id)) {
+        /*
+         * It came from somewhere else. Move it in FIRST, then place it — so the
+         * gesture the person made ("put it here, in this position") is the
+         * gesture that happens, rather than a refusal they cannot see.
+         */
+        if (item.kind === 'project') {
+          await api(`/projects/${item.id}/move`, {
+            method: 'POST',
+            body:
+              gap.containerKind === 'folder'
+                ? { spaceId: gap.spaceId, folderId: gap.containerId }
+                : { spaceId: gap.containerId, folderId: null },
+          })
+        } else if (item.kind === 'list') {
+          await api(`/lists/${item.id}/move`, { method: 'POST', body: { projectId: gap.containerId } })
+        } else {
+          // No route moves a folder between spaces, and a drop that does
+          // nothing in silence is the bug this whole section is about.
+          toast.error(t('nav.reorderSameSpaceOnly'))
+          return
+        }
+      }
+      const without = current.filter((id) => id !== item.id)
+      const next = [...without.slice(0, gap.index), item.id, ...without.slice(gap.index)]
+      await reorderSiblings(item.kind, gap, next)
+      /*
+       * NOTHING IS REDRAWN OPTIMISTICALLY. The order on screen after this is
+       * the order the server answered with, because the whole point of the
+       * write is that it outlives the tab — a tree that rearranges itself and
+       * tells the server nothing is the same picture as one that worked, and
+       * the person only finds out on the next load.
+       */
+      for (const key of ['spaces', 'space-tree', 'projects', 'folders', 'lists', 'move-targets']) {
+        await qc.invalidateQueries({ queryKey: [key] })
+      }
+      toast.success(t('nav.reordered'))
+    } catch (err) {
+      toast.error(err instanceof Error && err.message ? err.message : t('nav.reorderFailed'))
+    }
+  }
+
+  /** The handlers every between-rows reorder strip shares. */
+  const gapProps = (gap: Gap) => ({
+    'data-testid': gapId(gap),
+    'data-gap-kind': gap.itemKind,
+    'data-gap-index': String(gap.index),
+    onDragOver: (e: React.DragEvent) => {
+      if (!canDropAtGap(gap)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = 'move' as const
+      const id = gapId(gap)
+      if (dropTarget !== id) setDropTarget(id)
+    },
+    onDragLeave: () => setDropTarget((prev) => (prev === gapId(gap) ? null : prev)),
+    onDrop: (e: React.DragEvent) => {
+      e.preventDefault()
+      e.stopPropagation()
+      void dropAtGap(gap)
+    },
+    'data-drop-active': dropTarget === gapId(gap) && canDropAtGap(gap) ? 'true' : undefined,
+  })
 
   const dropOn = async (target: { kind: 'folder' | 'space' | 'project'; id: string; spaceId: string }) => {
     const item = dragItem
@@ -917,7 +1061,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
            * place anybody looks for them.
            */
           const [projects, folders, spaceLists] = await Promise.all([
-            api<Array<{ id: string; name: string; folderId?: string | null }>>(`/projects/space/${space.id}`),
+            api<Array<{ id: string; name: string; folderId?: string | null; position?: number; createdAt?: string }>>(
+              `/projects/space/${space.id}`,
+            ),
             api<Array<{ id: string; name: string; visibility?: string | null }>>(`/spaces/${space.id}/folders`).catch(() => []),
             api<Array<{ id: string; name: string; projectId: string; visibility?: string | null }>>(
               `/lists/space/${space.id}`,
@@ -929,7 +1075,27 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               return { ...project, lists }
             }),
           )
-          return { ...space, projects: projectsWithLists, folders, spaceLists }
+          /*
+           * §V2-S13 — THE READER `projects.position` never had.
+           *
+           * The column has existed since the table did. Nothing wrote it
+           * (`updateProject` whitelists its updatable columns and leaves it
+           * out) and nothing read it — `getProjectsBySpace` has no `ORDER BY`
+           * at all, so the tree drew whatever order Postgres handed back, which
+           * changes as rows are updated and after a vacuum. Sorting here is
+           * what makes the drag-reorder write mean something; without it the
+           * new endpoint would be the mirror defect with a fresh coat on.
+           *
+           * The same tiebreak the server uses when it orders projects
+           * (`position` then `createdAt`), so the two cannot disagree about
+           * what "first" means for two projects that share a position.
+           */
+          const ordered = [...projectsWithLists].sort(
+            (a, b) =>
+              (a.position ?? 0) - (b.position ?? 0) ||
+              String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')),
+          )
+          return { ...space, projects: ordered, folders, spaceLists }
         }),
       )
       return projectGroups
@@ -1816,6 +1982,10 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     CHANNELS, direct messages, aur spaces." Directly under AI
                     Chats, exactly as both frames stack them. */}
                 {featureEnabled(FLAGS.CHAT) && <ChannelsSection workspaceId={workspaceId} />}
+                {/* §V2-S07 frames `00:05` / `06:25` — "…CHANNELS, direct
+                    messages, aur spaces" `[06:21]`, in that order, and both
+                    frames stack Direct Messages directly under Channels. */}
+                {featureEnabled(FLAGS.CHAT) && <DirectMessagesSection workspaceId={workspaceId} />}
                 {/* A1.7 — without this row a privately shared list is only
                     reachable by link, since it is hidden from the tree below. */}
                 <NavLink to={"/app/$workspaceId/shared" as any} params={{ workspaceId }} icon={Users} label={t('nav.sharedWithMe')} compact favorite={favoriteProps('Shared with me', `/app/${workspaceId}/shared`)} />
@@ -1957,6 +2127,35 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
               {t('nav.recentHint')}
             </div>
             {visibleTree?.map((space) => {
+              /*
+               * §V2-S13 — one reorder strip, wherever siblings are drawn.
+               *
+               * Four places draw an ordered row of siblings (a space's
+               * projects, a folder's projects, a project's lists, a space's
+               * folders) and all four get the SAME strip from here rather than
+               * four hand-written copies — the ordering rule has to be one
+               * fact, or the four drift and three of them are subtly wrong.
+               *
+               * It is 6px of nothing until a drag of the matching kind starts,
+               * and it never renders while the tree filter is on: the filtered
+               * tree is a subset, so `siblingIds` there would be a partial
+               * order and the write would reorder a list the person cannot
+               * see all of.
+               */
+              const renderGap = (gap: Gap) =>
+                filtering ? null : (
+                  <div
+                    key={gapId(gap)}
+                    aria-hidden
+                    className={cn(
+                      'h-1.5 -my-0.5 rounded transition-colors',
+                      canDropAtGap(gap) && 'bg-border/40',
+                      dropTarget === gapId(gap) && canDropAtGap(gap) && 'h-1.5 bg-brand-500',
+                    )}
+                    {...gapProps(gap)}
+                  />
+                )
+
               /*
                * §G15-10 — one list row, wherever it hangs.
                *
@@ -2157,7 +2356,31 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                   </div>
                   {projectOpen(project.id) && (
                     <div className="ml-5 space-y-0.5">
-                      {project.lists.map((list) => renderListNode(list, project.id))}
+                      {project.lists.map((list, i) => (
+                        <Fragment key={list.id}>
+                          {renderGap({
+                            itemKind: 'list',
+                            containerKind: 'project',
+                            containerId: project.id,
+                            spaceId: space.id,
+                            index: i,
+                            siblingIds: project.lists.map((l) => l.id),
+                          })}
+                          {renderListNode(list, project.id)}
+                        </Fragment>
+                      ))}
+                      {/* The last gap, so something can be dropped AFTER the
+                          final row. Without it the bottom position is the one
+                          place in the order nothing can be moved to. */}
+                      {project.lists.length > 0 &&
+                        renderGap({
+                          itemKind: 'list',
+                          containerKind: 'project',
+                          containerId: project.id,
+                          spaceId: space.id,
+                          index: project.lists.length,
+                          siblingIds: project.lists.map((l) => l.id),
+                        })}
                       {project.lists.length === 0 && (
                         <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noLists')}</div>
                       )}
@@ -2345,11 +2568,20 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                 </div>
                 {spaceOpen(space.id) && (
                   <div className="ml-6 space-y-0.5">
-                    {(space.folders ?? []).map((folder) => {
+                    {(space.folders ?? []).map((folder, folderIndex) => {
                       const folderProjects = space.projects.filter((p) => p.folderId === folder.id)
                       const open = filtering || (expandedFolders[folder.id] ?? true)
+                      const folderIds = (space.folders ?? []).map((f) => f.id)
                       return (
                         <div key={folder.id} className="space-y-0.5">
+                          {renderGap({
+                            itemKind: 'folder',
+                            containerKind: 'space',
+                            containerId: space.id,
+                            spaceId: space.id,
+                            index: folderIndex,
+                            siblingIds: folderIds,
+                          })}
                           {/* §V2-S12 `[08:23]` — the folder is the drop target
                               she names. `data-drop-active` only ever appears
                               while a drop here would really move something,
@@ -2358,11 +2590,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <div
                             className={cn(
                               'group flex items-center gap-1 rounded-md',
+                              dragItem?.kind === 'folder' && dragItem.id === folder.id && 'opacity-50',
                               dropTarget === folder.id &&
                                 canDropOn({ kind: 'folder', id: folder.id }) &&
                                 'ring-1 ring-brand-500 bg-accent/20',
                             )}
                             data-testid={`tree-folder-${folder.id}`}
+                            // A folder is draggable only for the gaps below:
+                            // `canDropOn` answers `false` for every row target,
+                            // so this can reorder and cannot re-parent.
+                            {...dragProps({ kind: 'folder', id: folder.id })}
                             {...dropProps({ kind: 'folder', id: folder.id, spaceId: space.id })}
                           >
                             <button
@@ -2441,7 +2678,28 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                             // INSIDE this folder, rather than inferring it from
                             // a database column the tree may not have read yet.
                             <div className="ml-4 space-y-0.5" data-testid={`tree-folder-children-${folder.id}`}>
-                              {folderProjects.map((project) => renderProjectNode(project))}
+                              {folderProjects.map((project, i) => (
+                                <Fragment key={project.id}>
+                                  {renderGap({
+                                    itemKind: 'project',
+                                    containerKind: 'folder',
+                                    containerId: folder.id,
+                                    spaceId: space.id,
+                                    index: i,
+                                    siblingIds: folderProjects.map((p) => p.id),
+                                  })}
+                                  {renderProjectNode(project)}
+                                </Fragment>
+                              ))}
+                              {folderProjects.length > 0 &&
+                                renderGap({
+                                  itemKind: 'project',
+                                  containerKind: 'folder',
+                                  containerId: folder.id,
+                                  spaceId: space.id,
+                                  index: folderProjects.length,
+                                  siblingIds: folderProjects.map((p) => p.id),
+                                })}
                               {folderProjects.length === 0 && (
                                 <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.emptyFolder')}</div>
                               )}
@@ -2450,7 +2708,39 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         </div>
                       )
                     })}
-                    {ungrouped.map((project) => renderProjectNode(project))}
+                    {/* After the last folder, so a folder can be moved to the
+                        bottom of the space's folder list. */}
+                    {(space.folders ?? []).length > 0 &&
+                      renderGap({
+                        itemKind: 'folder',
+                        containerKind: 'space',
+                        containerId: space.id,
+                        spaceId: space.id,
+                        index: (space.folders ?? []).length,
+                        siblingIds: (space.folders ?? []).map((f) => f.id),
+                      })}
+                    {ungrouped.map((project, i) => (
+                      <Fragment key={project.id}>
+                        {renderGap({
+                          itemKind: 'project',
+                          containerKind: 'space',
+                          containerId: space.id,
+                          spaceId: space.id,
+                          index: i,
+                          siblingIds: ungrouped.map((p) => p.id),
+                        })}
+                        {renderProjectNode(project)}
+                      </Fragment>
+                    ))}
+                    {ungrouped.length > 0 &&
+                      renderGap({
+                        itemKind: 'project',
+                        containerKind: 'space',
+                        containerId: space.id,
+                        spaceId: space.id,
+                        index: ungrouped.length,
+                        siblingIds: ungrouped.map((p) => p.id),
+                      })}
                     {/*
                       §G15-10 — the lists that belong to the SPACE, not to a
                       project in it.
@@ -2461,6 +2751,19 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                       space's hidden container, which the project endpoint never
                       returns, so without this they would be openable by URL and
                       findable by search and absent from the tree.
+                    */}
+                    {/*
+                      NO REORDER STRIPS HERE, and the reason is recorded rather
+                      than left as an unexplained absence. Every one of these
+                      lists lives in the space's single hidden container, so
+                      their order is `lists.position` within that container and
+                      `POST /lists/project/:id/reorder` would in principle do
+                      it — but that route demands `orderedIds` contain EVERY
+                      list of the project, and `/lists/space/:id` applies a
+                      visibility filter this column does not. A viewer who
+                      cannot see one of them would send a short list and be
+                      refused, every time, with no way to tell why. That is a
+                      real gap, not a decision that these cannot be ordered.
                     */}
                     {(space.spaceLists ?? []).map((list) => (
                       <div key={list.id} data-testid={`space-list-${list.id}`}>
@@ -3201,6 +3504,226 @@ function ChannelsSection({ workspaceId }: { workspaceId: string }) {
         >
           <Plus className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">{t('nav.addChannel')}</span>
+        </button>
+      )}
+    </div>
+  )
+}
+
+/**
+ * §V2-S07 frames `00:05` / `06:25` — what a direct message is CALLED.
+ *
+ * `dmLabel` is every other participant joined with commas for a group DM and
+ * the single peer's name for a 1:1; `dmPeerName` is the first peer alone. Four
+ * places had this two-step fallback written out by hand — the chat rail, the
+ * chat page's header, its forward picker, and the Direct Messages section
+ * below — and a fifth copy is how one conversation ends up with two names on
+ * two surfaces.
+ *
+ * IT LIVES HERE RATHER THAN IN `chat-sidebar.tsx`, which is the more obvious
+ * home, for a bundling reason worth stating: this file is imported by
+ * `routes/app.tsx` and is therefore in the shell chunk on every `/app/*` page,
+ * including the chat page. Importing a 20-line helper the other way would have
+ * dragged the whole 800-line chat rail into that shell chunk for every page in
+ * the product. This direction costs nothing.
+ *
+ * `fallback` is the caller's word for "a DM with nobody in it", which is a REAL
+ * state and not a defensive `?? ''`: `chat.service.ts` builds `peers` by
+ * excluding the signed-in user, so a DM whose only remaining member is you
+ * arrives with `dmLabel` and `dmPeerName` both null. Frame `06:25` draws that
+ * row as `Hamda Tahir — You`; Rundesk cannot create one at all, because
+ * `ensureDmChannel` refuses `currentUserId === peerUserId` outright.
+ */
+export function dmDisplayName(
+  channel: { dmLabel?: string | null; dmPeerName?: string | null },
+  fallback: string,
+) {
+  return channel.dmLabel ?? channel.dmPeerName ?? fallback
+}
+
+/**
+ * §V2-S07 frames `00:05` and `06:25` — **Direct Messages**, the section
+ * directly under Channels.
+ *
+ * Both frames draw TWO sections, not one: `Channels` over `# General - Leo`,
+ * `# Welcome` and `+ Add Channel`, then `Direct Messages` over `suleman`,
+ * `Hamda Tahir — You` and `+ New message`. `[06:21]`: *"yahan saari chats show
+ * hoti hain — yeh group communication channels, DIRECT MESSAGES, aur SPACES."*
+ * Named in the same sentence as its sibling and drawn as its own heading.
+ *
+ * The ledger had this as `P | Sidebar Direct Messages — exists on the chat
+ * page, not the workspace tree`, and that was exactly right: `chat_channels.is_dm`
+ * is a real column, `GET …/chat/channels` returns both kinds behind it, and the
+ * chat page has split them since it was written. The workspace tree rendered
+ * neither, then one.
+ *
+ * WHY NOT ONE SECTION WITH A DIVIDER. The two have different creation
+ * gestures — `+ Add Channel` takes a name, `+ New message` takes a PERSON —
+ * and folding them together would make one button do a thing it cannot do.
+ * They also have different row content: a channel is `#` plus a name, a DM is
+ * a face plus whoever is in it.
+ *
+ * THE SAME QUERY KEY as `ChannelsSection` and as the chat page, deliberately:
+ * one request answers all three, and a DM started here appears there without a
+ * second fetch or a second idea of what the list contains.
+ */
+function DirectMessagesSection({ workspaceId }: { workspaceId: string }) {
+  const { t } = useTranslation()
+  const navigate = useNavigate()
+  const qc = useQueryClient()
+  const [picking, setPicking] = useState(false)
+  const [query, setQuery] = useState('')
+  const [starting, setStarting] = useState(false)
+
+  const channelsQuery = useQuery({
+    queryKey: ['chat-channels', workspaceId],
+    queryFn: () =>
+      api<
+        Array<{
+          id: string
+          name: string | null
+          isDm?: boolean
+          dmLabel?: string | null
+          dmPeerName?: string | null
+          dmPeerAvatarUrl?: string | null
+        }>
+      >(`/workspaces/${workspaceId}/chat/channels`),
+    enabled: !!workspaceId,
+  })
+  const dms = (channelsQuery.data ?? []).filter((c) => c.isDm)
+
+  /*
+   * Only fetched once the picker is open. `+ New message` needs the workspace
+   * roster and nothing else on this section does, so a sidebar that nobody
+   * starts a DM from should not pay for it on every load.
+   */
+  const membersQuery = useQuery({
+    queryKey: ['workspace-members', workspaceId],
+    queryFn: () =>
+      api<Array<{ userId: string; displayName?: string | null; email?: string | null; avatarUrl?: string | null }>>(
+        `/workspaces/${workspaceId}/members`,
+      ),
+    enabled: !!workspaceId && picking,
+  })
+  const needle = query.trim().toLowerCase()
+  const candidates = (membersQuery.data ?? []).filter((m) =>
+    needle ? `${m.displayName ?? ''} ${m.email ?? ''}`.toLowerCase().includes(needle) : true,
+  )
+
+  const startDm = async (peerUserId: string) => {
+    if (starting) return
+    setStarting(true)
+    try {
+      const created = await api<{ id: string }>(`/workspaces/${workspaceId}/chat/dms`, {
+        method: 'POST',
+        body: { peerUserId },
+      })
+      await qc.invalidateQueries({ queryKey: ['chat-channels', workspaceId] })
+      setPicking(false)
+      setQuery('')
+      if (created?.id) {
+        navigate({
+          to: '/app/$workspaceId/chat',
+          params: { workspaceId },
+          search: { channel: created.id },
+        })
+      }
+    } catch (err) {
+      // `ensureDmChannel` refuses a DM with yourself and one with a non-member,
+      // in its own words. Showing them beats a generic failure, because both
+      // are things the person can act on.
+      toast.error(err instanceof Error && err.message ? err.message : t('nav.newMessageError'))
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  /*
+   * Same rule as Channels: nothing before the first answer and nothing if it
+   * never came. A headed, empty "Direct Messages" is the claim "you have no
+   * conversations", and neither "not yet" nor "that request failed" is it.
+   */
+  if (channelsQuery.isLoading || channelsQuery.isError) return null
+
+  return (
+    <div className="pt-1" data-testid="sidebar-direct-messages" data-count={dms.length}>
+      <div className="px-2 py-1 text-[10px] uppercase tracking-wider text-muted-foreground">
+        {t('nav.directMessages')}
+      </div>
+      {dms.map((dm) => {
+        const label = dmDisplayName(dm, t('chat.directMessage'))
+        return (
+          <Link
+            key={dm.id}
+            to="/app/$workspaceId/chat"
+            params={{ workspaceId }}
+            search={{ channel: dm.id }}
+            data-testid={`sidebar-dm-${dm.id}`}
+            title={label}
+            className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+          >
+            {dm.dmPeerAvatarUrl ? (
+              <img src={dm.dmPeerAvatarUrl} alt="" className="h-4 w-4 shrink-0 rounded-full object-cover" />
+            ) : (
+              <span className="h-4 w-4 shrink-0 rounded-full bg-accent/30 text-[8px] font-semibold flex items-center justify-center uppercase">
+                {label.slice(0, 1)}
+              </span>
+            )}
+            <span className="truncate">{label}</span>
+          </Link>
+        )
+      })}
+      {picking ? (
+        <div className="px-2 py-1 space-y-1">
+          <Input
+            autoFocus
+            data-testid="sidebar-new-message-search"
+            value={query}
+            placeholder={t('nav.newMessagePlaceholder')}
+            className="h-7 text-[12px]"
+            onChange={(e) => setQuery(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                setPicking(false)
+                setQuery('')
+              }
+            }}
+          />
+          <div className="max-h-44 overflow-y-auto space-y-0.5" data-testid="sidebar-new-message-results">
+            {membersQuery.isLoading && (
+              <div className="px-1 py-1 text-[11px] text-muted-foreground">{t('common.loading')}</div>
+            )}
+            {!membersQuery.isLoading && candidates.length === 0 && (
+              <div className="px-1 py-1 text-[11px] text-muted-foreground" data-testid="sidebar-new-message-empty">
+                {t('nav.newMessageNoOne')}
+              </div>
+            )}
+            {candidates.map((m) => (
+              <button
+                key={m.userId}
+                type="button"
+                disabled={starting}
+                data-testid={`sidebar-new-message-user-${m.userId}`}
+                onClick={() => void startDm(m.userId)}
+                className="w-full flex items-center gap-2 rounded-md px-1 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-60"
+              >
+                <span className="h-4 w-4 shrink-0 rounded-full bg-accent/30 text-[8px] font-semibold flex items-center justify-center uppercase">
+                  {(m.displayName || m.email || '?').slice(0, 1)}
+                </span>
+                <span className="truncate">{m.displayName || m.email}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          data-testid="sidebar-new-message"
+          onClick={() => setPicking(true)}
+          className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+        >
+          <Plus className="h-3.5 w-3.5 shrink-0" />
+          <span className="truncate">{t('nav.newMessage')}</span>
         </button>
       )}
     </div>

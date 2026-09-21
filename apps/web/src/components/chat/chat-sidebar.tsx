@@ -5,8 +5,13 @@ import type { ChatChannel, ChatChannelGroup, ChatMember, ChatSpace } from './cha
 import { initials } from './chat-utils'
 import { usePresence, presenceDotClass, type PresenceStatus } from '../../lib/use-presence'
 import { useTranslation } from '../../lib/i18n'
+// §V2-S07 — one fallback for what a DM is called, shared with the workspace
+// tree's Direct Messages section. See the comment on the function itself for
+// why the shell-chunk file is the one that owns it.
+import { dmDisplayName } from '../workspace-sidebar'
 
 type PendingInvite = { id: string; email: string }
+
 
 export function ChatSidebar({
   channels,
@@ -194,7 +199,7 @@ export function ChatSidebar({
         <div className="flex w-full flex-1 flex-col items-center gap-1 overflow-y-auto">
           {railChannels.map((c) => {
             const unread = c.unreadCount ?? 0
-            const label = c.isDm ? c.dmLabel ?? c.dmPeerName ?? t('chat.directMessage') : `#${c.name}`
+            const label = c.isDm ? dmDisplayName(c, t('chat.directMessage')) : `#${c.name}`
             return (
               <button
                 key={`rail-${c.id}`}

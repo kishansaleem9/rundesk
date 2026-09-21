@@ -80,6 +80,19 @@ export type ContainerCreated = {
   path: string
   /** Status keys the new list was seeded with. Empty for a folder. */
   statuses: string[]
+  /**
+   * §V2-S16 `18:48` — the view keys this list actually EXPOSES, read back from
+   * the space's `view_config` the way `statuses` is read back from the row.
+   *
+   * The frame's sentence ends *"Use the `rundesk > ddddd > List` for task
+   * details or the `rundesk > ddddd > Board` to manage work by status."* Those
+   * two chips are offers to go somewhere, and a space whose view config does
+   * not enable Board has no Board to go to. Naming it anyway would be the dead
+   * control — a chip that looks like a destination and opens the wrong tab —
+   * so the sentence is composed from this list rather than from the two views
+   * the frame happens to show. Empty for a folder.
+   */
+  views: string[]
 }
 
 export type ContainerRefused = {
@@ -191,6 +204,29 @@ export function containerPath(spaceName: string, name: string): string {
 }
 
 /**
+ * Which views a list in this space actually exposes.
+ *
+ * ONE definition, used by the create path (to compose `18:48`'s sentence) and
+ * by `resolveRefs` (to decide whether a stored view chip is still a place you
+ * can go). The rule is the list route's own: an empty or absent `enabledViews`
+ * means every view, not no views — and getting that backwards would make every
+ * chip vanish on the default space, which is most of them.
+ *
+ * `allKeys` is passed in rather than imported so this file stays I/O-free and
+ * dependency-free; the caller hands it `SPACE_VIEW_KEYS`, the server's single
+ * copy, so nothing here becomes the seventh duplicated list.
+ */
+export function enabledViewsFor(
+  viewConfig: { enabledViews?: string[] | null } | null | undefined,
+  allKeys: readonly string[],
+): string[] {
+  const configured = viewConfig?.enabledViews
+  if (!Array.isArray(configured) || configured.length === 0) return [...allKeys]
+  const kept = configured.filter((v) => allKeys.includes(v))
+  return kept.length ? kept : [...allKeys]
+}
+
+/**
  * The sentence frame `18:48` settles on, composed SERVER-SIDE from the row
  * that was actually written.
  *
@@ -208,9 +244,45 @@ export function describeContainerResult(result: ContainerToolResult): string {
     const statuses = result.statuses.length
       ? ' with standard task statuses'
       : ' — but with no status pipeline, which is a bug worth reporting'
-    return `Done, created [[list:${result.id}]] in ${result.spaceName}${statuses}.`
+    return `Done, created [[list:${result.id}]] in ${result.spaceName}${statuses}.${describeContainerViews(result)}`
   }
   return `Done, created the folder ${result.path} in ${result.spaceName}.`
+}
+
+/**
+ * What each view is FOR, in the frame's own words.
+ *
+ * `18:48`: *"Use the … List for task details or the … Board to manage work by
+ * status."* The clause is the reason to press the chip; a bare pair of chips
+ * would be two links with no argument for either. Only the views Rundesk can
+ * render appear here, and a view with no clause is not offered at all rather
+ * than offered with a blank reason.
+ */
+const VIEW_PURPOSE: Record<string, string> = {
+  list: 'for task details',
+  board: 'to manage work by status',
+  table: 'to edit many fields at once',
+  calendar: 'to see it by date',
+  gantt: 'to see what blocks what',
+  team: 'to see it per person',
+}
+
+/**
+ * The tail of the sentence: one clickable path chip per view the list HAS.
+ *
+ * Returns '' when the list exposes none — which is a real state, not a
+ * defensive one: a space can enable a set this build cannot render, and a
+ * sentence that then said "use the List view" would be pointing at a tab that
+ * is not on the page.
+ */
+export function describeContainerViews(result: ContainerCreated): string {
+  const offers = result.views
+    .filter((v) => VIEW_PURPOSE[v])
+    .map((v) => `[[view:${result.id}:${v}]] ${VIEW_PURPOSE[v]}`)
+  if (offers.length === 0) return ''
+  if (offers.length === 1) return ` Use ${offers[0]}.`
+  const last = offers[offers.length - 1]
+  return ` Use ${offers.slice(0, -1).join(', ')} or ${last}.`
 }
 
 /**

@@ -1,5 +1,6 @@
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
+import { GMAIL_SEARCH_SCOPE, SHAREPOINT_SEARCH_SCOPE } from '../../search/sources'
 import { ConfigService } from '@nestjs/config'
 import { and, desc, eq, inArray } from 'drizzle-orm'
 import { createHmac, timingSafeEqual } from 'node:crypto'
@@ -15,13 +16,34 @@ import { SecurityService } from '../../security/security.service'
 import { NotificationsService } from '../../notifications/notifications.service'
 import { CalendarAccountsService } from '../../calendar-sync/calendar-accounts.service'
 
+/**
+ * §V2-11 frame `19:07` — `gmail` and `sharepoint` join this union, and they are
+ * the two the App Center row was opened over.
+ *
+ * Both were already names the product used out loud. `SEARCH_SOURCES` listed
+ * them, the command palette drew a tab for each, and the tab offered a
+ * "Connect" link — pointing at a page where neither could be connected, because
+ * this union had never heard of `gmail` and `sharepoint` borrowed OneDrive's
+ * row. A source you are invited to connect and cannot is the facade; a source
+ * that reports itself connected over somebody else's credential and then
+ * returns nothing is the confident zero. They shipped one of each.
+ *
+ * Neither is a new vendor relationship: Gmail rides the Google client that
+ * Drive and Calendar already use, SharePoint the Microsoft client that Outlook
+ * and OneDrive already use. What is new is the SCOPE, and that is the whole
+ * point — `Files.ReadWrite` cannot see a SharePoint site and `drive.readonly`
+ * cannot read a mailbox, so sharing a row would have meant sharing a consent
+ * that does not cover the question.
+ */
 type Provider =
   | 'github'
   | 'gitlab'
   | 'gcal'
   | 'google-drive'
+  | 'gmail'
   | 'outlook'
   | 'onedrive'
+  | 'sharepoint'
   | 'linear'
   | 'salesforce'
   | 'dropbox'
@@ -137,14 +159,24 @@ export class IntegrationConnectionsService {
     })
   }
 
+  /**
+   * Every provider a workspace can actually connect.
+   *
+   * The App Center asks for this and decides each tile's state from the answer
+   * rather than from a flag in the client — so "can this be connected" is a
+   * fact about the server, and a tile cannot claim a connector that does not
+   * exist here.
+   */
   listSupportedProviders() {
     return [
       'github',
       'gitlab',
       'gcal',
       'google-drive',
+      'gmail',
       'outlook',
       'onedrive',
+      'sharepoint',
       'linear',
       'salesforce',
       'dropbox',
@@ -344,7 +376,33 @@ export class IntegrationConnectionsService {
     return rows
   }
 
-  async requestAccess(workspaceId: string, userId: string, provider: string, note?: string) {
+  /**
+   * §V2-11 frame `19:07` — how long a request's subject may be, and why it is
+   * checked at all.
+   *
+   * `provider` arrives as a raw query parameter and reaches three places: a
+   * Postgres `text` column with no bound, every workspace admin's notification
+   * TITLE, and a tile's badge. The App Center's "Suggest an app" writes through
+   * this same path with a name a person types, so the value stopped being drawn
+   * from a fixed list of ids the moment that control existed. Eighty characters
+   * is longer than any real app name and short enough to render.
+   *
+   * REFUSED, not truncated. A silent trim would store "Some Very Long Applicat"
+   * and hand the admin a name nobody asked for, and the person who typed it
+   * would be told it worked.
+   */
+  private static readonly MAX_PROVIDER_LENGTH = 80
+
+  async requestAccess(workspaceId: string, userId: string, providerRaw: string, note?: string) {
+    const provider = (providerRaw ?? '').trim()
+    if (!provider) {
+      throw new BadRequestException('An access request needs an app to be about')
+    }
+    if (provider.length > IntegrationConnectionsService.MAX_PROVIDER_LENGTH) {
+      throw new BadRequestException(
+        `App name is too long: ${IntegrationConnectionsService.MAX_PROVIDER_LENGTH} characters at most`,
+      )
+    }
     const [existing] = await this.db
       .select()
       .from(integrationAccessRequests)
@@ -474,8 +532,10 @@ export class IntegrationConnectionsService {
       providerRaw === 'gitlab' ||
       providerRaw === 'gcal' ||
       providerRaw === 'google-drive' ||
+      providerRaw === 'gmail' ||
       providerRaw === 'outlook' ||
       providerRaw === 'onedrive' ||
+      providerRaw === 'sharepoint' ||
       providerRaw === 'linear' ||
       providerRaw === 'salesforce' ||
       providerRaw === 'dropbox' ||
@@ -530,7 +590,20 @@ export class IntegrationConnectionsService {
         scopes: ['read_user', 'api'],
       }
     }
-    if (provider === 'outlook' || provider === 'onedrive') {
+    if (provider === 'outlook' || provider === 'onedrive' || provider === 'sharepoint') {
+      /*
+       * One Microsoft app registration, three different consents. SharePoint
+       * asks for `Sites.Read.All` — the scope its search genuinely needs —
+       * rather than reusing OneDrive's `Files.ReadWrite`, which reaches the
+       * signed-in user's own drive and no site. Reusing it is what made the
+       * SharePoint tab report itself connected over a credential that could
+       * never answer.
+       */
+      const microsoftScopes: Record<'outlook' | 'onedrive' | 'sharepoint', string> = {
+        outlook: 'Calendars.ReadWrite',
+        onedrive: 'Files.ReadWrite',
+        sharepoint: SHAREPOINT_SEARCH_SCOPE,
+      }
       return {
         provider,
         authUrl:
@@ -541,10 +614,7 @@ export class IntegrationConnectionsService {
           'https://login.microsoftonline.com/common/oauth2/v2.0/token',
         clientId: process.env.MICROSOFT_CLIENT_ID ?? '',
         clientSecret: process.env.MICROSOFT_CLIENT_SECRET ?? '',
-        scopes:
-          provider === 'outlook'
-            ? ['openid', 'email', 'profile', 'offline_access', 'Calendars.ReadWrite']
-            : ['openid', 'email', 'profile', 'offline_access', 'Files.ReadWrite'],
+        scopes: ['openid', 'email', 'profile', 'offline_access', microsoftScopes[provider]],
       }
     }
     if (provider === 'linear') {
@@ -594,10 +664,18 @@ export class IntegrationConnectionsService {
       }
     }
 
-    const scopes =
-      provider === 'gcal'
-        ? ['openid', 'email', 'profile', 'https://www.googleapis.com/auth/calendar.events']
-        : ['openid', 'email', 'profile', DRIVE_SEARCH_SCOPE]
+    /*
+     * The Google clients. Named per provider rather than left as an
+     * `if gcal … else drive` fallthrough: with Gmail added, the else branch
+     * would have handed a mail connection the DRIVE scope, and the failure
+     * would have been an empty inbox search that blamed the mailbox.
+     */
+    const googleScopes: Record<'gcal' | 'google-drive' | 'gmail', string> = {
+      gcal: 'https://www.googleapis.com/auth/calendar.events',
+      'google-drive': DRIVE_SEARCH_SCOPE,
+      gmail: GMAIL_SEARCH_SCOPE,
+    }
+    const scopes = ['openid', 'email', 'profile', googleScopes[provider]]
 
     return {
       provider,
@@ -620,7 +698,7 @@ export class IntegrationConnectionsService {
     if (provider === 'gitlab') {
       return ['GITLAB_CLIENT_ID', 'GITLAB_CLIENT_SECRET'].filter((k) => !process.env[k])
     }
-    if (provider === 'outlook' || provider === 'onedrive') {
+    if (provider === 'outlook' || provider === 'onedrive' || provider === 'sharepoint') {
       return ['MICROSOFT_CLIENT_ID', 'MICROSOFT_CLIENT_SECRET'].filter((k) => !process.env[k])
     }
     if (provider === 'linear') {
@@ -795,7 +873,7 @@ export class IntegrationConnectionsService {
         metadata: { username: me.username ?? null },
       }
     }
-    if (provider === 'outlook' || provider === 'onedrive') {
+    if (provider === 'outlook' || provider === 'onedrive' || provider === 'sharepoint') {
       const meRes = await fetch(
         `${process.env.MICROSOFT_GRAPH_API_URL ?? 'https://graph.microsoft.com/v1.0'}/me`,
         {
