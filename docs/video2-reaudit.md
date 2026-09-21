@@ -739,7 +739,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | M | Plan-tier paywall UI; "uses have expired" metered state |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
 | B | Gantt: Auto fit, week numbers, collapsible panels, local export |
-| M | Create-modal placeholder "Add description, or write with ⚡AI" |
+| M | Create-modal placeholder "Add description, or write with ⚡AI" — **and it has no frame behind it.** `video2-frame-observations.md:250` cites `10:00`; `09:54` through `10:08` are all the Board view, and the other create modal it cites, `21:36`, is the Brain² hub. Every create modal that IS on screen (`00:08`, `00:14`, `00:20`) already has a description typed into it, so the placeholder is never drawn. Left `M` rather than built: a string with no frame is a summary, and building to a summary instead of to the frame is what step 1 exists to stop. See §7 |
 | B | Customize view: Autosave, Pin, Private, Protected, Set default, Copy link, Sharing |
 | B\* | **Customize: Stack fields, Show empty fields, Collapse empty columns** — board switches, each read by the grid. `list-customize` 29 |
 | M | Customize on the LIST view — frame `11:00` puts a DIFFERENT trio in that same place: Show task locations · Show subtask parent names · Show closed tasks. Two are absent from the tree entirely; the third exists as the toolbar's Closed chip and not in this panel |
@@ -2673,6 +2673,20 @@ the frames:
 | `:431-433` | GPT-5.**4**; "Best models" holds all the rows | **GPT-5.6**, and "Best models" holds **three** rows; the other four are behind Show more |
 | `:501` | 12 open tasks | **13**, and its own breakdown 11+1+1 does not equal 12 |
 | `:516-517` | two explainer cards | **three**, in a carousel with a pager |
+| `:250-251` | `10:00` "create modal again", description placeholder **"Add description, or write with ⚡AI"** | `10:00` is the **Board view**, and so are `09:54`, `10:02`, `10:05` and `10:08` — the lanes `TO DO · PLANNING · IN PROGRESS · AT RISK · UPDATE REQUIRED · ON HOLD · COMPLETE`, which is what `:252` itself describes as the drag that follows. No create modal is open anywhere in that window, so the placeholder string has no frame behind it at this timecode |
+| `:99` | `21:36` create modal asking Task → Doc → Reminder → Whiteboard → Dashboard | `21:36` is the **Brain² hub** at `/ai/brain` — Ask \| Agents toggle, Super Agents rail, the four starter cards, and the credit meter reading `12 Brain AI uses` / `500 Credits left`. The tab strip it describes is real, but it is the one at `00:08`–`00:20`, not here |
+
+Two more, found 21 September by extracting the frames rather than trusting the
+line. Both are timecode errors rather than content errors — the tab strip at
+`:99` exists, just not at `21:36` — but a row derived from a timecode that
+shows something else cannot be checked against the frame at all, which is how
+`Create-modal placeholder` came to sit in §2 with no frame behind it.
+
+The `21:36` frame is worth keeping for a different reason: it corroborates four
+rows that are still `M` — the Brain² hub and its AI-scoped nav, the Ask\|Agents
+toggle, Super Agents, and the credit meter — and it shows the focus pill this
+audit built (`Work on dbgdh · 2h 50m left`) sitting in the app header exactly
+where §V2-06 says it belongs.
 
 `:383` is the load-bearing one: a row built from that line alone gets built in
 the wrong surface, and one was.
