@@ -532,14 +532,27 @@ Two general rules:
 
 - **Probe, do not reason, about which branch fires.** Two minutes against a
   running API settled what half an hour of reading the condition had not.
-- **`status >= 400 && status < 500` is the shape to look for.** It asserts that
-  SOMETHING refused and never which thing, so any second guard over the same
-  input hides the first one rotting. Four suites use it:
-  `task-merge` (fixed — it now reads the sentence), and `ai-model-picker`,
-  `ai-value` and `comment-recording`, which are candidates and not yet
-  examined. Listed rather than corrected, because whether each is vulnerable
-  depends on whether more than one guard can refuse that input, and that is a
-  question to answer with a break patch rather than by eye.
+- **ANY status-only assertion on a REFUSAL is the shape to look for**, and the
+  first version of this note said `status >= 400 && status < 500` and was too
+  narrow by one day. `list-name-taken` asserts `status === 409` and has the
+  identical problem: the 409 comes either from `assertListNameFree`, carrying
+  frame `08:50`'s sentence, or from the partial unique index on `lower(name)`
+  raising a 23505 that `AllExceptionsFilter` maps to 409 with the generic
+  *"That resource already exists"*. A patch making the service check
+  case-sensitive changes only WHICH sentence the person reads, and the check
+  saw 409 either way.
+
+  **`AllExceptionsFilter` is why this keeps happening.** It maps 23502, 23503,
+  23505, 23514, 22P02, 22001, 22003 and 23P01 to 4xx across every endpoint —
+  a good safety net, and it means the database is a silent second guard behind
+  every service-level validation in the product. Wherever a service check
+  exists to give a constraint a human sentence, the status is the constraint's
+  and only the sentence is the service's.
+
+  Four suites use the `>= 400 && < 500` form: `task-merge` (fixed), and
+  `ai-model-picker`, `ai-value` and `comment-recording`, unexamined. `===` on a
+  single refusal code is commoner still. Each is a question to answer with a
+  break patch rather than by eye.
 - **A refusal's message is part of its contract.** The behaviour here was never
   unsafe; a person merging a subtask into its parent was simply told about a
   merge they had not attempted, for as long as the rule has existed.

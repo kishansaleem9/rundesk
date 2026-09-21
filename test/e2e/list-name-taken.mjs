@@ -42,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 14
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -125,6 +125,28 @@ try {
     cased.status === 409,
     'and case does not get around it',
     `"${NAME.toUpperCase()}" was accepted alongside "${NAME}" (${cased.status})`,
+  )
+
+  /*
+   * AND BY THE SERVICE, WHICH IS WHERE THE FRAME'S WORDS LIVE.
+   *
+   * The 409 has two sources. `assertListNameFree` raises one with the
+   * sentence frame `08:50` shows; the partial unique index on `lower(name)`
+   * raises a Postgres 23505, which `AllExceptionsFilter` maps to 409 with the
+   * generic "That resource already exists". Asserting the status alone cannot
+   * tell them apart — a break patch making the service check case-SENSITIVE
+   * left this green, because the index caught it and the filter dressed it up.
+   *
+   * The service's own comment says this is the point: "This check exists so
+   * the ANSWER is a 409 with the frame's words rather than a bare Postgres
+   * unique-violation surfacing as a 500." So the words are what to assert.
+   */
+  chk(
+    /taken/i.test(JSON.stringify(cased.error ?? '')),
+    'and says so in the frame\'s words, not the database\'s',
+    `the error was ${JSON.stringify(cased.error)} — a generic conflict here means the service ` +
+      'check missed the case variant and the unique index caught it instead, which is a 409 ' +
+      'either way and a different sentence to the person who typed the name',
   )
 
   // -------------------------------------------------------------------------
