@@ -403,7 +403,6 @@ export class CustomFieldsService {
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
-        config: customFieldDefinitions.config,
       })
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))

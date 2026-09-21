@@ -178,6 +178,19 @@ irrelevant trains everyone to ignore it.
   line and failed there — a timeout in the middle of the word-bar section,
   pointing at the wrong thing. If a precondition can fail, it is a check. If it
   is not worth a line, it is not worth waiting for.
+- **A `boundingBox()` read before a refetch reflows the page is a mouse gesture
+  aimed at where the element used to be.** `custom-field-types` drew on a
+  signature pad with `page.mouse`, having read its box a few lines earlier —
+  and the line between them had emptied the field ABOVE it, so the panel
+  refetched, that row collapsed, and the pad moved up by its height. The
+  pointerdown landed outside the pad, the stroke was never made, and the check
+  reported the feature broken. **It passed on the unpatched tree every time**
+  and failed under four break patches — the four that added a field row, which
+  pushed the pad further down the panel. A check that only reddens under a
+  patch that has nothing to do with it is unattributable, which is the same
+  cost as a check that cannot fail. `scrollIntoViewIfNeeded()` immediately
+  before the read, and put the mutation that moves things AFTER the gesture
+  that measures them.
 - **A stub's body is the ENVELOPE, not the handler's `return`.** Every response
   here goes through a response interceptor: `status()` returns
   `{available: true}` and the wire carries
@@ -339,6 +352,19 @@ green "confirmations" that meant nothing until they were found.
 - The API build emits extensionless imports into `packages/db/src`, so plain
   `node dist/apps/api/src/main.js` cannot resolve them. Run it through the tsx
   loader (`--require tsx/dist/preflight.cjs --import tsx/dist/loader.mjs`).
+- **Lane k's port is `3020 + k`, and the shorthand `302k` stops being true at
+  ten.** `PORT=302$K` with `K=10` starts an API on **30210** against the right
+  database, so the lane looks alive from the process list and nothing answers
+  on 3030 — and the health poll that would have caught it was written against
+  the same wrong number. `fleet-up.sh` gets this right (`PORT=$((3020 + k))`);
+  a runbook typed by hand does not. Arithmetic, not string concatenation.
+- **Ten lanes is more Postgres than there is.** Each API holds a pool of ten
+  and `max_connections` is 100, so a full fleet plus one `psql` is over the
+  line. The failure arrives as `FATAL: sorry, too many clients already` inside
+  a suite, which reads exactly like a product bug and is not one — two
+  neighbouring suites "failed" this way and both were green on a retry. Check
+  `select count(*) from pg_stat_activity` before believing a suite that dies
+  in its fixture, and stop a lane you are not using.
 - **A running API already has the schema the WORKING TREE has.** Because of the
   loader above, `packages/db/src/schema/*.ts` is compiled from source at require
   time — so the moment anyone adds a column, every running API instance starts
