@@ -2404,6 +2404,38 @@ Three. None changes a count; all three are in code this session touched.
   `:921`.** Covered by the busy-state row above; noted separately because it is a
   one-line fix independent of the rest of that row.
 
+### Added 21 September
+
+- **Four confident zeros in one control: the `@` picker narrows Locations on
+  the server and the other four tabs in the browser.** Found while repairing
+  `task-mentions`. In `apps/web/src/components/task-detail-sheet.tsx`, Tasks
+  (`:5891`) asks `/tasks/workspace/:ws?limit=200` — and the endpoint caps at
+  whatever it is handed (`tasks.controller.ts:151`) — then filters the reply
+  locally. Docs (`:5896`), Whiteboards (`:5907`) and Channels (`:5931`) have
+  the same shape. So the 201st task in a workspace cannot be mentioned, and
+  typing its name shows "no matches" rather than "not loaded". Locations
+  (`:5923`) does it correctly, server-side, which is what makes this legible:
+  one tab in the same popover is held to a standard the other four are not.
+  Two hundred tasks is an ordinary workspace, so Tasks is the one that bites
+  first. **Not fixed** — it is four fetches in a file two other agents were
+  working in, and it wants its own suite.
+
+- **`POST /tasks` with `assigneeIds` announced nothing. FIXED.** `createTask`
+  inserted the `task_assignees` rows and stopped: no `task_assigned`
+  notification, no `task.assigned` event, no `task.assignee_changed`
+  automation, nothing for watchers. `addAssignee` — the PATCH path — did all
+  four. So assigning somebody from the create modal, which is the ordinary way
+  a task gets an assignee rather than an edge case, put their name on a task
+  and never told them, and left the automations UI's own "Task assignee
+  changes" trigger silent. The row in `task_assignees` stood as evidence for
+  an event that never happened: the mirror defect, on the busiest write in the
+  product. Found while teaching `video1-acceptance` to seed its own inbox —
+  the peer created a task assigned to the signed-in account, the API answered
+  201, and `GET /notifications` stayed empty for fifteen seconds. Extracted
+  into `announceAssignment` and called from both paths rather than copied,
+  since two announcements to keep in step is the duplicated-list defect and
+  this audit has found six already.
+
 ---
 
 ## Counts

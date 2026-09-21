@@ -1761,9 +1761,14 @@ export class TasksService {
       })
       .returning()
 
-    if (data.assigneeIds?.length) {
+    // The assignees a task is BORN with are announced exactly as the ones added
+    // later are — see `announceAssignment`. Writing the rows and stopping there
+    // is what this used to do, and it meant the create modal could put your
+    // name on a task without telling you.
+    const bornAssignees = [...new Set(data.assigneeIds ?? [])].filter(Boolean)
+    if (bornAssignees.length) {
       await this.db.insert(taskAssignees).values(
-        data.assigneeIds.map((userId) => ({ taskId: task.id, userId })),
+        bornAssignees.map((userId) => ({ taskId: task.id, userId })),
       )
     }
     if (data.labelIds?.length) {
@@ -1807,6 +1812,13 @@ export class TasksService {
 
     // Push to connected calendars if the task has a due date.
     if (task.dueDate) this.fireCalendarPush(task.id)
+
+    // Announced here rather than beside the insert above, so the task is fully
+    // hydrated, indexed and on the realtime channel before anyone is told to go
+    // and look at it.
+    for (const userId of bornAssignees) {
+      await this.announceAssignment({ taskId: task.id, assigneeId: userId, actorId: data.createdById })
+    }
 
     return hydrated
   }
@@ -3602,49 +3614,85 @@ export class TasksService {
     }
     await this.logActivity({ taskId, actorId, action: 'assigned', meta: { userId } })
 
-    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
-    if (taskRow) {
-      const ctx = await this.resolveWorkspaceForList(taskRow.listId)
-      if (ctx) {
-        void this.fireTaskEvent('task.assigned', ctx.workspaceId, { taskId, assigneeId: userId }, {
-          taskId,
-          userId: actorId,
-          projectId: ctx.projectId,
-          listId: taskRow.listId,
-          newValue: userId,
-        })
-        // The automations UI exposes this as the "Task assignee changes" trigger.
-        // Fire it directly (not via fireTaskEvent) to avoid a duplicate webhook.
-        void this.automations
-          .fire('task.assignee_changed', {
-            workspaceId: ctx.workspaceId,
-            taskId,
-            userId: actorId,
-            projectId: ctx.projectId,
-            listId: taskRow.listId,
-            newValue: userId,
-          })
-          .catch(() => {})
-
-        // Don't notify someone they assigned themselves
-        if (userId !== actorId) {
-          const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
-          void this.notifications.create({
-            userId,
-            workspaceId: ctx.workspaceId,
-            actorId,
-            type: 'task_assigned',
-            title: `You were assigned "${taskRow.title}"`,
-            target: { entityType: 'task', entityId: taskId, url: this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskId) },
-            emailContext: { taskTitle: taskRow.title, workspaceName },
-          })
-        }
-        // §G10-6 — and everybody watching hears who it moved to.
-        void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: userId, added: true })
-      }
-    }
+    await this.announceAssignment({ taskId, assigneeId: userId, actorId })
 
     return this.getTask(taskId)
+  }
+
+  /**
+   * Tell everyone who should hear that a task now has an assignee.
+   *
+   * WHY THIS IS A METHOD AND NOT THE TAIL OF `addAssignee`. It used to be the
+   * tail of `addAssignee`, which meant only the PATCH path did any of it.
+   * `createTask` takes `assigneeIds` too, and it inserted the `task_assignees`
+   * rows and stopped:
+   *
+   *     if (data.assigneeIds?.length) {
+   *       await this.db.insert(taskAssignees).values(…)
+   *     }
+   *
+   * No notification, no `task.assigned` event, no `task.assignee_changed`
+   * automation. So assigning somebody from the create modal — which is the
+   * ordinary way a task gets an assignee, not an edge case — put their name on
+   * a task and never told them, left the "Task assignee changes" trigger
+   * silent, and gave the realtime layer nothing to emit. The row in
+   * `task_assignees` stood as evidence for an event that never happened, which
+   * is the mirror defect exactly.
+   *
+   * Found by `video1-acceptance.mjs` while it was being taught to seed its own
+   * inbox: the peer created a task assigned to the signed-in account, the API
+   * answered 201, and `GET /notifications` stayed empty for fifteen seconds.
+   *
+   * Extracted rather than copied, because two assignment announcements that
+   * have to be kept in step is the duplicated-list defect waiting to happen —
+   * and this audit has already found six of those.
+   */
+  private async announceAssignment(params: {
+    taskId: string
+    assigneeId: string
+    actorId: string
+  }) {
+    const { taskId, assigneeId, actorId } = params
+    const [taskRow] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
+    if (!taskRow) return
+    const ctx = await this.resolveWorkspaceForList(taskRow.listId)
+    if (!ctx) return
+
+    void this.fireTaskEvent('task.assigned', ctx.workspaceId, { taskId, assigneeId }, {
+      taskId,
+      userId: actorId,
+      projectId: ctx.projectId,
+      listId: taskRow.listId,
+      newValue: assigneeId,
+    })
+    // The automations UI exposes this as the "Task assignee changes" trigger.
+    // Fire it directly (not via fireTaskEvent) to avoid a duplicate webhook.
+    void this.automations
+      .fire('task.assignee_changed', {
+        workspaceId: ctx.workspaceId,
+        taskId,
+        userId: actorId,
+        projectId: ctx.projectId,
+        listId: taskRow.listId,
+        newValue: assigneeId,
+      })
+      .catch(() => {})
+
+    // Don't notify someone they assigned themselves
+    if (assigneeId !== actorId) {
+      const workspaceName = await this.resolveWorkspaceName(ctx.workspaceId)
+      void this.notifications.create({
+        userId: assigneeId,
+        workspaceId: ctx.workspaceId,
+        actorId,
+        type: 'task_assigned',
+        title: `You were assigned "${taskRow.title}"`,
+        target: { entityType: 'task', entityId: taskId, url: this.buildTaskUrl(ctx.workspaceId, ctx.spaceId, ctx.projectId, taskRow.listId, taskId) },
+        emailContext: { taskTitle: taskRow.title, workspaceName },
+      })
+    }
+    // §G10-6 — and everybody watching hears who it moved to.
+    void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: assigneeId, added: true })
   }
 
   /**
