@@ -60,7 +60,7 @@ const argOf = (name, fallback) => {
  * download that never arrived — turns into a shorter run that still reports
  * "0 failed". Exact makes a skipped branch a failure.
  */
-const EXPECTED_CHECKS = 28
+const EXPECTED_CHECKS = 29
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -185,6 +185,47 @@ try {
   }
   const MINE = [idFirst, idMid, idLast, ...idBulk]
   console.log(`\x1b[2m  workspace ${workspaceId}, project ${projectA.id}, tag ${TAG}\x1b[0m`)
+
+  /*
+   * THE SERVER'S OWN `?projectId=`, which nothing had ever called.
+   *
+   * `GET /tasks/workspace/:id/timeline` accepts `projectId` and narrows on it
+   * (`tasks.service.ts`, `opts.projectId ? [eq(lists.projectId, …)]`), and the
+   * one client in the product does not send it. That was on the open-defects
+   * list as "the same shape as the `/ai/activity` `userId` defect", and
+   * **the framing was wrong**, which is why this is a check rather than a fix:
+   *
+   *   · `/ai/activity` was a parameter the UI NEEDED and failed to send, so
+   *     the panel showed everyone's activity where it promised one person's.
+   *   · here the query has no `limit` and no window, so the page holds every
+   *     dated task in the workspace. `projectOptions` is derived from exactly
+   *     those rows, so the browser-side filter can never offer a project it
+   *     cannot then show — and narrowing server-side would collapse the
+   *     options list to the one project already chosen. The client is right.
+   *
+   * So the parameter is not dead wiring to be removed, and not a bug to be
+   * fixed — it is API surface with no exercise, which is how a query parameter
+   * comes to be quietly broken. One check, against this run's own two
+   * projects: unscoped sees both, scoped sees one, and the one it sees is the
+   * one that was asked for. Asserted on ids this run created, never on totals,
+   * because the workspace is shared.
+   */
+  const wholeWorkspace = await api(`/tasks/workspace/${workspaceId}/timeline`)
+  const scopedToA = await api(`/tasks/workspace/${workspaceId}/timeline?projectId=${projectA.id}`)
+  const idsOf = (res) => new Set((res.data ?? []).map((t) => t.id))
+  const whole = idsOf(wholeWorkspace)
+  const scoped = idsOf(scopedToA)
+  const otherId = (wholeWorkspace.data ?? []).find((t) => t.title === TITLES.other)?.id ?? null
+  chk(
+    wholeWorkspace.status === 200 && scopedToA.status === 200 &&
+      !!otherId && whole.has(otherId) && !scoped.has(otherId) &&
+      MINE.every((id) => whole.has(id) && scoped.has(id)),
+    'the timeline endpoint really narrows on `projectId`, which no client sends',
+    `unscoped ${wholeWorkspace.status} holding ${whole.size}, scoped ${scopedToA.status} holding ` +
+      `${scoped.size}; the other project's task ${JSON.stringify(otherId)} was ` +
+      `${scoped.has(otherId) ? 'STILL THERE' : 'absent'} and this run's own ` +
+      `${MINE.filter((id) => scoped.has(id)).length}/${MINE.length} survived`,
+  )
 
   const ctx = await browser.newContext({
     viewport: { width: 1600, height: 1200 },

@@ -157,10 +157,27 @@ try {
   )
 
   // ── the member makes a list in each, so the CREATOR branch is in play ──────
+  /*
+   * A DISTINCT NAME PER CALL, and it is the break test that demanded it.
+   *
+   * This used to send `${TAG} list` every time. The fixture makes one list per
+   * space, so nothing collided — until `sdp-19-create-ungated` removed the
+   * permission gate and the probe below tried the same name in the same space.
+   * `POST /lists` answered **409 List name taken**, no row was written, and
+   * the row-count check ("no list was actually written") therefore PASSED
+   * WITH THE GATE DELETED. A name collision had quietly stood in for the
+   * permission refusal, and only three of the four checks reddened.
+   *
+   * That is the whole argument for step 6 in miniature: the check looked
+   * right, the status code it asserted was right, and the reason behind the
+   * status was somebody else's.
+   */
+  let listSeq = 0
   const makeList = async (space) => {
+    listSeq += 1
     const res = await M('/lists', {
       method: 'POST',
-      body: { spaceId: space.id, name: `${TAG} list` },
+      body: { spaceId: space.id, name: `${TAG} list ${listSeq}` },
     })
     return res
   }
