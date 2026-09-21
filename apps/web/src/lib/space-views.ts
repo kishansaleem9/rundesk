@@ -31,10 +31,24 @@ import type { TranslationKey } from './i18n'
  * missing, and does not compile with a key that is not a view either. The bug
  * class cannot come back through this module without a compiler error.
  *
- * (2) and (4) still hold their own copies — they are owned elsewhere and are
- * being changed by other work in flight. They should import `SPACE_VIEW_KEYS`
- * and `viewLabelKey` from here; until they do, (4) in particular is a live
- * defect and is reported as one.
+ * ALL FOUR NOW IMPORT FROM HERE, and this paragraph used to say otherwise.
+ *
+ * It read: "(2) and (4) still hold their own copies — they are owned elsewhere
+ * and are being changed by other work in flight." That was true when it was
+ * written and stopped being true when (4) was fixed, and nothing went back to
+ * read it — *the stale reason*, the defect class whose whole effect is to
+ * suppress the investigation that would find it. The sentence named the work
+ * as somebody else's and kept naming it that after the work was done.
+ *
+ * (2), the list route, was the last and was closed on 21 September. It had
+ * carried TWO copies, not one: `ALL_VIEWS` and `activeView`'s hand-written
+ * union of the same six keys, several hundred lines apart in one file. The `v`
+ * cycler read a third, five-key literal that predated Team View, so the tab
+ * was drawn and unreachable by keyboard — which is the failure `team-view.mjs`
+ * reports in those words.
+ *
+ * The keys now exist TWICE in the whole repository: `space-presets.ts` on the
+ * server, and this module mirroring it.
  */
 
 /**

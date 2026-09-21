@@ -105,6 +105,7 @@ import {
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { toDateInput, withDatePart } from '../lib/task-dates'
 import { criticalPath } from '../lib/gantt'
+import { SPACE_VIEW_KEYS, type SpaceViewKey } from '../lib/space-views'
 import { TaskDetailSheet } from '../components/task-detail-sheet'
 import { FreshnessControls, useRefreshInterval } from '../components/freshness-controls'
 import { ListStatusesManager } from '../components/list-statuses-manager'
@@ -1421,7 +1422,10 @@ function ListDetail() {
   const [newTaskTitle, setNewTaskTitle] = useState('')
   const [newTaskPriority, setNewTaskPriority] = useState<TaskPriority>('normal')
   const [newTaskDueDate, setNewTaskDueDate] = useState('')
-  const [activeView, setActiveView] = useState<'list' | 'board' | 'calendar' | 'table' | 'gantt' | 'team'>('list')
+  // The union is `SpaceViewKey`, not a second hand-written copy of it: this
+  // file held two literal lists of the same six view keys, and a key present in
+  // one and absent from the other is a tab that renders nothing.
+  const [activeView, setActiveView] = useState<SpaceViewKey>('list')
   /*
    * §V2-13, frames `09:26` and `10:42` — the two surfaces she NAMES as paid.
    *
@@ -1476,20 +1480,29 @@ function ListDetail() {
   })
   const spaceViewConfig = spaceViewCfgQuery.data?.find((s) => s.id === spaceId)?.viewConfig ?? null
   /*
-   * §V2-13 — 'team' added here as well as to the tab list, and the pair is the
-   * point. This is a SECOND hand-kept copy of the view set; the API has its own
-   * in `space-presets.ts`. A view missing from this one is filtered out of the
-   * tabs silently — no error, no empty tab, just absence — which is exactly how
-   * the first version of Team View rendered nothing.
+   * §V2-13 — THE HAND-KEPT COPY IS GONE. This was `ALL_VIEWS`, a second literal
+   * list of the view keys sitting a few hundred lines from `activeView`'s
+   * hand-written union of the same six — two copies of one fact in ONE FILE,
+   * with the API's `space-presets.ts` holding a third.
    *
-   * It is the third duplicated-list bug found in this pass: the planner's two
-   * settings types, the two field-type lists, and now this.
+   * A view missing from this copy was filtered out of the tabs silently — no
+   * error, no empty tab, just absence — which is exactly how the first version
+   * of Team View rendered nothing, and what `team-view.mjs` means when it
+   * reports that "a cycler keeping its own copy of the view keys walks past
+   * whichever one that copy is missing, and the tab stays clickable so nothing
+   * looks wrong".
+   *
+   * `lib/space-views.ts` was written to end this class and says so in its own
+   * header, listing four copies and which had drifted. Two of the three it
+   * named as outstanding have since been fixed; this was the last, and its
+   * own comment had been describing the defect rather than closing it.
    */
-  const ALL_VIEWS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
-  const enabledViews: Array<typeof activeView> =
+  const enabledViews: Array<SpaceViewKey> =
     spaceViewConfig?.enabledViews && spaceViewConfig.enabledViews.length
-      ? (spaceViewConfig.enabledViews.filter((v) => (ALL_VIEWS as readonly string[]).includes(v)) as Array<typeof activeView>)
-      : [...ALL_VIEWS]
+      ? (spaceViewConfig.enabledViews.filter((v) =>
+          (SPACE_VIEW_KEYS as readonly string[]).includes(v),
+        ) as Array<SpaceViewKey>)
+      : [...SPACE_VIEW_KEYS]
   // Keep a ref in sync so the keyboard 'v' cycler reads the live enabled set
   // without re-subscribing its listener each time the config changes.
   const enabledViewsRef = useRef(enabledViews)
@@ -2401,15 +2414,19 @@ function ListDetail() {
         // Cycle only through the views this space enables (§5 per-space config),
         // so the shortcut can never land on a hidden view.
         //
-        // `ALL_VIEWS`, NOT A SIXTH COPY OF THE VIEW KEYS. This read
+        // `SPACE_VIEW_KEYS`, NOT A COPY OF THE VIEW KEYS. This read
         // `['list', 'board', 'table', 'calendar', 'gantt']` — the same five
-        // names `ALL_VIEWS` holds eight hundred lines above, minus `team`. So
-        // Team View, built during this audit and drawn in the tab strip, could
-        // not be reached by the keyboard at all: `v` walked past it forever.
-        // The keys now exist four times rather than five (`space-presets.ts` is
-        // the source of truth, `lib/space-views.ts` and `ALL_VIEWS` are the
-        // other two), and this site holds none of its own.
-        const order: Array<typeof activeView> = (ALL_VIEWS as readonly string[] as Array<typeof activeView>)
+        // names the route's own `ALL_VIEWS` held eight hundred lines above,
+        // minus `team`. So Team View, built during this audit and drawn in the
+        // tab strip, could not be reached by the keyboard at all: `v` walked
+        // past it forever, and the tab stayed clickable so nothing looked
+        // wrong. That is the sentence `team-view.mjs` fails with.
+        //
+        // The keys now exist TWICE: `space-presets.ts` on the server, which is
+        // the source of truth, and `lib/space-views.ts` here, which mirrors it.
+        // `ALL_VIEWS` is gone and so is `activeView`'s hand-written union, so
+        // this file holds no copy of its own and cannot drift from either.
+        const order: Array<SpaceViewKey> = (SPACE_VIEW_KEYS as readonly string[] as Array<SpaceViewKey>)
           .filter((v) => enabledViewsRef.current.includes(v))
         if (order.length === 0) return
         const idx = order.indexOf(activeView)
