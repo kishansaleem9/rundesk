@@ -305,6 +305,14 @@ green "confirmations" that meant nothing until they were found.
 - **One runner per worktree, enforced.** Two break runs sharing a checkout
   check out, patch and build over each other, and every result afterwards is
   about whichever wrote last. Take a lock.
+- **ONE BREAK SET AT A TIME ON A FOUR-CORE BOX, however many worktrees exist.**
+  The worktrees make three runs *safe*; they do not make three runs *fast*.
+  Every patch is a full `vite build`, so three concurrent sets put the load
+  average at 6–9 on four cores and each set slowed to roughly one patch per
+  several minutes — slower in wall-clock, for all three, than running them in
+  turn, and with nothing usable finished for the whole of it. Stopping two took
+  the load from 6.5 to 3.4 immediately. "One runner per worktree" is about
+  correctness; this is about arithmetic, and the two are different rules.
 - **AND NOTHING OUTSIDE THE RUN MAY TOUCH ITS LANE'S SERVER.** The lock stops
   two break runs colliding; it does not stop YOU. `fleet-restart.sh "9"`,
   typed meaning *lane nine*, restarted lanes ONE THROUGH NINE — because the
