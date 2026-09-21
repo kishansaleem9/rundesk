@@ -156,13 +156,27 @@ bundle, and the four lanes a full regression was stopped over. In every case
 the result looked exactly like a result. Read the `== syncing … to <sha>` and
 `== BASELINE (no patch) …` lines before anything below them.
 
-**Not yet applied at all — about 66 patches across 8 suites:**
+~~**Not yet applied at all — about 66 patches across 8 suites:**~~ **STALE, and
+recounted from the files on 21 September.** Five of the eight have since run to
+a green baseline: `tab-title-countdown` (10/0, 7 patches), `task-cover` (18/0,
+3), `focus-pill` (15/0, 8), `task-field-create` (16/0) and
+`integration-error-card` (25/0, 9 — complete, after an earlier run of it had
+REFUSED on a baseline that never printed).
+
+Three are genuinely incomplete, and each for a different reason worth keeping:
 
 ```
-tab-title-countdown (7)   task-cover (3)          focus-pill (12)
-list-card-cover (8)       task-header-status (7)  task-activity-filter (8)
-task-field-create (9)     integration-error-card (2, the new facet pair)
+list-card-cover        8 patches exist, the log holds 1
+task-header-status     7 patches, the run left NO baseline line — it crashed
+                       or timed out before printing one, so nothing below it
+                       was attributable
+task-activity-filter   8 patches, same
 ```
+
+**A run with no `== BASELINE (no patch) … 0 failed` line is not a run.** That
+is the shape `check-break-freshness.mjs` reports separately from STALE, because
+a set whose baseline never printed looks in every other respect like a set that
+passed.
 
 `list-empty-states` (7/7) and `sidebar-sections` (15/15) finished after that
 list was written — both complete, every patch reddening. They are done, not
