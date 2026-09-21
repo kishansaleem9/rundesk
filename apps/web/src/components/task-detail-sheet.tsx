@@ -917,6 +917,23 @@ export function TaskDetailSheet({
    * bug this audit has already found once, in "collapse all".
    */
   const [fieldCreateStamp, setFieldCreateStamp] = useState(0)
+  /*
+   * CLEARED WHEN THE TAB IS LEFT, so it cannot open a form on a later mount.
+   *
+   * `CustomFieldsPanel` is rendered behind `activeTab === 'fields'`, so leaving
+   * the tab unmounts it and returning mounts it again — and its open-on-stamp
+   * effect fires on mount for any truthy stamp. Once "Add fields" had been
+   * pressed even once, the stamp stayed set and every later visit to Fields
+   * opened the create form unasked. Nothing failed and nothing said so.
+   *
+   * Clearing it HERE rather than comparing it there is deliberate: a ref inside
+   * the panel is initialised on the mount the bump caused, so "has it changed"
+   * is false exactly when the form is supposed to open — which is how the first
+   * attempt at this broke "Add fields" outright.
+   */
+  useEffect(() => {
+    if (activeTab !== 'fields') setFieldCreateStamp(0)
+  }, [activeTab])
   // §Share — one panel, shared with every other object type.
   const [shareOpen, setShareOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -8066,11 +8083,16 @@ function CustomFieldsPanelInner({
    * `···` menu's Custom Fields row, and the suite still saw the form — because
    * the remount was opening it, not the menu. The check could not tell the two
    * apart, and neither could anybody reading it.
+   *
+   * THE FIX IS IN THE PARENT, not here, and the first attempt at it here was
+   * wrong: a `useRef(openCreateStamp)` initialises to the current value on the
+   * very mount the bump caused, so `stamp !== last` was false exactly when the
+   * form should have opened and "Add fields" stopped working. The sheet clears
+   * the stamp when the tab is left instead, so a later mount sees 0 and this
+   * effect can stay as simple as it reads.
    */
-  const lastCreateStamp = useRef(openCreateStamp)
   useEffect(() => {
-    if (openCreateStamp && openCreateStamp !== lastCreateStamp.current) setCreating(true)
-    lastCreateStamp.current = openCreateStamp
+    if (openCreateStamp) setCreating(true)
   }, [openCreateStamp])
 
   const fieldsQuery = useQuery({
