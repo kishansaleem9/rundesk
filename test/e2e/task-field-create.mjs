@@ -42,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 18
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -177,6 +177,28 @@ try {
     'a type the enum has not got is refused with 400, not a cast error',
     `it answered ${badType.status}; an unknown enum member reaching the insert is a 500 that ` +
       'reads as a broken server',
+  )
+  /*
+   * AND IT REALLY IS NOT A CAST ERROR, which the check above says and cannot
+   * enforce. `custom_field_type` is a Postgres enum, so an unknown value
+   * reaching the insert raises 22P02, and `AllExceptionsFilter` maps that to
+   * 400 with "A value has an invalid format". The status is identical whether
+   * the service refused it or the column did.
+   *
+   * A break patch deleting the service's type check left the status check
+   * green, which is how this was found — the sixth time in one session that a
+   * status-only assertion on a refusal turned out to be measuring the database.
+   *
+   * The service's sentence NAMES THE VALID TYPES, and that is the whole
+   * difference: somebody who sent `banana` needs the list, not the news that a
+   * format was invalid.
+   */
+  chk(
+    /One of:/.test(JSON.stringify(badType.error ?? '')),
+    'and the refusal lists the types it would have taken',
+    `it said ${JSON.stringify(badType.error)} — a generic format message means the service ` +
+      'check is gone and the enum column refused it instead, which is the cast error this ' +
+      'check was written to rule out',
   )
   const noOptions = await A(`/workspaces/${workspaceId}/tasks/${taskA.id}/custom-fields`, {
     method: 'POST',
