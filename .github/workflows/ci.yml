@@ -189,19 +189,21 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND ONE. At the same 1.1 minutes each that is about
-    # 111 minutes plus setup. 120 would still fit, with nine minutes of
-    # headroom — but the count has gone 50 → 85 → 88 → 93 → 96 → 98 → 101 in
-    # two days, and a limit whose margin is thinner than one session's growth
-    # is a limit that fails on somebody else's commit. 150.
+    # The job now runs ONE HUNDRED AND FOUR. At the same 1.1 minutes each that
+    # is about 114 minutes plus setup — so 120 no longer fits, and the margin
+    # under 150 is down to about half an hour. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 in two days.
     #
-    # FOUR MORE SUITES ARE WRITTEN AND WAITING on a local green run before they
-    # are registered — ai-assign, attach-on-create, create-menu-ai and
-    # planner-command-bar — plus planner-onboarding. At 106 that is ~117
-    # minutes, which is the point at which 150 stops being comfortable.
-    # **Split this job before it reaches 106**, not after: it is one job with
-    # one setup, and splitting shortens the wall clock without changing the
-    # bill.
+    # **SPLIT THIS JOB.** Two suites are still written and waiting on a green
+    # run (`planner-command-bar`, `planner-onboarding`) and a third is being
+    # built, which puts it at 107 and ~118 minutes. That is the point at which
+    # a slow runner starts being killed with the answer half-written, and a
+    # pipeline that is merely old reads as a flaky one — which is a pipeline
+    # nobody looks at.
+    #
+    # Splitting shortens the WALL CLOCK and not the bill: the minutes are the
+    # same either way, plus a second setup. It is worth doing now because the
+    # limit is about to start costing runs, not to save money.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -1532,6 +1534,53 @@ jobs:
       - name: The assignee filter counts the indirect ways work reaches you
         if: '!cancelled()'
         run: node test/e2e/list-assignee-filter.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S02 `01:10` — files staged on the CREATE modal, before the task
+      # exists. `input.files` is a LIVE FileList and the change handler clears
+      # `e.target.value` the moment it returns (it must, or re-picking the same
+      # file fires no event). Reading `Array.from(picked)` inside React's
+      # setState updater therefore iterated an emptied list, and every pick was
+      # dropped — the Attachments section could not draw a row for ANY file.
+      # The gate is `state: 'attached'`: the input is a hidden `display:none`
+      # child of the paperclip label, so waiting for it to be visible could
+      # never resolve. Check 1 asserts the LABEL is visible instead, so "a
+      # picker nobody can open" still fails.
+      - name: Files staged before the task exists survive the pick
+        if: '!cancelled()'
+        run: node test/e2e/attach-on-create.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S13 `17:44`/`18:45` — the create menu's AI row. Asserted against
+      # BOTH doors: a list made from a space with no project lands in that
+      # space's hidden default container, which `getProjectsBySpace` excludes
+      # on purpose, so walking the visible projects can never find it. The
+      # check counts matches across `/lists/space/:id` and the per-project
+      # walk and still demands exactly one, so nothing-created, wrong-space and
+      # created-twice all redden it.
+      - name: The create menu's AI row writes what it reports
+        if: '!cancelled()'
+        run: node test/e2e/create-menu-ai.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2 — "⚡ Assign with AI". `assign_task` existed; choosing the person
+      # did not. The ranking is the feature, so the suite adds work to the
+      # first pick and requires the suggestion to name somebody ELSE — with no
+      # escape hatch, since the subject's list is the run's own and every
+      # candidate starts at `inList = 0`, so only load moved. It recommends and
+      # does not assign, which is asserted by re-reading the task.
+      - name: Assign with AI ranks by real load, and does not assign
+        if: '!cancelled()'
+        run: node test/e2e/ai-assign.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -17,6 +17,13 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
+import {
+  evaluateFormula,
+  parseFormula,
+  toFormulaConfig,
+  FormulaError,
+  FORMULA_NUMERIC_TYPES,
+} from './formula'
 
 /**
  * THE ONE LIST OF FIELD TYPES, taken from the column that stores them.
@@ -44,7 +51,51 @@ type FieldValue = string | number | boolean | string[] | null
 export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 
 /** The types that hold a list rather than one value. */
-const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting'])
+const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting', 'tasks'])
+
+/**
+ * 0146 — a SIGNATURE is the strokes that were drawn, and nothing else.
+ *
+ * `stroke;stroke;…`, each stroke `x,y x,y …`, each coordinate an integer in a
+ * 0–1000 box so the drawing scales to whatever it is rendered in. A stroke
+ * needs two points, because one point is not a line and would render as
+ * nothing at all — a value that stores as valid and draws as empty is the
+ * quietest kind of lie a field can tell.
+ */
+const SIGNATURE_MAX_LENGTH = 20_000
+const SIGNATURE_GRID = 1000
+
+function assertSignature(value: unknown): asserts value is string {
+  if (typeof value !== 'string') {
+    throw new BadRequestException('A signature is the strokes that were drawn, given as a string')
+  }
+  if (value.length > SIGNATURE_MAX_LENGTH) {
+    throw new BadRequestException(`A signature cannot be longer than ${SIGNATURE_MAX_LENGTH} characters`)
+  }
+  const strokes = value.split(';').filter((s) => s !== '')
+  if (strokes.length === 0) {
+    throw new BadRequestException('A signature needs at least one stroke — clear it instead of storing an empty one')
+  }
+  for (const stroke of strokes) {
+    const points = stroke.trim().split(/\s+/).filter(Boolean)
+    if (points.length < 2) {
+      throw new BadRequestException('Every stroke needs at least two points — a single point draws nothing')
+    }
+    for (const point of points) {
+      const parts = point.split(',')
+      if (parts.length !== 2) {
+        throw new BadRequestException(`"${point}" is not an x,y point`)
+      }
+      for (const n of parts) {
+        if (!/^\d{1,4}$/.test(n) || Number(n) > SIGNATURE_GRID) {
+          throw new BadRequestException(
+            `"${point}" is outside the 0–${SIGNATURE_GRID} box a signature is drawn in`,
+          )
+        }
+      }
+    }
+  }
+}
 
 @Injectable()
 export class CustomFieldsService {
@@ -121,6 +172,16 @@ export class CustomFieldsService {
     if ((dto.type === 'dropdown' || dto.type === 'labels') && (!dto.options || dto.options.length === 0)) {
       throw new BadRequestException(`${dto.type === 'labels' ? 'Labels' : 'Dropdown'} fields require at least one option`)
     }
+    /*
+     * 0146 — A FORMULA IS CHECKED BEFORE IT IS STORED, not when somebody reads
+     * it. An expression that cannot be evaluated is a field that draws a blank
+     * on every task forever, and the person who could have fixed it is the one
+     * typing it in now. The references are resolved against the project's real
+     * fields for the same reason: `{Budgte}` is a typo, and a typo that saves
+     * is a field nobody can tell from an empty one.
+     */
+    const formulaConfig =
+      dto.type === 'formula' ? await this.checkedFormulaConfig(projectId, dto.config) : null
 
     // Position = current max + 1
     const existing = await this.db
@@ -140,7 +201,12 @@ export class CustomFieldsService {
         options: dto.options ?? null,
         // Normalised on the way in, so a half-written config cannot make the
         // percentage depend on which fields somebody happened to send.
-        config: dto.type === 'progress_auto' ? toProgressConfig(dto.config) : null,
+        config:
+          dto.type === 'progress_auto'
+            ? toProgressConfig(dto.config)
+            : dto.type === 'formula'
+              ? formulaConfig
+              : null,
         position: nextPos,
       })
       .returning()
@@ -190,6 +256,65 @@ export class CustomFieldsService {
     })
   }
 
+  /**
+   * 0146 — the expression, checked against the fields it claims to read.
+   *
+   * Three separate refusals, and each one names the thing that is wrong,
+   * because "invalid formula" tells the person typing it nothing they can act
+   * on. `excludeFieldId` is the field being edited: a formula that refers to
+   * itself would recurse, and a formula that refers to another formula would
+   * make the answer depend on the order the definitions came back in.
+   */
+  private async checkedFormulaConfig(
+    projectId: string,
+    rawConfig: unknown,
+    excludeFieldId?: string,
+  ): Promise<{ expression: string }> {
+    const expressionInput = (rawConfig as { expression?: unknown } | null | undefined)?.expression
+    let parsed: { expression: string; refs: string[] }
+    try {
+      parsed = parseFormula(expressionInput)
+    } catch (err) {
+      if (err instanceof FormulaError) throw new BadRequestException(`Formula: ${err.message}`)
+      throw err
+    }
+
+    const siblings = await this.db
+      .select({
+        id: customFieldDefinitions.id,
+        name: customFieldDefinitions.name,
+        type: customFieldDefinitions.type,
+      })
+      .from(customFieldDefinitions)
+      .where(eq(customFieldDefinitions.projectId, projectId))
+
+    const numeric: ReadonlySet<string> = new Set(FORMULA_NUMERIC_TYPES)
+    for (const ref of parsed.refs) {
+      const hits = siblings.filter((s) => s.name === ref && s.id !== excludeFieldId)
+      if (hits.length === 0) {
+        throw new BadRequestException(`Formula: there is no field called "${ref}" on this project`)
+      }
+      /*
+       * TWO FIELDS OF THE SAME NAME make `{Budget}` ambiguous, and picking the
+       * first would make the number depend on which row was inserted first.
+       * Nothing stops two fields sharing a name today, so this is reachable.
+       */
+      if (hits.length > 1) {
+        throw new BadRequestException(
+          `Formula: "${ref}" names ${hits.length} fields on this project, so it is ambiguous`,
+        )
+      }
+      const hit = hits[0]!
+      if (!numeric.has(hit.type)) {
+        throw new BadRequestException(
+          `Formula: "${ref}" is a ${hit.type} field, and a formula can only read ` +
+            `${FORMULA_NUMERIC_TYPES.join(', ')}`,
+        )
+      }
+    }
+    return { expression: parsed.expression }
+  }
+
   async updateDefinition(
     workspaceId: string,
     fieldId: string,
@@ -217,6 +342,43 @@ export class CustomFieldsService {
     if (patch.config !== undefined && def.type === 'progress_auto') {
       set.config = toProgressConfig(patch.config)
     }
+    /* 0146 — the same check the create path runs, so an expression cannot be
+     * edited into one that create would have refused. */
+    if (patch.config !== undefined && def.type === 'formula') {
+      set.config = await this.checkedFormulaConfig(def.projectId, patch.config, def.id)
+    }
+    /*
+     * 0146 — A RENAME THAT WOULD ORPHAN A FORMULA IS REFUSED.
+     *
+     * A formula stores the NAME it reads, because a name is what somebody
+     * types. Rename "Budget" to "Budget (USD)" and every `{Budget}` stops
+     * resolving — and it stops quietly, drawing a dash where a number was. The
+     * refusal names the formula, so the fix is obvious: edit it first.
+     */
+    if (patch.name !== undefined && patch.name !== def.name) {
+      const formulas = await this.db
+        .select({ name: customFieldDefinitions.name, config: customFieldDefinitions.config })
+        .from(customFieldDefinitions)
+        .where(
+          and(
+            eq(customFieldDefinitions.projectId, def.projectId),
+            eq(customFieldDefinitions.type, 'formula'),
+          ),
+        )
+      const users = formulas.filter((f) => {
+        try {
+          return parseFormula(toFormulaConfig(f.config).expression).refs.includes(def.name)
+        } catch {
+          return false
+        }
+      })
+      if (users.length > 0) {
+        throw new BadRequestException(
+          `"${def.name}" cannot be renamed while ${users.map((f) => `"${f.name}"`).join(', ')} ` +
+            'reads it — change the formula first',
+        )
+      }
+    }
     const [row] = await this.db
       .update(customFieldDefinitions)
       .set(set)
@@ -237,8 +399,11 @@ export class CustomFieldsService {
       .select({
         id: customFieldDefinitions.id,
         projectId: customFieldDefinitions.projectId,
+        // 0146 — the rename guard needs the name it is replacing.
+        name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
+        config: customFieldDefinitions.config,
       })
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
@@ -296,11 +461,48 @@ export class CustomFieldsService {
     const wantsProgress = defs.some((d) => d.type === 'progress_auto')
     const progress = wantsProgress ? await this.progressFor(taskId) : null
 
+    /*
+     * 0146 — WHAT A FORMULA CAN SEE, built once for the whole task.
+     *
+     * Only the fields THIS task has: `defs` is already narrowed by list scope,
+     * so a formula that reads a field scoped to a different list resolves to
+     * nothing here and the result is null — which is the honest answer, since
+     * the field it wants does not apply to this task.
+     *
+     * `progress_auto` is readable by a formula and is itself derived, so it is
+     * taken from the computed number rather than from a row that never exists.
+     */
+    const numericByName = new Map<string, number | null>()
+    if (defs.some((d) => d.type === 'formula')) {
+      for (const d of defs) {
+        if (!(FORMULA_NUMERIC_TYPES as readonly string[]).includes(d.type)) continue
+        if (d.type === 'progress_auto') {
+          numericByName.set(
+            d.name,
+            progress
+              ? computeProgress(toProgressConfig(d.config), progress.inputs, progress.taskIsDone)
+              : null,
+          )
+          continue
+        }
+        const stored = byField.get(d.id)?.value.v
+        numericByName.set(d.name, typeof stored === 'number' ? stored : null)
+      }
+    }
+
     return defs.map((d) => {
       if (d.type === 'progress_auto') {
         return {
           definition: d,
           value: computeProgress(toProgressConfig(d.config), progress!.inputs, progress!.taskIsDone),
+        }
+      }
+      if (d.type === 'formula') {
+        return {
+          definition: d,
+          value: evaluateFormula(toFormulaConfig(d.config).expression, (name) =>
+            numericByName.has(name) ? numericByName.get(name)! : null,
+          ),
         }
       }
       const stored = byField.get(d.id)?.value.v ?? null
@@ -387,6 +589,16 @@ export class CustomFieldsService {
     if (def.type === 'progress_auto') {
       throw new BadRequestException(
         'Progress (Auto) is calculated from subtasks, checklists and assigned comments — it cannot be set directly',
+      )
+    }
+    /*
+     * 0146 — and a Formula for the same reason, said in its own words. A
+     * shared "this field is derived" message would be cheaper and would tell
+     * the caller nothing about which fields to change instead.
+     */
+    if (def.type === 'formula') {
+      throw new BadRequestException(
+        'Formula is calculated from the other fields on this task — it cannot be set directly',
       )
     }
 
@@ -540,6 +752,49 @@ export class CustomFieldsService {
           }
           break
         }
+        /*
+         * 0146 — TASKS, frame `00:42`'s picker.
+         *
+         * The same shape of rule as `people` and `files`, for the same reason:
+         * an id that is not a task in this workspace would render as a link to
+         * something the reader cannot open, or as nothing at all. A task
+         * cannot point at itself either — a self-reference draws a row that
+         * navigates to the page you are on.
+         */
+        case 'tasks': {
+          if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
+            throw new BadRequestException('Tasks expects a list of task ids')
+          }
+          if (new Set(value).size !== value.length) {
+            throw new BadRequestException('The same task was given twice')
+          }
+          if ((value as string[]).includes(taskId)) {
+            throw new BadRequestException('A task cannot be related to itself')
+          }
+          if (value.length) {
+            const rows = await this.db
+              .select({ id: tasks.id })
+              .from(tasks)
+              .innerJoin(lists, eq(lists.id, tasks.listId))
+              .innerJoin(projects, eq(projects.id, lists.projectId))
+              .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+              .where(
+                and(
+                  eq(spaces.workspaceId, workspaceId),
+                  inArray(tasks.id, value as string[]),
+                ),
+              )
+            const known = new Set(rows.map((r) => r.id))
+            if ((value as string[]).some((v) => !known.has(v))) {
+              throw new BadRequestException('Those tasks are not in this workspace')
+            }
+          }
+          break
+        }
+        /* 0146 — the strokes, checked against the grammar the column documents. */
+        case 'signature':
+          assertSignature(value)
+          break
         case 'people': {
           if (!Array.isArray(value) || value.some((v) => typeof v !== 'string')) {
             throw new BadRequestException('People expects a list of user ids')

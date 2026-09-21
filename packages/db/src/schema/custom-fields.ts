@@ -30,6 +30,26 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   // people who voted, and only the caller can add or remove their own.
   'files',
   'voting',
+  /*
+   * 0146 — three of the thirteen types frame `00:20`–`00:42` lists and this
+   * product had not got. The other ten are recorded as decisions in
+   * `docs/video2-reaudit.md` rather than half-built here.
+   *
+   * `formula` is DERIVED, like `progress_auto`: no row is ever written for it
+   * in `custom_field_values`. Its definition carries `config.expression` and
+   * the service evaluates it over the task's other numeric fields on read.
+   *
+   * `tasks` holds task ids — a NAMED, untyped reference to other tasks. It is
+   * not `task_dependencies`, which is typed (blocks / blocked by) and drives
+   * the Related Items panel; this is a field with a name of its own.
+   *
+   * `signature` holds the drawn strokes as a string. It records what was
+   * drawn and nothing else — no signer, no timestamp claim anywhere on screen,
+   * because neither is stored.
+   */
+  'formula',
+  'tasks',
+  'signature',
 ])
 
 /**
@@ -57,6 +77,7 @@ export const customFieldDefinitions = pgTable(
      *
      * progress_auto: { sources: { subtasks, checklists, assignedComments },
      *                  doneStatusIs100 }
+     * formula:       { expression }   — 0146, e.g. `({Spent} / {Budget}) * 100`
      */
     config:       jsonb('config').$type<Record<string, unknown>>(),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -84,8 +105,12 @@ export const customFieldValues = pgTable(
     //   date                        → { v: ISO string }
     //   checkbox                    → { v: boolean }
     //   labels/people               → { v: string[] }  (§V2-01c)
+    //   tasks                       → { v: string[] }  (task ids, 0146)
+    //   signature                   → { v: string }    (stroke data, 0146)
     //
-    // No row is ever written for `progress_auto` — it is derived on read.
+    // No row is ever written for `progress_auto` or `formula` — both are
+    // derived on read, and both refuse a write rather than accept one they
+    // would then ignore.
     value:          jsonb('value').$type<{ v: string | number | boolean | string[] | null }>().notNull(),
     updatedAt:      timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   },
