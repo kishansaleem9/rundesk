@@ -311,6 +311,15 @@ green "confirmations" that meant nothing until they were found.
   independent conditions hid the row, so removing one proved nothing. That is
   good code and a bad patch: rewrite the patch to remove both, rather than
   concluding the check is weak.
+- **A COUNT CHECKED AGAINST ONE PROVES NOTHING: `1` IS THE NUMBER A HARDCODED
+  NUMBER IS.** `sidebar-dms-7-count-is-a-constant` replaces a section's
+  `data-count` with the literal `1` and came back **14 passed, 0 failed**,
+  because that run had exactly one direct message. The suite already refused a
+  workspace with NO DMs — "every check below would pass vacuously" — and one is
+  the same problem a step along. Seed **two** of anything a count is asserted
+  over, and make the fixture create the second rather than hope for it: this
+  one needed a third workspace member, and the seed ships two users, so the
+  fixture registers a peer and adds them.
 - **A CHECK THAT READS A STALE `useMemo` IS READING A CACHED CORRECT ANSWER.**
   The claim was "a subtask still names its parent when the parent has been
   filtered off the screen". The check hid the parent and looked — and passed

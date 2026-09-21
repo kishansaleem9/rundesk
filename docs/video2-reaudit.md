@@ -2798,6 +2798,7 @@ worktree under a lock:
 | `sidebar-sections` | 15 | 15 |
 | `list-customize` (the 8 List-trio checks) | 8 | 8 |
 | `space-create-menu` (the Form row) | 5 | 5 |
+| `sidebar-dms` | 10 | 9 + 1 pending |
 | `template-center` | 10 | 10 |
 | …and the rest of the session's suites | | all |
 
@@ -2837,6 +2838,34 @@ labelled. It reddens one check, which is the check written after the fact to
 catch exactly it. `form-5-space-lists-endpoint` points the destination picker
 back at `GET /lists/space/:id` and reddens two: it is the defect as found,
 preserved so the endpoint's narrower meaning cannot quietly be re-adopted.
+
+### Three checks proved worthless while green, and all three were the check
+
+`sidebar-dms` was 9 of 10 first. `sidebar-dms-7-count-is-a-constant` replaces
+the DM section's `data-count` with the literal `1` — a count that can only ever
+say one thing — and came back **14 passed, 0 failed**, because that run had
+exactly one direct message. The suite already refused a workspace with NO DMs,
+on the stated grounds that every check below would pass vacuously; one is the
+same problem a step along, and it is the single number a hardcoded count is
+most likely to be. Fixing it needed a second conversation, which needed a third
+workspace member, and the seed ships two users — so the fixture registers a
+peer and adds them, and the guard now demands two. **The suite is green again
+at 14/14 with the new fixture; the re-test of that patch against the
+strengthened check has not run yet, which is why the table above says
+`9 + 1 pending` rather than 10.**
+
+Put beside the other two, the shape is the same every time and the mechanism
+never is:
+
+| suite | why the broken build passed |
+| --- | --- |
+| `folder-dialog` | the fixture made a space with no preset, so a list correctly fell back and the suite's own guard fired |
+| `list-customize` | the check read an un-invalidated `useMemo` — a cached correct answer |
+| `sidebar-dms` | one DM, so a hardcoded `1` matched the real count |
+
+In each the fixture made the wrong answer coincide with the right one. None
+could have been found by reading the suite, because each suite was green and
+each product was correct. **This is the argument for step 6 in three lines.**
 
 ### The patch that proved a CHECK wrong, which is what step 6 is for
 

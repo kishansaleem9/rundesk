@@ -111,6 +111,60 @@ try {
     throw new Error('this workspace has nobody else in it, so a DM cannot exist — every check here would pass vacuously')
   }
 
+  /*
+   * A SECOND DM, SEEDED, AND THE REASON IS A BREAK PATCH THAT DID NOT REDDEN.
+   *
+   * `sidebar-dms-7-count-is-a-constant` replaces the section's `data-count`
+   * with the literal `1` — a count that can only ever say one thing, which is
+   * the facade in miniature. It came back 14 passed, 0 failed, because this
+   * run had exactly ONE direct message and a constant 1 is indistinguishable
+   * from a correct 1.
+   *
+   * The guard below already refused a workspace with NO DM, on the grounds
+   * that every check would pass vacuously. One is the same problem one step
+   * along: it is the only count a hardcoded number is likely to be, so it is
+   * the one count that cannot prove a count is computed. Two can.
+   *
+   * Seeded through `POST …/chat/dms`, which is idempotent — `ensureDmChannel`
+   * returns the existing conversation rather than making a second one — so
+   * this cannot inflate the number on a re-run.
+   */
+  /*
+   * THE SECOND PEER IS MADE, not looked for. The seed ships two users, so a
+   * workspace has two members and there is nobody to have a second
+   * conversation with — which is why the count could only ever be 1 and why
+   * the patch went unnoticed. `POST /auth/register` makes a user (with a
+   * personal workspace of their own, which nothing here touches) and
+   * `POST /workspaces/:id/members` puts them in this one; neither leaves
+   * anything behind that another suite reads, because the email carries this
+   * run's tag.
+   */
+  let secondPeer = members.find((m) => m.userId && m.userId !== ME && m.userId !== peer.userId)
+  if (!secondPeer) {
+    const email = `dm-peer-${TAG}@rundesk.internal`
+    const made = await api('/auth/register', {
+      method: 'POST',
+      body: { email, password: 'Peer@12345!', name: `DM peer ${TAG}` },
+    })
+    if (made.status >= 300) {
+      throw new Error(`could not register a second peer: ${made.status} ${JSON.stringify(made.error)}`)
+    }
+    const added = await api(`/workspaces/${WS}/members`, { method: 'POST', body: { email } })
+    if (added.status >= 300) {
+      throw new Error(`could not add the second peer to the workspace: ${added.status} ${JSON.stringify(added.error)}`)
+    }
+    const again = await api(`/workspaces/${WS}/members`)
+    secondPeer = (again.data ?? []).find((m) => m.email === email)
+    if (!secondPeer?.userId) throw new Error('the second peer was added and did not come back in the member list')
+  }
+  const seeded = await api(`/workspaces/${WS}/chat/dms`, {
+    method: 'POST',
+    body: { peerUserId: secondPeer.userId },
+  })
+  if (seeded.status >= 300) {
+    throw new Error(`could not seed a second DM: ${seeded.status} ${JSON.stringify(seeded.error)}`)
+  }
+
   // A couple of tagged PUBLIC channels, so "the DM section holds no channels"
   // is asserted against channels that really exist.
   const myChannels = []
@@ -216,10 +270,20 @@ try {
   const dmIds = all.filter((c) => c.isDm).map((c) => c.id)
   startedDmId = all.find((c) => c.isDm && c.dmPeerId === peer.userId)?.id ?? null
 
+  /*
+   * TWO, NOT ONE. See the seeding note above: a count check against a single
+   * DM cannot tell a computed count from a hardcoded `1`, and a break patch
+   * proved exactly that by staying green. The second peer is registered and
+   * added if the workspace has nobody spare, so this threshold is always
+   * reachable; if it is ever not, refusing is right — the alternative is a
+   * green run that proves less than it claims.
+   */
   chk(
-    dmIds.length > 0,
+    dmIds.length >= 2,
     `the server now reports ${dmIds.length} direct message(s) for this account`,
-    'the server reports no DM at all, so every check below would pass vacuously for ever',
+    `the server reports ${dmIds.length} DM(s); at least two are needed, because a count check ` +
+      'against one cannot tell a computed count from a hardcoded 1 — which is what ' +
+      '`sidebar-dms-7-count-is-a-constant` demonstrated by staying green',
   )
 
   const dmRows = page.locator('[data-testid^="sidebar-dm-"]')
