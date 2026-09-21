@@ -5,7 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { resolveIsManager, folderVisibilityFilter } from '../../common/permissions/item-visibility'
-import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
 
 @Injectable()
 export class FoldersService {
@@ -80,6 +80,9 @@ export class FoldersService {
   async create(spaceId: string, data: { name: string; color?: string }, actorId?: string) {
     const name = (data.name ?? '').trim()
     if (!name) throw new BadRequestException('Folder name is required')
+    // §V2-06 `06:52` — before the name check, so a refused actor is told they
+    // may not add to this space rather than that the name is taken.
+    await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'folder' })
     await this.assertFolderNameFree(spaceId, name)
     const [row] = await this.db
       .insert(folders)

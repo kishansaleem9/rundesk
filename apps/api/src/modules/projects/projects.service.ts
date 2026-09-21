@@ -3,7 +3,7 @@ import { eq, and, or, inArray, sql } from 'drizzle-orm'
 import { projects, spaces, projectMembers, spaceMembers, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
@@ -78,6 +78,10 @@ export class ProjectsService {
       .where(eq(spaces.id, spaceId))
       .limit(1)
     if (space) await this.plans.assertCanCreateProjects(space.workspaceId)
+    // §V2-06 `06:52` — and the space's own Default permission, which the plan
+    // cap above says nothing about: one is "how many may exist", the other is
+    // "may YOU add one here".
+    await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'project' })
 
     const result = await this.db
       .insert(projects)

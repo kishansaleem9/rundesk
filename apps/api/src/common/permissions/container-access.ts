@@ -115,3 +115,45 @@ export async function assertCanManageContainer(
 
   throw new ForbiddenException(`Only the creator or a workspace admin can modify this ${params.kind}`)
 }
+
+/**
+ * §V2-06 frame `06:52` — the same gate, on the way IN.
+ *
+ * THE HOLE THIS CLOSES. `assertCanManageContainer` above consults the space's
+ * Default permission before every edit and delete, and **creation consulted
+ * nothing at all**. `createList`, `createProject` and `FoldersService.create`
+ * each took an `actorId`, wrote the row, and returned it. So in a space set to
+ * "View only" a member could not rename a list, could not delete a list, and
+ * could freely make a new one — and, being its creator, could then edit that
+ * one too, because the creator short-circuit sits below the space gate only
+ * for containers that already exist.
+ *
+ * That is not a gap in a rule, it is a door around it. "View only" means the
+ * shape of this space is not yours to change, and adding to it is a change of
+ * shape. The frame's own wording is about what members may *do* in the space,
+ * not about which verbs happen to be guarded.
+ *
+ * DELIBERATELY THE SAME RESOLVER, not a second copy of the rule. One
+ * `resolveSpaceLevel` means the create gate and the manage gate cannot drift
+ * apart, which is the duplicated-list defect this audit keeps finding — and it
+ * means an explicit `space_members` grant raises both at once, so a person
+ * given `edit` on a view-only space can still create.
+ *
+ * `edit`, matching manage and delete. `admin` on this ladder is the rung that
+ * may re-share an object, and making a list is not a sharing act.
+ *
+ * A caller with no actor is an internal one (a seeder, a template expansion)
+ * and is left alone, exactly as `assertCanManageContainer` leaves it alone.
+ */
+export async function assertCanCreateInSpace(
+  db: Db,
+  params: { spaceId: string | null | undefined; actorId: string | null | undefined; kind: string },
+): Promise<void> {
+  if (!params.spaceId || !params.actorId) return
+  await assertSpaceLevel(db, {
+    spaceId: params.spaceId,
+    actorId: params.actorId,
+    required: 'edit',
+    kind: params.kind,
+  })
+}

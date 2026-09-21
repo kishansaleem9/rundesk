@@ -9,7 +9,7 @@ import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
@@ -144,6 +144,21 @@ export class ListsService {
     data: { name: string; description?: string; visibility?: 'public' | 'private' },
     actorId?: string,
   ) {
+    /*
+     * §V2-06 `06:52` — the owning space's Default permission, on the way IN.
+     * A list is created under a PROJECT, so the space has to be resolved
+     * before it can be consulted; every other container already knows its own.
+     */
+    const [owning] = await this.db
+      .select({ spaceId: projects.spaceId })
+      .from(projects)
+      .where(eq(projects.id, projectId))
+      .limit(1)
+    await assertCanCreateInSpace(this.db, {
+      spaceId: owning?.spaceId,
+      actorId,
+      kind: 'list',
+    })
     await this.assertListNameFree(projectId, data.name)
     const result = await this.db
       .insert(lists)

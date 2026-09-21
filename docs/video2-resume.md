@@ -93,11 +93,24 @@ awaiting a run.
 Around fifty were found. Most were fixed inside the row that exposed them.
 These are the ones still standing:
 
-1. **Container CREATE is completely ungated.** `lists.service.ts` and
-   `projects.service.ts` check workspace membership and container privacy and
-   nothing else, so a member can create a list inside a `view`-only space and
-   is only refused when they try to edit it. The update/delete half is now
-   gated (`space-default-permission`, 18 checks); this is the other half.
+1. ~~**Container CREATE is completely ungated.**~~ **FIXED 21 September** —
+   `space-default-permission.mjs` 18 → **22 checks**. `assertCanCreateInSpace`
+   in `common/permissions/container-access.ts`, called from `createList`,
+   `createProject` and `FoldersService.create`. It uses **the same resolver**
+   the edit and delete paths refuse with, so the two gates cannot drift apart
+   and an explicit `space_members` grant raises both at once.
+
+   The suite is the part worth reading. Its old check read *"the member creates
+   a list of their own in each space"* — it **passed**, and it was standing in
+   front of the hole saying the hole was meant to be there. A member in a "View
+   only" space could not rename a list and could not delete one, and could
+   freely make a new one, then edit that one too, because the creator
+   short-circuit applies to containers that already exist. A door around the
+   rule rather than a gap in it. The member's list still has to exist in each
+   space for the creator-branch refusals, so the space is now briefly raised to
+   `edit`, the list is made, and it is put back — which is also the real
+   sequence rather than a contrivance: a space gets downgraded and what is
+   already inside it stays.
 2. ~~**`gmail` is a federated search source that can never be connected.**~~
    **FIXED 21 September** — `app-catalogue.mjs`, 25 checks. Both `gmail` and
    `sharepoint` are real providers now, each asking its own OAuth scope, with

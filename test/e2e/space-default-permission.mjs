@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
  * with `<`, a branch that silently skipped turns into a shorter run that still
  * reports "0 failed".
  */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 22
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -164,15 +164,93 @@ try {
     })
     return res
   }
-  const viewList = await makeList(viewSpace)
-  const commentList = await makeList(commentSpace)
+  /*
+   * THIS USED TO READ `the member creates a list of their own in each space`,
+   * AND IT PASSED, AND THAT WAS THE BUG.
+   *
+   * Creation consulted the space's Default permission nowhere. So in a space
+   * set to "View only" a member could not rename a list and could not delete
+   * one, and could freely make a new one — then edit that one too, because the
+   * creator short-circuit applies to containers that already exist. A door
+   * around the rule rather than a gap in it, and this check was standing in
+   * front of it saying the door was meant to be there.
+   *
+   * The member's own list still has to EXIST in each space, because the
+   * creator-branch refusals below are the other half of the row. So the space
+   * is briefly raised to `edit`, the member creates their list, and it is put
+   * back. That is also the real sequence rather than a contrivance: a space
+   * gets downgraded and what is already inside it stays.
+   */
+  const withEditable = async (space, fn) => {
+    const up = await A(`/spaces/${space.id}`, {
+      method: 'PUT',
+      body: { defaultPermission: 'edit' },
+    })
+    if (up.status >= 400) throw new Error(`could not raise ${space.id}: ${up.status}`)
+    try {
+      return await fn()
+    } finally {
+      const down = await A(`/spaces/${space.id}`, {
+        method: 'PUT',
+        body: { defaultPermission: space.defaultPermission },
+      })
+      if (down.status >= 400) {
+        throw new Error(
+          `could not restore ${space.id} to ${space.defaultPermission}: ${down.status} — ` +
+            'every refusal below would then be measuring an editable space',
+        )
+      }
+    }
+  }
+  const viewList = await withEditable(viewSpace, () => makeList(viewSpace))
+  const commentList = await withEditable(commentSpace, () => makeList(commentSpace))
   const editList = await makeList(editSpace)
   chk(
     viewList.status < 400 && !!viewList.data?.id &&
       commentList.status < 400 && !!commentList.data?.id &&
       editList.status < 400 && !!editList.data?.id,
-    'the member creates a list of their own in each space',
+    'the member has a list of their own in each space, made while the space allowed it',
     `create returned ${viewList.status} / ${commentList.status} / ${editList.status}`,
+  )
+
+  // ── `06:52` — and ADDING to the space is a change to the space ────────────
+  console.log('\n▶ `06:52` — "View only" refuses creation, not only editing')
+  /*
+   * The same resolver the edit and delete paths refuse with, so the two gates
+   * cannot drift apart — and so an explicit `space_members` grant raises both
+   * at once. `comment` is checked as well as `view`, because `comment` is
+   * below `edit` on the ladder and a check written as `=== 'view'` would ship.
+   */
+  const listsBefore = await A(`/lists/space/${viewSpace.id}`)
+  const countBefore = (listsBefore.data ?? []).length
+  const madeInView = await makeList(viewSpace)
+  chk(
+    madeInView.status === 403,
+    'creating a list in a view-only space is refused with 403',
+    `POST /lists returned ${madeInView.status} ${messageOf(madeInView.error)} — creation used to ` +
+      'consult the space default nowhere, so a member could add to a space they could not edit',
+  )
+  chk(
+    /default permission/i.test(messageOf(madeInView.error)),
+    'and it says WHY, in the same words the rename refusal uses',
+    `the refusal read "${messageOf(madeInView.error)}"`,
+  )
+  /*
+   * The row count, not the status. A 403 with the row written anyway is a
+   * check passing on a bug — the same reason the rename refusal re-reads the
+   * list below.
+   */
+  const listsAfter = await A(`/lists/space/${viewSpace.id}`)
+  chk(
+    listsAfter.status === 200 && (listsAfter.data ?? []).length === countBefore,
+    'and no list was actually written — the refusal was not cosmetic',
+    `the space held ${countBefore} list(s) before and ${(listsAfter.data ?? []).length} after`,
+  )
+  const madeInComment = await makeList(commentSpace)
+  chk(
+    madeInComment.status === 403,
+    'and "Comment" refuses it too — the rung below `edit`, not only the bottom one',
+    `POST /lists returned ${madeInComment.status} ${messageOf(madeInComment.error)}`,
   )
 
   // ── the refusals ──────────────────────────────────────────────────────────
