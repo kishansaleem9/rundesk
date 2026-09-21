@@ -20,6 +20,18 @@ OUT="/tmp/claude-0/break-$SUITE.txt"
 # NOT truncated here. It used to be, above the lock — so a run that was refused
 # for interleaving destroyed the previous run's results on its way out, and a
 # real 5/6 became a one-line refusal. Truncation happens after the lock is held.
+#
+# AND EVERY RUN IS ARCHIVED, because truncating this file is how the ledger came
+# to hold six numbers nothing on disk could support. `$OUT` is one file per
+# SUITE, so a later single-patch re-run — confirming one fix — erased the record
+# of the full set that had run before it. Six suites showed one patch on disk
+# for runs that really happened, and six rows in section 8 had to be withdrawn
+# for want of evidence rather than because they were wrong.
+#
+# The archive copy is taken on EXIT, so a killed run leaves its partial results
+# behind too. `$OUT` keeps its name and its truncate-on-start behaviour, so
+# every watcher, monitor and grep that reads it is unaffected.
+OUT_RUN="/tmp/claude-0/break-$SUITE-$(date +%Y%m%d-%H%M%S).txt"
 TSX="/home/user/rundesk/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export E2E_EMAIL=admin@rundesk.internal
@@ -76,7 +88,7 @@ if ! mkdir "$LOCK" 2>/dev/null; then
   echo "lane $LANE is already break-testing — refusing to interleave" >&2
   exit 3
 fi
-trap 'rmdir "$LOCK" 2>/dev/null' EXIT
+trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; rmdir "$LOCK" 2>/dev/null' EXIT
 # Only now that the lane is ours. A refusal must not touch the results of the
 # run that legitimately holds it.
 : > "$OUT"

@@ -166,6 +166,14 @@ jobs:
       - name: Every break patch still finds its line
         run: python3 scripts/check-break-patches.py
 
+      # And still names a check that exists. A patch whose anchor is fine but
+      # whose `# Reddens:` line points at a deleted check applies perfectly and
+      # proves nothing — `teams-empty-state-1` named a check that had not
+      # existed for a day. This is a RATCHET: 35 claims and 121 silent patches
+      # are grandfathered, and the build fails when either number grows.
+      - name: Break patches still name a check that exists
+        run: node scripts/check-break-claims.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
