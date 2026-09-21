@@ -2406,6 +2406,53 @@ Three. None changes a count; all three are in code this session touched.
 
 ### Added 21 September
 
+- **Every file staged on the create modal was silently dropped. FIXED.**
+  `input.files` is a **live** `FileList` — the same object every time — and the
+  change handler clears `e.target.value` the moment it returns, which it must,
+  or re-picking the same file fires no change event. `addAttachments` checked
+  `picked.length` synchronously but read `Array.from(picked)` **inside**
+  React's `setAttachments` updater, which runs later, by which point the list
+  was empty. So the Attachments section could never draw a row **for any
+  file**, and the paperclip stayed on "Attach a file" with nothing on screen to
+  say a file had been lost. The whole §V2-S02 `01:10` feature was inert.
+  `quick-create-modal.tsx:548` snapshots synchronously; `attach-on-create.mjs`
+  13/13, and `aoc-1-filelist-read-late` reverts it to 1/5.
+
+- **`projects.position` is honoured in one surface and contradicted by the
+  rest.** The mirror defect, half-built. It has a writer (`POST
+  /workspaces/:id/sidebar/reorder`) and exactly one reader — the sidebar sorts
+  client-side. `getProjectsBySpace` has no `ORDER BY` at all, so the **other
+  twenty** call sites of `/projects/space/:id` render whatever order Postgres
+  hands back, which changes after row updates and after a vacuum. The order
+  somebody dragged into place holds in the tree and nowhere else. *Not fixed* —
+  it wants its own row and its own suite.
+
+- **A fifth copy of the view keys, one key short.** The six space view keys
+  exist four times over: `space-presets.ts:32` is the source of truth,
+  `lib/space-views.ts:51`, a local `ALL_VIEWS` at the list route's `:1367`, and
+  a **fifth** at `:2204` of that same file reading
+  `['list','board','table','calendar','gantt']` — **missing `team`** — which is
+  what the `v` keyboard view-cycler walks. So Team View, built this audit,
+  cannot be reached by the shortcut. The file's own comment at `:1360` warns
+  that a view missing from the list "is filtered out of the tabs silently".
+  *Not fixed* — two agents had that file open.
+
+- **The create menu prints a refusal key where a sentence exists.**
+  `quick-create-modal.tsx:399` renders `Set that up — skipped (no_permission)`.
+  `ai-containers.ts:62` ships `CONTAINER_REFUSAL_TEXT`, whose own comment reads
+  *"The refusal a person reads. One sentence, and it says what would change
+  it"* — but `AiService.executeOne` returns only `reason` and drops
+  `result.message`, so the sentence never leaves the server on that path. The
+  stale reason, with the good reason sitting one field away. *Not fixed.*
+
+- **A plan that refuses everything says "Nothing to create".** The same panel
+  declares `warnings?: string[]` on its `AiPlan` type and never renders it,
+  while `ai-command.ts` fills `warnings` with precisely the "why this was not
+  planned" sentences and `workspace-ai-page.tsx:625` does render them. So the
+  reason is computed, sent, and thrown away, and the create menu shows
+  `create-ai-nothing` instead. A confident zero with the answer in the
+  response body. *Not fixed.*
+
 - **Four confident zeros in one control: the `@` picker narrows Locations on
   the server and the other four tabs in the browser.** Found while repairing
   `task-mentions`. In `apps/web/src/components/task-detail-sheet.tsx`, Tasks

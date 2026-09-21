@@ -295,10 +295,21 @@ try {
    * facts and only the second one is the feature.
    */
   const afterView = await A(`/lists/${viewList.data.id}`)
+  /*
+   * COMPARED AGAINST THE NAME THAT WAS CREATED, not against a re-derived
+   * literal. This read `=== \`${TAG} list\``, and giving each fixture list its
+   * own sequence number — which the break test above demanded — broke it
+   * immediately: the row was correctly untouched and the check reported it
+   * changed, because the literal it compared to no longer described anything.
+   * A check that re-derives a value the fixture owns will drift every time the
+   * fixture does; reading it back from the creation response cannot.
+   */
+  const viewListName = viewList.data?.name
   chk(
-    afterView.status === 200 && afterView.data?.name === `${TAG} list`,
+    afterView.status === 200 && !!viewListName && afterView.data?.name === viewListName,
     'and the list really is unchanged — the refusal was not cosmetic',
-    `the list is now named ${JSON.stringify(afterView.data?.name)} (status ${afterView.status})`,
+    `the list was created as ${JSON.stringify(viewListName)} and is now named ` +
+      `${JSON.stringify(afterView.data?.name)} (status ${afterView.status})`,
   )
 
   const deletedView = await M(`/lists/${viewList.data.id}`, { method: 'DELETE' })
