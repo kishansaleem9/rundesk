@@ -25,9 +25,31 @@ describe('ProjectsService project event firing', () => {
           onConflictDoNothing: async () => undefined,
         })),
       })),
-      // fireProjectEvent resolves workspaceId via the project's space.
+      /*
+       * ONE ROW THAT ANSWERS EVERY READ ON THIS PATH, and it has to carry more
+       * than the workspace id now. `fireProjectEvent` resolves `workspaceId`
+       * via the project's space — that is what this row was for — and since
+       * §V2-06 `createProject` also consults the space's Default permission
+       * before writing, which reads `workspace_members.role` first.
+       *
+       * `role: 'workspace_admin'` is not decoration: it is in
+       * `WS_UNRESTRICTED`, so `resolveSpaceLevel` returns `admin` from the
+       * workspace role and stops. Without it the blanket mock answers the
+       * membership lookup with a row whose `role` is undefined, the resolver
+       * falls through to the space's own `default_permission` — also undefined
+       * here — and the service correctly refuses to create anything. The test
+       * then fails on a permission error while being about event firing.
+       *
+       * `default_permission` is `notNull().default('edit')` in the schema, so
+       * that undefined is a property of this mock and not something production
+       * can produce.
+       */
       select: mock.fn(() => ({
-        from: () => ({ where: () => ({ limit: async () => [{ workspaceId: 'w-1' }] }) }),
+        from: () => ({
+          where: () => ({
+            limit: async () => [{ workspaceId: 'w-1', role: 'workspace_admin' }],
+          }),
+        }),
       })),
     } as any
     const webhooks = { fire: mock.fn(async () => undefined) } as any
