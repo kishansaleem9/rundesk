@@ -144,6 +144,7 @@ const noClaim = []
 const noSuite = []
 const notFound = []
 let unverifiable = 0
+let crossSuite = 0
 let ok = 0
 
 for (const f of files) {
@@ -170,8 +171,24 @@ for (const f of files) {
 
   if (suite) {
     const hay = hayFor(suite)
-    const missing = quoted.filter((q) => !findsClaim(hay, q))
+    const absent = quoted.filter((q) => !findsClaim(hay, q))
+    /*
+     * A PATCH CAN REDDEN CHECKS IN MORE THAN ONE SUITE, and this had no model
+     * for it. `paywall-sites-3-gate-list-export` widens an export gate, and its
+     * header names three sentences from its own suite and a fourth followed by
+     * the words "and in list-export.mjs" — which is true, and was reported as a
+     * rotted claim because the resolved suite does not contain it.
+     *
+     * A sentence that is somewhere in `test/e2e` is a real check; the patch is
+     * simply aimed at two suites. Counted separately rather than folded into
+     * `verified`, because it is worth being able to see how many patches cross
+     * a suite boundary — that is where a run of one suite can be misread as
+     * having proved something about another.
+     */
+    const cross = absent.filter((q) => suitesContaining(q).length > 0)
+    const missing = absent.filter((q) => !cross.includes(q))
     if (missing.length) notFound.push([name, suite, missing])
+    else if (cross.length) crossSuite++
     else ok++
     continue
   }
@@ -194,7 +211,7 @@ for (const [name, , missing] of noSuite) {
 }
 
 console.log(
-  `\n[break-claims] ${ok} verified · ${unverifiable} unverifiable (unit claims, or no quoted ` +
+  `\n[break-claims] ${ok} verified · ${crossSuite} verified in another suite · ${unverifiable} unverifiable (unit claims, or no quoted ` +
     `sentence) · ${notFound.length} claim a check their suite does not have · ${noSuite.length} ` +
     `quote a sentence no suite contains · ${noClaim.length} make no claim at all`,
 )
@@ -224,7 +241,7 @@ if (noClaim.length) {
  * orphans another claim, or a new patch that makes none, fails the build that
  * brings it — and the baseline is a number in the file that only goes down.
  */
-const BASELINE = { notFound: 21, noSuite: 1, noClaim: 121 }
+const BASELINE = { notFound: 16, noSuite: 1, noClaim: 121 }
 const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {
