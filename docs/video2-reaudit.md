@@ -2870,6 +2870,7 @@ worktree under a lock:
 | `sidebar-sections` | 15 | 15 |
 | `space-create-menu` (the Form row) | 5 | 5 |
 | `list-assignee-filter` | 15 | 15 |
+| `sidebar-reorder` | 11 | 11 |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `folder-create` | 12 | 12 |
 | `list-empty-states` | 7 | 7 |
@@ -2915,6 +2916,73 @@ were in this state: `app-catalogue-20`, `ai-create-containers/acc-1`,
 `command-palette/cp-43` (PATCH FAILED). The last two have since been fixed and
 need only a re-run; `app-catalogue-20` is rewritten to withdraw the tab where
 the tab list is produced, which breaks the behaviour without touching the type.
+
+### The still-green patch that was worth the run twice over
+
+`sidebar-reorder` came back 10 patches, **one still green**, and it was the
+still-green one that paid.
+
+`sidebar-reorder-6` describes a folder FALLING THROUGH INTO `canDropOn`'s list
+rule, and implemented DELETING that rule. With the line gone there is nothing to
+fall through into: folders still reach the explicit `return false`, the
+behaviour it claimed to break was unchanged, and the check stayed green —
+honestly. **A patch has to make the code take the wrong branch, not remove a
+branch**, and the two are easy to confuse when the branch you remove is the one
+the defect would have used.
+
+The edit it made by mistake is the finding. With the list rule deleted, **all 21
+checks passed** while list-drop-on-a-project was gone entirely — the suite
+asserted that a FOLDER dropped on a project row sends nothing and never that a
+LIST dropped on one sends something. **A refusal asserted without its permission
+is half a rule, and the half with no check is the half that can be deleted.**
+
+Two checks added — the drop is accepted, and the list lands in that project,
+read back out of the database — and `sidebar-reorder-11-list-rule-deleted` keeps
+the accidental edit on purpose as the patch that covers that line. Re-run whole,
+because the suite had changed and by this file's own rule that stales every
+earlier result in the set: **baseline 23 green, 11 patches, 11 reddened, none
+unbuilt**, and patch 11 fails exactly its two checks and nothing else.
+
+### Nothing had ever checked that a patch names a check that exists
+
+A patch's `# Reddens:` line is the only thing tying it to the thing it proves,
+and **a patch whose claim has rotted still applies perfectly** — so no run, no
+anchor check and no `PATCH FAILED` line will ever mention it.
+`teams-empty-state-1-one-card` named *"the frame's two explainer cards"*, a
+check that had not existed for a day, and it was found by reading it. There are
+573 patches.
+
+`scripts/check-break-claims.mjs` resolves each patch's suite the way a reader
+does — what the header says, else the longest filename prefix that is a suite,
+else whichever suite contains the sentence — and verifies the quoted sentence is
+really there. **345 verified · 85 unverifiable · 22 claim a check their suite
+does not have · 121 make no claim at all.**
+
+It took four passes to stop lying, and the intermediate numbers are the reason
+the first was not written down. **136** "names no suite that exists" became
+**1** once it knew that `# Reddens: "…"` with no suite name is a legitimate
+format, because the FILENAME carries the suite — a fact about the parser, not
+about the patches. **72** "claims a check their suite does not have" became
+**22** after three spellings of one sentence stopped counting as three missing
+checks (`\"` from being inside a Python string, `'` against the suite's `"`, and
+suites that quote a label INSIDE the sentence where the claim does not), and
+after matching moved to the longest literal fragment, because a check sentence
+is usually a template literal and `…four columns wide at ${VIEWPORT.width}px`
+cannot be found by searching for `1440px`.
+
+**The tuning stops at five consecutive words**, and that is a decision rather
+than a threshold: each loosening converted artefacts into verified claims, and
+one more loosening would have converted real ones too. Five words of a check's
+own sentence do not appear by accident in a different check. What is left over
+is reported, and some of it is a patch paraphrasing where it should have quoted
+— a real defect in the patch, and not one the matcher should be bent to hide.
+
+It is registered as a **ratchet**: today's numbers are in the file and the build
+fails when one grows. Failing on arrival makes red the normal state, and a check
+everybody steps over is worse than none; exiting 0 with the findings printed is
+a check that cannot fail. Break-tested both ways — a claimless probe patch, and
+a real claim reworded to a plausible synonym of its own check, each take it to
+exit 1.
 
 ### The two checkers, and the one that broke what it was measuring
 
