@@ -605,6 +605,21 @@ as the same defects one level up.
   `.git` — an export, a tarball — the command failed, both readings were empty,
   and "nothing changed" was reported by a check with no way to tell. A guard
   must refuse where it cannot measure.
+- **A BLANKET `catch {}` AROUND AN ASSERTION MAKES IT UNCONDITIONAL.** The
+  eighth assertion in `check-video2-counts.mjs` compares the handoff document's
+  headline against §4. Its first version referenced a binding that is
+  block-scoped to the §2 parser, which throws a `ReferenceError` from outside
+  that block — and the whole assertion sat in `try { … } catch { }`. So it threw
+  on every run, reported nothing, and **setting the headline to 999 did not
+  fail the build**. The catch now tolerates `ENOENT` and re-throws everything
+  else. The general rule: a `catch` around a check must name the one condition
+  it forgives, because every other condition it swallows is the check not
+  running.
+- **BREAK-TEST THE ASSERTION, NOT JUST THE CODE.** That bug was invisible to
+  reading and took ten seconds to find by setting the number wrong and watching
+  the exit code. Every assertion added to these scripts gets the same treatment:
+  break it, see it fail, restore it, see it pass. Twice today that found an
+  assertion that had never once run.
 - **AN ANCHOR BEGINNING WITH SPACES CANNOT PIN INDENTATION.** A more-deeply
   indented copy of the same line contains it, so `s.count(a)` sees two and the
   patch refuses. Both cases found were correct code — a loading skeleton
