@@ -659,10 +659,10 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
 | M | Task header "Brain²" button — deliberate: the hub does not exist |
 | B | @ picker People/Tasks/Docs; "Does not have access to task" |
-| M | @ picker Whiteboards / Locations / Channels; Brain section; Agents |
-| M | Per-@-type keyboard hint footer |
+| P | @ picker **Whiteboards / Locations / Channels closed** by `task-mentions.mjs`, 17 checks (frames `04:00`/`04:11`). Still open, and blocked rather than pending: **Brain section** and **Agents**, both of which address the Brain² hub that does not exist (see §3). The Locations check asserts a request LEFT THE PAGE carrying the typed word and exactly the three location types — filtering the sidebar's cached tree in the browser finds nothing for a space created this minute and calls it "no matches" |
+| B | Per-@-type keyboard hint footer — closed by `task-mentions.mjs`, 17 checks. Frame `04:00` draws `'@' People | '@@' Tasks | '@@@' Docs | '@@@@' Whiteboards | '@/' Locations | '#' Channels`; Rundesk had no footer at all |
 | B | Voice note, Transcribe, Insert as text, inline player, **locale→speech language** |
-| M | "Attach as audio file" tooltip |
+| B | "Attach as audio file" tooltip — closed by `comment-recording.mjs`, 32 checks |
 | B | **Comment "+" menu** — eight of the frame's ten items, each one wired |
 | B | Slash commands in the comment composer, and in the "+" menu |
 | M | "Brain" in the "+" menu — the Brain² hub does not exist |
@@ -682,7 +682,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | | capability |
 |---|---|
 | B | Related Items — one panel, Relationships \| References, single entry point |
-| M | Right-rail "Related Items" icon + tooltip |
+| B | Right-rail "Related Items" icon + tooltip — closed by `task-attachments.mjs`, 13 checks (frames `06:05`–`06:08`) |
 | B | Sidebar Direct Messages — closed by `sidebar-dms.mjs`, 14 checks. The data had been there the whole time and the surface was not: `chat_channels.is_dm` is a real column and `workspace-chat-page.tsx` has split `publicChannels` from `dmChannels` since it was written. The Channels section filters DMs out on purpose — `+ Add Channel` takes a name and `+ New message` takes a person, so one button cannot be both — and filtering them out without giving them a home left them reachable only from the page you had to already be on to know you had any |
 | M | Create-menu search "Describe anything to create"; Create with AI; Super Agent |
 | M | "Form" absent from the create menu though the module exists |
@@ -761,12 +761,12 @@ checks, not about a run.**
 | B | A PERMANENT delete for a task — `deletedAt` into the same Trash the other entities use, restorable there, purged by the same cron after the same 30 days. Archive is never purged. An archived task must NOT appear in the Trash, and that check was impossible to satisfy before |
 | M | "Add to ›" (a task in more than one list) |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
-| M | "⚡ Assign with AI" — `assign_task` exists; CHOOSING the person does not |
+| B | "⚡ Assign with AI" — closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task |
 | — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
 | M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
 | B | Live focus countdown in the header |
-| M | Countdown in the browser tab title |
+| B | Countdown in the browser tab title — closed by `tab-title-countdown.mjs`, 10 checks. A title set once is a screenshot rather than a countdown, so the suite reads it twice and requires the remainder to have decreased; it also leaves the app and requires the title to be restored, because a countdown that outlives the page it belongs to is read as live |
 | M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |
 | M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck |
 | B | Skills; Recent Chats with auto-derived names |
@@ -775,13 +775,13 @@ checks, not about a run.**
 
 | | capability |
 |---|---|
-| B | Model picker — "Best models", hover cards with Speed/Intelligence bars, Show more, and a preferred model persisted SERVER-SIDE (it was localStorage only). ChatGPT and Gemini are listed and deliberately NOT selectable: no OpenAI or Google client exists, and an unroutable provider carries no model field so nothing can route to one by accident |
-| M | "Best models" header; hover cards with Speed/Intelligence bars; Show more |
-| M | Inline word suggestions while typing |
+| B | Model picker — the **"Best models" header, the disclosure, and a preferred model persisted SERVER-SIDE** (it was localStorage only, and a preference that does not survive a second browser is a habit that one browser happens to remember). ChatGPT and Gemini are listed and deliberately NOT selectable: no OpenAI or Google client exists, and an unroutable provider carries no model field, so nothing can route to one by accident. `ai-model-picker.mjs`, 32 checks |
+| B | "Best models" hover cards with Speed/Intelligence bars — closed by `ai-model-cards.mjs`, 24 checks (frame `17:16`). **THIS ROW AND THE ONE ABOVE IT DESCRIBED THE SAME SCREEN AND DISAGREED.** The row above read `B | … hover cards with Speed/Intelligence bars …` while this one read `M | … hover cards with Speed/Intelligence bars …`, one line apart. Reading the code settled it: the header and the disclosure were built, and the hover card was not — the bars were inline in every row, under a comment arguing that hover-to-see is worse. The `B` row overclaimed, and the duplicate is why nobody noticed. The two now divide the screen between them rather than both claiming it. The bars are MEASURED: the fill sits inside a visibly wider track, Speed differs from Intelligence within one model, and the same metric differs between two models — two identical bars drawn at full width would satisfy a check that only asked they exist |
+| B | Inline word suggestions while typing — closed by `ai-answer-rendering.mjs`, 51 checks (frames `17:42`–`17:50`). Three different sets at three timecodes, so a fixed three would photograph identically. Building it found that **the composer could not be typed into at all** — `value={input}` with no `onChange` — which is why `nextWordSuggestions` had always been correct and had never been called with anything but `''` |
 | B | **Live step log**; steps emitted only after the lookup returns |
 | B | **"No changes made."**; copy / 👍👎 / retry; **Follow ups** (generated, capped at 3) |
 | B | Integration error card — the provider's own message, stored per connection, cleared on a successful connect, with the Help-centre link |
-| M | Success message with clickable path chips (`rundesk › ddddd › List`) |
+| B | Success message with clickable path chips (`rundesk › ddddd › List`) — closed by `ai-answer-rendering.mjs`, 51 checks (frame `18:48`). The chip was a `<span>`: a path that looked like a link, could not be pressed, could not be middle-clicked and did not exist to a keyboard — the dead control, in the one place the answer is telling you to act. A view the space cannot draw degrades to the list rather than being offered |
 | B | AI Analytics: Time Saved with its working, Human Cost Savings, editable rate, Edit benchmark, validation, net-can-be-negative |
 | B | "Actions completed" — the 24 raw feature values grouped into the frames' 8 categories, server-side. Three categories cannot be filled at all and print a reason rather than `0`: a zero meaning "impossible" and a zero meaning "you did none" look identical on screen. The unit stays a run, not an "action" |
 | M | **Credits entirely**: tab, category→credits table, usage-trend chart with limit line, Add credits, My Agent Performance |
@@ -793,7 +793,7 @@ checks, not about a run.**
 | B | Teams Hub reachable by a plain member; All Teams / All People / Org Chart; My Teams; search; org-chart empty state |
 | B | Teams empty-state headline; **Browse People / Create Team** buttons; two explainer cards |
 | B | Per-person work preview cards — each showing its own person's work, asserted by seeding two people differently |
-| M | Contextual starter cards that change with context |
+| B | Contextual starter cards that change with context — closed by `ai-answer-rendering.mjs`, 51 checks (frames `16:32` / `21:15`, four cards each and not one in common). Asserted as a DELTA, not an absolute: the suite creates two overdue tasks and requires "Find Blockers" to name exactly two more than before, because the e2e database is shared |
 
 ---
 
