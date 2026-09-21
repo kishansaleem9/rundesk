@@ -74,10 +74,14 @@ went missing entirely. A list that is only written once stops being true.
   `INLINE_EDITABLE_TYPES` says out loud which types the grid can really edit —
   the money column stayed editable, and there is a check that it did, because
   "make it all read-only" is the feature removed rather than the bug fixed.
-- **A fourth duplicated-list bug**, found while adding Team View: the list route
-  keeps its own `ALL_VIEWS` copy and silently filters out anything missing from
-  it. Four now: two planner settings types, two field-type lists, the API vs
-  route view keys, and this.
+- ~~**A fourth duplicated-list bug**, found while adding Team View: the list
+  route keeps its own `ALL_VIEWS` copy and silently filters out anything missing
+  from it.~~ **CLOSED 21 September.** It was worse than this line said — the
+  route held THREE copies, not one: `ALL_VIEWS`, `activeView`'s hand-written
+  union, and the `v` cycler's own five-key literal. All three read
+  `SPACE_VIEW_KEYS` now and the keys exist twice in the repository. Four of the
+  class found in that pass: two planner settings types, two field-type lists,
+  the API vs route view keys, and this.
 - **A fifth, and the first visible on screen.** Two implementations of "how long
   ago" that disagreed: the list route's locale-aware `formatAge`, and
   `docs-panel.tsx`'s hardcoded-English `relativeTime` returning "3d ago". The
@@ -2587,10 +2591,17 @@ Three. None changes a count; all three are in code this session touched.
   names `ALL_VIEWS` holds eight hundred lines above it, minus `team`. So Team
   View — built during this audit — was drawn in the tab strip, was selectable
   by mouse, and the keyboard walked past it forever. Present, reachable one
-  way, unreachable the other, and nothing on screen to say so. The cycler now
-  reads `ALL_VIEWS`, which takes the keys from five copies down to four
-  (`space-presets.ts` is the source of truth; `lib/space-views.ts` and
-  `ALL_VIEWS` are the others).
+  way, unreachable the other, and nothing on screen to say so.
+
+  **And the fix at the time was itself a copy.** The cycler was pointed at the
+  route's own `ALL_VIEWS`, which took the keys from five copies to four and
+  left the class alive. On 21 September the route's copies went entirely:
+  `ALL_VIEWS` and `activeView`'s hand-written union of the same six keys, nine
+  hundred lines apart in one file, both now `SPACE_VIEW_KEYS`. **The keys exist
+  TWICE in the repository** — `space-presets.ts` on the server, and
+  `lib/space-views.ts` mirroring it. Found by reading team-view's REFUSED break
+  log, whose baseline had been 12 passed 1 failed, sitting under a ledger row
+  that read as proven; baseline is 13 green now.
 
   The new check presses `v` **`tabs + 1` times** and requires it to have
   visited every view, because a cycler that merely MOVES proves nothing — and
