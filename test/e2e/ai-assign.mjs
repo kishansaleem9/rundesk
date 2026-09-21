@@ -179,11 +179,22 @@ try {
    * `collectWorkloadLoads`, and this is what says so from outside: two
    * independent counts drifting apart is the duplicated-list defect in
    * arithmetic, and it is invisible from either endpoint alone.
+   *
+   * 201, NOT 200. `workloadBalance` is a plain `@Post` with no `@HttpCode`, and
+   * Nest answers 201 for those — the route's real contract, not an accident.
+   * This check was written against 200 and failed on its first run reporting
+   * `the suggestion said 0 and workload-balance said 0`: the two counts already
+   * agreed, and the status was the only thing wrong with it. The neighbouring
+   * assertions here keep `=== 200` because they are GETs, which is exactly why
+   * this is easy to miss — the file is consistent with itself and wrong in one
+   * place. Pinned exactly rather than loosened to `< 300`, because "any success
+   * will do" is how a route that starts answering 204 with no body keeps a
+   * green check.
    */
   const balance = await api('/ai/workload-balance', { method: 'POST', body: { workspaceId: WS } })
   const balanceLoad = (balance.data?.loads ?? []).find((l) => l.userId === pick1.userId)
   chk(
-    balance.status === 200 && !!balanceLoad && balanceLoad.open === pick1.openTasks,
+    balance.status === 201 && !!balanceLoad && balanceLoad.open === pick1.openTasks,
     'the suggestion’s open-task count matches what the workload endpoint reports for the same person',
     `the suggestion said ${pick1.openTasks} and workload-balance said ${balanceLoad?.open ?? '(absent)'} ` +
       `(status ${balance.status})`,

@@ -189,18 +189,19 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs NINETY-EIGHT. At the same 1.1 minutes each that is about
-    # 108 minutes plus setup. 120 would still fit, with twelve minutes of
-    # headroom — but the count has gone 50 → 85 → 88 → 93 → 96 → 98 in two
-    # days, and a limit whose margin is thinner than one session's growth is a
-    # limit that fails on somebody else's commit. 150.
+    # The job now runs ONE HUNDRED AND ONE. At the same 1.1 minutes each that is about
+    # 111 minutes plus setup. 120 would still fit, with nine minutes of
+    # headroom — but the count has gone 50 → 85 → 88 → 93 → 96 → 98 → 101 in
+    # two days, and a limit whose margin is thinner than one session's growth
+    # is a limit that fails on somebody else's commit. 150.
     #
-    # NINE MORE SUITES ARE WRITTEN AND WAITING on a local green run before they
-    # are registered — ai-assign, ai-model-cards, attach-on-create,
-    # create-menu-ai, list-assignee-filter, list-customize, planner-command-bar,
-    # planner-onboarding, and space-wizard's extension. At 107 that is ~118
-    # minutes, which is the point at which 150 stops being comfortable. Split
-    # the job before adding the tenth, not after.
+    # FOUR MORE SUITES ARE WRITTEN AND WAITING on a local green run before they
+    # are registered — ai-assign, attach-on-create, create-menu-ai and
+    # planner-command-bar — plus planner-onboarding. At 106 that is ~117
+    # minutes, which is the point at which 150 stops being comfortable.
+    # **Split this job before it reaches 106**, not after: it is one job with
+    # one setup, and splitting shortens the wall clock without changing the
+    # bill.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -1488,6 +1489,49 @@ jobs:
       - name: The @ picker's sections are real, not labels
         if: '!cancelled()'
         run: node test/e2e/task-mentions.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-S18 `17:16` — the model picker's hover card. The ledger carried both
+      # `B | Model picker — "Best models", hover cards…` and `M | …hover cards
+      # with Speed/Intelligence bars` one row apart; reading the code settled
+      # it, and the B row overclaimed. The bars are MEASURED: fill inside a
+      # visibly wider track, Speed differing from Intelligence within a model,
+      # and the same metric differing between two models. Two identical bars
+      # drawn at full width would satisfy a check that only asked they exist.
+      - name: The model picker's cards say something
+        if: '!cancelled()'
+        run: node test/e2e/ai-model-cards.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2 `10:35` — the BOARD Customize panel: Stack fields · Show empty
+      # fields · Collapse empty columns. Measured off the geometry, not the
+      # attribute: the board is a CSS grid with `min-h-40`, so every column's
+      # bounding box is identical collapsed or not, and the collapse check reads
+      # the lane's BODY. Unstacked fields are compared by CENTRES, because the
+      # meta row is `items-center` and fields of different heights have
+      # different tops while plainly sitting on one line.
+      - name: The board Customize switches reach the cards
+        if: '!cancelled()'
+        run: node test/e2e/list-customize.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2 `11:30` — "Tasks where I have assigned", over Comments · Subtasks ·
+      # Checklists. Each is a separate server source, and the fixture gives
+      # every task exactly ONE route to the person, so a union that quietly
+      # returns everything fails on the task that should not be there. The
+      # Subtasks source returns the PARENT, which is the row you can act on.
+      - name: The assignee filter counts the indirect ways work reaches you
+        if: '!cancelled()'
+        run: node test/e2e/list-assignee-filter.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -72,7 +72,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 50
+const EXPECTED_CHECKS = 51
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -657,13 +657,41 @@ try {
    * here: with no provider key `GET /ai/status` reports `available: false` and
    * the composer is correctly disabled, so there is no way to type. Everything
    * the bar does is client-side and real; this only opens the door.
+   *
+   * THE BODY IS THE ENVELOPE, NOT THE PAYLOAD. This stub used to fulfil with
+   * `{"available":true}`, and every API response in this product is wrapped —
+   * the real route answers `{"data":{"available":false},"error":null}` and the
+   * client reads `.data`. So the flat body unwrapped to `undefined`, the
+   * composer stayed disabled, and the run died thirty seconds later on
+   * `locator.fill` with nothing to say about why. Copy the shape from the live
+   * route, never from the handler's `return`: the response interceptor sits
+   * between them.
    */
   await page.route('**/api/v1/ai/status', (route) =>
-    route.fulfill({ status: 200, headers: { 'content-type': 'application/json' }, body: '{"available":true}' }),
+    route.fulfill({
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+      body: '{"data":{"available":true},"error":null}',
+    }),
   )
   await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
   const box = page.getByTestId('ai-composer-input')
-  await waitUntil(() => box.isEnabled().catch(() => false), { timeoutMs: 25_000 })
+  /*
+   * ASSERTED, NOT AWAITED AND DISCARDED. This was a bare `await waitUntil(…)`
+   * whose result nobody read, so a composer that never enabled carried on into
+   * `box.fill` and failed there — a timeout in the middle of the word-bar
+   * section, pointing at the wrong thing. A precondition that can fail is a
+   * check; if it is not worth a line, it is not worth waiting for.
+   */
+  const typeable = await waitUntil(() => box.isEnabled().catch(() => false), { timeoutMs: 25_000 })
+    .then(() => true)
+    .catch(() => false)
+  chk(
+    typeable,
+    'the composer is typeable once the product reports AI available',
+    'the composer stayed disabled with `/ai/status` stubbed available — the stub is not reaching ' +
+      'the client, and every word-bar check below would fail as a timeout rather than as itself',
+  )
   chk(
     (await page.getByTestId('ai-word-suggestions').count()) === 0,
     'an empty composer offers nothing — the frames show no bar before anything is typed',
