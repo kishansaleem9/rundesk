@@ -1118,4 +1118,18 @@ await browser.close()
 server.close()
 
 console.log(`\n${passed} passed, ${failed} failed`)
+/*
+ * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
+ * branch that silently skipped becomes a shorter run that still reports zero
+ * failures and exits 0. Ninety-two checks over a long walk is a lot of places
+ * to stop quietly. Observed from a green run, not guessed.
+ */
+const EXPECTED_CHECKS = 92
+if (passed + failed !== EXPECTED_CHECKS) {
+  console.log(
+    `\n\x1b[31m✗ ${passed + failed} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +
+      'early, so the count above describes the part it reached and nothing else.',
+  )
+  process.exit(1)
+}
 process.exit(failed === 0 ? 0 : 1)
