@@ -1,0 +1,35 @@
+-- Three of the thirteen field types frame `00:20`–`00:42` lists and this
+-- product had not got.
+--
+-- The picker's `All` section holds THIRTY-TWO types — `00:20` opens it at the
+-- top, `00:42` reaches its foot, and the two shots overlap on Progress (Auto) ·
+-- Email · Phone, so the list is continuous. Nineteen of them existed here;
+-- these are the three of the remaining thirteen that can be REAL without a
+-- provider key, which is the whole basis for picking them:
+--
+--   · **formula** — arithmetic over the task's other numeric fields. DERIVED,
+--     like `progress_auto`: no row is ever written for it in
+--     `custom_field_values` and `setValue` refuses one, because a number stored
+--     in a column is right when it is written and wrong the moment an input
+--     changes. The definition carries `config.expression`, checked against the
+--     project's real fields on the way in so a `{Budgte}` cannot save.
+--
+--   · **tasks** — task ids, a NAMED untyped reference to other tasks. Not
+--     `task_dependencies`, which is typed (blocks / blocked by) and drives the
+--     Related Items panel; this is a field with a name of its own and no
+--     scheduling meaning. Stored as `string[]` in the existing jsonb value
+--     column, like `people` and `files`, and validated the same way: every id
+--     must be a task in this workspace, none may be the task itself.
+--
+--   · **signature** — the drawn strokes as a string, `x,y x,y;x,y x,y`, each
+--     coordinate an integer in a 0–1000 box. It records what was drawn and
+--     nothing else: no signer, no timestamp, and nothing on screen claims
+--     either, because `custom_field_values` has no column for who wrote a
+--     value.
+--
+-- The other ten are recorded as decisions in `docs/video2-reaudit.md` rather
+-- than half-built: eight need a language model, and Relationship and Button
+-- would each be a store or a control with nothing behind it.
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'formula';
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'tasks';
+ALTER TYPE "custom_field_type" ADD VALUE IF NOT EXISTS 'signature';

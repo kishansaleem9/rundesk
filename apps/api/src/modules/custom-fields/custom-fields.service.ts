@@ -54,7 +54,7 @@ export const TSHIRT_SIZES = ['xs', 's', 'm', 'l', 'xl'] as const
 const MULTI_TYPES: ReadonlySet<string> = new Set(['labels', 'people', 'files', 'voting', 'tasks'])
 
 /**
- * 0146 — a SIGNATURE is the strokes that were drawn, and nothing else.
+ * 0158 — a SIGNATURE is the strokes that were drawn, and nothing else.
  *
  * `stroke;stroke;…`, each stroke `x,y x,y …`, each coordinate an integer in a
  * 0–1000 box so the drawing scales to whatever it is rendered in. A stroke
@@ -173,7 +173,7 @@ export class CustomFieldsService {
       throw new BadRequestException(`${dto.type === 'labels' ? 'Labels' : 'Dropdown'} fields require at least one option`)
     }
     /*
-     * 0146 — A FORMULA IS CHECKED BEFORE IT IS STORED, not when somebody reads
+     * 0158 — A FORMULA IS CHECKED BEFORE IT IS STORED, not when somebody reads
      * it. An expression that cannot be evaluated is a field that draws a blank
      * on every task forever, and the person who could have fixed it is the one
      * typing it in now. The references are resolved against the project's real
@@ -257,7 +257,7 @@ export class CustomFieldsService {
   }
 
   /**
-   * 0146 — the expression, checked against the fields it claims to read.
+   * 0158 — the expression, checked against the fields it claims to read.
    *
    * Four separate refusals — the expression will not parse, it names a field
    * that is not here, it names two fields at once, or it names one a formula
@@ -345,13 +345,13 @@ export class CustomFieldsService {
     if (patch.config !== undefined && def.type === 'progress_auto') {
       set.config = toProgressConfig(patch.config)
     }
-    /* 0146 — the same check the create path runs, so an expression cannot be
+    /* 0158 — the same check the create path runs, so an expression cannot be
      * edited into one that create would have refused. */
     if (patch.config !== undefined && def.type === 'formula') {
       set.config = await this.checkedFormulaConfig(def.projectId, patch.config, def.id)
     }
     /*
-     * 0146 — A RENAME THAT WOULD ORPHAN A FORMULA IS REFUSED.
+     * 0158 — A RENAME THAT WOULD ORPHAN A FORMULA IS REFUSED.
      *
      * A formula stores the NAME it reads, because a name is what somebody
      * types. Rename "Budget" to "Budget (USD)" and every `{Budget}` stops
@@ -402,7 +402,7 @@ export class CustomFieldsService {
       .select({
         id: customFieldDefinitions.id,
         projectId: customFieldDefinitions.projectId,
-        // 0146 — the rename guard needs the name it is replacing.
+        // 0158 — the rename guard needs the name it is replacing.
         name: customFieldDefinitions.name,
         type: customFieldDefinitions.type,
         options: customFieldDefinitions.options,
@@ -464,7 +464,7 @@ export class CustomFieldsService {
     const progress = wantsProgress ? await this.progressFor(taskId) : null
 
     /*
-     * 0146 — WHAT A FORMULA CAN SEE, built once for the whole task.
+     * 0158 — WHAT A FORMULA CAN SEE, built once for the whole task.
      *
      * Only the fields THIS task has: `defs` is already narrowed by list scope,
      * so a formula that reads a field scoped to a different list resolves to
@@ -594,7 +594,7 @@ export class CustomFieldsService {
       )
     }
     /*
-     * 0146 — and a Formula for the same reason, said in its own words. A
+     * 0158 — and a Formula for the same reason, said in its own words. A
      * shared "this field is derived" message would be cheaper and would tell
      * the caller nothing about which fields to change instead.
      */
@@ -755,7 +755,7 @@ export class CustomFieldsService {
           break
         }
         /*
-         * 0146 — TASKS, frame `00:42`'s picker.
+         * 0158 — TASKS, frame `00:42`'s picker.
          *
          * The same shape of rule as `people` and `files`, for the same reason:
          * an id that is not a task in this workspace would render as a link to
@@ -793,7 +793,7 @@ export class CustomFieldsService {
           }
           break
         }
-        /* 0146 — the strokes, checked against the grammar the column documents. */
+        /* 0158 — the strokes, checked against the grammar the column documents. */
         case 'signature':
           assertSignature(value)
           break

@@ -86,7 +86,7 @@ const ALL_TYPES = [
   'text', 'number', 'dropdown', 'date', 'checkbox', 'url', 'email', 'phone',
   'money', 'rating', 'progress_auto', 'long_text', 'labels', 'people',
   'location', 'tshirt_size', 'progress_manual', 'files', 'voting',
-  // 0146
+  // 0158
   'formula', 'tasks', 'signature',
 ]
 /** The six the list route's picker offers. A picker holding only these is the drifted copy. */

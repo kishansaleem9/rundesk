@@ -31,7 +31,7 @@ export const customFieldTypeEnum = pgEnum('custom_field_type', [
   'files',
   'voting',
   /*
-   * 0146 — three of the thirteen types frame `00:20`–`00:42` lists and this
+   * 0158 — three of the thirteen types frame `00:20`–`00:42` lists and this
    * product had not got. The other ten are recorded as decisions in
    * `docs/video2-reaudit.md` rather than half-built here.
    *
@@ -77,7 +77,7 @@ export const customFieldDefinitions = pgTable(
      *
      * progress_auto: { sources: { subtasks, checklists, assignedComments },
      *                  doneStatusIs100 }
-     * formula:       { expression }   — 0146, e.g. `({Spent} / {Budget}) * 100`
+     * formula:       { expression }   — 0158, e.g. `({Spent} / {Budget}) * 100`
      */
     config:       jsonb('config').$type<Record<string, unknown>>(),
     createdAt:    timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
@@ -105,8 +105,8 @@ export const customFieldValues = pgTable(
     //   date                        → { v: ISO string }
     //   checkbox                    → { v: boolean }
     //   labels/people               → { v: string[] }  (§V2-01c)
-    //   tasks                       → { v: string[] }  (task ids, 0146)
-    //   signature                   → { v: string }    (stroke data, 0146)
+    //   tasks                       → { v: string[] }  (task ids, 0158)
+    //   signature                   → { v: string }    (stroke data, 0158)
     //
     // No row is ever written for `progress_auto` or `formula` — both are
     // derived on read, and both refuse a write rather than accept one they

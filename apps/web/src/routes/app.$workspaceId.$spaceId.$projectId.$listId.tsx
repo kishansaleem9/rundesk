@@ -225,10 +225,10 @@ type CustomFieldType = 'text' | 'number' | 'dropdown' | 'date' | 'checkbox' | 'u
  * Offered when CREATING a field from this view's picker.
  *
  * The comment here used to read "deliberately the same set this view knows how
- * to render". Half of that was true and the half that was not is 0146's find:
+ * to render". Half of that was true and the half that was not is 0158's find:
  * the picker offers six, but the COLUMNS draw whatever the project has, and a
  * definition made anywhere else — the create modal offers all twenty-two —
- * lands in this grid all the same. Until 0146 every one of them rendered as
+ * lands in this grid all the same. Until 0158 every one of them rendered as
  * `String(value)`, so a `people` field drew a comma-separated list of uuids,
  * and clicking the cell opened a text box whose save the API answered 400.
  * `customCellText` and `INLINE_EDITABLE_TYPES` below are what make the second
@@ -262,7 +262,7 @@ type CustomFieldValue = {
 }
 
 /**
- * 0146 — the types a cell in this grid can really EDIT in place.
+ * 0158 — the types a cell in this grid can really EDIT in place.
  *
  * Everything else is drawn read-only. The alternative, which is what this file
  * did until now, is a text box over a `people` field: it accepts what you type,
@@ -5055,7 +5055,7 @@ function TableView({
                       <div key={field.id} className="w-36 px-3 flex items-center relative">
                         {!editable ? (
                           /*
-                           * 0146 — READ-ONLY, and it opens nothing.
+                           * 0158 — READ-ONLY, and it opens nothing.
                            *
                            * A `people`, `tasks`, `signature` or derived field
                            * has no editor in this grid; until now clicking one
@@ -5205,7 +5205,7 @@ function CustomFieldEditor({
     )
   }
   /*
-   * 0146 — T-shirt Size is a FIXED set, so it gets the set rather than a text
+   * 0158 — T-shirt Size is a FIXED set, so it gets the set rather than a text
    * box. A free-text cell over it accepts "Large", sends it, and the API
    * refuses everything that is not one of the five.
    */

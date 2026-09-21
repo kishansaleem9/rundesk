@@ -3,7 +3,7 @@ import { test } from 'node:test'
 import { parseFormula, evaluateFormula, toFormulaConfig, FormulaError } from './formula'
 
 /**
- * 0146 — the parts of a formula field with edges, away from the database.
+ * 0158 — the parts of a formula field with edges, away from the database.
  *
  * The e2e suite proves the type round-trips through Postgres and draws. These
  * are the cases that are tedious to reach through a browser and easy to get

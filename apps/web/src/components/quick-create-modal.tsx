@@ -443,7 +443,7 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
   { value: 'progress_manual', labelKey: 'taskDetail.fieldType.progressManual' },
   { value: 'files', labelKey: 'taskDetail.fieldType.files' },
   { value: 'voting', labelKey: 'taskDetail.fieldType.voting' },
-  // 0146 — three more of the frame's list; `formula` sits with the derived one.
+  // 0158 — three more of the frame's list; `formula` sits with the derived one.
   { value: 'tasks', labelKey: 'taskDetail.fieldType.tasks' },
   { value: 'signature', labelKey: 'taskDetail.fieldType.signature' },
   { value: 'progress_auto', labelKey: 'taskDetail.fieldType.progressAuto' },
@@ -478,7 +478,7 @@ function TaskForm({
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
-  /* 0146 — a formula's expression, checked by the API against the project's
+  /* 0158 — a formula's expression, checked by the API against the project's
    * own fields before it is stored. */
   const [newFieldExpression, setNewFieldExpression] = useState('')
   const [newFieldRequired, setNewFieldRequired] = useState(false)
@@ -777,7 +777,7 @@ function TaskForm({
           ...(newFieldType === 'progress_auto'
             ? { config: { sources: progressSources, doneStatusIs100: progressDoneIs100 } }
             : {}),
-          // 0146 — the formula's expression travels in the same `config` the
+          // 0158 — the formula's expression travels in the same `config` the
           // progress panel uses, for the same reason: it is type-specific
           // settings that are not an option list.
           ...(newFieldType === 'formula'
@@ -1170,7 +1170,7 @@ function TaskForm({
                 />
               )}
               {/*
-                0146 — the expression, for the same reason the options box
+                0158 — the expression, for the same reason the options box
                 above appears: the API refuses a formula without one, so the
                 input is here rather than letting the save fail. The field
                 names go in braces and are checked against the project's real

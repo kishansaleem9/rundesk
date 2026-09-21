@@ -251,7 +251,7 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   progress_manual: 'taskDetail.fieldType.progressManual',
   files: 'taskDetail.fieldType.files',
   voting: 'taskDetail.fieldType.voting',
-  // 0146 — three of the thirteen types frame `00:20`–`00:42` lists.
+  // 0158 — three of the thirteen types frame `00:20`–`00:42` lists.
   formula: 'taskDetail.fieldType.formula',
   tasks: 'taskDetail.fieldType.tasks',
   signature: 'taskDetail.fieldType.signature',
@@ -7948,13 +7948,13 @@ type CustomFieldDef = {
     | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
     /* 0145 — attachment ids, and the ids of whoever voted. */
     | 'files' | 'voting'
-    /* 0146 — `formula` is read-only here for the same reason `progress_auto`
+    /* 0158 — `formula` is read-only here for the same reason `progress_auto`
      * is: the API refuses a write to it, so an editor would be a control that
      * errors every time it is used. */
     | 'formula' | 'tasks' | 'signature'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
-  /** 0146 — `{ expression }` on a formula, the progress sources on a
+  /** 0158 — `{ expression }` on a formula, the progress sources on a
    *  `progress_auto`. Sent by the API on every definition; only these two
    *  types ever put anything in it. */
   config?: { expression?: string } | null
@@ -8012,7 +8012,7 @@ const CREATABLE_TYPES_FROM_LABELS = Object.keys(FIELD_TYPE_LABEL_KEYS)
 /** Types that are a list of choices, and so need options before they mean anything. */
 const TYPES_NEEDING_OPTIONS: ReadonlySet<string> = new Set(['dropdown', 'labels'])
 /**
- * 0146 — and the one that needs an expression.
+ * 0158 — and the one that needs an expression.
  *
  * The API refuses a formula without one, so the input appears rather than
  * letting the save fail — the same rule the options box above follows. A type
@@ -8040,7 +8040,7 @@ function CustomFieldsPanelInner({
   const [newType, setNewType] = useState('text')
   const [newScope, setNewScope] = useState<'project' | 'list'>('project')
   const [newOptions, setNewOptions] = useState('')
-  /* 0146 — the formula's expression, e.g. `{Budget} - {Spent}`. */
+  /* 0158 — the formula's expression, e.g. `{Budget} - {Spent}`. */
   const [newExpression, setNewExpression] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   // Keyed on the stamp, so pressing "Add fields" again re-opens a form the
@@ -8273,7 +8273,7 @@ function CustomFieldsPanelInner({
           {definition.type === 'progress_auto' ? (
             <ProgressAutoValue value={typeof value === 'number' ? value : null} />
           ) : definition.type === 'formula' ? (
-            /* 0146 — derived, so shown rather than edited. Same reasoning as
+            /* 0158 — derived, so shown rather than edited. Same reasoning as
              * the branch above: the API refuses the write. */
             <FormulaValue
               value={typeof value === 'number' ? value : null}
@@ -8328,7 +8328,7 @@ function ProgressAutoValue({ value }: { value: number | null }) {
 }
 
 /**
- * 0146, frame `00:20` — the derived number, and the expression it came from.
+ * 0158, frame `00:20` — the derived number, and the expression it came from.
  *
  * THE EXPRESSION IS ON SCREEN, not only in the create form. A number with no
  * visible derivation is a number nobody can check, and the commonest question
@@ -8631,7 +8631,7 @@ function CustomFieldEditor({
           onCommit={onCommit}
         />
       )
-    // ── 0146 ────────────────────────────────────────────────────────────
+    // ── 0158 ────────────────────────────────────────────────────────────
     case 'tasks':
       return (
         <TasksFieldEditor
@@ -8822,7 +8822,7 @@ function PeopleFieldEditor({
 }
 
 /**
- * 0146 — TASKS, frame `00:42`'s picker.
+ * 0158 — TASKS, frame `00:42`'s picker.
  *
  * A NAMED reference to other tasks, and deliberately not a dependency. The
  * Related Items panel writes `task_dependencies`, which is TYPED — blocks,
@@ -8919,7 +8919,7 @@ function signatureStrokes(value: string): string[] {
 }
 
 /**
- * 0146 — SIGNATURE, frame `00:42`'s picker.
+ * 0158 — SIGNATURE, frame `00:42`'s picker.
  *
  * It stores the strokes that were drawn and NOTHING ELSE. No signer, no
  * timestamp, and nothing on screen claims either — `custom_field_values` has

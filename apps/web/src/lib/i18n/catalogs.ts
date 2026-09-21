@@ -2411,7 +2411,7 @@ export const en = {
   // 0145 — attachment references, and votes.
   'taskDetail.fieldType.files': 'files',
   'taskDetail.fieldType.voting': 'voting',
-  // 0146 — three more of frame `00:20`–`00:42`'s field types.
+  // 0158 — three more of frame `00:20`–`00:42`'s field types.
   'taskDetail.fieldType.formula': 'formula',
   'taskDetail.fieldType.tasks': 'tasks',
   'taskDetail.fieldType.signature': 'signature',
@@ -9002,7 +9002,7 @@ export const es: Record<TranslationKey, string> = {
   'taskDetail.fieldType.tshirtSize': 'talla',
   'taskDetail.fieldType.files': 'archivos',
   'taskDetail.fieldType.voting': 'votación',
-  // 0146
+  // 0158
   'taskDetail.fieldType.formula': 'fórmula',
   'taskDetail.fieldType.tasks': 'tareas',
   'taskDetail.fieldType.signature': 'firma',
@@ -15464,7 +15464,7 @@ export const ar: Record<TranslationKey, string> = {
   'taskDetail.fieldType.tshirtSize': 'المقاس',
   'taskDetail.fieldType.files': 'ملفات',
   'taskDetail.fieldType.voting': 'تصويت',
-  // 0146
+  // 0158
   'taskDetail.fieldType.formula': 'معادلة',
   'taskDetail.fieldType.tasks': 'مهام',
   'taskDetail.fieldType.signature': 'توقيع',
@@ -21847,7 +21847,7 @@ export const ur: Record<TranslationKey, string> = {
   'taskDetail.fieldType.tshirtSize': 'سائز',
   'taskDetail.fieldType.files': 'فائلیں',
   'taskDetail.fieldType.voting': 'ووٹنگ',
-  // 0146
+  // 0158
   'taskDetail.fieldType.formula': 'فارمولا',
   'taskDetail.fieldType.tasks': 'ٹاسکس',
   'taskDetail.fieldType.signature': 'دستخط',
