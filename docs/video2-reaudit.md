@@ -2936,6 +2936,14 @@ worktree under a lock:
 | `comment-recording` — **never covered before** | 4 | 4 |
 | `view-visibility` — **never covered before** | 3 | 3 |
 | `list-name-taken` — **never covered before** | 3 | 2, and one that found the third second-guard |
+| `checklists` — **never break-TESTABLE before** | 3 | 3 |
+| `list-card-cover` | 8 | 8 |
+| `task-activity-filter` | 4 | 4 |
+| `task-header-status` | 3 | 3 |
+| `person-panel` | 1 | 1 |
+| `planner-blocks` | 1 | 1 |
+| `space-default-permission` | 1 | 1 |
+| `ai-value` | 1 | 1 |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `folder-create` | 12 | 12 |
 | `list-empty-states` | 7 | 7 |
