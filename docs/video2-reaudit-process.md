@@ -234,6 +234,17 @@ irrelevant trains everyone to ignore it.
   once this happened within the hour. Build your lane its own bundle
   (`--outDir /tmp/claude-0/dist-<lane> --emptyOutDir`); `verify.sh` picks it up
   automatically and names the bundle it measured on the result line.
+- **A SHARED THING MADE PRIVATE IS STILL STALE — IT IS JUST STALE PRIVATELY.**
+  The per-lane bundles above fixed the collision and nothing aged them out. A
+  full regression ran against four bundles built three hours and six source
+  files earlier, and every result from those lanes was about code that no
+  longer existed; the first failure it produced was unattributable and the
+  sweep had to be thrown away. This is the *same* defect as the unsynced break
+  worktree, in the fix written that morning to avoid it — and it was harder to
+  see, because a private staleness is one nothing else trips over.
+  `verify.sh` refuses (exit 6) on a bundle older than its source now, and
+  `refresh-dists.sh` clears it. **When you isolate a shared resource, ask what
+  used to keep it current and whether anything still does.**
 - **Prove the request, not just the render.** For anything that changes what the
   server is asked for, capture the request (`page.on('request', …)`) and assert
   the parameter went out. Rendering the right thing for the wrong reason is the

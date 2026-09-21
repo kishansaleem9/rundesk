@@ -21,12 +21,33 @@ Four at once:
   verify.sh list-filters 3 & verify.sh bookmarks 4 & wait )
 ```
 
-## Two things that will bite you
+## Three things that will bite you
 
 **`apps/web/dist` is shared, and that is fine — until you rebuild it.** A suite
-only ever reads the bundle, so lanes can share one. Break tests rebuild, so a
-break test cannot share a dist with anything; give each one its own `--outDir`
-or run them one at a time.
+only ever reads the bundle, so lanes can share one. `vite build` empties the
+directory before writing, though, so a run that starts mid-build dies on
+`ENOENT …/index.html` — and a run that starts just *after* somebody else's
+build finishes reports an ordinary pass or fail about a tree that is not the
+one it is testing. With four agents working at once this happened within the
+hour.
+
+So `verify.sh` prefers `/tmp/claude-0/dist-<lane>` when that lane has built
+one:
+
+```bash
+bash scripts/e2e-lanes/refresh-dists.sh "1 2 3 4"
+```
+
+**And a private bundle is still stale, it is just stale privately.** Nothing
+ages those out. A full regression was run here against four bundles built
+three hours and six source files earlier, and every result from those lanes
+was about code that no longer existed. `verify.sh` now **refuses** (exit 6)
+when any source file under `apps/web/src`, `packages/ui/src` or
+`packages/feature-flags/src` is newer than the bundle it is about to measure,
+names three of the offenders, and prints the rebuild command. It refuses
+rather than rebuilding for the same reason `wt-break.sh` refuses: seven lanes
+each firing their own `vite build` on four cores turns one forgotten rebuild
+into a thundering herd.
 
 **A running API already has the schema your WORKING TREE has.** The API build
 emits extensionless imports into `packages/db/src`, so it can only run under
