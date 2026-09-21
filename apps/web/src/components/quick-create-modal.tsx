@@ -443,7 +443,11 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
   { value: 'progress_manual', labelKey: 'taskDetail.fieldType.progressManual' },
   { value: 'files', labelKey: 'taskDetail.fieldType.files' },
   { value: 'voting', labelKey: 'taskDetail.fieldType.voting' },
+  // 0146 — three more of the frame's list; `formula` sits with the derived one.
+  { value: 'tasks', labelKey: 'taskDetail.fieldType.tasks' },
+  { value: 'signature', labelKey: 'taskDetail.fieldType.signature' },
   { value: 'progress_auto', labelKey: 'taskDetail.fieldType.progressAuto' },
+  { value: 'formula', labelKey: 'taskDetail.fieldType.formula' },
 ]
 
 /** §G15 frame #12 — what the create footer needs to know about. */
@@ -474,6 +478,9 @@ function TaskForm({
   const [newFieldName, setNewFieldName] = useState('')
   const [newFieldType, setNewFieldType] = useState('text')
   const [newFieldOptions, setNewFieldOptions] = useState('')
+  /* 0146 — a formula's expression, checked by the API against the project's
+   * own fields before it is stored. */
+  const [newFieldExpression, setNewFieldExpression] = useState('')
   const [newFieldRequired, setNewFieldRequired] = useState(false)
   /*
    * §V2-S01c frame `00:20` — "a SEARCHABLE FIELD-TYPE PICKER".
@@ -770,6 +777,12 @@ function TaskForm({
           ...(newFieldType === 'progress_auto'
             ? { config: { sources: progressSources, doneStatusIs100: progressDoneIs100 } }
             : {}),
+          // 0146 — the formula's expression travels in the same `config` the
+          // progress panel uses, for the same reason: it is type-specific
+          // settings that are not an option list.
+          ...(newFieldType === 'formula'
+            ? { config: { expression: newFieldExpression.trim() } }
+            : {}),
           ...(needsOptions
             ? {
                 // "High, Low" typed by a person becomes real options. The value
@@ -795,6 +808,7 @@ function TaskForm({
       setMakingField(false)
       setNewFieldName('')
       setNewFieldOptions('')
+      setNewFieldExpression('')
       setNewFieldRequired(false)
       setNewFieldListOnly(false)
       setFieldTypeQuery('')
@@ -1156,6 +1170,24 @@ function TaskForm({
                 />
               )}
               {/*
+                0146 — the expression, for the same reason the options box
+                above appears: the API refuses a formula without one, so the
+                input is here rather than letting the save fail. The field
+                names go in braces and are checked against the project's real
+                fields on the way in, so a typo is refused with the name it
+                could not find rather than saved as a field that draws blank
+                on every task forever.
+              */}
+              {newFieldType === 'formula' && (
+                <input
+                  value={newFieldExpression}
+                  onChange={(e) => setNewFieldExpression(e.target.value)}
+                  data-testid="quick-create-new-field-expression"
+                  placeholder={t('quickCreate.fieldExpressionPlaceholder')}
+                  className="h-7 w-56 rounded-md border border-border bg-card px-1.5 font-mono text-[11px]"
+                />
+              )}
+              {/*
                 Frame `00:25` — the asterisk on "Field name*". A required field
                 is a real thing here: the task sheet marks it, and
                 "Collapse empty fields" refuses to hide it because an empty
@@ -1222,7 +1254,8 @@ function TaskForm({
                   !newFieldName.trim() ||
                   makeField.isPending ||
                   ((newFieldType === 'dropdown' || newFieldType === 'labels') &&
-                    newFieldOptions.trim() === '')
+                    newFieldOptions.trim() === '') ||
+                  (newFieldType === 'formula' && newFieldExpression.trim() === '')
                 }
                 onClick={() => makeField.mutate()}
               >

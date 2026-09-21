@@ -251,6 +251,10 @@ const FIELD_TYPE_LABEL_KEYS: Record<string, TranslationKey> = {
   progress_manual: 'taskDetail.fieldType.progressManual',
   files: 'taskDetail.fieldType.files',
   voting: 'taskDetail.fieldType.voting',
+  // 0146 — three of the thirteen types frame `00:20`–`00:42` lists.
+  formula: 'taskDetail.fieldType.formula',
+  tasks: 'taskDetail.fieldType.tasks',
+  signature: 'taskDetail.fieldType.signature',
 }
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -7944,8 +7948,16 @@ type CustomFieldDef = {
     | 'long_text' | 'labels' | 'people' | 'location' | 'tshirt_size' | 'progress_manual'
     /* 0145 — attachment ids, and the ids of whoever voted. */
     | 'files' | 'voting'
+    /* 0146 — `formula` is read-only here for the same reason `progress_auto`
+     * is: the API refuses a write to it, so an editor would be a control that
+     * errors every time it is used. */
+    | 'formula' | 'tasks' | 'signature'
   isRequired: boolean
   options: Array<{ label: string; value: string; color?: string }> | null
+  /** 0146 — `{ expression }` on a formula, the progress sources on a
+   *  `progress_auto`. Sent by the API on every definition; only these two
+   *  types ever put anything in it. */
+  config?: { expression?: string } | null
 }
 
 /** `string[]` is §V2-01c's `labels` and `people`; the API sends [] when unset,
@@ -7999,6 +8011,15 @@ function CustomFieldsPanel({
 const CREATABLE_TYPES_FROM_LABELS = Object.keys(FIELD_TYPE_LABEL_KEYS)
 /** Types that are a list of choices, and so need options before they mean anything. */
 const TYPES_NEEDING_OPTIONS: ReadonlySet<string> = new Set(['dropdown', 'labels'])
+/**
+ * 0146 — and the one that needs an expression.
+ *
+ * The API refuses a formula without one, so the input appears rather than
+ * letting the save fail — the same rule the options box above follows. A type
+ * offered in the picker that can only ever answer 400 is a dead control with a
+ * server behind it.
+ */
+const TYPES_NEEDING_EXPRESSION: ReadonlySet<string> = new Set(['formula'])
 
 function CustomFieldsPanelInner({
   taskId,
@@ -8019,6 +8040,8 @@ function CustomFieldsPanelInner({
   const [newType, setNewType] = useState('text')
   const [newScope, setNewScope] = useState<'project' | 'list'>('project')
   const [newOptions, setNewOptions] = useState('')
+  /* 0146 — the formula's expression, e.g. `{Budget} - {Spent}`. */
+  const [newExpression, setNewExpression] = useState('')
   const [createError, setCreateError] = useState<string | null>(null)
   // Keyed on the stamp, so pressing "Add fields" again re-opens a form the
   // reader had closed. See the stamp's declaration in the sheet.
@@ -8048,6 +8071,7 @@ function CustomFieldsPanelInner({
       type: string
       scope: 'project' | 'list'
       options?: Array<{ label: string; value: string }>
+      config?: { expression: string }
     }) =>
       api<CustomFieldDef>(`/workspaces/${workspaceId}/tasks/${taskId}/custom-fields`, {
         method: 'POST',
@@ -8057,6 +8081,7 @@ function CustomFieldsPanelInner({
       setCreating(false)
       setNewName('')
       setNewOptions('')
+      setNewExpression('')
       setNewType('text')
       setNewScope('project')
       setCreateError(null)
@@ -8080,8 +8105,12 @@ function CustomFieldsPanelInner({
     .filter(Boolean)
     .map((label) => ({ label, value: label.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_+|_+$/g, '') }))
   const needsOptions = TYPES_NEEDING_OPTIONS.has(newType)
+  const needsExpression = TYPES_NEEDING_EXPRESSION.has(newType)
   const canSubmit =
-    newName.trim() !== '' && (!needsOptions || parsedOptions.length > 0) && !createField.isPending
+    newName.trim() !== '' &&
+    (!needsOptions || parsedOptions.length > 0) &&
+    (!needsExpression || newExpression.trim() !== '') &&
+    !createField.isPending
 
   const createForm = creating ? (
     <form
@@ -8096,6 +8125,7 @@ function CustomFieldsPanelInner({
           type: newType,
           scope: newScope,
           ...(needsOptions ? { options: parsedOptions } : {}),
+          ...(needsExpression ? { config: { expression: newExpression.trim() } } : {}),
         })
       }}
     >
@@ -8141,6 +8171,16 @@ function CustomFieldsPanelInner({
           placeholder={t('taskDetail.newFieldOptions')}
           aria-label={t('taskDetail.newFieldOptions')}
           className="w-full rounded-md border border-border bg-card px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
+        />
+      )}
+      {needsExpression && (
+        <input
+          data-testid="task-field-create-expression"
+          value={newExpression}
+          onChange={(e) => setNewExpression(e.target.value)}
+          placeholder={t('taskDetail.newFieldExpression')}
+          aria-label={t('taskDetail.newFieldExpression')}
+          className="h-8 w-full rounded-md border border-border bg-card px-2 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-ring"
         />
       )}
       {createError && (
@@ -8232,6 +8272,13 @@ function CustomFieldsPanelInner({
           */}
           {definition.type === 'progress_auto' ? (
             <ProgressAutoValue value={typeof value === 'number' ? value : null} />
+          ) : definition.type === 'formula' ? (
+            /* 0146 — derived, so shown rather than edited. Same reasoning as
+             * the branch above: the API refuses the write. */
+            <FormulaValue
+              value={typeof value === 'number' ? value : null}
+              expression={definition.config?.expression ?? ''}
+            />
           ) : (
             <CustomFieldEditor
               definition={definition}
@@ -8276,6 +8323,42 @@ function ProgressAutoValue({ value }: { value: number | null }) {
       <span className="w-10 text-right text-sm tabular-nums" data-testid="custom-field-progress-pct">
         {value}%
       </span>
+    </div>
+  )
+}
+
+/**
+ * 0146, frame `00:20` — the derived number, and the expression it came from.
+ *
+ * THE EXPRESSION IS ON SCREEN, not only in the create form. A number with no
+ * visible derivation is a number nobody can check, and the commonest question
+ * about a formula field is "where did that come from".
+ *
+ * Null is drawn as "no value yet" rather than as 0, for the reason the API
+ * sends null in the first place: a formula whose inputs are unfilled has no
+ * answer, and zero is an answer.
+ */
+function FormulaValue({ value, expression }: { value: number | null; expression: string }) {
+  const { t } = useTranslation()
+  return (
+    <div className="space-y-0.5" data-testid="custom-field-formula">
+      {value == null ? (
+        <p className="text-sm text-muted-foreground" data-testid="custom-field-formula-empty">
+          {t('taskDetail.fieldType.formulaNothing')}
+        </p>
+      ) : (
+        <p className="text-sm tabular-nums" data-testid="custom-field-formula-value">
+          {value}
+        </p>
+      )}
+      {expression !== '' && (
+        <code
+          className="block text-[10px] text-muted-foreground"
+          data-testid="custom-field-formula-expression"
+        >
+          {expression}
+        </code>
+      )}
     </div>
   )
 }
@@ -8548,6 +8631,25 @@ function CustomFieldEditor({
           onCommit={onCommit}
         />
       )
+    // ── 0146 ────────────────────────────────────────────────────────────
+    case 'tasks':
+      return (
+        <TasksFieldEditor
+          value={Array.isArray(value) ? value : []}
+          workspaceId={workspaceId}
+          taskId={taskId}
+          disabled={disabled}
+          onCommit={onCommit}
+        />
+      )
+    case 'signature':
+      return (
+        <SignatureFieldEditor
+          value={typeof value === 'string' ? value : ''}
+          disabled={disabled}
+          onCommit={onCommit}
+        />
+      )
   }
 }
 
@@ -8715,6 +8817,215 @@ function PeopleFieldEditor({
           )
         })
       )}
+    </div>
+  )
+}
+
+/**
+ * 0146 — TASKS, frame `00:42`'s picker.
+ *
+ * A NAMED reference to other tasks, and deliberately not a dependency. The
+ * Related Items panel writes `task_dependencies`, which is TYPED — blocks,
+ * blocked by — and drives what that panel draws. This is a field with a name
+ * of its own ("QA ticket", "Design brief") and no scheduling meaning, so it
+ * writes its own value and claims nothing about the dependency graph.
+ *
+ * The chosen tasks are drawn as rows with their titles, because a list of
+ * uuids is not a reference anybody can follow. Titles come from the same query
+ * the picker offers from, which is the same set the API will accept — a picker
+ * that could offer more than the write takes is a 400 waiting for a click.
+ */
+function TasksFieldEditor({
+  value,
+  workspaceId,
+  taskId,
+  disabled,
+  onCommit,
+}: {
+  value: string[]
+  workspaceId: string
+  taskId: string
+  disabled?: boolean
+  onCommit: (next: CustomFieldValue) => void
+}) {
+  const { t } = useTranslation()
+  const { data: candidates = [] } = useQuery({
+    queryKey: ['workspace-tasks-lite', workspaceId],
+    queryFn: () => api<MentionTaskLite[]>(`/tasks/workspace/${workspaceId}?limit=200`),
+    enabled: !!workspaceId,
+  })
+  const titleOf = (id: string) => candidates.find((c) => c.id === id)?.title
+  /* The task itself is never offered: the API refuses a self-reference, and a
+   * row that navigates to the page you are already on is not a reference. */
+  const offerable = candidates.filter((c) => c.id !== taskId && !value.includes(c.id))
+
+  return (
+    <div className="space-y-1" data-testid="cf-tasks">
+      {value.map((id) => (
+        <div
+          key={id}
+          data-testid={`cf-task-${id}`}
+          className="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs"
+        >
+          <span className="truncate">
+            {/* An id with no title is a task outside the 200 this picker
+                asked for. Saying so is better than drawing a uuid as a name. */}
+            {titleOf(id) ?? t('taskDetail.fieldType.tasksUnknown')}
+          </span>
+          <button
+            type="button"
+            disabled={disabled}
+            data-testid={`cf-task-remove-${id}`}
+            aria-label={t('taskDetail.fieldType.tasksRemove')}
+            onClick={() => onCommit(value.filter((v) => v !== id))}
+            className="ml-auto text-muted-foreground hover:text-destructive disabled:opacity-50"
+          >
+            ✕
+          </button>
+        </div>
+      ))}
+      <select
+        data-testid="cf-tasks-add"
+        aria-label={t('taskDetail.fieldType.tasksAdd')}
+        disabled={disabled || offerable.length === 0}
+        value=""
+        onChange={(e) => {
+          if (!e.target.value) return
+          onCommit([...value, e.target.value])
+        }}
+        className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs"
+      >
+        <option value="">{t('taskDetail.fieldType.tasksAdd')}</option>
+        {offerable.map((c) => (
+          <option key={c.id} value={c.id}>
+            {c.title}
+          </option>
+        ))}
+      </select>
+    </div>
+  )
+}
+
+/** The drawn box is 0–1000 on both axes, which is the range the API accepts. */
+const SIGNATURE_BOX = 1000
+
+/** `"x,y x,y;x,y x,y"` → one SVG `d` per stroke. Empty strokes are dropped. */
+function signatureStrokes(value: string): string[] {
+  return value
+    .split(';')
+    .map((stroke) => stroke.trim().split(/\s+/).filter(Boolean))
+    .filter((points) => points.length >= 2)
+    .map((points) => points.map((p, i) => `${i === 0 ? 'M' : 'L'}${p.replace(',', ' ')}`).join(' '))
+}
+
+/**
+ * 0146 — SIGNATURE, frame `00:42`'s picker.
+ *
+ * It stores the strokes that were drawn and NOTHING ELSE. No signer, no
+ * timestamp, and nothing on screen claims either — `custom_field_values` has
+ * no column for who wrote a value, and a line reading "signed by you" over a
+ * value anybody with write access can replace would be a claim the data does
+ * not support. The drawing is the whole feature; when it needs to be evidence
+ * of who signed, that is a different row with a column behind it.
+ */
+function SignatureFieldEditor({
+  value,
+  disabled,
+  onCommit,
+}: {
+  value: string
+  disabled?: boolean
+  onCommit: (next: CustomFieldValue) => void
+}) {
+  const { t } = useTranslation()
+  const boxRef = useRef<SVGSVGElement | null>(null)
+  /** The stroke being drawn right now. Committed strokes live in `value`. */
+  const [live, setLive] = useState<string[]>([])
+  const drawing = useRef(false)
+
+  const pointAt = (e: React.PointerEvent<SVGSVGElement>) => {
+    const box = boxRef.current?.getBoundingClientRect()
+    if (!box || box.width === 0 || box.height === 0) return null
+    const x = Math.round(((e.clientX - box.left) / box.width) * SIGNATURE_BOX)
+    const y = Math.round(((e.clientY - box.top) / box.height) * SIGNATURE_BOX)
+    const clamp = (n: number) => Math.min(SIGNATURE_BOX, Math.max(0, n))
+    return `${clamp(x)},${clamp(y)}`
+  }
+
+  const finish = () => {
+    if (!drawing.current) return
+    drawing.current = false
+    /* A stroke of one point draws nothing and the API refuses it, so a click
+     * that never moved is dropped here rather than sent to be rejected. */
+    if (live.length < 2) {
+      setLive([])
+      return
+    }
+    const next = value === '' ? live.join(' ') : `${value};${live.join(' ')}`
+    setLive([])
+    onCommit(next)
+  }
+
+  const strokes = [...signatureStrokes(value), ...signatureStrokes(live.join(' '))]
+
+  return (
+    <div className="space-y-1" data-testid="cf-signature">
+      <svg
+        ref={boxRef}
+        data-testid="cf-signature-pad"
+        data-strokes={signatureStrokes(value).length}
+        viewBox={`0 0 ${SIGNATURE_BOX} ${SIGNATURE_BOX}`}
+        preserveAspectRatio="none"
+        className={cn(
+          'h-24 w-full rounded-md border border-input bg-transparent touch-none',
+          disabled ? 'opacity-50' : 'cursor-crosshair',
+        )}
+        onPointerDown={(e) => {
+          if (disabled) return
+          const p = pointAt(e)
+          if (!p) return
+          drawing.current = true
+          setLive([p])
+          e.currentTarget.setPointerCapture(e.pointerId)
+        }}
+        onPointerMove={(e) => {
+          if (!drawing.current) return
+          const p = pointAt(e)
+          if (!p) return
+          setLive((prev) => (prev[prev.length - 1] === p ? prev : [...prev, p]))
+        }}
+        onPointerUp={finish}
+        onPointerLeave={finish}
+      >
+        {strokes.map((d, i) => (
+          <path
+            key={i}
+            d={d}
+            fill="none"
+            stroke="currentColor"
+            strokeWidth={8}
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            vectorEffect="non-scaling-stroke"
+          />
+        ))}
+      </svg>
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          disabled={disabled || value === ''}
+          data-testid="cf-signature-clear"
+          onClick={() => onCommit(null)}
+          className="rounded border border-border px-2 py-0.5 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-50"
+        >
+          {t('taskDetail.fieldType.signatureClear')}
+        </button>
+        <span className="text-[11px] text-muted-foreground" data-testid="cf-signature-hint">
+          {value === ''
+            ? t('taskDetail.fieldType.signatureHint')
+            : t('taskDetail.fieldType.signatureSigned')}
+        </span>
+      </div>
     </div>
   )
 }

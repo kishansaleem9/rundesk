@@ -16,7 +16,7 @@
  * THE TWO THINGS THIS SUITE IS REALLY FOR.
  *
  *   · The picker must offer every type. Three creation paths already existed
- *     and the list route's offers six of the nineteen; nobody noticed, because
+ *     and the list route's offers six of the twenty-two; nobody noticed, because
  *     each picker is individually plausible. That is the *duplicated list*, and
  *     a fourth hand-written copy is how it happens again. So the count is
  *     asserted, and so is the presence of types only the long list has.
@@ -86,9 +86,15 @@ const ALL_TYPES = [
   'text', 'number', 'dropdown', 'date', 'checkbox', 'url', 'email', 'phone',
   'money', 'rating', 'progress_auto', 'long_text', 'labels', 'people',
   'location', 'tshirt_size', 'progress_manual', 'files', 'voting',
+  // 0146
+  'formula', 'tasks', 'signature',
 ]
 /** The six the list route's picker offers. A picker holding only these is the drifted copy. */
 const THE_SHORT_LIST = ['text', 'number', 'date', 'checkbox', 'url', 'dropdown']
+/** Types no drifted copy has ever carried, so their presence is the real test. */
+const ONLY_THE_LONG_LIST = [
+  'voting', 'people', 'tshirt_size', 'files', 'progress_auto', 'formula', 'tasks', 'signature',
+]
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -234,7 +240,7 @@ try {
 
   /*
    * THE PICKER'S LENGTH, AGAINST A LIST WRITTEN OUT INDEPENDENTLY ABOVE. The
-   * count and the membership are separate questions: nineteen of the wrong
+   * count and the membership are separate questions: twenty-two of the wrong
    * types would pass a count alone.
    */
   const offered = await page.getByTestId('task-field-create-type').locator('option').evaluateAll(
@@ -247,9 +253,9 @@ try {
       (offered.length === THE_SHORT_LIST.length ? ' — that is the list route\'s six, copied' : ''),
   )
   chk(
-    ['voting', 'people', 'tshirt_size', 'files', 'progress_auto'].every((t) => offered.includes(t)),
-    'including the five that only the long list has, so it is not the drifted six-item copy',
-    `missing: [${['voting', 'people', 'tshirt_size', 'files', 'progress_auto'].filter((t) => !offered.includes(t)).join(', ')}]`,
+    ONLY_THE_LONG_LIST.every((t) => offered.includes(t)),
+    'including the eight that only the long list has, so it is not the drifted six-item copy',
+    `missing: [${ONLY_THE_LONG_LIST.filter((t) => !offered.includes(t)).join(', ')}]`,
   )
 
   /*
