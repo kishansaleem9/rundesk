@@ -39,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 20
+const EXPECTED_CHECKS = 22
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -194,11 +194,36 @@ try {
     'eight hours saved per model call is refused',
     `it returned ${absurdMinutes.status} — the panel would report a saving nobody could defend`,
   )
+  /*
+   * AND IN THE SERVICE'S WORDS, NOT THE DATABASE'S.
+   *
+   * Migration 0140 puts CHECK constraints on both columns
+   * (`<= 480`, `<= 10000000`), and `AllExceptionsFilter` maps a 23514 to 400
+   * with the generic "A value failed a database constraint". So deleting the
+   * bounds from `validateBenchmark` does not let an absurd benchmark through —
+   * it only changes the sentence, from one naming the range to one naming
+   * nothing. A status-only assertion cannot see that, which is the same hole
+   * `task-merge` and `list-name-taken` each had.
+   *
+   * The range is the useful part: somebody typing 100000 needs to be told what
+   * the ceiling is, not that a constraint exists.
+   */
+  chk(
+    /between 0 and/i.test(JSON.stringify(absurdMinutes.error ?? '')),
+    'and the refusal names the range, rather than reporting a database constraint',
+    `it said ${JSON.stringify(absurdMinutes.error)} — a generic constraint message means the ` +
+      'service bound is gone and the CHECK in migration 0140 caught it instead',
+  )
   const absurdRate = await setBenchmark({ hourlyRateCents: 999999999 })
   chk(
     absurdRate.status >= 400 && absurdRate.status < 500,
     'and so is an hourly rate nobody is paid',
     `it returned ${absurdRate.status}`,
+  )
+  chk(
+    /outside the range/i.test(JSON.stringify(absurdRate.error ?? '')),
+    'and that refusal is the service\'s sentence too',
+    `it said ${JSON.stringify(absurdRate.error)}`,
   )
   const fractional = await setBenchmark({ minutesSavedPerRun: 2.5 })
   chk(
