@@ -144,6 +144,15 @@ jobs:
       - name: No break patches in the tree
         run: node scripts/check-no-break-patches.mjs
 
+      # The re-audit ledger's headline count read `88 built · 21 partial · 64
+      # missing` while the table under it — printed under the words "so the
+      # number can be checked rather than believed" — read 104 / 20 / 49. BOTH
+      # SUMMED TO 173, so the disagreement was invisible at a glance and
+      # survived several passes. A count is the one thing in that file that
+      # gets quoted without being checked, so it is checked here instead.
+      - name: The re-audit ledger agrees with its own derivation
+        run: node scripts/check-video2-counts.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks

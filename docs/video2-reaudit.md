@@ -542,8 +542,8 @@ went missing entirely. A list that is only written once stops being true.
   a suite that goes red on somebody else's commit is what that rule exists to
   prevent. The twenty-eight break patches — thirteen for `list-customize`,
   fifteen for `list-assignee-filter` — were each verified by parsing and by
-  applying them to a COPY of the target file, and the fourteen with any type
-  risk were compiled; none was run against a live stack. Writing "B" here
+  applying them to a COPY of the target file, and the seventeen carrying any
+  type risk were compiled; none was run against a live stack. Writing "B" here
   would have made a claim about a run that did not happen, which is the same
   move as a check that cannot fail.
   **Compiling them found a new break-testing trap, and it is worth the line.**
@@ -812,7 +812,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 104 built · 20 partial · 49 missing.**
+**174 rows: 104 built · 20 partial · 50 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -827,10 +827,10 @@ How that is made up, so the number can be checked rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 79 | 12 | 41 | 132 |
+| §2, the sections table | 79 | 12 | 42 | 133 |
 | §5, recovered from the frame observations | 31 | 4 | 6 | 41 |
 | §6, corrections applied to the above | −6 | +4 | +2 | 0 |
-| **consolidated** | **104** | **20** | **49** | **173** |
+| **consolidated** | **104** | **20** | **50** | **174** |
 
 Sixteen of §5's rows closed after it was written, each named with the suite
 that proves it — see the `closed by:` line on the row itself. A row is not

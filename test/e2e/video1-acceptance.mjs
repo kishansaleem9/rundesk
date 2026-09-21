@@ -20,6 +20,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -28,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 17
+const EXPECTED_CHECKS = 18
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -37,6 +38,13 @@ const API = `http://127.0.0.1:${API_PORT}/api/v1`
 const ME = {
   email: process.env.E2E_EMAIL ?? 'admin@rundesk.internal',
   password: process.env.E2E_PASSWORD ?? 'Admin@123!',
+}
+/* The seeded second account. `notification-gaps.mjs` uses the same pair, and
+   for the same reason: this product does not notify you about your own
+   actions, so a notification fixture needs somebody who is not you. */
+const PEER = {
+  email: process.env.E2E_PEER_EMAIL ?? 'org-admin@rundesk.internal',
+  password: process.env.E2E_PEER_PASSWORD ?? 'OrgAdmin@123!',
 }
 
 let passed = 0
@@ -67,6 +75,7 @@ const browser = await chromium.launch(launchOptions())
 try {
   const login = await signInApi(API, ME.email, ME.password)
   const A = apiAs(login.accessToken)
+  const myUserId = login.user?.id ?? login.id
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   const stamp = Date.now()
@@ -223,23 +232,70 @@ try {
   }
 
   // ── The inbox ─────────────────────────────────────────────────────────────
+  /*
+   * THIS BLOCK USED TO BORROW ANOTHER SUITE'S LEFTOVERS, and that is why it is
+   * written out at this length.
+   *
+   * It read `GET /notifications`, and if the list came back empty it failed
+   * with *"no notifications to work with"* — so whether it passed depended on
+   * whether some earlier suite in the same database had happened to leave this
+   * account a notification. `rundesk_pristine` has **zero** notification rows,
+   * so on a genuinely clean lane the check could only ever fail; in CI it runs
+   * against `rundesk_ci` after dozens of other suites and passed by accident of
+   * ordering. It was found on verification lane 8, where the only two rows in
+   * the table belonged to `outsider-…@rundesk.invalid` — a fixture user from a
+   * different suite — and this account had none.
+   *
+   * A check that depends on what ran before it is not a check. So the suite
+   * makes its own notification now, and the seed is asserted in its own right
+   * rather than being a silent precondition: if the seed fails, THAT is what
+   * the failure line says, instead of the inbox being blamed for it.
+   *
+   * IT HAS TO COME FROM SOMEBODY ELSE. `notification-gaps.mjs` pins the rule in
+   * its own checks — "a notification telling you what you just did is noise you
+   * cannot react to" — so the product suppresses self-notification and this
+   * account cannot seed itself. `org-admin@rundesk.internal` is the seeded peer
+   * those suites already use for exactly this.
+   *
+   * Polled, not slept. Notifications are written after the request that causes
+   * them returns, so how long they take is a property of the machine — the
+   * three-second wait this block used to open with is the sampling mistake
+   * `lib/wait.mjs` exists to replace.
+   */
   console.log('\n▶ the inbox')
+  const peer = await signInApi(API, PEER.email, PEER.password).catch(() => null)
+  const P = peer?.accessToken ? apiAs(peer.accessToken) : null
+  const seedTask = P
+    ? await P('/tasks', {
+        method: 'POST',
+        body: { listId, title: `Inbox seed ${Date.now()}`, assigneeIds: [myUserId] },
+      })
+    : { status: 0, error: 'could not sign in as the peer' }
+
+  let notifs = []
+  await waitUntil(async () => {
+    notifs = (await A('/notifications')).data ?? []
+    return notifs.length > 0
+  }, { timeoutMs: 15_000, stepMs: 250 }).catch(() => {})
+
+  chk(
+    notifs.length > 0,
+    'the peer assigning a task puts something in this account\'s inbox',
+    `seed task answered ${seedTask.status} (${JSON.stringify(seedTask.error ?? null)}) and ` +
+      `GET /notifications returned ${notifs.length} row(s) after 15s — with nothing in the ` +
+      'inbox the check below would be measuring an empty page, which is what it used to do',
+  )
+
   await page.goto(`${stack.base}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
-  const notifs = (await A('/notifications')).data ?? []
-  if (notifs.length > 0) {
-    await A('/notifications/mark-all-read', { method: 'POST' })
-    await page.reload({ waitUntil: 'domcontentloaded' })
-    chk(
-      await appears(page.getByTestId('inbox-clear-all')),
-      '§G10-12 Clear all is there even with nothing unread',
-      'Clear all vanished once everything was read',
-    )
-    for (const n of notifs.filter((n) => !n.readAt)) {
-      await A(`/notifications/${n.id}/unread`, { method: 'POST' }).catch(() => {})
-    }
-  } else {
-    chk(false, '§G10-12 Clear all is there even with nothing unread', 'no notifications to work with')
+  await A('/notifications/mark-all-read', { method: 'POST' })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  chk(
+    await appears(page.getByTestId('inbox-clear-all')),
+    '§G10-12 Clear all is there even with nothing unread',
+    'Clear all vanished once everything was read',
+  )
+  for (const n of notifs.filter((n) => !n.readAt)) {
+    await A(`/notifications/${n.id}/unread`, { method: 'POST' }).catch(() => {})
   }
 } catch (e) {
   failed += 1
