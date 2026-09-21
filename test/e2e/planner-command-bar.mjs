@@ -252,11 +252,37 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ what it opens is the palette this product already has')
 
+  /*
+   * NOTHING YET, AND ⌘K STILL OPENS EXACTLY ONE — and the second half is what
+   * makes this check able to see the thing its own sentence is about.
+   *
+   * "Nothing is mounted" on its own cannot. `app.tsx` mounts the palette only
+   * while open and keeps the ⌘K listener at shell level, precisely because a
+   * listener inside a component that is not mounted can never open it; the
+   * component then registers a ⌘K listener of its OWN, which TOGGLES. So a
+   * planner that mounted a second copy unconditionally would put a second
+   * toggle on the window — and both copies would still be closed, still
+   * rendering nothing, and a count of zero would go on reading zero. The
+   * always-mounted defect this row exists to rule out was invisible to the
+   * count that claimed to rule it out.
+   *
+   * One keypress makes it visible: the shell's listener opens the shell's
+   * palette and the stowaway's toggle opens the stowaway, so ⌘K answers with
+   * TWO. Closed again afterwards, so the click below is still the thing that
+   * opens the one palette check 7 counts.
+   */
+  const noneBefore = await palette().count()
+  await page.keyboard.press('Control+k')
+  const oneOnHotkey = await waitUntil(async () => (await palette().count()) === 1, { timeoutMs: 10_000 })
+  const openedByHotkey = await palette().count()
+  await page.keyboard.press('Escape')
+  const closedAgain = await waitUntil(async () => (await palette().count()) === 0, { timeoutMs: 10_000 })
   chk(
-    (await palette().count()) === 0,
-    'nothing is mounted before the bar is pressed',
-    'the palette was already mounted with the bar untouched — it registers its own ⌘K listener, ' +
-      'so a second always-mounted copy makes one keypress toggle two palettes',
+    noneBefore === 0 && oneOnHotkey && openedByHotkey === 1 && closedAgain,
+    'nothing is mounted before the bar is pressed, and ⌘K opens exactly one palette',
+    `${noneBefore} palettes were mounted with the bar untouched and ⌘K brought up ` +
+      `${openedByHotkey} (closed again: ${closedAgain}) — the palette registers its own ⌘K ` +
+      'toggle, so a second always-mounted copy makes one keypress open two',
   )
 
   await bar().click()
