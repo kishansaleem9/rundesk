@@ -319,6 +319,16 @@ green "confirmations" that meant nothing until they were found.
   the `pkill` contains the pattern, so it kills the process doing the killing
   and the surrounding script dies mid-way. Kill by port
   (`lsof -t -i ":$PORT" -sTCP:LISTEN`) or by a PID you recorded.
+- **A WATCHER IS FOR WATCHING. DO NOT PUT WORK IN ONE.** Two watchers were set
+  on the same condition and both fired the same script, so a bundle rebuild and
+  a suite run raced each other and the run reported on a directory the rebuild
+  was in the middle of emptying. The guards catch a *stale* bundle; nothing
+  catches two writers to the same one. Side effects belong in a single
+  background job, chained with `&&`, with the watcher only reading the result.
+- **One rebuild per output directory at a time**, for the same reason. This is
+  the shared-`dist` collision again, at a smaller scale and entirely
+  self-inflicted: per-lane bundles stop *other agents* colliding with you and
+  do nothing about you colliding with yourself.
 - **`VAR=x yes | cmd` sets `VAR` for `yes`, not for `cmd`.** The variable
   attaches to the first command in the pipeline. `export` it instead. This
   costs a confusing round trip every time, because the failure is `cmd`
