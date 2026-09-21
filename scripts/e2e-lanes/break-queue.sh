@@ -48,7 +48,21 @@ while IFS= read -r line; do
   RES="/tmp/claude-0/break-$SUITE.txt"
   BASE=$(grep -m1 '^== BASELINE' "$RES" 2>/dev/null)
   RAN=$(grep -E '^== ' "$RES" 2>/dev/null | grep -vcE '^== (syncing|BASELINE|restoring|REFUSING)')
-  GREEN=$(grep -A1 -E '^== ' "$RES" 2>/dev/null | grep -c ', 0 failed')
+  # A STILL-GREEN PATCH IS A PATCH LINE FOLLOWED IMMEDIATELY BY ITS RESULT —
+  # `wt-break.sh` prints any FAIL lines in between, so adjacency IS the test.
+  #
+  # The first version was `grep -A1 -E '^== '`, which also matches the BASELINE
+  # line, and a green baseline reads "58 passed, 0 failed". So every set came
+  # back claiming one more still-green patch than it had, and the first set it
+  # ran reported STILL-GREEN 1 for five patches that all reddened. A wrong
+  # number in the metric this script exists to report honestly.
+  GREEN=$(awk '
+    /^== (syncing|BASELINE|restoring|REFUSING)/ { patch=0; next }
+    /^== / { patch=1; next }
+    patch && /, 0 failed/ { n++ }
+    { patch=0 }
+    END { print n+0 }
+  ' "$RES" 2>/dev/null)
   UNBUILT=$(grep -cE '^== .*(BUILD|PATCH) FAILED' "$RES" 2>/dev/null)
   # STILL-GREEN AND UNBUILT ARE REPORTED SEPARATELY, ALWAYS. A patch that never
   # built prints no "N passed, M failed" line, so it is not counted as still
