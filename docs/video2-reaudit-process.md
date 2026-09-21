@@ -738,6 +738,21 @@ as the same defects one level up.
   the fixture, the comparison, the line that builds the value. That is a
   different reading from the one that writes the patch, and it is the one that
   is skipped.
+
+  **AND THE WORST CASE IS PATCHING THE WRONG SUBSYSTEM ALTOGETHER.**
+  `save-comment`'s checks say "Inbox › Later", so I patched
+  `notifications.snoozedUntil` — the snooze that puts a NOTIFICATION in the
+  Later tab. The suite never touches it. It reads `task_comment_saves`, its own
+  table with its own endpoint, on line 149 of the file: `select count(*) from
+  task_comment_saves`. Both patches ran green because they had nothing to do
+  with the feature, and every word in their headers was true about a subsystem
+  nobody was testing.
+
+  **A shared word in a UI label is not a shared implementation.** The check
+  names a TABLE or an ENDPOINT somewhere; find that line before writing
+  anything. It took four instances of this rule to learn that the reading has
+  to start at the assertion and walk outwards, not start at the feature and
+  hope to meet it.
 - **A CLAIM CHOSEN BECAUSE IT VERIFIES IS WORSE THAN ONE THAT HAS ROTTED.**
   `check-break-claims.mjs` rejects a patch whose `# Reddens:` sentence is not in
   its suite, and the obvious way to satisfy it is to go and find a sentence that
