@@ -418,7 +418,19 @@ export function CommentRecorder({
            * rather than a design.
            */}
           <div data-testid="comment-recording-choices" className="flex items-center gap-1.5">
-            <Button size="sm" data-testid="comment-recording-attach" onClick={attach}>
+            {/*
+              §M frame `04:42` — the tooltip on this button reads "Attach as
+              audio file", and it is the pair to Transcribe's "Insert as text"
+              below: the two say what the SAME recording becomes, which is the
+              only thing distinguishing them. Only on a voice note, because a
+              screen clip is not an audio file and the sentence would be a lie.
+            */}
+            <Button
+              size="sm"
+              data-testid="comment-recording-attach"
+              title={finished.kind === 'voice' ? t('commentRecorder.attachAsAudioFile') : undefined}
+              onClick={attach}
+            >
               {finished.kind === 'voice' ? t('commentRecorder.voiceNote') : t('commentRecorder.attachClip')}
             </Button>
             {/* Only a voice note is transcribable — a screen clip was never listened to. */}

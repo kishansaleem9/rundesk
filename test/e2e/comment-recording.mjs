@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 31
+const EXPECTED_CHECKS = 32
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -451,6 +451,22 @@ try {
     (await page.getByTestId('comment-recording-transcribe').getAttribute('title')) === 'بطور متن داخل کریں',
     'with "Insert as text" as the tooltip on Transcribe',
     'Transcribe carries no tooltip — the frame shows one, and it is what explains the button',
+  )
+  /*
+   * §M frame `04:42` — and the PAIR to it on the other button. The two
+   * tooltips are what distinguish the choices: the same recording becomes an
+   * audio file or becomes text. Asserted as a non-empty string that is not the
+   * OTHER tooltip, so a copy-paste that gave both buttons the same words fails
+   * here rather than reading as two working tooltips.
+   */
+  const attachTitle = await page.getByTestId('comment-recording-attach').getAttribute('title')
+  const transcribeTitle = await page.getByTestId('comment-recording-transcribe').getAttribute('title')
+  chk(
+    !!attachTitle && attachTitle !== transcribeTitle,
+    'and "Attach as audio file" as the tooltip on the voice-note button',
+    `the voice-note button's tooltip was ${JSON.stringify(attachTitle)} against Transcribe's ` +
+      `${JSON.stringify(transcribeTitle)} — absent means the frame's tooltip is missing, equal ` +
+      'means both buttons claim to do the same thing',
   )
   chk(
     await page.getByTestId('comment-recording-preview').isVisible().catch(() => false),
