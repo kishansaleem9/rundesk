@@ -189,11 +189,18 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs NINETY-SIX. At the same 1.1 minutes each that is about
-    # 106 minutes plus setup. 120 would still fit, with fourteen minutes of
-    # headroom — but the count has gone 50 → 85 → 88 → 93 in a day, and a limit
-    # whose margin is thinner than one session's growth is a limit that fails
-    # on somebody else's commit. 150.
+    # The job now runs NINETY-EIGHT. At the same 1.1 minutes each that is about
+    # 108 minutes plus setup. 120 would still fit, with twelve minutes of
+    # headroom — but the count has gone 50 → 85 → 88 → 93 → 96 → 98 in two
+    # days, and a limit whose margin is thinner than one session's growth is a
+    # limit that fails on somebody else's commit. 150.
+    #
+    # NINE MORE SUITES ARE WRITTEN AND WAITING on a local green run before they
+    # are registered — ai-assign, ai-model-cards, attach-on-create,
+    # create-menu-ai, list-assignee-filter, list-customize, planner-command-bar,
+    # planner-onboarding, and space-wizard's extension. At 107 that is ~118
+    # minutes, which is the point at which 150 stops being comfortable. Split
+    # the job before adding the tenth, not after.
     #
     # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
     # this job gives the count; multiply by 1.1 and add a few minutes of setup.
@@ -1439,6 +1446,48 @@ jobs:
       - name: Team schedules give everyone a column
         if: '!cancelled()'
         run: node test/e2e/team-schedules.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-11 `19:07` — App Center → Connections. Four ledger rows live in one
+      # screenshot and share one failure mode: a control that cannot do the
+      # thing it offers. `?types=gmail` used to run an UNFILTERED Rundesk search
+      # — your own tasks and documents, presented as the contents of a mailbox —
+      # and a workspace with OneDrive linked saw SharePoint report itself
+      # connected over a token nothing queried. Every tile's button is now
+      # either a real connector or an honest "we cannot, ask an admin".
+      - name: The App Center offers only what it can do
+        if: '!cancelled()'
+        run: node test/e2e/app-catalogue.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-06 `15:20`–`16:20` — the live focus countdown in the app header.
+      # The row was marked BUILT and the pill did not exist: the hook computed
+      # the countdown and its only consumer wrote `document.title`, so the
+      # evidence for the feature was code no header ever read. The position is
+      # MEASURED against the breadcrumbs, not merely "somewhere on the left" —
+      # a break patch that moved it into the tool rail passed the looser check.
+      - name: The focus countdown is in the header and is live
+        if: '!cancelled()'
+        run: node test/e2e/focus-pill.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
+      # §V2-05 `04:00`/`04:11` — the @ picker's six sections and the keyboard
+      # hint footer. Rundesk had three tabs and no footer. The Locations check
+      # asserts a request LEFT THE PAGE carrying the typed word and exactly the
+      # three location types: filtering the sidebar's cached tree in the browser
+      # finds nothing for a space created this minute, and calls it "no matches".
+      - name: The @ picker's sections are real, not labels
+        if: '!cancelled()'
+        run: node test/e2e/task-mentions.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

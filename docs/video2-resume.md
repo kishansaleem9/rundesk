@@ -12,18 +12,30 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**173 rows — 104 built · 20 partial · 49 missing.** `docs/video2-reaudit.md`
-§4 carries the arithmetic; §5 holds the 41 rows recovered from
+**174 rows — 104 built · 20 partial · 50 missing.** `docs/video2-reaudit.md`
+§4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its
 check count.
+
+`scripts/check-video2-counts.mjs` now checks that arithmetic on every build,
+because it had already gone wrong: §4's headline read `88 built · 21 partial ·
+64 missing` while the table directly under it — printed under the words *"so
+the number can be checked rather than believed"* — read `104 · 20 · 49`. Both
+summed to 173, so nothing looked wrong at a glance and it survived several
+passes. **Do not edit the headline by hand;** change the table and let the
+check tell you what the headline should say.
 
 A row moves to built when a suite exercises it against a real API, a real
 Postgres and a real browser — never because the code was written.
 
 ## 2. What is verified, and what is not
 
-**96 suites exist. 96 are registered in `ci.yml`. All run green locally.**
+**112 suites exist. 104 are registered in `ci.yml`.** The eight unregistered
+ones are unregistered on purpose: a suite goes into `ci.yml` when it has run
+green locally, never when the code is merely written. Registering a red suite
+is worse than leaving it out, because it turns the pipeline into something
+nobody reads.
 
 **Break-testing is the incomplete part**, and it is the step that separates a
 check from decoration. Of the patches that have been applied and observed:
@@ -86,10 +98,17 @@ These are the ones still standing:
    nothing else, so a member can create a list inside a `view`-only space and
    is only refused when they try to edit it. The update/delete half is now
    gated (`space-default-permission`, 18 checks); this is the other half.
-2. **`gmail` is a federated search source that can never be connected.**
-   `search/sources.ts` names it and the command palette ships a tab for it,
-   but no provider exists and no Gmail search path exists. A confident zero
-   with a "connect it" affordance pointing at nothing. SharePoint is the same.
+2. ~~**`gmail` is a federated search source that can never be connected.**~~
+   **FIXED 21 September** — `app-catalogue.mjs`, 25 checks. Both `gmail` and
+   `sharepoint` are real providers now, each asking its own OAuth scope, with
+   real query paths behind them. Two worse things were underneath: `?types=gmail`
+   ran an **unfiltered Rundesk search**, so choosing the Gmail tab returned your
+   own tasks and documents presented as the contents of a mailbox — a wrong
+   answer, not an empty one — and `SOURCE_PROVIDER.sharepoint` was `'onedrive'`,
+   so a workspace with OneDrive linked saw SharePoint report itself **connected**
+   over a token nothing queried. `listSources` now only calls a source connected
+   when the stored grant carries the scope the query needs, which also fixed a
+   live confident zero for `google-drive`.
 3. **292 inert `.catch(() => {})` across 63 suites.** `apiClient` never throws,
    so these catch nothing: cleanup that silently does not clean up, and setup
    that silently does not set up. `docs/e2e-shared-state-audit.md` has the
@@ -156,10 +175,18 @@ enough to re-extract any frame once the video is to hand.
 
 ## 6. CI
 
-**CI is red for one reason and it is not this branch.** Both jobs complete in
-two to three seconds and return HTTP 404 for their logs — they never start.
-The same signature appears on an unrelated branch by a different author. The
-monthly Actions allowance is exhausted.
+**CI cannot run until 1 October, and its "failures" are not failures.** Every
+push produces two check-run events that report `failure`, and they are noise.
+The run itself reports `status: "queued"` while its jobs report `conclusion:
+"failure"`; each job has `runner_id: 0`, an empty `runner_name`, a two-second
+duration, and returns **HTTP 404** for its logs, because there are no logs —
+nothing ever executed. The monthly Actions allowance is exhausted and the same
+signature appears on an unrelated branch by a different author.
+
+Do not spend time on these, and do not comment on the PR about them. The
+session stays subscribed so that genuine review comments still arrive; the
+check failures are filtered out by hand. **The tell is `runner_id: 0` plus a
+404 on the logs** — a real failure has a runner and has logs.
 
 The last run that genuinely executed on this branch was
 [532](https://github.com/iamreebskhan/rundesk/actions/runs/34601298029) at
@@ -168,11 +195,13 @@ evidence.
 
 **When the allowance resets**, do not wait for a push to coincide with it.
 `ci.yml` carries a `workflow_dispatch` trigger; fire a run at the branch head.
-Expect the first one to take around 110 minutes — `postgres-harnesses` runs 96
+Expect the first one to take around 110 minutes — `postgres-harnesses` runs 98
 suites at roughly 1.1 minutes each, and its `timeout-minutes` is 150 with that
 arithmetic written beside it. **If you add a suite, redo that arithmetic**;
-the number has gone 50 → 85 → 88 → 93 → 96 in a day and has already been
-stale twice.
+the number has gone 50 → 85 → 88 → 93 → 96 → 98 in two days and has already
+been stale twice. Nine more suites are written and waiting on a local green
+run; at 107 the job is about 118 minutes, which is where 150 stops being
+comfortable. **Split the job before adding the tenth, not after.**
 
 ## 7. The thing most worth remembering
 
@@ -185,7 +214,23 @@ Three separate times this session, a harness manufactured green:
   patch measured the previous patch's breakage;
 - a queue runner claimed a lane with its own marker rather than the real lock,
   never checked the return code, and reported eight successes having run
-  nothing.
+  nothing;
+- **the break worktrees are detached checkouts made once and never moved**, so
+  they drift behind the branch as work lands. `list-card-cover` was tested
+  against a tree two commits old: four of its checks failed on *every* patch,
+  including patches touching nothing near them, because those four were already
+  failing unpatched. Every line in that results file looked like a result and
+  meant nothing. `wt-break.sh` now syncs to `HEAD`, runs the suite with **no
+  patch at all** first, and writes `== BASELINE (no patch) 26 passed, 0 failed`
+  as the file's first line — refusing (exit 4 and 5) rather than produce an
+  unreadable run;
+- **`apps/web/dist` is shared, and four agents rebuilt it at once.** `vite
+  build` empties the directory before writing, so a run that starts mid-build
+  dies on `ENOENT …/index.html`. The crash is the harmless half: a run that
+  starts just *after* somebody else's build finishes reports an ordinary pass
+  or fail about a tree that is not the one it is testing. `verify.sh` now
+  prefers `/tmp/claude-0/dist-<lane>` when a lane has built one, and names the
+  bundle it measured on the result line.
 
 And a break patch reached a commit — a testid renamed `-DISABLED` with
 `hidden`, shipping a control that rendered and did nothing. It was found only
