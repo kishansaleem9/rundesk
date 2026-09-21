@@ -736,7 +736,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Board view: status lanes, colours, counts, per-lane add, drag between lanes, + Add group |
 | B | **Team view** — a view type, ungated; rows per person with their own load |
 | B | Paywall that teaches — at the two sites she names, Team view `09:26` and board export `10:42`. List export stays free, and a check asserts it. Refused server-side, not just hidden |
-| B\* | **Plan-tier paywall UI** — frame `09:26`'s modal, closed by `paywall-sites.mjs`, 30 checks, break set complete 10/10: the plain line, the heading naming the tier and the feature, the panel that describes and previews, the tier beside it, and one button. Stale, not missing. **The metered *"uses have expired"* state is the part still absent**, which is what the asterisk records |
+| B\* | **Plan-tier paywall UI** — frame `09:26`'s modal, closed by `paywall-sites.mjs`, 30 checks, break set complete 10/10: the plain line, the heading naming the tier and the feature, the panel that describes and previews, the tier beside it, and one button. Stale, not missing. **The metered *"uses have expired"* state is the part still absent, and it is blocked on the reference.** `09:30` draws the second state inline — the same feature preview over *"Your Team view uses have expired."* and one **Contact admin** button — and that is ALL it draws. No counter, no remaining count, no allowance, no reset. Rundesk has no metering to hang it on either: `PlanUsage.usage` is `{ members, projects }`, which counts things that EXIST rather than times a feature was USED. Building it means inventing the allowance and the reset policy and then writing checks against my own invention; building only the renderer is worse — a branch nothing can reach is the mirror defect. Recorded as blocked rather than pending |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
 | B | Gantt: Auto fit, week numbers, collapsible panels, local export |
 | M | Create-modal placeholder "Add description, or write with ⚡AI" — **and it has no frame behind it.** `video2-frame-observations.md:250` cites `10:00`; `09:54` through `10:08` are all the Board view, and the other create modal it cites, `21:36`, is the Brain² hub. Every create modal that IS on screen (`00:08`, `00:14`, `00:20`) already has a description typed into it, so the placeholder is never drawn. Left `M` rather than built: a string with no frame is a summary, and building to a summary instead of to the frame is what step 1 exists to stop. See §7 |
@@ -2731,9 +2731,14 @@ assumed so, and they divide cleanly: six are blocked rather than pending — the
 Brain² hub and the four rows that hang off it need an agent runtime Rundesk
 does not have and an `ANTHROPIC_API_KEY` that is empty here and in CI, and
 "add to a colleague's priorities" is a deliberate refusal recorded on its own
-row. **TWO are buildable**: **`"Add to ›"`** (one task in more than one list,
-which is a schema change and the largest thing left in this file) and the
-metered *"uses have expired"* state.
+row. **ONE is buildable**: **`"Add to ›"`** — one task in more than one list,
+a schema change and the largest thing left in this file.
+
+The metered *"uses have expired"* state was counted here too, and is not.
+`09:30` draws that state's sentence and its one button and nothing else — no
+counter, no allowance, no reset — and Rundesk has no metering to attach it to.
+A policy I choose, checked against checks I write, is not a build to the
+reference.
 
 `"Create Task ▾"` was counted among the buildable until its frame was actually
 opened. `00:07` draws the split button in the create modal's footer and **no
@@ -2741,9 +2746,15 @@ frame in the video ever opens the chevron** — the observations file names it
 once and never again — so there are no menu contents to build to, and
 inventing them is the thing this file refuses to do. Blocked on the reference.
 The create-modal placeholder stays `M` for the same reason, which its own row
-explains. That makes two rows now held back by what the frames do not show
-rather than by what Rundesk does not have, and the distinction is worth
-keeping: one is waiting on work, the other on a better reference.
+explains. That makes THREE rows now held back by what the frames do not
+show rather than by what Rundesk does not have — the create-modal placeholder,
+`"Create Task ▾"`'s menu, and the metered state's policy — and the distinction
+is worth keeping: one kind is waiting on work, the other on a better
+reference, and only the first belongs in a backlog.
+
+**Which leaves exactly one buildable row in §2.** Not a comfortable number to
+report, and it is the one that took reading fifteen rows against the code and
+then three of them against the pixels to arrive at. The first pass said fifty.
 
 ### Voice notes and Required views were closable the whole time
 
