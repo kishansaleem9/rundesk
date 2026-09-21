@@ -20,8 +20,8 @@
  *
  * Quoted text is compared after normalising quotes, dashes and whitespace away
  * (see `norm`), and a sentence assembled from a template literal is matched on
- * its leading fragment (see `findsClaim`), because the interpolated part is not
- * in the file at all. A claim that cannot be checked either way is counted as
+ * its longest literal fragment (see `findsClaim`), because the interpolated
+ * part is not in the file at all. A claim that cannot be checked either way is counted as
  * UNVERIFIABLE rather than as a failure — a check that says "I could not tell"
  * is worth more than one that guesses.
  *
@@ -61,16 +61,26 @@ const norm = (s) =>
 
 /*
  * A CHECK SENTENCE IS OFTEN A TEMPLATE LITERAL, so its literal text is not in
- * the file: `the grid is four columns wide at ${VIEWPORT.width}px` cannot be
- * found by searching for "…at 1440px". The claim's leading fragment still can
- * be, and matching on it is the difference between a checker that finds rotted
- * claims and one that reports every interpolated sentence as rotted.
+ * the file at all: `the grid is four columns wide at ${VIEWPORT.width}px`
+ * cannot be found by searching for "…at 1440px". Matching on a literal fragment
+ * instead is the difference between a checker that finds rotted claims and one
+ * that reports every interpolated sentence as rotted.
+ *
+ * The fragment cannot be the claim's PREFIX, which is what this tried first:
+ * the interpolation is often at the START — `<name> really exists in this run's
+ * own space`, `every one of the ${n} tiles offered` — leaving a prefix far too
+ * short to match on. So the longest contiguous fragment ANYWHERE in the
+ * sentence is looked for, longest first. 30 characters, because a fragment
+ * short enough to appear in two different checks would verify a claim against
+ * the wrong one.
  */
-const MIN_PREFIX = 24
+const MIN_FRAGMENT = 30
 const findsClaim = (hay, q) => {
   if (hay.includes(q)) return true
-  for (let n = q.length - 1; n >= MIN_PREFIX; n--) {
-    if (hay.includes(q.slice(0, n))) return true
+  for (let len = q.length - 1; len >= MIN_FRAGMENT; len--) {
+    for (let i = 0; i + len <= q.length; i++) {
+      if (hay.includes(q.slice(i, i + len))) return true
+    }
   }
   return false
 }
@@ -201,7 +211,7 @@ if (noClaim.length) {
  * orphans another claim, or a new patch that makes none, fails the build that
  * brings it — and the baseline is a number in the file that only goes down.
  */
-const BASELINE = { notFound: 35, noSuite: 1, noClaim: 121 }
+const BASELINE = { notFound: 26, noSuite: 2, noClaim: 121 }
 const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {
