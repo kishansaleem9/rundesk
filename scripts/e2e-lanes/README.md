@@ -81,8 +81,16 @@ is the only useful behaviour once you have been burned by one:
 | exit | meaning |
 |---|---|
 | 3 | that worktree is already break-testing — retry, do not switch lanes |
-| 4 | the worktree cannot be moved to `HEAD`, so results would be about the wrong tree |
+| 4 | the worktree cannot be moved to `HEAD`, **or its API or web build failed**, so there would be nothing trustworthy to measure |
 | 5 | the **unpatched** suite is not green, so no patch below could be told apart from what is already broken |
+
+Exit 4 covers the builds because they used to run unchecked. One was killed
+part-way by a stray `pkill vite`, the worktree was left with no `dist` at all,
+and the next run died inside the suite on
+`ENOENT …/wtN/apps/web/dist/index.html` — which reads as a broken suite rather
+than as a build that never finished. A worktree with no bundle is also built
+once before the baseline, since the sync block only runs when the revision
+differs and a never-built worktree would otherwise slip past it.
 
 Exits 4 and 5 exist because of one concrete failure. The worktrees are detached
 checkouts made once and never moved, so they drift behind the branch as work

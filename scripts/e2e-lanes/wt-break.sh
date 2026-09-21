@@ -109,9 +109,34 @@ if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
   ( cd "$WT/packages/db"
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
     yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 )
-  pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1
-  pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1
+  # CHECKED, because an unchecked build is a silent one. This ran without `||`
+  # and a build killed part-way — by a stray `pkill vite`, as it happens — left
+  # the worktree with no `dist` at all. The next run then died inside the suite
+  # on `ENOENT …/wtN/apps/web/dist/index.html`, which reads as a broken suite
+  # rather than as a build that never finished. Say which it was.
+  if ! pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1; then
+    { echo "== API BUILD FAILED in $WT — refusing, the lane would serve a stale binary"
+      tail -5 "/tmp/claude-0/wt$LANE-api.log"; } >> "$OUT"
+    exit 4
+  fi
+  if ! pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1; then
+    { echo "== WEB BUILD FAILED in $WT — refusing, there would be no bundle to measure"
+      tail -5 "/tmp/claude-0/wt$LANE-web.log"; } >> "$OUT"
+    exit 4
+  fi
   restart
+fi
+
+# A worktree that was never built, or whose build was interrupted before this
+# guard existed, has no bundle and nothing above would have noticed: the sync
+# block only runs when the revision differs. Build it once, here, so the
+# baseline below measures a page rather than an ENOENT.
+if [ ! -f "$WT/apps/web/dist/index.html" ]; then
+  echo "== $WT has no bundle — building it before the baseline" >> "$OUT"
+  if ! pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1; then
+    { echo "== WEB BUILD FAILED in $WT"; tail -5 "/tmp/claude-0/wt$LANE-web.log"; } >> "$OUT"
+    exit 4
+  fi
 fi
 
 timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
