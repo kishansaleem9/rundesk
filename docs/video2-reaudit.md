@@ -74,6 +74,25 @@ went missing entirely. A list that is only written once stops being true.
   `INLINE_EDITABLE_TYPES` says out loud which types the grid can really edit —
   the money column stayed editable, and there is a check that it did, because
   "make it all read-only" is the feature removed rather than the bug fixed.
+- **The custom-field create form opened itself on every later visit to the
+  Fields tab.** `CustomFieldsPanel` is rendered behind `activeTab === 'fields'`,
+  so leaving the tab unmounts it and returning mounts it again — and its
+  open-on-stamp effect read `if (openCreateStamp) setCreating(true)`, which is
+  true on MOUNT as well as on a bump. Once "Add fields" had been pressed even
+  once the stamp stayed set, and the form appeared unasked every time after.
+  Nothing failed and nothing said so.
+
+  **Found by a break patch that ran GREEN.** `tfc-6` removes the stamp bump from
+  the `···` menu's Custom Fields row and the suite still saw a form — because
+  the REMOUNT was opening it, not the menu. Two ways of arriving at a visible
+  form, one assertion, and the wrong one was doing the work.
+
+  The sheet clears the stamp when the tab is left. **The first fix was wrong and
+  the baseline guard caught it**: a `useRef` inside the panel initialises to the
+  current value on the very mount the bump caused, so "has it changed" was false
+  exactly when the form should open and "Add fields" stopped working outright.
+  `task-field-create` came back 10 passed 4 failed, no patch ran, and nothing
+  was measured against a half-broken build.
 - **A merge refusal that described the opposite merge, in five places at
   once.** `mergeRefusal` had a rule keyed `target-is-descendant`, commented
   *"merging into your own subtask: the survivor would be a child of the task
