@@ -110,7 +110,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 57
+const EXPECTED_CHECKS = 59
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -324,6 +324,40 @@ try {
   check(
     (await page.getByTestId('person-time-off-list').innerText().catch(() => '')).includes(away),
     'and the panel shows the days back, without a reload',
+  )
+
+  /*
+   * AND A BACKWARDS RANGE IS REFUSED IN WORDS.
+   *
+   * `time-off.service.ts` refuses `endsOn < startsOn` with "endsOn must not be
+   * before startsOn", and migration 0090 also carries
+   * `CONSTRAINT time_off_range_check CHECK (ends_on >= starts_on)` — so
+   * AllExceptionsFilter would answer 400 with "A value failed a database
+   * constraint" even with the service check gone. Neither the refusal nor the
+   * sentence was tested at all; the service check is the only thing that tells
+   * somebody which of the two dates to change.
+   *
+   * Sent through the API rather than the form, because a date input that
+   * refuses to hold a backwards range client-side would make this untestable
+   * from the page without saying so.
+   */
+  const backwards = await A(`/workspaces/${workspaceId}/time-off`, {
+    method: 'POST',
+    body: { userId: meId, startsOn: back, endsOn: away },
+  })
+  if (backwards.data?.id) {
+    await A(`/workspaces/${workspaceId}/time-off/${backwards.data.id}`, { method: 'DELETE' })
+  }
+  check(
+    backwards.status >= 400 && backwards.status < 500,
+    'time off that ends before it starts is refused',
+    `it answered ${backwards.status} and stored ${JSON.stringify(backwards.data ?? null)}`,
+  )
+  check(
+    /must not be before/i.test(JSON.stringify(backwards.error ?? '')),
+    'and says which of the two dates is wrong, rather than naming a constraint',
+    `it said ${JSON.stringify(backwards.error)} — a database-constraint message here leaves ` +
+      'somebody staring at two date fields with no idea which one to move',
   )
 
   if (savedRow) {
