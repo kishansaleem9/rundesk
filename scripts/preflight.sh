@@ -26,6 +26,8 @@ step "web unit tests"                   bash -c 'cd apps/web && ../../packages/d
 step "migration guardrail"              node scripts/check-migration-order.mjs
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
+step "every break patch finds its line" python3 scripts/check-break-patches.py
+step "break runs postdate their suites" node scripts/check-break-freshness.mjs
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"

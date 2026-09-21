@@ -55,7 +55,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 23
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -388,6 +388,43 @@ try {
     'and a folder dropped on a project sends nothing — there is no route that re-parents one',
     `a folder drop produced ${JSON.stringify(moves.slice(beforeFolderMoves))}; ` +
       '`/lists/<folderId>/move` is a real route and a folder id is not a list',
+  )
+
+  /*
+   * AND THE PERMISSION, NOT ONLY THE REFUSAL. The check above says a folder on
+   * a project row sends nothing. Nothing said a LIST on a project row sends
+   * something — so `canDropOn`'s entire list rule,
+   *
+   *     if (dragItem.kind === 'list') return target.kind === 'project'
+   *
+   * could be deleted and all 21 checks stayed green. That was found by a break
+   * patch aimed at something else: `sidebar-reorder-6` meant to model a folder
+   * FALLING THROUGH into this rule, and modelled deleting the rule instead, so
+   * folders still hit `return false`, the behaviour it claimed to break was
+   * unchanged, and the only thing it really broke had no check on it.
+   *
+   * A refusal asserted without its permission is half a rule. The half with no
+   * check is the half that can be deleted.
+   */
+  const beforeListOnProject = moves.length
+  const movedList = drawnLists[0]
+  const armedListRow = await html5DragTo(page, `tree-list-${movedList}`, `tree-project-${P[1].id}`)
+  chk(
+    armedListRow,
+    'a list dropped ON a project row is accepted',
+    'the project row refused a list — `canDropOn` permits exactly this, and without the drop ' +
+      'there is no way to move a list between projects from the tree at all',
+  )
+  chk(
+    await waitUntil(async () => {
+      const [row] = await sql`select project_id from lists where id = ${movedList}`
+      return row?.project_id === P[1].id
+    }, { timeoutMs: 20_000 }),
+    'and it lands in that project',
+    'the list did not re-parent. Sent during this drag: ' +
+      `${JSON.stringify(moves.slice(beforeListOnProject))} (no move = the drop was accepted and ` +
+      'then did nothing, which is the facade; a move with no re-parent = the route was called ' +
+      'with the wrong body)',
   )
 
   // ==========================================================================

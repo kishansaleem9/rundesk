@@ -452,6 +452,73 @@ green "confirmations" that meant nothing until they were found.
   attaches to the first command in the pipeline. `export` it instead. This
   costs a confusing round trip every time, because the failure is `cmd`
   complaining that a perfectly-set variable is missing.
+- **"STILL GREEN: 0" CANNOT SEE A PATCH THAT NEVER RAN.** This was the summary
+  line for every break set in this audit: count the runs that came back all
+  green. A patch that `BUILD FAILED` prints no `N passed, M failed` line at all,
+  so it is not counted as still green — which is precisely what a patch that
+  reddened looks like. `app-catalogue` was reported as *"20 patches, 0 still
+  green"* and was 19 of 20. Five patches across five sets were in that state.
+  Count the patches that DEMONSTRABLY REDDENED, and report unbuilt separately;
+  `0 failed is not it ran` applies to the reporting as much as to the suite.
+- **A PATCH MUST MAKE THE CODE TAKE THE WRONG BRANCH, NOT REMOVE A BRANCH.**
+  `sidebar-reorder-6` describes a folder *falling through into* the list rule
+  and implemented *deleting* the list rule. With that line gone there is nothing
+  to fall through into, folders still reach the explicit `return false`, the
+  behaviour it claimed to break was unchanged, and the suite stayed green —
+  honestly. Removing a branch changes which defects are reachable, which is a
+  different edit with different consequences.
+- **A REFUSAL ASSERTED WITHOUT ITS PERMISSION IS HALF A RULE.** That same wrong
+  patch proved something better than itself: with the list rule deleted, all 21
+  checks passed. The suite asserted that a folder dropped on a project row sends
+  nothing, and never that a list dropped on one sends something. **The half with
+  no check is the half that can be deleted.** Whenever a check asserts that
+  something is refused, look for the check asserting the matching thing is
+  allowed — and if the patch that reddens one is the same edit as the patch that
+  reddens the other, only one of them is real.
+- **FIXING A FIXTURE INVALIDATES EVERY RESULT PREVIOUSLY MEASURED THROUGH IT.**
+  Nine of `sidebar-dms`'s ten patches ran before the fixture fix that gave the
+  run a second direct message; their logs say *"the server now reports 1 direct
+  message(s)"* and the suite went from 13 checks to 14 in that commit. They were
+  honest work against a suite that no longer exists. `check-break-freshness.mjs`
+  asks this mechanically: does the run postdate the suite's last change?
+- **A LOG TRUNCATED PER RUN DESTROYS THE EVIDENCE FOR THE LEDGER'S NUMBERS.**
+  `wt-break.sh` truncates `break-<suite>.txt` each time, so a later single-patch
+  re-run erases the full set's record. Six suites show one patch on disk for runs
+  that did happen, and six ledger rows had to be withdrawn because nothing could
+  support them any more. Per-run files, or an appended run header, cost nothing.
+
+### Checking the checkers
+
+The two scripts that check the break patches were each wrong in a way the
+patches themselves have taught this audit to recognise, so they are written down
+as the same defects one level up.
+
+- **A "DRY RUN" THAT EXECUTES.** `check-break-patches.py` runs each patch with
+  writes redirected to a sink, because the patch's own `assert` is the test.
+  Its first version seeded a fake `io` into the patch's globals — and every
+  patch begins `import io`, which rebinds that name to the real module on its
+  first line. It edited 62 source files while printing anchor statistics, and
+  those statistics (57 failures where the truth was 6) were mostly an artefact
+  of the damage it was doing to the tree it was measuring.
+- **A GUARD THAT REPORTS ON THE WRONG TREE.** The fix was to compare
+  `git status` before and after. The second version compared it in the directory
+  the SCRIPT lives in, and the patches hardcode `/home/user/rundesk`. Running
+  the checker from a clone, in order to prove the guard worked, rewrote 61 files
+  in the original repo while printing *"working tree unchanged — verified
+  against git status"* over the top. **Watch every tree the thing you are
+  running could write to, not the one you launched it from.**
+- **A GUARD THAT PASSES WHERE IT CANNOT RUN.** The same comparison returned
+  `git status`'s stdout and ignored its exit code, so in any directory without a
+  `.git` — an export, a tarball — the command failed, both readings were empty,
+  and "nothing changed" was reported by a check with no way to tell. A guard
+  must refuse where it cannot measure.
+- **AN ANCHOR BEGINNING WITH SPACES CANNOT PIN INDENTATION.** A more-deeply
+  indented copy of the same line contains it, so `s.count(a)` sees two and the
+  patch refuses. Both cases found were correct code — a loading skeleton
+  repeating its card's header, and two renderings of one list. Anchor from the
+  preceding newline. And when a file really does render the same thing twice,
+  the patch has to break BOTH: patching one leaves the check free to exercise
+  the other and go green against a defect in the same file.
 
 ### Environment
 

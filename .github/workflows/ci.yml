@@ -153,6 +153,19 @@ jobs:
       - name: The re-audit ledger agrees with its own derivation
         run: node scripts/check-video2-counts.mjs
 
+      # 573 break patches anchor on exact lines of source. A refactor that moves
+      # one silently disarms the check it proves — and the only way to find out
+      # used to be running that suite's set, eight minutes, to read one
+      # `PATCH FAILED` line out of a long log. This dry-applies every patch in a
+      # second and fails the build naming the ones that no longer find their
+      # line, so the refactor and the disarmed check arrive in the same PR.
+      #
+      # `check-no-break-patches.mjs` above is the opposite guard: that none of
+      # them is APPLIED in the tree. Both are needed — one says the patches can
+      # still break the code, the other that they have not.
+      - name: Every break patch still finds its line
+        run: python3 scripts/check-break-patches.py
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks

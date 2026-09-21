@@ -34,17 +34,65 @@ import subprocess
 import sys
 import traceback
 
-BREAKS = '/tmp/claude-0/breaks'
-ROOT = '/home/user/rundesk'
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+# THE TRACKED COPY IS THE ONE THAT MATTERS. `/tmp/claude-0/breaks` is where the
+# runner reads from on this machine and where they lived until they were
+# committed; the repository is what CI has and what survives the container.
+BREAKS = os.path.join(ROOT, 'test/e2e/breaks')
+if not os.path.isdir(BREAKS):
+    BREAKS = '/tmp/claude-0/breaks'
 
 _real_open = builtins.open
 _real_io_open = _io.open
 
 
+def _dirty_one(root):
+    """One working tree's dirt, or a refusal.
+
+    THE GUARD MUST NOT BE ABLE TO PASS BY ACCIDENT. The first version returned
+    `.stdout` and ignored the exit code, so anywhere without a `.git` — an
+    export, a tarball, a container that clones shallowly into a plain directory
+    — `git status` failed, the output was empty, and BEFORE == AFTER == '' said
+    "nothing changed" about a check that had no way to tell. Found by running
+    the checker from a `git archive` copy to test something else entirely.
+    """
+    r = subprocess.run(
+        ['git', 'status', '--porcelain'], cwd=root, capture_output=True, text=True, check=False
+    )
+    if r.returncode != 0:
+        print(
+            f'[break-patches] REFUSING: `git status` failed in {root}, so this run could not '
+            'tell whether it modified your files. These patches WRITE; the only thing making '
+            'this safe is being able to check afterwards.',
+            file=sys.stderr,
+        )
+        sys.exit(2)
+    return r.stdout
+
+
+# WATCH EVERY TREE A PATCH COULD REACH, NOT THE ONE THIS SCRIPT LIVES IN.
+#
+# The second version watched `ROOT` alone, and that is wrong in the exact case
+# the `_here()` rewriting exists for. Every patch hardcodes `/home/user/rundesk`.
+# If the shim leaks, the write goes to THAT path — not to the checkout the
+# script was launched from. Running the checker inside a clone with the shim
+# disabled, to prove the guard worked, rewrote 61 files in the ORIGINAL repo
+# while the clone's own status stayed clean, and the script printed
+#
+#     [break-patches] working tree unchanged — verified against git status
+#
+# over the top of it. A guard reporting on the wrong tree is worse than no
+# guard: it is the facade, in the thing written to detect facades. Both roots
+# are watched now, and a `git status` that cannot run in either is a refusal.
+HARDCODED = '/home/user/rundesk'
+
+WATCHED = [ROOT]
+if os.path.isdir(HARDCODED) and os.path.abspath(HARDCODED) != os.path.abspath(ROOT):
+    WATCHED.append(HARDCODED)
+
+
 def _dirty():
-    return subprocess.run(
-        ['git', 'status', '--porcelain'], cwd=ROOT, capture_output=True, text=True, check=False
-    ).stdout
+    return {root: _dirty_one(root) for root in WATCHED}
 
 
 BEFORE = _dirty()
@@ -57,10 +105,24 @@ class _Sink(_io.StringIO):
         pass
 
 
+def _here(path):
+    """Map the patch's hardcoded repo root onto this checkout.
+
+    `wt-break.sh` does the same thing when it applies a patch to a worktree —
+    the patches say `/home/user/rundesk/...` and the runner rewrites it. Without
+    this the check passes vacuously anywhere else (every file "missing") or, in
+    CI, fails every patch for a reason that has nothing to do with the anchors.
+    """
+    p = str(path)
+    if p.startswith(HARDCODED + '/') and ROOT != HARDCODED:
+        return os.path.join(ROOT, p[len(HARDCODED) + 1 :])
+    return p
+
+
 def _guarded_open(path, mode='r', *args, **kwargs):
     if any(c in mode for c in 'wax+'):
         return _Sink()
-    return _real_io_open(path, mode, *args, **kwargs)
+    return _real_io_open(_here(path), mode, *args, **kwargs)
 
 
 patches = sorted(glob.glob(os.path.join(BREAKS, '*.py')))
@@ -94,10 +156,14 @@ for path in patches:
         sys.stdout = real_stdout
 
 AFTER = _dirty()
-if AFTER != BEFORE:
-    print('[break-patches] ABORT — this run CHANGED THE WORKING TREE. Restore with:', file=sys.stderr)
-    print('    git -C %s checkout -- .' % ROOT, file=sys.stderr)
-    print(AFTER, file=sys.stderr)
+changed = [r for r in WATCHED if AFTER[r] != BEFORE[r]]
+if changed:
+    for root in changed:
+        print(f'[break-patches] ABORT — this run CHANGED FILES IN {root}. Restore with:', file=sys.stderr)
+        print(f'    git -C {root} checkout -- .', file=sys.stderr)
+        was, now = set(BEFORE[root].splitlines()), set(AFTER[root].splitlines())
+        for line in sorted(now - was):
+            print(f'      {line}', file=sys.stderr)
     sys.exit(2)
 
 for tag, rows in (('ANCHOR GONE  ', miss), ('ANCHOR DOUBLE', dupe), ('FILE GONE    ', gone), ('PATCH ERROR  ', err)):
@@ -106,5 +172,5 @@ for tag, rows in (('ANCHOR GONE  ', miss), ('ANCHOR DOUBLE', dupe), ('FILE GONE 
 
 bad = len(miss) + len(dupe) + len(gone) + len(err)
 print(f'\n[break-patches] {ok} of {len(patches)} patches still apply cleanly; {bad} would fail')
-print('[break-patches] working tree unchanged — verified against git status')
+print('[break-patches] unchanged, verified with git status in: ' + ', '.join(WATCHED))
 sys.exit(1 if bad else 0)
