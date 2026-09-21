@@ -10,9 +10,9 @@
  * `task-menu` (33), `comment-recording` (32), `a61-meeting-record` (28),
  * `task-merge` and `list-export` (25 each).
  *
- * `task-menu` was the first one closed, so the ratchet stands at 52. The run
- * this file prints is always the current count; the paragraph above is what it
- * was when anybody first looked.
+ * `task-menu` and `custom-field-progress` are closed, so the ratchet stands at
+ * 51. The count this file prints is always the current one; the paragraph above
+ * is what it was when anybody first looked.
  *
  * A suite with no patch is not a suite that failed. It is a suite about which
  * nothing is known: every one of its checks may be a facade, and being green
@@ -80,7 +80,7 @@ console.log(`[break-coverage] ${uncovered.length} suites have NO break patch at 
 for (const n of uncovered) console.log(`    ${String(checksIn[n]).padStart(3)} checks  ${n}`)
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 52
+const BASELINE_UNCOVERED = 51
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
