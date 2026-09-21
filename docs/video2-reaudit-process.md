@@ -704,6 +704,21 @@ as the same defects one level up.
   without one, and it must not quietly become "built".
 - **Re-check a recorded reason before trusting it.** See *the stale reason*
   above. Two rows in this audit were closable the whole time.
+- **READ THE LINE THE CHECK DEPENDS ON, NOT THE LINE THE PATCH TOUCHES.** A
+  claim verifying tells you the sentence exists in the suite. It tells you
+  nothing about whether your edit reaches it. Three patches this session
+  verified their claim and could not have reddened it:
+
+  | patch | why the edit never reached the check |
+  | --- | --- |
+  | `custom-field-progress-4` (clamp) | no fixture makes a source report more done than it holds |
+  | `mp-7-flat-bars` | the check compares Fast to MAX; the patch moved Fast past DEEP |
+  | `space-presets-3` (plan filter) | the features map is built over ALL keys, so `wipLimits` is false either way |
+
+  Each was found by opening the check and following what it actually reads —
+  the fixture, the comparison, the line that builds the value. That is a
+  different reading from the one that writes the patch, and it is the one that
+  is skipped.
 - **A CLAIM CHOSEN BECAUSE IT VERIFIES IS WORSE THAN ONE THAT HAS ROTTED.**
   `check-break-claims.mjs` rejects a patch whose `# Reddens:` sentence is not in
   its suite, and the obvious way to satisfy it is to go and find a sentence that
