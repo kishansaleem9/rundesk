@@ -704,6 +704,25 @@ as the same defects one level up.
   without one, and it must not quietly become "built".
 - **Re-check a recorded reason before trusting it.** See *the stale reason*
   above. Two rows in this audit were closable the whole time.
+- **THE SUITE USUALLY NAMES THE DEFECT IT FEARS. START THERE.** Writing a
+  patch for an uncovered suite is not a blank page: read its failure messages
+  and the comments beside the code it exercises, because the author has
+  generally written down the exact thing that must not happen — and the guard
+  against it is the thing nobody has proven. Every suite closed this way said
+  it out loud first:
+
+  | suite | where the defect was already written down |
+  | --- | --- |
+  | `doc-task-links` | the method's comment: *"a doc that lists it would be a way to read titles somebody is not allowed to see"* |
+  | `planner-blocks` | beside the check: *"told what they did or told that a database was unhappy"* |
+  | `save-comment` | the failure text: *"saved comments render in the Inbox tab too, so the Later check proves nothing"* |
+  | `space-presets` | above the check: *"everything above could pass on a build that stores the answer and does nothing with it"* |
+  | `list-name-taken` | the service comment explaining why its 409 exists at all |
+
+  **The knowledge was written down every time and never turned into evidence.**
+  That is the stale-reason class one level up: a sentence that describes a risk,
+  accurate when written, with nothing anywhere that would notice if the risk
+  arrived.
 - **READ THE LINE THE CHECK DEPENDS ON, NOT THE LINE THE PATCH TOUCHES.** A
   claim verifying tells you the sentence exists in the suite. It tells you
   nothing about whether your edit reaches it. Three patches this session
