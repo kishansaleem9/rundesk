@@ -2882,6 +2882,12 @@ worktree under a lock:
 | `space-create-menu` (the Form row) | 5 | 5 |
 | `list-assignee-filter` | 15 | 15 |
 | `sidebar-reorder` | 11 | 11 |
+| `team-view` | 1 | 1 |
+| `integration-error-card` | 9 | 9 |
+| `task-menu` — **never covered before** | 4 | 4 |
+| `custom-field-progress` — **never covered before** | 5 | 5 |
+| `list-export` — **never covered before** | 3 | 3 |
+| `task-merge` — **never covered before** | 3 | 1, and two that were right to stay green |
 | `teams-empty-state` (the carousel) | 4 | 4 |
 | `folder-create` | 12 | 12 |
 | `list-empty-states` | 7 | 7 |
@@ -2928,6 +2934,33 @@ were in this state: `app-catalogue-20`, `ai-create-containers/acc-1`,
 need only a re-run; `app-catalogue-20` is rewritten to withdraw the tab where
 the tab list is produced, which breaks the behaviour without touching the type.
 
+### The denominator, and the four suites it sent me to
+
+Every row above is a numerator. **Nobody had ever printed the other number.**
+Counted on 21 September: 101 suites carry **1961 checks**, and **47 of those
+suites had no break patch at all** — including the largest in the repository.
+`video-regression` has 81 checks and nothing had ever been aimed at one of
+them; `custom-field-progress` 58; `task-menu` 33; `comment-recording` 32;
+`a61-meeting-record` 28; `task-merge` and `list-export` 25 each.
+
+A suite with no patch is not a suite that failed. It is a suite **about which
+nothing is known** — every check in it may be a facade and being green says
+nothing either way. That is the sentence step 6 has carried since it was
+written, applied only ever to individual checks and never to the set of suites,
+which is how *"eight break sets verified"* came to read like coverage when it
+was eight out of a hundred and one.
+
+**The first answer was 53 and it was reported before it was checked.** The
+evidence against it was in the same line of output — *"(64 could not be
+attributed to a suite)"*. `# Reddens: task-field-create — "…"` separates with an
+em dash rather than a colon, and the abbreviated prefixes (`tfc-`, `taf-`,
+`tai-`, `lwb-`) match no suite filename, so four suites that DO have patches
+were counted as having none. `check-break-coverage.mjs` resolves by sentence as
+a third step now, 581 of 592 attribute, and the eleven that still do not are
+printed BY NAME — a number in brackets is exactly what hid this.
+
+Six of the 47 are closed so far, and the ratchet holds the rest.
+
 ### The still-green patch that was worth the run twice over
 
 `sidebar-reorder` came back 10 patches, **one still green**, and it was the
@@ -2953,6 +2986,33 @@ the accidental edit on purpose as the patch that covers that line. Re-run whole,
 because the suite had changed and by this file's own rule that stales every
 earlier result in the set: **baseline 23 green, 11 patches, 11 reddened, none
 unbuilt**, and patch 11 fails exactly its two checks and nothing else.
+
+### And a second one, where the check and the patch were both right
+
+`task-merge` was one of the four uncovered suites closed, and two of its three
+patches came back GREEN.
+
+Neither check was worthless and neither patch was wrong about the code. Both
+checks assert `status >= 400 && < 500` and nothing more, and in both cases a
+**second guard refuses the same input**:
+
+- merging into your own subtask is caught by `target-is-descendant` — and,
+  since the source has a subtask and the target IS that subtask, by
+  `would-nest-twice` as well;
+- merging an already-binned source is caught by `already-binned` — and, because
+  a merged source is `isArchived`, by `assertTaskWriteAccess` a few lines
+  further down, which refuses archived tasks on its own.
+
+So either rule can be deleted outright with the suite green, because the merge
+really is still refused. **Defence in depth is worth keeping. A check that
+cannot see which guard fired is not** — the one that rots will be the one
+nobody is looking at.
+
+The lesson was already in this repository, on `sidebar-reorder-9`: *two
+mechanisms that produce one status code have to be told apart by their
+message.* It had never been applied here. Two checks added that read the
+sentence, 25 → 27, and both patches now name the check they really redden
+rather than the one that stays green under them.
 
 ### Nothing had ever checked that a patch names a check that exists
 
