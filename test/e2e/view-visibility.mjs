@@ -25,7 +25,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 21
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -76,6 +76,35 @@ try {
   const secret = await mkView(`Secret ${stamp}`, { visibility: 'private' })
   const guarded = await mkView(`Guarded ${stamp}`, { visibility: 'protected' })
   if (!shared?.id || !secret?.id || !guarded?.id) throw new Error('could not make the views')
+
+  /*
+   * AN UNKNOWN VISIBILITY IS REFUSED, AND BY THE SERVICE.
+   *
+   * `views.service.ts` checks `VISIBILITIES.includes(...)` and throws naming
+   * the value it could not accept; migration 0134 also puts
+   * `CHECK (visibility IN ('everyone','private','protected'))` on the column,
+   * and `AllExceptionsFilter` maps that 23514 to a 400. So the status is the
+   * database's either way and only the sentence is the service's — the same
+   * shape as `list-name-taken`'s 409 and `ai-value`'s bounds.
+   *
+   * Nothing tested this at all: the service check, the constraint and the
+   * message were three things nobody had ever asked a question of.
+   */
+  const bogus = await A(`/lists/${list.id}/views`, {
+    method: 'POST', body: { name: `Bogus ${stamp}`, type: 'list', config: {}, visibility: 'everybody' },
+  })
+  chk(
+    bogus.status >= 400 && bogus.status < 500,
+    'a view cannot be created with a visibility that does not exist',
+    `it answered ${bogus.status} — an unknown visibility was stored, and every reader of that ` +
+      'column now has a fourth case it was never written for',
+  )
+  chk(
+    /everybody/.test(JSON.stringify(bogus.error ?? '')),
+    'and the refusal names the value it would not take',
+    `it said ${JSON.stringify(bogus.error)} — a message that does not quote the value leaves ` +
+      'somebody guessing which of the fields they sent was the wrong one',
+  )
 
   console.log('\n▶ a private view belongs to the person who made it')
   chk(secret.visibility === 'private', 'a view can be created private',
