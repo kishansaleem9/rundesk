@@ -793,7 +793,7 @@ checks, not about a run.**
 | B | Favorite in the task menu (same hook as the star) |
 | B | Archive in the task menu — and named honestly for the first time |
 | B | A PERMANENT delete for a task — `deletedAt` into the same Trash the other entities use, restorable there, purged by the same cron after the same 30 days. Archive is never purged. An archived task must NOT appear in the Trash, and that check was impossible to satisfy before |
-| M | "Add to ›" (a task in more than one list) |
+| M | "Add to ›" — frame `15:35` draws the row and its chevron; **no frame opens the submenu and the transcript never speaks the item**, so what it adds a task TO is unspecified. The gloss this row carried for six weeks — *"a task in more than one list"* — is ClickUp's real product, not anything in the video, and it is what kept the row on the buildable side. Blocked on the reference, not on Rundesk. See §6 |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
 | B | "⚡ Assign with AI" — closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task |
 | — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
@@ -2731,8 +2731,8 @@ assumed so, and they divide cleanly: six are blocked rather than pending — the
 Brain² hub and the four rows that hang off it need an agent runtime Rundesk
 does not have and an `ANTHROPIC_API_KEY` that is empty here and in CI, and
 "add to a colleague's priorities" is a deliberate refusal recorded on its own
-row. **ONE is buildable**: **`"Add to ›"`** — one task in more than one list,
-a schema change and the largest thing left in this file.
+row. The last one, **`"Add to ›"`**, was carried as the one buildable row until
+its frame was opened too — see below. **NONE is buildable.**
 
 The metered *"uses have expired"* state was counted here too, and is not.
 `09:30` draws that state's sentence and its one button and nothing else — no
@@ -2752,9 +2752,53 @@ show rather than by what Rundesk does not have — the create-modal placeholder,
 is worth keeping: one kind is waiting on work, the other on a better
 reference, and only the first belongs in a backlog.
 
-**Which leaves exactly one buildable row in §2.** Not a comfortable number to
-report, and it is the one that took reading fifteen rows against the code and
-then three of them against the pixels to arrive at. The first pass said fifty.
+`"Add to ›"` was the last row standing, and it fell to the same question asked
+one row later than it should have been: **what does the video say its submenu
+does?** Nothing. Frame `15:35` draws the menu with `Add to ›` and its chevron,
+the cursor resting on `Send email to task`, the submenu **closed**; the other
+frames in the window — `15:00`, `15:15`, `15:20`, `15:50`, `15:52`, `15:55` —
+never open it either. The transcript for that window narrates **five** items
+(`[15:22]` Favourite, `[15:27]` history, `[15:32]` print, `[15:38]` convert,
+`[15:41]` fields) and **"Add to" is not one of them.** It is drawn and never
+spoken.
+
+So where did *"a task in more than one list"* come from? Not the reference. That
+phrase appears **nowhere** in `video2-frame-observations.md` and nowhere in the
+transcript — it occurs exactly twice in the whole corpus, both times in THIS
+file, in the row and in the sentence promoting it. It is ClickUp's real product,
+which I know independently, written down as though it were an observation. The
+row's *justification* was the invention, which is why it survived fifteen rows
+of checking: the checking was aimed at whether Rundesk has the feature, and the
+answer to that was honestly "no" every time.
+
+The `Convert to ›` precedent does not rescue it, and it is worth saying why,
+because the two look identical. That submenu is also never opened — §4 of the
+gap audit says so — and it was still built, on the ground that the defensible
+reading is *"the conversion Rundesk's own schema already supports:
+`parentTaskId` and nothing more"*. The rule that licensed it is **build only
+what an existing column already affords**, not "a closed submenu may be
+guessed". Here the schema affords the opposite: `tasks.list_id` is a single
+`notNull` FK (`schema/tasks.ts:17`), there is no task↔list join table in any of
+the 21 schema files that mention `taskId`, and every read path assumes one list.
+There is no orphan column waiting for a reader — the mirror defect, where the
+build is free because half of it already exists. There is only a new table, a
+migration, and a rewrite of every list query, all of it in service of a sentence
+the video never says.
+
+**Which leaves ZERO buildable rows in §2**, and FOUR held back by the reference
+rather than by Rundesk: the create-modal placeholder, `"Create Task ▾"`'s menu,
+the metered state's policy, and now `Add to ›`. The count does not move — the
+row stays `M`, because it is still a thing the product does not have — but the
+reason does, and the reason is what a backlog is read for. The first pass said
+fifty were buildable.
+
+The lesson is narrower and more uncomfortable than "check the frames". Every one
+of these four was checked against the frames repeatedly. What went unchecked was
+the **gloss** — the parenthetical that says what the row MEANS — and a gloss is
+where knowledge from outside the reference gets in, because it reads as
+description and is never re-derived. *The stale reason*, turned on a row's own
+justification instead of on its status. The fix is mechanical: a row's
+parenthetical must quote a frame or a timecode, or say that it cannot.
 
 ### Voice notes and Required views were closable the whole time
 

@@ -504,6 +504,20 @@ green "confirmations" that meant nothing until they were found.
   without one, and it must not quietly become "built".
 - **Re-check a recorded reason before trusting it.** See *the stale reason*
   above. Two rows in this audit were closable the whole time.
+- **A row's GLOSS must quote a frame or admit it cannot.** The parenthetical
+  that says what a row *means* is where knowledge from outside the reference
+  gets in, because it reads as description and is never re-derived. `"Add to ›"`
+  carried *"(a task in more than one list)"* — ClickUp's real product, which I
+  know independently, and a phrase that appears nowhere in the observations file
+  or the transcript. That gloss, not the row, is what kept it classed buildable
+  through fifteen passes of checking: every pass asked "does Rundesk have this?"
+  and got an honest no, and none asked "does the video say this?" A closed
+  submenu specifies nothing. Build only what an existing column already affords
+  — the test that licensed `Convert to ›` (`parentTaskId` was already there) and
+  refuses `Add to ›` (`tasks.list_id` is a single `notNull` FK with no join
+  table anywhere).
+- **"Blocked on the reference" is a different row from "not built yet",** and
+  only the second belongs in a backlog. Four rows here are the first kind.
 
 ---
 
