@@ -2,13 +2,14 @@
 
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { bail } from './lib/bail.mjs'
 
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'packages/db/src/migrations')
 const SQL_NAME = /^(\d{4})_[a-z0-9_]+\.sql$/
 
 function fail(message) {
   console.error(`[migration-check] ${message}`)
-  process.exit(1)
+  bail(1)
 }
 
 function ok(message) {

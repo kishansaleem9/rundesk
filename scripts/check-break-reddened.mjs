@@ -59,6 +59,7 @@ import { fileURLToPath } from 'node:url'
 import { norm, quotedIn } from './lib/claim-match.mjs'
 import { reddensText, makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
 import { measuredAt, patchDeps, makeMeasurementCheck } from './lib/log-tree.mjs'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -199,7 +200,7 @@ const BASELINE = { accounted: 804, green: 0, unproven: 0 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
-  process.exit(0)
+  bail(0)
 }
 
 const lines = (raw, kind) =>

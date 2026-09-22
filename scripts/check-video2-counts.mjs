@@ -49,6 +49,7 @@
 import { readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bail } from './lib/bail.mjs'
 
 /*
  * ANCHORED TO THIS FILE, not to wherever it was run from. Both documents were
@@ -468,7 +469,7 @@ if (problems.length) {
   console.error('[video2-counts] the ledger disagrees with itself:\n')
   for (const p of problems) console.error(`  · ${p}\n`)
   console.error(`Fix ${PATH} §4, or this number will be quoted as fact.`)
-  process.exit(1)
+  bail(1)
 }
 /*
  * AND THE SUMMARY ONLY CLAIMS WHAT RAN.

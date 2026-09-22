@@ -64,6 +64,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 /*
@@ -77,7 +78,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SUITES = process.env.SUITE_DIR ?? join(ROOT, 'test/e2e')
 const CHECK_CALL = /\b(chk|check)\s*\(/
 
-// Set by every refusal below. The file used to `process.exit(1)` at each of
+// Set by every refusal below. The file used to `bail(1)` at each of
 // them; with that gone, the final line must not clobber the code they set.
 let fatal = false
 

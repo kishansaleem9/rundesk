@@ -30,6 +30,7 @@ import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { proveMutationsBite } from './lib/mutate.mjs'
+import { bail } from './lib/bail.mjs'
 
 /*
  * DYNAMIC, so `--mutate` can aim these cases at a broken copy. This subject
@@ -174,7 +175,7 @@ try {
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed) {
   console.error('[suite-of-patch] the attribution contract is broken')
-  process.exit(1)
+  bail(1)
 }
 /*
  * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true

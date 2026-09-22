@@ -33,12 +33,13 @@
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const OBS = join(ROOT, 'docs/video2-frame-observations.md')
 if (!existsSync(OBS)) {
   console.error('[frames] no docs/video2-frame-observations.md — nothing to trace')
-  process.exit(1)
+  bail(1)
 }
 
 // An OBSERVATION is a top-level bullet that opens with a timestamp. Nested
@@ -168,5 +169,5 @@ if (nowhere.length) {
       'there — an unanswered frame and a frame answered under another timestamp look identical from\n' +
       'here, and the difference is the whole point.',
   )
-  process.exit(1)
+  bail(1)
 }

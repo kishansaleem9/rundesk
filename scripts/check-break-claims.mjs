@@ -55,6 +55,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -293,7 +294,7 @@ if (bucketed !== files.length) {
       `${Math.abs(files.length - bucketed)} fell into no column at all, so every number above is ` +
       'about a subset nobody named.',
   )
-  process.exit(1)
+  bail(1)
 }
 
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
@@ -301,7 +302,7 @@ if (grew.length) {
   console.error('\n[break-claims] THIS IS WORSE THAN THE BASELINE:')
   for (const k of grew) console.error(`  ${k}: ${BASELINE[k]} → ${actual[k]}`)
   console.error('  Fix the patch, or fix the check it names. Do not raise the baseline to pass.')
-  process.exit(1)
+  bail(1)
 }
 const shrank = Object.keys(BASELINE).filter((k) => actual[k] < BASELINE[k])
 if (shrank.length) {

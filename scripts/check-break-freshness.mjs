@@ -48,6 +48,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
 import { patchDeps, makeDriftCheck, CONTROL, measuredAt } from './lib/log-tree.mjs'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const BREAKS = '/tmp/claude-0'
@@ -60,7 +61,7 @@ const ARCHIVE = /-\d{8}-\d{6}\.txt$/
 const logs = readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f) && !ARCHIVE.test(f))
 if (logs.length === 0) {
   console.log('[break-freshness] no break logs on this machine — nothing to check')
-  process.exit(0)
+  bail(0)
 }
 
 const lastChanged = (name) => {
@@ -227,7 +228,7 @@ rows.sort((a, b) => a.verdict.localeCompare(b.verdict) || a.suite.localeCompare(
 // the disagreement would be invisible.
 if (process.argv.includes('--porcelain')) {
   for (const r of rows) console.log(`${r.verdict}\t${r.suite}\t${r.tree ?? 'unknown'}`)
-  process.exit(0)
+  bail(0)
 }
 
 const TAGS = {
@@ -440,7 +441,7 @@ if (
   absent.length ||
   inert.length
 )
-  process.exit(1)
+  bail(1)
 // A row with no suite file was never COMPARED to anything, so it cannot be
 // folded into "all N postdate their suite" — that sentence is the whole output
 // most readers see, and counting an unmeasured log inside it is how a total

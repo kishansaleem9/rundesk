@@ -166,6 +166,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { messageReads, topLevelArgs, THROWS, locatorVars } from './lib/suite-reads.mjs'
+import { bail } from './lib/bail.mjs'
 
 /*
  * `SUITE_DIR` EXISTS SO THE FIVE LINE-BASED RULES CAN BE TESTED AT ALL.
@@ -597,5 +598,5 @@ if (rows.length) {
       'assertion under it REDDENS on a null box: `>= N` does, `< N` does not, and that one needs a\n' +
       '`!!box &&` beside the catch.',
   )
-  process.exit(1)
+  bail(1)
 }
