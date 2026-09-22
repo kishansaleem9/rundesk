@@ -18,9 +18,18 @@
  * refused to continue rather than let the check pass vacuously, which is the
  * only reason anybody looked.
  *
- * The check with teeth is 5 and 8: `status` says done AND `statusCategory`
- * says closed AND a reader that reasons on the category agrees. Asserting the
- * stored key alone passes on the bug — that was never the broken half.
+ * The check with teeth is the pair at the end: `status` says done AND
+ * `statusCategory` says closed AND a reader that reasons on the category
+ * agrees. Asserting the stored key alone passes on the bug — that was never
+ * the broken half.
+ *
+ * AND THE READER-AGREES HALF WAS VACUOUS UNTIL IT HAD A CONTROL. It asserted
+ * the closed task is ABSENT from the teams work preview — and the task was
+ * created with no assignee, while `workPreview` joins `task_assignees`. An
+ * unassigned task is absent from it whatever its category says, so the check
+ * passed on the very bug it was written for. The task is assigned now, and the
+ * check above it asserts the preview DOES list it while it is open. An absence
+ * means something only next to the presence it replaced.
  *
  *   node test/e2e/list-statuses-seeded.mjs --api 3011
  */
@@ -32,7 +41,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -102,13 +111,46 @@ try {
   )
   if (!closed?.key) throw new Error('without a closed status there is no way to finish anything here')
 
-  const mkTask = await A('/tasks', { method: 'POST', body: { listId: starter.id, title: `done-check ${TAG}` } })
+  /*
+   * ASSIGNED TO ME, and that is not a detail.
+   *
+   * The work-preview check at the bottom asserts this task is ABSENT from a
+   * reader that reasons on the category. It used to create the task with no
+   * assignee — and `workPreview` joins `task_assignees`, so an unassigned task
+   * is absent from it whatever its category says. The check passed on the bug
+   * it was written to catch, and on a build with no category logic at all. A
+   * confident zero: the right answer, for a reason that has nothing to do with
+   * the question.
+   *
+   * Assigning it is half the fix; the control below — that it IS listed while
+   * it is open — is the other half, and the half that makes the absence mean
+   * something.
+   */
+  const meId = auth.user?.id ?? auth.userId
+  const mkTask = await A('/tasks', {
+    method: 'POST',
+    body: { listId: starter.id, title: `done-check ${TAG}`, assigneeIds: meId ? [meId] : [] },
+  })
   if (mkTask.status >= 300 || !mkTask.data?.id) throw new Error(`could not create a task: ${mkTask.status}`)
   const taskId = mkTask.data.id
   chk(
     mkTask.data.statusCategory === 'open',
     'a new task starts open',
     `a brand new task came back as "${mkTask.data.statusCategory}"`,
+  )
+
+  const titlesIn = async () => {
+    const res = await A(`/workspaces/${ws}/teams/work-preview`)
+    const list = Array.isArray(res.data) ? res.data : (res.data?.people ?? [])
+    const row = list.find((r) => (r.userId ?? r.user?.id) === meId)
+    return { status: res.status, titles: (row?.items ?? row?.tasks ?? []).map((t) => t.title ?? t.name) }
+  }
+  const whileOpen = await titlesIn()
+  chk(
+    whileOpen.status === 200 && whileOpen.titles.includes(`done-check ${TAG}`),
+    'and a reader that reasons on the category counts it as current work while it is open',
+    `the work preview (${whileOpen.status}) does not list the open task: ${JSON.stringify(whileOpen.titles)} — ` +
+      'so its absence after closing would prove nothing',
   )
 
   const patched = await A(`/tasks/${taskId}`, { method: 'PATCH', body: { status: closed.key } })
@@ -139,15 +181,11 @@ try {
    * same column. The teams work preview lists a person's OPEN work; a task
    * stored as done-but-open shows up there forever.
    */
-  const meId = auth.user?.id ?? auth.userId
-  const preview = await A(`/workspaces/${ws}/teams/work-preview`)
-  const rows = Array.isArray(preview.data) ? preview.data : (preview.data?.people ?? [])
-  const mine = rows.find((r) => (r.userId ?? r.user?.id) === meId)
-  const titles = (mine?.items ?? mine?.tasks ?? []).map((t) => t.title ?? t.name)
+  const afterClose = await titlesIn()
   chk(
-    preview.status === 200 && !titles.includes(`done-check ${TAG}`),
+    afterClose.status === 200 && !afterClose.titles.includes(`done-check ${TAG}`),
     'and a reader that reasons on the category no longer counts it as current work',
-    `the work preview (${preview.status}) still lists it: ${JSON.stringify(titles)}`,
+    `the work preview (${afterClose.status}) still lists it: ${JSON.stringify(afterClose.titles)}`,
   )
 
   /*
