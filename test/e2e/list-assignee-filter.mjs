@@ -404,11 +404,13 @@ try {
     `the page made ${viaRequests.length} assigned-via request(s) with all three switches off: ${JSON.stringify(viaRequests)}`,
   )
   chk(
-    await page.getByTestId('list-assignee-selected').getAttribute('data-user-id') === ME &&
+    (await page.getByTestId('list-assignee-selected').getAttribute('data-user-id').catch(() => null)) === ME &&
       await page.getByTestId('list-assignee-clear').count() === 1,
     'the chosen face sits beside the chip with the frame’s ✕ on it',
     `the chip reported data-user-id=` +
-      `${JSON.stringify(await page.getByTestId('list-assignee-selected').getAttribute('data-user-id'))} ` +
+      `${JSON.stringify(
+        await page.getByTestId('list-assignee-selected').getAttribute('data-user-id').catch(() => null),
+      )} ` +
       `with ${await page.getByTestId('list-assignee-clear').count()} clear button(s)`,
   )
   chk(

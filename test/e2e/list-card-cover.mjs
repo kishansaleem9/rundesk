@@ -213,18 +213,22 @@ try {
     `the board drew ${await cardFor(made.image).count()} cards for it`)
   chk(await coverIn(made.image).count() === 1, 'the card carries a cover band',
     'the board card draws no cover — the picker writes a column nothing reads')
-  chk(await coverIn(made.image).getAttribute('data-cover-kind') === 'image',
+  chk((await coverIn(made.image).getAttribute('data-cover-kind').catch(() => null)) === 'image',
     'and knows it is an image rather than a colour',
-    `the band reported kind=${JSON.stringify(await coverIn(made.image).getAttribute('data-cover-kind'))}`)
+    `the band reported kind=${JSON.stringify(
+      await coverIn(made.image).getAttribute('data-cover-kind').catch(() => null),
+    )}`)
   /*
    * The src, not merely "an img exists". A card that drew a placeholder, or
    * the first cover in the payload, would satisfy every check above and this
    * is the one it fails.
    */
   chk(
-    await coverIn(made.image).locator('img').getAttribute('src') === COVER_LINK,
+    (await coverIn(made.image).locator('img').getAttribute('src').catch(() => null)) === COVER_LINK,
     'the image it draws is the one that was set, byte for byte',
-    `the <img> src was ${JSON.stringify(await coverIn(made.image).locator('img').getAttribute('src'))}`,
+    `the <img> src was ${JSON.stringify(
+      await coverIn(made.image).locator('img').getAttribute('src').catch(() => null),
+    )}`,
   )
   chk(await coverIn(made.colour).getAttribute('data-cover-kind') === 'color',
     'the colour-covered card draws a colour band',

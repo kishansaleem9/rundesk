@@ -254,7 +254,12 @@ try {
     'the panel padlocks exactly the four this plan cannot reach',
     `it padlocked ${JSON.stringify(lockedRows)}`,
   )
-  const proBadge = (await page.getByTestId('space-wizard-clickapp-lock-customFields').innerText()).trim()
+  // `.catch` because `clickapps-plan-gating-8-nolockpayload` sends no lock
+  // payload, so there is no badge to read: this waited out the default
+  // timeout, threw, and ended the run at 14 of 15.
+  const proBadge = (
+    await page.getByTestId('space-wizard-clickapp-lock-customFields').innerText().catch(() => '')
+  ).trim()
   chk(
     proBadge === 'Pro' &&
       (await page.getByTestId('space-wizard-feature-customFields').isDisabled()) &&

@@ -367,10 +367,16 @@ try {
    * list that seeded a same-sized default cannot pass.
    */
   const effective = async (listId) => {
+    // NO ID IS AN ANSWER, NOT A CRASH. The check above reports whether a list
+    // could be made in each folder, and `folder-statuses-19-new-reader-breaks-the-writer`
+    // makes both creates answer 500 — after which `inheriting.list.data.id`
+    // threw `Cannot read properties of null` and ended the run at 20 of 21,
+    // one check short, under a headline about the harness.
+    if (!listId) return { status: 0, keys: [] }
     const r = await api(`/lists/${listId}/statuses`)
     return { status: r.status, keys: (r.data ?? []).map((x) => x.key).sort() }
   }
-  const inheritStatuses = await effective(inheriting.list.data.id)
+  const inheritStatuses = await effective(inheriting.list?.data?.id)
   chk(
     inheritStatuses.status === 200 &&
       inheritStatuses.keys.length === spaceKeys.length &&

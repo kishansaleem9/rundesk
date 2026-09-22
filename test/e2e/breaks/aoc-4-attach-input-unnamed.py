@@ -1,13 +1,25 @@
-# The attach input loses its name, so the suite's opening gate has nothing to
-# wait for. This is the patch that proves the gate is still a gate after it was
-# changed from `state:'visible'` to `state:'attached'` — remove the input and
-# the suite stops dead, exactly as it should.
-# Reddens: attach-on-create: no check sentence, and that is the point — the
-#   gate runs BEFORE the first check, so the run throws inside the try block
-#   and the EXPECTED_CHECKS guard fails it on 0 of 13. This header used to
-#   quote the two lines the run prints instead; a claim checker can only read
-#   those as a check the suite does not have, because they are not checks.
-#   The suite is still named so coverage can attribute the patch.
+# The attach input loses its testid, so nothing in the page can find it.
+#
+# THIS USED TO BE A PATCH WHOSE EVIDENCE WAS THE RUN ENDING, and the header said
+# so: "no check sentence, and that is the point — the gate runs BEFORE the first
+# check, so the run throws and the EXPECTED_CHECKS guard fails it on 0 of 13".
+# It was written to prove the opening `waitForSelector` was still a gate after
+# its state changed from `visible` to `attached`. What it actually proved is that
+# a thirteen-check suite could be made to report nothing at all — and the check
+# immediately after that gate asserts the same fact the gate did: the input is
+# there, it takes several files, and it sits behind a label a person can press.
+#
+# So the gate no longer throws, `stage()` is bounded, and this patch reddens
+# checks instead of a run. It is still the patch that proves the input is
+# load-bearing; it now says which sentences depend on it.
+#
+# PREDICTED MOST OF THE SUITE, which is honest for a patch that removes the one
+# control every section uses: the multiple-files check first, then every row,
+# dedupe, removal and upload check that needs a staged file. The exact count is
+# read off the run rather than guessed at here.
+#
+# Reddens: attach-on-create: "the file input accepts several files at once,
+#   behind a paperclip a person can press"
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'

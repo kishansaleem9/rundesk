@@ -418,9 +418,12 @@ try {
    * THE CHECK WITH TEETH. Read back from the SERVER, and compared with the
    * group's own key: "a task was created" is true of the old quick-add too.
    */
-  const targetGroup = await emptyGroup.getAttribute('data-group')
+  const targetGroup = await emptyGroup.getAttribute('data-group').catch(() => null)
   const GROUP_TITLE = `group add ${TAG}`
-  await emptyGroup.locator('[data-testid="list-group-add-task"]').click()
+  // `list-view-controls-42-empty-group-no-add` takes the control away, which is
+  // the check above: this click then waited out the default timeout and ended
+  // the run at 44 of 49.
+  await emptyGroup.locator('[data-testid="list-group-add-task"]').click({ timeout: 8000 }).catch(() => {})
   await emptyGroup.locator('[data-testid="list-group-add-title"]').fill(GROUP_TITLE)
   await page.keyboard.press('Enter')
   const landed = await waitUntil(async () => {

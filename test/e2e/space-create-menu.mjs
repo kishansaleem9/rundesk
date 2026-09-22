@@ -485,9 +485,21 @@ try {
     () => page.getByTestId('quick-create-form-list').locator('option').count().then((n) => n > 1),
     { timeoutMs: 10_000 },
   )
-  const submitDisabledWithNoList = await page.getByTestId('quick-create-form-submit').isDisabled()
-  if (targetList) await page.getByTestId('quick-create-form-list').selectOption(targetList)
-  await page.getByTestId('quick-create-form-submit').click()
+  const submitDisabledWithNoList = await page
+    .getByTestId('quick-create-form-submit')
+    .isDisabled()
+    .catch(() => false)
+  // BOUNDED, BECAUSE AN EMPTY LIST DROPDOWN IS WHAT `form-5-space-lists-endpoint`
+  // MAKES. It breaks the endpoint the picker reads, so there is no option to
+  // select: this waited out the default timeout, threw, and ended the run at
+  // 24 of 28 with the checks below unreported.
+  if (targetList) {
+    await page
+      .getByTestId('quick-create-form-list')
+      .selectOption(targetList, { timeout: 8000 })
+      .catch(() => {})
+  }
+  await page.getByTestId('quick-create-form-submit').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(2500)
 
   const forms = await api(`/workspaces/${WS}/forms`)

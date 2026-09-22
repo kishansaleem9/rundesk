@@ -327,7 +327,9 @@ try {
     'and pressing it reaches every conversation, including the sixth',
     `after "More" the section drew ${await chatRows.count()} of ${total}`,
   )
-  await page.getByTestId('ai-chats-less').click()
+  // `sidebar-sections-7-more-is-one-way` removes the collapse control, which is
+  // what the checks below report: an unqualified click ended the run at 11 of 25.
+  await page.getByTestId('ai-chats-less').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await chatRows.count()) === 5, { timeoutMs: 10_000 }),
     'and it folds back to the preview',
@@ -371,7 +373,9 @@ try {
     `y: folder=${folBox?.y} imports=${impBox?.y} templates=${tplBox?.y}`,
   )
 
-  await imports.click()
+  // `sidebar-sections-8-no-imports-templates` removes the two rows, which the
+  // check above reports; clicking one ended the run at 14 of 25.
+  await imports.click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => page.url().includes(`/app/${WS}/import`), { timeoutMs: 15_000 }),
     'Imports goes to the import page',
@@ -381,7 +385,7 @@ try {
   await page.getByTestId(`space-link-${space.id}`).hover({ timeout: 20_000 })
   await page.getByTestId(`space-create-open-${space.id}`).click({ timeout: 20_000 })
   await page.getByTestId('space-create-menu').waitFor({ timeout: 15_000 })
-  await page.getByTestId('space-create-templates').click()
+  await page.getByTestId('space-create-templates').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => page.url().includes(`/app/${WS}/templates`), { timeoutMs: 15_000 }),
     'and Templates goes to the templates page',

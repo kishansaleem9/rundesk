@@ -259,11 +259,13 @@ try {
   chk(await help.count() === 1, 'the card offers a help article',
     'no help link on the error card — the frame draws one under the message')
   chk(
-    (await help.getAttribute('href')) === '/app/help',
+    (await help.getAttribute('href').catch(() => null)) === '/app/help',
     'pointing at the help page',
-    `the link pointed at ${JSON.stringify(await help.getAttribute('href'))}`,
+    `the link pointed at ${JSON.stringify(await help.getAttribute('href').catch(() => null))}`,
   )
-  await help.click()
+  // `integration-error-card-4-no-help-link` removes the link, so reading and
+  // clicking it both waited out the default timeout and ended the run at 16 of 25.
+  await help.click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1500)
   chk(
     /\/app\/help$/.test(page.url()) && (await page.locator('[data-testid^="book-call-"]').count()) > 0,

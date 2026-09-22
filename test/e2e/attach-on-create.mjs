@@ -92,11 +92,23 @@ let page = null
 let SPACE = null
 let api = null
 
-/** Stage a file on the hidden input without a file on disk. */
+/**
+ * Stage a file on the hidden input without a file on disk.
+ *
+ * BOUNDED, BECAUSE AN ABSENT INPUT IS WHAT ONE OF THIS SUITE'S PATCHES MAKES.
+ * `aoc-4-attach-input-unnamed` removes the testid, and an unqualified
+ * `setInputFiles` then waited out the default timeout and threw — so the run
+ * ended rather than reporting thirteen absences, and the patch's own header
+ * said its evidence was "the whole run".
+ */
 const stage = (page, name, body) =>
-  page.setInputFiles('[data-testid="quick-create-attach"]', [
-    { name, mimeType: 'text/plain', buffer: Buffer.from(body) },
-  ])
+  page
+    .setInputFiles(
+      '[data-testid="quick-create-attach"]',
+      [{ name, mimeType: 'text/plain', buffer: Buffer.from(body) }],
+      { timeout: 8000 },
+    )
+    .catch(() => {})
 
 const rowNames = (page) =>
   page.locator('[data-testid^="quick-create-attachname-"]').evaluateAll((els) =>
@@ -162,16 +174,29 @@ try {
    * things the suite then does with the input — `evaluate(el => el.multiple)`
    * and `setInputFiles` — both work on a hidden input by design.
    *
-   * It is still a gate: remove the input from the task tab and nothing is
-   * attached, so this throws exactly as it did before. What it no longer
-   * demands is that a raw file input be painted on screen, which no frame asks
-   * for and which the visible half of the control is checked for below.
+   * What it no longer demands is that a raw file input be painted on screen,
+   * which no frame asks for and which the visible half of the control is
+   * checked for below.
+   *
+   * AND IT IS NO LONGER A GATE THAT THROWS. It used to, and the check
+   * immediately below asserts the same thing — the input is there, takes
+   * several files, and sits behind a pressable label — so removing the input
+   * ended the run BEFORE the check that would have said so. `aoc-4` was the
+   * patch that proved the gate was a gate, and what it proved was that a
+   * thirteen-check suite could report nothing at all.
    */
-  await page.waitForSelector('[data-testid="quick-create-attach"]', { state: 'attached', timeout: 20_000 })
+  const attachThere = await page
+    .waitForSelector('[data-testid="quick-create-attach"]', { state: 'attached', timeout: 20_000 })
+    .then(() => true)
+    .catch(() => false)
 
   console.log('\n▶ the picker takes more than one file `[frame 01:10]`')
   chk(
-    await page.locator('[data-testid="quick-create-attach"]').evaluate((el) => el.multiple === true) &&
+    attachThere &&
+      (await page
+        .locator('[data-testid="quick-create-attach"]')
+        .evaluate((el) => el.multiple === true)
+        .catch(() => false)) &&
       // …and it is REACHABLE: the hidden input is only a control if the label
       // wrapping it is on screen to be pressed. A `display:none` input with no
       // visible label is a picker nobody can open.
@@ -181,8 +206,10 @@ try {
         .isVisible()
         .catch(() => false)),
     'the file input accepts several files at once, behind a paperclip a person can press',
-    'the input is single-file — picking a second one replaced the first, with nothing on screen to say so — ' +
-      'or it is hidden behind nothing pressable',
+    attachThere
+      ? 'the input is single-file — picking a second one replaced the first, with nothing on screen to say so — ' +
+        'or it is hidden behind nothing pressable'
+      : 'there is no file input on the task tab at all, so every check below is reading an absence',
   )
 
   console.log('\n▶ and lists them, one row each, by name')
