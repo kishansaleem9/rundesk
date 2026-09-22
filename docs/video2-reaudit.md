@@ -4141,12 +4141,44 @@ the failing one prints its reason instead of its name.
 `us-1-grouped-column-still-shown` is the second kind and its own header says so:
 "the `status` iteration of".
 
-**The named remedy, not yet taken: seventy suites share the one-line
-`${bad ?? good}` and could print `FAIL <sentence> — <reason>` instead.** That
-would make every failure line name its check and turn most of the twenty into
-direct evidence. It is deferred rather than forgotten, because it changes
-seventy suite files and every break set measured against them becomes a
-statement about a file that has changed — the freshness rule this audit runs on.
+### Every failing check names itself now, and that is what the column was for
+
+The remedy was deferred for one round and then taken, because looking at the
+unproven column decided it. Sampling five showed the claim was CORRECT in all
+five and the log simply did not say so — `mp-7-flat-bars` claims "the Fast
+tier's Speed bar is visibly longer than the Max tier's" and the run says
+`FAIL speed measured fast=38px max=38px`. Then four more turned out to be
+genuine misattributions that took manual archaeology to identify, because
+identifying WHICH check failed is impossible from a log that prints only
+reasons:
+
+- `clickapps-plan-gating-6-switchlive` names a check that passes — the padlock
+  BADGES, which `disabled={false}` does not touch — and reddens the one beside
+  it, which reads the switch's own disabled state.
+- `custom-field-progress-2` names the pooling check and reddens four arithmetic
+  ones.
+- `list-export-3` names the content-type check and reddens the four that parse
+  the bytes.
+- `space-wizard-views-1` names the row-order check and reddens the label.
+- `tab-title-countdown-4` names the all-day check and reddens the one about a
+  countdown outliving its block.
+
+So `chk` prints the sentence, an em dash, then the reason — the format the newer
+suites already use — in all seventy files, replaced identically. No check's
+outcome changes.
+
+**The cost, stated rather than absorbed: 66 break sets are now measured against
+suite files that have changed**, so `check-break-freshness.mjs` fails until they
+are re-run, and `never-run-plan.mjs --stale` prints that work as a plan. It is
+the other half of the question that file already answered: a patch whose log
+predates a change to its suite is in the same position as one with no log at
+all. 390 patches there, 241 with no log, three lanes, unattended.
+
+And a second look at the matcher moved thirteen patches on its own.
+`findsClaim` falls back to any five consecutive words, which is right for "does
+this SUITE contain the sentence" and wrong for "did this CHECK pass" — a
+five-word overlap with a neighbouring check's sentence reads as the claimed
+check passing. Whole-claim matching took the measured count from 501 to 514.
 
 ### And the first thing it found was itself, twice
 
