@@ -6121,3 +6121,52 @@ able to check.
 ```
 
 804 + 4 = 808. Every patch on disk is accounted for, against the tree as it is.
+
+---
+
+## §12 — What is left, and the order measurement says to do it in
+
+The four freeze items are closed, so the remaining work is video 2's own. The
+`P` and `M` rows were read against the tree rather than recalled, and they split
+into four things that can be built and a longer list that cannot.
+
+**Blocked, and each for a reason already recorded on its row:** everything
+hanging off the Brain² hub — the header button, the `+`-menu entry, the hub
+itself, the credit meter, the generated artefacts — needs an agent runtime
+Rundesk does not have. The Cover Search tab needs an image provider. Basecamp
+and Confluence import need their own APIs. And four are decisions rather than
+gaps: a colleague's priorities, `"Add to ›"` (no frame opens the submenu),
+the create-modal placeholder (no frame behind it at all), and credits.
+
+**Buildable, four:**
+
+| item | what the frame asks for | what exists |
+|---|---|---|
+| Threads | `05:50` — a panel headed *"Thread by \<name\>"* holding the comment, its reactions and a *"Reply to comment…"* composer of its own | replies nest inline; the API already stores `parentCommentId`, so this is a UI build |
+| View types | Activity and Workload | six of eleven; Map / Mind Map / Timeline are a recorded decision, not a gap |
+| Create Folder description | a description on the folder dialog | blocked *on purpose* — `folders` has no column and `FoldersService` whitelists `{name, color}`, so the field would store into nothing. Building it means the column AND a reader, or it is the mirror defect |
+| Document import | the second row of `12:08`'s submenu | the delimited-file importer is built and 19/19 break-tested; documents are the open half |
+
+### The order is decided by drift, not by appetite
+
+A break patch's provenance depends on the product files it edits, so editing a
+file re-opens every patch that touches it. Counted across the 809 patches on
+disk:
+
+| item | the file it turns on | patches it would drift |
+|---|---|---|
+| View types | `space-presets.ts` | **2** |
+| Document import | the importer | 21 |
+| Create Folder description | `folders.service.ts` + the dialog | ~25 |
+| Threads | `task-detail-sheet.tsx` | **80** |
+
+Forty times the cost between the cheapest and the dearest, and `task-detail-
+sheet.tsx` is the most-patched file in the tree. Threads first would drift 80
+patches and buy a second full sweep; View types first costs two. So: **View
+types → Document import → Create Folder description → Threads**, and every edit
+to one file goes in together, because a file that drifts twice is measured
+twice.
+
+This is written down because the number that decides it — 80 — is not something
+anyone would guess, and because a container reclaim has already cost this
+engagement its unpushed work once.
