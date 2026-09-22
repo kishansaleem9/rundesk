@@ -25,6 +25,7 @@ step "api unit tests"                   bash -c 'cd apps/api && pnpm exec tsx --
 step "web unit tests"                   bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ") > /tmp/preflight-web.log 2>&1'
 step "migration guardrail"              node scripts/check-migration-order.mjs
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
+step "and that guard actually looks"    node scripts/check-patch-guard.mjs --mutate
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
 step "every frame is answered somewhere" node scripts/check-frame-traceability.mjs
 step "every break patch finds its line" python3 scripts/check-break-patches.py

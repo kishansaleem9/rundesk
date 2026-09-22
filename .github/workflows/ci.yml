@@ -144,6 +144,20 @@ jobs:
       - name: No break patches in the tree
         run: node scripts/check-no-break-patches.mjs
 
+      # And that the guard above is looking at anything, because it was the
+      # weakest zero in the set. Its roots were RELATIVE and reached through
+      # `existsSync`, so from any directory but the repository root every root
+      # missed, the walk visited nothing, and it printed "clean — no
+      # break-patch signatures" and exited 0. Measured from /tmp: exactly that.
+      # preflight.sh happens to `cd` first, which is why it survived.
+      #
+      # Now the roots are anchored to the script, a missing root fails instead
+      # of being skipped, the file count is asserted against a floor, and
+      # "clean" says how many files it read. 14 cases planting into a throwaway
+      # tree — never into this one — and seven mutations, all of which bite.
+      - name: And that guard actually looks at the tree
+        run: node scripts/check-patch-guard.mjs --mutate
+
       # The re-audit ledger's headline count read `88 built · 21 partial · 64
       # missing` while the table under it — printed under the words "so the
       # number can be checked rather than believed" — read 104 / 20 / 49. BOTH

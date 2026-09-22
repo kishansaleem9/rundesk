@@ -5205,3 +5205,68 @@ thing about all seven of the set's logs: *"the log ran 23 checks and ai-assign
 declares 24: a short run, a run of another suite, or a run that predates a check
 this suite has since grown."* Not credited, not discarded — counted as
 unreadable until the set runs again.
+
+### The weakest zero in the set: a guard that passed by looking at nothing
+
+`check-no-break-patches.mjs` exists because `43f7b57` shipped
+`data-testid="task-add-fields-DISABLED"` to main — a control that renders and
+does nothing, found only because the agent whose patch it was went looking
+through HEAD afterwards. Its header ends: *"Vigilance is not a control. This
+is."*
+
+It was not.
+
+```
+$ cd /tmp && node /home/user/rundesk/scripts/check-no-break-patches.mjs
+[break-patch-check] clean — no break-patch signatures in apps, packages or test
+exit=0
+```
+
+`ROOTS` was `['apps', 'packages', 'test']` — **relative** — reached through
+`fs.existsSync(root)`. From any directory but the repository root, every root
+missed, the loop skipped all three silently, the walk visited zero files, and it
+reported a clean tree with a zero exit. `preflight.sh` happens to `cd` first,
+which is exactly why it survived for as long as it existed. A control that
+passes by looking at nothing is worse than no control: it is the vigilance its
+own header rejects, wearing a green tick.
+
+Four changes, each closing one way the scan could cover nothing:
+
+- roots resolved from the script's own location, so the answer does not depend
+  on the working directory — measured from `/tmp` and from the repository root:
+  **2,526 files, same answer**
+- **a missing root is a failure, not a skip.** It names which roots are gone and
+  says the layout has changed
+- a floor on the file count, because "no signatures found" in a scan of three
+  files is a statement about the scan
+- and "clean" now reads *"2526 file(s) read across apps, packages and test"*.
+  A clean verdict has to say what it covered
+
+`scripts/check-patch-guard.mjs` keeps all four true: **14 cases, seven
+mutations, all seven of which bite.** It plants into a throwaway tree rather
+than into this one — a case file that writes `BROKEN:` into a real component and
+restores it afterwards is precisely the accident the guard was written after, a
+step-6 edit outliving the step. A test for this guard must not need the guard.
+
+#### Two cases that proved nothing, and what they found
+
+**The `-DISABLED` case planted nothing.** It anchored on `<div` in
+`toaster.tsx`, which draws no bare div, so the replace was a no-op and the case
+passed against an unmodified file. Re-planted as its own line, it fires.
+
+**The missing-root case could not produce a missing root.** It passed the clean
+fixture set and dropped `test` from `roots` — but writing `test/src/c.mjs`
+creates `test/` on the way to the file, so the root was always there.
+
+**And `path.resolve(full) !== SELF` is dead code.** Mutating it to `true`
+changes no answer, because `ROOTS` never walks `scripts/`. It is kept, with the
+reason written into the guard, and the scope it depends on is now pinned by its
+own case: a signature under `scripts/` does not change the verdict, by decision
+rather than by accident. Widening `ROOTS` to include `scripts` fails that case —
+which is the right moment to notice both that the exclusion becomes
+load-bearing and that the case file plants `// BROKEN:` fixtures on purpose.
+There are eleven such signatures under `scripts/` now; the scope is the only
+reason they are not reported.
+
+**Preflight is 24 steps, 23 green.** The single red step is `break runs measured
+this tree`, which is the sweep's own work list.
