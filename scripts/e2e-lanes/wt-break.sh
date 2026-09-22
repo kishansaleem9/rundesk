@@ -45,6 +45,35 @@ export E2E_PASSWORD='Admin@123!'
 # patch then "fails" for the same irrelevant reason.
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 
+# THE FAILURE SENTENCES, AND FOR HALF THE SUITES THEY WERE NEVER CAPTURED.
+#
+# This was `grep -E '\bFAIL\b' "$log" | sed 's/\x1b\[[0-9;]*m//g'` — strip the
+# colours AFTER matching. Suites print their failures two ways:
+#
+#     "  FAIL  the chip says ..."                 <- matches
+#     "  \x1b[31mFAIL\x1b[0m the pill read ..."   <- does NOT
+#
+# `\b` is a word boundary, and `m` is a word character, so `mFAIL` has none
+# before the F. Every suite that colours the word itself had its FAIL lines
+# silently dropped: `focus-pill`'s `fp-1-set-once` reddened eleven checks and
+# the log recorded the patch name, no sentences, and `4 passed, 11 failed`.
+#
+# The count went with them. `NFAIL` was 0, so "… and N more FAIL lines not
+# shown" could not fire either — the one line that would have said something
+# was missing.
+#
+# What that costs is the whole point of the log. The summary says HOW MANY
+# checks reddened; only the sentences say WHICH, and a patch is only evidence
+# if the checks it reddened are the ones it claims. The numbers in the ledger
+# were right and unverifiable.
+#
+# So the colours come off FIRST and `\bFAIL\b` then does what it was added for:
+# excluding the `FAILURES` banner suites print above their summary, which a
+# bare `FAIL` matched and counted as one more failure than there were.
+fail_lines() {
+  sed 's/\x1b\[[0-9;]*m//g' "$1" | grep -E '\bFAIL\b'
+}
+
 restart() {
   # KILL BY PORT, NOT BY ENV VAR.
   #
@@ -258,7 +287,7 @@ case "$BASE" in
   *)
     { echo "== REFUSING TO BREAK-TEST — the unpatched suite is not green, so no patch below"
       echo "   could be told apart from what is already broken. Fix the baseline first."
-      grep -E '\bFAIL\b' "/tmp/claude-0/brk-$SUITE-baseline.log" | sed 's/\x1b\[[0-9;]*m//g' | head -6
+      fail_lines "/tmp/claude-0/brk-$SUITE-baseline.log" | head -6
     } >> "$OUT"
     exit 5
   ;;
@@ -404,10 +433,10 @@ for b in "$@"; do
     #    A crash is not a proof: the checks after the throw did not run, and the
     #    ones before it were measured against a process that then died. Named
     #    here so `break-queue.sh` can count it as its own outcome.
-    NFAIL=$(grep -cE '\bFAIL\b' "/tmp/claude-0/brk-$b.log")
+    NFAIL=$(fail_lines "/tmp/claude-0/brk-$b.log" | wc -l)
     SUMMARY=$(grep -E 'passed,' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
     { echo "== $b"
-      grep -E '\bFAIL\b' "/tmp/claude-0/brk-$b.log" | sed 's/\x1b\[[0-9;]*m//g' | head -12
+      fail_lines "/tmp/claude-0/brk-$b.log" | head -12
       [ "$NFAIL" -gt 12 ] && echo "  … and $((NFAIL - 12)) more FAIL lines not shown"
       if [ -n "$SUMMARY" ]; then
         echo "$SUMMARY"

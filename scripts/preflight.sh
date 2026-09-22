@@ -29,6 +29,7 @@ step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
 step "every break patch finds its line" python3 scripts/check-break-patches.py
 step "break runs postdate their suites" node scripts/check-break-freshness.mjs
 step "break patches name a real check"  node scripts/check-break-claims.mjs
+step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
