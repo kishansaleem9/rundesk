@@ -400,10 +400,27 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * Only the length guard is waived. The pass-count assertion below still has
    * to hold, because that is the one that catches a log this file cannot parse.
    */
+  /*
+   * "A RUN STILL IN PROGRESS" IS IN THIS LIST BECAUSE IT HAPPENED. Run against
+   * a live sweep, this read a log whose patch was executing at that moment:
+   * `af-3-no-failure-recorded` had printed thirty of `ai-activity-filters`'
+   * thirty-four checks and had not yet written its totals line, so the count
+   * came back 30 against a declared 34 and the reason said "a short run". It
+   * was not one — the baseline above it was 34 of 34 and every finished patch
+   * in the same log reported the full thirty-four.
+   *
+   * The verdict was right and the REASON was misleading, which is its own
+   * defect: a reason sends the next reader somewhere, and this one would have
+   * sent them hunting a section-ender that did not exist. Unreadable is still
+   * unreadable — a log without its totals is not evidence — so nothing is
+   * waived here. Only the sentence is honest about the likeliest cause when
+   * this is run while lanes are busy.
+   */
   if (ran !== want && !declaresShortRun(text)) {
     unknown.push(
-      `${name} — the log ran ${ran} checks and ${suite} declares ${want}: a short run, a run of ` +
-        'another suite, or a run that predates a check this suite has since grown',
+      `${name} — the log ran ${ran} checks and ${suite} declares ${want}: a run still in ` +
+        'progress, a short run, a run of another suite, or a run that predates a check this ' +
+        'suite has since grown',
     )
     continue
   }
