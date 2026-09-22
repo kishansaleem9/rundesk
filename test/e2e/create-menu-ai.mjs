@@ -278,8 +278,14 @@ try {
   )
 
   console.log('\n▶ Create with AI needs something to create from')
+  // The disabled read opens the condition, so there is no `&&` in front of it to
+  // short-circuit: a button that is gone would sit out the default timeout and
+  // end the section here instead (ledger §10). Bounded and caught, then compared
+  // against `true` — a missing control is not a disabled one, and null has to
+  // fail this check rather than be read as "dead".
+  const aiOpenDisabled = await page.getByTestId('create-ai-open').isDisabled({ timeout: 8000 }).catch(() => null)
   chk(
-    (await page.getByTestId('create-ai-open').isDisabled()) &&
+    aiOpenDisabled === true &&
       (await page.locator('[data-testid="create-ai-hint"]').count()) === 1,
     'with the box empty the button is not pressable, and says why',
     'the button was live with nothing to describe — it would send an empty prompt and render ' +
@@ -457,8 +463,13 @@ try {
     'the description box carries the frame\'s placeholder',
     `it read ${JSON.stringify(descPlaceholder)}`,
   )
+  // Same shape as the Create-with-AI read above: first in the condition, nothing
+  // short-circuits it, and an absent ⚡AI control would stall the run out here.
+  // Bounded and caught, and `=== true` so that null — no such button at all —
+  // fails, instead of a missing control passing as a disabled one.
+  const describeAiDisabled = await page.getByTestId('quick-create-describe-ai').isDisabled({ timeout: 8000 }).catch(() => null)
   chk(
-    await page.getByTestId('quick-create-describe-ai').isDisabled(),
+    describeAiDisabled === true,
     'and the ⚡AI control is dead until the task has a title — that title IS the prompt',
     'it was live with no title, so it would have asked the model to write about nothing',
   )
