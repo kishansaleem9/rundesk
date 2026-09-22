@@ -494,9 +494,24 @@ try {
      * row, and the failure names the ones that are bare — which is the
      * difference between "add explanations" and "add the two you dropped".
      */
+    /*
+     * THE LABELS THE APP RENDERS, NOT THE AUDIT'S SHORTHAND. The first version
+     * of this check looked for `View` followed by a dash — and the level is
+     * called "View only", so `View` is followed by ` only` and it reported the
+     * level bare on a perfectly good build. The harness refused the whole set
+     * on a red baseline, which is the guard doing its job: a check that fails
+     * on the unpatched tree says nothing about any patch.
+     *
+     * The four checks above pass with `View` because `includes` matches inside
+     * "View only"; a row check cannot, so it carries the real labels.
+     *
+     * Matched per LINE, because innerText puts each level's row on its own and
+     * an unanchored scan would happily pair one level's label with the next
+     * level's dash.
+     */
     const bare = []
-    for (const lvl of ['View', 'Comment', 'Edit', 'Full edit']) {
-      const row = new RegExp(`${lvl}\\s*[\u2014-]\\s*\\S`, 'i')
+    for (const lvl of ['View only', 'Comment', 'Edit', 'Full edit']) {
+      const row = new RegExp(`^[^\\n]*\\b${lvl}\\b[^\\n]*?[\u2014-]\\s*\\S`, 'im')
       if (!row.test(t)) bare.push(lvl)
     }
     share.step(bare.length === 0, `listed without an explanation: ${bare.join(', ') || '(none)'}`)
