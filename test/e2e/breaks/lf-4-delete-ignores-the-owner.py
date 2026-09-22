@@ -15,9 +15,14 @@
 # not exist" — deliberately, because telling those apart would confirm that
 # somebody else's filter exists. A 200 is therefore the whole failure.
 #
-# ONE CHECK. Reading stays scoped, so the check above it passes; deleting your
-# OWN filter still works, so the check below it passes. Only the peer's delete
-# succeeds where it should have been refused.
+# IT REDDENS TWO, AND THE SECOND IS AN HONEST CASCADE. The peer's delete
+# succeeds, so the row is gone — and "while you can delete your own" then
+# answers 404, because there is nothing left to delete. Predicted one; the
+# extra failure is the patch's own damage rather than a weak check, and the
+# order is the suite's: it tests the refusal before the permission, which is
+# the right order for every other build.
+#
+# Reading stays scoped, so the check above both of them passes.
 #
 # Reddens: list-filters: "and cannot delete one"
 import io

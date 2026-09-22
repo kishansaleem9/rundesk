@@ -15,11 +15,16 @@
 # and both fail the same two checks for different reasons — which is the honest
 # answer, because a caller cannot tell them apart either.
 #
-# REDDENS TWO, AND THEY ARE THE PAIR. "the same row is updated, not a second one
-# made" fails on the missing id; "so there is still exactly one filter by that
-# name" fails on the count. The round-trip check above passes, because the
-# FIRST save is untouched — which is why the replace behaviour needs its own
-# two checks rather than being implied by the one that saves.
+# IT REDDENED ONE, NOT TWO, AND THAT FOUND A GAP. "the same row is updated, not
+# a second one made" failed on the missing id. "So there is still exactly one
+# filter by that name" PASSED — correctly: the insert was dropped, so there IS
+# one row. The count check cannot tell "replaced" from "second save silently
+# discarded", and the id check only tripped by accident, because `returning()`
+# gives nothing for a dropped insert. An upsert that kept the id and forgot to
+# `set` the rules would have passed both.
+#
+# So the suite now reads the stored rules back after the second save. "Replaces
+# it" is a claim about CONTENTS, and this patch reddens that check too.
 #
 # Reddens: list-filters: "the same row is updated, not a second one made"
 import io

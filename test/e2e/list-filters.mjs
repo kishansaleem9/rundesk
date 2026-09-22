@@ -23,7 +23,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 12
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -124,6 +124,25 @@ try {
     afterReplace.filter((f) => f.name === `Urgent mine ${stamp}`).length === 1,
     'so there is still exactly one filter by that name',
     `there are now ${afterReplace.filter((f) => f.name === `Urgent mine ${stamp}`).length}`,
+  )
+  /*
+   * AND THE RULES ARE THE NEW ONES, which neither check above asks.
+   *
+   * `lf-1-saving-makes-a-second-row` turns the upsert into
+   * `onConflictDoNothing`, so the second save is silently DROPPED — one row by
+   * that name, exactly as the check above requires, holding the rules from the
+   * first save. It only tripped the id check by accident, because `returning()`
+   * gives nothing for a dropped insert. An upsert that kept the id and forgot
+   * to `set` the rules would have passed both.
+   *
+   * "Replaces it" is a claim about the CONTENTS, so the contents are read back.
+   */
+  const replaced = afterReplace.find((f) => f.id === saved.data?.id)
+  chk(
+    sameShape(replaced?.rules, [{ id: 'r9', field: 'status', op: 'is', value: 'done' }]),
+    'and it holds the rules that were saved second, not the first set',
+    `the stored rules are ${JSON.stringify(replaced?.rules)} — a save that keeps the ` +
+      'row and discards the edit is the same loss as one that never happened',
   )
 
   console.log('\n▶ and the endpoint refuses shapes the panel could not have built')
