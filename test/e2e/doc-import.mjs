@@ -59,7 +59,7 @@ const argOf = (name, fallback) => {
  * from 32 to 37. An exact comparison is what turned a wrong number into a
  * visible one instead of a quiet pass.
  */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 15
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -220,6 +220,15 @@ try {
         .then((r) => (r.ok ? r.text() : null))
         .catch(() => null)
     : null
+  /*
+   * AND THE ROUND TRIP IS BLIND TO ONE THING, which a break run proved rather
+   * than a reading. `doc-import-1-title-heading-kept` leaves the leading H1 in
+   * the BODY, and the export compensates exactly: its rule is "prepend
+   * `# <title>` unless the body already opens with one", so a doc carrying its
+   * own title as content exports to the same bytes as one that does not. The
+   * patch reddened NOTHING. So the stored document is asserted directly below,
+   * beside the round trip rather than instead of it.
+   */
   chk(
     exported === FILE,
     'exporting it gives back the file byte for byte — headings, lists, tables, code and links all survived',
@@ -229,13 +238,32 @@ try {
         `${[...FILE].findIndex((c, i) => exported[i] !== c)} of ${FILE.length}`,
   )
 
+  const firstBlock = docRes.data?.content?.content?.[0]
+  chk(
+    !!firstBlock && !(firstBlock.type === 'heading' && Number(firstBlock.attrs?.level) === 1),
+    'and the title was CONSUMED — the doc does not carry its own heading twice',
+    `the doc's first block is ${JSON.stringify(firstBlock?.type)} level ` +
+      `${JSON.stringify(firstBlock?.attrs?.level)}; a leading h1 here is the title stored twice, ` +
+      'which the export hides by not prepending a second one',
+  )
+
   // ── the two that fail silently ────────────────────────────────────────────
   console.log('\n▶ the imported doc can be found again')
   /*
-   * `create` does three things after its insert — index, emit, snapshot — and
-   * the import did none of them when it was written. An unindexed doc is
-   * there and unreachable, which is most of the reason to import one, and no
-   * check about its CONTENT can see that.
+   * WHAT THIS CAN AND CANNOT PROVE, corrected after a break run.
+   *
+   * It was written to assert that `indexDocInSearch` runs, and it cannot:
+   * `SearchService.search` uses Meilisearch only `if (this.enabled &&
+   * this.index && …)` and otherwise falls back to a database query. No
+   * Meilisearch is configured in a lane, so removing the index call changes
+   * nothing here and `doc-import-2` reddened NOTHING against it.
+   *
+   * The check is kept because what it DOES prove is real and user-facing: the
+   * imported doc is reachable through the search endpoint by whichever path
+   * this deployment uses. The indexing call itself is unmeasurable without a
+   * Meilisearch, and is recorded as such rather than asserted by a check that
+   * cannot see it. The revision check below is the one that holds the
+   * follow-ups honest, because it CAN be broken.
    */
   const found = await waitUntil(
     async () => {
@@ -259,8 +287,23 @@ try {
   )
   chk(
     found,
-    'search finds it — an imported document you cannot find again is most of the point lost',
-    'the doc was never indexed; it exists and is unreachable, which no check about its content would notice',
+    'the search endpoint finds it, so an imported document is reachable again',
+    'search returned no hit for this doc — it exists and cannot be found, which no check about its content would notice',
+  )
+
+  /*
+   * THE OPENING REVISION, which `create` writes and the import did not when it
+   * was first written. Without it the first edit has nothing to diff against
+   * and the document's history begins AFTER its content — a silent loss, and
+   * unlike the index this one is observable without extra infrastructure.
+   */
+  const revRes = madeDocId ? await api(`/docs/${madeDocId}/revisions`) : { status: 599, data: null }
+  const revisions = Array.isArray(revRes.data) ? revRes.data : []
+  chk(
+    revRes.status < 300 && revisions.length >= 1,
+    'and it has an opening revision, so the first edit has something to diff against',
+    `GET /docs/:id/revisions answered ${revRes.status} with ${revisions.length} revision(s) — ` +
+      'a doc whose history starts after its content has lost the import itself',
   )
 
   console.log('\n▶ what it refuses, and whether it says why')

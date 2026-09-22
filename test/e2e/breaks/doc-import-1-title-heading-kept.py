@@ -1,13 +1,18 @@
 # The leading H1 is kept as content, so every import grows a duplicate heading.
 #
-# THE ONE THE CONTENT ROUND TRIP CANNOT SEE ON ITS OWN. A doc's title lives
-# outside its content, and `exportDocMarkdown` prepends `# <title>` when the
-# body has no leading H1 — so an importer that does not CONSUME one produces a
-# doc whose body opens with its own title. Export it and import it again and
-# there are two. The markdown-to-tiptap conversion is untouched and perfect
-# throughout; it is the DOCUMENT that drifts.
+# THE ONE THE ROUND TRIP IS BLIND TO, and this patch is what proved it.
 #
-# Reddens: doc-import: "exporting it gives back the file byte for byte — headings, lists, tables, code and links all survived"
+# A doc's title lives outside its content, and `exportDocMarkdown` prepends
+# `# <title>` ONLY when the body does not already open with one. So a doc
+# carrying its own title as content exports to exactly the same bytes as one
+# that does not: the compensation is perfect and the round trip stays green.
+# Aimed at that check first, this patch reddened NOTHING — which is how the
+# blind spot was found rather than reasoned about.
+#
+# It is aimed at the stored DOCUMENT instead, which is where the duplication
+# actually is: the doc's first block becomes an h1 holding its own title.
+#
+# Reddens: doc-import: "and the title was CONSUMED — the doc does not carry its own heading twice"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/docs/tiptap-markdown.ts'
 a = "    content.content.shift()\n"
