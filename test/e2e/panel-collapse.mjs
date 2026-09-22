@@ -492,28 +492,56 @@ try {
    */
   await A('/notifications/test', { method: 'POST', body: { workspaceId } })
   const seeded = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.type === 'test_notification')
+  /*
+   * FOUR CHECKS WHICHEVER WAY THIS GOES, and it used to be one, two, three or
+   * four depending on how far the chain got. `EXPECTED_CHECKS` is compared with
+   * `!==`, so a regression anywhere in here made the suite report `✗ 53 of 56
+   * checks ran` — the harness breaking, not the feature — with whatever it did
+   * find underneath that headline. Every branch reports all four now, the
+   * unreached ones as failures naming why.
+   */
   check(!!seeded, 'a notification exists to mark unread', 'could not seed one')
-  if (seeded) {
+  const unreadChain = [
+    ['and it can be marked read first', null],
+    ['a read row offers Mark unread', null],
+    ['and pressing it really un-reads it', null],
+  ]
+  let chainAt = 0
+  const chainCheck = (cond, why) => {
+    const [good] = unreadChain[chainAt++]
+    check(cond, good, why ?? '')
+  }
+  const chainRest = (why) => {
+    while (chainAt < unreadChain.length) {
+      const [good] = unreadChain[chainAt++]
+      check(false, good, why)
+    }
+  }
+  if (!seeded) {
+    chainRest('skipped: no notification could be seeded')
+  } else {
     await A(`/notifications/${seeded.id}/read`, { method: 'POST' })
     const afterRead = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.id === seeded.id)
-    check(!!afterRead?.readAt, 'and it can be marked read first', `readAt=${afterRead?.readAt}`)
+    chainCheck(!!afterRead?.readAt, `readAt=${afterRead?.readAt}`)
 
     await page.goto(`${origin}/app/${workspaceId}/inbox`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3500)
     const row = page.getByTestId(`notif-${seeded.id}`)
     if ((await row.count()) === 0) {
-      check(false, 'the read row is on the Inbox', 'the seeded row did not render')
+      chainRest('skipped: the seeded row did not render on the Inbox')
     } else {
       await row.hover()
       await page.waitForTimeout(400)
       const btn = page.getByTestId(`notif-unread-${seeded.id}`)
       const offered = await btn.isVisible().catch(() => false)
-      check(offered, 'a read row offers Mark unread', 'no way back from read')
-      if (offered) {
+      chainCheck(offered, 'no way back from read')
+      if (!offered) {
+        chainRest('skipped: there was no Mark unread to press')
+      } else {
         await btn.click()
         await page.waitForTimeout(2000)
         const afterUnread = ((await A('/notifications?view=inbox')).data ?? []).find((n) => n.id === seeded.id)
-        check(afterUnread?.readAt == null, 'and pressing it really un-reads it', `readAt=${afterUnread?.readAt}`)
+        chainCheck(afterUnread?.readAt == null, `readAt=${afterUnread?.readAt}`)
       }
     }
     await A(`/notifications/${seeded.id}/clear`, { method: 'POST' }).catch(() => {})
@@ -536,6 +564,9 @@ try {
     await repliesLink.click()
     await page.waitForTimeout(2500)
     check(/\/replies$/.test(new URL(page.url()).pathname), 'and it goes to the Replies page', page.url())
+  } else {
+    // Reported, not skipped — see the note on the four-check chain above.
+    check(false, 'and it goes to the Replies page', 'skipped: there was no Replies entry to click')
   }
 
   // ---------------------------------------------------------------------
@@ -569,23 +600,45 @@ try {
   const hasBurger = await burger.isVisible().catch(() => false)
   check(hasBurger, 'and a menu button is offered instead', 'no way to open navigation below 1024px')
 
-  if (hasBurger) {
+  /*
+   * THREE CHECKS WHICHEVER WAY THIS GOES — see the note on the unread chain
+   * above. No menu button used to mean one check where the full path reports
+   * four, so losing phone navigation entirely showed up as a SHORT RUN rather
+   * than as three failures naming it.
+   */
+  const drawerChain = [
+    'which opens the navigation',
+    'carrying the destinations',
+    'and closes once you go somewhere',
+  ]
+  let drawerAt = 0
+  const drawerRest = (why) => {
+    while (drawerAt < drawerChain.length) check(false, drawerChain[drawerAt++], why)
+  }
+  if (!hasBurger) {
+    drawerRest('skipped: there was no menu button to open')
+  } else {
     await burger.click()
     const drawer = await small
       .getByTestId('workspace-sidebar-drawer')
       .waitFor({ timeout: 6000 })
       .then(() => true)
       .catch(() => false)
-    check(drawer, 'which opens the navigation', 'the menu button opened nothing')
-    if (drawer) {
+    drawerAt++
+    check(drawer, drawerChain[0], 'the menu button opened nothing')
+    if (!drawer) {
+      drawerRest('skipped: the drawer never opened')
+    } else {
       const links = await small.locator('[data-testid="workspace-sidebar-drawer"] a').count()
+      drawerAt++
       check(links >= 3, `carrying the destinations (${links} links)`, `only ${links} link(s) in the drawer`)
       // A nav that stays open over the page it navigated to is its own dead end.
       await small.locator('[data-testid="workspace-sidebar-drawer"] a').first().click().catch(() => {})
       await small.waitForTimeout(1200)
+      drawerAt++
       check(
         !(await small.getByTestId('workspace-sidebar-drawer').isVisible().catch(() => false)),
-        'and closes once you go somewhere',
+        drawerChain[2],
         'the drawer stayed open over the page it opened',
       )
     }
@@ -613,7 +666,17 @@ try {
     })
   const moved = await dockLeft()
   check(moved !== null && moved > 400, `the dock can be moved away (left=${moved})`, `dock left=${moved}`)
-  if (moved !== null && moved > 400) {
+  if (moved === null || moved <= 400) {
+    // Two checks on this path too — see the note on the unread chain above. A
+    // dock that cannot be moved leaves nothing to reset, and saying so twice
+    // keeps the run the same length as one that could.
+    check(false, 'and Reset dock position brings it home', 'skipped: the dock never moved away')
+    check(
+      false,
+      'and forgets the old spot, so a reload does not undo it',
+      'skipped: the dock never moved away',
+    )
+  } else {
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('rundesk:reset-dock')))
     const back = await page
       .waitForFunction(
