@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
  * run that still passes — and half of this suite is branches that only run once
  * an earlier step really happened.
  */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 20
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -311,12 +311,40 @@ try {
   console.log('\n▶ running the import')
 
   await page.getByTestId('import-sheet-project').fill(`Import ${TAG}`)
-  await page.getByTestId('import-sheet-start').click()
-  const finished = await waitUntil(
-    () => page.getByTestId('import-sheet-report').isVisible().catch(() => false),
-    { timeoutMs: 60_000 },
+  /*
+   * A START THAT CANNOT BE PRESSED IS A FINDING, NOT A THROW.
+   *
+   * This was a bare `.click()` followed by `if (!finished) throw`, and
+   * `imports-3-deadpreset` is what that costs: make the preset a recoloured
+   * button and the Jira file maps to nothing importable, so Start stays
+   * DISABLED. The click retried for thirty seconds, threw, and ended the run at
+   * 7 of 19 checks. Twelve checks about what the import wrote were reported by
+   * nobody, and the patch was credited with reddening the one check it claims.
+   *
+   * The cascade is real and worth SEEING: a broken mapping means nothing
+   * imports, and the checks below say so in their own sentences against an
+   * empty database. What is not worth having is a throw deciding which of them
+   * get to speak.
+   */
+  const start = page.getByTestId('import-sheet-start')
+  const started = await start
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
+  const finished =
+    started &&
+    (await waitUntil(
+      () => page.getByTestId('import-sheet-report').isVisible().catch(() => false),
+      { timeoutMs: 60_000 },
+    ))
+  chk(
+    finished,
+    'pressing Start runs the import, and it reports a result',
+    started
+      ? 'Start was pressed and the import never reported a result'
+      : 'Start could not be pressed at all — with nothing importable it stays disabled, so every ' +
+        'check below is about an import that did not run',
   )
-  if (!finished) throw new Error('the import never reported a result')
 
   // ── what Postgres actually holds ───────────────────────────────────────────
   const importedTasks = await sql`
