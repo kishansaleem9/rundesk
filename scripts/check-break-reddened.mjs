@@ -51,11 +51,21 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
-import { reddensText } from './lib/suite-of-patch.mjs'
+import { reddensText, makeSuiteOf } from './lib/suite-of-patch.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
+const SUITES = join(ROOT, 'test/e2e')
 const LOGS = '/tmp/claude-0'
+
+const suiteNames = readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4))
+const suiteOf = makeSuiteOf({ suiteDir: SUITES, candidates: suiteNames })
+const expectedIn = {}
+for (const n of suiteNames) {
+  expectedIn[n] = Number(
+    readFileSync(join(SUITES, `${n}.mjs`), 'utf8').match(/^const EXPECTED_CHECKS = (\d+)/m)?.[1] ?? 0,
+  )
+}
 
 /*
  * Measured 22 September over 782 surviving run logs.
@@ -67,10 +77,20 @@ const LOGS = '/tmp/claude-0'
  * to 51 and BOTH ceilings went to zero, so a ceiling-only ratchet would have
  * called that an improvement.
  *
- * Lowering the floor is legitimate only when patches were deliberately
- * deleted, and then it is said out loud with the patches named.
+ * Lowering the floor is legitimate only when the MEASUREMENT changed and the
+ * new number is the true one — and then it is said out loud, here, with what
+ * changed. It has happened once:
+ *
+ * **620 → 501, and the 620 was wrong.** The first version compared a claim
+ * against any log it found, and 119 of those logs were not complete runs of the
+ * suite the patch names: `ai-answer-rendering` declares 51 checks and its logs
+ * hold 30, 29, 26 and 12, while `v1a-2-announce-notifies-the-actor` aims at
+ * `notification-gaps` and had been exercised inside the `video1-acceptance`
+ * set. Each of those was counted as a measurement. 501 is what is actually
+ * measured; the difference moved to the unusable-log pile, where it can be
+ * worked off by running the sets.
  */
-const BASELINE = { reddened: 620, green: 3, unproven: 27 }
+const BASELINE = { reddened: 501, green: 2, unproven: 20 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -107,9 +127,41 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   // because `m` is a word character — the bug that kept `wt-break.sh` from
   // recording a single failure sentence for 102 of the 113 suites.
   const raw = readFileSync(log, 'utf8').replace(/\x1b\[[0-9;]*m/g, '')
-  const totals = raw.match(/^(\d+) passed, (\d+) failed/m)
+  const totals = raw.match(/^(\d+) passed, (\d+) failed(?:, (\d+) skipped)?/m)
   if (!totals) {
     unknown.push(`${name} — the log has no totals; the run died before them`)
+    continue
+  }
+  /*
+   * AND THE LOG HAS TO BE A COMPLETE RUN OF THE SUITE THE PATCH NAMES.
+   *
+   * `brk-<patch>.log` is whatever suite was being exercised when that patch
+   * was applied, and nothing in the filename says which. Two things hide in
+   * there, and the same comparison catches both:
+   *
+   *  - A SHORT RUN. `ai-answer-rendering` declares 51 checks and its logs hold
+   *    30, 29, 26, 12 — runs that stopped early, whose "0 failed describes the
+   *    part it reached and nothing else". Counting one as a measurement is the
+   *    confident zero, and 129 of the 652 readable logs are in this state.
+   *  - A RUN OF THE WRONG SUITE. `v1a-2-announce-notifies-the-actor` aims at
+   *    `notification-gaps` and was exercised inside the `video1-acceptance`
+   *    set, so its `0 failed` is about checks the patch was never pointed at.
+   *
+   * A log may also simply predate a suite that has since grown checks, which
+   * is the same answer: it is not a statement about the file as it is now.
+   */
+  const ran = Number(totals[1]) + Number(totals[2]) + Number(totals[3] ?? 0)
+  const suite = suiteOf(name, readFileSync(join(BREAKS, f), 'utf8'))
+  const want = suite ? expectedIn[suite] : 0
+  if (!suite || !want) {
+    unknown.push(`${name} — no suite with a declared check count to compare the log against`)
+    continue
+  }
+  if (ran !== want) {
+    unknown.push(
+      `${name} — the log ran ${ran} checks and ${suite} declares ${want}: a short run, a run of ` +
+        'another suite, or a run that predates a check this suite has since grown',
+    )
     continue
   }
   /*
