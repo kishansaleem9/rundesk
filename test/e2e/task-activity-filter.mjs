@@ -321,16 +321,32 @@ try {
   )
 
   await page.getByTestId('activity-filter-clear').click()
-  const restored = await waitUntil(
-    async () =>
-      (await count.getAttribute('data-pending')) === 'false'
-      && Number(await count.getAttribute('data-count')) >= 100,
-    { timeoutMs: 20_000 },
-  )
+  const wholeFeed = async () =>
+    (await count.getAttribute('data-pending')) === 'false'
+    && Number(await count.getAttribute('data-count')) >= 100
+  const restored = await waitUntil(wholeFeed, { timeoutMs: 20_000 })
+  /*
+   * AND IT HAS TO STAY BACK, which this could not tell.
+   *
+   * `taf-8-clear-leaves-the-search-box` removes `setSearchDraft('')` from the
+   * Clear handler: the applied search is cleared, the BOX keeps the term, and
+   * the 200ms debounce puts it straight back — so the feed recovers for a
+   * fraction of a second and then empties again for good. `waitUntil` polls, so
+   * it caught that fraction and returned true, and the patch ran green against
+   * a check whose sentence is exactly the thing that is broken.
+   *
+   * One second is five debounce windows, so a term that is coming back has
+   * come back by the time this reads the count again.
+   */
+  await page.waitForTimeout(1000)
+  const stayed = restored && (await wholeFeed())
   chk(
-    restored,
+    stayed,
     'and Clear brings the whole feed back',
-    'clearing the filters left the feed narrowed',
+    restored
+      ? `the feed came back and then narrowed again — data-count=${await count.getAttribute('data-count')} ` +
+        'a second later, so Clear reset the applied search and left the box that feeds it'
+      : 'clearing the filters left the feed narrowed',
   )
 } catch (err) {
   failed += 1
