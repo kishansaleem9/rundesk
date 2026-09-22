@@ -107,6 +107,13 @@ const openAiPage = async (page) => {
   )
 }
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   console.log('\n▶ `GET /ai/models` — two lists, because they are two different things')
   const catalog = await api('/ai/models')
@@ -233,7 +240,7 @@ try {
     'the model menu was already open before anything was clicked',
   )
 
-  await trigger.click()
+  await trigger.click({ timeout: 8000 }).catch(() => {})
   const menuUp = await waitUntil(
     () => page.getByTestId('ai-model-menu').isVisible().catch(() => false),
     { timeoutMs: 8_000 },
@@ -299,7 +306,7 @@ try {
     'what it hides is not in the DOM before it is pressed',
     'the disclosure’s contents were rendered before the disclosure was opened',
   )
-  await page.getByTestId('ai-model-show-more').click()
+  await page.getByTestId('ai-model-show-more').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(300)
   const hidden = page.locator('[data-testid^="ai-model-option-"][data-available="false"]')
   chk(
@@ -339,7 +346,7 @@ try {
   const writesBeforeChoice = prefWrites.length
   // The OTHER tier, so the click has something to change. Choosing the one
   // already in use would leave this check unable to fail.
-  await page.getByTestId('ai-model-option-deep').click()
+  await page.getByTestId('ai-model-option-deep').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(600)
   chk(
     (await trigger.getAttribute('data-tier')) === 'deep',
@@ -352,8 +359,8 @@ try {
     `${prefWrites.length - writesBeforeChoice} preference writes left the browser on a bare selection`,
   )
 
-  await trigger.click()
-  await page.getByTestId('ai-model-set-preferred').click()
+  await trigger.click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('ai-model-set-preferred').click({ timeout: 8000 }).catch(() => {})
   const wrote = await waitUntil(() => prefWrites.length > writesBeforeChoice, { timeoutMs: 8_000 })
   chk(wrote, 'pressing "Set as my preferred model" sends a write',
     'no PUT to /ai/preferences ever left the browser')
@@ -405,7 +412,7 @@ try {
     `localStorage still holds rundesk.aiTier=${JSON.stringify(legacyKey)} — ` +
       'two sources of truth for one setting, which is how they drift',
   )
-  await page2.getByTestId('ai-model-tier').click()
+  await page2.getByTestId('ai-model-tier').click({ timeout: 8000 }).catch(() => {})
   chk(
     (await page2.locator('[data-testid="ai-model-preferred-badge-fast"]').count()) === 1 &&
       (await page2.locator('[data-testid^="ai-model-preferred-badge-"]').count()) === 1,

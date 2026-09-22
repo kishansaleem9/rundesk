@@ -83,6 +83,13 @@ const TAG = `e2e-attach-${Date.now()}`
 /** The fixture's own size, so "the count is 3" is not a claim about the database. */
 const SEEDED = 3
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
@@ -143,7 +150,7 @@ try {
   if (!(await waitUntil(() => page.getByTestId('task-tab-overview').isVisible().catch(() => false), { timeoutMs: 25_000 }))) {
     throw new Error('the task sheet never mounted')
   }
-  await page.getByTestId('task-tab-attachments').click()
+  await page.getByTestId('task-tab-attachments').click({ timeout: 8000 }).catch(() => {})
   const cards = page.getByTestId('attachment-card')
   if (!(await waitUntil(async () => (await cards.count()) === SEEDED, { timeoutMs: 20_000 }))) {
     throw new Error(`the attachments panel drew ${await cards.count()} cards, not ${SEEDED}`)
@@ -253,12 +260,12 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ "more" removes it, on the server, and the header follows')
 
-  await page.getByTestId('attachment-more').first().click()
+  await page.getByTestId('attachment-more').first().click({ timeout: 8000 }).catch(() => {})
   const removeItem = page.getByTestId('attachment-remove')
   if (!(await waitUntil(() => removeItem.isVisible().catch(() => false), { timeoutMs: 10_000 }))) {
     throw new Error('the attachment "more" menu never opened')
   }
-  await removeItem.click()
+  await removeItem.click({ timeout: 8000 }).catch(() => {})
 
   const gone = await waitUntil(async () => (await cards.count()) === SEEDED - 1, { timeoutMs: 20_000 })
   const serverAfter = (await A(`/tasks/${task.id}/attachments`)).data ?? []
@@ -288,7 +295,7 @@ try {
       `"${await rail.getAttribute('title').catch(() => '—')}"`,
   )
 
-  await rail.click()
+  await rail.click({ timeout: 8000 }).catch(() => {})
   const panel = page.getByTestId('related-items-panel')
   const opened = await waitUntil(() => panel.isVisible().catch(() => false), { timeoutMs: 15_000 })
   /*

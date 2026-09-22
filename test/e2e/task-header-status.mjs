@@ -95,6 +95,13 @@ const RENAMED = [
 ]
 const DEFAULT_KEYS = ['backlog', 'todo', 'in_progress', 'in_review', 'done', 'cancelled']
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
@@ -220,7 +227,7 @@ try {
   )
 
   console.log('\n▶ pressing ▶ advances the task, on the server')
-  await next.click()
+  await next.click({ timeout: 8000 }).catch(() => {})
   const advanced = await waitUntil(
     async () => ((await A(`/tasks/${task.id}`)).data?.status === 'cooking'),
     { timeoutMs: 15_000 },
@@ -248,7 +255,7 @@ try {
     'from `cooking` the same button now offers `shipped` — it reads the current status, not a constant',
     `the button still offers "${secondKey}" after the task moved; it is not recomputing`,
   )
-  await next.click()
+  await next.click({ timeout: 8000 }).catch(() => {})
   const advancedTwice = await waitUntil(
     async () => ((await A(`/tasks/${task.id}`)).data?.status === 'shipped'),
     { timeoutMs: 15_000 },

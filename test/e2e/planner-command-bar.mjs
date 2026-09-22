@@ -112,6 +112,13 @@ const SOURCES = [
 const envelope = (data) => JSON.stringify({ data, error: null })
 const browser = await chromium.launch(LAUNCH)
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   /** Every search the palette asked the server for, so check 8 can assert the
    *  REQUEST carried the query rather than that a box accepted typing. */
@@ -289,7 +296,7 @@ try {
       'toggle, so a second always-mounted copy makes one keypress open two',
   )
 
-  await bar().click()
+  await bar().click({ timeout: 8000 }).catch(() => {})
   const opened = await waitUntil(async () => (await palette().count()) > 0, { timeoutMs: 15_000 })
   chk(
     opened && (await palette().count()) === 1,

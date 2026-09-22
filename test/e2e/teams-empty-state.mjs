@@ -102,6 +102,13 @@ const flat = (s) => s.replace(/\s+/g, ' ').trim()
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
@@ -206,7 +213,7 @@ try {
    */
   const carousel = page.getByTestId('teams-empty-carousel')
   const idxBefore = await carousel.getAttribute('data-index')
-  await page.getByTestId('teams-empty-pager-next').click()
+  await page.getByTestId('teams-empty-pager-next').click({ timeout: 8000 }).catch(() => {})
   const advanced = await waitUntil(
     async () => (await carousel.getAttribute('data-index')) === '1',
     { timeoutMs: 8000 },
@@ -222,8 +229,8 @@ try {
    * the frame never draws. Pressing → twice more from here has to come back to
    * the first card rather than stop dead on a control that looks broken.
    */
-  await page.getByTestId('teams-empty-pager-next').click()
-  await page.getByTestId('teams-empty-pager-next').click()
+  await page.getByTestId('teams-empty-pager-next').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('teams-empty-pager-next').click({ timeout: 8000 }).catch(() => {})
   const wrapped = await waitUntil(
     async () => (await carousel.getAttribute('data-index')) === '0',
     { timeoutMs: 8000 },
@@ -262,7 +269,7 @@ try {
   )
 
   console.log('\n▶ Browse People goes somewhere, and it is where it says')
-  await page.getByTestId('teams-empty-browse').click()
+  await page.getByTestId('teams-empty-browse').click({ timeout: 8000 }).catch(() => {})
   const peopleArrived = await waitUntil(
     async () => (await page.getByTestId('teams-person').count()) > 0,
     { timeoutMs: 15_000 },
@@ -279,11 +286,11 @@ try {
   )
 
   console.log('\n▶ Create Team leaves a real team behind')
-  await page.getByTestId('teams-tab-teams').click()
+  await page.getByTestId('teams-tab-teams').click({ timeout: 8000 }).catch(() => {})
   await waitUntil(() => page.getByTestId('teams-empty-create').isVisible().catch(() => false), {
     timeoutMs: 10_000,
   })
-  await page.getByTestId('teams-empty-create').click()
+  await page.getByTestId('teams-empty-create').click({ timeout: 8000 }).catch(() => {})
   const dialogOpen = await waitUntil(
     () => page.getByTestId('teams-create-dialog').isVisible().catch(() => false),
     { timeoutMs: 10_000 },
@@ -293,7 +300,7 @@ try {
 
   const teamName = `Bridge crew ${stamp}`
   await page.getByTestId('teams-create-name').fill(teamName)
-  await page.getByTestId('teams-create-submit').click()
+  await page.getByTestId('teams-create-submit').click({ timeout: 8000 }).catch(() => {})
 
   /*
    * THE SERVER IS THE WITNESS, not the screen. A page that draws the row it

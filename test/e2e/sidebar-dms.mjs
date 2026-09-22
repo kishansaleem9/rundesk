@@ -83,6 +83,13 @@ let sql = null
  */
 let startedDmId = null
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
   const api = apiClient(`${B}/api/v1`, auth.accessToken)
@@ -246,7 +253,7 @@ try {
     'the picker never listed a colleague this workspace really has',
   )
 
-  await peerButton.click()
+  await peerButton.click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => dmPosts.some((b) => b.includes(peer.userId)), { timeoutMs: 15_000 }),
     'choosing somebody really starts the conversation — their id left the browser in a POST',

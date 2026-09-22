@@ -90,6 +90,13 @@ let sql = null
  */
 const TAG = `zqx${Date.now().toString(36)}`
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
@@ -174,14 +181,14 @@ try {
   if (!(await waitUntil(() => page.getByTestId('task-tab-overview').isVisible().catch(() => false), { timeoutMs: 25_000 }))) {
     throw new Error('the task sheet never mounted')
   }
-  await page.getByTestId('task-tab-comments').click()
+  await page.getByTestId('task-tab-comments').click({ timeout: 8000 }).catch(() => {})
   const input = page.getByTestId('comment-input')
   if (!(await waitUntil(() => input.isVisible().catch(() => false), { timeoutMs: 20_000 }))) {
     throw new Error('the comment composer never mounted')
   }
 
   const picker = page.getByTestId('comment-mention-picker')
-  await input.click()
+  await input.click({ timeout: 8000 }).catch(() => {})
   await input.fill('@')
   if (!(await waitUntil(() => picker.isVisible().catch(() => false), { timeoutMs: 15_000 }))) {
     throw new Error('the @ picker never opened')
@@ -312,7 +319,7 @@ try {
    */
   await input.fill(`@@@@${TAG}`)
   await waitUntil(async () => (await boardRows.count()) === 1, { timeoutMs: 15_000 })
-  await boardRows.first().click()
+  await boardRows.first().click({ timeout: 8000 }).catch(() => {})
   const inserted = await waitUntil(async () => !(await input.inputValue()).includes('@'), { timeoutMs: 10_000 })
   const value = await input.inputValue()
   chk(
@@ -349,7 +356,7 @@ try {
     'no `Comment ▾` control on the composer',
   )
 
-  await trigger.click()
+  await trigger.click({ timeout: 8000 }).catch(() => {})
   const commentItem = page.getByTestId('comment-mode-item-comment')
   const emailItem = page.getByTestId('comment-mode-item-email')
   const opened = await waitUntil(() => emailItem.isVisible().catch(() => false), { timeoutMs: 10_000 })

@@ -95,6 +95,13 @@ const WS = process.env.E2E_WS ?? (await pickWorkspace(api)).id
 let browser = null
 let ctx = null
 
+/*
+ * EVERY CLICK IN THIS SUITE IS BOUNDED. A control one of this suite's own break
+ * patches removes is a failing check below; an unqualified `.click()` is instead
+ * thirty seconds and a run that ends where it stood, with the checks after it
+ * never reported. Eleven patches across nine suites did exactly that before this
+ * was applied ahead of the runs rather than after them.
+ */
 try {
   console.log('\n▶ `GET /ai/models` — the cut `[17:16]` makes, made on the server')
   /*
@@ -170,7 +177,7 @@ try {
     { timeoutMs: 15_000 },
   )
 
-  await page.getByTestId('ai-model-tier').click()
+  await page.getByTestId('ai-model-tier').click({ timeout: 8000 }).catch(() => {})
   const menuUp = await waitUntil(
     () => page.getByTestId('ai-model-menu').isVisible().catch(() => false),
     { timeoutMs: 8_000 },
@@ -331,7 +338,7 @@ try {
   )
   chk(focusCard, 'focusing a row with the keyboard opens its card too', 'the card is mouse-only')
 
-  await page.getByTestId('ai-model-show-more').click()
+  await page.getByTestId('ai-model-show-more').click({ timeout: 8000 }).catch(() => {})
   await waitUntil(() => page.getByTestId('ai-model-more').isVisible().catch(() => false), { timeoutMs: 5_000 })
   const hidden = page.locator('[data-testid^="ai-model-option-"][data-available="false"]')
   chk(
