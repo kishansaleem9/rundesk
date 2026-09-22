@@ -250,9 +250,16 @@ try {
    * It read the rail's `.x` under the name `railRight` — the rail's LEFT edge —
    * so a bar overlapping the rail's right half compared as clear of it. And
    * `?? 0` turned a rail that was not on screen into a rail at x=0, after which
-   * `barBox.x > 0` is true of every bar that exists. The patch removes
-   * `max-w-xl` from a container that is `absolute inset-x-0 … px-4`, so the bar
-   * really does start at 16px and cover the rail; the check said it did not.
+   * `barBox.x > 0` is true of every bar that exists.
+   *
+   * AND THE SENTENCE THAT STOOD HERE WAS WRONG about the layout. It said the
+   * patch "removes `max-w-xl` from a container that is `absolute inset-x-0 …
+   * px-4`, so the bar really does start at 16px and cover the rail". `absolute`
+   * resolves against the nearest positioned ancestor, which is the CALENDAR
+   * region, to the right of the rail — the measured run came back "left edge
+   * (560px) is clear of the rail, which ends at 531px". The claim was read off
+   * class names rather than measured, in the comment explaining a measurement.
+   * The patch is `fixed` now, which is what makes `inset-x-0` mean the viewport.
    *
    * The rail's box must exist, and the comparison is against its RIGHT edge,
    * which is what the paragraph above this has always said.
