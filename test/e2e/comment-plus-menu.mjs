@@ -206,7 +206,11 @@ try {
     'choosing it opens the emoji row',
     'the item did nothing — there is no emoji anything in the composer',
   )
-  await page.getByTestId('comment-emoji-🎉').click()
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('comment-emoji-🎉').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await page.getByTestId('comment-input').inputValue()).includes('🎉'),
       { timeoutMs: 10_000 }),
@@ -301,7 +305,7 @@ try {
     'choosing it asks who',
     'the item opened no way to pick a person',
   )
-  await page.getByTestId('comment-assign-select').selectOption(me.id)
+  await page.getByTestId('comment-assign-select').selectOption(me.id, { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
       async () => (await readText(page.getByTestId('comment-assign-pending'))).length > 0,

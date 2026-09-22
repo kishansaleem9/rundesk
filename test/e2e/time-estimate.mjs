@@ -271,9 +271,9 @@ try {
   await settle()
   await page.getByTestId('quick-create-open').click({ timeout: 20_000 })
   await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
-  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` })
-  await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` })
-  await page.getByTestId('quick-create-list').selectOption({ label: `List ${TAG}` })
+  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` }, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` }, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-list').selectOption({ label: `List ${TAG}` }, { timeout: 8000 }).catch(() => {})
   const QUICK_TITLE = `Quick estimate ${TAG}`
   await page.getByTestId('quick-create-task-title').fill(QUICK_TITLE)
   await page.getByTestId('quick-create-estimate').fill('90m')

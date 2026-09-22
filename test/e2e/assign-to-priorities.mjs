@@ -291,7 +291,11 @@ try {
     () => page.getByTestId('priority-prompt').isVisible().catch(() => false),
     { timeoutMs: 15_000 },
   )
-  await page.getByTestId('priority-prompt-mute').click()
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('priority-prompt-mute').click({ timeout: 8000 }).catch(() => {})
 
   await openTask(afterMuteTask.id)
   await (await assignChip(me.id)).click({ timeout: 20_000 })

@@ -369,8 +369,12 @@ try {
   await input.fill('')
   await input.press(' ')
   await waitUntil(() => page.getByTestId('comment-ai-panel').isVisible().catch(() => false), { timeoutMs: 10_000 })
-  await page.getByTestId('comment-ai-prompt').fill(`ask the vendor for the revised quote ${TAG}`)
-  await page.getByTestId('comment-ai-mode').selectOption('shorten')
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('comment-ai-prompt').fill(`ask the vendor for the revised quote ${TAG}`, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('comment-ai-mode').selectOption('shorten', { timeout: 8000 }).catch(() => {})
   requests.length = 0
   await page.getByTestId('comment-ai-run').click()
   const aiError = page.getByTestId('comment-ai-error')

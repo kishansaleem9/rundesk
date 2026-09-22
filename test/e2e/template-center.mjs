@@ -424,7 +424,7 @@ try {
 
   console.log('\n▶ Clear filters puts every axis back at once')
   await page.getByTestId('templates-facet-type-list').click({ timeout: 10_000 }).catch(() => {})
-  await page.getByTestId('templates-facet-complexity-beginner').click()
+  await page.getByTestId('templates-facet-complexity-beginner').click({ timeout: 8000 }).catch(() => {})
   chk(await settle(1), 'List + Beginner together leave one template',
     `the grid drew ${await cards().count()} cards`)
   /*
@@ -438,7 +438,7 @@ try {
   await page.getByTestId('templates-facet-usecase').selectOption('support')
   await waitUntil(() => page.getByTestId('templates-category-engineering').count().then((n) => n === 1),
     { timeoutMs: 8_000 })
-  await page.getByTestId('templates-category-engineering').click()
+  await page.getByTestId('templates-category-engineering').click({ timeout: 8000 }).catch(() => {})
   chk(await settle(1), 'adding Use Case and Category on top still leaves that one',
     `the grid drew ${await cards().count()} cards with all four axes on`)
   chk(await page.getByTestId('templates-facet-clear').count() === 1,

@@ -347,9 +347,13 @@ try {
   )
 
   console.log('\n▶ the blocked actor and the board download `[10:42]`')
-  await page.getByTestId('feature-gate-close').click()
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('feature-gate-close').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(400)
-  await page.getByTestId('work-view-tab-type-board').click()
+  await page.getByTestId('work-view-tab-type-board').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1200)
   await openDetails(page.getByTestId('list-customize'))
   const exportSection = page.getByTestId('list-export-section')

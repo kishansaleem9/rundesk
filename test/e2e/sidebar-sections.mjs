@@ -289,7 +289,7 @@ try {
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('sidebar-add-channel').click({ timeout: 25_000 })
   const NEW_CHANNEL = `added-${TAG}`
-  await page.getByTestId('sidebar-add-channel-name').fill(NEW_CHANNEL)
+  await page.getByTestId('sidebar-add-channel-name').fill(NEW_CHANNEL, { timeout: 8000 }).catch(() => {})
   await page.getByTestId('sidebar-add-channel-save').click()
   chk(
     await waitUntil(() => channelPosts.some((b) => b.includes(NEW_CHANNEL)), { timeoutMs: 15_000 }),

@@ -500,7 +500,11 @@ try {
   await waitUntil(() => page.getByTestId('comment-recording-active').isVisible().catch(() => false), { timeoutMs: 10_000 })
   await page.getByTestId('comment-recording-stop').click()
   await waitUntil(() => page.getByTestId('comment-recording-ready').isVisible().catch(() => false), { timeoutMs: 10_000 })
-  await page.getByTestId('comment-recording-attach').click()
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('comment-recording-attach').click({ timeout: 8000 }).catch(() => {})
 
   const attached = await waitUntil(
     async () => (await page.locator('text=/voice-note_.*\\.webm/').count()) > 0,

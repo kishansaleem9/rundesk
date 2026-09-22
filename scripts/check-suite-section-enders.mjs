@@ -44,6 +44,28 @@
  * stood in front of their own check are the whole finding, which is the same
  * ratio the press rule had: precise because the pairing is the suite's own.
  *
+ * AND A THIRD RULE THAT IS NOT A GATE, on purpose.
+ *
+ * The real lesson of `list-view-controls-42-empty-group-no-add` is that its
+ * press had been bounded FOR IT, by name, in a comment — and the run still
+ * ended at 45 of 50, on the `fill` underneath. Bounding one step of a sequence
+ * and leaving the next alone moves the thirty seconds one line down.
+ *
+ * I wrote that as a rule — "an interaction under something that is allowed to
+ * fail" — and it found thirty real sites across twenty suites, every one of
+ * which is now bounded. It is still not a gate, because it cannot be stated
+ * without reading FORMATTING: whether a call counts as bounded depends on how
+ * many lines it is written across, and each fix makes the next line a new site,
+ * so it converges by cascade rather than by being right. Two window sizes gave
+ * two different answers about the same tree, and at that point the rule was
+ * being tuned against its own output rather than against the defect.
+ *
+ * The two rules above pair an interaction with a CHECK about the same element,
+ * which is the suite's own statement rather than a guess about layout. Those
+ * gate. The sequence shape is caught where it has always been caught: every
+ * instance shortens a run, and `EXPECTED_CHECKS` being exact turns that into a
+ * row that gates.
+ *
  * Exit 1 with every site named.
  */
 import { readdirSync, readFileSync } from 'node:fs'

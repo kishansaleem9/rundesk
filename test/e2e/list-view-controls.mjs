@@ -457,8 +457,16 @@ try {
   // `list-view-controls-42-empty-group-no-add` takes the control away, which is
   // the check above: this click then waited out the default timeout and ended
   // the run at 44 of 49.
+  //
+  // AND THE FILL UNDER IT, which is where the same run ended the next time —
+  // 45 of 50. Bounding the press and leaving the typing unbounded moves the
+  // thirty seconds one line down: with no control to press there is no composer
+  // to type into, and the two checks below have something to say about that.
   await emptyGroup.locator('[data-testid="list-group-add-task"]').click({ timeout: 8000 }).catch(() => {})
-  await emptyGroup.locator('[data-testid="list-group-add-title"]').fill(GROUP_TITLE)
+  await emptyGroup
+    .locator('[data-testid="list-group-add-title"]')
+    .fill(GROUP_TITLE, { timeout: 8000 })
+    .catch(() => {})
   await page.keyboard.press('Enter')
   const landed = await waitUntil(async () => {
     const rows = (await api(`/tasks/list/${fixture.listId}`)).data ?? []

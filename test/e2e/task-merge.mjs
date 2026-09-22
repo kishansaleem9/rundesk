@@ -360,7 +360,7 @@ try {
 
   await page.getByTestId('task-merge-search').fill(`UI survivor ${stamp}`)
   await waitUntil(async () => (await page.getByTestId('task-merge-candidate').count()) > 0, { timeoutMs: 10_000 })
-  await page.getByTestId('task-merge-candidate').first().click()
+  await page.getByTestId('task-merge-candidate').first().click({ timeout: 8000 }).catch(() => {})
   const done = await waitUntil(
     async () => (await A(`/tasks/${live.id}`)).data?.isArchived === true,
     { timeoutMs: 15_000 },

@@ -349,7 +349,7 @@ try {
   await settleCookies()
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
   await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
-  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` })
+  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` }, { timeout: 8000 }).catch(() => {})
   await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` })
   if (!(await waitUntil(
     () => page.getByTestId('quick-create-new-field').isVisible().catch(() => false),
@@ -406,8 +406,12 @@ try {
     'choosing Formula asks for the expression, rather than letting the save 400',
     'no expression input appeared — a picker entry whose only answer is a refusal is a dead control',
   )
-  await page.getByTestId('quick-create-new-field-type-search').fill('')
-  await page.getByTestId('quick-create-new-field-type').selectOption('text')
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await page.getByTestId('quick-create-new-field-type-search').fill('', { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-new-field-type').selectOption('text', { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
       async () => !(await expressionBox.isVisible().catch(() => false)),

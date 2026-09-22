@@ -304,10 +304,10 @@ try {
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
   await page.getByTestId('create-tab-folder').click({ timeout: 20_000 })
-  await page.getByTestId('quick-create-folder-name').fill(NAME)
-  await page.getByTestId('quick-create-folder-space').selectOption(SPACE_A)
+  await page.getByTestId('quick-create-folder-name').fill(NAME, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-space').selectOption(SPACE_A, { timeout: 8000 }).catch(() => {})
   const postsBefore = folderPosts.length
-  await page.getByTestId('quick-create-folder-submit').click()
+  await page.getByTestId('quick-create-folder-submit').click({ timeout: 8000 }).catch(() => {})
 
   chk(
     await waitUntil(() => folderPosts.length > postsBefore, { timeoutMs: 15_000 }),
@@ -350,9 +350,9 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByTestId(`space-toggle-${SPACE_A}`).click({ timeout: 25_000 })
   await page.getByTestId(`space-new-folder-${SPACE_A}`).click({ timeout: 20_000 })
-  await page.getByTestId('sidebar-folder-name').fill(NAME)
+  await page.getByTestId('sidebar-folder-name').fill(NAME, { timeout: 8000 }).catch(() => {})
   const sidebarPostsBefore = folderPosts.length
-  await page.getByTestId('sidebar-folder-submit').click()
+  await page.getByTestId('sidebar-folder-submit').click({ timeout: 8000 }).catch(() => {})
 
   chk(
     await waitUntil(() => folderPosts.length > sidebarPostsBefore, { timeoutMs: 15_000 }),

@@ -579,8 +579,8 @@ try {
   // The modal has to be OPENED — arriving at the workspace does not open it.
   await page.getByTestId('quick-create-open').click({ timeout: 20_000 })
   await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
-  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` })
-  await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` })
+  await page.getByTestId('quick-create-space').selectOption({ label: `Space ${TAG}` }, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-project').selectOption({ label: `Project ${TAG}` }, { timeout: 8000 }).catch(() => {})
 
   const offered = await waitUntil(
     () => page.getByTestId('quick-create-new-field').isVisible().catch(() => false),

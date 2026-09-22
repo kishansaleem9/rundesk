@@ -204,7 +204,7 @@ try {
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   await page.goto(`${B}/app/${WS}/${listPath}`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 })
-  await page.getByTestId('work-view-tab-type-board').click()
+  await page.getByTestId('work-view-tab-type-board').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1500)
 
   console.log('\n▶ and it is drawn on the card, where the frame draws it')

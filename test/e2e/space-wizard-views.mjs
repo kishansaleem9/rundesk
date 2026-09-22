@@ -257,7 +257,7 @@ try {
   await page.getByTestId('space-wizard-views-done').click()
   await page.waitForSelector('[data-testid="space-wizard-step2"]', { timeout: 10_000 })
   const before = spacePosts.length
-  await page.getByTestId('space-wizard-create').click()
+  await page.getByTestId('space-wizard-create').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(2500)
 
   let sent = null

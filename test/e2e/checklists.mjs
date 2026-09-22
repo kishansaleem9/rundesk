@@ -123,10 +123,17 @@ try {
     'there is no way to start a checklist except by adding an item to an implicit one',
   )
 
+  /*
+   * ALL THREE STEPS BOUNDED, OR NONE. The helper's own answer is the
+   * `waitUntil` at the end, which asks Postgres whether the checklist exists —
+   * so every step on the way there can fail and be reported by that. Bounding
+   * only the first press would move the thirty-second exception to the second
+   * line and end the section instead of returning false (ledger §10).
+   */
   const newChecklist = async (title) => {
-    await page.getByTestId('checklist-add').click()
-    await page.getByTestId('checklist-name-input').fill(title)
-    await page.getByTestId('checklist-create-confirm').click()
+    await page.getByTestId('checklist-add').click({ timeout: 8000 }).catch(() => {})
+    await page.getByTestId('checklist-name-input').fill(title, { timeout: 8000 }).catch(() => {})
+    await page.getByTestId('checklist-create-confirm').click({ timeout: 8000 }).catch(() => {})
     return waitUntil(
       async () => (await sql`
         select 1 from task_checklists where task_id = ${task.id} and title = ${title}`).length > 0,

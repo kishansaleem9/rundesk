@@ -221,7 +221,11 @@ try {
       'a search box that does not filter is a search box in name only',
   )
 
-  await row.click()
+  // Bounded and caught: what stands above it — a check, or a gate whose answer
+  // nobody reads — is allowed to fail, so this has to report rather than throw.
+  // Bounding one step and leaving the next unbounded only moves the thirty
+  // seconds one line down (ledger §10).
+  await row.click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const rows = await sql`
@@ -235,12 +239,18 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ an unknown email is an invitation, not a dead end')
 
-  await page.getByTestId('assignee-picker-open').click()
+  // THE GATE BELOW IS ALLOWED TO FAIL AND THE TYPING WAS NOT. `waitUntil`
+  // catches its predicate's throws and returns false, and nothing reads the
+  // answer — so when the picker does not open, execution arrives at an
+  // unbounded `fill` on a box that is not there and spends thirty seconds
+  // before ending the section. Bounding a press and leaving the typing under it
+  // unbounded just moves the exception one line down (ledger §10).
+  await page.getByTestId('assignee-picker-open').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(() => page.getByTestId('assignee-search').isVisible().catch(() => false), {
     timeoutMs: 10_000,
   })
   const inviteEmail = `newcomer-${Date.now()}@rundesk.invalid`
-  await page.getByTestId('assignee-search').fill(inviteEmail)
+  await page.getByTestId('assignee-search').fill(inviteEmail, { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
       () => page.getByTestId('assignee-invite').isVisible().catch(() => false),

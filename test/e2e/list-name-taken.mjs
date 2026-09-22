@@ -218,11 +218,11 @@ try {
    */
   await page.goto(`${stack.base}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
-  await page.getByTestId('quick-create-space').selectOption(space.id)
-  await page.getByTestId('quick-create-project').selectOption(project.id)
-  await page.getByTestId('quick-create-new-list').click()
-  await page.getByTestId('quick-create-new-list-name').fill(NAME)
-  await page.getByTestId('quick-create-new-list-save').click()
+  await page.getByTestId('quick-create-space').selectOption(space.id, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-project').selectOption(project.id, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-new-list').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-new-list-name').fill(NAME, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-new-list-save').click({ timeout: 8000 }).catch(() => {})
 
   const toast = page.locator('[data-sonner-toast]').first()
   chk(
@@ -261,11 +261,11 @@ try {
    */
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
-  await page.getByTestId('create-tab-list').click()
-  await page.getByTestId('quick-create-list-name').fill(NAME)
-  await page.getByTestId('quick-create-list-space').selectOption(space.id)
-  await page.getByTestId('quick-create-list-project').selectOption(project.id)
-  await page.getByTestId('quick-create-list-submit').click()
+  await page.getByTestId('create-tab-list').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-list-name').fill(NAME, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-list-space').selectOption(space.id, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-list-project').selectOption(project.id, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-list-submit').click({ timeout: 8000 }).catch(() => {})
 
   const tabToast = page.locator('[data-sonner-toast]').first()
   chk(
