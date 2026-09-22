@@ -250,6 +250,18 @@ jobs:
       - name: Rule six's reader holds its contract
         run: node scripts/check-suite-reads.mjs
 
+      # And the five rules ABOVE it, which had no case file at all — five loops
+      # reporting 0 forever with nothing able to tell a working rule from a
+      # broken one. Not refactored into functions, because that is the change
+      # that turns a real 0 into a false one while looking like tidying: the
+      # checker takes a SUITE_DIR and this points it at fixture suites, one
+      # shape per file, then asserts on what it actually prints. `--mutate`
+      # applies ten mutations of the checker and requires each to redden a
+      # case; all ten bite. Its first case found that one physical site was
+      # being reported twice under two labels.
+      - name: Rules one to five hold theirs, and each case bites
+        run: node scripts/check-suite-enders.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover

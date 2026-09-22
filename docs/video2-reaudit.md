@@ -5113,3 +5113,68 @@ rather than papered over: they were each measured against the tree when they
 went in — nineteen, five, twenty, three and twenty sites, all real — but none of
 them has a case file, so none of them would notice itself breaking. Rule six is
 the first with one, because it is the first whose steady-state answer is zero.
+
+### And the five rules above it, which reported zero with nothing watching
+
+Rule six got a case file the day it was written. The five above it had none —
+each measured against the tree when it went in (nineteen, five, twenty, three
+and twenty sites, all real) and then left as a loop reporting `0` forever with
+nothing able to tell a working rule from a broken one. The ledger named that
+gap in the paragraph above; this closes it.
+
+**It does not refactor them.** Pulling five line-based loops out into pure
+functions is the change that turns a real 0 into a false one while looking like
+tidying, and the whole point is to stop trusting 0. So the checker takes a
+`SUITE_DIR` — read by nothing in the audit but the case file — and
+`check-suite-enders.mjs` points it at fixture suites, one shape per file, then
+asserts on what it actually prints. Rules, file walking and reporting are all
+under test with no refactor at all.
+
+**25 cases, and ten mutations of the checker, all ten of which bite.**
+
+| deleted or defeated | the case that fails |
+|---|---|
+| rule one's press requirement | seventeen cases, since every fixture becomes a site |
+| rule one's ten-line window | a press eleven lines down pairs with the check anyway |
+| rule one's "is this check about existence" | a press under a check about a VALUE is reported |
+| rule two's asserted-testid set | a legitimate page-load gate is reported |
+| rule two's caught-gate skip | a caught gate is reported |
+| rule three's two-line catch window | a catch on the following line is missed |
+| rule four's identifier match | the rule matches on proximity instead |
+| rule five's section boundary | an assertion carries into the next section |
+| rule five's `waitUntil` exclusion | a polled read is reported |
+| a rule missing from the press subtraction | four rules firing once each miscount |
+
+#### Two findings the cases produced, which is what a case file is for
+
+**One physical site was being reported twice.** The very first case asserted
+that rule one's shape fires rule one and nothing else, and it failed: rule five
+fires too, and is right to — rule five is rule one without the ten-line window,
+so every press rule one catches is also something the section asserts. Two rows,
+one line to fix, and the summary read "1 press … 1 use of something this section
+asserts". So the labels stay — they say which argument makes a site a site — and
+a DISTINCT site count goes in front of them. "Nineteen presses and twenty
+sections" was never thirty-nine places.
+
+**Rule one was narrower than its own guard.** It matched `.click()` — a press
+with no argument at all — while the guard four lines above it already skipped
+any line carrying a `timeout:` or a `.catch(`. So the regex only ever excluded
+presses whose options object holds NEITHER, and there are seventeen of those in
+the tree: `click({ force: true })`, `selectOption({ label })` and the like,
+every one of which waits the full default thirty seconds and throws exactly as a
+bare press does.
+
+Broadened to `.click(`, the checker **still reports 0 sites on this tree** —
+none of the seventeen sits under an existence check naming the same testid — so
+this closes a blind spot at a measured cost of nothing, rather than introducing
+a report to argue with. Both halves are pinned: an options object with no
+timeout is a site, one with a timeout is not.
+
+### The `ai-assign` refusal, re-measured
+
+It came back **23 passed, 0 failed** at the baseline. The diagnosis above was
+right: the failure in the refusal log could not have come from the check it
+named, the suite had already been rewritten at `6c029e5`, and the fix was a
+re-run rather than a re-aim. Six of its seven patches reddened the check they
+claim; `assign-2-second-count` came back GREEN, which is a live finding on the
+current tree and the next thing to chase rather than a number to move.

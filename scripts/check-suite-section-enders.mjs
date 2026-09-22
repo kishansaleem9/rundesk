@@ -167,7 +167,24 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { messageReads } from './lib/suite-reads.mjs'
 
-const SUITES = new URL('../test/e2e', import.meta.url).pathname
+/*
+ * `SUITE_DIR` EXISTS SO THE FIVE LINE-BASED RULES CAN BE TESTED AT ALL.
+ *
+ * Rule six's reader came out into a module and got a case file because its
+ * steady-state answer is zero and zero is the number this audit has learnt not
+ * to take on trust. The same is true of every rule above it — all five report 0
+ * on a clean tree, and a regression in any of them would be invisible — but
+ * they are line-based loops woven into this file, and pulling five of those out
+ * into pure functions is a refactor that could turn a real 0 into a false one
+ * while looking like tidying.
+ *
+ * So `check-suite-enders.mjs` points this at a directory of fixture suites
+ * instead, one shape per file, and asserts on what this actually prints. That
+ * tests the rules AND the file walking AND the reporting, with no refactor at
+ * all — and a mutation of any rule's logic reddens the case that covers it.
+ * Nothing in the audit reads this variable; only the case file sets it.
+ */
+const SUITES = process.env.SUITE_DIR ?? new URL('../test/e2e', import.meta.url).pathname
 // How far below a check a press is still "the press that check is about". Ten
 // lines covers a chk spanning its three arguments plus a comment; beyond that
 // the two are about different things and the pairing would be a guess.
@@ -192,7 +209,24 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       if (/catch|timeout/.test(line)) continue
       for (const id of new Set(ids)) {
         const quoted = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-        if (!new RegExp(`getByTestId\\(['\`]${quoted}['\`]\\)[^\\n]*\\.click\\(\\)`).test(line)) continue
+        /*
+         * `.click(` RATHER THAN `.click()`, and the change is safe because it
+         * was measured. This read `\\.click\\(\\)` — a press with NO argument at
+         * all — and the guard four lines up already skips any line carrying a
+         * `timeout:` or a `.catch(`. So the narrower regex only ever excluded
+         * presses with an options object that holds NEITHER: seventeen of those
+         * exist in the tree (`click({ force: true })`, `selectOption({ label })`
+         * and the like) and every one waits Playwright's full default thirty
+         * seconds and throws, exactly as a bare press does.
+         *
+         * Broadened, the checker still reports 0 sites on this tree — none of
+         * the seventeen sits under an existence check naming the same testid —
+         * so this closes a blind spot at a cost of nothing rather than
+         * introducing a report to argue with. `check-suite-enders.mjs` pins
+         * both halves: an options object with no timeout IS a site, and one
+         * with a timeout is not.
+         */
+        if (!new RegExp(`getByTestId\\(['\`]${quoted}['\`]\\)[^\\n]*\\.click\\(`).test(line)) continue
         rows.push({ file, line: j + 1, id, text: line.trim() })
       }
     }
@@ -313,12 +347,32 @@ for (const r of rows) {
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
+/*
+ * THE DISTINCT COUNT, BECAUSE THE PER-RULE COUNTS OVERLAP AND USED NOT TO SAY SO.
+ *
+ * `check-suite-enders.mjs` found this with its first case: rule one and rule
+ * five both fire on
+ *
+ *     chk(await visible('thing'), 'there is a control to press', …)
+ *     await page.getByTestId('thing').click()
+ *
+ * and they are right to. Rule five is rule one without the ten-line window, so
+ * every press rule one catches is also something the section asserts. Two rows,
+ * one physical site — and the summary reported "1 press … 1 use of something
+ * this section asserts", which reads as two places to go and fix.
+ *
+ * Both labels are worth keeping: they say which argument makes the site a site,
+ * and a reader fixing it wants that. So the labels stay and the SITE count goes
+ * in front of them. "Nineteen presses and twenty sections" was never 39 places.
+ */
+const distinct = new Set(rows.map((r) => `${r.file}:${r.line}`)).size
 console.log(
-  `[section-enders] ${rows.length - gates - boxes - sames - sections - messages} press(es) on a ` +
+  `[section-enders] ${distinct} site(s) across ${new Set(rows.map((r) => r.file)).size} suite(s), ` +
+    `flagged as: ${rows.length - gates - boxes - sames - sections - messages} press(es) on a ` +
     `control the check above them may find absent, ${gates} gate(s) in front of a check about the ` +
     `same element, ${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a ` +
     `locator guarded one line up, ${sections} use(s) of something this section asserts exists, and ` +
-    `${messages} read(s) in a chk message, across ${new Set(rows.map((r) => r.file)).size} suite(s)`,
+    `${messages} read(s) in a chk message — a site can be more than one of these`,
 )
 if (rows.length) {
   console.error(

@@ -36,6 +36,7 @@ step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "nothing ends a section on a throw" node scripts/check-suite-section-enders.mjs
 step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs
+step "and rules one to five bite"        node scripts/check-suite-enders.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs
