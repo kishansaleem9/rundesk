@@ -40,6 +40,7 @@ step "nothing ends a section on a throw" node scripts/check-suite-section-enders
 step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs
 step "and every ender rule bites"        node scripts/check-suite-enders.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
+step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs

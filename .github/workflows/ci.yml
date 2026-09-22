@@ -300,6 +300,18 @@ jobs:
       - name: The S3 stub is faithful to the SDK, and each case bites
         run: node scripts/check-s3-stub.mjs --mutate
 
+      # The same recorded reason, one subsystem over. A row of AI surfaces is
+      # blocked in the ledger on ANTHROPIC_API_KEY being "empty here and in
+      # CI", and their suites assert the refusal. But `ai.service.ts` writes
+      # `new Anthropic({ apiKey })` with no baseURL, and the SDK's own default
+      # for that is readEnv('ANTHROPIC_BASE_URL') — so the seam is already in
+      # the product and needs no change to it. The first case asserts exactly
+      # that, against the real SDK rather than by reading its source: an SDK
+      # that stopped honouring the variable would otherwise send these suites
+      # at the live API. 10 cases, 6 of 6 mutations redden one.
+      - name: The model seam is really a seam, and each case bites
+        run: node scripts/check-model-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover

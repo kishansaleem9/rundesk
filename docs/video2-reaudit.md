@@ -2790,6 +2790,50 @@ does not have and an `ANTHROPIC_API_KEY` that is empty here and in CI, and
 row. The last one, **`"Add to ›"`**, was carried as the one buildable row until
 its frame was opened too — see below. **NONE is buildable.**
 
+**The `ANTHROPIC_API_KEY` half of that reason is now known to be wrong, and the
+agent-runtime half is not.** They were stated together and have to be separated,
+because only one of them survives being checked.
+
+`ai.service.ts` constructs `new Anthropic({ apiKey })` and passes no `baseURL`,
+so the SDK fills that in — and its default is `readEnv('ANTHROPIC_BASE_URL')`.
+The seam is already in the product and needs no change to it, exactly as
+`R2_ENDPOINT` already was for storage. Measured against the real SDK,
+constructed the way the service constructs it:
+
+```
+baseURL the SDK chose = http://127.0.0.1:9299
+reply text = {"title":"Stubbed task title", …}   usage = {"input_tokens":34,"output_tokens":37}
+the stub saw 1 call(s); the product's own system prompt reached it = true
+```
+
+So `scripts/e2e-lanes/model-stub.mjs` exists, with `check-model-stub.mjs` over
+it — 10 cases, 6 of 6 mutations redden one — and the first of those cases is the
+seam itself, asserted against the SDK rather than read out of its source, so an
+SDK that stopped honouring the variable could not send these suites at the live
+API unnoticed.
+
+What that does and does not unlock. It does **not** make the eight absent AI
+field types measurable: they are not built, and a stub cannot measure a surface
+that does not exist. What it unlocks is the row of surfaces that DO exist and
+whose suites can currently only assert *"AI features are not configured"* — the
+task-detail AI bar, the answer surfaces, the model picker's live half. A stub
+cannot say whether a model writes a good summary, and no check built on it
+should pretend to; it can say whether the product builds a prompt and sends it,
+parses the answer rather than echoing it, reports a refusal in words, and meters
+what came back. Those are the product's own defects, and the refusal path could
+never reach them.
+
+**Not wired into the lanes, deliberately, and this is the honest state of it.**
+Configuring a model would do to those suites what configuring storage did to the
+cover picker's Upload tab: every check that asserts the refusal would have to be
+rewritten against the live path, one suite at a time, with break patches to
+match. That is the video-2 work, and a 268-patch sweep is in flight against the
+current tree as this is written. The reason is retired and the seam is proven;
+the rewrite is the next piece of work, not this one.
+
+The agent-runtime half of the original reason stands unchanged: a stub answers
+`/v1/messages`, and Brain²'s hub still needs a runtime Rundesk does not have.
+
 The metered *"uses have expired"* state was counted here too, and is not.
 `09:30` draws that state's sentence and its one button and nothing else — no
 counter, no allowance, no reset — and Rundesk has no metering to attach it to.
