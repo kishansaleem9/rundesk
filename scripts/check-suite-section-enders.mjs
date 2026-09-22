@@ -521,6 +521,109 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+/*
+ * RULE TEN. A `querySelector` RESULT DEREFERENCED INSIDE AN EVALUATE.
+ *
+ * FOUND BY A BREAK RUN, like rule nine, and for the same reason: nothing above
+ * it looks at code that runs in the BROWSER. Rules one to nine all read
+ * Playwright calls, and a Playwright locator auto-waits. `document.querySelector`
+ * does not. It answers about the frame it lands on and returns null on no
+ * match, so it races the render:
+ *
+ *     await page.evaluate((s) => {
+ *       const el = document.querySelector(s)
+ *       el.dispatchEvent(new DragEvent('drop', …))
+ *     }, sel(toTestId))
+ *
+ * Under `sidebar-reorder-4-gap-uses-stale-parent` that printed
+ * `TypeError: Cannot read properties of null (reading 'dispatchEvent')` — true,
+ * and it names neither the element nor the drag. It is the stale reason this
+ * audit keeps finding, arriving from inside the page instead of from a check.
+ *
+ * WHY THIS ONE GATES, WHICH IS RULE ONE'S ARGUMENT AND HAD TO BE EARNED. The
+ * first scan for this shape reported ELEVEN sites and SIX of them were already
+ * guarded — by a ternary (`panel ? panel.scrollTop : -1`), by `instanceof`
+ * (`v instanceof HTMLVideoElement ? v.videoWidth > 0 : false`, where null is
+ * simply not an instance), and by `!v` sitting in the middle of a longer
+ * condition (`if (!vp || !bar) return null`), which a guard regex anchored to
+ * the open paren cannot see. Six working call sites reported as defects is a
+ * checker nobody would keep, and that scan would have been one.
+ *
+ * So the guard question is asked about the FIRST USE of the variable rather
+ * than about a window of text, and every way of using it is classified:
+ * `!v`, `v?.`, `v ??`, `v ? … : …`, `v &&`, `v ||`, a comparison against null,
+ * and `v instanceof` are all guards; `v.` and `v[` are the dereference; being
+ * passed to a call or returned says nothing either way and the walk continues.
+ * On the tree as it stood that separates the five real sites from the six
+ * guarded ones exactly, and all five are fixed.
+ *
+ * WHAT THE FIX IS, and it is not "throw a better error". Three of the five sit
+ * under a check that already measures the thing — whether the strip exists,
+ * whether the upload started — so the evaluate reports `false` and the check's
+ * own sentence prints. Throwing would still end the section; the point is to
+ * get the failure back to the check that was written to explain it.
+ */
+const blockBody = (lines, i) => {
+  let depth = 0
+  const out = []
+  for (let j = i + 1; j < Math.min(i + 40, lines.length); j++) {
+    out.push(lines[j])
+    let left = false
+    for (const ch of lines[j]) {
+      if (ch === '{') depth += 1
+      else if (ch === '}') {
+        depth -= 1
+        if (depth < 0) {
+          left = true
+          break
+        }
+      }
+    }
+    if (left) break
+  }
+  return out.join('\n')
+}
+const firstUseOf = (body, v) => {
+  const re = new RegExp(`\\b${v.replace(/\$/g, '\\$')}\\b`, 'g')
+  let m
+  while ((m = re.exec(body))) {
+    const before = body.slice(Math.max(0, m.index - 2), m.index)
+    const after = body.slice(m.index + v.length, m.index + v.length + 14)
+    if (/!\s*$/.test(before)) return 'guard'
+    /*
+     * `el?.foo` and `el ?? x` are NOT listed as guards, and that is deliberate
+     * rather than an omission. Both fall through as neutral, so the walk goes
+     * on — which is the only way to catch the mixed shape, an optional chain
+     * on one line and a bare dereference on the next. Listing them would have
+     * stopped the walk at the safe use and called the unsafe one guarded.
+     * Written as guards first; no mutation could tell the two spellings apart,
+     * which is how the mixed case came to light.
+     */
+    if (/^\s*\?[^.?]/.test(after)) return 'guard'
+    if (/^\s*(&&|\|\||===|!==|==|!=)/.test(after)) return 'guard'
+    if (/^\s+instanceof\b/.test(after)) return 'guard'
+    if (/^\s*[.[]/.test(after)) return 'deref'
+  }
+  return 'none'
+}
+// `querySelectorAll` cannot match: the alternation has to be followed by `(`
+// and there it is followed by `All(`. It answers [] on no match anyway.
+const QS = /^\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w$.?]*(querySelector|closest)\(/
+let derefs = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(QS)
+    if (!m) continue
+    // A default supplied on the declaration line itself — `?? document.body`,
+    // `|| fallback` — means the variable is never null to begin with.
+    if (/\?\?|\|\|/.test(lines[i].slice(lines[i].indexOf('=')))) continue
+    if (firstUseOf(blockBody(lines, i), m[1]) !== 'deref') continue
+    derefs += 1
+    rows.push({ file, line: i + 1, id: m[2], text: lines[i].trim().replace(/\s+/g, ' '), deref: true })
+  }
+}
+
 // RULE FOUR. The same locator variable: through a guard, then bare.
 const ANYVERB = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|boundingBox)\(/
 let sames = 0
@@ -625,7 +728,8 @@ for (const r of rows) {
       `${r.wholeFile ? '  (asserted elsewhere in this file — a patch removes it everywhere)' : ''}` +
       `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}` +
       `${r.lead ? '  (read at the HEAD of a condition — nothing short-circuits it either)' : ''}` +
-      `${r.assign ? '  (a standalone assignment — there is no condition to short-circuit)' : ''}`,
+      `${r.assign ? '  (a standalone assignment — there is no condition to short-circuit)' : ''}` +
+      `${r.deref ? '  (a querySelector result dereferenced — it does not wait, and null has no members)' : ''}`,
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
@@ -650,14 +754,14 @@ for (const r of rows) {
 const distinct = new Set(rows.map((r) => `${r.file}:${r.line}`)).size
 console.log(
   `[section-enders] ${distinct} site(s) across ${new Set(rows.map((r) => r.file)).size} suite(s), ` +
-    `flagged as: ${rows.length - gates - boxes - sames - sections - files - messages - leadReads.length - assigns} ` +
+    `flagged as: ${rows.length - gates - boxes - sames - sections - files - messages - leadReads.length - assigns - derefs} ` +
     `press(es) on a control the check above them may find absent, ${gates} gate(s) in front of a ` +
     `check about the same element, ${boxes} box read(s) that throw when nothing matches, ${sames} ` +
     `use(s) of a locator guarded one line up, ${sections} use(s) of something this section asserts ` +
     `exists, ${files} use(s) of something asserted elsewhere in the same file, and ` +
     `${messages} read(s) in a chk message, ${leadReads.length} at the head of a condition, and ` +
-    `${assigns} in a standalone assignment ` +
-    '— a site can be more than one of these',
+    `${assigns} in a standalone assignment, and ${derefs} querySelector result(s) ` +
+    'dereferenced inside an evaluate — a site can be more than one of these',
 )
 if (rows.length) {
   console.error(
@@ -665,7 +769,10 @@ if (rows.length) {
       'press, `.catch(() => {})` for a gate or a box read — so the checks below report what happened\n' +
       'instead of being replaced by a thirty-second exception. For a box read, check that the\n' +
       'assertion under it REDDENS on a null box: `>= N` does, `< N` does not, and that one needs a\n' +
-      '`!!box &&` beside the catch.',
+      '`!!box &&` beside the catch.\n' +
+      'For a dereferenced `querySelector`, guard it inside the evaluate and hand the answer back —\n' +
+      '`if (!el) return false` — so the check below reports in its own words. A throw would still\n' +
+      'end the section, which is the thing being fixed.',
   )
   bail(1)
 }

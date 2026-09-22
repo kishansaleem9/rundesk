@@ -114,11 +114,22 @@ const html5Drag = async (page, fromTestId, toTestId) => {
     () => page.locator(sel(toTestId)).getAttribute('data-drop-active').then((v) => v === 'true'),
     { timeoutMs: 5_000 },
   )
-  await page.evaluate((s) => {
+  /*
+   * GUARDED, AND THE ANSWER FOLDED INTO THE RETURN — see the twin of this
+   * helper in `sidebar-reorder.mjs` for the reasoning. In short: a
+   * `querySelector` inside an evaluate does not wait, the dragover above
+   * already covered "never there", so a null here means the node detached
+   * mid-drag; reporting it beats a `Cannot read properties of null` that ends
+   * the section, and ANDing it into the return keeps a drop that never fired
+   * from reading as an accepted drag.
+   */
+  const dropped = await page.evaluate((s) => {
     const el = document.querySelector(s)
+    if (!el) return false
     el.dispatchEvent(new DragEvent('drop', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
+    return true
   }, sel(toTestId))
-  return armed
+  return armed && dropped
 }
 
 let browser = null

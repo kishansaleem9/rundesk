@@ -80,7 +80,7 @@ const chk = (cond, good, bad) => {
  * left out of it silently steals from rule one's number.
  */
 const SUMMARY =
-  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something this section.*?(\d+) use\(s\) of something asserted elsewhere.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition.*?(\d+) in a standalone assignment/s
+  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something this section.*?(\d+) use\(s\) of something asserted elsewhere.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition.*?(\d+) in a standalone assignment.*?(\d+) querySelector result\(s\)/s
 
 // `checker` is only ever passed by the mutation pass, to ask a mutant whether
 // it runs at all before its verdict is read.
@@ -109,6 +109,7 @@ const run = (files, checker = CHECKER) => {
             messages: +m[8],
             leads: +m[9],
             assigns: +m[10],
+            derefs: +m[11],
           }
         : null,
     }
@@ -671,6 +672,210 @@ chk(
   'a read inside a waitUntil predicate was reported',
 )
 
+/*
+ * RULE TEN'S CASES, AND THE SIX THAT MATTER MOST ARE THE NEGATIVE ONES.
+ *
+ * The first scan for this shape reported eleven sites and six were already
+ * guarded, in five different spellings. Each of those spellings is a case here,
+ * because a rule that flags them is a rule the tree would rightly throw out —
+ * and because every one of them was written by hand in a real suite, so they
+ * are the shapes the next person will write too.
+ */
+console.log('\n▶ rule ten — a querySelector result dereferenced inside an evaluate')
+
+{
+  const res = run({
+    'deref.mjs': [
+      `await page.evaluate((s) => {`,
+      `  const el = document.querySelector(s)`,
+      `  el.dispatchEvent(new DragEvent('drop', { bubbles: true }))`,
+      `}, sel(id))`,
+      '',
+    ].join('\n'),
+  })
+  chk(
+    only(res, 'derefs'),
+    'a bare dereference of a querySelector result is one site',
+    `the counts were ${JSON.stringify(res.counts)}`,
+  )
+}
+
+chk(
+  run({
+    'deref-guarded.mjs': [
+      `await page.evaluate((s) => {`,
+      `  const el = document.querySelector(s)`,
+      `  if (!el) return false`,
+      `  el.dispatchEvent(new DragEvent('drop', { bubbles: true }))`,
+      `  return true`,
+      `}, sel(id))`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'an early return on `!el` is not',
+  'a guarded dereference was reported',
+)
+
+chk(
+  run({
+    'deref-long-condition.mjs': [
+      `await page.evaluate(() => {`,
+      `  const vp = document.querySelector('[data-testid="viewport"]')`,
+      `  const bar = document.querySelector('[data-testid="bar"]')`,
+      `  if (!vp || !bar) return null`,
+      `  return { v: vp.getBoundingClientRect(), b: bar.getBoundingClientRect() }`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one guarded in the MIDDLE of a longer condition — the spelling a guard regex anchored to the open paren cannot see',
+  'a `!a || !b` guard was reported; this is the case that separates the rule from the scan that preceded it',
+)
+
+chk(
+  run({
+    'deref-compared.mjs': [
+      `await page.evaluate(() => {`,
+      `  const el = document.querySelector('[data-testid="thing"]')`,
+      `  if (el === null) return ''`,
+      `  return el.textContent`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one compared against null before it is read',
+  'a null-compared dereference was reported',
+)
+
+chk(
+  run({
+    'deref-shortcircuit.mjs': [
+      `await page.evaluate(() => {`,
+      `  const el = document.querySelector('[data-testid="thing"]')`,
+      `  return el && el.textContent`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one behind `&&` — the idiom rule one declined to gate over, and it still declines',
+  'a short-circuited dereference was reported',
+)
+
+chk(
+  run({
+    'deref-ternary.mjs': [
+      `await page.evaluate(() => {`,
+      `  const panel = document.querySelector('[data-testid="panel"]')`,
+      `  return panel ? panel.scrollTop : -1`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one behind a ternary',
+  'a ternary-guarded dereference was reported',
+)
+
+chk(
+  run({
+    'deref-instanceof.mjs': [
+      `await page.waitForFunction(() => {`,
+      `  const v = document.querySelector('video')`,
+      `  return v instanceof HTMLVideoElement ? v.videoWidth > 0 : false`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one behind `instanceof`, where null is simply not an instance',
+  'an instanceof-guarded dereference was reported',
+)
+
+chk(
+  run({
+    'deref-optional.mjs': [
+      `await page.evaluate(() => {`,
+      `  const el = document.querySelector('[data-dragging="true"]')`,
+      `  el?.dispatchEvent(new DragEvent('dragend', { bubbles: true }))`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor an optional chain',
+  'an optional chain was reported',
+)
+
+chk(
+  run({
+    'deref-optional-then-bare.mjs': [
+      `await page.evaluate(() => {`,
+      `  const el = document.querySelector('[data-testid="thing"]')`,
+      `  el?.dispatchEvent(new Event('focus'))`,
+      `  return el.textContent`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 1,
+  'but an optional chain followed by a BARE dereference still is — the chain guards its own line and nothing below it',
+  'a bare dereference below an optional chain was missed',
+)
+
+chk(
+  run({
+    'deref-all.mjs': [
+      `await page.evaluate((p) => {`,
+      `  const rows = document.querySelectorAll('[data-testid^="' + p + '"]')`,
+      `  return rows.length`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor a querySelectorAll, which answers an empty list rather than null',
+  'a querySelectorAll was reported',
+)
+
+chk(
+  run({
+    'deref-default.mjs': [
+      `await page.evaluate(() => {`,
+      `  const host = document.querySelector('[data-testid="host"]') ?? document.body`,
+      `  return host.childElementCount`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one given a fallback on its own line',
+  'a defaulted declaration was reported',
+)
+
+chk(
+  run({
+    'deref-closest.mjs': [
+      `await page.evaluate(() => {`,
+      `  const row = document.querySelector('[data-testid="cell"]')`,
+      `  const host = row.closest('tr')`,
+      `  return host.rowIndex`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 2,
+  'and `closest` is held to the same rule, because it answers null the same way',
+  'the two null-returning reads in one evaluate were not both reported',
+)
+
+chk(
+  run({
+    'deref-later.mjs': [
+      `await page.evaluate(() => {`,
+      `  const el = document.querySelector('[data-testid="thing"]')`,
+      `  record(el)`,
+      `  return el.textContent`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 1,
+  'and a use that says nothing either way — passed to a call — does not end the walk',
+  'the dereference below a neutral use was missed',
+)
+
 console.log('\n▶ rule seven — a throwing read at the HEAD of a condition')
 
 chk(
@@ -843,6 +1048,14 @@ if (process.argv.includes('--mutate')) {
     ['rule nine forgets that a ternary short-circuits', "if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page/.test(stmt)) continue", 'if (false) continue'],
     ['rule nine forgets that evaluateAll cannot throw', "if (/\\.evaluateAll\\(/.test(stmt)) continue", 'if (false) continue'],
     ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - files - messages - leadReads.length - assigns', 'rows.length - gates - boxes - sames - sections - files - messages - leadReads.length'],
+    ["rule ten stops reading `!v` as a guard", "if (/!\\s*$/.test(before)) return 'guard'", "if (false) return 'guard'"],
+    ['rule ten forgets that a ternary short-circuits', "if (/^\\s*\\?[^.?]/.test(after)) return 'guard'", "if (false) return 'guard'"],
+    ['rule ten forgets that null is not an instance of anything', "if (/^\\s+instanceof\\b/.test(after)) return 'guard'", "if (false) return 'guard'"],
+    ['rule ten forgets that a comparison is a guard', "if (/^\\s*(&&|\\|\\||===|!==|==|!=)/.test(after)) return 'guard'", "if (false) return 'guard'"],
+    ["rule ten stops walking past a use that says nothing either way", "if (/^\\s*[.[]/.test(after)) return 'deref'\n  }\n  return 'none'", "if (/^\\s*[.[]/.test(after)) return 'deref'\n    return 'none'\n  }\n  return 'none'"],
+    ['rule ten stops sparing querySelectorAll, which answers a list', '(querySelector|closest)\\(', '(querySelector|closest)'],
+    ['rule ten forgets a fallback given on the declaration line', "if (/\\?\\?|\\|\\|/.test(lines[i].slice(lines[i].indexOf('=')))) continue", 'if (false) continue'],
+    ['rule ten stops looking past the line below the declaration', 'for (let j = i + 1; j < Math.min(i + 40, lines.length); j++) {\n    out.push(lines[j])', 'for (let j = i + 1; j < Math.min(i + 2, lines.length); j++) {\n    out.push(lines[j])'],
   ]
   console.log('\n▶ and each mutation of the checker reddens a case')
   for (const [label, from, to] of MUTATIONS) {

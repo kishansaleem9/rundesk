@@ -112,11 +112,29 @@ const html5DragTo = async (page, fromTestId, toTestId) => {
     () => page.locator(sel(toTestId)).getAttribute('data-drop-active').then((v) => v === 'true'),
     { timeoutMs: 5_000 },
   )
-  await page.evaluate((s) => {
+  /*
+   * GUARDED, AND THE ANSWER FOLDED INTO THE RETURN.
+   *
+   * `document.querySelector` inside an evaluate does not wait — unlike a
+   * locator it answers about the frame it lands on. The dragover above already
+   * threw if the target was missing, so a null HERE means the node detached
+   * between arming and dropping, mid-drag. Dereferencing it raised
+   * `Cannot read properties of null (reading 'dispatchEvent')`: a sentence that
+   * names neither the selector nor the drag. Worse, the throw left every later
+   * check in the section unrun.
+   *
+   * So the evaluate reports instead of throwing, and the report is ANDed into
+   * the value callers already read. A drop that never dispatched can then never
+   * come back as an accepted drag, and the caller's own failure line — which
+   * says what this particular drag was meant to move — is what prints.
+   */
+  const dropped = await page.evaluate((s) => {
     const el = document.querySelector(s)
+    if (!el) return false
     el.dispatchEvent(new DragEvent('drop', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
+    return true
   }, sel(toTestId))
-  return armed
+  return armed && dropped
 }
 
 /**
@@ -437,13 +455,30 @@ try {
    * will be answering from tree data that is a refetch behind, and the refusal
    * will happen in the browser with no request sent — silently.
    */
+  /*
+   * BOTH EVALUATES GUARDED, AND FOR OPPOSITE REASONS.
+   *
+   * The SOURCE must be there: without a list in flight this section has
+   * nothing to prove, so a missing row is loud and names the selector. It used
+   * to be an unguarded deref, and under `sidebar-reorder-4-gap-uses-stale-parent`
+   * that read `Cannot read properties of null (reading 'dispatchEvent')` —
+   * a true sentence that told the next reader neither which element nor which
+   * drag.
+   *
+   * The TARGET must not be: the check below asserts a negative and already
+   * measures whether the strip exists, so an absent strip belongs in that
+   * failure line, not in a throw that would take the rest of the section with
+   * it.
+   */
   await page.evaluate((s) => {
     const el = document.querySelector(s)
+    if (!el) throw new Error(`no drag source ${s} — the list row this section drags is not drawn`)
     window.__dt = new DataTransfer()
     el.dispatchEvent(new DragEvent('dragstart', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
   }, `[data-testid="tree-list-${listIds[0]}"]`)
   await page.evaluate((s) => {
     const el = document.querySelector(s)
+    if (!el) return
     el.dispatchEvent(new DragEvent('dragover', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
   }, `[data-testid="tree-gap-project-${space.id}-0"]`)
   /*
@@ -466,8 +501,11 @@ try {
   chk(
     wrongKindStrip === 1 && wrongKindArmed !== 'true',
     'a list over a project strip does not arm it',
-    'the project strip armed for a list — the strip accepts anything in flight, so the ' +
-      'next drop would reorder a container with an id that is not one of its children',
+    wrongKindStrip !== 1
+      ? `the project strip is not on the page (${wrongKindStrip} of it), so there was nothing ` +
+        'for the list to be dragged over and this check proved nothing either way'
+      : 'the project strip armed for a list — the strip accepts anything in flight, so the ' +
+        'next drop would reorder a container with an id that is not one of its children',
   )
   await page.evaluate(() => document.querySelector('[data-dragging="true"]')?.dispatchEvent(
     new DragEvent('dragend', { bubbles: true }),

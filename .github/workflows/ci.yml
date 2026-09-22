@@ -272,6 +272,16 @@ jobs:
       # claims. Nineteen sites had this shape and all nineteen were real — a
       # bare standalone press has no short-circuit to hide behind, which is why
       # this one is mechanical where the same rule over reads is not.
+      #
+      # Rule ten is the first that reads code running in the BROWSER. A
+      # Playwright locator auto-waits; `document.querySelector` does not, and
+      # answers null on no match, so a bare dereference races the render. Under
+      # `sidebar-reorder-4-gap-uses-stale-parent` that printed `Cannot read
+      # properties of null (reading 'dispatchEvent')` — true, and it names
+      # neither the element nor the drag. The first scan for it reported eleven
+      # sites of which SIX were already guarded, in five spellings a text rule
+      # cannot see, so the rule classifies the variable's first USE instead;
+      # each of those six spellings is now a case.
       - name: Nothing ends a section on a throw where a check belongs
         run: node scripts/check-suite-section-enders.mjs
 

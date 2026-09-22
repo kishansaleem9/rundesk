@@ -985,12 +985,23 @@ try {
   // The panel mounts its handlers a tick after the tab renders; dispatching on
   // the frame the element appears samples before React has attached them.
   await page.waitForTimeout(800)
-  await page.evaluate(() => {
+  /*
+   * THE ZONE'S PRESENCE IS CARRIED OUT, NOT ASSUMED.
+   *
+   * `document.querySelector` inside an evaluate answers about the frame it
+   * lands on and never waits, so a zone that has not mounted used to surface as
+   * `Cannot read properties of null (reading 'dispatchEvent')`. Reported
+   * instead, it separates the two failures the check below would otherwise
+   * blur: a zone that ate the file, and a zone that was never drawn.
+   */
+  const zoneFound = await page.evaluate(() => {
     const el = document.querySelector('[data-testid="task-attachments-dropzone"]')
+    if (!el) return false
     const dt = new DataTransfer()
     dt.items.add(new File(['hello'], 'dropped.txt', { type: 'text/plain' }))
     el.dispatchEvent(new DragEvent('dragover', { dataTransfer: dt, bubbles: true, cancelable: true }))
     el.dispatchEvent(new DragEvent('drop', { dataTransfer: dt, bubbles: true, cancelable: true }))
+    return true
   })
   const dropUploaded = await waitUntil(
     () => posted.some((r) => r.endsWith('/presign')),
@@ -999,9 +1010,12 @@ try {
   chk(
     dropUploaded,
     'and dropping a file starts a real upload',
-    `the drop was swallowed \u2014 the zone accepted the gesture and asked the server for ` +
-      `nothing. Requests seen: ${JSON.stringify(posted)}. An inert border and a border that ` +
-      'lights up then eats the file are the same lie; the second just has better manners.',
+    zoneFound
+      ? `the drop was swallowed \u2014 the zone accepted the gesture and asked the server for ` +
+        `nothing. Requests seen: ${JSON.stringify(posted)}. An inert border and a border that ` +
+        'lights up then eats the file are the same lie; the second just has better manners.'
+      : 'there was no dropzone to drop on \u2014 `task-attachments-dropzone` never mounted, so ' +
+        'nothing here was measured; this is not the zone eating the file',
   )
 
 } catch (e) {
