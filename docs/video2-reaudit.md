@@ -4089,6 +4089,161 @@ been fixed, added to three that were fine — which is the shape of the
 
 ---
 
+## 8c. The evidence, and the checker that reads it
+
+§8 and §8b record what reddened, patch by patch, read off the break logs by
+hand. This section is about discovering that those logs were missing the one
+thing that makes them evidence — and about the checker that now reads what
+survives.
+
+### 102 of the 113 suites have never had a failure sentence recorded
+
+`wt-break.sh` captured failures with
+
+```sh
+grep -E '\bFAIL\b' "$log" | sed 's/\x1b\[[0-9;]*m//g'
+```
+
+— strip the colours AFTER matching. Suites print their failures two ways:
+
+```
+  FAIL  the chip says "Assigned to …"
+  \x1b[31mFAIL\x1b[0m the header pill read null
+```
+
+`\b` is a word boundary and `m` is a word character, so `mFAIL` has none before
+the F. **Every suite that colours the word had its failure lines silently
+dropped, and 102 of the 113 do.** `focus-pill`'s `fp-1-set-once` reddened eleven
+checks and the log recorded the patch name, no sentences, and `4 passed, 11
+failed`. The count went with them: `NFAIL` was 0, so "… and N more FAIL lines
+not shown" could not fire either.
+
+The summary says HOW MANY checks reddened. Only the sentences say WHICH — and a
+patch is evidence only if the checks it reddened are the ones it claims. Every
+number in §8 was right and unverifiable.
+
+### `check-break-reddened.mjs`: 501 patches measured, not read
+
+The evidence was never lost, only never copied. `wt-break.sh` writes
+`/tmp/claude-0/brk-<patch>.log` for every patch it runs and 782 survive, so the
+comparison nobody had made is available for most of the catalogue:
+
+**501 patches reddened a check they claim · 2 reddened nothing · 20 unproven ·
+274 with no usable log.**
+
+Most suites print `FAIL ${bad ?? good}`, so a failing check often does not name
+itself; the check's sentence appears among the PASSES exactly when it passed,
+and that is the inference. UNPROVEN is where the log cannot answer — failures
+happened and every claimed sentence is also among the passes — and it has two
+causes this does not guess between: a real misattribution, or a claim quoting a
+fragment of a template sentence that several iterations of a loop print while
+the failing one prints its reason instead of its name.
+`us-1-grouped-column-still-shown` is the second kind and its own header says so:
+"the `status` iteration of".
+
+**The named remedy, not yet taken: seventy suites share the one-line
+`${bad ?? good}` and could print `FAIL <sentence> — <reason>` instead.** That
+would make every failure line name its check and turn most of the twenty into
+direct evidence. It is deferred rather than forgotten, because it changes
+seventy suite files and every break set measured against them becomes a
+statement about a file that has changed — the freshness rule this audit runs on.
+
+### And the first thing it found was itself, twice
+
+**The inference is vacuously satisfiable.** With the escape-strip removed the
+checker read BETTER — 634 reddened, 0 unproven — because PASS lines that cannot
+be matched make every claim look absent from them. A check that cannot fail,
+inside the check written to catch checks that cannot fail. The parse is asserted
+now: the PASS line count must equal the reported pass total, which holds exactly
+across all 762 logs on this machine. And the reddened count is a FLOOR, because
+both ceilings went to zero in that state and a ceiling-only ratchet would have
+called it an improvement.
+
+**And 119 of the 652 readable logs were not complete runs of the suite the patch
+names**, which took the headline from 620 to 501. `brk-<patch>.log` is whatever
+suite was being exercised when that patch was applied and nothing in the
+filename says which, so one comparison against the suite's own
+`EXPECTED_CHECKS` catches two things:
+
+- a SHORT RUN — `ai-answer-rendering` declares 51 and its logs hold 30, 29, 26
+  and 12, runs whose "0 failed describes the part it reached and nothing else";
+- a run of the WRONG SUITE — `v1a-2-announce-notifies-the-actor` aims at
+  `notification-gaps` and had been exercised inside the `video1-acceptance` set,
+  so its `0 failed` was about checks it was never pointed at. It was one of the
+  three "reddened nothing" findings and it was an artefact.
+
+**620 → 501 is a ratchet FLOOR being lowered**, which is legitimate only when
+the measurement changed and the new number is the true one. It is said out loud
+in the file, beside the number.
+
+### Which suite is this patch about? Four answers, and they disagreed
+
+The question is asked in four places and every copy had drifted. Coverage had
+three steps — the named suite, the filename prefix, then the suite containing
+the quoted sentence. Claims had step one with a COLON ONLY plus step two.
+Freshness had step one alone. `never-run-plan.mjs` copied freshness's.
+
+The cost was 22 patches that could not be SCHEDULED: freshness reported them as
+"(no suite named)" where coverage attributes them fine, and the run plan is
+built from that list. And `[,:—-]` had a backtracking bug that made it worse —
+`# Reddens: sidebar-dms "the workspace tree has a Direct Messages section"`
+separates with a SPACE, so the regex matched `sidebar` and used the hyphen as
+its delimiter. A suite name cut at the first hyphen, with `sidebar.mjs` sitting
+right there to be attributed to instead.
+
+`scripts/lib/suite-of-patch.mjs` is the one answer, with 15 assertions and three
+break-tests. Step one takes the identifier and walks it back a segment at a time
+until a tracked suite turns up, which subsumes every delimiter anybody used.
+Writing the test found two more things: a `unit:` claim was being attributed to
+an e2e suite by a five-word FRAGMENT of a sentence that exists only in a
+`*.test.ts` (attributed patches 798 → 797, and both unattributable ones are now
+`unit:` claims, which is the honest number); and the Reddens-block extractor
+needed a following line to stop at, so a block that is the LAST thing in a file
+extracted nothing, silently.
+
+### Four product defects the sweep turned up
+
+**The AI panel dropped the answer you just watched arrive.** The thread-history
+effect is keyed on the thread id so a refetch cannot wipe a turn that is still
+streaming, and its comment says so. What the guard does not cover is the ONE
+seed it allows: arriving with `?thread=X&prompt=Y` starts a turn on mount, and
+if the history request settles after that turn lands — a slow first fetch is
+enough — `setMessages` replaced everything and the answer disappeared, with the
+step log above it explaining what it did. Nothing is broken afterwards; the next
+thread switch loads the stored copy. The answer simply vanishes off the screen.
+It is merged by id now.
+
+`ai-answer-rendering` is where that surfaced, and the suite had **never once run
+to its declared length** — the check after the failing one read `innerText()`
+unconditionally on an element the check above had just found absent, so the run
+ended at 35 of 51 and all twenty-one of its break patches were measured against
+that.
+
+**Four priority words that decided nothing.** `imports-9-priorityscale` emptied
+`URGENT_WORDS` to make Jira's "Highest" import as high, and ran GREEN:
+`mapPriority` answers "highest" twice on its own, an exact table entry and a
+containment rule ordered ahead of `high`. `highest`, `urgent`, `critical` and
+`lowest` sat in those lists deciding nothing — the duplicated list, in the
+function whose doc comment says it delegates the common vocabulary so the two
+cannot drift. The comment went with them: what it described about `mapPriority`
+has not been true since `mapPriority` put `highest` and `lowest` first.
+
+**A raw NUL byte in a TypeScript file.** `dupKey` joins a list name and a title
+with `\x00`, which is a good separator for a key made of user text. Written as a
+raw byte it makes every text tool treat the source as binary: `grep` prints
+"binary file matches" and skips it, so a search for anything in that file comes
+back EMPTY rather than wrong. Found by searching it and getting nothing.
+
+**And one dispatcher, because two queues ran the same suite twice.** Two
+per-suite waiter shells woke on the same freed lane seconds apart and `ui-sweep`
+ran on lanes 2 and 3 at once, both appending to one log: a patch result above
+the baseline that produced it, two DONE markers, a `restoring wt2` line inside a
+lane-4 run. The worktrees were never at risk — `wt-break.sh` takes the lane lock
+— but the RECORD was corrupted, which is worse, because it is the part nobody
+re-derives. `run-plan.sh` keeps the work list in one process now.
+
+---
+
 ## 9. The misclassified rows, resolved
 
 §6 listed eighteen rows whose recorded status was wrong, four of them marked
