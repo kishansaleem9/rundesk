@@ -30,6 +30,7 @@ step "every break patch finds its line" python3 scripts/check-break-patches.py
 step "break runs postdate their suites" node scripts/check-break-freshness.mjs
 step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
+step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"

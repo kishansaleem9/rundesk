@@ -169,17 +169,31 @@ jobs:
       # And still names a check that exists. A patch whose anchor is fine but
       # whose `# Reddens:` line points at a deleted check applies perfectly and
       # proves nothing — `teams-empty-state-1` named a check that had not
-      # existed for a day. This is a RATCHET: 35 claims and 121 silent patches
-      # are grandfathered, and the build fails when either number grows.
+      # existed for a day. A RATCHET, now at ZERO on all three of its numbers:
+      # the 121 claimless patches and the 36 rotted claims it was created to
+      # grandfather are all closed, so it fails on the first one that arrives.
       - name: Break patches still name a check that exists
         run: node scripts/check-break-claims.mjs
 
-      # And the denominator, which this audit had never printed: 53 of 101
-      # suites have no break patch at all. A suite with none is not a suite
-      # that failed — it is one about which nothing is known, and green says
-      # nothing either way. Ratcheted, so a new suite arrives with a patch.
+      # And the denominator, which this audit had never printed. A suite with no
+      # patch is not a suite that failed — it is one about which nothing is
+      # known, and green says nothing either way. The first answer was 47 of
+      # 101; then 0 of 101; then 11 of 113, because the count came from
+      # grepping `chk(` and eleven suites name their helper `check(`. It reads
+      # each suite's own EXPECTED_CHECKS now. Ratcheted, so a new suite arrives
+      # with a patch.
       - name: No new suite arrives without a break patch
         run: node scripts/check-break-coverage.mjs
+
+      # A conditional check makes the run LENGTH conditional, and every suite
+      # compares its length with `!==`. So a real regression inside one of these
+      # branches reports `✗ 88 of 92 checks ran` — a headline that reads as the
+      # harness breaking rather than the product — with the failures it found
+      # sitting underneath it. Four instances in two days, every one found by
+      # running a patch. A heuristic and a ratchet, both said out loud in the
+      # script: it finds the shape, not whether the condition is ever false.
+      - name: No new suite gets a conditional check with no else
+        run: node scripts/check-suite-check-branches.mjs
 
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.

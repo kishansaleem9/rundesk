@@ -43,10 +43,11 @@
  * uncovered list however long nobody wrote a patch for them.
  *
  * The count is each suite's own `EXPECTED_CHECKS` now, for the reasons written
- * above it, and the real numbers are **113 suites · 2726 checks · 11
- * uncovered**. 47 → 0 → 11 is one number being corrected, not two regressions;
- * the ratchet's own comment at the bottom says which of those moves is
- * legitimate and why.
+ * above it, and when the denominator was corrected the real numbers were
+ * **113 suites · 2726 checks · 11 uncovered**. 47 → 0 → 11 is one number being
+ * corrected, not two regressions; the ratchet's own comment at the bottom says
+ * which of those moves is legitimate and why. The printed numbers are always
+ * the current ones — only the constant at the bottom is kept in step by hand.
  *
  * AND ZERO HERE STILL DOES NOT MEAN "IT WORKS". Read the paragraph below about
  * `save-comment`: this counts aim, and the ledger's §8 counts what reddened.
@@ -240,8 +241,13 @@ if (unattributedNames.length) {
  * regression this check exists to catch, and it still fails on it.
  *
  * 11 → 0 is the work in front of this, and each suite closed lowers it by one.
+ * Four are closed — `emoji-picker`, `loading-states`, `stale-chunk-recovery`
+ * and `addressability-live` — so it stands at 7. The seven left are the big
+ * ones: `ui-sweep` (107 checks), `video1-fast-items` (92), `task-depth` (91),
+ * `chat-message-actions` (73), `settings-depth` (61), `panel-collapse` (56)
+ * and `syncup-live` (48).
  */
-const BASELINE_UNCOVERED = 11
+const BASELINE_UNCOVERED = 7
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,

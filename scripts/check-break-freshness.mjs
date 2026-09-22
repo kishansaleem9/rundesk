@@ -27,7 +27,7 @@
 //
 // Exit 1 if any set is stale.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, statSync, readFileSync } from 'node:fs'
+import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 
 const ROOT = new URL('..', import.meta.url).pathname
@@ -153,6 +153,71 @@ if (stale.length) {
   )
   console.error('Re-run them, or the ledger is reporting numbers about files that no longer exist.')
 }
+/*
+ * AND THE PATCHES WHOSE RUN LOG IS NOT ON THIS MACHINE AT ALL.
+ *
+ * Everything above compares a surviving log against its suite. This asks the
+ * prior question — is there a log? — and the answer for 290 of 764 patches is
+ * no. `check-break-coverage.mjs` counts every one of them as covering its
+ * suite, and says in its own header that it counts AIM rather than proof;
+ * between the two, a patch can be written, attributed, claim-verified and
+ * reported as closing a suite with nothing on disk saying it ever applied.
+ *
+ * TWO CAUSES, AND THIS CANNOT TELL THEM APART, so it does not claim to:
+ *
+ *  - the set was written and never run. That is the one worth acting on, and
+ *    it is why the list is printed on every run rather than at the end of a
+ *    session.
+ *  - the set RAN and its log was overwritten. `wt-break.sh` truncates
+ *    `break-<suite>.txt` at the start of every run, so a suite exercised in
+ *    batches of four keeps only the last batch. `break-ai-answer-rendering.txt`
+ *    holds exactly one patch line, `aar-23`, out of twenty-three that ran.
+ *    The per-run archive (`break-<suite>-YYYYMMDD-HHMMSS.txt`) exists to stop
+ *    that, and it was added after most of these ran — so what this number
+ *    measures, for the older sets, is how much the truncation cost before
+ *    anybody noticed.
+ *
+ * Either way the ledger's §8 is the only surviving record for those rows, and
+ * a number whose evidence is gone is a number nobody can check. That is this
+ * file's whole premise, one level up.
+ *
+ * MATCHED BY PATCH NAME ACROSS EVERY LOG, ARCHIVES INCLUDED, and the first
+ * version matched by SUITE name instead. Patches are named after the feature
+ * rather than the suite — `ai-model-cards`'s are `amc-*`,
+ * `task-attachments`'s are `tat-*`, `notification-gaps`'s ran inside
+ * `break-video1-acceptance.txt` — so asking whether a log is named after the
+ * suite reported a set that had run as never having run. The same mistake this
+ * file's own header describes making when counting patches.
+ */
+const everRun = new Set()
+for (const f of readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f))) {
+  for (const line of readFileSync(join(BREAKS, f), 'utf8').split('\n')) {
+    const m = line.match(/^== ([a-z0-9][a-z0-9-]*)\b/)
+    if (m) everRun.add(m[1])
+  }
+}
+const neverRan = new Map()
+for (const f of readdirSync(join(ROOT, 'test/e2e/breaks')).filter((f) => f.endsWith('.py'))) {
+  const name = f.slice(0, -3)
+  if (everRun.has(name)) continue
+  const text = readFileSync(join(ROOT, 'test/e2e/breaks', f), 'utf8')
+  const named = (text.match(/^#\s*Reddens:\s*([a-z0-9][a-z0-9-]*)\s*[,:—-]/im) || [])[1]
+  const suite = named && existsSync(join(ROOT, 'test/e2e', `${named}.mjs`)) ? named : '(no suite named)'
+  neverRan.set(suite, (neverRan.get(suite) ?? 0) + 1)
+}
+if (neverRan.size) {
+  const patches = [...neverRan.values()].reduce((a, b) => a + b, 0)
+  console.log(
+    `\n[break-freshness] ${patches} patch(es) across ${neverRan.size} suite(s) have NO SURVIVING RUN LOG here.`,
+  )
+  console.log('                  Either never run, or run before per-run archiving existed and')
+  console.log('                  overwritten — this cannot tell which, and does not guess:')
+  for (const [s, n] of [...neverRan].sort((a, b) => b[1] - a[1])) {
+    console.log(`                    ${String(n).padStart(3)}  ${s}`)
+  }
+  console.log('                  Coverage counts all of them as aimed at. Nothing here proves any ran.')
+}
+
 if (stale.length || refusedSets.length || broken.length || absent.length || inert.length) process.exit(1)
 console.log(
   `\n[break-freshness] all ${rows.length} break set(s) postdate their suite, none refused, ` +
