@@ -29,6 +29,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { makeChain } from './lib/chain.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -77,6 +78,8 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+
+const chain = makeChain(check)
 // ---------------------------------------------------------------------------
 // Two releases
 // ---------------------------------------------------------------------------
@@ -565,9 +568,16 @@ console.log('\n5. a tab that is only out of date, with nothing broken')
     .waitFor({ state: 'visible', timeout: 15000 })
     .then(() => true)
     .catch(() => false)
-  check(noticed, 'a stale tab is told there is a newer build')
+  const newBuild = chain(
+    'a stale tab is told there is a newer build',
+    'and reloading lands on the new one',
+    'and stops saying so once it is current',
+  )
+  newBuild.step(noticed, 'the tab was never told')
 
-  if (noticed) {
+  if (!noticed) {
+    newBuild.rest('skipped: there was no notice to press, so nothing reloaded')
+  } else {
     await page.locator('[data-testid="new-build-reload"]').click()
     await page.waitForTimeout(4000)
     await page.getByRole('textbox', { name: /search/i }).first()
@@ -577,10 +587,10 @@ console.log('\n5. a tab that is only out of date, with nothing broken')
       const res = await fetch('/version.json', { cache: 'no-store' })
       return (await res.json()).buildId
     })
-    check(runningNow !== runningA, 'and reloading lands on the new one', `${runningA} -> ${runningNow}`)
-    check(
+    newBuild.step(runningNow !== runningA, `${runningA} -> ${runningNow}`)
+    newBuild.step(
       (await page.locator('[data-testid="new-build-available"]').count()) === 0,
-      'and stops saying so once it is current',
+      'the notice is still on screen',
     )
   }
 

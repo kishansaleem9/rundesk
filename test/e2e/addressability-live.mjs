@@ -158,8 +158,17 @@ try {
   for (const group of ['status', 'priority']) {
     const all = page.locator(`[data-testid="palette-${group}-all"]`)
     const present = await all.count()
+    // Two checks per group whichever way it goes — see the note on the back
+    // link above. A missing All chip used to shorten the run by one rather
+    // than failing the claim that it starts selected.
     check(present > 0, `the ${group} filter offers an explicit All`, `no All chip in the ${group} group`)
-    if (present > 0) {
+    if (present === 0) {
+      check(
+        false,
+        `and All is the state it starts in for ${group}`,
+        'skipped: there was no All chip to read the state off',
+      )
+    } else {
       check(
         (await all.getAttribute('aria-pressed')) === 'true' ||
           (await all.getAttribute('data-active')) === 'true' ||

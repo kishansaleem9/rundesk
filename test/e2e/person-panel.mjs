@@ -18,6 +18,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { readText } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -109,6 +110,8 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+
+const chain = makeChain(check)
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
 const EXPECTED_CHECKS = 59
 
@@ -496,18 +499,28 @@ try {
 
   const profile = await A(`/workspaces/${workspaceId}/people/${meId}`)
   const buckets = profile.data?.taskBuckets
-  check(Boolean(buckets), 'a profile answers with task buckets, not one flat list')
-  if (buckets) {
+  const bucketChain = chain(
+    'a profile answers with task buckets, not one flat list',
+    'TODAY holds what is due today',
+    'OVERDUE holds what has already passed',
+    'NEXT holds what is coming',
+    'and "created, not assigned to anyone" is its own question',
+    'a task with an assignee is not counted as unassigned',
+  )
+  bucketChain.step(Boolean(buckets), 'the profile returned no taskBuckets at all')
+  if (!buckets) {
+    bucketChain.rest('skipped: there were no buckets to look in')
+  } else {
     const holds = (key, id) => (buckets[key] ?? []).some((row) => row.id === id)
-    check(holds('today', bToday?.id), 'TODAY holds what is due today')
-    check(holds('overdue', bOver?.id), 'OVERDUE holds what has already passed')
-    check(holds('next', bNext?.id), 'NEXT holds what is coming')
-    check(holds('createdUnassigned', bMine?.id),
-      'and "created, not assigned to anyone" is its own question')
+    bucketChain.step(holds('today', bToday?.id), 'the seeded due-today task is not in TODAY')
+    bucketChain.step(holds('overdue', bOver?.id), 'the seeded overdue task is not in OVERDUE')
+    bucketChain.step(holds('next', bNext?.id), 'the seeded upcoming task is not in NEXT')
+    bucketChain.step(holds('createdUnassigned', bMine?.id),
+      'the seeded unassigned task is not in createdUnassigned')
     // The one that would quietly be wrong: anything with an assignee on it is
     // somebody's, and must not appear in the pile that is sitting on nobody.
-    check(!holds('createdUnassigned', bToday?.id),
-      'a task with an assignee is not counted as unassigned')
+    bucketChain.step(!holds('createdUnassigned', bToday?.id),
+      'an assigned task is sitting in the unassigned pile')
   }
 
   /*
@@ -819,10 +832,16 @@ try {
       .waitFor({ timeout: 25000 })
       .then(() => true)
       .catch(() => false)
-    check(wrote, 'and pressing it writes a summary into the panel', 'nothing appeared after pressing Get StandUp')
-    if (wrote) {
+    const standup = chain(
+      'and pressing it writes a summary into the panel',
+      'with something actually in it',
+    )
+    standup.step(wrote, 'nothing appeared after pressing Get StandUp')
+    if (!wrote) {
+      standup.rest('skipped: nothing was written, so there was nothing to read')
+    } else {
       const shown = (await page.getByTestId('person-standup-result').innerText().catch(() => '')) ?? ''
-      check(shown.trim().length > 10, 'with something actually in it', JSON.stringify(shown.slice(0, 120)))
+      standup.step(shown.trim().length > 10, JSON.stringify(shown.slice(0, 120)))
     }
   }
   await page.keyboard.press('Escape')

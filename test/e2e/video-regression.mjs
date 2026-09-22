@@ -13,6 +13,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNotification } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -147,6 +148,34 @@ let REF = '—'
 const ok = (m) => { results.push([REF, true, m]); console.log(`  \x1b[32mPASS\x1b[0m [${REF}] ${m}`) }
 const bad = (m) => { results.push([REF, false, m]); console.log(`  \x1b[31mFAIL\x1b[0m [${REF}] ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
+/*
+ * A COUNTED SKIP, for a gate on the INVOCATION rather than on the product.
+ *
+ * `API` is only set when this suite discovered the workspace itself; given
+ * `WS` in the environment it has no client, and the two "Clear all survives
+ * having read everything" checks cannot be arranged. That made the run's
+ * LENGTH depend on how it was invoked — and `EXPECTED_CHECKS` is compared with
+ * `!==`, so one of the two invocations had to be wrong about the count.
+ *
+ * Pushed into `results` so the total is the same either way, and marked
+ * `'skip'` rather than `true` so it cannot be read as a pass. Only the
+ * machine, the deployment or the invocation may skip; a skip reachable by a
+ * product regression is a check that cannot fail.
+ */
+const skip = (m, why) => {
+  results.push([REF, 'skip', m])
+  console.log(`  \x1b[2mSKIP\x1b[0m [${REF}] ${m} — ${why}`)
+}
+
+/*
+ * A CHAIN THAT REPORTS THE SAME NUMBER OF CHECKS WHICHEVER WAY IT GOES.
+ *
+ * `EXPECTED_CHECKS` is compared with `!==`, so an `if` whose body calls `chk()`
+ * and which has no `else` makes a regression read as the harness breaking. The
+ * G13-10 block below is where that was found — see its own comment — and this
+ * file had eight more of the shape. See `test/e2e/lib/chain.mjs`.
+ */
+const chain = makeChain(chk)
 const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${what}`) }
 const area = (n) => console.log(`\n\x1b[1;35m${'═'.repeat(66)}\n  ${n}\n${'═'.repeat(66)}\x1b[0m`)
 
@@ -180,13 +209,22 @@ try {
 
   ref('A1.9', 'The + menu offers more than a task')
   const newBtn = page.getByRole('button', { name: /^New$/ }).first()
-  chk(await newBtn.count() > 0, 'there is a New button in the topbar', 'no New button')
-  if (await newBtn.count()) {
+  const plusMenu = chain(
+    'there is a New button in the topbar',
+    'the menu offers Task',
+    'the menu offers Doc',
+    'the menu offers List',
+  )
+  const haveNew = (await newBtn.count()) > 0
+  plusMenu.step(haveNew, 'no New button')
+  if (!haveNew) {
+    plusMenu.rest('skipped: there was no New button to open a menu from')
+  } else {
     await newBtn.click()
     await page.waitForTimeout(1200)
     const menu = await seen()
     for (const item of ['Task', 'Doc', 'List']) {
-      chk(new RegExp(item, 'i').test(menu), `the menu offers ${item}`, `the menu has no ${item}`)
+      plusMenu.step(new RegExp(item, 'i').test(menu), `the menu has no ${item}`)
     }
     await page.keyboard.press('Escape')
     await page.waitForTimeout(500)
@@ -232,9 +270,16 @@ try {
       chk(new RegExp(`\\b${v}\\b`).test(listPage), `the ${v} view is offered`, `no ${v} view`)
     }
     const addView = page.locator('button').filter({ hasText: /^View$/ }).last()
-    chk(await addView.count() > 0, 'there is a control to save the current view',
-      'no add-a-view control beside the tabs')
-    if (await addView.count()) {
+    const savedView = chain(
+      'there is a control to save the current view',
+      'and a saved view then sits in the tab strip',
+      'under the name it was given',
+    )
+    const haveAddView = (await addView.count()) > 0
+    savedView.step(haveAddView, 'no add-a-view control beside the tabs')
+    if (!haveAddView) {
+      savedView.rest('skipped: there was no control to save a view with')
+    } else {
       // Make one rather than assume one is there. Naming is a window.prompt, so
       // it has to be answered before the click resolves.
       const viewName = `Team View ${Math.random().toString(36).slice(2, 8)}`
@@ -242,21 +287,25 @@ try {
       await addView.click()
       await page.waitForTimeout(3000)
       const savedTabs = await page.locator('button[title^="Actions for the"]').count()
-      chk(savedTabs > 0, `and a saved view then sits in the tab strip (${savedTabs})`,
-        'the saved view did not appear as a tab')
-      chk((await seen()).includes(viewName), 'under the name it was given',
-        `"${viewName}" is not in the tab strip`)
+      savedView.step(savedTabs > 0, 'the saved view did not appear as a tab',
+        `and a saved view then sits in the tab strip (${savedTabs})`)
+      savedView.step((await seen()).includes(viewName), `"${viewName}" is not in the tab strip`)
     }
 
     ref('A1.4', 'A filter builder, not three fixed fields')
     const filterBtn = page.getByRole('button', { name: /^Filter/i }).first()
-    chk(await filterBtn.count() > 0, 'there is a Filter control', 'no Filter control on a list view')
-    if (await filterBtn.count()) {
+    const filterBuilder = chain('there is a Filter control', 'the builder offers')
+    const haveFilter = (await filterBtn.count()) > 0
+    filterBuilder.step(haveFilter, 'no Filter control on a list view')
+    if (!haveFilter) {
+      filterBuilder.rest('skipped: there was no Filter control to open a builder from')
+    } else {
       await filterBtn.click()
       await page.waitForTimeout(1500)
       const f = await seen()
       const fields = ['Assignee', 'Priority', 'Due', 'Status'].filter((x) => new RegExp(x, 'i').test(f))
-      chk(fields.length >= 3, `the builder offers ${fields.join(', ')}`, `only ${fields.length} filter fields offered`)
+      filterBuilder.step(fields.length >= 3, `only ${fields.length} filter fields offered`,
+        `the builder offers ${fields.join(', ')}`)
       await page.keyboard.press('Escape')
       await page.waitForTimeout(600)
     }
@@ -287,20 +336,28 @@ try {
   await page.keyboard.press('Control+k')
   await page.waitForTimeout(1500)
   const palette = page.locator('input:visible').first()
-  chk(await palette.count() > 0, 'Cmd/Ctrl-K opens a search box', 'the command palette did not open')
-  if (await palette.count()) {
+  const cmdBar = chain(
+    'Cmd/Ctrl-K opens a search box',
+    'Ask AI is offered as the first move on a query',
+    'a leading slash offers commands rather than results',
+  )
+  const havePalette = (await palette.count()) > 0
+  cmdBar.step(havePalette, 'the command palette did not open')
+  if (!havePalette) {
+    cmdBar.rest('skipped: there was no search box to type into')
+  } else {
     ref('A2.3', 'Ask AI from the search box')
     await palette.fill('regr')
     await page.waitForTimeout(2500)
     const p = await seen()
-    chk(/Ask AI/i.test(p), 'Ask AI is offered as the first move on a query', 'no Ask AI row in search')
+    cmdBar.step(/Ask AI/i.test(p), 'no Ask AI row in search')
 
     ref('A2.1b', 'Slash puts it in command mode')
     await palette.fill('/')
     await page.waitForTimeout(1800)
     const cmds = await seen()
-    chk(/command/i.test(cmds) || /Create|Go to/i.test(cmds),
-      'a leading slash offers commands rather than results', 'slash did not switch to commands')
+    cmdBar.step(/command/i.test(cmds) || /Create|Go to/i.test(cmds),
+      'slash did not switch to commands')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(600)
   }
@@ -369,7 +426,11 @@ try {
      * are different questions and the control must not be gated on the wrong
      * one.
      */
-    if (API) {
+    if (!API) {
+      // The invocation, not the product — see `skip` above.
+      skip('and Clear all survives having read everything', 'this run was given WS, so it has no API client')
+      skip('and the check left the inbox exactly as it found it', 'nothing was changed to put back')
+    } else {
       /*
        * The rows that were unread are recorded and PUT BACK afterwards.
        *
@@ -586,28 +647,44 @@ try {
     const before = await ta.inputValue()
     const composer = page.locator('div').filter({ has: page.locator('textarea') }).last()
     const askAi = composer.getByRole('button', { name: /Ask AI/i }).first()
-    chk(await askAi.count() > 0, 'the composer has an Ask AI control', 'no Ask AI in the composer')
-    if (await askAi.count()) {
+    const composerAi = chain(
+      'the composer has an Ask AI control',
+      'it offers modes to choose from',
+      'the draft is untouched until a mode is picked',
+    )
+    const haveAskAi = (await askAi.count()) > 0
+    composerAi.step(haveAskAi, 'no Ask AI in the composer')
+    if (!haveAskAi) {
+      composerAi.rest('skipped: there was no Ask AI control to open a prompt from')
+    } else {
       await askAi.click()
       await page.waitForTimeout(1600)
       const pop = await seen()
-      chk(/Improve/i.test(pop) && /Shorten/i.test(pop),
-        'it offers modes to choose from', 'the AI popover offers no modes')
-      chk((await ta.inputValue()) === before,
-        'the draft is untouched until a mode is picked', 'opening the prompt already rewrote the draft')
+      composerAi.step(/Improve/i.test(pop) && /Shorten/i.test(pop), 'the AI popover offers no modes')
+      composerAi.step((await ta.inputValue()) === before,
+        'opening the prompt already rewrote the draft')
       await page.keyboard.press('Escape')
       await page.waitForTimeout(800)
     }
 
     ref('A3.6', 'The link picker has Tasks / Docs / Channels')
     const link = page.getByRole('button', { name: /Link a task, doc or channel/i }).first()
-    chk(await link.count() > 0, 'there is a link control in the toolbar', 'no link control')
-    if (await link.count()) {
+    const linkPicker = chain(
+      'there is a link control in the toolbar',
+      'the Tasks tab is offered',
+      'the Docs tab is offered',
+      'the Channels tab is offered',
+    )
+    const haveLink = (await link.count()) > 0
+    linkPicker.step(haveLink, 'no link control')
+    if (!haveLink) {
+      linkPicker.rest('skipped: there was no link control to open a picker from')
+    } else {
       await link.click()
       await page.waitForTimeout(1500)
       const picker = await seen()
       for (const tab of ['Tasks', 'Docs', 'Channels']) {
-        chk(new RegExp(tab, 'i').test(picker), `the ${tab} tab is offered`, `no ${tab} tab`)
+        linkPicker.step(new RegExp(tab, 'i').test(picker), `no ${tab} tab`)
       }
       await page.keyboard.press('Escape')
       await page.waitForTimeout(800)
@@ -926,18 +1003,27 @@ try {
   ref('A6.1', 'A meeting can be recorded and reopened')
   await go(`/app/${WS}/ai`, 3500)
   const notesTab = page.getByRole('button', { name: 'Meeting notes', exact: true })
-  chk(await notesTab.count() > 0, 'the Meeting notes tab exists', 'no Meeting notes tab')
-  if (await notesTab.count()) {
+  const meetingNotes = chain(
+    'the Meeting notes tab exists',
+    'the meeting record panel is there',
+    'attendees are part of the record',
+    'so is the recording',
+    'the panel says plainly that calls are not transcribed',
+  )
+  const haveNotesTab = (await notesTab.count()) > 0
+  meetingNotes.step(haveNotesTab, 'no Meeting notes tab')
+  if (!haveNotesTab) {
+    meetingNotes.rest('skipped: there was no tab to open, so the panel was never on screen')
+  } else {
     await notesTab.click()
     await page.waitForTimeout(2500)
     const notes = await seen()
-    chk(/Meeting record/i.test(notes), 'the meeting record panel is there', 'no meeting record panel')
-    chk(/Who was there/i.test(notes), 'attendees are part of the record', 'no attendee picker')
-    chk(/Recording link/i.test(notes), 'so is the recording', 'no recording field')
+    meetingNotes.step(/Meeting record/i.test(notes), 'no meeting record panel')
+    meetingNotes.step(/Who was there/i.test(notes), 'no attendee picker')
+    meetingNotes.step(/Recording link/i.test(notes), 'no recording field')
 
     ref('A6.2b', 'It does not claim to transcribe')
-    chk(/does not transcribe/i.test(notes),
-      'the panel says plainly that calls are not transcribed',
+    meetingNotes.step(/does not transcribe/i.test(notes),
       'nothing tells the user transcription is not happening')
   }
 
@@ -955,13 +1041,21 @@ try {
 }
 
 console.log(`\n${'═'.repeat(66)}`)
-const failed = results.filter(([, pass]) => !pass)
+const failed = results.filter(([, pass]) => pass === false)
+const skipped = results.filter(([, pass]) => pass === 'skip')
 if (failed.length) {
   console.log('\x1b[31mFAILURES\x1b[0m')
   for (const [r, , m] of failed) console.log(`  [${r}] ${m}`)
   console.log('═'.repeat(66))
 }
-console.log(`\n\x1b[1m${results.length - failed.length} passed, ${failed.length} failed\x1b[0m`)
+// `=== false`, not `!pass`: a counted skip is truthy and must not read as a
+// failure, and the totals below must not read it as a pass either. The
+// `N passed, M failed` prefix is kept exactly as it was because
+// `scripts/e2e-lanes/break-queue.sh` parses it.
+console.log(
+  `\n\x1b[1m${results.length - failed.length - skipped.length} passed, ${failed.length} failed` +
+    `${skipped.length ? `, ${skipped.length} skipped` : ''}\x1b[0m`,
+)
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
  * branch that silently skipped becomes a shorter run that still reports zero

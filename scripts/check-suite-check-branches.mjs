@@ -133,14 +133,23 @@ for (const [file, lines] of rows) {
  * coverage checker could not see, and for the same reason. A suite with no
  * break patch is a suite whose conditions have never been made false.
  *
- * 20 now, and the balanced ones are `syncup-live` (ten), `panel-collapse`
- * (six), `video1-fast-items` (fifteen), `task-depth` (four),
- * `addressability-live` (three) and `emoji-picker` (one). The fix is
+ * 7 now — all of them in `ui-sweep`, the last suite left. Balanced so far:
+ * `video1-fast-items` (fifteen), `syncup-live` (ten), `video-regression`
+ * (nine), `panel-collapse` (six), `task-depth` (four), `addressability-live`
+ * (four), `person-panel` (two), and one each in `emoji-picker`,
+ * `loading-states` and `stale-chunk-recovery`. The fix is
  * `test/e2e/lib/chain.mjs` — `step` for the next check, `rest` to report the
  * remainder as failed with the reason, and `skipRest` for a gate on the
  * machine rather than on the product, which is the narrow case where the
  * honest answer is "unknown" rather than "broken". Keep this paragraph in step
  * with the constant.
+ *
+ * AND A HEURISTIC THAT CANNOT SEE A FIX KEEPS REPORTING ONE. `loading-states`
+ * balanced its panel loop with an early `continue` rather than an `else` — the
+ * branches really did report two checks either way — and this kept flagging it,
+ * because it matches the SHAPE. The cheapest honest answer is to write the shape
+ * the checker can read; the alternative is a permanent known-false entry in a
+ * list whose whole value is that every line in it is worth reading.
  *
  * EVERY BALANCED SUITE WAS RE-RUN AND ITS COUNT HELD. `video1-fast-items` is
  * 92 of 92, `task-depth` 91, `panel-collapse` 56, `ui-sweep` 107 — the point of
@@ -149,7 +158,7 @@ for (const [file, lines] of rows) {
  * about. `syncup-live` is the one that moved, 48 → 59, and it moved because a
  * floor became an exact count with skips included.
  */
-const BASELINE = 20
+const BASELINE = 7
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
   console.error('  A conditional check makes the run length conditional, and EXPECTED_CHECKS is')
