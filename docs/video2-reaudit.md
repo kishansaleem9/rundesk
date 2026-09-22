@@ -4889,3 +4889,40 @@ against a zero ceiling would be a suppression list with one entry. The check I
 wrote to catch it is deleted too, because a check no patch can redden is the
 same problem one level up. `accounted` falls by one, visibly, which is what a
 floor is for.
+
+### The shape that kept slipping past rule one
+
+Nine of the ten section-enders the sweep surfaced after the first checker landed
+had one shape, and rule one could not see it: it pairs a press with a check in
+the TEN LINES above it, and in every one of these the check and the press are in
+the same SECTION, thirty lines apart. `aoc-1-filelist-read-late` stages files
+with no Attachments section — the check directly says so — and the press on the
+X inside a row of that section is twenty lines below it. 6 of 14 checks.
+
+The section is the suite's own boundary, between one `console.log('\n▶ …')` and
+the next, and it is exactly the scope a throw destroys. So the rule is: within a
+section, a testid any check asserts the existence of is one that every later
+interaction in that section has to survive the absence of. **Twenty instances
+across thirteen suites**, all fixed — presses bounded and caught, reads caught to
+null where the comparison beside them reddens on null, which every one of these
+does. One of them reads its select in the FAILURE MESSAGE as well as the
+condition, and a message is evaluated whether the check passed or failed.
+
+One false-positive class, named rather than absorbed: a read inside a
+`waitUntil` predicate is already safe, because `waitUntil` catches its
+predicate's throws. `comment-plus-menu` has three and they are correct as
+written.
+
+**Why this one is gated when the sequence rule is not.** The sequence rule
+("bounding one step moves the exception to the next") can only be stated by
+reading formatting — how many lines a call is written across — and two window
+sizes gave two different answers about the same tree. This one is stated in the
+suite's own structure. And the arithmetic favoured acting: the eighty sets still
+to run would each have surfaced one of these, at a fix and a re-run round
+apiece.
+
+The five gated rules now are: a press on a control the check above it may find
+absent; a gate in front of a check about the same element; a `boundingBox()`
+that throws when nothing matches; the same locator guarded on one line and bare
+on the next; and this one. What stays out, with its reasoning in the file: the
+sequence shape, and any rule over reads that cannot see `&&` short-circuiting.
