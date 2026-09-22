@@ -1,6 +1,8 @@
 # Check 3 — THE WEEK BAND AS A FACADE.
 # Every cell prints W1. The band renders, the header grows, the toggle toggles;
 # the only assertion that can catch it is one that knows what week it is.
+#
+# Reddens: gantt-controls: "the band is off to begin with, so turning it on is a change and not a redraw"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

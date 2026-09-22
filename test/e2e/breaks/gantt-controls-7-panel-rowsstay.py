@@ -2,6 +2,8 @@
 # Width goes to zero, the rows keep rendering inside the clipped box. They still
 # report a 260px bounding box, which is why the check counts them instead of
 # asking whether they look visible.
+#
+# Reddens: gantt-controls: "collapsed, the panel is zero wide and draws no rows at all"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

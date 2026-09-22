@@ -2,6 +2,8 @@
 # The pane is still a real scrollport, so check 26 passes exactly as before;
 # the header just scrolls away with the rows. This is the half of the fix that
 # a "does the pane scroll" assertion on its own would never notice.
+#
+# Reddens: gantt-controls: "and the date header held the top of the pane while the bars moved"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

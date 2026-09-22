@@ -3,6 +3,8 @@
 # still flips to "true" — and the viewport never moves, so the line the button
 # promised to show you is off to the right where it always was. This is the
 # patch the coordinator asked for: state without scroll.
+#
+# Reddens: gantt-controls: "and it reached today by growing the range"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

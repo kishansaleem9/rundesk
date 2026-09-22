@@ -3,6 +3,8 @@
 # on the date header resolves against a box that never moves and the header is
 # sticky in name only. Nothing looks wrong until the chart has more rows than
 # fit on screen.
+#
+# Reddens: gantt-controls: "and the date header held the top of the pane while the bars moved"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

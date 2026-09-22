@@ -1,5 +1,7 @@
 # Check 8 — stop refusing the row with no name: let it through with an empty
 # title. The report still says 2 rejected while three tasks appear.
+#
+# Reddens: imports: "neither refused row produced a task"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

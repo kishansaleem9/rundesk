@@ -1,6 +1,8 @@
 # Check 10 — THE CONFIDENT ZERO. Write `status` and leave `status_category` at
 # its 'open' default, so an imported Done task is counted outstanding by every
 # rollup, the Closed toggle and the progress ring.
+#
+# Reddens: imports: "category, which is the column every rollup reads"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

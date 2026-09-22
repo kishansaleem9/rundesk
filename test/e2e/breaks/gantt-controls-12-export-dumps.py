@@ -2,6 +2,8 @@
 # Every dated task in the workspace goes into the file, including the project
 # the filter is excluding and every other run's rows. It looks like more data,
 # which is exactly why nobody notices.
+#
+# Reddens: gantt-controls: "and nothing from the project the filter excluded"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

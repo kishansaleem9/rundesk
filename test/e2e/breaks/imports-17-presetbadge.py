@@ -1,5 +1,7 @@
 # Check 17 — hardcode the report's preset badge. It can only ever say one thing,
 # which is the definition of a facade.
+#
+# Reddens: imports: "the report names the preset the import ran under"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-import-page.tsx'
 s = io.open(p, encoding='utf-8').read()

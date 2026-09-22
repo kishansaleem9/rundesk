@@ -1,6 +1,8 @@
 # Check 5 — A TOGGLE THAT ONLY GOES ONE WAY.
 # Pressing "Week numbers" a second time re-writes `true`. A check that only
 # ever turns the band on would never notice.
+#
+# Reddens: gantt-controls: "and it is a toggle, not a latch: pressing it again takes the band away"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

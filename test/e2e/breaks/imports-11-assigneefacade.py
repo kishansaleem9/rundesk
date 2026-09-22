@@ -1,5 +1,7 @@
 # Check 11 — count the assignee and never write the row. The report says one
 # person was linked; task_assignees is empty. The facade, exactly.
+#
+# Reddens: imports: "the Assignee cell linked the signed-in member to the task"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

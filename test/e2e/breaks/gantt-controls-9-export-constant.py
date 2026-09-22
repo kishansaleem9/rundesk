@@ -2,6 +2,8 @@
 # export check is real: a download still happens, it is still named correctly,
 # it is still a CSV with the right columns — and it says the same thing every
 # time, no matter what is on screen.
+#
+# Reddens: gantt-controls: "and its bytes carry the three tasks this run seeded, by name"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

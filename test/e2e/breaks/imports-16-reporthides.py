@@ -1,5 +1,7 @@
 # Check 16 — the server refuses two rows and the report does not draw them. The
 # count still reads 2, so only a check on the listed lines catches it.
+#
+# Reddens: imports: "the report reads created 2"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-import-page.tsx'
 s = io.open(p, encoding='utf-8').read()

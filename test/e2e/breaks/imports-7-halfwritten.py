@@ -1,6 +1,8 @@
 # Check 7 — import the first row of each list and stop. The job still reports
 # success; the list is half of what the file held. (Also fails check 10, which
 # needs the second task to exist.)
+#
+# Reddens: imports: "exactly the two importable rows exist as tasks"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

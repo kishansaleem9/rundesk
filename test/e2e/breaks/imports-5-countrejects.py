@@ -1,5 +1,7 @@
 # Check 5 — count the rows that will be REFUSED as rows that will be imported, so
 # the preview promises four and delivers two.
+#
+# Reddens: imports: "the preview counts 4 rows: 2 importable, 2 rejected"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

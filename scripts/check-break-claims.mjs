@@ -255,7 +255,7 @@ if (noClaim.length) {
  * orphans another claim, or a new patch that makes none, fails the build that
  * brings it — and the baseline is a number in the file that only goes down.
  */
-const BASELINE = { notFound: 16, noSuite: 1, noClaim: 111 }
+const BASELINE = { notFound: 16, noSuite: 1, noClaim: 75 }
 const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {

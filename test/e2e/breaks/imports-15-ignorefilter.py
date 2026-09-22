@@ -1,5 +1,7 @@
 # Check 15 — THE MIRROR OF THE FACADE. listJobs ignores its `source` parameter,
 # so the column is written, stored, and honoured by nothing.
+#
+# Reddens: imports: "is a column something READS — the history filters on it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

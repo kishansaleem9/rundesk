@@ -2,6 +2,8 @@
 # The commonest shape of this facade: the button flips its own state, the chart
 # is redrawn at the px/day it already had, and every "the control responded"
 # assertion passes. Only the measured span can tell the difference.
+#
+# Reddens: gantt-controls: "and the last task, which was off screen, is now inside the viewport"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

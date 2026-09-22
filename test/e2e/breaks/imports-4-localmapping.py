@@ -1,5 +1,7 @@
 # Check 4 — the mapping edit updates local state and never tells the server.
 # Identical on screen; the column is imported anyway.
+#
+# Reddens: imports: "changing a column sends the new mapping to the server"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-import-page.tsx'
 s = io.open(p, encoding='utf-8').read()

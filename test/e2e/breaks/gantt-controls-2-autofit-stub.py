@@ -1,6 +1,8 @@
 # Check 13 — the "AND IT FILLS" half of the auto-fit assertion.
 # Shrink the chart to a stub instead of fitting it. `span <= viewport` is
 # satisfied; a Gantt 120px wide is not what Auto fit means.
+#
+# Reddens: gantt-controls: "it fits, and it fills"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

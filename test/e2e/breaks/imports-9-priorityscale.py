@@ -1,5 +1,7 @@
 # Check 9 — drop the extra priority words, so Jira's 'Highest' falls through to a
 # substring match and lands on `high` instead of `urgent`.
+#
+# Reddens: imports: "the fields the CSV carried are the fields the task has"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

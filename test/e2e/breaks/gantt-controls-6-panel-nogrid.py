@@ -5,6 +5,8 @@
 #
 # Pins the width WITHOUT touching the bounded scrollport, so the sticky checks
 # stay green and only check 8 reddens.
+#
+# Reddens: gantt-controls: "and the grid took the width back"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

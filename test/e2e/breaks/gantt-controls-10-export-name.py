@@ -1,6 +1,8 @@
 # Check 17 — the download's name.
 # The file arrives with a generic name instead of the one the product promises,
 # which is what someone ends up with twelve of in their Downloads folder.
+#
+# Reddens: gantt-controls: "the download arrives as"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

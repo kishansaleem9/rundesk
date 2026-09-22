@@ -1,5 +1,7 @@
 # Check 2 — an undrawn source with no reason. 'Record decisions as decisions':
 # an absence WITH a reason is a different row from an absence without one.
+#
+# Reddens: imports: "each undrawn source is named with a reason, as text rather than as a control"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

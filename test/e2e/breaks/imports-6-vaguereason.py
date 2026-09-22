@@ -1,5 +1,7 @@
 # Check 6 — keep the refusal but drop the WHY: no column, no value, just 'could
 # not be imported'. A person cannot act on it.
+#
+# Reddens: imports: "and names the file line and the reason for each refusal"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

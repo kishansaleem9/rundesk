@@ -3,6 +3,8 @@
 # cost is that nothing keeps the task names level with their bars except this
 # one assignment. Drop it and the chart scrolls while the names stay put — every
 # row is then labelled with somebody else's task, which reads as a data bug.
+#
+# Reddens: gantt-controls: "and the task panel came with it"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

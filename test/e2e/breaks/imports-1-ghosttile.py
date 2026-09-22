@@ -1,6 +1,8 @@
 # Check 1 — THE ANTI-FACADE CHECK. Rename the Wrike preset to 'basecamp', so the
 # picker draws a Basecamp tile with no importer behind it: exactly the ten-tiles
 # facade this row was built to avoid.
+#
+# Reddens: imports: "there is no importer behind it, which is the facade this row exists to avoid"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

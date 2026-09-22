@@ -1,6 +1,8 @@
 # Check 19 — THE DUPLICATED LIST, drifting.
 # The header row loses a column the rows still write, so every cell after it is
 # under the wrong heading. Individually plausible; wrong in a spreadsheet.
+#
+# Reddens: gantt-controls: "with the columns the chart shows"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()
