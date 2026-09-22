@@ -291,10 +291,19 @@ try {
    * somebody else's fixture left behind in the shared database.
    */
   const UI_FIELD = `Made on the task ${TAG}`
-  await page.getByTestId('task-field-create-name').fill(UI_FIELD)
-  await page.getByTestId('task-field-create-type').selectOption('rating')
-  await page.getByTestId('task-field-create-scope').selectOption('list')
-  await page.getByTestId('task-field-create-submit').click()
+  /*
+   * BOUNDED, BECAUSE THE PATCH ABOVE TAKES THE OPTION THIS SELECTS.
+   * `tfc-3-short-type-list` cuts the picker down to the list route's six types,
+   * and `rating` is not among them — `selectOption` threw on an option that no
+   * longer exists and the run ended at 14 of 18, with the four checks below
+   * never asked. They read the SERVER for the field that was supposed to be
+   * created, and "nothing was created" is the honest consequence of a picker
+   * that cannot offer the type (ledger §10).
+   */
+  await page.getByTestId('task-field-create-name').fill(UI_FIELD, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('task-field-create-type').selectOption('rating', { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('task-field-create-scope').selectOption('list', { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('task-field-create-submit').click({ timeout: 8000 }).catch(() => {})
 
   const landed = await waitUntil(async () => {
     const r = await A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`)

@@ -1,7 +1,12 @@
 # The task's picker offers the list route's six types instead of all nineteen —
 # the exact duplicated-list drift this codebase already shipped once, where
 # each picker is individually plausible and nobody compares them.
-# Reddens: task-field-create — "the type picker offers all 19 field types",
+# THE COUNT IS NOT QUOTED, because the suite interpolates it: the sentence
+# reads `all ${ALL_TYPES.length} field types`, so a number in this header is a
+# hostage. It said 19 and the run printed 22 — three types were added after it
+# was written, and the claim survived only because the matcher compares against
+# the literal part of the template.
+# Reddens: task-field-create — "the type picker offers all",
 #          "including the five that only the long list has"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
