@@ -4816,3 +4816,28 @@ the field mismatch surfaced the moment a check tried to use it. That is the
 third time today the static version of a question was noisier than the measured
 one, and it is the argument for spending the machine time rather than the
 cleverness.
+
+### And the four claims nothing measured
+
+`check-break-reddened.mjs` excludes a `unit:` claim on purpose — the evidence is
+a `*.test.ts` and an e2e log has nothing to say about it — and reported the four
+of them as their own count. Honest, and it left four claims in an inventory of
+798 that were DECLARED rather than measured, in an audit whose entire thesis is
+the difference between the two.
+
+They are also the cheapest claims here to check. No browser, no database, no
+lane: `tsx --test <file>` is about a second. `check-unit-claims.mjs` applies each
+patch, runs the file its claim names, and requires the run to FAIL with the
+quoted test's own name in the output — so a patch that breaks a neighbour in the
+same file is not credited with reddening the one it claims. **Four of four
+redden**, which is what the exclusion had been assuming.
+
+It edits the working tree, so it is preflight-only and it checks up after
+itself: every file a patch touches is copied first and written back in a
+`finally`, and then `git status` has to come back clean for `apps` and
+`packages` or it exits 1 naming what is left. Break-tested four ways — a claim
+naming a file that does not exist, a claim naming a test the failure does not
+mention, a patch that leaves its test passing, and the restore deliberately
+disabled, which is the one that matters: a checker that leaves a break patch
+applied would put it in the next commit, arriving through the tool that was
+supposed to be careful.
