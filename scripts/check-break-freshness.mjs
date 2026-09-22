@@ -76,6 +76,19 @@ for (const log of logs) {
   const patchLines = text.split('\n').filter((l) => l.startsWith('== ') && !CONTROL.test(l))
   const patches = patchLines.length
   const buildFailed = patchLines.filter((l) => /BUILD FAILED|PATCH FAILED/.test(l)).length
+  // A PATCH FILE THAT WAS NEVER FOUND IS THE SAME KIND OF NOTHING AS ONE THAT
+  // NEVER BUILT, and it hid for longer because its line is quieter. `wt-break.sh`
+  // read patches from `/tmp/claude-0/breaks` long after the tracked copy became
+  // the source, so a patch written into `test/e2e/breaks` and never hand-copied
+  // came back "== <name> MISSING". That line starts with `== `, is not a control
+  // line and does not say FAILED, so it counted as a patch here and as a patch
+  // in `break-queue.sh` — two sets of four reported "patches 4 · STILL-GREEN 0 ·
+  // UNBUILT 0" having opened no file at all.
+  //
+  // `PATCH CHANGED NOTHING` joins it: applied, left the tree identical, proved
+  // nothing, and says neither MISSING nor FAILED.
+  const missing = patchLines.filter((l) => / MISSING/.test(l)).length
+  const noChange = patchLines.filter((l) => /PATCH CHANGED NOTHING/.test(l)).length
   const refused = /^== REFUSING TO BREAK-TEST/m.test(text)
   const done = /^DONE /m.test(text)
 
@@ -96,6 +109,8 @@ for (const log of logs) {
     verdict: refused ? 'REFUSED' : stale ? 'STALE' : 'fresh',
     patches,
     buildFailed,
+    missing,
+    noChange,
     done,
     detail: dirty
       ? 'suite has UNCOMMITTED edits — the run cannot be about this file'
@@ -111,7 +126,11 @@ rows.sort((a, b) => a.verdict.localeCompare(b.verdict) || a.suite.localeCompare(
 const TAGS = { fresh: '  ok  ', STALE: ' STALE', REFUSED: 'REFUSED', 'NO SUITE FILE': '  ??  ' }
 for (const r of rows) {
   const bf = r.buildFailed ? `  ${r.buildFailed} BUILD/PATCH FAILED` : ''
-  console.log(`${TAGS[r.verdict] ?? '  ??  '} ${r.suite.padEnd(34)} ${r.patches ?? '-'} patches  ${r.detail}${bf}`)
+  const ms = r.missing ? `  ${r.missing} MISSING` : ''
+  const nc = r.noChange ? `  ${r.noChange} CHANGED NOTHING` : ''
+  console.log(
+    `${TAGS[r.verdict] ?? '  ??  '} ${r.suite.padEnd(34)} ${r.patches ?? '-'} patches  ${r.detail}${bf}${ms}${nc}`,
+  )
 }
 
 // A LOG THAT REFUSED, AND A PATCH THAT DID NOT BUILD, ARE BOTH "IT RAN" WEARING
@@ -122,13 +141,20 @@ for (const r of rows) {
 const stale = rows.filter((r) => r.verdict === 'STALE')
 const refusedSets = rows.filter((r) => r.verdict === 'REFUSED')
 const broken = rows.filter((r) => r.buildFailed > 0)
+const absent = rows.filter((r) => r.missing > 0)
+const inert = rows.filter((r) => r.noChange > 0)
 for (const r of refusedSets) console.error(`\n[break-freshness] ${r.suite}: the run REFUSED — a red baseline means no patch was measured`)
 for (const r of broken) console.error(`[break-freshness] ${r.suite}: ${r.buildFailed} patch(es) never built — they prove nothing about the checks they aimed at`)
+for (const r of absent) console.error(`[break-freshness] ${r.suite}: ${r.missing} patch file(s) were never found — that set opened nothing`)
+for (const r of inert) console.error(`[break-freshness] ${r.suite}: ${r.noChange} patch(es) left the tree identical — applied and inert`)
 if (stale.length) {
   console.error(
     `\n[break-freshness] ${stale.length} break set(s) were measured against a suite that has since changed.`,
   )
   console.error('Re-run them, or the ledger is reporting numbers about files that no longer exist.')
 }
-if (stale.length || refusedSets.length || broken.length) process.exit(1)
-console.log(`\n[break-freshness] all ${rows.length} break set(s) postdate their suite, none refused, every patch built`)
+if (stale.length || refusedSets.length || broken.length || absent.length || inert.length) process.exit(1)
+console.log(
+  `\n[break-freshness] all ${rows.length} break set(s) postdate their suite, none refused, ` +
+    'every patch file was found, built, and changed something',
+)

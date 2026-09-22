@@ -75,10 +75,36 @@ while IFS= read -r line; do
     END { print n+0 }
   ' "$RES" 2>/dev/null)
   UNBUILT=$(grep -cE '^== .*(BUILD|PATCH) FAILED' "$RES" 2>/dev/null)
-  # STILL-GREEN AND UNBUILT ARE REPORTED SEPARATELY, ALWAYS. A patch that never
-  # built prints no "N passed, M failed" line, so it is not counted as still
-  # green — which is exactly what a patch that reddened looks like. Reporting
-  # only still-green counted five unbuilt patches across five sets as proven.
-  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · STILL-GREEN $GREEN · UNBUILT $UNBUILT" >> "$OUT"
+  # AND MISSING IS A THIRD THING, which this line learned the same way it
+  # learned the second.
+  #
+  # `wt-break.sh` prints "== <name> MISSING" for a patch file it cannot find.
+  # That matches `^== `, so it counted towards `patches`; it is followed by no
+  # result line, so it did not count as still-green; and it says neither BUILD
+  # nor PATCH FAILED, so it did not count as unbuilt. Two sets of four came
+  # back reading "patches 4 · STILL-GREEN 0 · UNBUILT 0" — byte-identical to
+  # four patches that all reddened — having run nothing at all.
+  #
+  # That is the confident zero, in the script whose entire purpose is to report
+  # these numbers honestly, and it is the second time this line has had to grow
+  # a column rather than let a category fall between the ones it had.
+  MISSING=$(grep -cE '^== .* MISSING' "$RES" 2>/dev/null)
+  # `PATCH CHANGED NOTHING` is a fourth one, and it fell through the same gap:
+  # `wt-break.sh` prints it when a patch applied and left the tree identical,
+  # which is not a build failure and not a MISSING file. Counted here rather
+  # than discovered later, because the lesson of the line above is that every
+  # outcome needs a column of its own the first time it is noticed.
+  NOCHANGE=$(grep -cE '^== .*PATCH CHANGED NOTHING' "$RES" 2>/dev/null)
+  # STILL-GREEN, UNBUILT AND MISSING ARE REPORTED SEPARATELY, ALWAYS. A patch
+  # that never built prints no "N passed, M failed" line, so it is not counted
+  # as still green — which is exactly what a patch that reddened looks like.
+  # Reporting only still-green counted five unbuilt patches across five sets as
+  # proven.
+  RED=$((RAN - GREEN - UNBUILT - MISSING - NOCHANGE))
+  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE" >> "$OUT"
+  # SAY IT TWICE WHEN NOTHING RAN. A set is a claim about patches that
+  # executed, and a line reading "patches 4" for four files nobody opened is
+  # the claim without the thing it is about.
+  [ "$RED" -le 0 ] && echo "== $SUITE PROVED NOTHING — no patch reddened the suite" >> "$OUT"
 done < "$QUEUE"
 echo "== QUEUE DONE" >> "$OUT"

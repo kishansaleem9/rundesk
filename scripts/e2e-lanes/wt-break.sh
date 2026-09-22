@@ -32,6 +32,10 @@ OUT="/tmp/claude-0/break-$SUITE.txt"
 # behind too. `$OUT` keeps its name and its truncate-on-start behaviour, so
 # every watcher, monitor and grep that reads it is unaffected.
 OUT_RUN="/tmp/claude-0/break-$SUITE-$(date +%Y%m%d-%H%M%S).txt"
+# Where the tracked patches are. Derived from this script's own location so it
+# is right in a clone that is not at /home/user/rundesk, unlike the paths the
+# patches themselves carry (those are rewritten into the worktree below).
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TSX="/home/user/rundesk/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export E2E_EMAIL=admin@rundesk.internal
@@ -207,8 +211,26 @@ for b in "$@"; do
   # argument was spelled the obvious way is the stale-reason defect wearing a
   # shell script: the message named a real condition and meant something else.
   b="${b##*/}"; b="${b%.py}"
-  SRC="/tmp/claude-0/breaks/$b.py"
-  [ -f "$SRC" ] || { echo "== $b MISSING (no /tmp/claude-0/breaks/$b.py)" >> "$OUT"; continue; }
+  # THE REPOSITORY IS THE SOURCE, AND THIS LINE WAS THE LAST PLACE THAT STILL
+  # DISAGREED.
+  #
+  # `/tmp/claude-0/breaks` is where these lived before they were committed.
+  # `check-break-patches.py` moved to the tracked copy and says why in its own
+  # comment — "the repository is what CI has and what survives the container" —
+  # and this script was never brought along, so it kept reading the staging
+  # directory. Every patch written straight into `test/e2e/breaks` and never
+  # hand-copied across came back MISSING, which is what happened to twelve of
+  # them in a row: four suites' worth of patches, none of which ran.
+  #
+  # The fallback stays so an older staged patch is still reachable, but the
+  # tracked file wins whenever there is one. A patch edited in the repository
+  # and stale in `/tmp` would otherwise run the stale copy and report on it
+  # under the new name — the two directories were byte-identical when this was
+  # written, so nothing already recorded describes the wrong patch, but only
+  # because nobody had yet edited one in place.
+  SRC="$REPO/test/e2e/breaks/$b.py"
+  [ -f "$SRC" ] || SRC="/tmp/claude-0/breaks/$b.py"
+  [ -f "$SRC" ] || { echo "== $b MISSING (not in $REPO/test/e2e/breaks nor /tmp/claude-0/breaks)" >> "$OUT"; continue; }
   P="/tmp/claude-0/wt$LANE-patch.py"
   sed "s#/home/user/rundesk#$WT#g" "$SRC" > "$P"
 
