@@ -604,6 +604,29 @@ Two general rules:
   same defect as `wt-break.sh` truncating per run, introduced in the script
   written to work around that one. Nothing was lost, because the per-run
   archives added that morning already held the results.
+- **THE RUNNER READ FROM SOMEWHERE ELSE THAN YOU WROTE TO.** Break patches
+  lived in `/tmp/claude-0/breaks` before they were committed.
+  `check-break-patches.py` moved to the tracked copy and wrote down why — "the
+  repository is what CI has and what survives the container" — and
+  `wt-break.sh` was never brought along. Twelve patches written straight into
+  `test/e2e/breaks` came back `== <name> MISSING`, and two sets of four
+  reported
+
+      patches 4 · STILL-GREEN 0 · UNBUILT 0
+
+  which is byte-identical to four patches that all reddened. `MISSING` starts
+  with `== `, is not a control line, is followed by no result line, and says
+  neither BUILD nor PATCH FAILED — so it fell through every category the
+  summary had. **A summary that cannot say "nothing ran" will say "nothing
+  went wrong" instead.** Each outcome gets a column of its own the first time
+  it is noticed, not the second: `PATCH CHANGED NOTHING` was added in the same
+  edit, before it had cost anything, because it was sitting in exactly the same
+  gap.
+
+  The check for this belongs in preflight, not in a habit. Two directories
+  holding the same 614 files agreed byte for byte, which is the only reason
+  nothing already recorded describes the wrong patch — and that is luck, not
+  a property: it held only because no patch had yet been edited in place.
 
 ### Checking the checkers
 
