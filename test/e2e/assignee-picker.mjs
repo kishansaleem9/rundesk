@@ -166,7 +166,9 @@ try {
     'the assignee field offers a picker',
     'assignment is still a row of chips with no way in',
   )
-  await page.getByTestId('assignee-picker-open').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('assignee-picker-open').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(
       () => page.getByTestId('assignee-search').isVisible().catch(() => false),
@@ -248,7 +250,7 @@ try {
     'an email that matches nobody just showed "no matches" — the frame offers an invitation',
   )
 
-  await page.getByTestId('assignee-invite').click()
+  await page.getByTestId('assignee-invite').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const invites = (await A(`/invitations/workspace/${workspaceId}`)).data ?? []

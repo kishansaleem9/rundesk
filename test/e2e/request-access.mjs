@@ -227,7 +227,9 @@ try {
     'no request-access button',
   )
 
-  await page.getByTestId('request-access-button').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('request-access-button').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2500)
   chk(
     await page.getByTestId('request-access-sent').isVisible().catch(() => false),

@@ -717,7 +717,9 @@ try {
     'the row offers More settings',
     'there is no expander — frame `00:25` has one',
   )
-  await page.getByTestId('quick-create-new-field-more').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('quick-create-new-field-more').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(
       () => page.getByTestId('quick-create-new-field-scope').isVisible().catch(() => false),

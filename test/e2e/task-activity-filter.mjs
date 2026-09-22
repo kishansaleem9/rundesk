@@ -328,7 +328,9 @@ try {
     'the panel emptied and took its own filter bar with it, so the filter could not be undone',
   )
 
-  await page.getByTestId('activity-filter-clear').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('activity-filter-clear').click({ timeout: 10_000 }).catch(() => {})
   const wholeFeed = async () =>
     (await count.getAttribute('data-pending')) === 'false'
     && Number(await count.getAttribute('data-count')) >= 100

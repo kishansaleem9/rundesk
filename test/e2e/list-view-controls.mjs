@@ -369,7 +369,9 @@ try {
   console.log('\n▶ the table draws five, and hiding one moves the heading AND the cells')
   await page.getByTestId('work-view-tab-type-table').click()
   await page.waitForTimeout(1800)
-  await page.getByTestId('list-columns').locator('summary').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('list-columns').locator('summary').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(400)
   const tableCols = await page.locator('[data-testid^="list-column-"]').evaluateAll(
     (els) => els.map((e) => e.getAttribute('data-testid')).sort(),

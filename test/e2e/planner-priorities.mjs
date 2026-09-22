@@ -134,7 +134,9 @@ try {
 
   const TITLE = `Ship the thing ${TAG}`
   await page.getByTestId('planner-priority-input').fill(TITLE)
-  await page.getByTestId('planner-priority-add').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('planner-priority-add').click({ timeout: 10_000 }).catch(() => {})
 
   let stored = []
   const added = await waitUntil(async () => {

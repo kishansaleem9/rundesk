@@ -392,7 +392,9 @@ try {
   )
 
   const beforePick = searchCalls.length
-  await page.getByTestId('palette-assignee-option-u3').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('palette-assignee-option-u3').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(1500)
   chk(
     (await page.locator('[data-testid="palette-assignee-value"]').innerText().catch(() => '')).trim() ===

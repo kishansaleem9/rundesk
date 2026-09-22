@@ -453,7 +453,9 @@ try {
   )
   chk(hasTarget, 'and it offers a task that can be a parent',
     'the picker had nothing to convert into')
-  await page.getByTestId('task-convert-candidate').first().click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('task-convert-candidate').first().click({ timeout: 10_000 }).catch(() => {})
   const nested = await waitUntil(
     async () => (await A(`/tasks/${task.id}`)).data?.parentTaskId === other.id,
     { timeoutMs: 10_000 },

@@ -270,7 +270,9 @@ try {
   )
 
   console.log('\n▶ pressed, it asks the real planner — and the refusal reaches the person')
-  await page.getByTestId('create-ai-open').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('create-ai-open').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(() => planCalls.length === 1, { timeoutMs: 20_000 }),
     'pressing it sends exactly one POST /ai/command',

@@ -179,7 +179,9 @@ try {
       `and Table ${(await page.getByTestId('comment-slash-table').isVisible().catch(() => false)) ? 'visible too — nothing was filtered' : 'hidden'}`,
   )
 
-  await page.getByTestId('comment-slash-quote').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('comment-slash-quote').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const v = await box.inputValue()

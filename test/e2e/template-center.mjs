@@ -374,13 +374,15 @@ try {
     'Marketing had two templates and still offered a "See N more"')
 
   mark = browseCalls.length
-  await page.getByTestId('templates-category-more-engineering').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('templates-category-more-engineering').click({ timeout: 10_000 }).catch(() => {})
   chk(await settle(7), 'pressing it drills into Engineering and shows all seven',
     `the grid drew ${await cards().count()} cards`)
   chk(await waitUntil(() => sinceLast(mark).some((u) => /[?&]category=engineering(&|$)/.test(u)), { timeoutMs: 8_000 }),
     'and category=engineering went to the server — it is a query, not a client-side slice',
     `no request carried category=engineering: ${JSON.stringify(sinceLast(mark))}`)
-  await page.getByTestId('templates-category-engineering').click()
+  await page.getByTestId('templates-category-engineering').click({ timeout: 10_000 }).catch(() => {})
   chk(await settle(ALL_SHOWN), 'and clicking the heading again clears it',
     `the grid drew ${await cards().count()} cards`)
 
@@ -421,7 +423,7 @@ try {
   chk(await settle(ALL_SHOWN), 'going back to All restores them', `the grid drew ${await cards().count()} cards`)
 
   console.log('\n▶ Clear filters puts every axis back at once')
-  await page.getByTestId('templates-facet-type-list').click()
+  await page.getByTestId('templates-facet-type-list').click({ timeout: 10_000 }).catch(() => {})
   await page.getByTestId('templates-facet-complexity-beginner').click()
   chk(await settle(1), 'List + Beginner together leave one template',
     `the grid drew ${await cards().count()} cards`)
@@ -442,7 +444,7 @@ try {
   chk(await page.getByTestId('templates-facet-clear').count() === 1,
     'the Clear filters control appears once something is on',
     'nothing offered to clear the filters')
-  await page.getByTestId('templates-facet-clear').click()
+  await page.getByTestId('templates-facet-clear').click({ timeout: 10_000 }).catch(() => {})
   chk(await settle(ALL_SHOWN), 'pressing it restores all of them', `the grid drew ${await cards().count()} cards`)
   /*
    * Read back off the CONTROLS, not off the card count: this is the check that

@@ -271,7 +271,9 @@ try {
   )
 
   requests.length = 0
-  await page.getByTestId('task-type-fill-ai').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('task-type-fill-ai').click({ timeout: 10_000 }).catch(() => {})
   const genCalls = await waitUntil(
     () => requests.filter((r) => r.method === 'POST' && r.url.includes('/ai/task/generate')).length > 0,
     { timeoutMs: 25_000 },

@@ -253,7 +253,9 @@ try {
     'no "Add fields" control on the task; the one item of the five with no destination still has none',
   )
 
-  await page.getByTestId('task-add-fields').click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('task-add-fields').click({ timeout: 10_000 }).catch(() => {})
   const formOpen = await waitUntil(
     () => page.getByTestId('task-field-create-form').isVisible().catch(() => false),
     { timeoutMs: 15_000 },

@@ -258,7 +258,9 @@ try {
   chk((await readout('list-card-cover')).trim() === 'Image',
     'and Card cover reads "Image", as the frame shows',
     `it read ${JSON.stringify((await readout('list-card-cover')).trim())}`)
-  await page.getByTestId('list-card-size').locator('summary').first().click()
+  // Bounded and caught: the check above it is allowed to fail, and an unbounded
+  // press on a control that is not there ends the section instead (ledger §10).
+  await page.getByTestId('list-card-size').locator('summary').first().click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(250)
   const sizeOptions = await page.locator('[data-testid^="list-card-size-"]').evaluateAll((els) =>
     els.map((e) => e.getAttribute('data-testid')).filter((id) => id !== 'list-card-size-value').sort(),
@@ -361,7 +363,7 @@ try {
     'the Save view chip never appeared — Card size is not part of the view config')
   await page.evaluate(() => { window.prompt = () => 'card size view' })
   const before = viewWrites.length
-  await page.getByTestId('list-save-view').click()
+  await page.getByTestId('list-save-view').click({ timeout: 10_000 }).catch(() => {})
   const wrote = await waitUntil(
     () => viewWrites.slice(before).some((b) => b?.config?.cardSize === 'large'),
     { timeoutMs: 10_000 },
