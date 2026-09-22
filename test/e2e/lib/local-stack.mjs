@@ -146,6 +146,13 @@ async function proxyLogin(req, res, apiPort) {
  * clone has no dist at all, so there is nothing to be wrong about.) Refused
  * rather than warned, because a warning above fifty PASS lines is a warning
  * nobody reads.
+ *
+ * A TOUCH READS THE SAME AS AN EDIT, and that is the trade. Restoring a file
+ * from a backup — which a break-test does — leaves the same bytes with a new
+ * mtime, and this refuses on it and costs a rebuild. Content hashing would tell
+ * the two apart and would also have to be kept in step with the build to be
+ * trusted; over-building is the cheaper mistake, and it only happens to someone
+ * who has just been moving source files around by hand.
  */
 function refuseStaleBundle(dist) {
   const newest = (dir) => {
