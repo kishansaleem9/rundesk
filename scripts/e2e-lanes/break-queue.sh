@@ -58,55 +58,10 @@ while IFS= read -r line; do
   RC=$?
   RES="/tmp/claude-0/break-$SUITE.txt"
   BASE=$(grep -m1 '^== BASELINE' "$RES" 2>/dev/null)
-  # ONE PASS, ONE OUTCOME PER PATCH, AND THE COLUMNS ADD UP BY CONSTRUCTION.
-  #
-  # This was six greps over the same file with overlapping patterns, and it grew
-  # a column every time a category was found falling between the ones it had:
-  # STILL-GREEN, then UNBUILT, then MISSING, then NO-CHANGE, then SHORT. Each
-  # addition was right and the SHAPE was wrong — `RED` was whatever was left
-  # after subtracting five independently-counted sets, so any patch matching two
-  # of them was subtracted twice. A short run that also reports `0 failed` was
-  # counted as still-green AND as short, which takes REDDENED below zero and
-  # trips "PROVED NOTHING" on a set that proved something.
-  #
-  # That is the duplicated list, in the script whose entire purpose is to report
-  # these numbers honestly — five patterns describing one partition, drifting
-  # apart. So each patch block is classified exactly once, in the order a reader
-  # would: the header says MISSING, FAILED or CHANGED NOTHING, else the body
-  # says the run stopped early, else the summary says 0 failed, else it
-  # reddened. The sum is asserted below rather than assumed.
-  eval "$(awk '
-    function flush() {
-      if (!inpatch) return
-      if      (hdr ~ / MISSING/)                 missing++
-      else if (hdr ~ /(BUILD|PATCH) FAILED/)     unbuilt++
-      else if (hdr ~ /PATCH CHANGED NOTHING/)    nochange++
-      else if (nosummary)                       crashed++
-      else if (isshort)                          short++
-      else if (isgreen)                          green++
-      else                                       red++
-      inpatch = 0
-    }
-    /^== (syncing|BASELINE|restoring|REFUSING)/ { flush(); next }
-    /^== / { flush(); inpatch = 1; hdr = $0; isshort = 0; isgreen = 0; nosummary = 0; next }
-    inpatch && /^  NO SUMMARY:/ { nosummary = 1; next }
-    inpatch && /^  SHORT RUN:/  { isshort = 1; next }
-    # AND THE OTHER WORDING FOR THE SAME FACT. Suites report a short run two
-    # ways: the `\u2717 N of M checks ran` line `wt-break.sh` tags as SHORT RUN,
-    # and `FAIL ran N checks, expected M`, which several suites print as an
-    # ordinary failure. `app-catalogue-10-frame-app-missing` stopped at 16 of 25
-    # and was classified RED here — a patch that reddened four checks, three of
-    # which it never reached. One partition, two spellings, and only one of them
-    # was being read.
-    inpatch && /FAIL ran [0-9]+ checks, expected/ { isshort = 1; next }
-    inpatch && /, 0 failed/     { isgreen = 1; next }
-    END {
-      flush()
-      printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d CRASHED=%d RED=%d\n",
-        missing+unbuilt+nochange+short+crashed+green+red, green+0, unbuilt+0, missing+0,
-        nochange+0, short+0, crashed+0, red+0
-    }
-  ' "$RES" 2>/dev/null)"
+  # The classifier lives in `classify-break-log.awk`, because the reporter asks
+  # the same question of the same file and two copies of it is the duplicated
+  # list this audit keeps finding.
+  eval "$(awk -f "$(dirname "$0")/classify-break-log.awk" "$RES" 2>/dev/null)"
   : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${CRASHED:=0}" "${RED:=0}"
   echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE · SHORT $SHORT · CRASHED $CRASHED" >> "$OUT"
   # THE PARTITION IS ASSERTED, NOT TRUSTED. The whole reason the old arithmetic
