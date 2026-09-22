@@ -45,7 +45,13 @@
  * cannot fail dressed as a passing one, which is the reason
  * `check-break-freshness.mjs` is not in CI either.
  *
- * Two ratchets, both of which may fall and may not rise.
+ * A `unit:` CLAIM IS NOT JUDGED HERE AT ALL. Its evidence is a `*.test.ts`, and
+ * the e2e log its patch happens to appear in cannot speak to it either way — so
+ * counting a green from one as "a patch that disproves no check" is the same
+ * mistake as counting a short run as a reddening. Reported as its own count.
+ *
+ * Three ratchets: a floor on what is measured, ceilings on the two kinds of
+ * silence.
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -102,7 +108,10 @@ for (const n of suiteNames) {
  * with nothing wrong. 500 is under that and still catches the failure this
  * floor exists for: the escape-strip regression took the count to 51.
  */
-const BASELINE = { reddened: 500, green: 2, unproven: 14 }
+// `green` is 1 rather than 2 since the `unit:` claims stopped being counted as
+// patches that disproved nothing — their evidence is a `*.test.ts` and an e2e
+// log cannot speak to it either way.
+const BASELINE = { reddened: 500, green: 1, unproven: 14 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -121,11 +130,27 @@ const green = []
 const unproven = []
 const unknown = []
 const noClaim = []
+const unitClaim = []
 let reddened = 0
 
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const name = f.slice(0, -3)
-  const claims = quotedIn(reddensText(readFileSync(join(BREAKS, f), 'utf8')))
+  const block = reddensText(readFileSync(join(BREAKS, f), 'utf8'))
+  /*
+   * A `unit:` CLAIM'S EVIDENCE IS A UNIT TEST, AND AN E2E LOG CANNOT SPEAK TO
+   * IT. `planner-priorities-1-two-cache-keys-again` points at
+   * `use-priorities.test.ts`; its e2e set runs it and reports `0 failed`,
+   * correctly, because nothing in that suite is about the query key it changes.
+   * Counting that as "a patch that disproves no check" is the same mistake as
+   * counting a short run as a reddening: the log is not evidence about this
+   * patch either way. Three patches are in this state, and a green from them is
+   * neither a finding nor a pass — it is silence, and it is reported as such.
+   */
+  if (/^#\s*Reddens:\s*unit\b/im.test(block)) {
+    unitClaim.push(name)
+    continue
+  }
+  const claims = quotedIn(block)
   if (!claims.length) {
     noClaim.push(name)
     continue
@@ -236,7 +261,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
 console.log(
   `[break-reddened] ${reddened} patch(es) reddened a check they claim · ${green.length} reddened ` +
     `nothing · ${unproven.length} unproven · ${unknown.length} have no usable log · ` +
-    `${noClaim.length} quote no sentence`,
+    `${noClaim.length} quote no sentence · ${unitClaim.length} claim a unit test`,
 )
 const show = (label, rows, why) => {
   if (!rows.length) return
