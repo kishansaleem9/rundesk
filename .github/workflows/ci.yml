@@ -204,6 +204,15 @@ jobs:
       - name: The chain helper holds its contract
         run: node scripts/check-chain-helper.mjs
 
+      # And the matcher that decides whether a claim counts as verified, for 798
+      # patches across two checkers. Every one of its rules is a LOOSENING that
+      # exists because a real claim was being misread, and a loosening is one
+      # edit away from a matcher that matches anything. The floor's height is
+      # pinned in both directions, because a test of the floor's existence left
+      # lowering it from five words to four completely green.
+      - name: The claim matcher holds its contract
+        run: node scripts/check-claim-match.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
