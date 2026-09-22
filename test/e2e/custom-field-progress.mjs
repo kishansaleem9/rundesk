@@ -703,10 +703,17 @@ try {
    * is chosen. A filter you then have to act on separately is a different,
    * slower control.
    */
+  // Read once, bounded and caught: the message below is evaluated whether the
+  // check passes or fails, so a patch that takes the type picker away would end
+  // the section here instead of reporting it.
+  const typedType = await page
+    .getByTestId('quick-create-new-field-type')
+    .inputValue({ timeout: 6000 })
+    .catch(() => null)
   chk(
-    (await page.getByTestId('quick-create-new-field-type').inputValue()).startsWith('progress'),
+    (typedType ?? '').startsWith('progress'),
     'and lands on a matching type without a second click',
-    `the selected type was "${await page.getByTestId('quick-create-new-field-type').inputValue()}"`,
+    `the selected type was ${JSON.stringify(typedType)}`,
   )
 
   // -------------------------------------------------------------------------

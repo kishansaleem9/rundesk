@@ -226,10 +226,30 @@ try {
   )
 
   const fastHint = best.find((m) => m.id === 'fast')?.hint ?? ''
+  /*
+   * READ ONCE, BOUNDED AND CAUGHT. `amc-5-bound-moved` drops the server's
+   * visible bound to two, so the `fast` row goes behind the disclosure, no card
+   * opens on hover, and `ai-model-hint-fast` is not on the page: this read
+   * waited out Playwright's default thirty seconds and ended the run at 13 of
+   * 24 — AFTER reddening the check it claims and two more besides, so the row
+   * credited it correctly and eleven checks went unreported anyway.
+   *
+   * `innerText` is an eighth verb in the class, and the `fastHint.length > 0 &&`
+   * in front of it is no guard: `fast` is still in the served catalogue, so the
+   * short-circuit never fires. Nor would a working short-circuit have saved
+   * this, because the MESSAGE read the same locator a second time and a `chk`
+   * message is evaluated whether the check passes or fails. One read, held in a
+   * variable, is the only shape that closes both.
+   */
+  const fastCardText = await page
+    .getByTestId('ai-model-hint-fast')
+    .innerText({ timeout: 8000 })
+    .then((t) => t.trim())
+    .catch(() => null)
   chk(
-    fastHint.length > 0 && (await page.getByTestId('ai-model-hint-fast').innerText()).trim() === fastHint,
+    fastHint.length > 0 && fastCardText === fastHint,
     'carrying that model’s OWN one line, the same one the catalogue serves',
-    `the card read ${JSON.stringify((await page.getByTestId('ai-model-hint-fast').innerText()).trim())} ` +
+    `the card read ${fastCardText === null ? 'nothing — no hint element was on the page' : JSON.stringify(fastCardText)} ` +
       `against a served hint of ${JSON.stringify(fastHint)}`,
   )
 
@@ -306,12 +326,17 @@ try {
       `${(await page.getByTestId('ai-model-card-fast').count()) ? 'up' : 'gone'}`,
   )
   const maxHint = best.find((m) => m.id === 'max')?.hint ?? ''
+  // The same read, the same way, for the same reason as the `fast` card above:
+  // a bound that hides a row hides its card, and this one is read twice too.
+  const maxCardText = await page
+    .getByTestId('ai-model-hint-max')
+    .innerText({ timeout: 8000 })
+    .then((t) => t.trim())
+    .catch(() => null)
   chk(
-    maxHint.length > 0 &&
-      maxHint !== fastHint &&
-      (await page.getByTestId('ai-model-hint-max').innerText()).trim() === maxHint,
+    maxHint.length > 0 && maxHint !== fastHint && maxCardText === maxHint,
     'saying something different about a different model',
-    `the second card read ${JSON.stringify((await page.getByTestId('ai-model-hint-max').innerText()).trim())} ` +
+    `the second card read ${maxCardText === null ? 'nothing — no hint element was on the page' : JSON.stringify(maxCardText)} ` +
       `against ${JSON.stringify(fastHint)} on the first`,
   )
   const maxSpeed = await widthOf('ai-model-bar-speed-max')

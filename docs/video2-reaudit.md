@@ -5029,3 +5029,87 @@ fixture fact rather than a product one.
 Nothing needed fixing; the refusal needed re-measuring. It is in the plan the
 round regenerated, so the seven `assign-*` patches stay UNKNOWN — not absent,
 not green — until it runs.
+
+### Rule six: the read in the message, where no short-circuit can reach it
+
+`amc-5-bound-moved` drops the server's `BEST_MODELS_VISIBLE` from three to two,
+so the `fast` row goes behind the disclosure and its card never opens. The run
+reddened the check the patch claims AND two more besides — and then spent
+thirty seconds on this:
+
+```
+chk(
+  fastHint.length > 0 && (await page.getByTestId('ai-model-hint-fast').innerText()).trim() === fastHint,
+  'carrying that model’s OWN one line, the same one the catalogue serves',
+  `the card read ${JSON.stringify((await page.getByTestId('ai-model-hint-fast').innerText()).trim())} …`,
+)
+```
+
+13 of 24. `innerText` is an eighth verb in the section-ender class, and the
+guard in front of it — `fastHint.length > 0 &&` — does not fire, because `fast`
+is still in the served catalogue; the row went behind a disclosure, it did not
+leave the catalogue.
+
+**And this one gates, where the broad read scan did not.** That distinction is
+the whole finding. Rule one's header rejected a scan over `innerText` and
+`getAttribute` because six of its nine candidates were already guarded by `&&`
+short-circuiting, "which is the idiom these suites use and which a text rule
+cannot see." A MESSAGE ARGUMENT HAS NO CONDITION TO SHORT-CIRCUIT. It is
+evaluated whether the check passes or fails, so the idiom that made the broad
+scan useless cannot apply — the objection dissolves instead of being argued
+around. Even a guard that DID fire would have left the message reading the same
+absent element a second time.
+
+A message read is also the one case where bounding is unconditionally right.
+Rule three's caveat — catching a box read is only safe while the assertion under
+it reddens on absence — has no counterpart, because **a message decides
+nothing.** It is diagnostic text. A message that throws does not weaken a
+verdict; it replaces the verdict with an exception and takes the rest of the
+section with it.
+
+**Seventeen sites across thirteen suites, all seventeen now bounded**, each read
+once into a variable used in both the condition and the message. That retires
+the double read as well: twenty-six `chk`s in this tree read the same locator
+twice, and two of them were not merely wasteful —
+
+- `list-card-cover` called `sizeReadout()` again from the message, and
+  `sizeReadout` calls `openCustomize`. Reading the diagnostic REOPENED the panel
+  that the next line deliberately shuts before anything is measured. A sentence
+  describing the page was moving it.
+- `list-view-controls` read `data-calendar-period` and `todayBtn.isDisabled()`
+  five times between them across three checks, all bare, with a caught gate
+  above them — so `list-calendar` going missing would have ended that section on
+  whichever line got there first.
+
+#### And zero is the number this audit has learnt not to take on trust
+
+The rule is now a gate over a tree with no sites left in it, which means its
+answer in CI is `0`, and "0 failed is not it ran." So its reader came out into
+`scripts/lib/suite-reads.mjs` and `scripts/check-suite-reads.mjs` breaks it:
+**17 cases, and six mutations of the reader, every one of which reddens the case
+that names the defect.**
+
+| deleted | the case that fails |
+|---|---|
+| `.slice(2)` | a read in the CONDITION is reported as a message read |
+| string-skipping in the splitter | `"a, 'b, c', d"` splits into four arguments |
+| depth-counting in the splitter | `'a, f(b, c), d'` splits into four arguments |
+| `if (depth !== 0) continue` | a truncated `chk(` is scanned on an invented argument list |
+| the `.catch` exclusion | a read that already catches is reported, so the fix cannot fix it |
+| `count` added to the verb list | `count()` is reported, and bounding it is busywork |
+
+The two splitter cases each put **two** commas in front of the read, and that is
+deliberate: one comma only moves a condition read to index 1, which `.slice(2)`
+drops whatever the splitter does — a one-comma case would pass with the skipping
+deleted and prove nothing. Two commas walk it to index 2, inside the message's
+range, where a blind splitter reports a guarded condition as a defect.
+
+Confirmed against the real tree too, not only fixtures: putting one of the
+seventeen back reddens the gate at `paywall-sites.mjs:329` by name, and the
+restore leaves `git status` clean.
+
+**Rules one to five remain line-based and untested.** That is a gap, named here
+rather than papered over: they were each measured against the tree when they
+went in — nineteen, five, twenty, three and twenty sites, all real — but none of
+them has a case file, so none of them would notice itself breaking. Rule six is
+the first with one, because it is the first whose steady-state answer is zero.

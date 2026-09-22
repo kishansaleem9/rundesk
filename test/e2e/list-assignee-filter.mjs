@@ -418,10 +418,17 @@ try {
       )} ` +
       `with ${await page.getByTestId('list-assignee-clear').count()} clear button(s)`,
   )
+  // The chip read above was bounded and caught; this one, four lines down, was
+  // not — and it is read twice, once in the condition and once in the message a
+  // failing check prints. `chk` evaluates its message either way.
+  const selectValue = await page
+    .getByTestId('list-assignee-filter')
+    .inputValue({ timeout: 6000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('list-assignee-filter').inputValue() === ME,
+    selectValue === ME,
     'and the native select beside it moved with it, rather than disagreeing',
-    `the select reads ${JSON.stringify(await page.getByTestId('list-assignee-filter').inputValue())} while the picker holds ${ME}`,
+    `the select reads ${JSON.stringify(selectValue)} while the picker holds ${ME}`,
   )
 
   // ── one switch at a time, each changing the GRID ──────────────────────────

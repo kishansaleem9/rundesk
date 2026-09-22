@@ -301,13 +301,19 @@ try {
   // the same patch; this was the last unguarded wait (ledger §10).
   await page.waitForSelector('[data-testid="planner-onboarding-card"]', { timeout: 15_000 }).catch(() => {})
   const first = await readCard()
+  // And the position read, twice over, was the last thing in this section that
+  // `po-1-panel-never-shows` could still end it on: the gate above is caught,
+  // `readCard` answers rather than throws, and this was bare in the condition
+  // AND in the message — which `chk` evaluates whether the check passes or not.
+  const position = await page
+    .locator('[data-testid="planner-onboarding-position"]')
+    .textContent({ timeout: 6000 })
+    .then((t) => t?.trim() ?? null)
+    .catch(() => null)
   chk(
-    first === CARD_TITLES[0] &&
-      (await page.locator('[data-testid="planner-onboarding-position"]').textContent())?.trim() ===
-        `1/${CARD_TITLES.length}`,
+    first === CARD_TITLES[0] && position === `1/${CARD_TITLES.length}`,
     `it opens on ${JSON.stringify(CARD_TITLES[0])}, card 1 of ${CARD_TITLES.length}`,
-    `it opened on ${JSON.stringify(first)} at position ` +
-      `${JSON.stringify((await page.locator('[data-testid="planner-onboarding-position"]').textContent())?.trim())}`,
+    `it opened on ${JSON.stringify(first)} at position ${JSON.stringify(position)}`,
   )
 
   await page.locator('[data-testid="planner-onboarding-next"]').click({ timeout: 8000 }).catch(() => {})

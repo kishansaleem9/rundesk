@@ -211,11 +211,22 @@ try {
   // Bounding one step and leaving the next unbounded only moves the thirty
   // seconds one line down (ledger §10).
   await page.getByTestId('comment-emoji-🎉').click({ timeout: 8000 }).catch(() => {})
+  const emojiLanded = await waitUntil(
+    async () => (await page.getByTestId('comment-input').inputValue()).includes('🎉'),
+    { timeoutMs: 10_000 },
+  )
+  // The condition above is safe — `waitUntil` catches its predicate's throws —
+  // and the message below had nothing. A `chk` message is evaluated whether the
+  // check passes or fails, so a composer this section has removed would end the
+  // section here rather than report the failure the check is for.
+  const composerHeld = await page
+    .getByTestId('comment-input')
+    .inputValue({ timeout: 6000 })
+    .catch(() => null)
   chk(
-    await waitUntil(async () => (await page.getByTestId('comment-input').inputValue()).includes('🎉'),
-      { timeoutMs: 10_000 }),
+    emojiLanded,
     'and the emoji lands in the comment being written',
-    `the composer held "${await page.getByTestId('comment-input').inputValue()}" — the row is decoration`,
+    `the composer held ${JSON.stringify(composerHeld)} — the row is decoration`,
   )
 
   // -------------------------------------------------------------------------

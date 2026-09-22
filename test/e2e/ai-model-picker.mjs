@@ -249,10 +249,18 @@ try {
     { timeoutMs: 8_000 },
   )
   chk(menuUp, 'clicking the pill opens it', 'the model menu never appeared')
+  // Read once, bounded and caught: a `chk` message is evaluated whether the
+  // check passes or fails, so a second read here would end the section on any
+  // patch that takes the group heading away.
+  const bestHeader = await page
+    .getByTestId('ai-model-group-best')
+    .innerText({ timeout: 6000 })
+    .then((t) => t.trim())
+    .catch(() => null)
   chk(
-    (await page.getByTestId('ai-model-group-best').innerText()).trim() === 'Best models',
+    bestHeader === 'Best models',
     'headed "Best models", as the frame heads it',
-    `the header read ${JSON.stringify((await page.getByTestId('ai-model-group-best').innerText()).trim())}`,
+    `the header read ${JSON.stringify(bestHeader)}`,
   )
 
   const selectable = page.locator('[data-testid^="ai-model-option-"][data-available="true"]')
@@ -400,10 +408,14 @@ try {
   const ctx2 = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   const page2 = await ctx2.newPage()
   await openAiPage(page2)
+  const secondTier = await page2
+    .getByTestId('ai-model-tier')
+    .getAttribute('data-tier', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    (await page2.getByTestId('ai-model-tier').getAttribute('data-tier')) === 'fast',
+    secondTier === 'fast',
     'a browser that has never seen this account opens on the preferred tier',
-    `the second browser read data-tier="${await page2.getByTestId('ai-model-tier').getAttribute('data-tier')}" ` +
+    `the second browser read data-tier=${JSON.stringify(secondTier)} ` +
       '— the preference is still not following the person',
   )
   const legacyKey = await page2.evaluate(() => {

@@ -645,11 +645,24 @@ try {
       { timeoutMs: 10_000 },
     ))
   const stored = (await A(`/planner/${workspaceId}/settings`)).data ?? {}
+  /*
+   * BOUNDED AND CAUGHT, and hoisted out of the message. The ternary below IS
+   * lazy, so `untickable === false` never reaches the read — but `untickable`
+   * only says there was a Holidays row to press, never that the chip is still
+   * drawn. The read inside `waitUntil` above is safe because `waitUntil`
+   * catches its predicate's throws; this one had nothing, and a `chk` message
+   * is evaluated whether the check passes or fails.
+   */
+  const chipNow = await page
+    .getByTestId('planner-calendars-count')
+    .textContent({ timeout: 6000 })
+    .then((t) => t?.trim() ?? null)
+    .catch(() => null)
   chk(
     chipFell && (stored.hiddenCalendarIds ?? []).includes('workspace:holidays'),
     'unticking Holidays drops the chip by one and is remembered on the account',
     untickable
-      ? `the chip read ${(await page.getByTestId('planner-calendars-count').textContent())?.trim()} and the ` +
+      ? `the chip read ${JSON.stringify(chipNow)} and the ` +
         `stored settings were ${JSON.stringify(stored.hiddenCalendarIds ?? null)}`
       : 'there was no Holidays row in the picker to untick, so whether unticking sticks could not be ' +
         'read at all — reported as failed because UNKNOWN is not the same as fine',

@@ -728,11 +728,19 @@ try {
     'pressing Download still opens the gate that teaches',
     'the board Download did nothing visible on a plan that does not include it',
   )
+  // Read once, bounded and caught: the check above is ALLOWED to find the gate
+  // absent, and when it is absent so is its plan label. A `chk` message is
+  // evaluated whether the check passes or fails, so the second read here would
+  // end the section rather than report which tier was offered.
+  const gatePlan = await page
+    .getByTestId('feature-gate-plan')
+    .getAttribute('data-plan', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('feature-gate-plan').getAttribute('data-plan') === notePlan,
+    gatePlan === notePlan,
     'and the caption names the same tier the gate offers',
     `the caption said ${JSON.stringify(notePlan)} and the dialog offers ` +
-      `${JSON.stringify(await page.getByTestId('feature-gate-plan').getAttribute('data-plan'))} — ` +
+      `${JSON.stringify(gatePlan)} — ` +
       'two readers of one catalog have drifted, and the cheaper of the two is a wrong price on a label',
   )
   await page.getByTestId('feature-gate-close').click()
@@ -749,10 +757,14 @@ try {
   await page.waitForTimeout(1200)
   await openPanel()
   await openDetails(page.getByTestId('list-export-section'), 300)
+  const exportView = await page
+    .getByTestId('list-export-section')
+    .getAttribute('data-export-view', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('list-export-section').getAttribute('data-export-view') === 'list',
+    exportView === 'list',
     'standing on List, the panel is about the list download',
-    `the panel said it would export ${JSON.stringify(await page.getByTestId('list-export-section').getAttribute('data-export-view'))}`,
+    `the panel said it would export ${JSON.stringify(exportView)}`,
   )
   chk(
     await page.getByTestId('list-export-plan-note').count() === 0,

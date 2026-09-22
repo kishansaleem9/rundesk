@@ -491,11 +491,17 @@ try {
    * shape of a check that fails for a reason that is not the code.
    */
   const signatureRow = page.getByTestId('custom-field-row').filter({ hasText: 'Sign here' })
+  // Read once, bounded and caught. The message is evaluated whether the check
+  // passes or fails, and a pad that is not drawn at all is precisely the mirror
+  // defect this check exists to catch — so it has to be reportable, not fatal.
+  const padStrokes = await signatureRow
+    .getByTestId('cf-signature-pad')
+    .getAttribute('data-strokes', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    Number(await signatureRow.getByTestId('cf-signature-pad').getAttribute('data-strokes')) === 2,
+    padStrokes !== null && Number(padStrokes) === 2,
     'the signature row draws the two strokes the server holds',
-    'the pad reports ' +
-      `${await signatureRow.getByTestId('cf-signature-pad').getAttribute('data-strokes')} strokes ` +
+    `the pad reports ${JSON.stringify(padStrokes)} strokes ` +
       'for a value with two in it — a value that stores and does not draw is the mirror defect',
   )
 

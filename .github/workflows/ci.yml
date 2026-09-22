@@ -240,6 +240,16 @@ jobs:
       - name: Nothing ends a section on a throw where a check belongs
         run: node scripts/check-suite-section-enders.mjs
 
+      # Rule six of that checker, which is a gate over a tree with zero sites
+      # left in it — and zero is the number this audit has learnt not to take on
+      # trust. The rule turns on two things that can be wrong without looking
+      # wrong: which `chk` argument is the message, and a comma splitter that
+      # has to see through nested calls and strings to say so. Each case here is
+      # written so that deleting the line it covers changes the answer; all six
+      # mutations redden, each on the case that names the defect.
+      - name: Rule six's reader holds its contract
+        run: node scripts/check-suite-reads.mjs
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover

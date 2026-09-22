@@ -75,6 +75,18 @@ const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
 
+/*
+ * READS THAT ANSWER `null` INSTEAD OF ENDING THE SECTION. Both verbs wait for
+ * the element and THROW when it never arrives, and both are read twice below —
+ * once in a condition and once in the message beside it. A `chk` message is
+ * evaluated whether the check passes or fails, so no `&&` in the condition can
+ * protect the second read; these hold the answer in a variable and use it in
+ * both places. `null` is not a value any of these checks accept, so an absent
+ * control still fails, in a sentence, with the rest of the section reported.
+ */
+const attrOf = (loc, name) => loc.getAttribute(name, { timeout: 6000 }).catch(() => null)
+const valueOf = (loc) => loc.inputValue({ timeout: 6000 }).catch(() => null)
+
 const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
 const api = apiClient(`${B}/api/v1`, auth.accessToken)
 const ME = auth.user?.id ?? auth.id
@@ -338,10 +350,11 @@ try {
    */
   await page.getByTestId('ai-activity-mine').click()
   await page.waitForTimeout(400)
+  const mineOffAgain = await attrOf(page.getByTestId('ai-activity-mine'), 'data-on')
   chk(
-    (await page.getByTestId('ai-activity-mine').getAttribute('data-on')) === 'false',
+    mineOffAgain === 'false',
     'pressing it again turns the control back off',
-    `the toggle still reads data-on="${await page.getByTestId('ai-activity-mine').getAttribute('data-on')}" ` +
+    `the toggle still reads data-on=${JSON.stringify(mineOffAgain)} ` +
       '— it can be switched on and never off',
   )
   const beforeMiss = calls.length
@@ -433,14 +446,15 @@ try {
     'the list did not report that its filters matched nothing')
   await page.getByTestId('ai-activity-clear-filters').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1500)
+  const clearedStatus = await valueOf(page.getByTestId('ai-activity-status'))
+  const clearedFeature = await valueOf(page.getByTestId('ai-activity-feature'))
+  const clearedMine = await attrOf(page.getByTestId('ai-activity-mine'), 'data-on')
   chk(
-    (await page.getByTestId('ai-activity-status').inputValue()) === '' &&
-      (await page.getByTestId('ai-activity-feature').inputValue()) === '' &&
-      (await page.getByTestId('ai-activity-mine').getAttribute('data-on')) === 'false',
+    clearedStatus === '' && clearedFeature === '' && clearedMine === 'false',
     'and Clear filters clears all three, not just the one it used to know about',
-    `after clearing: status=${JSON.stringify(await page.getByTestId('ai-activity-status').inputValue())} ` +
-      `feature=${JSON.stringify(await page.getByTestId('ai-activity-feature').inputValue())} ` +
-      `mine=${await page.getByTestId('ai-activity-mine').getAttribute('data-on')}`,
+    `after clearing: status=${JSON.stringify(clearedStatus)} ` +
+      `feature=${JSON.stringify(clearedFeature)} ` +
+      `mine=${JSON.stringify(clearedMine)}`,
   )
   chk(
     await waitUntil(async () => (await page.getByTestId('ai-activity-row').count()) > 0, { timeoutMs: 10_000 }),

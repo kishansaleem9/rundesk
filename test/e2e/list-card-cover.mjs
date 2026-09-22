@@ -310,11 +310,24 @@ try {
    * constant still passes through the attribute.
    */
   const sizeReadout = async () => (await readout('list-card-size')).trim()
-  chk((await sizeReadout()) === 'Large' &&
-      (await page.getByTestId('list-card-size').getAttribute('data-value')) === 'large',
+  /*
+   * BOTH READS HOISTED, and for two different reasons. The attribute read was
+   * bare: a `chk` message is evaluated whether the check passes or fails, so a
+   * row this patch removes would end the section on the message rather than on
+   * the check. And `sizeReadout` is guarded but NOT free — it calls
+   * `openCustomize`, so reading it a second time from the message reopens the
+   * panel that the line below deliberately shuts before anything is measured. A
+   * diagnostic sentence must not move the page it is describing.
+   */
+  const sizeText = await sizeReadout()
+  const sizeAttr = await page
+    .getByTestId('list-card-size')
+    .getAttribute('data-value', { timeout: 6000 })
+    .catch(() => null)
+  chk(sizeText === 'Large' && sizeAttr === 'large',
     'choosing Large changes what the row says it is set to',
-    `with the panel open the row reads ${JSON.stringify(await sizeReadout())} ` +
-      `and reports ${JSON.stringify(await page.getByTestId('list-card-size').getAttribute('data-value'))}`)
+    `with the panel open the row reads ${JSON.stringify(sizeText)} ` +
+      `and reports ${JSON.stringify(sizeAttr)}`)
   await closeCustomize()
   const largeCovered = await heightOf(made.image)
   const largePlain = await heightOf(made.plain)

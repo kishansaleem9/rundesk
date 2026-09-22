@@ -318,10 +318,18 @@ try {
     'and it opens with the frame’s own sentence about the plan',
     `the eyebrow read ${JSON.stringify(eyebrow)}`,
   )
+  // Read once, bounded and caught. The eyebrow above goes through `readText`,
+  // which already answers rather than throws; this read had nothing, and it was
+  // written twice — the second time in the message, which `chk` evaluates
+  // whether the check passes or fails.
+  const offeredTier = await page
+    .getByTestId('feature-gate-plan')
+    .getAttribute('data-plan', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('feature-gate-plan').getAttribute('data-plan') === 'business',
+    offeredTier === 'business',
     'it names Business, the cheapest tier that includes Team View',
-    `the offered tier was ${JSON.stringify(await page.getByTestId('feature-gate-plan').getAttribute('data-plan'))}`,
+    `the offered tier was ${JSON.stringify(offeredTier)}`,
   )
   /*
    * THE HALF THE ROW IS NAMED FOR. A gate that only says no is a wall; the
@@ -393,10 +401,14 @@ try {
   await page.getByTestId('work-view-tab-type-list').click()
   await page.waitForTimeout(1200)
   await openDetails(page.getByTestId('list-customize'))
+  const exportView = await page
+    .getByTestId('list-export-section')
+    .getAttribute('data-export-view', { timeout: 6000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('list-export-section').getAttribute('data-export-view') === 'list',
+    exportView === 'list',
     'standing on List, the panel is about the list download',
-    `the panel said it would export ${JSON.stringify(await page.getByTestId('list-export-section').getAttribute('data-export-view'))}`,
+    `the panel said it would export ${JSON.stringify(exportView)}`,
   )
   chk(
     await page.getByTestId('list-export-section').getAttribute('data-export-locked') === 'false',

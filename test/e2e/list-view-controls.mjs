@@ -499,29 +499,49 @@ try {
   await page.waitForSelector('[data-testid="list-calendar"]', { timeout: 20_000 }).catch(() => {})
   const todayBtn = page.getByTestId('list-calendar-today')
   const prevBtn = page.getByTestId('list-calendar-prev')
+  /*
+   * EVERY READ IN THIS SECTION ANSWERS INSTEAD OF THROWING. The gate above is
+   * caught, so a patch that removes the calendar reaches these lines — and both
+   * verbs wait for their element and throw when it never arrives. Two of the
+   * reads below were written twice over, once in a condition and once in the
+   * message beside it, and a `chk` message is evaluated whether the check
+   * passes or fails: no `&&` in the condition can spare the second read.
+   *
+   * `null` is not a value any of these checks accept — the period comparisons
+   * are `===` and `!==` against a string read the same way, and `disabled`
+   * wants `true` or `false` — so an absent control still FAILS, in a sentence,
+   * with the rest of the section reported.
+   */
+  const period = () =>
+    page
+      .getByTestId('list-calendar')
+      .getAttribute('data-calendar-period', { timeout: 6000 })
+      .catch(() => null)
+  const todayOff = () => todayBtn.isDisabled({ timeout: 6000 }).catch(() => null)
   const todayBox = await todayBtn.boundingBox().catch(() => null)
   const prevBox = await prevBtn.boundingBox().catch(() => null)
   chk(!!todayBox && !!prevBox && todayBox.x < prevBox.x,
     'Today is on the toolbar, and leftmost as the frame draws it',
     `Today at ${todayBox ? Math.round(todayBox.x) : 'absent'}, Prev at ${prevBox ? Math.round(prevBox.x) : 'absent'}`)
-  chk(await todayBtn.isDisabled(),
+  chk(await todayOff() === true,
     'and is inert while the calendar is already showing the current period',
     'Today was live on a calendar that had not moved — it cannot say where you are')
-  const startPeriod = await page.getByTestId('list-calendar').getAttribute('data-calendar-period')
+  const startPeriod = await period()
   await page.getByTestId('list-calendar-next').click()
   await page.getByTestId('list-calendar-next').click()
   await page.waitForTimeout(600)
-  const movedPeriod = await page.getByTestId('list-calendar').getAttribute('data-calendar-period')
-  chk(movedPeriod !== startPeriod && !(await todayBtn.isDisabled()),
+  const movedPeriod = await period()
+  const todayWoke = await todayOff()
+  chk(movedPeriod !== startPeriod && todayWoke === false,
     'paging forward moves the calendar and wakes Today up',
     `the period went ${JSON.stringify(startPeriod)} → ${JSON.stringify(movedPeriod)}, ` +
-      `Today ${(await todayBtn.isDisabled()) ? 'stayed disabled' : 'is live'}`)
+      `Today disabled=${JSON.stringify(todayWoke)}`)
   await todayBtn.click()
   await page.waitForTimeout(600)
-  chk(await page.getByTestId('list-calendar').getAttribute('data-calendar-period') === startPeriod,
+  const backPeriod = await period()
+  chk(backPeriod !== null && backPeriod === startPeriod,
     'and one press brings it back to the current period',
-    `after pressing Today the calendar sat on ` +
-      `${JSON.stringify(await page.getByTestId('list-calendar').getAttribute('data-calendar-period'))}, ` +
+    `after pressing Today the calendar sat on ${JSON.stringify(backPeriod)}, ` +
       `where it started on ${JSON.stringify(startPeriod)}`)
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)

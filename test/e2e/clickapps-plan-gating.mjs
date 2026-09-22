@@ -260,14 +260,24 @@ try {
   const proBadge = (
     await page.getByTestId('space-wizard-clickapp-lock-customFields').innerText().catch(() => '')
   ).trim()
+  // The badge read above was bounded for `-8-nolockpayload` and these two were
+  // left bare — each of them read TWICE, once in the condition and once in the
+  // message, and a `chk` message is evaluated whether the check passes or
+  // fails. `null` is neither `true` nor `false`, so an absent switch fails this
+  // check in a sentence instead of replacing it with an exception.
+  const cfDisabled = await page
+    .getByTestId('space-wizard-feature-customFields')
+    .isDisabled({ timeout: 6000 })
+    .catch(() => null)
+  const prioDisabled = await page
+    .getByTestId('space-wizard-feature-priority')
+    .isDisabled({ timeout: 6000 })
+    .catch(() => null)
   chk(
-    proBadge === 'Pro' &&
-      (await page.getByTestId('space-wizard-feature-customFields').isDisabled()) &&
-      !(await page.getByTestId('space-wizard-feature-priority').isDisabled()),
+    proBadge === 'Pro' && cfDisabled === true && prioDisabled === false,
     'Custom Fields is marked "Pro" and un-switchable, while Priority stays switchable',
     `the badge read ${JSON.stringify(proBadge)}, customFields disabled=` +
-      `${await page.getByTestId('space-wizard-feature-customFields').isDisabled()}, priority disabled=` +
-      `${await page.getByTestId('space-wizard-feature-priority').isDisabled()}`,
+      `${JSON.stringify(cfDisabled)}, priority disabled=${JSON.stringify(prioDisabled)}`,
   )
   const note = await page.getByTestId('space-wizard-plan-note').innerText().catch(() => '')
   chk(

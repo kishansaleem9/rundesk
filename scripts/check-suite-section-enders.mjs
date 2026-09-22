@@ -102,7 +102,44 @@
  * is the argument for gating it rather than waiting for the other eighty sets
  * to find them one at a time.
  *
- * AND A SIXTH SHAPE THAT IS NOT A GATE, on purpose.
+ * RULE SIX — A READ IN THE MESSAGE, WHERE NO SHORT-CIRCUIT CAN REACH IT.
+ *
+ *     chk(
+ *       fastHint.length > 0 && (await page.getByTestId('ai-model-hint-fast').innerText()).trim() === fastHint,
+ *       'carrying that model’s OWN one line, the same one the catalogue serves',
+ *       `the card read ${JSON.stringify((await page.getByTestId('ai-model-hint-fast').innerText()).trim())} …`,
+ *     )
+ *
+ * `amc-5-bound-moved` drops the server's visible bound from three to two, so the
+ * `fast` row goes behind the disclosure and its card never opens. The run
+ * reddened the check this patch claims AND two more, then spent thirty seconds
+ * on that read and ended at 13 of 24.
+ *
+ * WHY THIS ONE GATES WHERE THE BROAD READ SCAN DID NOT, and it is the whole
+ * argument: rule one's header rejected a scan over `innerText` and
+ * `getAttribute` because six of its nine candidates were already guarded by
+ * `&&` short-circuiting, "which is the idiom these suites use and which a text
+ * rule cannot see." A MESSAGE ARGUMENT HAS NO CONDITION TO SHORT-CIRCUIT. It is
+ * evaluated whether the check passes or fails, so the idiom that made the broad
+ * scan useless cannot apply, and the objection dissolves rather than being
+ * argued around. The line above is the proof: its condition carries a guard,
+ * `fastHint.length > 0 &&`, and the guard does not fire — `fast` is still in the
+ * served catalogue — but even a guard that DID fire would have left the message
+ * reading the same absent element a second time.
+ *
+ * And a message read is the one case where bounding is unconditionally right.
+ * Rule three's caveat — catching a box read is only safe while the assertion
+ * under it reddens on absence — has no counterpart here, because A MESSAGE
+ * DECIDES NOTHING. It is diagnostic text. A message that throws does not weaken
+ * a verdict, it replaces the verdict with an exception and takes the rest of the
+ * section with it. There is no suite that wants that.
+ *
+ * Seventeen sites, one balanced call each — no window, no formatting, the same
+ * property that made rule three gateable. The fix reads once into a variable,
+ * bounded and caught, and uses the variable in both places, which also retires
+ * the double read: twenty-six `chk`s in this tree read the same locator twice.
+ *
+ * AND A SEVENTH SHAPE THAT IS NOT A GATE, on purpose.
  *
  * The real lesson of `list-view-controls-42-empty-group-no-add` is that its
  * press had been bounded FOR IT, by name, in a comment — and the run still
@@ -128,6 +165,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { messageReads } from './lib/suite-reads.mjs'
 
 const SUITES = new URL('../test/e2e', import.meta.url).pathname
 // How far below a check a press is still "the press that check is about". Ten
@@ -255,19 +293,32 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+// RULE SIX. A throwing read on a testid locator inside a `chk` MESSAGE. The
+// reader lives in `lib/suite-reads.mjs` so `check-suite-reads.mjs` can break
+// its two fragile parts — the comma splitter and the argument index — and
+// require the answer to change.
+let messages = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  for (const hit of messageReads(readFileSync(join(SUITES, file), 'utf8'))) {
+    messages += 1
+    rows.push({ file, line: hit.line, id: hit.verb, text: hit.text, message: true })
+  }
+}
+
 for (const r of rows) {
   console.log(
     `  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}` +
-      `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}`,
+      `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}` +
+      `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}`,
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
 console.log(
-  `[section-enders] ${rows.length - gates - boxes - sames - sections} press(es) on a control the ` +
-    `check above them may find absent, ${gates} gate(s) in front of a check about the same element, ` +
-    `${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a locator guarded one ` +
-    `line up, and ${sections} use(s) of something this section asserts exists, across ` +
-    `${new Set(rows.map((r) => r.file)).size} suite(s)`,
+  `[section-enders] ${rows.length - gates - boxes - sames - sections - messages} press(es) on a ` +
+    `control the check above them may find absent, ${gates} gate(s) in front of a check about the ` +
+    `same element, ${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a ` +
+    `locator guarded one line up, ${sections} use(s) of something this section asserts exists, and ` +
+    `${messages} read(s) in a chk message, across ${new Set(rows.map((r) => r.file)).size} suite(s)`,
 )
 if (rows.length) {
   console.error(
