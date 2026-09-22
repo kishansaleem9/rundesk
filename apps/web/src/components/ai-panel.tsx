@@ -1063,6 +1063,27 @@ export function AiPanel({
    *
    * Keyed on the thread id rather than the query data: the query refetches, and
    * re-seeding on every settle would wipe a turn that is still streaming.
+   *
+   * AND THE FIRST SEED COULD WIPE ONE THAT HAD ALREADY FINISHED. The guard
+   * above stops RE-seeding; it says nothing about the one seed it does allow.
+   * Arriving with `?thread=X&prompt=Y` starts a turn on mount, and if the
+   * history request settles after that turn lands — a slow first fetch is
+   * enough — this replaced `messages` wholesale and the answer the person just
+   * watched arrive disappeared, along with the step log above it explaining
+   * what it did. Nothing was broken afterwards: the next thread switch loads
+   * the stored copy. The answer simply vanished off the screen.
+   *
+   * `ai-answer-rendering` is where this surfaced. Its busy-state section holds
+   * the `/ai/chat` response open, asserts the in-flight state, releases it and
+   * then looks for the `create_list` step — a step the finished message carries
+   * in `msg.steps`. The check had never passed, and the suite had never once
+   * run to its own declared length, so its twenty-one break patches were all
+   * measured against short runs.
+   *
+   * So the history is MERGED over what this mount produced rather than
+   * replacing it. Nothing is duplicated: the seed runs once per thread, so the
+   * server's own copy of the turn is never shown beside the local one, and the
+   * local one is dropped at the next thread switch.
    */
   useEffect(() => {
     if (!threadId) {
@@ -1076,14 +1097,16 @@ export function AiPanel({
     const loaded = threadQuery.data
     if (!loaded || loaded.id !== threadId) return
     loadedThreadRef.current = threadId
-    setMessages(
-      loaded.messages.map((m) => ({
-        role: m.role,
-        content: m.content,
-        id: m.id,
-        feedback: m.feedback ?? null,
-      })),
-    )
+    const history = loaded.messages.map((m) => ({
+      role: m.role,
+      content: m.content,
+      id: m.id,
+      feedback: m.feedback ?? null,
+    }))
+    setMessages((prev) => {
+      const known = new Set(history.map((m) => m.id))
+      return [...history, ...prev.filter((m) => !known.has(m.id))]
+    })
   }, [threadId, threadQuery.data])
 
   /**

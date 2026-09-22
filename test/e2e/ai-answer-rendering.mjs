@@ -535,11 +535,25 @@ try {
     'when the tool step arrives the step log names it — not a generic "Working"',
     'the create_list step never appeared in the trace',
   )
+  /*
+   * READ ONLY IF IT IS THERE, and it was read unconditionally. The check above
+   * had never passed, so this `innerText()` spent Playwright's default thirty
+   * seconds on an element that was not on the page, threw, and ended the run on
+   * `33 passed, 3 failed` with `ran 35 checks, expected 51`. Sixteen checks
+   * never reported, and the twenty-one break patches aimed at this suite were
+   * every one of them measured against a run that stopped here.
+   */
+  const stepWords = settled
+    ? (await page.getByTestId('ai-trace-step-create_list').innerText().catch(() => '')).trim()
+    : null
   chk(
-    !/^working$/i.test((await page.getByTestId('ai-trace-step-create_list').innerText()).trim()),
+    stepWords !== null && stepWords.length > 0 && !/^working$/i.test(stepWords),
     'with its own words, so a missing translation cannot pass as a present one',
-    `the step read ${JSON.stringify(await page.getByTestId('ai-trace-step-create_list').innerText())} — ` +
-      'the unknown-step fallback is "Working", and a check for "a step is present" would pass on it',
+    settled
+      ? `the step read ${JSON.stringify(stepWords)} — the unknown-step fallback is "Working", and a ` +
+        'check for "a step is present" would pass on it'
+      : 'there was no create_list step on the page to read, so what it says could not be checked — ' +
+        'reported as failed because UNKNOWN is not the same as fine',
   )
   const createdUp = await waitUntil(
     () => page.getByTestId(`ai-created-list-${listId}`).isVisible().catch(() => false),
