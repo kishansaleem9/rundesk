@@ -135,7 +135,22 @@ try {
    * A colleague opening something must move the workspace list and NOT my own —
    * if both read the same rows, one of the two menu entries is decoration.
    */
-  const theirPick = restBefore[0]
+  /*
+   * NOT `restBefore[0]`, WHICH IS WHATEVER RELEVANCE ALREADY PUT FIRST.
+   *
+   * It was, and the check below passed under a patch that scored every hit
+   * zero — `engagementKey` splitting on the last hyphen, so no key matched a
+   * stored row and trending returned relevance unchanged. `workspaceTrend[0]`
+   * was then `baseline[0]`, which is exactly what `restBefore[0]` is, and the
+   * check read as "a colleague's opens move the workspace list" while proving
+   * only that the list had not been shuffled.
+   *
+   * The second element is the cheapest fix that restores the meaning: it is
+   * not the underdog, so the two modes still disagree, and it is not already
+   * on top, so arriving there has to be the engagement's doing. `baseline`
+   * is asserted to hold at least three hits above, so this index exists.
+   */
+  const theirPick = restBefore[1]
   for (let i = 0; i < 9; i += 1) {
     await B(`/search/${workspaceId}/opened`, { method: 'POST', body: split(theirPick) })
   }

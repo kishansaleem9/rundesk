@@ -18,6 +18,14 @@
 # all. That is the signature the suite was shaped to catch: the tail is not the
 # thing that proves trending works, the top is.
 #
+# AND IT CAUGHT A THIRD CHECK BEING WEAKER THAN IT READ. On its first run this
+# reddened two checks, not the three predicted: "a colleague's opens move the
+# workspace list" passed. The colleague's pick was `restBefore[0]` — whatever
+# relevance had already put first — so under a build that scores everything
+# zero it is still first, and the check could not tell a working workspace
+# sort from no sort at all. It picks `restBefore[1]` now, and this patch
+# reddens three.
+#
 # Reddens: trending-sort: "opening the least relevant hit five times puts it first"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
