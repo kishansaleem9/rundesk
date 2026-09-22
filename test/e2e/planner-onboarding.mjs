@@ -192,15 +192,27 @@ try {
   console.log('\n▶ the screen frames `12:40`–`12:50` draw')
 
   await openPlanner()
-  await page.waitForSelector('[data-testid="planner-onboarding"]', { timeout: 15_000 })
+  /*
+   * NOT A GATE THAT THROWS — the check immediately below asserts the very thing
+   * this waits for. `po-1-panel-never-shows` removes the panel, and with the
+   * wait unqualified and no `catch` on the outer try, the process died on an
+   * uncaught TimeoutError: no totals, no short-run line, nothing said about the
+   * patch at all.
+   */
+  const panelUp = await page
+    .waitForSelector('[data-testid="planner-onboarding"]', { timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false)
   chk(
-    (await panel().count()) === 1,
+    panelUp && (await panel().count()) === 1,
     'a person with no calendar connected gets the onboarding panel',
     'the planner drew no onboarding panel for an account with nothing connected — ' +
       'the whole row was that this screen does not exist',
   )
 
-  const headline = (await page.locator('[data-testid="planner-onboarding-title"]').textContent())?.trim()
+  const headline = (
+    await page.locator('[data-testid="planner-onboarding-title"]').textContent().catch(() => null)
+  )?.trim()
   chk(
     headline === HEADLINE,
     `with frame \`12:40\`'s own headline, ${JSON.stringify(HEADLINE)}`,
@@ -403,6 +415,23 @@ try {
       'invitation to connect one, and it has no reason to exist once that is done',
   )
   await ctx.close()
+} catch (e) {
+  /*
+   * A CATCH, BECAUSE WITHOUT ONE THIS SUITE COULD NOT REPORT A FAILURE AT ALL.
+   *
+   * This was `try { … } finally { … }` with no catch, so anything that threw
+   * left the process on an uncaught exception — before the totals line, before
+   * the `EXPECTED_CHECKS` guard, before anything. `po-1-panel-never-shows`
+   * produced exactly that: `wt-break.sh` recorded `NO SUMMARY: the run printed
+   * no 'N passed, M failed' line — it died before the totals`, which is the one
+   * outcome that says nothing whatsoever about the patch.
+   *
+   * Every other suite here records the throw as a failure and lets the totals
+   * and the short-run guard print. Three did not: `planner-onboarding`,
+   * `planner-command-bar` and `team-schedules`.
+   */
+  failed += 1
+  console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
   await browser.close()
   server.close()

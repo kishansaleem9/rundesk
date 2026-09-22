@@ -371,6 +371,23 @@ try {
   )
 
   await ctx.close()
+} catch (e) {
+  /*
+   * A CATCH, BECAUSE WITHOUT ONE THIS SUITE COULD NOT REPORT A FAILURE AT ALL.
+   *
+   * This was `try { … } finally { … }` with no catch, so anything that threw
+   * left the process on an uncaught exception — before the totals line, before
+   * the `EXPECTED_CHECKS` guard, before anything. `po-1-panel-never-shows`
+   * produced exactly that: `wt-break.sh` recorded `NO SUMMARY: the run printed
+   * no 'N passed, M failed' line — it died before the totals`, which is the one
+   * outcome that says nothing whatsoever about the patch.
+   *
+   * Every other suite here records the throw as a failure and lets the totals
+   * and the short-run guard print. Three did not: `planner-onboarding`,
+   * `planner-command-bar` and `team-schedules`.
+   */
+  failed += 1
+  console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
   await browser.close()
   server.close()
