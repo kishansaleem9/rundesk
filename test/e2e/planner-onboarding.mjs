@@ -256,7 +256,14 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ the buttons reach the OAuth flow the rest of the product uses')
 
-  await page.locator('[data-testid="planner-onboarding-connect-gcal"]').click()
+  /*
+   * BOUNDED AND CAUGHT, ALL FIVE. `po-1-panel-never-shows` stops the panel
+   * being drawn at all — which is what its two checks above say — and then an
+   * unbounded press on a control inside it threw and ended the run. Every
+   * press in this file is on something that patch removes, so bounding one
+   * would only move the exception to the next (ledger §10).
+   */
+  await page.locator('[data-testid="planner-onboarding-connect-gcal"]').click({ timeout: 8000 }).catch(() => {})
   /*
    * BOTH HALVES OF PRESSING IT, and the second half is not decoration.
    *
@@ -299,7 +306,7 @@ try {
       `${JSON.stringify((await page.locator('[data-testid="planner-onboarding-position"]').textContent())?.trim())}`,
   )
 
-  await page.locator('[data-testid="planner-onboarding-next"]').click()
+  await page.locator('[data-testid="planner-onboarding-next"]').click({ timeout: 8000 }).catch(() => {})
   /*
    * WAITS FOR THE TITLE TO CHANGE, and asserts the title — not the index.
    *
@@ -316,7 +323,7 @@ try {
   )
 
   /* Back again, so ← is exercised rather than assumed to be →'s mirror. */
-  await page.locator('[data-testid="planner-onboarding-prev"]').click()
+  await page.locator('[data-testid="planner-onboarding-prev"]').click({ timeout: 8000 }).catch(() => {})
   const backAgain = await waitUntil(async () => (await readCard()) === CARD_TITLES[0], { timeoutMs: 8000 })
   chk(
     backAgain,
@@ -332,7 +339,7 @@ try {
   const walked = []
   for (let i = 0; i < CARD_TITLES.length; i += 1) {
     walked.push(await readCard())
-    await page.locator('[data-testid="planner-onboarding-next"]').click()
+    await page.locator('[data-testid="planner-onboarding-next"]').click({ timeout: 8000 }).catch(() => {})
     await waitUntil(async () => (await readCard()) !== walked[walked.length - 1], { timeoutMs: 8000 })
   }
   chk(
@@ -411,7 +418,7 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ both halves of the gate')
 
-  await page.locator('[data-testid="planner-onboarding-dismiss"]').click()
+  await page.locator('[data-testid="planner-onboarding-dismiss"]').click({ timeout: 8000 }).catch(() => {})
   const gone = await waitUntil(async () => (await panel().count()) === 0, { timeoutMs: 8000 })
   chk(
     gone && settings.plannerOnboardingDismissed === true,
