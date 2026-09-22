@@ -68,6 +68,25 @@ const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const origin = stack.base
 const browser = await chromium.launch(launchOptions())
 
+/*
+ * THE ROSTER IS PUT BACK IN `finally`, NOT WHERE THE CHECK IS.
+ *
+ * The removal used to live at the end of the `try`, after eight checks — so
+ * any run that threw before reaching it left a freshly-signed-up
+ * "Asking Member <stamp>" in the workspace permanently. That is not a
+ * hypothetical: a break patch that stops the card from rendering makes the
+ * click below it throw, and every such run would have added another member.
+ * The file's own comment already records what an accumulating roster costs —
+ * `ui-sweep`'s reports-to picker failed on ten identically-named people.
+ *
+ * Cleanup belongs where it runs whatever happened. The check that the roster
+ * is clean stays in the `try`, because that is an assertion rather than a
+ * tidy-up, and the `finally` pass is idempotent.
+ */
+let cleanupA = null
+let cleanupWorkspaceId = null
+let cleanupOutsiderId = null
+
 try {
   // ── Arrange ───────────────────────────────────────────────────────────────
   const login = await signInApi(API, ADMIN.email, ADMIN.password)
@@ -77,6 +96,8 @@ try {
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
   if (!workspaceId) throw new Error('no workspace')
+  cleanupA = A
+  cleanupWorkspaceId = workspaceId
 
   // A list to hang the private task off.
   const spaces = (await A(`/spaces/workspace/${workspaceId}`)).data ?? []
@@ -129,6 +150,7 @@ try {
     },
   })
   if (!signup.data?.accessToken) throw new Error(`signup failed: ${signup.status} ${JSON.stringify(signup.error)}`)
+  cleanupOutsiderId = signup.data?.user?.id ?? signup.data?.id
 
   const added = await A(`/workspaces/${workspaceId}/members`, {
     method: 'POST',
@@ -270,6 +292,13 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  // Whatever happened above, the workspace gets its roster back. Idempotent:
+  // the happy path already removed them and this is a 404 it ignores.
+  if (cleanupA && cleanupWorkspaceId && cleanupOutsiderId) {
+    await cleanupA(`/workspaces/${cleanupWorkspaceId}/members/${cleanupOutsiderId}`, {
+      method: 'DELETE',
+    }).catch(() => {})
+  }
   await browser.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
