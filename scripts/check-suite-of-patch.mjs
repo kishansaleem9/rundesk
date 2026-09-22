@@ -26,7 +26,7 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeSuiteOf } from './lib/suite-of-patch.mjs'
+import { makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
 
 const dir = mkdtempSync(join(tmpdir(), 'suite-of-patch-'))
 let passed = 0
@@ -119,6 +119,18 @@ try {
 
   console.log('\n6. and no Reddens line at all')
   is(suiteOf('zzz-1', '# just a comment\n'), null, 'is null rather than a throw')
+
+  // A DECLARED SHORT RUN. `check-break-reddened.mjs` waives its length guard on
+  // this line, so a patch that could set it by accident would have its own run
+  // length stop being checked. The empty-value case is the one that matters:
+  // `\s` after the colon matches the newline, and `# Expect:` alone would then
+  // read as SHORT because the next line's first word happened to follow it.
+  console.log('\n7. a patch that declares a short run')
+  is(declaresShortRun('# Expect: SHORT\nimport io\n'), true, 'the marker is read')
+  is(declaresShortRun('#   Expect:   SHORT\n'), true, 'and spacing around it does not matter')
+  is(declaresShortRun('# Expect:\nSHORT anything\n'), false, 'a bare `# Expect:` declares nothing')
+  is(declaresShortRun('# Expect: SHORTER\n'), false, 'and SHORTER is not SHORT')
+  is(declaresShortRun('# Reddens: a: "b"\nimport io\n'), false, 'an ordinary patch declares nothing')
 } finally {
   rmSync(dir, { recursive: true, force: true })
 }

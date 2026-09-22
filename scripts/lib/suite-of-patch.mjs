@@ -61,6 +61,28 @@ import { norm, findsClaim, quotedIn } from './claim-match.mjs'
  * truncated mid-quote — so a looser block here would hand step three sentences
  * the author never claimed.
  */
+/*
+ * AND THE OTHER THING A PATCH HEADER CAN DECLARE: that a short run is its
+ * honest outcome, with
+ *
+ *     # Expect: SHORT
+ *
+ * One patch has earned it. `acc-7-no-id-returned` makes the action report
+ * success with no container id, so the check that reads the id reddens — the
+ * defect, named — and the twenty-six checks after it ADDRESS that id and have
+ * nothing left to be about.
+ *
+ * `[ \t]` rather than `\s`, for the reason `declaresRerun` carries in
+ * `log-tree.mjs`: `\s` matches the newline, so a bare `# Expect:` would read as
+ * a declaration whose value is the first word of the next line.
+ *
+ * `break-report.sh` asks the same question with a grep, because it is bash and
+ * cannot import this. That is the one duplicate here, it is a grep of a
+ * documented marker rather than a second rule, and both spellings are in this
+ * comment so a change to either is a change to a line that names the other.
+ */
+export const declaresShortRun = (text) => /^#[ \t]*Expect:[ \t]*SHORT\b/im.test(text)
+
 export const reddensText = (text) => {
   const lines = text.split('\n')
   const i = lines.findIndex((l) => /^#\s*Reddens:/i.test(l))

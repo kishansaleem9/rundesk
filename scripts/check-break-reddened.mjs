@@ -57,7 +57,7 @@ import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { norm, quotedIn } from './lib/claim-match.mjs'
-import { reddensText, makeSuiteOf } from './lib/suite-of-patch.mjs'
+import { reddensText, makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
 import { measuredAt, patchDeps, makeMeasurementCheck } from './lib/log-tree.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -140,6 +140,21 @@ for (const n of suiteNames) {
  * time it speaks. 171 is what is measured against this tree today; the chain in
  * `chain-plan.sh` re-runs the rest, and this rises as it drains.
  *
+ * AND THE FLOOR IS ON `accounted`, NOT ON `reddened`, because `reddened` cannot
+ * be a ratchet under the provenance gate. Fixing three suites this morning —
+ * `list-customize`, `ai-answer-rendering` and `imports`, each of them a section
+ * that was ending on a throw instead of reporting — correctly stripped their 13
+ * patches of their logs, took reddened from 175 to 162, and FAILED PREFLIGHT ON
+ * THE IMPROVEMENT. A floor that punishes fixing the measuring instrument is a
+ * floor that will be edited until it stops speaking.
+ *
+ * `accounted` is reddened plus the patches held back purely on provenance: every
+ * patch whose log the reader could READ, whatever the tree said afterwards. A
+ * suite fix moves a patch between those two buckets and the sum does not move. A
+ * reader regression moves patches out of both — the escape-strip bug would have
+ * taken it from 620 to 51 exactly as before — and that is the failure this floor
+ * is for.
+ *
  * `green` goes 1 → 0 by the same accounting, and it is the more interesting
  * number. All nine greens turned out to be measurements of trees from before
  * their own fixes — `fd-7-toggle-latches` at 06:27 against a check its suite
@@ -147,7 +162,7 @@ for (const n of suiteNames) {
  * UNKNOWN, which is what they always were, so 0 is both the strictest floor and
  * the honest one: a patch that reddens nothing on THIS tree has not been aimed.
  */
-const BASELINE = { reddened: 171, green: 0, unproven: 1 }
+const BASELINE = { accounted: 760, green: 0, unproven: 1 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -168,6 +183,19 @@ const notCurrent = makeMeasurementCheck({ root: ROOT })
 const green = []
 const unproven = []
 const unknown = []
+/*
+ * DISQUALIFIED BY PROVENANCE, KEPT APART FROM DISQUALIFIED BY THE READER.
+ *
+ * These two are both "no usable log" to a reader of the summary and they move
+ * for opposite reasons, which the floor below has to be able to tell apart. A
+ * suite FIX moves its patches from reddened into here — correctly, their logs
+ * are about the old suite — and a reader REGRESSION moves patches into
+ * `unknown`. The first is work landing and the second is the failure the floor
+ * exists to catch, and with one bucket the floor punished both: fixing three
+ * suites this morning took it from 175 to 162 and failed preflight on the
+ * improvement.
+ */
+const drifted = []
 const noClaim = []
 const unitClaim = []
 let reddened = 0
@@ -252,13 +280,25 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const rec = measured.get(name)
   const moved = notCurrent(rec, patchDeps(readFileSync(join(BREAKS, f), 'utf8'), suite))
   if (moved.length) {
-    unknown.push(
+    drifted.push(
       `${name} — measured at ${rec?.sha ?? 'an unrecorded commit'}, since when ` +
         `${moved.length} file(s) the run depended on changed (${moved[0]})`,
     )
     continue
   }
-  if (ran !== want) {
+  /*
+   * UNLESS THE PATCH SAID THE RUN WOULD BE SHORT, in which case the length is
+   * the one thing about the log that is not evidence of anything.
+   * `acc-7-no-id-returned` declares it: with no container id returned, the
+   * twenty-six checks that address that id have nothing to be about, and the
+   * check it aims at is among the seven that DID run. Rejecting the log on
+   * length left it permanently unreadable — the patch's own outcome held back
+   * by the outcome it declared.
+   *
+   * Only the length guard is waived. The pass-count assertion below still has
+   * to hold, because that is the one that catches a log this file cannot parse.
+   */
+  if (ran !== want && !declaresShortRun(readFileSync(join(BREAKS, f), 'utf8'))) {
     unknown.push(
       `${name} — the log ran ${ran} checks and ${suite} declares ${want}: a short run, a run of ` +
         'another suite, or a run that predates a check this suite has since grown',
@@ -322,10 +362,12 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   )
 }
 
+const accounted = reddened + drifted.length
 console.log(
   `[break-reddened] ${reddened} patch(es) reddened a check they claim · ${green.length} reddened ` +
-    `nothing · ${unproven.length} unproven · ${unknown.length} have no usable log · ` +
-    `${noClaim.length} quote no sentence · ${unitClaim.length} claim a unit test`,
+    `nothing · ${unproven.length} unproven · ${drifted.length} measured against a tree that has ` +
+    `moved · ${unknown.length} have no usable log · ${noClaim.length} quote no sentence · ` +
+    `${unitClaim.length} claim a unit test`,
 )
 const show = (label, rows, why) => {
   if (!rows.length) return
@@ -339,6 +381,16 @@ show(
   green,
   'the run came back 0 failed, so the patch is not evidence about any check at all',
 )
+// WORTH PRINTING NOW THAT PROVENANCE HAS ITS OWN BUCKET. This was 633 rows and
+// a count was the only readable form; it is 21, and every one of them is a log
+// the READER could not read — which is the failure the floor guards, so the
+// names belong on screen next to it.
+show(
+  'patch(es) with a log this cannot read',
+  unknown,
+  'a run that died before its totals, a run of the wrong length, or a log whose PASS lines do ' +
+    'not add up to its own pass count',
+)
 show(
   'patch(es) UNPROVEN',
   unproven,
@@ -347,11 +399,12 @@ show(
 )
 
 let bad = 0
-if (reddened < BASELINE.reddened) {
+if (accounted < BASELINE.accounted) {
   console.error(
-    `\n[break-reddened] only ${reddened} patches reddened a check they claim, down from ` +
-      `${BASELINE.reddened}. Measured evidence does not disappear on its own: either the logs ` +
-      'stopped being readable, or patches were deleted.',
+    `\n[break-reddened] ${reddened} reddened plus ${drifted.length} held back on provenance is ` +
+      `${accounted}, down from ${BASELINE.accounted}. A log the reader can read either credits its ` +
+      'patch or is set aside because the tree moved; a patch leaving BOTH buckets means the reader ' +
+      'stopped reading, or the patch was deleted.',
   )
   bad = 1
 }
