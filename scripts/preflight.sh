@@ -37,7 +37,7 @@ step "and the unit claims redden too"   node scripts/check-unit-claims.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "nothing ends a section on a throw" node scripts/check-suite-section-enders.mjs
-step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs
+step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs --mutate
 step "and every ender rule bites"        node scripts/check-suite-enders.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate

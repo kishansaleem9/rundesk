@@ -120,7 +120,23 @@ export const messageReads = (src) => {
     // is nothing to say about it, and guessing where it ends would invent an
     // argument list.
     if (depth !== 0) continue
-    for (const arg of topLevelArgs(src.slice(i + 4, end)).slice(2)) {
+    /*
+     * BOTH MESSAGE ARGUMENTS, NOT ONLY THE FAILURE ONE.
+     *
+     * This read `.slice(2)` — the `bad` argument and anything after it — on the
+     * reasoning that the failure message is where the diagnostic reads live.
+     * That is where they live, and it is not where the DANGER lives:
+     * `chk(cond, good, bad)` is an ordinary call, so all three arguments are
+     * evaluated before `chk` runs. A throwing read in `good` throws exactly as
+     * surely as one in `bad`, and the whole argument for gating rule six is
+     * that a message has no condition to short-circuit it.
+     *
+     * Measured before widening: the tree holds ZERO unguarded throwing reads in
+     * a second argument today, so this closes a blind spot at a cost of nothing
+     * rather than introducing a report to argue with — the same trade rule one
+     * made when it broadened from `.click()` to `.click(`.
+     */
+    for (const arg of topLevelArgs(src.slice(i + 4, end)).slice(1)) {
       if (!THROWS.test(arg)) continue
       // Written inline as a testid, OR held in a variable assigned from a
       // locator factory in this file. Same read, same throw.

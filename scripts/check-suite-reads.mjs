@@ -24,7 +24,19 @@
  *
  *   node scripts/check-suite-reads.mjs
  */
-import { messageReads, topLevelArgs, THROWS, locatorVars } from './lib/suite-reads.mjs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { proveMutationsBite } from './lib/mutate.mjs'
+
+/*
+ * DYNAMIC, so `--mutate` can aim these cases at a broken copy. This is rule
+ * six's reader, and rule six GATES — a reader that quietly stopped finding
+ * anything would report 0 sites forever and read as a clean tree.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SUBJECT = process.env.SUITE_READS_LIB ?? './lib/suite-reads.mjs'
+const { messageReads, topLevelArgs, THROWS, locatorVars } = await import(SUBJECT)
 
 let pass = 0
 let fail = 0
@@ -39,6 +51,24 @@ const chk = (cond, good, bad) => {
 }
 
 console.log('\n▶ the shape the rule is for')
+
+/*
+ * BOTH MESSAGE ARGUMENTS. `chk(cond, good, bad)` is an ordinary call, so all
+ * three are evaluated before `chk` runs: a throwing read in the PASS sentence
+ * throws exactly as surely as one in the failure reason. The reader started at
+ * index 2 and nothing pinned that, so narrowing it back reddens nothing —
+ * which is how `--mutate` found this.
+ */
+chk(
+  messageReads(`chk(ok, \`saw \${await page.getByTestId('t').innerText()}\`, 'why')`).length === 1,
+  'a throwing read in the PASS sentence is a site too — every argument is evaluated',
+  'a read in the second argument was not seen',
+)
+chk(
+  messageReads(`chk(await page.getByTestId('t').innerText(), 'l', 'w')`).length === 0,
+  'but the CONDITION is not this rule — rule seven owns it, and an `&&` can short-circuit there',
+  'the condition was reported as a message read',
+)
 
 chk(
   messageReads(
@@ -242,6 +272,38 @@ chk(
  * Measured 22 September: 17 cases. A floor, because the set grows.
  */
 let short = false
+/*
+ * AND THAT EACH CASE BITES. The floor below catches an empty case file; it
+ * cannot catch a reader that has stopped reading. Each mutation is a way this
+ * module could go quiet — and going quiet is the dangerous direction, because
+ * rule six reports 0 sites on a clean tree either way.
+ */
+if (process.argv.includes('--mutate')) {
+  fail += proveMutationsBite({
+    subject: join(HERE, 'lib/suite-reads.mjs'),
+    caseFile: fileURLToPath(import.meta.url),
+    envVar: 'SUITE_READS_LIB',
+    label: "rule six's reader",
+    alive: (mutant) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(mutant)})`], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      return { ok: r.status === 0, why: (r.stderr ?? '').trim() }
+    },
+    mutations: [
+      ['the comma splitter stops counting square brackets', "else if ('([{'.includes(c)) depth += 1", "else if ('({'.includes(c)) depth += 1"],
+      ['the comma splitter stops skipping strings', "if (c === \"'\" || c === '\"' || c === '`') quote = c", 'if (false) quote = c'],
+      ['an escaped quote ends a string early', "if (c === quote && inner[i - 1] !== '\\\\') quote = null", 'if (c === quote) quote = null'],
+      ['the reader goes back to skipping the PASS sentence', 'topLevelArgs(src.slice(i + 4, end)).slice(1)', 'topLevelArgs(src.slice(i + 4, end)).slice(2)'],
+      ['the reader starts at the CONDITION, which rule seven owns', 'topLevelArgs(src.slice(i + 4, end)).slice(1)', 'topLevelArgs(src.slice(i + 4, end)).slice(0)'],
+      ['a locator variable stops counting as a read', '!readsAVar(arg)', 'true'],
+      ['a testid spelling stops counting as a read', '/getByTestId\\(|data-testid/.test(arg)', 'false'],
+      ['isDisabled stops being a throwing read', '/\\.(innerText|textContent|inputValue|isDisabled', '/\\.(innerText|textContent|inputValue'],
+    ],
+  })
+}
+
 const MIN_CASES = 20
 if (pass + fail < MIN_CASES) {
   console.error(
