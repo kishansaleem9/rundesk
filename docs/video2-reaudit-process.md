@@ -803,6 +803,33 @@ as the same defects one level up.
   and rewording the header so the suite was followed by a comma instead of a
   colon cost the patch its attribution (743 → 742) with every check still
   green — one line of prose, two checkers, and only one of them noticed.
+- **A PATCH TO A WORKSPACE PACKAGE IS BUILT FROM WHEREVER `node_modules`
+  RESOLVES IT, WHICH IS NOT NECESSARILY THE TREE YOU PATCHED.** The lane
+  worktrees borrow `node_modules` with an absolute symlink into the repo, and
+  pnpm links workspace packages RELATIVELY inside it —
+  `@rundesk/ui -> ../../../../packages/ui`. Four levels up from the REPO's
+  directory is the repo, so a patch to `packages/ui/src/styles.css` applied in
+  the worktree, appeared in `git diff`, triggered the rebuild, and produced a
+  byte-identical bundle. `PATCH CHANGED NOTHING` cannot catch it: the patch
+  really did change the worktree. `sd-1-contrast-marks-but-does-not-paint` ran
+  GREEN and `folder-create-12-toast-bottom-right` was recorded as reddening
+  three checks unrelated to its claim. **Before trusting any result about a
+  patch outside `apps/`, resolve the import the build actually follows** —
+  `readlink -f <tree>/apps/web/node_modules/@rundesk/ui` answers it in one
+  line.
+- **A SKIPPED CHECK THAT IS COUNTED IS WHAT LETS AN ENVIRONMENT-GATED SUITE
+  COMPARE EXACTLY.** `syncup-live` was the one suite keeping a FLOOR (`<`), and
+  its comment argued the exception carefully: five checks depend on the machine
+  — a routable audio output, a configured bucket, an entitlement — so 53 here
+  and 48 on a headless runner, and "an exact comparison has to be wrong on one
+  of them". It is not. A check that cannot run is not ABSENT, it is UNKNOWN, and
+  an unknown outcome can be reported and counted like any other: the total is
+  the same number on every machine, `!==` catches a branch that vanished
+  silently, and a runner with no soundcard still exits 0 because a skip is not
+  a failure. **Only the machine or the deployment may skip.** A skip reachable
+  by a product regression is a check that cannot fail, which is what the floor
+  was. And when the exception was finally measured, it named the wrong five: the
+  five that actually skip are all one gate.
 - **AN ANCHOR BEGINNING WITH SPACES CANNOT PIN INDENTATION.** A more-deeply
   indented copy of the same line contains it, so `s.count(a)` sees two and the
   patch refuses. Both cases found were correct code — a loading skeleton

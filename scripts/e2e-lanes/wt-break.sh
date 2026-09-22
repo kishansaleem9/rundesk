@@ -125,26 +125,35 @@ trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; rmdir "$LOCK" 2>/dev/null' EXIT
 # tree's packages. Idempotent, and re-done on every sync so a package added
 # upstream cannot go missing.
 link_own_packages() {
-  for dir in . apps/web apps/api; do
+  # Every workspace directory that has dependencies of its own. `packages/ui`
+  # is the one that made this list explicit: it imports `sonner`, and with the
+  # build finally reading the WORKTREE's copy, node walked up from
+  # `$WT/packages/ui/` and found no `node_modules` at all — so the fix for one
+  # resolution bug produced a build failure, which is the honest version of the
+  # same problem and took ten seconds to read.
+  for dir in . apps/web apps/api packages/ui packages/db packages/feature-flags packages/eslint-config; do
     src="$REPO/$dir/node_modules"
     dst="$WT/$dir/node_modules"
     [ -d "$src" ] || continue
-    # Only replace a symlink we can see is borrowed; a real directory here was
-    # installed on purpose and is left alone.
-    [ -L "$dst" ] || continue
-    rm -f "$dst"
+    # A symlink is borrowed and gets replaced; nothing there at all gets built.
+    # A REAL directory was installed on purpose and is left alone.
+    if [ -e "$dst" ] && [ ! -L "$dst" ]; then
+      # Already ours from a previous run — refresh `@rundesk` and move on.
+      :
+    elif [ -L "$dst" ]; then
+      rm -f "$dst"
+    fi
     mkdir -p "$dst"
-    for entry in "$src"/* "$src"/.bin; do
-      [ -e "$entry" ] || continue
-      name="$(basename "$entry")"
+    # `ls -A`, not a glob: `.bin` and `.pnpm` are dotted, and a glob silently
+    # drops them. Leaving `.bin` out breaks every package that shells out.
+    ls -A "$src" 2>/dev/null | while IFS= read -r name; do
       [ "$name" = "@rundesk" ] && continue
-      ln -sfn "$entry" "$dst/$name"
+      ln -sfn "$src/$name" "$dst/$name"
     done
     if [ -d "$src/@rundesk" ]; then
       mkdir -p "$dst/@rundesk"
-      for pkg in "$src"/@rundesk/*; do
-        [ -e "$pkg" ] || continue
-        ln -sfn "$WT/packages/$(basename "$pkg")" "$dst/@rundesk/$(basename "$pkg")"
+      ls -A "$src/@rundesk" 2>/dev/null | while IFS= read -r pkg; do
+        ln -sfn "$WT/packages/$pkg" "$dst/@rundesk/$pkg"
       done
     fi
   done
@@ -212,6 +221,17 @@ fi
 # Also here, not only under the sync: a worktree already at HEAD skips the block
 # above entirely, and that is exactly the state the borrowed symlink survived in.
 link_own_packages
+# AND THE BASELINE IS MEASURED AGAINST A BUNDLE BUILT FROM THESE SOURCES.
+#
+# Belt and braces with the rebuild in the restore block at the bottom: that one
+# runs at the END of a set, so it is missed by any run that was killed, refused
+# or crashed — and this is the first thing that reads `dist`. Unconditional and
+# cheap next to a suite run.
+pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1 || {
+  { echo "== WEB BUILD FAILED in $WT before the baseline — refusing"
+    tail -5 "/tmp/claude-0/wt$LANE-web.log"; } >> "$OUT"
+  exit 4
+}
 timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
   > "/tmp/claude-0/brk-$SUITE-baseline.log" 2>&1
 BASE=$(grep -E 'passed,' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
@@ -410,6 +430,16 @@ echo "== restoring $WT" >> "$OUT"
   export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
   yes | pnpm exec drizzle-kit push --force > /dev/null 2>&1 )
 pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
+# AND THE BUNDLE, WHICH `git checkout -- .` DOES NOT TOUCH.
+#
+# `dist/` is not tracked, so restoring the sources leaves the last patch's
+# BUNDLE on disk — and the last patch in a set is usually a web one. The next
+# run's baseline is measured against whatever bundle is there, so lane N could
+# open suite B against a bundle still carrying suite A's final patch. A patch
+# for one suite rarely reddens another, which is exactly what makes it silent:
+# the baseline comes back green and every result in the run is about a tree
+# nobody described.
+pnpm -C apps/web exec vite build > /dev/null 2>&1
 pnpm -C apps/web exec vite build > /dev/null 2>&1
 restart
 echo "DONE $SUITE" >> "$OUT"
