@@ -24,6 +24,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -115,6 +116,8 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+
+const chain = makeChain(check)
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
 const EXPECTED_CHECKS = 91
 
@@ -350,15 +353,20 @@ try {
   if (hasAssign) await page.getByTestId('quick-create-assign').selectOption({ index: 1 }).catch(() => {})
 
   const hasTag = await page.getByTestId('quick-create-tag-input').isVisible().catch(() => false)
-  check(hasTag, 'and a tag you type and commit with Enter', 'no tag input on create')
-  if (hasTag) {
+  const tagOnCreate = chain(
+    'and a tag you type and commit with Enter',
+    'and Enter commits the tag without submitting the form',
+  )
+  tagOnCreate.step(hasTag, 'no tag input on create')
+  if (!hasTag) {
+    tagOnCreate.rest('skipped: there was no tag input to press Enter in')
+  } else {
     await page.getByTestId('quick-create-tag-input').fill(CREATE_TAG)
     await page.getByTestId('quick-create-tag-input').press('Enter')
     await page.waitForTimeout(400)
     // Enter commits the tag; it must not submit the half-filled form.
-    check(
+    tagOnCreate.step(
       await page.getByTestId('quick-create-description').isVisible().catch(() => false),
-      'and Enter commits the tag without submitting the form',
       'pressing Enter on a tag closed the form',
     )
   }
@@ -380,28 +388,42 @@ try {
   const made = (madeList.data ?? []).find((x) => x.title === CREATED)
   check(!!made, 'the task is created', `no task titled ${CREATED}`)
 
-  if (made) {
+  /*
+   * SEVEN CHECKS WHICHEVER WAY THIS GOES. A create that fails takes every
+   * field check with it, so the one thing a broken create form cannot do is
+   * report which of its seven fields arrived — the run simply gets shorter and
+   * `EXPECTED_CHECKS` then calls it a stopped run rather than a broken form.
+   */
+  const fields = chain(
+    'the priority she chose is the priority it has',
+    'both dates arrived',
+    'and the due date carries a time, not just a day',
+    'the estimate is stored in seconds',
+    'the description arrived',
+    'somebody is assigned',
+    'and the tag she typed is on it',
+  )
+  if (!made) {
+    fields.rest('skipped: no task was created, so none of its fields exist')
+  } else {
     const full = await A(`/tasks/${made.id}`)
     const d = full.data ?? {}
-    check(d.priority === 'urgent', 'the priority she chose is the priority it has', `priority=${d.priority}`)
-    check(!!d.dueDate && !!d.startDate, 'both dates arrived', `start=${d.startDate} due=${d.dueDate}`)
+    fields.step(d.priority === 'urgent', `priority=${d.priority}`)
+    fields.step(!!d.dueDate && !!d.startDate, `start=${d.startDate} due=${d.dueDate}`)
     // The time of day is the half that used to be dropped.
-    check(
+    fields.step(
       !!d.dueDate && new Date(d.dueDate).getUTCHours() + new Date(d.dueDate).getUTCMinutes() >= 0 &&
         /T\d\d:\d\d/.test(new Date(d.dueDate).toISOString()),
-      'and the due date carries a time, not just a day',
       String(d.dueDate),
     )
-    check(Number(d.timeEstimate) === 3 * 3600, 'the estimate is stored in seconds', `timeEstimate=${d.timeEstimate}`)
-    check(
+    fields.step(Number(d.timeEstimate) === 3 * 3600, `timeEstimate=${d.timeEstimate}`)
+    fields.step(
       typeof d.description === 'string' && d.description.includes('made at create time'),
-      'the description arrived',
       JSON.stringify(d.description ?? null),
     )
-    check((d.assignees ?? []).length > 0, 'somebody is assigned', JSON.stringify(d.assignees ?? []))
-    check(
+    fields.step((d.assignees ?? []).length > 0, JSON.stringify(d.assignees ?? []))
+    fields.step(
       (d.labels ?? []).some((l) => (l.name ?? l) === CREATE_TAG),
-      'and the tag she typed is on it',
       JSON.stringify(d.labels ?? []),
     )
     await A(`/tasks/${made.id}`, { method: 'DELETE' }).catch(() => {})
@@ -459,19 +481,40 @@ try {
     'so a second task can carry the same tag',
   )
 
-  // Taking it off, from the badge itself.
+  /*
+   * TAKING IT OFF, FROM THE BADGE ITSELF — and this used to read `applied.id`
+   * on a value that is undefined whenever the tag was never attached.
+   *
+   * `td-tags-1-created-but-not-attached` makes exactly that happen: the label
+   * is created and never put on the task, so `applied` is undefined and
+   * `applied.id` threw a TypeError. Two checks then never ran, and the run
+   * reported on the part it reached — which is the short run this whole sweep
+   * is about, arriving through a `.` rather than through an `if`.
+   */
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3800)
-  const removeBtn = page.getByTestId(`task-tag-remove-${applied.id}`)
-  check(await removeBtn.isVisible().catch(() => false), 'the badge carries its own remove control')
-  await removeBtn.click()
-  await page.waitForTimeout(2200)
-  const after = await A(`/tasks/${taskId}`)
-  check(
-    !(after.data?.labels ?? []).some((l) => l.id === applied.id),
+  const removal = chain(
+    'the badge carries its own remove control',
     'and pressing it takes the tag off',
-    JSON.stringify(after.data?.labels),
   )
+  if (!applied?.id) {
+    removal.rest('skipped: the tag was never attached, so there is no badge to remove')
+  } else {
+    const removeBtn = page.getByTestId(`task-tag-remove-${applied.id}`)
+    const haveRemove = await removeBtn.isVisible().catch(() => false)
+    removal.step(haveRemove, 'no remove control on the badge')
+    if (!haveRemove) {
+      removal.rest('skipped: there was no remove control to press')
+    } else {
+      await removeBtn.click()
+      await page.waitForTimeout(2200)
+      const after = await A(`/tasks/${taskId}`)
+      removal.step(
+        !(after.data?.labels ?? []).some((l) => l.id === applied.id),
+        JSON.stringify(after.data?.labels),
+      )
+    }
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G15 [22:28] — "/" in the description')
@@ -562,17 +605,24 @@ try {
 
   const dueEl = await dateField('Due date')
   const startEl = await dateField('Start date')
-  check(Boolean(dueEl) && Boolean(startEl), 'the sheet has a due and a start field')
-  if (dueEl && startEl) {
+  const dates = chain(
+    'the sheet has a due and a start field',
+    'and both of them can hold a time',
+    'a stored time is visible in the control',
+    'a time typed into the sheet is stored as that instant',
+  )
+  dates.step(Boolean(dueEl) && Boolean(startEl), 'one or both fields are missing from the sheet')
+  if (!dueEl || !startEl) {
+    dates.rest('skipped: there was no date field to read or type into')
+  } else {
     const dueType = await dueEl.evaluate((e) => e.type)
     const startType = await startEl.evaluate((e) => e.type)
-    check(
+    dates.step(
       dueType === 'datetime-local' && startType === 'datetime-local',
-      'and both of them can hold a time',
       `due=${dueType} start=${startType}`,
     )
     const shown = await dueEl.evaluate((e) => e.value)
-    check(shown.endsWith('T09:15'), 'a stored time is visible in the control', shown)
+    dates.step(shown.endsWith('T09:15'), shown)
 
     await dueEl.evaluate((e) => {
       const set = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set
@@ -581,9 +631,8 @@ try {
     })
     await page.waitForTimeout(2500)
     const after = new Date((await A(`/tasks/${datedId}`)).data?.dueDate)
-    check(
+    dates.step(
       after.getDate() === 5 && after.getHours() === 16 && after.getMinutes() === 45,
-      'a time typed into the sheet is stored as that instant',
       after.toISOString(),
     )
   }
@@ -781,16 +830,21 @@ try {
   await listForm.locator('button[type=submit]').click()
   await page.waitForTimeout(3200)
   const settingsStep = await page.locator('[data-testid=list-settings-step]').count()
-  check(settingsStep > 0, 'and creating one asks which views it opens with')
-  if (settingsStep > 0) {
-    check((await page.locator('[data-testid^=list-settings-view-]').count()) >= 3,
-      'offering the views a list really has')
-    check((await page.locator('[data-testid=list-settings-skip]').count()) > 0,
-      'with a "No thanks", which is what she does with it')
+  const listSettings = chain(
+    'and creating one asks which views it opens with',
+    'offering the views a list really has',
+    'with a "No thanks", which is what she does with it',
+    'and skipping applies nothing and leaves you in the list',
+  )
+  listSettings.step(settingsStep > 0, 'no settings step after creating a list')
+  if (settingsStep === 0) {
+    listSettings.rest('skipped: the settings step never appeared')
+  } else {
+    listSettings.step((await page.locator('[data-testid^=list-settings-view-]').count()) >= 3, '')
+    listSettings.step((await page.locator('[data-testid=list-settings-skip]').count()) > 0, '')
     await page.locator('[data-testid=list-settings-skip]').click()
     await page.waitForTimeout(2500)
-    check((await page.locator('[data-testid=list-settings-step]').count()) === 0,
-      'and skipping applies nothing and leaves you in the list')
+    listSettings.step((await page.locator('[data-testid=list-settings-step]').count()) === 0, '')
   }
 
   /*
