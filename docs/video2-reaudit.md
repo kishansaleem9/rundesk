@@ -4774,3 +4774,33 @@ compares against the literal part of a template, which is the part worth
 quoting. Of the 29 claims that quote a number, the rest are stable literals —
 HTTP statuses, `0,1,2`, `(500 - 125) * 2 is 750` — part of their sentence rather
 than hostage to it. Two were hostages and both quote the literal now.
+
+### Two hunts that found nothing, and why they are not kept
+
+The Attachments-tab defect was a FIELD-NAME mismatch — the web read
+`contentType` where the API answers `mimeType` — so the obvious next move is to
+look for more of them without waiting for a suite to run. Two attempts, both
+abandoned, and the reason is the same both times.
+
+**Every web payload field the server never emits: 121 hits, no signal.** The
+vocabulary of "what the server can emit" was built from every identifier used as
+an object key across `apps/api` and `packages/db`, and the web side from every
+`type X = { … }`. Most of what came back is local UI state —
+`dashboard-templates`' `nameKey`, `report-builder`'s `agg`, a grid row's `h` —
+because a type declaration does not say whether it describes a response.
+
+**Narrowed to types used as an `api<T>()` response: 14 hits, all false.**
+`UpcomingSettings.upcomingShowTimeLeft`, `ShareResponse.canShare`,
+`Clip.recordedBy`, `SprintRow.plannedPoints` and `MergeResult.moved` are all
+emitted; the scan missed them because a response is assembled in more shapes
+than a key literal — a `select({ … })` spread, a tally built by assignment and
+returned as `{ targetTaskId, moved }`, a mapping written across lines. To be
+sound the rule would have to understand how each endpoint composes its answer,
+which is a type checker, and the repository already has one.
+
+**The route that DID find it was measurement.** The testid question — which
+product controls does no suite name — pointed at a tab nothing exercised, and
+the field mismatch surfaced the moment a check tried to use it. That is the
+third time today the static version of a question was noisier than the measured
+one, and it is the argument for spending the machine time rather than the
+cleverness.
