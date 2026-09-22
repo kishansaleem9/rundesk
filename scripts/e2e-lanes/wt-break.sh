@@ -206,8 +206,21 @@ link_own_packages() {
 # evidence, and the baseline line at the top of the file is what lets the next
 # reader see that at a glance instead of inferring it from a pattern.
 REV=$(git -C /home/user/rundesk rev-parse HEAD)
+# THE COMMIT IS RECORDED WHETHER OR NOT ANYTHING HAD TO MOVE.
+#
+# This line used to live INSIDE the `if` below, so a set that started with its
+# worktree already at HEAD — which happens whenever two sets run back to back
+# without a commit between them — wrote no provenance at all.
+# `integration-error-card` came back 8 of 8 reddened and UNPLACEABLE: every
+# reader of these logs dates a run by this line, so a log without one is a
+# measurement of no particular tree.
+#
+# Worse than a gap in the record: those sets could never be brought current.
+# `--drifted` puts an unplaceable log back in the work list, the re-run has the
+# same chance of finding the worktree already synced, and the chain would stop
+# on "no progress" against sets that were running perfectly.
+echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
 if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
-  echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
   git -C "$WT" checkout -- . 2>/dev/null
   if ! git -C "$WT" checkout --detach "$REV" > /dev/null 2>&1; then
     echo "== CANNOT SYNC WORKTREE — refusing to run, results would be about the wrong tree" >> "$OUT"
