@@ -4777,7 +4777,7 @@ quoting. Of the 29 claims that quote a number, the rest are stable literals —
 HTTP statuses, `0,1,2`, `(500 - 125) * 2 is 750` — part of their sentence rather
 than hostage to it. Two were hostages and both quote the literal now.
 
-### Two hunts that found nothing, and why they are not kept
+### Three hunts that found nothing, and why they are not kept
 
 The Attachments-tab defect was a FIELD-NAME mismatch — the web read
 `contentType` where the API answers `mimeType` — so the obvious next move is to
@@ -4799,6 +4799,16 @@ than a key literal — a `select({ … })` spread, a tally built by assignment a
 returned as `{ targetTaskId, moved }`, a mapping written across lines. To be
 sound the rule would have to understand how each endpoint composes its answer,
 which is a type checker, and the repository already has one.
+
+**And narrowed to the exact shape, `out: row.in` against a web read of `in`:
+474 hits.** This is the Attachments defect written as a rule — the server maps
+`mimeType: row.contentType` and the picker read `.contentType` — so it should
+have been the precise one. It is the noisiest of the three, because a rename is
+not a GLOBAL fact: `workspaceId: row.entityId` in one endpoint sits beside
+`workspaceId` emitted as itself in twenty others, and the scan has no way to
+bind a web read to the endpoint it fetched from. Same conclusion as before, one
+level sharper: to be sound the rule needs to know which endpoint answered, which
+is a type checker.
 
 **The route that DID find it was measurement.** The testid question — which
 product controls does no suite name — pointed at a tab nothing exercised, and
