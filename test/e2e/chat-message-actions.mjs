@@ -238,9 +238,20 @@ try {
   // Clipboard granted up front: "Copy link" is checked by reading back what it
   // actually put on the clipboard, and an ungranted read rejects in a way that
   // looks exactly like a feature that copied nothing.
+  /*
+   * NOT UTC, ON PURPOSE. A run in UTC is a run in the one zone where every
+   * timezone bug is invisible: the offset is zero, so a value computed in UTC
+   * and a value computed in local time are the same string, and a check
+   * comparing them cannot fail. This container is UTC.
+   *
+   * `Asia/Karachi` is +05:00, has no DST, and is where the person in the
+   * walkthrough is — so the reminder pre-fill below is read on a clock five
+   * hours from the server's, which is the whole point of calling it local.
+   */
   const ctx = await browser.newContext({
     viewport: { width: 1680, height: 1000 },
     permissions: ['clipboard-read', 'clipboard-write'],
+    timezoneId: 'Asia/Karachi',
   })
   const page = await ctx.newPage()
   await signIn(page, origin, ADMIN)
@@ -350,7 +361,32 @@ try {
   const dialog = page.getByTestId('remind-dialog')
   check(await dialog.isVisible().catch(() => false), 'the reminder dialog opens')
   const prefilled = await page.getByTestId('remind-when').inputValue().catch(() => '')
-  check(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(prefilled), 'the time field is pre-filled and local', prefilled)
+  /*
+   * THE VALUE, NOT JUST THE SHAPE. This asserted the regex alone — so a box
+   * pre-filled from a UTC instant, which is five hours out on this context's
+   * clock, matched `^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$` perfectly and passed.
+   * The word "local" in the sentence was doing no work at all.
+   *
+   * `datetime-local` shows wall-clock time with no zone attached, so the
+   * expected string is computed IN THE PAGE, from the page's own clock, rather
+   * than from this process's. That is a definition of "an hour from now,
+   * locally" and not a copy of the component: if the component stops
+   * translating, the two differ by the offset.
+   */
+  const wantLocal = await page.evaluate(() => {
+    const inAnHour = new Date(Date.now() + 60 * 60 * 1000)
+    const local = new Date(inAnHour.getTime() - inAnHour.getTimezoneOffset() * 60 * 1000)
+    return local.toISOString().slice(0, 16)
+  })
+  const wellFormed = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(prefilled)
+  const drift = wellFormed
+    ? Math.abs(new Date(`${prefilled}:00Z`).getTime() - new Date(`${wantLocal}:00Z`).getTime())
+    : Infinity
+  check(
+    wellFormed && drift <= 3 * 60_000,
+    'the time field is pre-filled and local',
+    `${prefilled} where about ${wantLocal} was expected on this clock`,
+  )
   await page.getByTestId('remind-confirm').click()
   await page.waitForTimeout(2200)
   check(!(await dialog.isVisible().catch(() => false)), 'the dialog closes once the reminder is set')

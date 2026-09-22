@@ -533,20 +533,19 @@ try {
    * at all. Seven of those eight are the state this section left behind rather
    * than anything the patch broke.
    *
-   * The collapse is a persisted preference, so the reset goes through the same
-   * store the UI does and is then waited on rather than assumed.
+   * THROUGH THE UI, NOT THROUGH STORAGE. The first version of this reset wrote
+   * `collapsed: false` into localStorage and reloaded — and the collapse is
+   * persisted on the ACCOUNT as well, so the reload re-hydrated it from the
+   * server and the cascade survived the fix. The chord is what the person has;
+   * pressing it until the sidebar reports itself expanded goes through the same
+   * store, the same PATCH and the same hydration as everything else.
    */
-  await page.evaluate(() => {
-    try {
-      const raw = JSON.parse(localStorage.getItem('rundesk.sidebar') ?? '{}')
-      raw.state = { ...(raw.state ?? {}), collapsed: false }
-      localStorage.setItem('rundesk.sidebar', JSON.stringify(raw))
-    } catch {
-      /* storage blocked — the reload below still re-reads the server copy */
-    }
-  })
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
+  for (let i = 0; i < 3 && (await sidebarState()) !== 'false'; i += 1) {
+    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {})
+    await page.keyboard.press('Control+\\')
+    await settlesTo('false')
+  }
+  await page.waitForTimeout(1500)
 
   // ---------------------------------------------------------------------
   console.log('\n▶ G12-8 — a notification can be put back to unread')

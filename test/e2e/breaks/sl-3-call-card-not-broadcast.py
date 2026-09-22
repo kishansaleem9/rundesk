@@ -12,14 +12,23 @@
 # reload — which is exactly when a call invitation is worthless. A card that
 # arrives after the call is over is a log entry.
 #
-# ONE CHECK, AND THE SUITE SPLITS THE CLAIM IN TWO SO IT CAN SAY WHICH HALF
-# BROKE. "the call posts a card into the channel" reads the server and still
-# passes; "and the other person sees it in the channel" watches B's screen and
-# then reloads before giving up, so it fails only when the card reaches nobody
-# either way. Written was never the same fact as delivered, and this patch is
-# the case that separates them.
+# PREDICTED ONE AND IT RAN GREEN, WHICH FOUND THE SUITE MISSING A THIRD FACT.
 #
-# Reddens: syncup-live: "and the other person sees it in the channel"
+# The suite split the claim in two so it could say which half broke: "the call
+# posts a card into the channel" reads the server, and "and the other person
+# sees it in the channel" watches B's screen and then RELOADS before giving up.
+# The reload is deliberate — it separates "never announced" from "never
+# written" — and it is also why neither check can tell a card that was PUSHED
+# from one that was merely stored and found on the next fetch. This patch stores
+# it and pushes nothing, and both checks passed.
+#
+# The suite computed `neededReload` and read it nowhere, which is the facade's
+# mirror inside a test suite: a value derived correctly, by a variable named
+# after exactly the fact nobody asserted. It is a check of its own now — "and it
+# arrives without a reload — a card you have to refresh for is a log entry" —
+# and `EXPECTED_CHECKS` went 58 → 59.
+#
+# Reddens: syncup-live: "and it arrives without a reload"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/calls/calls.service.ts'
 a = """    this.realtime.emitToWorkspace(workspaceId, {

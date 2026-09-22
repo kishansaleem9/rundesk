@@ -235,12 +235,15 @@ const chain = makeChain(check, skip)
  * the five it described, which is the stale reason in a comment that exists to
  * justify an exception.
  *
- * 58 = 53 checks that ran plus the 5 the deployment cannot answer. Observed,
- * not derived: `53 passed, 0 failed, 5 skipped`. Raise it when checks are
+ * 59 = 54 checks that ran plus the 5 the deployment cannot answer. Observed,
+ * not derived: it was `53 passed, 0 failed, 5 skipped` when this was written,
+ * and the 54th is "and it arrives without a reload", added when
+ * `sl-3-call-card-not-broadcast` ran green against a pair of checks that both
+ * tolerated one. Raise it when checks are
  * added, and add a `skip` for any new gate on the machine so it stays one
  * number.
  */
-const EXPECTED_CHECKS = 58
+const EXPECTED_CHECKS = 59
 
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
@@ -700,6 +703,29 @@ if (!sawCard && cardWritten) {
   sawCard = await card.waitFor({ timeout: 20000 }).then(() => true).catch(() => false)
 }
 check(sawCard, 'and the other person sees it in the channel', 'the card never reached the other person, reload or not')
+/*
+ * THREE FACTS, NOT TWO — and `neededReload` was computed and read by nobody,
+ * which is the facade's mirror inside a test suite.
+ *
+ * The check above tolerates the reload on purpose, so it cannot tell a card
+ * that was PUSHED from one that was merely stored and found on the next fetch.
+ * `sl-3-call-card-not-broadcast` deletes the realtime emit — the card is
+ * inserted, the notifications go out, and nothing reaches an open channel until
+ * somebody reloads — and it ran GREEN against the pair above.
+ *
+ * A call invitation that arrives on the next reload is a log entry, so the
+ * third fact gets its own sentence. It is the one check here that could flake:
+ * the comment above is right that a socket still connecting when the call
+ * starts would miss the event. Fifteen seconds is the window, and a socket that
+ * has not connected inside a live call in fifteen seconds is itself the defect
+ * this reports — the failure names the reload so the two readings are told
+ * apart on sight rather than guessed at.
+ */
+check(
+  sawCard && !neededReload,
+  'and it arrives without a reload — a card you have to refresh for is a log entry',
+  neededReload ? 'it only appeared after a reload, so nothing was pushed' : 'the card never arrived at all',
+)
 if (neededReload && sawCard) {
   console.log('  NOTE  it only appeared after a reload — the realtime event did not reach B in time')
 }
