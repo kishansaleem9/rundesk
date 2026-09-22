@@ -360,11 +360,16 @@ try {
       await page.getByTestId('activity-search').inputValue().catch(() => null),
     )} over an unfiltered feed — the next keystroke re-applies a term the person has cleared`,
   )
+  // A chk message is evaluated whether the check passes or fails, so this read is
+  // bounded and caught rather than left to wait out the default 30 seconds on an
+  // element a patch removed. It is a locator held in a variable — the shape rule
+  // six could not see until it learnt to track locator variables.
+  const restoredCount = await count.getAttribute('data-count', { timeout: 8000 }).catch(() => null)
   chk(
     stayed,
     'and Clear brings the whole feed back',
     restored
-      ? `the feed came back and then narrowed again — data-count=${await count.getAttribute('data-count')} ` +
+      ? `the feed came back and then narrowed again — data-count=${JSON.stringify(restoredCount)} ` +
         'a second later, so Clear reset the applied search and left the box that feeds it'
       : 'clearing the filters left the feed narrowed',
   )

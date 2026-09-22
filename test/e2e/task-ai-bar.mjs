@@ -371,11 +371,18 @@ try {
     () => page.getByTestId('comment-ai-panel').isVisible().catch(() => false),
     { timeoutMs: 10_000 },
   )
+  /*
+   * Read once, bounded: a chk message is evaluated on the pass as well as on the
+   * failure, so an unbounded read here would wait out the default timeout and end
+   * the run when a patch removes the composer. The locator sits in a variable —
+   * the shape rule six could not see until it learnt to track locator variables.
+   */
+  const composerValue = await input.inputValue({ timeout: 8000 }).catch(() => null)
   chk(
-    panelOpened && (await input.inputValue()) === '',
+    panelOpened && composerValue === '',
     'space on an EMPTY composer opens the AI panel, and the space itself is swallowed rather than typed',
     panelOpened
-      ? `the panel opened but the composer now reads "${await input.inputValue()}" — the keystroke did both things`
+      ? `the panel opened but the composer now reads ${JSON.stringify(composerValue)} — the keystroke did both things`
       : 'space did nothing: the hint promises a gesture the composer does not honour, which is the ' +
         'printed-but-not-followable defect this audit keeps finding',
   )
