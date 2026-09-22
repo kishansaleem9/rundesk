@@ -753,6 +753,16 @@ as the same defects one level up.
   anything. It took four instances of this rule to learn that the reading has
   to start at the assertion and walk outwards, not start at the feature and
   hope to meet it.
+
+  **AND WALKING OUTWARDS MEANS THE FIXTURE TOO, NOT ONLY THE SELECTOR.** The
+  fifth instance was `no-dead-ends-1`, where I did read the assertion —
+  `escape.locator('a[href="/app"]').count() > 0` — and then made the link
+  conditional on `backTo`, reasoning that a session with no last-visited
+  workspace would lose its escape. The assertion runs in the FIRST of the
+  suite's two contexts, where `backTo` is set. A patch that depends on WHICH
+  SESSION is in play has to be checked against the session the assertion
+  actually uses; an unconditional edit does not, which is why it is the safer
+  shape when either would model the defect.
 - **A CLAIM CHOSEN BECAUSE IT VERIFIES IS WORSE THAN ONE THAT HAS ROTTED.**
   `check-break-claims.mjs` rejects a patch whose `# Reddens:` sentence is not in
   its suite, and the obvious way to satisfy it is to go and find a sentence that
