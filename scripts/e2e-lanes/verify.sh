@@ -2,6 +2,25 @@
 # Run one suite in one lane. `verify.sh <suite> <lane>`
 # Lane k talks to the API on port 302k, backed by database rundesk_v<k>.
 #
+# IT WAS UNCOMMITTED FOR A DAY, and `batch.sh` — which IS committed — did
+# nothing but invoke it out of `/tmp`. On any other checkout that is a tool
+# that appears usable and runs a file which exists nowhere in the repository.
+# This engagement has already lost a container with 86 unpushed commits in it;
+# the single-suite recipe should not be the next thing to go that way, and I
+# spent this morning re-typing it by hand — the port, the database, the dist —
+# because it was not here to read.
+#
+# IT EXPECTS AN API ALREADY LISTENING ON 302k. `wt-break.sh` starts one per lane
+# from that lane's worktree; outside a break set, start one yourself:
+#
+#   cd apps/api && PORT=302k \
+#     DATABASE_URL=postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v<k> \
+#     JWT_ACCESS_SECRET=... JWT_REFRESH_SECRET=... node dist/apps/api/src/main.js
+#
+# and mind the connection budget: Postgres allows 100 and each API holds about
+# ten, so eight forgotten ones is a sweep reporting "sorry, too many clients
+# already" as if it were a product failure. That happened.
+#
 # THE WEB BUNDLE IS PER-LANE WHEN THE LANE HAS ONE. `apps/web/dist` is shared,
 # and a suite only ever READS it, so sharing is fine — until somebody rebuilds.
 # `vite build` empties the directory before it writes, so a run that starts
