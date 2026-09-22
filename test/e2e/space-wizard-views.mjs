@@ -204,9 +204,17 @@ try {
   for (const view of EXPECTED_VIEWS) {
     const text = await labelOf(view)
     seen[view] = text
+    /*
+     * The sentence carries a LITERAL run long enough to quote. It read
+     * `the ${view} row reads "${EXPECTED_LABEL[view]}"`, whose only literal
+     * fragment is ` row reads "` — twelve characters, two words, and no break
+     * patch can name this check without quoting something that short.
+     * `space-wizard-views-1-teamlabel` reddens exactly the `team` iteration and
+     * had to claim a neighbouring check instead.
+     */
     chk(
       text === EXPECTED_LABEL[view],
-      `the ${view} row reads "${EXPECTED_LABEL[view]}"`,
+      `the ${view} row is labelled with the frame's own word, "${EXPECTED_LABEL[view]}"`,
       `the ${view} row read ${JSON.stringify(text)}, not ${JSON.stringify(EXPECTED_LABEL[view])}` +
         (text === 'List' && view !== 'list'
           ? ' — this is the missing-VIEW_LABEL-entry bug: the key fell back to a sibling\'s string'
