@@ -3880,6 +3880,97 @@ Three things turned up on the way that were not the shape being fixed:
   `panel-collapse` and `syncup-live` each grew their own `chain()` the same
   afternoon.
 
+### The two shared modules, and the holes in them
+
+Extracting the duplicated matcher and the duplicated chain helper was the right
+move and it was not the end of it. Both modules are load-bearing — one decides
+whether 798 claims count as verified, the other is used by eleven suites — and
+neither had a test. Writing one for each found a hole in each, within an hour of
+writing the module.
+
+**`test/e2e/lib/chain.mjs` had the hole it exists to prevent.** `step` past the
+end of its label list emitted `check(cond, undefined, …)`: a check with NO
+SENTENCE, printing `PASS undefined` and counting towards the total, so a chain
+used past its length silently inflated the count. Found by calling `step` three
+times on a chain of two; invisible by reading. It throws now, with the labels in
+the message, regardless of a label override — a label replaces the sentence AT a
+valid index and does not buy an extra slot, because the declared length is what
+`rest` and the suite's `EXPECTED_CHECKS` both depend on.
+
+**And the first version of the matcher's test was itself a check that could not
+fail.** It asserted the floor's existence and not its height: lowering
+`MIN_WORDS` from five to four left it completely green, and the floor is the one
+number a future loosening would reach for first. The assertions now fail in both
+directions.
+
+Writing that test also corrected something I had believed about the module. I
+asserted that a four-word claim does not verify; it does, because `findsClaim`
+tries the whole string before any fragment — and that is the right way round,
+because the author wrote exactly what the file says. It matters in practice: 28
+quoted claims are under five words and most are correct, quoting either a UI
+label the check names ("Find Blockers", "+ Add Channel") or the literal part of
+a template literal. What it costs is named in the test so nobody "fixes" it
+later: a two-word verbatim claim is weak evidence.
+
+Both tests are checkers rather than vitest files, because `test/e2e` has no
+runner and inventing one for a couple of dozen assertions is how a check ends up
+unregistered. Both are in `ci.yml` and preflight, and both are break-tested
+three ways.
+
+### Three more patches that ran green, and what each one meant
+
+- **`sl-3-call-card-not-broadcast` ran green twice.** The second time is the
+  interesting one: a third check had been added asserting the card arrives
+  without a reload, and the card arrived anyway. `call.started` carries the
+  channel id, and the web client invalidates `chat-messages` on any `call.*`
+  event that has one — so the card has TWO independent delivery paths and
+  neither can be removed on its own. No single plausible mistake can break that
+  claim. The patch stops pretending to be one; it removes both, which is the
+  minimum edit that can disprove the claim, and says so.
+
+  The comment that hid it was wrong too: the invalidation justified doing
+  nothing without a channelId by saying "the card is refreshed by its own poll a
+  moment later either way". There is no such poll. `chat-messages` has no
+  `refetchInterval`; the 20s one on that page is on RECEIPTS.
+
+- **`us-3-share-levels-lose-their-meaning` ran green**, and `each level carries
+  a one-line meaning` was `/only|explan|can |may /i` over the WHOLE dialog text.
+  A dialog that also holds a title, a member list and a Copy link button matches
+  one of four loose substrings whatever the levels say. It reads each level's own
+  row now — and the rewrite promptly failed its own baseline, because the level
+  is called "View only" and the check looked for `View` followed by a dash. The
+  harness refused the set on a red baseline, which is the guard working: one
+  refusal instead of four misread results.
+
+- **`al-2-chat-channel-chosen-silently` was aimed at an alias** one line below
+  the function the fallback effect actually calls. It applied, changed a real
+  line, and the suite came back 28 of 28.
+
+### And the runs, collected
+
+Every set that has run since the denominator was corrected, with its baseline:
+
+| suite | baseline | per-patch failures |
+| --- | --- | --- |
+| `emoji-picker` | 25 · 0 | 2 · 6 · 1 · 2 · 1 · 2 |
+| `loading-states` | 26 · 0 | 1 · 1 · 2 · 5 · 1 |
+| `stale-chunk-recovery` | 27 · 0 | 1 · 3 · 1 · 1 · 1 |
+| `addressability-live` | 28 · 0 | 2 · 1 · 3 · 2 |
+| `panel-collapse` | 56 · 0 | 6 · 1 · 1 · 2 |
+| `syncup-live` | 54 · 0 · 5 skipped | 1 · 1 · — · 1 |
+| `settings-depth` | 61 · 0 | 2 · 1 · 1 · 1 |
+| `chat-message-actions` | 73 · 0 | 5 · 3 · 1 · 1 |
+| `task-depth` | 91 · 0 | 6 · 2 · 1 · 3 |
+| `video1-fast-items` | 92 · 0 | — |
+| `video-regression` | 93 · 0 | 3 · 2 · 1 · 9 |
+| `ui-sweep` | 107 · 0 | 1 · 1 · — · 2 |
+| `person-panel` | 59 · 0 | 2 · 2 · 1 · 1 |
+| `command-palette` | 43 · 0 | 2 · 7 · 2 · 1 |
+
+Where a cell reads `—` the patch ran green and is dealt with above. Where a
+baseline is not `N · 0` the set was refused, which is the harness declining to
+measure anything against a suite that was already red.
+
 ---
 
 ## 9. The misclassified rows, resolved
