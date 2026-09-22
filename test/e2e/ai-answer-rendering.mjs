@@ -98,6 +98,31 @@ const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
 
+/*
+ * READING AN ELEMENT THAT IS NOT THERE IS A REPORT, NOT THE END OF THE RUN.
+ *
+ * Four of this suite's 22 break patches came back as SHORT runs and all four
+ * have one shape: the check aimed at reddens correctly, and then the NEXT line
+ * reads a locator the failure has just shown to be absent. Playwright waits its
+ * default thirty seconds and throws, the throw ends the section, and the run
+ * reports 16, 32 or 45 of 51 checks. `aar-7-list-refs-never-sent` lost
+ * thirty-five checks to one `getAttribute`.
+ *
+ * A patch credited with reddening one check while silencing thirty-five is
+ * worse than a patch that reddens nothing, because the number beside it looks
+ * like evidence. So every read that follows a check which is allowed to fail
+ * goes through these: absent reads as null, the check below reports null in its
+ * own sentence, and the section keeps going.
+ *
+ * THE SHORT TIMEOUT IS THE POINT, not an optimisation. Every one of these reads
+ * comes after a `waitUntil` that has already settled whether the element is
+ * there, so three seconds is a grace period rather than a race — and thirty
+ * seconds × ten reads is five minutes added to a suite that runs in four.
+ */
+const GRACE_MS = 3_000
+const textOf = (loc) => loc.innerText({ timeout: GRACE_MS }).catch(() => null)
+const attrOf = (loc, name) => loc.getAttribute(name, { timeout: GRACE_MS }).catch(() => null)
+
 const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
 const api = apiClient(`${B}/api/v1`, auth.accessToken)
 const WS = process.env.E2E_WS ?? (await pickWorkspace(api)).id
@@ -264,7 +289,7 @@ try {
     'and its heading and three-item list are real block elements',
     `found ${headingCount} heading(s) reading ${JSON.stringify(headingText)} and ${itemCount} list item(s)`,
   )
-  const answerText = (await answer.innerText()).replace(/\s+/g, ' ')
+  const answerText = ((await textOf(answer)) ?? '').replace(/\s+/g, ' ')
   chk(
     !answerText.includes('**') && !answerText.includes('## '),
     'with none of the syntax left visible',
@@ -280,7 +305,7 @@ try {
    * split is the interesting part: "answers render markdown" is only safe if
    * "questions do not" is also true.
    */
-  const questionText = await page.getByTestId(`ai-question-${questionId}`).innerText()
+  const questionText = (await textOf(page.getByTestId(`ai-question-${questionId}`))) ?? ''
   chk(
     questionText.includes('**project status**'),
     'while the QUESTION keeps its asterisks exactly as they were typed',
@@ -316,30 +341,32 @@ try {
     `chip counts were ${countA} and ${countB} with ${await skeletons.count()} skeleton(s) still on screen ` +
       `and ${await page.locator('[data-testid^="ai-ref-unresolved-"]').count()} reference(s) unresolved`,
   )
+  const [textA, textB] = [await textOf(chipA), await textOf(chipB)]
   chk(
-    (await chipA.innerText()).includes(`${TAG}-a`) && (await chipB.innerText()).includes(`${TAG}-b`),
+    (textA ?? '').includes(`${TAG}-a`) && (textB ?? '').includes(`${TAG}-b`),
     'each showing its own real title',
-    `they read ${JSON.stringify([await chipA.innerText(), await chipB.innerText()])}`,
+    `they read ${JSON.stringify([textA, textB])}`,
   )
-  const statusA = await chipA.getAttribute('data-ref-status')
-  const statusB = await chipB.getAttribute('data-ref-status')
+  const statusA = await attrOf(chipA, 'data-ref-status')
+  const statusB = await attrOf(chipB, 'data-ref-status')
   chk(
     statusA === 'todo' && statusB === 'in_progress',
     'and its own status — the two are not the same value',
     `the chips reported ${JSON.stringify([statusA, statusB])}; two chips that always agree are a facade`,
   )
-  const catA = await chipA.getAttribute('data-ref-status-category')
-  const catB = await chipB.getAttribute('data-ref-status-category')
+  const catA = await attrOf(chipA, 'data-ref-status-category')
+  const catB = await attrOf(chipB, 'data-ref-status-category')
   chk(
     catA === 'open' && catB === 'in_progress',
     'with the category that drives the badge colour, which is not the status key',
     `the categories were ${JSON.stringify([catA, catB])} — keying colour on the key breaks the moment ` +
       'a workspace renames a status',
   )
+  const badgeText = await textOf(page.getByTestId(`ai-ref-task-badge-${taskA.id}`))
   chk(
-    (await page.getByTestId(`ai-ref-task-badge-${taskA.id}`).innerText()).trim().toLowerCase() === 'todo',
+    (badgeText ?? '').trim().toLowerCase() === 'todo',
     'and a person can read the badge',
-    `the badge read ${JSON.stringify(await page.getByTestId(`ai-ref-task-badge-${taskA.id}`).innerText())}`,
+    `the badge read ${JSON.stringify(badgeText)}`,
   )
   chk(
     (await page.getByTestId(`ai-ref-list-${listId}`).count()) === 1,
@@ -357,10 +384,11 @@ try {
    * the WHOLE route: a chip holding just the list id can be drawn and not
    * opened, which is how a label starts pretending to be a control.
    */
+  const listHref = await attrOf(listChip, 'href')
   chk(
-    (await listChip.getAttribute('href')) === listRoute,
+    listHref === listRoute,
     'the list chip is a link to that list’s real route, space and project included',
-    `its href was ${JSON.stringify(await listChip.getAttribute('href'))}, expected ${JSON.stringify(listRoute)}`,
+    `its href was ${JSON.stringify(listHref)}, expected ${JSON.stringify(listRoute)}`,
   )
   const viewList = page.getByTestId(`ai-ref-view-${listId}-list`)
   const viewBoard = page.getByTestId(`ai-ref-view-${listId}-board`)
@@ -369,18 +397,22 @@ try {
     'and the sentence’s two VIEW chips resolved as well',
     `list-view chips: ${await viewList.count()}, board-view chips: ${await viewBoard.count()}`,
   )
-  const boardHref = await viewBoard.getAttribute('href')
+  const boardHref = await attrOf(viewBoard, 'href')
+  const listViewHref = await attrOf(viewList, 'href')
   chk(
-    (await viewList.getAttribute('href')) === `${listRoute}?view=list` && boardHref === `${listRoute}?view=board`,
+    listViewHref === `${listRoute}?view=list` && boardHref === `${listRoute}?view=board`,
     'each opening its OWN tab of that list — two chips, two different links',
-    `they pointed at ${JSON.stringify([await viewList.getAttribute('href'), boardHref])}`,
+    `they pointed at ${JSON.stringify([listViewHref, boardHref])}`,
   )
-  const boardText = (await viewBoard.innerText()).trim()
+  const boardText = (await textOf(viewBoard))?.trim() ?? null
+  const listPath = (await textOf(listChip))?.trim() ?? null
   chk(
-    boardText.startsWith(await listChip.innerText().then((s) => s.trim())) && boardText.split('>').length === 3,
+    boardText !== null &&
+      listPath !== null &&
+      boardText.startsWith(listPath) &&
+      boardText.split('>').length === 3,
     'and reading as the frame reads them — the list’s path with the view’s name on the end',
-    `the board chip read ${JSON.stringify(boardText)} against a list path of ` +
-      `${JSON.stringify((await listChip.innerText()).trim())}`,
+    `the board chip read ${JSON.stringify(boardText)} against a list path of ${JSON.stringify(listPath)}`,
   )
   /*
    * THE VIEW THIS BUILD CANNOT DRAW. `enabledViewsFor` filters unknown keys
@@ -389,12 +421,12 @@ try {
    * become a mindmap link, and that it still goes somewhere real.
    */
   const ghostView = page.getByTestId(`ai-ref-view-${listId}-mindmap`)
+  const ghostEnabled = await attrOf(ghostView, 'data-view-enabled')
+  const ghostHref = await attrOf(ghostView, 'href')
   chk(
-    (await ghostView.getAttribute('data-view-enabled')) === 'false' &&
-      (await ghostView.getAttribute('href')) === listRoute,
+    ghostEnabled === 'false' && ghostHref === listRoute,
     'a view this build does not draw degrades to the list instead of linking to a missing tab',
-    `it reported data-view-enabled=${JSON.stringify(await ghostView.getAttribute('data-view-enabled'))} ` +
-      `with href ${JSON.stringify(await ghostView.getAttribute('href'))}`,
+    `it reported data-view-enabled=${JSON.stringify(ghostEnabled)} with href ${JSON.stringify(ghostHref)}`,
   )
   /*
    * AND IT ACTUALLY GOES. An `href` proves the attribute; only a click proves
@@ -454,11 +486,11 @@ try {
   chk(
     movedBadge,
     'the chip now reads `done` — the badge is read at render time, not quoted from the answer',
-    `the chip still reports ${JSON.stringify(await page.getByTestId(`ai-ref-task-${taskA.id}`).getAttribute('data-ref-status'))}`,
+    `the chip still reports ${JSON.stringify(await attrOf(page.getByTestId(`ai-ref-task-${taskA.id}`), 'data-ref-status'))}`,
   )
   chk(
-    (await page.getByTestId(`ai-ref-task-${taskA.id}`).getAttribute('data-ref-status-category')) === 'closed' &&
-      (await page.getByTestId(`ai-ref-task-${taskB.id}`).getAttribute('data-ref-status')) === 'in_progress',
+    (await attrOf(page.getByTestId(`ai-ref-task-${taskA.id}`), 'data-ref-status-category')) === 'closed' &&
+      (await attrOf(page.getByTestId(`ai-ref-task-${taskB.id}`), 'data-ref-status')) === 'in_progress',
     'its category moved with it, and the OTHER chip did not move at all',
     'either the category lagged the status or both chips changed together',
   )
@@ -473,7 +505,7 @@ try {
   // ── The busy state ─────────────────────────────────────────────────────────
   console.log('\n▶ `18:45` — the busy state, while a request is genuinely in flight')
   const composer = page.getByTestId('ai-composer-input')
-  const restingPlaceholder = await composer.getAttribute('placeholder')
+  const restingPlaceholder = await attrOf(composer, 'placeholder')
   chk(
     !!restingPlaceholder && !/anything/i.test(restingPlaceholder),
     'a composer disabled because no model is configured no longer invites you to type',
@@ -511,14 +543,14 @@ try {
     { timeoutMs: 25_000 },
   )
   chk(busyUp, 'a busy state appears above the step log', 'nothing said the assistant was doing anything')
+  const busyState = await attrOf(page.getByTestId('ai-busy-state'), 'data-state')
+  const busyLabel = await textOf(page.getByTestId('ai-busy-label'))
   chk(
-    (await page.getByTestId('ai-busy-state').getAttribute('data-state')) === 'thinking' &&
-      (await page.getByTestId('ai-busy-label').innerText()).trim().length > 0,
+    busyState === 'thinking' && (busyLabel ?? '').trim().length > 0,
     'and before the first frame arrives it says it is thinking, in words',
-    `it reported data-state=${JSON.stringify(await page.getByTestId('ai-busy-state').getAttribute('data-state'))} ` +
-      `with the label ${JSON.stringify(await page.getByTestId('ai-busy-label').innerText())}`,
+    `it reported data-state=${JSON.stringify(busyState)} with the label ${JSON.stringify(busyLabel)}`,
   )
-  const busyPlaceholder = await page.getByTestId('ai-composer-input').getAttribute('placeholder')
+  const busyPlaceholder = await attrOf(page.getByTestId('ai-composer-input'), 'placeholder')
   chk(
     busyPlaceholder !== restingPlaceholder && !/anything/i.test(busyPlaceholder ?? ''),
     'and the composer says it is working, not what it says at rest',
@@ -672,7 +704,9 @@ try {
    * which is a label and would ask the assistant "Project Status".
    */
   const pressed = page.getByTestId('ai-starter-projectStatus')
-  const pressedTitle = (await pressed.innerText()).split('\n')[0].trim()
+  // `aar-18-starters-are-a-fixed-list` replaces the card set, so this card is
+  // gone and this read was the throw that cost that patch six checks.
+  const pressedTitle = ((await textOf(pressed)) ?? '').split('\n')[0].trim()
   await pressed.click()
   const asked = await waitUntil(
     async () => (await page.locator('[data-testid^="ai-question-"]').count()) > 0,
