@@ -260,20 +260,31 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ "more" removes it, on the server, and the header follows')
 
+  /*
+   * NOT A THROW. This was `throw new Error('the attachment "more" menu never
+   * opened')`, and `tat-6-cluster-escapes-its-card` moves the action cluster out
+   * of its card — so the menu was unreachable and the run ended at 10 of 13 with
+   * `SUITE ERROR`, three checks never asked. A menu that will not open is a
+   * reason the removal could not be tried, and a reason belongs in the detail of
+   * a failing check.
+   */
   await page.getByTestId('attachment-more').first().click({ timeout: 8000 }).catch(() => {})
   const removeItem = page.getByTestId('attachment-remove')
-  if (!(await waitUntil(() => removeItem.isVisible().catch(() => false), { timeoutMs: 10_000 }))) {
-    throw new Error('the attachment "more" menu never opened')
-  }
-  await removeItem.click({ timeout: 8000 }).catch(() => {})
+  const menuOpened = await waitUntil(() => removeItem.isVisible().catch(() => false), {
+    timeoutMs: 10_000,
+  })
+  if (menuOpened) await removeItem.click({ timeout: 8000 }).catch(() => {})
 
-  const gone = await waitUntil(async () => (await cards.count()) === SEEDED - 1, { timeoutMs: 20_000 })
+  const gone =
+    menuOpened && (await waitUntil(async () => (await cards.count()) === SEEDED - 1, { timeoutMs: 20_000 }))
   const serverAfter = (await A(`/tasks/${task.id}/attachments`)).data ?? []
   chk(
     gone && serverAfter.length === SEEDED - 1,
     `Remove took it off the server too — ${serverAfter.length} rows left, not just ${SEEDED - 1} on screen`,
-    `the screen shows ${await cards.count()} and the server holds ${serverAfter.length}: a removal that only ` +
-      'happened in the browser comes back on the next load',
+    menuOpened
+      ? `the screen shows ${await cards.count()} and the server holds ${serverAfter.length}: a removal that only ` +
+        'happened in the browser comes back on the next load'
+      : 'the attachment "more" menu never opened, so Remove could not be tried at all',
   )
 
   chk(

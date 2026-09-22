@@ -47,7 +47,10 @@ const argOf = (name, fallback) => {
  * this same list body and had no suite of their own — §V2-S13 `10:52`'s
  * per-group `+ Add Task` (four) and §V2-S13 `09:35`'s calendar `Today` (five).
  */
-const EXPECTED_CHECKS = 49
+// 50 since 22 September: `b2-cluster` gives the wrapper `display: contents` and
+// ran green — the chips stay adjacent at this viewport, so only the wrapper's
+// own BOX can tell a cluster from three things side by side.
+const EXPECTED_CHECKS = 50
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -179,6 +182,35 @@ try {
     const gaps = [subBox.x - (groupBox.x + groupBox.width), colBox.x - (subBox.x + subBox.width)]
     chk(gaps.every((g) => g >= 0 && g <= 14), 'with nothing wedged between them',
       `the gaps measured ${gaps.map((g) => Math.round(g)).join('px, ')}px`)
+    /*
+     * AND THE CLUSTER IS A BOX, WHICH IS WHAT MAKES IT A CLUSTER.
+     *
+     * Everything above is satisfied by three chips that merely happen to be
+     * adjacent. `b2-cluster` gives the wrapper `display: contents` — the element
+     * and its testid survive, the three chips are still its DOM children, and at
+     * this viewport nothing wraps, so the count check ("all three are in one
+     * cluster") and the one-row check both passed and the patch ran GREEN.
+     *
+     * What `contents` removes is the wrapper's own box. Without it the chips are
+     * laid out by the toolbar and wrap through the group at narrower widths,
+     * which is the state the wrap came from. A box that contains all three is
+     * the fact, and it is true at any width — so this is asserted here rather
+     * than by resizing the viewport and hoping the wrap lands where the frame
+     * would show it.
+     */
+    const clusterBox = await chipBox('list-view-controls')
+    chk(
+      !!clusterBox &&
+        clusterBox.width > 0 &&
+        clusterBox.x <= groupBox.x + 1 &&
+        clusterBox.x + clusterBox.width >= colBox.x + colBox.width - 1,
+      'and the cluster is a box of its own that holds all three',
+      clusterBox
+        ? `the cluster box ${JSON.stringify(clusterBox)} does not contain chips ending at ` +
+          `x=${Math.round(colBox.x + colBox.width)}`
+        : 'the cluster has no box at all — `display: contents` leaves the three laid out by the ' +
+          'toolbar, so they wrap through the group at narrower widths',
+    )
     /*
      * A floor per KIND of control, from what this build actually measures — one
      * floor for all three would be set by the narrowest and would not notice
