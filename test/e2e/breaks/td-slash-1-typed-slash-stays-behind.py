@@ -16,12 +16,20 @@
 # the gesture, not content, and a gesture that leaves a mark is a gesture that
 # has to be cleaned up by hand afterwards.
 #
-# One check, and it is written as its own sentence rather than folded into the
-# table assertion for exactly this reason: `picking Table writes a table` still
-# passes, because the table is written. Only `and the "/" that opened the menu
-# is gone` can tell.
+# PREDICTED ONE AND IT REDDENED TWO, and the second is the defect being worse
+# than the header described. `picking Table writes a table` still passes,
+# because the table is written — but `and renders as a real table, not a row of
+# pipes` fails, because a stray `/` immediately before the table's first row
+# keeps markdown from opening a table block at all. So the pipes render as
+# literal pipes in a paragraph.
 #
-# Reddens: task-depth: "and the \"/\" that opened the menu is gone"
+# That makes this blunter than "one leftover character": the block does not
+# merely collect a slash, it stops being a block. Recorded rather than
+# re-narrowed, because a patch whose damage is larger than predicted is still
+# a patch aimed at the right line.
+#
+# Reddens: task-depth: "and the \"/\" that opened the menu is gone" and
+#   "and renders as a real table, not a row of pipes"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """    const lineStart = text.lastIndexOf('\\n', caret - 1) + 1

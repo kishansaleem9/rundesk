@@ -16,16 +16,30 @@
 # — the condition reads as "skip the attach when it is already on", so removing
 # the body and keeping the check is a shape that appears in real diffs.
 #
-# THREE CHECKS, AND THE SET IS THE DEFECT THIS SUITE WAS WRITTEN FOR: #147 was
-# labels, assignments and both endpoints shipping long ago with nothing in the
-# web app ever calling them, and an HTTP check for "can a tag be attached" was
-# already true and told nobody anything. Here the two that read the server and
-# the one that reads the sheet all fall together, and `a name that does not
-# exist offers to create it` still passes.
+# PREDICTED THREE AND IT REDDENED SIX, and every one of the three extra is
+# honest rather than a miscount. #147 was labels, assignments and both
+# endpoints shipping long ago with nothing in the web app ever calling them,
+# and an HTTP check for "can a tag be attached" was already true and told
+# nobody anything. Here:
+#
+#  - the two that read the server and the one that reads the sheet fall, as
+#    predicted;
+#  - `reusing the same name returns the same tag` and `so a second task can
+#    carry the same tag` fall too, because both compare against `applied` —
+#    the label the broken path never attached — so they are checks coupled to
+#    the outcome of the thing under test rather than to the API they name;
+#  - and the two guarded checks report as failed with the reason, which is the
+#    guard doing its job: before it, `applied.id` threw and they simply did not
+#    run.
+#
+# `a name that does not exist offers to create it` still passes.
 #
 # Reddens: task-depth: "pressing Enter creates the tag AND puts it on the task"
 #   and "and the tag is visible on the task" and
-#   "the badge carries its own remove control"
+#   "the badge carries its own remove control" and
+#   "and pressing it takes the tag off" and
+#   "reusing the same name returns the same tag" and
+#   "so a second task can carry the same tag"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-tags.tsx'
 a = """      if (!onTask.has(label.id)) {
