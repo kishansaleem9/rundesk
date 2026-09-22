@@ -15,6 +15,8 @@
 # matters — a short run counted as a reddening is the confident zero this whole
 # audit is about.
 #
+# Expect: SHORT
+#
 # Reddens: ai-create-containers: "and hands back the id of what it made"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.service.ts'
