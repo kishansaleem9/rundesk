@@ -23,6 +23,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
@@ -160,6 +161,8 @@ const results = []
 const ok = (m) => { results.push([true, m]); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push([false, m]); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
+
+const chain = makeChain(chk)
 
 const browser = await chromium.launch(LAUNCH)
 const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })
@@ -708,27 +711,56 @@ try {
       `(typed ${JSON.stringify(typed)}) — a catcher with no Escape handler leaves no way to ` +
       'dismiss the menu except losing what you were searching for',
   )
-  await page.locator('[cmdk-input]').first().fill('')
-  await page.getByTestId('palette-more-types').click()
-  await page.waitForTimeout(600)
-
-  await page.getByTestId('palette-add-type-folder').click()
-  await page.waitForTimeout(600)
-  chk(
-    await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
+  /*
+   * THE PALETTE MAY BE GONE BY NOW, AND EVERY LINE BELOW ASSUMED IT WAS NOT.
+   *
+   * The check above is that Escape closes the ⋯ menu WITHOUT closing the
+   * palette. `cp-43-more-types-escape-closes-all` makes it close both — and
+   * then `[cmdk-input]').fill('')` spent thirty seconds on an input that no
+   * longer exists, threw, and the run ended on `38 passed, 2 failed` with
+   * `✗ 40 of 43 checks ran`. Three checks did not run, under a headline about
+   * the harness.
+   *
+   * Re-opened if it went, and the two promotion checks report either way. The
+   * failure above is the one that names the defect; these two say plainly that
+   * they could not be evaluated on a palette that had to be re-opened by the
+   * test.
+   */
+  const promo = chain(
     'choosing Folders puts it on the bar',
-    'the promoted type never appeared as a chip',
-  )
-
-  await page.keyboard.press('Escape')
-  await page.waitForTimeout(600)
-  await page.keyboard.press('Control+k')
-  await page.waitForTimeout(1200)
-  chk(
-    await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
     'and it is still there the next time the palette opens',
-    'the promoted chip was forgotten as soon as the palette closed',
   )
+  const paletteGone = !(await page.locator('[cmdk-input]').first().isVisible().catch(() => false))
+  if (paletteGone) {
+    await page.keyboard.press('Control+k')
+    await page.waitForTimeout(1200)
+  }
+  const backUp = await page.locator('[cmdk-input]').first().isVisible().catch(() => false)
+  if (!backUp) {
+    promo.rest('skipped: the palette was closed and would not re-open')
+  } else {
+    await page.locator('[cmdk-input]').first().fill('')
+    await page.getByTestId('palette-more-types').click({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(600)
+
+    await page.getByTestId('palette-add-type-folder').click({ timeout: 8000 }).catch(() => {})
+    await page.waitForTimeout(600)
+    promo.step(
+      await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
+      paletteGone
+        ? 'the palette had closed and the promotion could not be driven from where the frame drives it'
+        : 'the promoted type never appeared as a chip',
+    )
+
+    await page.keyboard.press('Escape')
+    await page.waitForTimeout(600)
+    await page.keyboard.press('Control+k')
+    await page.waitForTimeout(1200)
+    promo.step(
+      await page.getByTestId('palette-type-folder').isVisible().catch(() => false),
+      'the promoted chip was forgotten as soon as the palette closed',
+    )
+  }
 
   console.log('\n▶ §G03-5 — a Drive result opens instead of doing nothing')
   await page.keyboard.press('Escape')

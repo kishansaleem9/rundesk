@@ -827,8 +827,19 @@ export function ChatPage() {
          * did that a dozen times to two hundred people.
          *
          * Without a channelId there is nothing to scope to, and refetching
-         * everything would be worse than refetching nothing: the card is
-         * refreshed by its own poll a moment later either way.
+         * everything would be worse than refetching nothing — but note what
+         * that costs, because the earlier version of this comment claimed the
+         * card "is refreshed by its own poll a moment later either way" and
+         * there is no such poll. `chat-messages` has no `refetchInterval`; the
+         * 20s one on this page is on RECEIPTS. A call event with no channelId
+         * leaves an open channel showing nothing until something else
+         * invalidates, which for the call card is the explicit
+         * `chat.message.created` emit in `announce()`.
+         *
+         * So the card has TWO independent delivery paths — that emit, and this
+         * invalidation — and neither can be removed on its own without the
+         * other covering for it. `sl-3-call-card-not-broadcast` found that by
+         * running green twice.
          */
         if (event.channelId) {
           qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })

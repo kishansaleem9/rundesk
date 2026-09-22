@@ -14,11 +14,18 @@
 # matches". It also re-sorts by its own score, which throws away the server's
 # ranking: `ENTITY_ORDER` puts tasks above docs, and cmdk does not know that.
 #
-# FOUR CHECKS, AND THE SET IS WHY THIS SUITE IS WORTH ITS LENGTH: the row is
-# dropped, the snippet that justified it goes with it, "No matches" appears over
-# results the client has, and the ordering is re-scored. Each one is a separate
-# consequence of the same line, and a suite that only asserted "some results
-# render" would see none of them.
+# PREDICTED FOUR AND IT REDDENED SEVEN, and the three extra are the same line
+# reaching further than the header credited it. The four predicted — the row
+# dropped, the snippet gone with it, "No matches" over results the client has,
+# the ordering re-scored — are each a separate consequence, and a suite that
+# only asserted "some results render" would see none of them. The other three
+# are downstream: with cmdk filtering, every later section that types a query
+# and then reads what came back is reading a re-filtered list.
+#
+# Left as it is. A patch whose damage is wider than predicted is still a patch
+# aimed at the right line, and the seven failures are all the same defect seen
+# from seven places — which is a fair description of what deleting that prop
+# does to a search palette.
 #
 # The `/` command mode has its own filtering and must survive — `/ still
 # narrows commands itself` passes either way, which is what tells a reader this

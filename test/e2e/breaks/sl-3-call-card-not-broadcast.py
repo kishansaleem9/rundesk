@@ -1,35 +1,39 @@
-# The call card is written to the database and never broadcast.
+# The call card is written to the database and reaches an open channel by no
+# route at all.
 #
-# ITS MIRROR, and the row really is there — which is what makes it survive every
-# server-side check. `announce()` still inserts the `chatMessages` row with its
-# `callId` and its plain-words body, the notifications still go out to the
-# channel's members, and a reload shows the card because the messages query
-# fetches it. Only the realtime emit goes, which reads like removing a duplicate
-# of work the query already does.
+# TWO EDITS, IN TWO FILES, AND THAT IS THE FINDING RATHER THAN A LICENCE.
 #
-# What it costs is the moment the card is FOR. Somebody starts a SyncUp and the
-# people already looking at the channel see nothing until they happen to
-# reload — which is exactly when a call invitation is worthless. A card that
-# arrives after the call is over is a log entry.
+# The first version of this patch removed only the `chat.message.created` emit
+# in `announce()`. It ran GREEN twice — once against a pair of checks that both
+# tolerated a reload, and again after a third check was added asserting the card
+# arrives WITHOUT one. The second green is the interesting one: the card really
+# did arrive, pushed, with the emit gone.
 #
-# PREDICTED ONE AND IT RAN GREEN, WHICH FOUND THE SUITE MISSING A THIRD FACT.
+# Because delivery has a SECOND, INDEPENDENT PATH. `call.started` carries the
+# channel id, and `workspace-chat-page.tsx` invalidates `chat-messages` for that
+# channel on any `call.*` event that has one — so an open channel refetches, the
+# row is already in the database, and the card appears. Neither emitter can be
+# removed on its own: whichever goes, the other covers for it.
 #
-# The suite split the claim in two so it could say which half broke: "the call
-# posts a card into the channel" reads the server, and "and the other person
-# sees it in the channel" watches B's screen and then RELOADS before giving up.
-# The reload is deliberate — it separates "never announced" from "never
-# written" — and it is also why neither check can tell a card that was PUSHED
-# from one that was merely stored and found on the next fetch. This patch stores
-# it and pushes nothing, and both checks passed.
+# So a single plausible mistake cannot break "and the other person sees it in
+# the channel", and this patch stops pretending to be one. It removes both
+# paths, which is the MINIMUM edit that can disprove the claim — and it is
+# recorded here as such, because a patch that reddens nothing is not evidence
+# and a patch spread over two files is not a mistake anybody would make.
 #
-# The suite computed `neededReload` and read it nowhere, which is the facade's
-# mirror inside a test suite: a value derived correctly, by a variable named
-# after exactly the fact nobody asserted. It is a check of its own now — "and it
-# arrives without a reload — a card you have to refresh for is a log entry" —
-# and `EXPECTED_CHECKS` went 58 → 59.
+# What the redundancy costs is worth the note too: the invalidation fires on
+# every join, leave and recording toggle, so the card's delivery is guaranteed
+# by a mechanism that exists for something else. That is why neither line looks
+# load-bearing on its own, and it is exactly the shape that made the first
+# version of this patch read as a real defect.
 #
-# Reddens: syncup-live: "and it arrives without a reload"
+# THREE CHECKS, AND THE THIRD IS THE ONE THIS SEQUENCE ADDED. "the call posts a
+# card into the channel" reads the server and still passes: the row is there.
+#
+# Reddens: syncup-live: "and the other person sees it in the channel" and
+#   "and it arrives without a reload"
 import io
+
 p = '/home/user/rundesk/apps/api/src/modules/calls/calls.service.ts'
 a = """    this.realtime.emitToWorkspace(workspaceId, {
       type: 'chat.message.created',
@@ -39,8 +43,17 @@ a = """    this.realtime.emitToWorkspace(workspaceId, {
     } as never)
 
 """
-b = ""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
-io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))
-print('calls.service.ts: the call card is stored but never pushed to anybody.')
+io.open(p, 'w', encoding='utf-8').write(s.replace(a, ''))
+
+# …and the second path, which is what made the first version of this inert.
+q = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
+b = """        if (event.channelId) {
+          qc.invalidateQueries({ queryKey: ['chat-messages', event.channelId] })
+        }
+"""
+t = io.open(q, encoding='utf-8').read()
+assert t.count(b) == 1, f'anchor appears {t.count(b)} times in {q}, expected exactly 1'
+io.open(q, 'w', encoding='utf-8').write(t.replace(b, '        void event.channelId\n'))
+print('calls.service.ts + workspace-chat-page.tsx: the card reaches an open channel by no route.')
