@@ -15,9 +15,15 @@
 # below is the same claim, made mechanical: the plan generator honours it until
 # this patch has been measured at a commit later than this edit.
 #
-# Re-run: measured while `wt-break.sh` built `packages/**` patches from the repo
-#   rather than the worktree, so the toaster this patch edits was never the one
-#   under test.
+# AND THE RE-RUN HAPPENED, at 29f83079: 19 passed, 1 failed, on "the toast's
+# centre was at (1298, 1003) of 1500x1000" — bottom-RIGHT, which is what this
+# patch moves it to and what the check it names asserts against. So the header
+# above was right that the fix was a re-run rather than a re-aim, and the
+# `# Re-run:` line that said so is spent and gone: the generator counts a
+# declaration only while the patch file has changed since the run that measured
+# it, and nothing has changed since this one.
+#
+# It was the last UNPROVEN patch in the audit.
 #
 # Reddens: folder-create: "and it sits bottom-left, where frame `08:55` stacks them"
 import io, re
