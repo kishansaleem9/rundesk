@@ -390,7 +390,14 @@ try {
   })
   await page.waitForTimeout(150)
   const box = await panel().boundingBox()
-  const gridBox = await page.locator('[data-testid="planner-day-column"]').first().boundingBox()
+  // `.catch` because `po-9-onboarding-replaces-the-grid` removes the grid, which
+  // is what this check is about: the null is already the failing case below, and
+  // without the catch it was thirty seconds and an exception instead.
+  const gridBox = await page
+    .locator('[data-testid="planner-day-column"]')
+    .first()
+    .boundingBox()
+    .catch(() => null)
   chk(
     box !== null &&
       gridBox !== null &&
@@ -422,14 +429,26 @@ try {
   settings = {}
   accounts = [{ id: 'acct-1', status: 'connected' }]
   await openPlanner()
-  /* Positive wait first — the grid is proof the page finished — so the
-   * absence below is an absence rather than a page that had not rendered. */
-  await page.waitForSelector('[data-testid="planner-day-column"]', { timeout: 15_000 })
+  /*
+   * Positive wait first — the grid is proof the page finished — so the absence
+   * below is an absence rather than a page that had not rendered. FOLDED INTO
+   * THE CHECK rather than thrown: `po-9-onboarding-replaces-the-grid` takes the
+   * grid away, and this wait then ended the run with an uncaught TimeoutError
+   * instead of reporting anything. A page that never drew its grid is a reason
+   * the check could not be answered, and a reason belongs in a failing check.
+   */
+  const gridDrew = await page
+    .waitForSelector('[data-testid="planner-day-column"]', { timeout: 15_000 })
+    .then(() => true)
+    .catch(() => false)
   chk(
-    (await panel().count()) === 0,
+    gridDrew && (await panel().count()) === 0,
     'and a person who already has a calendar connected never sees it, dismissal or not',
-    'the onboarding panel was drawn for an account with a connected calendar — it is an ' +
-      'invitation to connect one, and it has no reason to exist once that is done',
+    gridDrew
+      ? 'the onboarding panel was drawn for an account with a connected calendar — it is an ' +
+        'invitation to connect one, and it has no reason to exist once that is done'
+      : 'the planner never drew a day column, so "no panel" could not be told apart from a page ' +
+        'that had not rendered',
   )
   await ctx.close()
 } catch (e) {
