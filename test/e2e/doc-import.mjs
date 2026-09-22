@@ -52,7 +52,14 @@ const argOf = (name, fallback) => {
  * run that still passes — and a suite whose subject is an importer has several
  * steps that only run once an earlier one really happened.
  */
-const EXPECTED_CHECKS = 14
+/*
+ * THIRTEEN, counted from the RUN rather than from the diff. This said 14 on
+ * the first pass and the run reported "13 of 14 checks ran", which reads as a
+ * skipped branch and was a miscount — the same slip `task-cover` made going
+ * from 32 to 37. An exact comparison is what turned a wrong number into a
+ * visible one instead of a quiet pass.
+ */
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -233,8 +240,20 @@ try {
   const found = await waitUntil(
     async () => {
       const r = await api(`/search/${workspaceId}?q=${encodeURIComponent(TAG)}`)
+      /*
+       * THE INDEX PREFIXES ITS IDS. A hit for a doc comes back as
+       * `id: "doc-<uuid>"` with `entityType: "doc"`, not as the bare uuid —
+       * so comparing against `madeDocId` matched NOTHING and this check failed
+       * against a product that indexes correctly. A check that fails for the
+       * wrong reason is worse than no check: `doc-import-2-never-indexed`
+       * would have "reddened" a check that was already red, and only
+       * `wt-break.sh` refusing a non-green baseline would have caught it.
+       */
       const hits = r.data?.results ?? r.data ?? []
-      return Array.isArray(hits) && hits.some((h) => (h.id ?? h.docId) === madeDocId)
+      return (
+        Array.isArray(hits) &&
+        hits.some((h) => h.entityType === 'doc' && h.id === `doc-${madeDocId}`)
+      )
     },
     { timeoutMs: 20_000 },
   )
