@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 24
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -256,6 +256,90 @@ try {
     `the chosen colour reaches the task byte for byte (${chosen})`,
     `after choosing ${chosen} the task's coverColor is ${JSON.stringify(customRow?.coverColor)} — ` +
       'a Custom cell that commits a constant passes every check but this one',
+  )
+
+  /*
+   * ── The Link tab, frame `03:15` ────────────────────────────────────
+   *
+   * *"Paste image link…"* with a **Submit** and *"Works with any image from the
+   * web"* under it. The tab was asserted to EXIST three sections above and
+   * nothing on it was ever touched: of this picker's eighteen testids the suite
+   * named five, and `cover-link-input`, `cover-link-apply` and
+   * `cover-link-error` were three of the thirteen it did not. A tab checked for
+   * its own presence, with the feature behind it unmeasured, is the facade
+   * defect inside the audit rather than inside the product.
+   *
+   * Found by asking a different question: which of the 115 frame observations
+   * are named nowhere in a suite or in the ledger? Fourteen, of which this is
+   * one, and it is the one that turned out to be a real hole — the rest are
+   * covered under an adjacent timestamp.
+   *
+   * THE VALUE IS READ BACK FROM THE SERVER, for the reason the Custom swatch
+   * carries: a Use-link button wired to a constant, or to nothing, opens and
+   * closes exactly like one that works.
+   */
+  console.log('\n▶ the Link tab takes an address, refuses one that is not, and commits the rest')
+  await page.getByTestId('cover-change').click()
+  chk(
+    await appears(page.getByTestId('cover-tab-link'), 6000),
+    'the picker still opens on something that can reach the Link tab',
+    'no Link tab to open',
+  )
+  await page.getByTestId('cover-tab-link').click({ timeout: 10_000 }).catch(() => {})
+  const linkBox = page.getByTestId('cover-link-input')
+  chk(
+    await appears(linkBox, 6000),
+    'the Link tab carries an address box',
+    'the Link tab opened onto nothing that takes an address',
+  )
+
+  // A refusal FIRST, because a box that accepts anything is the one that draws
+  // a broken banner on the task and says nothing about why.
+  const before = (await T()).data
+  // Bounded and caught for the same reason as the presses: the check above is
+  // allowed to find no address box, and a fill on one that is not there would
+  // end the section instead of letting the four checks below report.
+  await linkBox.fill('mountains.jpg', { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-link-apply').click({ timeout: 10_000 }).catch(() => {})
+  const refused = await appears(page.getByTestId('cover-link-error'), 6000)
+  const afterRefusal = (await T()).data
+  chk(
+    refused &&
+      (afterRefusal?.coverImageUrl ?? null) === (before?.coverImageUrl ?? null),
+    'a bare filename is refused, in words, and nothing is written to the task',
+    `the picker ${refused ? 'said so' : 'said nothing'} and the task now holds ` +
+      `coverImageUrl=${JSON.stringify(afterRefusal?.coverImageUrl ?? null)}`,
+  )
+
+  // And typing again clears it: an error that outlives its cause accuses the
+  // next address of a problem it does not have.
+  await linkBox.fill('https://example.com/a-real-looking-image.png', { timeout: 10_000 }).catch(() => {})
+  chk(
+    (await page.getByTestId('cover-link-error').count()) === 0,
+    'and the refusal clears as soon as the address changes',
+    'the refusal is still on screen under an address it is not about',
+  )
+
+  const LINKED = `https://example.com/cover-${stamp}.png`
+  await linkBox.fill(LINKED, { timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-link-apply').click({ timeout: 10_000 }).catch(() => {})
+  const linkLanded = await waitUntil(
+    async () => ((await T()).data?.coverImageUrl ?? '') === LINKED,
+    { timeoutMs: 8000 },
+  )
+  const linkedRow = (await T()).data
+  chk(
+    linkLanded && linkedRow?.coverImageUrl === LINKED,
+    'an http address becomes the task\'s cover, byte for byte',
+    `after submitting ${LINKED} the task holds coverImageUrl=` +
+      `${JSON.stringify(linkedRow?.coverImageUrl ?? null)}`,
+  )
+  chk(
+    (linkedRow?.coverColor ?? null) === null && (linkedRow?.coverStorageKey ?? null) === null,
+    'and it replaces the colour rather than sitting behind it',
+    `the task holds coverColor=${JSON.stringify(linkedRow?.coverColor ?? null)} and ` +
+      `coverStorageKey=${JSON.stringify(linkedRow?.coverStorageKey ?? null)} beside the link — ` +
+      'two covers set at once is one of them drawn and the other a surprise later',
   )
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })
