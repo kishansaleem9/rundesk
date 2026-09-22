@@ -43,7 +43,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -247,14 +247,34 @@ try {
 
   await openPlus()
   await item('comment-plus-new-doc').click()
-  const modalText = await waitUntil(
-    async () => (await readText(page.getByTestId('quick-create-modal').first())).length > 0,
-    { timeoutMs: 10_000 },
-  )
+  /*
+   * THE THIRD `body`-SCOPED CHECK IN THIS FILE, AND THE ONE THAT WAS STILL
+   * HERE. The comment two checks above records the same mistake twice — "the
+   * first version read the whole page… asserting on `body` instead of on the
+   * element that is supposed to have changed" — and this check still carried
+   * `|| (await readText(page.locator('body'))).includes('doc')` as a fallback.
+   *
+   * The task detail sheet behind the modal says "doc" in several places: the
+   * Docs relation, Linked docs, Related items. So the fallback was true
+   * whether or not the modal opened, and the check could not fail. Its whole
+   * subject is a menu row that might open nothing.
+   *
+   * The modal is addressed by a tab it definitely owns. `create-tab-doc`
+   * exists only inside the modal, and its `aria-pressed` says whether the item
+   * landed on the DOC tab — which is what this section's own heading claims and
+   * nothing asserted.
+   */
+  const docTab = page.getByTestId('create-tab-doc')
   chk(
-    modalText || (await readText(page.locator('body'))).toLowerCase().includes('doc'),
+    await waitUntil(() => docTab.isVisible().catch(() => false), { timeoutMs: 10_000 }),
     'the quick-create modal opens',
     'the item opened nothing — three "New …" rows with no creator behind them',
+  )
+  chk(
+    (await docTab.getAttribute('aria-pressed').catch(() => null)) === 'true',
+    'and it lands on the Doc tab, which is the row that was pressed',
+    `the Doc tab reads aria-pressed=${await docTab.getAttribute('aria-pressed').catch(() => null)} — ` +
+      '"New Doc" opened the creator on somebody else\'s tab',
   )
   await page.keyboard.press('Escape').catch(() => {})
 
