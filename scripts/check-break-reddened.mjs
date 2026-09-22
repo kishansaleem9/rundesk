@@ -171,7 +171,31 @@ for (const n of suiteNames) {
  * UNKNOWN, which is what they always were, so 0 is both the strictest floor and
  * the honest one: a patch that reddens nothing on THIS tree has not been aimed.
  */
-const BASELINE = { accounted: 759, green: 0, unproven: 1 }
+/*
+ * AND THE FINAL NUMBERS, SET WHEN A ROUND CAME BACK EMPTY — 22 September, 16:52:
+ *
+ *     round 2: nothing left — every log on disk measured the current tree
+ *
+ * 804 reddened · 0 green · 0 unproven · 0 drifted · 0 unusable · 4 unit claims,
+ * which is all 808 patches on disk, and 113 of 113 suites with a patch proven
+ * against THIS tree. `accounted` is `reddened + drifted`, so 804 is the measured
+ * floor and it is set here rather than left at the 759 that was true while the
+ * sweep was still running.
+ *
+ * WHY THIS ONE CAN BE AN EXACT NUMBER NOW. While the chain ran, `accounted`
+ * moved every few minutes as sets were re-measured, and any floor near the live
+ * figure would have failed on churn. Nothing is running: `never-run-plan.mjs`
+ * asks for 0 patches in both modes, so the only thing that can move this number
+ * is a change to the tree — which is exactly what a floor is for.
+ *
+ * `unproven` goes 1 → 0 and that is the honest ceiling, not a convenience. The
+ * last two were `assign-1-first-member` and `space-create-menu-1-onelabel`, both
+ * MISATTRIBUTED rather than unmeasurable: each named a check that passes under
+ * its own patch while its run reddened a different one. Re-aimed at what their
+ * logs show failing, they redden. A patch whose claim cannot be located in its
+ * own run is a claim to fix, and now nothing needs the tolerance.
+ */
+const BASELINE = { accounted: 804, green: 0, unproven: 0 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -203,10 +227,24 @@ const notCurrent = makeMeasurementCheck({ root: ROOT })
  * to the set of suites. It is an aggregation of the verdicts below, so it costs
  * nothing.
  *
- * NO FLOOR ON IT YET, and the reason is stated rather than left out: most logs
- * are currently held back on provenance while the chain re-measures them, so the
- * number is honest and low. The floor goes in when a round comes back empty,
- * against what is measured then.
+ * NO FLOOR WHILE THE SWEEP RAN, and the reason was stated rather than left out:
+ * most logs were held back on provenance while the chain re-measured them, so
+ * the number was honest and low. The floor went in when a round came back empty,
+ * against what was measured then — which is this, on 22 September at 16:52:
+ *
+ *     113 of 113 suite(s) have a patch measured against this tree to redden a
+ *     check it names
+ *
+ * ALL of them, which makes this the strongest single claim in the audit: every
+ * suite has at least one deliberately-broken edit that was applied to THIS tree
+ * and watched to turn a named check red. It is the sentence `check-break-
+ * coverage.mjs` cannot make — its own header says it counts AIM — and the one
+ * §8 used to make by hand, one suite at a time.
+ *
+ * An EQUALITY rather than a floor, because a new suite arriving with no break
+ * patch should fail this the day it lands rather than the day somebody notices.
+ * `withChecks` is the denominator, so the two move together and the check is
+ * "every suite that declares checks has one proven", not "at least 113 do".
  */
 const provenSuites = new Set()
 
@@ -429,6 +467,29 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
 
 const withChecks = Object.entries(expectedIn).filter(([, n]) => n > 0).map(([n]) => n)
 const unproved = withChecks.filter((n) => !provenSuites.has(n))
+/*
+ * THE EQUALITY, ENFORCED. Measured 22 September: 113 of 113. A suite that
+ * declares checks and has no patch proven against this tree fails here — the day
+ * it lands, rather than the day somebody reads the count and wonders.
+ */
+/*
+ * REPORTED HERE, COUNTED LATER. `bad` is declared eighty lines below this and
+ * `let` has a temporal dead zone, so assigning it here throws a ReferenceError
+ * rather than failing the check — which the first version of this block did, and
+ * which only stayed invisible because `unproved` is empty. A guard that crashes
+ * instead of reporting is the shape this whole file exists to find.
+ */
+if (unproved.length) {
+  console.error(
+    `\n[break-reddened] ${unproved.length} suite(s) declare checks and have no break patch ` +
+      'measured against THIS tree to redden one:',
+  )
+  for (const n of unproved.slice(0, 20)) console.error(`    ${n}`)
+  console.error(
+    '\n  Every suite had one when this floor went in. Either the suite is new and needs a patch,\n' +
+      '  or its set has not been run since the tree moved — `never-run-plan.mjs` says which.',
+  )
+}
 const accounted = reddened + drifted.length
 console.log(
   `[break-reddened] ${reddened} patch(es) reddened a check they claim · ${green.length} reddened ` +
@@ -512,7 +573,7 @@ show(
     'something else, or the claim is a fragment several loop iterations print',
 )
 
-let bad = 0
+let bad = unproved.length ? 1 : 0
 if (accounted < BASELINE.accounted) {
   console.error(
     `\n[break-reddened] ${reddened} reddened plus ${drifted.length} held back on provenance is ` +

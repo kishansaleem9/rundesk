@@ -5931,3 +5931,58 @@ This is the fix that header named — *"making the 70 suites print `FAIL
 <sentence> — <reason>` would move most of these into REDDENED, which is the fix
 rather than a looser rule here"* — applied to the four that still had the old
 form. No suite's check count moved.
+
+### The floors, set from what was measured
+
+With the chain drained and nothing running, the numbers stop moving and can be
+pinned exactly rather than kept under the churn:
+
+| ratchet | was | now | why |
+|---|---|---|---|
+| `accounted` | 759 | **804** | the measured floor, `reddened + drifted` |
+| `green` | 0 | **0** | unchanged; nothing reddens nothing |
+| `unproven` | 1 | **0** | the last two were misattributed, not unmeasurable |
+| proven suites | *no floor yet* | **equality, 113 of 113** | the sentence the sweep existed to earn |
+| needs-a-person | 3 | **0** | the cascades finished and the claims were re-aimed |
+
+The proven-suites number is the strongest single claim in the audit and it is
+now an EQUALITY rather than a floor: every suite that declares checks has at
+least one deliberately-broken edit applied to THIS tree and watched to turn a
+named check red. A new suite arriving without one fails the build that brings
+it, rather than the day somebody reads the count and wonders.
+
+#### Two mistakes in the closing work, both caught by measuring
+
+**A guard that would have crashed instead of failing.** The proven-suites block
+set `bad = 1` eighty lines above `let bad = 0`, which is a temporal dead zone —
+a ReferenceError, not a failed check. It exited 0 only because `unproved` is
+empty, so nothing ever entered the block. Found by forcing two suites into it:
+`exit=1, reports=True, crashed=False` only after the assignment moved to where
+`bad` exists. A guard that throws instead of reporting is precisely the shape
+this file spends four hundred lines finding.
+
+**And the last red step was the duplicated list one more time.** Preflight held
+at 24 of 25 on `break runs measured this tree`, which answers per LOG FILE while
+`never-run-plan.mjs` and `check-break-reddened.mjs` answer per PATCH, taking the
+newest log for each. Five logs here are ad-hoc SLICES — `custom-field-types-
+batch1`, `-batch2`, `-full`, `-patch15-rerun`, `task-mentions-fixed` — 82
+patches between them, and **every one of the 82 has since been measured by the
+canonical set.** So one instrument demanded four re-runs while the other two
+said there was nothing to do.
+
+Re-running a superseded slice reprints numbers already on disk. They are
+SUPERSEDED now, reported with their names and counts rather than swallowed,
+because "this log is old and it does not matter" is a claim a reader should be
+able to check.
+
+## PREFLIGHT CLEAN — 25 of 25
+
+```
+804 reddened a check they claim · 0 reddened nothing · 0 unproven ·
+0 measured against a tree that has moved · 0 have no usable log ·
+0 quote no sentence · 4 claim a unit test
+113 of 113 suite(s) have a patch measured against this tree
+0 patch(es) needing a run, out of 808 on disk
+```
+
+804 + 4 = 808. Every patch on disk is accounted for, against the tree as it is.

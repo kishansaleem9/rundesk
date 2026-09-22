@@ -141,8 +141,21 @@ const needsRun = new Set(NEEDS_RUN.flatMap((b) => [...(buckets[b] ?? [])]))
  */
 const PERSON_NOT_RUN = ['unreadable', 'unproven']
 const needsPerson = [...new Set(PERSON_NOT_RUN.flatMap((b) => [...(buckets[b] ?? [])]))].sort()
-// Measured 22 September: two short runs and one unproven. A CEILING.
-const MAX_NEEDS_PERSON = 3
+/*
+ * ZERO, SET WHEN THE CHAIN CAME BACK EMPTY — 22 September, 16:52.
+ *
+ * This was 3 while the sweep ran: two short runs and one unproven, gated so they
+ * could not accumulate in silence. All three are gone. The two shorts were the
+ * cascade finishing — each fix moved the throw to the next unguarded call until
+ * there was none — and the unproven were MISATTRIBUTED claims, re-aimed at the
+ * checks their own logs showed failing.
+ *
+ * A ceiling of 0 rather than "lower it as they go", because there is nothing
+ * left to go. A short run and an unproven claim are both complete measurements
+ * of this tree that say nothing about their patch, and one of either is a thing
+ * to fix rather than a number to carry.
+ */
+const MAX_NEEDS_PERSON = 0
 
 const bucketed = new Set(Object.values(buckets).flatMap((s) => [...s]))
 let bad = 0

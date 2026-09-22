@@ -47,7 +47,7 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
-import { patchDeps, makeDriftCheck, CONTROL } from './lib/log-tree.mjs'
+import { patchDeps, makeDriftCheck, CONTROL, measuredAt } from './lib/log-tree.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const BREAKS = '/tmp/claude-0'
@@ -187,6 +187,12 @@ for (const log of logs) {
     verdict,
     tree,
     patches,
+    // The patch names this log actually holds, so a superseded log can be told
+    // from a stale one: every name having a NEWER measurement elsewhere means
+    // re-running this file reprints numbers already on disk.
+    patchNames: patchLines
+      .map((l) => l.slice(3).trim().split(/\s+/)[0])
+      .filter((n) => n && !/MISSING|FAILED|CHANGED/.test(n)),
     buildFailed,
     missing,
     noChange,
@@ -245,7 +251,48 @@ for (const r of rows) {
 // "the unpatched suite is not green" — under a ledger row reading 7 of 7, and
 // `gantt-controls`'s holds one patch that BUILD FAILED under a row reading
 // 12 of 12. Neither number is supported by anything currently on disk.
-const stale = rows.filter((r) => r.tree === 'older')
+/*
+ * A LOG EVERY PATCH OF WHICH HAS A NEWER MEASUREMENT IS HISTORY, NOT WORK.
+ *
+ * This file answers per LOG FILE; `never-run-plan.mjs` and
+ * `check-break-reddened.mjs` answer per PATCH, taking the newest log for each.
+ * Five logs on this machine are ad-hoc SLICES — `custom-field-types-batch1`,
+ * `-batch2`, `-full`, `-patch15-rerun`, `task-mentions-fixed` — 82 patches
+ * between them, and every one of the 82 has since been measured by the
+ * canonical set. So this reported four stale sets and one unknown while the
+ * chain reported `nothing left` and the reddened checker reported 0 drifted.
+ *
+ * Two instruments, one question, three answers — the duplicated list again, and
+ * in the last red step of the preflight. Re-running a superseded slice changes
+ * no number that is not already on disk, which is the same reason the plan does
+ * not schedule a short run: it is not work, and demanding it keeps a gate red
+ * forever.
+ *
+ * SUPERSEDED IS REPORTED, NOT SWALLOWED. It is printed with its count, because
+ * "this log is old and it does not matter" is a claim, and a reader should be
+ * able to see which logs it was made about.
+ */
+const newestPerPatch = measuredAt(BREAKS)
+const supersededBy = (r) => {
+  const names = r.patchNames ?? []
+  if (!names.length) return false
+  return names.every((n) => {
+    const rec = newestPerPatch.get(n)
+    // `log` is the FILE the newest record came from. Any file but this one —
+    // the canonical set or one of its archives — means this log is history.
+    return rec && rec.log && rec.log !== `break-${r.suite}.txt`
+  })
+}
+const superseded = rows.filter((r) => (r.tree === 'older' || r.tree === 'unknown') && supersededBy(r))
+if (superseded.length) {
+  console.log(
+    `\n[break-freshness] ${superseded.length} log(s) are SUPERSEDED: every patch in them has since ` +
+      'been measured by another run, so re-running them would reprint numbers already on disk.',
+  )
+  for (const r of superseded) console.log(`                    ${r.suite} (${(r.patchNames ?? []).length} patch(es))`)
+}
+const isSuperseded = new Set(superseded.map((r) => r.suite))
+const stale = rows.filter((r) => r.tree === 'older' && !isSuperseded.has(r.suite))
 const refusedSets = rows.filter((r) => r.verdict === 'REFUSED')
 const broken = rows.filter((r) => r.buildFailed > 0)
 const absent = rows.filter((r) => r.missing > 0)
@@ -254,7 +301,7 @@ for (const r of refusedSets) console.error(`\n[break-freshness] ${r.suite}: the 
 for (const r of broken) console.error(`[break-freshness] ${r.suite}: ${r.buildFailed} patch(es) never built — they prove nothing about the checks they aimed at`)
 for (const r of absent) console.error(`[break-freshness] ${r.suite}: ${r.missing} patch file(s) were never found — that set opened nothing`)
 for (const r of inert) console.error(`[break-freshness] ${r.suite}: ${r.noChange} patch(es) left the tree identical — applied and inert`)
-const unknown = rows.filter((r) => r.tree === 'unknown')
+const unknown = rows.filter((r) => r.tree === 'unknown' && !isSuperseded.has(r.suite))
 if (stale.length) {
   console.error(
     `\n[break-freshness] ${stale.length} break set(s) were measured against a tree that has since changed.`,
