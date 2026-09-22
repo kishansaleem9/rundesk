@@ -194,7 +194,7 @@ try {
   const firstActions = page.getByTestId('attachment-actions').first()
   const opacityOf = (loc) => loc.evaluate((el) => Number(getComputedStyle(el).opacity))
   const before = await opacityOf(firstActions)
-  await firstCard.hover()
+  await firstCard.hover({ timeout: 8000 }).catch(() => {})
   const shown = await waitUntil(async () => (await opacityOf(firstActions)) > 0.9, { timeoutMs: 8_000 })
   const after = await opacityOf(firstActions)
   chk(

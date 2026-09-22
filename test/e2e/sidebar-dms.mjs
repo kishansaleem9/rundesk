@@ -239,7 +239,9 @@ try {
       'is the dead half of a feature',
   )
 
-  await newMessage.click({ timeout: 20_000 })
+  // A timeout without a catch is still a throw. `sidebar-dms-1-no-section`
+  // removes the section this control lives in, and the run ended at 4 of 14.
+  await newMessage.click({ timeout: 20_000 }).catch(() => {})
   await page.getByTestId('sidebar-new-message-search').waitFor({ timeout: 20_000 })
   /*
    * "+ New message" TAKES A PERSON. This is the whole reason DMs are a second
@@ -352,7 +354,7 @@ try {
       'is the generated channel name leaking through, which is what happens when `dmLabel` is ignored',
   )
 
-  await page.getByTestId(`sidebar-dm-${startedDmId}`).click({ timeout: 20_000 })
+  await page.getByTestId(`sidebar-dm-${startedDmId}`).click({ timeout: 20_000 }).catch(() => {})
   chk(
     await waitUntil(() => page.url().includes(`channel=${startedDmId}`), { timeoutMs: 15_000 }),
     'clicking it opens that conversation, by its id',

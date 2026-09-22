@@ -280,7 +280,7 @@ try {
    * `MODEL_TIERS` makes about its tiers reaches the screen.
    */
   const widthAfterHover = async (tierId, metric) => {
-    await page.getByTestId(`ai-model-option-${tierId}`).hover()
+    await page.getByTestId(`ai-model-option-${tierId}`).hover({ timeout: 8000 }).catch(() => {})
     const bar = page.getByTestId(`ai-model-bar-${metric}-${tierId}`)
     const up = await waitUntil(() => bar.isVisible().catch(() => false), { timeoutMs: 5_000 })
     return up ? ((await bar.boundingBox())?.width ?? 0) : 0

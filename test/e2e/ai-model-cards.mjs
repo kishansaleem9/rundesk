@@ -210,7 +210,7 @@ try {
    */
   const rowsBeforeHover = await rows.count()
   const fastRow = page.getByTestId('ai-model-option-fast')
-  await fastRow.hover()
+  await fastRow.hover({ timeout: 8000 }).catch(() => {})
   const fastCard = page.getByTestId('ai-model-card-fast')
   const cardUp = await waitUntil(() => fastCard.isVisible().catch(() => false), { timeoutMs: 5_000 })
   chk(cardUp, 'hovering a row opens that row’s card', 'no card appeared on hover')
@@ -289,7 +289,7 @@ try {
 
   // The other model. One card at a time, so this is a second hover, not a
   // second read of the same open card.
-  await page.getByTestId('ai-model-option-max').hover()
+  await page.getByTestId('ai-model-option-max').hover({ timeout: 8000 }).catch(() => {})
   const maxCardUp = await waitUntil(
     () => page.getByTestId('ai-model-card-max').isVisible().catch(() => false),
     { timeoutMs: 5_000 },

@@ -272,7 +272,7 @@ try {
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
-  await page.getByText('Analytics', { exact: true }).first().click({ timeout: 20_000 })
+  await page.getByText('Analytics', { exact: true }).first().click({ timeout: 20_000 }).catch(() => {})
   const gridUp = await waitUntil(
     () => page.getByTestId('ai-value-categories').isVisible().catch(() => false),
     { timeoutMs: 20_000 },
