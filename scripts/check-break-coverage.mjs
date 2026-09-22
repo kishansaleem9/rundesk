@@ -182,6 +182,42 @@ const uncovered = withChecks.filter((n) => !patches[n]).sort((a, b) => checksIn[
 const totalChecks = withChecks.reduce((a, n) => a + checksIn[n], 0)
 const totalPatches = Object.values(patches).reduce((a, b) => a + b, 0)
 
+/*
+ * THE POPULATION, ASKED BEFORE THE VERDICT, BECAUSE THE VERDICT IS A ZERO.
+ *
+ * `uncovered` is the suites with checks and no patch, and the ratchet below
+ * fails when it grows past zero. Over an EMPTY corpus it is also zero: point
+ * `SUITES` elsewhere and this printed "0 suites · 0 checks · 0 patches
+ * attributed (809 could not be attributed to a suite)" and exited 0. Measured,
+ * not supposed — the same probe that found the break-patch guard's relative
+ * roots and the frame checker's missing floor.
+ *
+ * The information was right there in the line: 809 unattributed. Nothing gated
+ * on it. So the three numbers the verdict rests on are floored, and the failure
+ * says which one gave way.
+ *
+ * Measured 22 September: 113 suites · 2,763 checks · 806 patches attributed.
+ */
+const FLOORS = { suites: 100, checks: 2_000, attributed: 700 }
+const below = [
+  withChecks.length < FLOORS.suites &&
+    `${withChecks.length} suite(s) with checks, below ${FLOORS.suites}`,
+  totalChecks < FLOORS.checks && `${totalChecks} check(s) in total, below ${FLOORS.checks}`,
+  totalPatches < FLOORS.attributed &&
+    `${totalPatches} patch(es) attributed to a suite, below ${FLOORS.attributed}` +
+      (unattributed ? ` — with ${unattributed} that could not be attributed at all` : ''),
+].filter(Boolean)
+if (below.length) {
+  console.error('\n[break-coverage] this check has nothing to be about as it stands:\n')
+  for (const b of below) console.error(`  · ${b}`)
+  console.error(
+    '\n"0 suites have NO break patch at all" is vacuously true of 0 suites. Fix the scan rather\n' +
+      'than the floor, unless the corpus genuinely shrank — and then say here which suites went\n' +
+      'and why, the way the ratchet below is moved.',
+  )
+  process.exit(1)
+}
+
 console.log(
   `[break-coverage] ${withChecks.length} suites · ${totalChecks} checks · ${totalPatches} patches ` +
     `attributed (${unattributed} could not be attributed to a suite)`,

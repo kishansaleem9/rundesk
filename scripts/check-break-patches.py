@@ -40,6 +40,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # committed; the repository is what CI has and what survives the container.
 BREAKS = os.path.join(ROOT, 'test/e2e/breaks')
 if not os.path.isdir(BREAKS):
+    # AND IT SAYS SO, rather than substituting in silence. The patches are
+    # committed now, so this fallback can only ever fire when the tracked copy
+    # has gone missing — and then a clean pass read from an untracked scratch
+    # directory is the worst possible answer. The floor below would be met by
+    # that copy and prove nothing about the repository.
+    print(
+        '[break-patches] WARNING: %s does not exist; falling back to /tmp/claude-0/breaks.\n'
+        '                The tracked copy is the one that matters — this result is about a\n'
+        '                scratch directory, not about the repository.' % BREAKS
+    )
     BREAKS = '/tmp/claude-0/breaks'
 
 _real_open = builtins.open
@@ -125,10 +135,32 @@ def _guarded_open(path, mode='r', *args, **kwargs):
     return _real_io_open(_here(path), mode, *args, **kwargs)
 
 
+# A FLOOR, BECAUSE "NOTHING TO CHECK" WAS AN EXIT 0 AND THIS RUNS IN CI.
+#
+# `if not patches: print('no patches on this machine'); sys.exit(0)` is the
+# check-that-cannot-fail shape, and unlike `check-break-reddened.mjs` — which is
+# preflight-only for exactly that reason — this is a CI step. A breaks directory
+# that went missing, or a fallback that resolved to an empty `/tmp/claude-0/breaks`,
+# would report success over nothing on every push.
+#
+# The patches are tracked, so the number is knowable rather than guessed.
+# Measured 22 September: 809. A floor rather than an equality because the set
+# grows; lowering it is legitimate only when patches were genuinely deleted, and
+# then it is said here with which ones and why — the same rule the break
+# ratchets keep.
+MIN_PATCHES = 750
 patches = sorted(glob.glob(os.path.join(BREAKS, '*.py')))
-if not patches:
-    print('[break-patches] no patches on this machine — nothing to check')
-    sys.exit(0)
+if len(patches) < MIN_PATCHES:
+    print(
+        '[break-patches] found %d patch(es) under %s, below the floor of %d.'
+        % (len(patches), BREAKS, MIN_PATCHES)
+    )
+    print(
+        '                This used to be "nothing to check" and an exit 0. A scan of an empty\n'
+        '                directory proves nothing about whether the patches apply, and this step\n'
+        '                runs in CI, so the pass would be reported on every push.'
+    )
+    sys.exit(1)
 
 miss, dupe, gone, err, ok = [], [], [], [], 0
 

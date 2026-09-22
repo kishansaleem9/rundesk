@@ -5452,3 +5452,52 @@ scan's input in isolation changes no answer, because that scan reports 0 anyway
 and now shares the floored `suiteList`. The realistic regression — the directory
 resolving elsewhere — reddens. A mutation of code that cannot realistically be
 written is not a gap; pretending it is would be padding the table above.
+
+### The probe, run to exhaustion
+
+Once `check-no-break-patches.mjs` turned out to pass by looking at nothing, the
+question became a sweep of its own: **put every checker that reports a zero in
+front of an empty corpus and see whether it notices.** Six did not.
+
+| checker | how it passed over nothing | now |
+|---|---|---|
+| `check-no-break-patches.mjs` | relative roots; from `/tmp` all three missed | anchored, roots asserted, 2,526 files counted |
+| `check-frame-traceability.mjs` | no floor at all; a docs reformat empties it | 5 floors, on the TEXT not the file count |
+| `check-suite-check-branches.mjs` | a zero with no denominator | "0 … in 0 of 113 suite(s) read" |
+| `check-break-coverage.mjs` | `0 suites have NO break patch` is true of 0 suites | 3 floors, and it says which gave way |
+| `check-break-patches.py` | `if not patches: sys.exit(0)` — **in CI** | floor of 750, and the `/tmp` fallback warns |
+| `check-video2-counts.mjs` | a caught ENOENT turned assertion 8 off in silence | the skip announces itself |
+
+Every one break-tested by pointing it somewhere empty and requiring it to
+redden, then restoring and requiring it to pass.
+
+**Two of these are worse than the rest.** `check-break-patches.py` runs in CI,
+and its "no patches on this machine — nothing to check" was an explicit
+`sys.exit(0)`: a breaks directory that went missing would have reported success
+on every push. And `check-video2-counts.mjs` had the failure *inside* the file
+written to stop numbers going unchecked — its own comment records an earlier
+version of the same mistake, where a `catch {}` swallowed a throw and "setting
+the headline to 999 did not fail the build". The catch that replaced it was
+narrowed to ENOENT and still said nothing when it fired.
+
+#### And a summary that claimed an assertion it had not run
+
+Making the skip announce itself exposed the next layer. The final line listed
+all eight reconciliations unconditionally — *"…the handoff document agrees with
+§4…"* — so with the document absent it printed the skip notice and then the
+claim, two lines apart. **A summary naming an assertion that did not run is the
+same defect as a suite reporting `0 failed` for checks it never reached.** The
+sentence is now assembled from what actually ran, and says explicitly when the
+handoff was not compared.
+
+#### What the probe did NOT find, which is worth recording too
+
+`check-migration-order.mjs` ("160 files, contiguous sequences 0000..0159, each
+present in the journal") and `check-break-claims.mjs` (whose population sum I
+added earlier today) already carry their denominators. The four contract tests —
+`check-chain-helper`, `check-claim-match`, `check-suite-of-patch`,
+`check-log-tree` — report "N cases held", which is a count of work done rather
+than of defects not found, and cannot go vacuous without going to zero cases.
+And no checker other than the break-patch guard resolved a path against the
+working directory; `check-video2-counts.mjs` did, but a missing ledger throws
+ENOENT and kills the run, which is loud. Both are anchored now anyway.

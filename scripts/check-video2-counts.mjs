@@ -47,8 +47,20 @@
  * and are not counted — the same rule the table's own legend states.
  */
 import { readFileSync } from 'node:fs'
+import { join, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
-const PATH = 'docs/video2-reaudit.md'
+/*
+ * ANCHORED TO THIS FILE, not to wherever it was run from. Both documents were
+ * reached by a path relative to the working directory — the same shape that let
+ * `check-no-break-patches.mjs` report a clean tree from `/tmp` having read
+ * nothing. This one is louder about it: a missing ledger throws ENOENT and the
+ * run dies, which is a failure rather than a false pass. But the resume
+ * document's read is CAUGHT, and from the wrong directory that catch turned
+ * assertion 8 off in silence.
+ */
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..')
+const PATH = join(REPO, 'docs/video2-reaudit.md')
 const doc = readFileSync(PATH, 'utf8')
 const problems = []
 
@@ -406,7 +418,7 @@ else if (five) {
  * quoted more often than the ledger it came from and checked less, which is
  * the same argument as assertion 7 one file over.
  */
-const RESUME = 'docs/video2-resume.md'
+const RESUME = join(REPO, 'docs/video2-resume.md')
 let resume = null
 try {
   resume = readFileSync(RESUME, 'utf8')
@@ -417,6 +429,14 @@ try {
   // nothing. Setting the headline to 999 did not fail the build. A check that
   // cannot fail, inside the check written to stop numbers going unchecked.
   if ((err && err.code) !== 'ENOENT') throw err
+  // AND THE TOLERATED CASE SAYS SO. A skip that prints nothing is
+  // indistinguishable from an assertion that ran and passed — the counted-skip
+  // rule this audit applies everywhere else, turned on the one place this file
+  // is allowed to do less than it says.
+  console.log(
+    `[video2-counts] SKIPPED assertion 8: ${RESUME} is not there, so the handoff document's\n` +
+      "                headline was compared against nothing. Every other assertion ran.",
+  )
 }
 if (resume !== null) {
   if (!consolidated) {
@@ -450,9 +470,29 @@ if (problems.length) {
   console.error(`Fix ${PATH} §4, or this number will be quoted as fact.`)
   process.exit(1)
 }
+/*
+ * AND THE SUMMARY ONLY CLAIMS WHAT RAN.
+ *
+ * This sentence listed all eight reconciliations unconditionally, including
+ * "the handoff document agrees with §4" — which is assertion 8, the one that is
+ * allowed to be skipped when `docs/video2-resume.md` is absent. With the
+ * document gone, the skip printed above and this printed the claim anyway, two
+ * lines apart. The skip notice was new; the sentence contradicting it was not.
+ *
+ * A summary that names an assertion which did not run is the same defect as a
+ * suite reporting `0 failed` for checks it never reached.
+ */
+const ran = [
+  '§4 adds up',
+  'its headline repeats it',
+  '§2 contributes the rows and split §4 credits',
+  'the paragraph under the table agrees with the table',
+  resume !== null && 'the handoff document agrees with §4',
+  "§5's appendices add to its as-recovered headline",
+  'that reconciles to §4',
+  "§5's rows add up to it",
+].filter(Boolean)
 console.log(
-  "[video2-counts] §4 adds up, its headline repeats it, §2 contributes the rows and split §4 " +
-    "credits, the paragraph under the table agrees with the table, the handoff document agrees " +
-    "with §4, §5's appendices add to its as-recovered headline, that reconciles to §4, and " +
-    "§5's rows add up to it",
+  `[video2-counts] ${ran.join(', ')}` +
+    (resume === null ? ' — and the handoff document was NOT compared; it is not there' : ''),
 )
