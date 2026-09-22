@@ -235,7 +235,13 @@ try {
     // Reached the way a person reaches it: the topbar "+".
     await press('quick-create-open')
     await press('create-tab-space')
-    await page.waitForSelector('[data-testid="space-wizard-step1"]', { timeout: 20_000 })
+    /*
+   * GATES THAT REPORT. Each of these waits for a panel some patch in this
+   * suite removes — `sw-1-no-templates-footer` takes the templates step away,
+   * `sw-10-one-tab-only` the views step — and a throw here ends the run before
+   * the checks that say the panel is missing get to say it (ledger §10).
+   */
+  await page.waitForSelector('[data-testid="space-wizard-step1"]', { timeout: 20_000 }).catch(() => {})
   }
 
   /*
@@ -252,7 +258,7 @@ try {
   )
 
   await press('space-wizard-use-templates')
-  await page.waitForSelector('[data-testid="space-wizard-templates"]', { timeout: 15_000 })
+  await page.waitForSelector('[data-testid="space-wizard-templates"]', { timeout: 15_000 }).catch(() => {})
   const offered = await page.locator('[data-testid^="space-wizard-tplcard-"]').evaluateAll((els) =>
     els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-tplcard-', '')),
   )
@@ -307,7 +313,7 @@ try {
   await press('space-wizard-continue')
 
   console.log('\n▶ step two is the workflow presets `[frame 07:06]`')
-  await page.waitForSelector('[data-testid="space-wizard-step2"]', { timeout: 10_000 })
+  await page.waitForSelector('[data-testid="space-wizard-step2"]', { timeout: 10_000 }).catch(() => {})
   const cards = await page.locator('[data-testid^="space-wizard-preset-"]').count()
   chk(cards === 4, 'all four cards are on screen', `found ${cards} preset card(s)`)
   chk(
@@ -353,7 +359,13 @@ try {
     `Hide ${wentAway ? 'worked but could not be undone' : 'did nothing'}`,
   )
 
-  await page.locator('[data-testid="space-wizard-copy-source"]').selectOption(SOURCE)
+  // `sw-6-hide-is-one-way` leaves the bar hidden with no way back, which the
+  // check above reports — and then this picked at a select that is not on
+  // screen for thirty seconds.
+  await page
+    .locator('[data-testid="space-wizard-copy-source"]')
+    .selectOption(SOURCE, { timeout: 8000 })
+    .catch(() => {})
   await press('space-wizard-copy-apply')
   chk(
     await waitUntil(async () => {
@@ -382,7 +394,7 @@ try {
 
   // The Required-views panel: List cannot be turned off.
   await press('space-wizard-row-views')
-  await page.waitForSelector('[data-testid="space-wizard-views"]', { timeout: 10_000 })
+  await page.waitForSelector('[data-testid="space-wizard-views"]', { timeout: 10_000 }).catch(() => {})
 
   console.log('\n▶ the views panel has the frame\'s TWO tabs `[frame 07:12]`')
   chk(
@@ -424,7 +436,10 @@ try {
    * `setViews`.
    */
   const markedApplied =
-    (await page.locator('[data-testid="space-wizard-viewtplcard-marketing"]').getAttribute('data-applied')) === 'true'
+    (await page
+      .locator('[data-testid="space-wizard-viewtplcard-marketing"]')
+      .getAttribute('data-applied', { timeout: 6000 })
+      .catch(() => null)) === 'true'
 
   /**
    * Press ONE view set and answer whether the switches underneath moved to

@@ -287,10 +287,13 @@ try {
   )
 
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId('sidebar-add-channel').click({ timeout: 25_000 })
+  // `sidebar-sections-1-no-channels-section` removes the section this button
+  // lives in, so the press was bounded at 25s and still THREW — bounding is not
+  // catching. The run ended at 6 of 25 (ledger §10).
+  await page.getByTestId('sidebar-add-channel').click({ timeout: 25_000 }).catch(() => {})
   const NEW_CHANNEL = `added-${TAG}`
   await page.getByTestId('sidebar-add-channel-name').fill(NEW_CHANNEL, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('sidebar-add-channel-save').click()
+  await page.getByTestId('sidebar-add-channel-save').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => channelPosts.some((b) => b.includes(NEW_CHANNEL)), { timeoutMs: 15_000 }),
     '"+ Add Channel" really creates one — the name left the browser in a POST',
