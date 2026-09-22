@@ -58,7 +58,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 24
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -306,6 +306,39 @@ try {
     (third.data?.ranked ?? []).every((r) => typeof r.overdue === 'number' && r.overdue >= 0),
     'and every candidate carries an overdue figure rather than a missing field',
     `the overdue values were ${JSON.stringify((third.data?.ranked ?? []).map((r) => r.overdue))}`,
+  )
+  /*
+   * THE CROSS-SOURCE CHECK AGAIN, HERE, WHERE THE TWO COUNTS CAN DIFFER.
+   *
+   * The one in the section above compares `openTasks` against
+   * workload-balance's `open` for the first pick, and it is right — but it
+   * stands where every candidate has `inList = 0`, because the subject's list
+   * was created by this run and nothing had been put in it yet. Its own comment
+   * records the first run of it: "the suggestion said 0 and workload-balance
+   * said 0". Two zeroes agreeing is not two sources agreeing.
+   *
+   * `assign-2-second-count` is the patch that proves it. It makes the
+   * suggestion keep its own arithmetic — `open + inList` instead of the shared
+   * `open` — and against a fixture of zeroes that is the same number, so the
+   * patch came back GREEN on a check written for exactly it. Here `inList` is
+   * 1, asserted on the line above, so `open + inList` is `open + 1` and the
+   * drift is the patch itself.
+   *
+   * The same person, deliberately: `pick1` is the one this section gave work in
+   * this list, and they are the only candidate whose two counts CAN disagree.
+   */
+  const balanceAgain = await api('/ai/workload-balance', { method: 'POST', body: { workspaceId: WS } })
+  const againLoad = (balanceAgain.data?.loads ?? []).find((l) => l.userId === pick1.userId)
+  chk(
+    balanceAgain.status === 201 &&
+      !!againLoad &&
+      typeof inThisList?.openTasks === 'number' &&
+      againLoad.open === inThisList.openTasks,
+    'and the two counts still agree once that person has work in THIS list, where they could drift',
+    `the suggestion said openTasks=${inThisList?.openTasks} with inList=${inThisList?.inList} and ` +
+      `workload-balance said open=${againLoad?.open ?? '(absent)'} (status ${balanceAgain.status}) — ` +
+      'a suggestion doing its own arithmetic recommends the opposite of the workload panel about the ' +
+      'same person on the same afternoon',
   )
 
   console.log('\n▶ somebody already on the task is not somebody to choose')

@@ -5178,3 +5178,30 @@ named, the suite had already been rewritten at `6c029e5`, and the fix was a
 re-run rather than a re-aim. Six of its seven patches reddened the check they
 claim; `assign-2-second-count` came back GREEN, which is a live finding on the
 current tree and the next thing to chase rather than a number to move.
+
+### `assign-2-second-count`: the check was right and the fixture was zero
+
+It came back GREEN on a check written for precisely it, and the check is not the
+problem. `assign-2-second-count` makes the suggestion keep its own arithmetic —
+`open + inList` instead of the shared `collectWorkloadLoads` `open` — and the
+cross-source check that would catch that stands where **every candidate has
+`inList = 0`**, because the subject's list is created by the run and nothing has
+been put in it yet. The check's own comment records its first run: *"the
+suggestion said 0 and workload-balance said 0."*
+
+`open + 0` is `open`. 23 passed, 0 failed.
+
+**Two zeroes agreeing is not two sources agreeing** — the same shape as a
+counted skip reported as a pass, one level down in the fixture rather than in
+the harness. So the suite asks the same question a second time, in the later
+section where the candidate has been given one task in this list and `inList`
+is 1, asserted on the line directly above. There `open + inList` is `open + 1`
+and the drift is the patch itself. The claim now names that check; the earlier
+one stays, because it is the cheaper statement of the same guarantee and it
+reddens for patches that break the shared read outright.
+
+`EXPECTED_CHECKS` 23 → 24, and the provenance reader immediately said the right
+thing about all seven of the set's logs: *"the log ran 23 checks and ai-assign
+declares 24: a short run, a run of another suite, or a run that predates a check
+this suite has since grown."* Not credited, not discarded — counted as
+unreadable until the set runs again.
