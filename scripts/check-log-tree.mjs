@@ -18,7 +18,7 @@ import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { measuredAt, patchDeps, makeDriftCheck } from './lib/log-tree.mjs'
+import { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck } from './lib/log-tree.mjs'
 
 let failed = 0
 const ok = (cond, what) => {
@@ -163,6 +163,22 @@ ok(bad[0] === '<unknown commit>', 'it says so in words a row can print')
 // nothing to compare, and asking git for a diff with no pathspec would return
 // the whole commit range — every log would be stale forever.
 ok(drift(first, []).length === 0, 'a patch with no deps at all is not stale by default')
+
+console.log('▶ and the same question about a whole measurement')
+
+// THE TWO ABSENCES. `check-break-reddened.mjs` and the plan generator both have
+// to decide what a MISSING record and a null sha mean, and both had the
+// conditional written out by hand. `rec?.sha ? drifted(…) : []` is the version
+// that reads every unplaceable log as a measurement of the current tree, which
+// is how nine greens from before their own fixes were counted as greens.
+const current = makeMeasurementCheck({ root: repo })
+ok(current(undefined, ['apps/web/src/a.tsx'])[0] === '<no run log>', 'no record at all is a reason, not a pass')
+ok(
+  current({ sha: null }, ['apps/web/src/a.tsx'])[0] === '<no commit recorded>',
+  'a log that never recorded its commit is a reason too',
+)
+ok(current({ sha: first }, ['apps/web/src/a.tsx']).length === 1, 'and a real record still answers by the diff')
+ok(current({ sha: first }, ['test/e2e/s.mjs']).length === 0, 'a measurement nothing has moved under is current')
 
 console.log(failed === 0 ? `\n${'ok'} log-tree: every case holds` : `\n${failed} FAILED`)
 process.exit(failed === 0 ? 0 : 1)

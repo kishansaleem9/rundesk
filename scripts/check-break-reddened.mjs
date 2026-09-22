@@ -58,6 +58,7 @@ import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { norm, quotedIn } from './lib/claim-match.mjs'
 import { reddensText, makeSuiteOf } from './lib/suite-of-patch.mjs'
+import { measuredAt, patchDeps, makeMeasurementCheck } from './lib/log-tree.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -128,11 +129,25 @@ for (const n of suiteNames) {
  *    of magnitude above the 51 the escape-strip regression produced, which is
  *    what this floor is for.
  *
- * `green` stays at 1 with nine live. All nine are diagnosed and fixed and are
- * waiting for a re-run to say so; lowering it now would be claiming the fixes
- * work before anything has measured them.
+ * AND THEN `reddened` WENT 641 → 171, WHICH IS THE ONE MOVE A FLOOR IS NOT
+ * ALLOWED TO MAKE QUIETLY. Nothing was measured away: a log now has to be a run
+ * of the tree as it is NOW, and 470 of the readable logs are runs of a suite or
+ * a product file that has changed since. The old number counted them.
+ *
+ * The floor is reset to the new true one rather than kept where the softer rule
+ * put it, because 600 under this rule is a number no evidence on this machine
+ * supports, and a floor that cannot be met is a floor that gets edited every
+ * time it speaks. 171 is what is measured against this tree today; the chain in
+ * `chain-plan.sh` re-runs the rest, and this rises as it drains.
+ *
+ * `green` goes 1 → 0 by the same accounting, and it is the more interesting
+ * number. All nine greens turned out to be measurements of trees from before
+ * their own fixes — `fd-7-toggle-latches` at 06:27 against a check its suite
+ * moved at 06:29, and eight more like it. Under the provenance gate they are
+ * UNKNOWN, which is what they always were, so 0 is both the strictest floor and
+ * the honest one: a patch that reddens nothing on THIS tree has not been aimed.
  */
-const BASELINE = { reddened: 600, green: 1, unproven: 1 }
+const BASELINE = { reddened: 171, green: 0, unproven: 1 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -146,6 +161,9 @@ const lines = (raw, kind) =>
       .filter((l) => new RegExp(`\\b${kind}\\b`).test(l))
       .join(' \u0001 '),
   )
+
+const measured = measuredAt(LOGS)
+const notCurrent = makeMeasurementCheck({ root: ROOT })
 
 const green = []
 const unproven = []
@@ -213,6 +231,31 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const want = suite ? expectedIn[suite] : 0
   if (!suite || !want) {
     unknown.push(`${name} — no suite with a declared check count to compare the log against`)
+    continue
+  }
+  /*
+   * AND IT HAS TO BE A RUN OF THE TREE AS IT IS NOW.
+   *
+   * Every guard above asks whether the log is a complete run of the right
+   * suite. None of them asks whether that suite, or the product under it, is
+   * still the one on disk — so a green from before its own fix reads exactly
+   * like a green from after it. That is the shape of all nine greens this file
+   * currently reports: `fd-7-toggle-latches` was measured at 06:27 against a
+   * check the suite moved at 06:29, and the fix was FOR that patch.
+   *
+   * `brk-<patch>.log` carries no commit of its own — it is the suite's raw
+   * output — so the sha comes from the per-suite log that named this patch in
+   * the same run, which is what `measuredAt` reads. A log about a tree that has
+   * since moved is UNKNOWN: not a green, not a reddening, and counted out loud
+   * so that "9 greens" cannot mean "9 unmeasured patches" again.
+   */
+  const rec = measured.get(name)
+  const moved = notCurrent(rec, patchDeps(readFileSync(join(BREAKS, f), 'utf8'), suite))
+  if (moved.length) {
+    unknown.push(
+      `${name} — measured at ${rec?.sha ?? 'an unrecorded commit'}, since when ` +
+        `${moved.length} file(s) the run depended on changed (${moved[0]})`,
+    )
     continue
   }
   if (ran !== want) {

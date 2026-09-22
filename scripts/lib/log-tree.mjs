@@ -93,6 +93,22 @@ export function patchDeps(text, suite) {
   return [...deps]
 }
 
+// `(record from measuredAt, deps) => why this measurement is not about HEAD`,
+// empty when it is. The record may be missing entirely (no log names this patch)
+// or carry a null sha (a log from before the line was written), and BOTH are
+// reasons rather than absences: the tempting `rec?.sha ? drifted(…) : []` reads
+// every unplaceable log as current, which is the direction that turns a stale
+// green into a measurement. Two callers had that conditional written out by
+// hand, so it lives here with the test beside it.
+export function makeMeasurementCheck({ root }) {
+  const drifted = makeDriftCheck({ root })
+  return (rec, deps) => {
+    if (!rec) return ['<no run log>']
+    if (!rec.sha) return ['<no commit recorded>']
+    return drifted(rec.sha, deps)
+  }
+}
+
 // `(sha, paths) => the paths that changed between sha and HEAD`, memoised
 // because 650 patches across 80 suites ask the same question a few hundred
 // times. An unknown sha answers `['<unknown commit>']`: a log whose tree cannot
