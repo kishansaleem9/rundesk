@@ -6,11 +6,13 @@
 # follow it — except now there is a box to type into, which is worse, because
 # the typing disappears and reads as success.
 #
-# IT STOPS THE RUN. The server list stays empty, so `stored.find(…)` is
-# undefined and the tick check dereferences `row.id`. That is not a weakness:
-# five of the nine checks below this one act on a priority that was supposed to
-# exist, and a suite cannot evaluate "ticking it marks it done" when there is
-# no it. The run reports how far it reached.
+# IT STOPS THE RUN AT 7 OF 10 — two passed, five failed. The server list stays
+# empty, so four checks fail in their own words (the write, the rail, the
+# per-person read and the panel), and then `stored.find(…)` is undefined and
+# the tick check dereferences `row.id`. That is not a weakness: the three
+# checks after it act on a priority that was supposed to exist, and a suite
+# cannot evaluate "ticking it marks it done" when there is no it. The run
+# reports how far it reached.
 #
 # The `add` mutation itself is left alone, because the defect being modelled is
 # the CONTROL not being wired — the mutations existed all along, on the person

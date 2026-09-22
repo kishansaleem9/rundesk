@@ -631,6 +631,25 @@ Two general rules:
   same defect as `wt-break.sh` truncating per run, introduced in the script
   written to work around that one. Nothing was lost, because the per-run
   archives added that morning already held the results.
+- **TWO WRITERS, ONE WORKING TREE — AND THE SECOND ONE WAS MINE.** Measuring
+  whether three `time-estimate` patches also redden `estimate.test.ts` meant a
+  loop that applies a patch, runs the test, reverts. A background typecheck job
+  was doing the same three things to the same files at the same time, so the
+  loop's numbers described neither state: it reported patch 5 passing the unit
+  test 15/0, and patch 1 at 11/4. Run again with nothing else touching the
+  tree: 14/1 and 10/5.
+
+  I nearly wrote "this defect is caught only by the browser suite" into a patch
+  header as a finding. `wt-break.sh` takes a lock for exactly this reason and
+  its comment says why — "two runs sharing one worktree check out, patch and
+  build over each other and every result is then about whichever run wrote
+  last". **The rule applies to the hand-run loop as much as to the harness:**
+  before measuring anything against the working tree, check that no background
+  job is patching it, and prefer `run_in_background: false` for the measuring
+  loop itself.
+
+  The tell was there to be read: the two runs disagreed. **Two measurements of
+  one thing that differ is not a reason to pick the more interesting one.**
 - **THE RUNNER READ FROM SOMEWHERE ELSE THAN YOU WROTE TO.** Break patches
   lived in `/tmp/claude-0/breaks` before they were committed.
   `check-break-patches.py` moved to the tracked copy and wrote down why — "the

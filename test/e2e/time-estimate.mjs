@@ -33,7 +33,9 @@ const argOf = (name, fallback) => {
 /**
  * "0 failed" is not "it ran".
  *
- * 11, not 10. It was 10 while the file had eleven unconditional checks — an
+ * 13 since the two "12x" checks were added; 11 before that.
+ *
+ * It was once 10 while the file had eleven unconditional checks — an
  * eleventh was added and this constant was not raised. Nothing noticed,
  * because the comparison was `ran < EXPECTED_CHECKS`: running MORE than the
  * floor never trips it, so the constant drifts upward-blind and quietly stops
@@ -41,7 +43,7 @@ const argOf = (name, fallback) => {
  *
  * Raise this when a check is added; that is the whole contract.
  */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -214,6 +216,34 @@ try {
     !(await page.getByTestId('task-estimate-suggestion').isVisible().catch(() => false)),
     'and offers no suggestion for it',
     'a suggestion row appeared under text the field did not understand',
+  )
+
+  /*
+   * AND NONSENSE WITH A NUMBER IN IT, which is the harder half and was missing.
+   *
+   * "soon" is refused by having no digits at all — the parser finds no parts
+   * and gives up — so the three checks above pass under a parser that matched
+   * duration parts ANYWHERE in the box instead of requiring the whole of it.
+   * `estimate.ts` says what that costs in its own words: it "would read '12x'
+   * as twelve hours and 'due soon 3h' as three — recording an estimate nobody
+   * made." The unit test covers "12x"; nothing drove it through the field, so
+   * the field's own refusal was only ever exercised against a word.
+   */
+  const beforeX = await storedSeconds(task.id)
+  await box.click()
+  await box.fill('12x')
+  await page.waitForTimeout(800)
+  chk(
+    !(await page.getByTestId('task-estimate-suggestion').isVisible().catch(() => false)),
+    'and "12x" is not twelve hours — no suggestion under a number with rubbish attached',
+    'the field offered to read "12x" as a duration, which is an estimate nobody typed',
+  )
+  await box.press('Enter')
+  await page.waitForTimeout(1500)
+  chk(
+    (await storedSeconds(task.id)) === beforeX,
+    'and committing it changes nothing',
+    `the estimate went from ${beforeX}s to ${await storedSeconds(task.id)}s because "12x" was typed`,
   )
 
   // -------------------------------------------------------------------------
