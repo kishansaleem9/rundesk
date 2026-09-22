@@ -254,10 +254,15 @@ try {
     'and neither does pasting a URL',
     'a URL opened the block menu',
   )
+  // Same rule as above: the message is evaluated either way, so the read feeding
+  // it is hoisted, bounded and caught — one read, used by both the condition and
+  // the message. Another locator held in a variable, so `null` (the box gone)
+  // fails the check rather than ending the run.
+  const typedValue = await box.inputValue({ timeout: 8000 }).catch(() => null)
   chk(
-    (await box.inputValue()) === URL_TEXT,
+    typedValue === URL_TEXT,
     'and every character of it arrives',
-    `the box holds "${await box.inputValue()}" instead of "${URL_TEXT}"`,
+    `the box holds ${JSON.stringify(typedValue)} instead of "${URL_TEXT}"`,
   )
 } catch (err) {
   failed += 1

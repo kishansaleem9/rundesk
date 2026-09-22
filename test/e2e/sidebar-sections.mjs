@@ -323,10 +323,15 @@ try {
   )
 
   const more = page.getByTestId('ai-chats-more')
+  // Read once, bounded and caught: a `chk` message is evaluated whether the check
+  // passes or fails, so a removed "More" row would wait out the default thirty
+  // seconds here and end the section. `more` is a locator held in a VARIABLE —
+  // the shape rule six could not see until it learnt to track locator variables.
+  const moreHidden = await more.getAttribute('data-hidden', { timeout: 8000 }).catch(() => null)
   chk(
-    Number(await more.getAttribute('data-hidden')) === total - 5,
+    moreHidden !== null && Number(moreHidden) === total - 5,
     `the "More" row says ${total - 5} are hidden`,
-    `"More" claimed ${await more.getAttribute('data-hidden')} hidden of ${total} total — ` +
+    `"More" claimed ${JSON.stringify(moreHidden)} hidden of ${total} total — ` +
       'a "More" that does not know how many cannot tell you whether it is holding one ' +
       'conversation back or forty. Before this the sixth was simply unreachable.',
   )
