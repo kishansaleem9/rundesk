@@ -108,10 +108,31 @@ for (const n of suiteNames) {
  * with nothing wrong. 500 is under that and still catches the failure this
  * floor exists for: the escape-strip regression took the count to 51.
  */
-// `green` is 1 rather than 2 since the `unit:` claims stopped being counted as
-// patches that disproved nothing — their evidence is a `*.test.ts` and an e2e
-// log cannot speak to it either way.
-const BASELINE = { reddened: 500, green: 1, unproven: 14 }
+/*
+ * `green` is 1 rather than 2 since the `unit:` claims stopped being counted as
+ * patches that disproved nothing — their evidence is a `*.test.ts` and an e2e
+ * log cannot speak to it either way.
+ *
+ * TIGHTENED AS THE WORK LANDED, which is the only direction a ratchet moves
+ * without an argument:
+ *
+ *  - `unproven` 14 → 1. Thirteen headers named a check that PASSES while the
+ *    patch reddened a different one, and each was re-aimed at the check its own
+ *    log shows failing. The one left is `folder-create-12-toast-bottom-right`,
+ *    whose log dates from the worktree package-resolution era and shows three
+ *    failures a toast-position patch cannot cause — that one needs a re-run,
+ *    not a re-aim, and until it re-runs this number cannot honestly be zero.
+ *  - `reddened` 500 → 600, measured at 623. Kept below the live figure because
+ *    `wt-break.sh` truncates each patch log at the start of its run, so a sweep
+ *    in flight dips the count by however many are mid-rewrite. Still an order
+ *    of magnitude above the 51 the escape-strip regression produced, which is
+ *    what this floor is for.
+ *
+ * `green` stays at 1 with nine live. All nine are diagnosed and fixed and are
+ * waiting for a re-run to say so; lowering it now would be claiming the fixes
+ * work before anything has measured them.
+ */
+const BASELINE = { reddened: 600, green: 1, unproven: 1 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')

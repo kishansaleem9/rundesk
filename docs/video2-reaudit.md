@@ -4338,6 +4338,50 @@ check: the duplicated priority list, the duplicated grid sizes, the three ways
 the wizard closes, the stub that could not disagree with the selection, and the
 line no suite executes — which became `teamScheduleColumns` and a unit test.
 
+### The suite that had never run to its own length
+
+`ai-answer-rendering` declares 51 checks. Every log on disk held 30, 29, 26 or
+12 of them, its set refused twice on a red baseline, and all twenty-one patches
+aimed at it had been "measured" against runs that stopped in the same place.
+**It runs to 51 and passes all of them now**, so those patches are being
+measured for the first time.
+
+Two things had to change. The check after the failing one read `innerText()`
+unconditionally on an element the check above it had just found absent — thirty
+seconds, a throw, sixteen checks unreported. And the AI panel's thread-history
+effect REPLACED `messages` wholesale on its one allowed seed, so a turn that
+finished while the history request was in flight disappeared off the screen,
+step log and all.
+
+**A green baseline does not say which of the two mattered**, and a product fix
+with no patch aimed at it is a fix nobody can show is load-bearing. So
+`aar-24-history-seed-replaces-the-turn` restores the wholesale replace — what
+the code said for months, under a comment explaining that the `loadedThreadRef`
+guard stops a REFETCH wiping a streaming turn. The guard is real and the comment
+is true; what neither covers is the one seed it does allow. The header is
+written BEFORE the run and says what each outcome would mean, so the prediction
+is on the record rather than fitted afterwards.
+
+### And two diagnoses of mine that were wrong
+
+Both were corrected by a run rather than by re-reading, which is the whole
+argument for running the patches.
+
+**`taf-8-clear-leaves-the-search-box`.** I said removing `setSearchDraft('')`
+lets the 200ms debounce put the term straight back, and that the check had been
+fooled by a transient recovery. It is keyed on `[searchDraft]` — which Clear no
+longer changes — so the effect never re-runs, `search` stays empty, and the feed
+really does come back and stay back. The check was right to pass twice. What the
+patch leaves is a STALE BOX: a term on screen over a list that is no longer
+filtered, and the next keystroke re-applying a search the person has cleared.
+Nothing asserted it, which is why two rounds of looking at the FEED found
+nothing.
+
+**`aoc-5-input-not-cleared`** is the same lesson from the other side: the patch
+was right about the product and no wording of the check could have caught it,
+because `setInputFiles` dispatches a change event whatever the input held. The
+defect is a native picker's behaviour and Playwright goes around it.
+
 ### One suite's litter was another suite's red baseline
 
 `ai-assign` refused its whole set on one failing check: "with a runner-up, whose
