@@ -13,6 +13,15 @@
 # edit. It is checked against another signed-in person now, which is the only
 # shape that can tell the two apart.
 #
+# IT REDDENS THREE, NOT THE ONE PREDICTED, and the two extra are honest. The
+# peer's delete succeeds, so the external bookmark really is gone — the card
+# check below then reads a list that no longer contains it, and the
+# element-kind check looks up a testid that no longer renders. That is the
+# patch's own damage propagating rather than a weakness in those checks: a
+# deleted row cannot be shown. Recorded because the prediction was too narrow,
+# and a prediction that is too narrow is the one that hides a cascade nobody
+# reasoned about.
+#
 # Reddens: bookmarks: "and a colleague who knows the id still cannot delete it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/bookmarks/bookmarks.service.ts'
