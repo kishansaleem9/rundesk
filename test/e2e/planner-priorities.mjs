@@ -20,7 +20,9 @@
  * `lib/use-priorities`. They were ALSO reading the same endpoint under two
  * different React Query keys — `person-priorities` and `planner-priorities` —
  * so a write in one left the other stale; that is now one key, and this suite
- * checks it by writing in the rail and reading the person panel.
+ * checks it by writing in the rail and reading the person panel — through the
+ * APP, in the same page, which is the only reading that can see a cache key at
+ * all. It used to say that and call the endpoint directly instead.
  *
  * AGAINST THE REAL STACK: every assertion is about a row that survived the
  * round trip, which is the whole difference between a control and a readout.
@@ -39,7 +41,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 9
+const EXPECTED_CHECKS = 10
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -146,16 +148,48 @@ try {
   console.log('\n▶ ONE cache entry — the person panel sees what the rail wrote')
 
   /*
-   * The two surfaces used to read this endpoint under different keys. Reading
-   * the person panel's own query through the app after writing in the rail is
-   * the check that separates "shared key" from "two lists that happen to agree
-   * because the page was reloaded".
+   * The two surfaces used to read this endpoint under different keys.
+   *
+   * THE PARAGRAPH THAT USED TO BE HERE DESCRIBED A CHECK THIS FILE DID NOT
+   * HAVE. It said: "Reading the person panel's own query through the app after
+   * writing in the rail is the check that separates 'shared key' from 'two
+   * lists that happen to agree because the page was reloaded'." The code below
+   * it called the API directly with `A(...)`, which goes nowhere near the app's
+   * cache — so it asserted that two ENDPOINTS agree about a row, which is a
+   * server fact that was never in doubt and cannot be broken by any number of
+   * React Query keys. The stale-reason defect, in a comment explaining why a
+   * check is strong.
+   *
+   * Both halves are here now and they are different claims. This one is the
+   * server's.
    */
   const personList = await A(`/workspaces/${workspaceId}/people/${(await A('/users/me')).data.id}/priorities`)
   chk(
     (personList.data ?? []).some((p) => p.title === TITLE),
     'the per-person read returns it too — one resource, one list',
     'the person-scoped endpoint does not have the priority the rail just made',
+  )
+
+  /*
+   * And this one is the cache's: the person panel, opened in the same page
+   * with no reload, showing what the rail wrote. Two query keys over one
+   * endpoint fail here and nowhere else.
+   */
+  await page.getByTestId('user-menu').click()
+  await page.waitForTimeout(700)
+  await page.getByTestId('menu-my-profile').click()
+  chk(
+    await waitUntil(
+      async () => (await readText(page.getByTestId('person-priorities'))).includes(TITLE),
+      { timeoutMs: 12_000 },
+    ),
+    'and the person panel shows it without a reload — one cache entry, not two',
+    'the panel opened on a list that does not have the priority the rail just wrote',
+  )
+  await page.keyboard.press('Escape')
+  await waitUntil(
+    async () => !(await page.getByTestId('person-panel').isVisible().catch(() => false)),
+    { timeoutMs: 5_000 },
   )
 
   // -------------------------------------------------------------------------
