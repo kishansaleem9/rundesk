@@ -92,6 +92,9 @@ const TAG = `e2e-cal-${Date.now()}`
 // tell the next person that an integration they do not have is live.
 let holidayId = null
 let stagedZoomId = null
+// The colleague this suite invites. Named and taken back in the cleanup, because
+// sixteen of them had piled up in one lane database before anybody looked.
+let otherEmail = null
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -263,12 +266,23 @@ try {
    * the id in a URL must never be enough on its own.
    */
   console.log('\n▶ somebody else’s account is not yours to touch')
-  const otherEmail = `calpeer-${Date.now()}@rundesk.invalid`
+  otherEmail = `calpeer-${Date.now()}@rundesk.invalid`
   const otherPass = 'CalPeer@123!'
   const reg = await fetch(`${API}/auth/register`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: otherEmail, displayName: `Cal Peer`, password: otherPass }),
+    body: JSON.stringify({
+        email: otherEmail,
+        // TAGGED, because a CONSTANT display name pollutes every later suite.
+        // This read `Cal Peer`, so each run of this file left another member of
+        // that name in the shared workspace — and `ai-assign` then failed a
+        // check that requires two candidates' reason sentences to differ,
+        // because `explainCandidate` names a person by their display name and
+        // two of them were called the same thing. One suite's litter, another
+        // suite's red baseline, with nothing connecting the two.
+        displayName: `Cal Peer ${TAG}`,
+        password: otherPass,
+      }),
   })
   if (!reg.ok) throw new Error(`could not register a second person: ${reg.status}`)
   await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: otherEmail, role: 'member' } })
@@ -785,6 +799,20 @@ try {
     }
     if (stagedZoomId) {
       await sql`delete from workspace_integration_connections where id = ${stagedZoomId}`.catch(() => {})
+    }
+    /*
+     * AND THE COLLEAGUE, because leaving them behind is another suite's red
+     * baseline. This file invited one per run and never took them back, so a
+     * lane database held sixteen members called "Cal Peer" — and `ai-assign`
+     * failed a check that required two candidates' reason sentences to differ,
+     * since `explainCandidate` names a person by their display name. One
+     * suite's litter, another suite's refusal, with nothing connecting them.
+     * The name carries this run's TAG now as well, so a leftover cannot collide
+     * with a later one either.
+     */
+    if (otherEmail) {
+      await sql`delete from workspace_members where user_id in (select id from users where email = ${otherEmail})`.catch(() => {})
+      await sql`delete from users where email = ${otherEmail}`.catch(() => {})
     }
     // Attendees first: the fixture meetings are tagged, and leaving them behind
     // would put busy time on this user's calendar in every later run.

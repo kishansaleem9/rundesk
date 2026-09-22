@@ -158,9 +158,29 @@ try {
     `the reason read ${JSON.stringify(pick1.reason)} for someone with openTasks=${pick1.openTasks}`,
   )
   const runner1 = first.data?.runnerUp
+  /*
+   * "A DIFFERENT SENTENCE" WAS THE WRONG TEST, and a shared workspace proved it.
+   * This compared the two reason STRINGS, and `explainCandidate` names a person
+   * by `displayName || email` — so two members who genuinely share a display
+   * name get identical sentences and the check failed on a workspace that had
+   * accumulated two users called "Cal Peer". That is a fixture fact, not a
+   * product one: people are allowed to share a name.
+   *
+   * What the product really guarantees, and what a shared label breaks, is that
+   * the runner-up's reason is ABOUT THE RUNNER-UP and carries THEIR numbers —
+   * the same pair of facts the check above asserts for the pick. Strictly
+   * stronger than the string comparison, and it still reddens
+   * `assign-6-one-reason-for-everybody`, whose constant sentence contains
+   * neither the name nor the count.
+   */
+  const runnerName = runner1?.displayName || runner1?.email || ''
   chk(
-    !!runner1?.userId && runner1.userId !== pick1.userId && runner1.reason !== pick1.reason,
-    'with a runner-up, whose reason is a different sentence about a different person',
+    !!runner1?.userId &&
+      runner1.userId !== pick1.userId &&
+      typeof runner1.reason === 'string' &&
+      runner1.reason.startsWith(`${runnerName}:`) &&
+      runner1.reason.includes(`${runner1.openTasks} open task`),
+    'with a runner-up whose reason names the runner-up and carries their own count',
     `runner-up was ${JSON.stringify(runner1 ?? null)} against a pick of ${pick1.userId}`,
   )
   const ranked = first.data?.ranked ?? []
