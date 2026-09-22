@@ -3569,6 +3569,206 @@ create?*
 
 ---
 
+## 8b. Closing the eleven suites the coverage count could not see
+
+The zero in §8 was true of 101 suites and silent about twelve. What follows is
+what happened when the denominator was corrected, because closing those eleven
+found more defects per patch than any comparable stretch of this audit — and
+every one of them was in a CHECK or in the HARNESS rather than in the product.
+
+### The denominator: 47 → 0 → 11 → 0
+
+`check-break-coverage.mjs` counted a suite's checks by grepping `\bchk\(` and
+gated everything on `checksIn[n] > 0`. A suite whose helper is named `check(`
+counted zero checks and was dropped from the denominator — which means it could
+not appear in the uncovered list however long nobody wrote a patch for it.
+Eleven tracked suites are in that state, carrying **633 checks**: `ui-sweep`
+(107), `video1-fast-items` (92), `task-depth` (91), `chat-message-actions` (73),
+`settings-depth` (61), `panel-collapse` (56), `syncup-live` (48),
+`addressability-live` (28), `stale-chunk-recovery` (27), `loading-states` (26)
+and `emoji-picker` (24). A twelfth, `person-panel` (59), was also invisible and
+already had patches.
+
+The count is each suite's own `EXPECTED_CHECKS` now: every one of the 113 files
+declares one, it is the exact runtime count rather than a static
+approximation, and each suite compares its own result against it on every run —
+so unlike a `chk(` tally it cannot drift from what the suite does. It also
+stops missing a wrapper: `video-regression` routes fourteen checks through a
+local helper, and the grep saw 67 where the suite runs 93.
+
+**47 → 0 → 11 → 0 is one number being corrected, not three regressions**, and
+the ratchet's own comment now says which direction of move is legitimate and
+why, so the raise cannot be used as cover later.
+
+### Eleven sets, forty-six patches, and what they found
+
+| suite | patches | reddened | found |
+| --- | --- | --- | --- |
+| `emoji-picker` | 6 | 2·6·1·2·1·2 | a persistence check vacuous twice over; an unguarded click that killed the run |
+| `loading-states` | 5 | 1·1·2·5·1 | nothing; the suite held |
+| `stale-chunk-recovery` | 5 | 1·3·1·1·1 | a reload-loop check too loose to see a missing cooldown |
+| `addressability-live` | 4 | 2·1·3·2 | three unbalanced branches; a facade check reading the whole document |
+| `panel-collapse` | 4 | 6·1·1·2 | six unbalanced branches; four unbounded clicks; a section leaking a persisted preference |
+| `syncup-live` | 4 | 1·1·1·1 | the only suite keeping a floor; ten unbalanced branches; a third delivery fact nobody asserted |
+| `settings-depth` | 4 | 1·1·1·1 | the workspace-package resolution bug |
+| `chat-message-actions` | 4 | 5·3·1·1 | a check that named "local" and read only the format, in a UTC container; an unbounded click |
+| `task-depth` | 4 | — | four unbalanced branches; an unguarded dereference |
+| `video1-fast-items` | 4 | — | — |
+| `ui-sweep` | 4 | — | a literal `check(true, …)` |
+
+### The four patches that ran GREEN
+
+Each one was a defect in the check, and none was visible by reading it.
+
+**`emoji-picker-5-frequent-not-persisted`** deletes `writeFrequent` outright.
+"and it leads Frequently Used next time" was vacuous in two independent ways:
+it picked `.first()` — whatever already led the row, so the claim was satisfied
+by nothing happening — and it re-opened the picker by clicking its trigger
+twice, which does not remount anything. The count lives in
+`useState(() => readFrequent())`, so storage is read once at mount with the
+running total in a ref beside it: a picker that wrote nothing down still showed
+the right order for as long as it stayed open. It picks the SECOND entry now
+and reloads the page. **Third instance in this audit of a persistence check
+satisfied by an in-memory copy.**
+
+**`sl-3-call-card-not-broadcast`** keeps the `chatMessages` insert and drops the
+realtime emit. The suite split the claim in two so it could say which half
+broke — written on the server, seen on the screen — and the second check
+RELOADS before giving up, deliberately, to separate never-announced from
+never-written. That is also why neither check can tell a card that was pushed
+from one that was merely stored. The suite computed `neededReload` and read it
+nowhere: a value derived correctly, by a variable named after exactly the fact
+nobody asserted. It is a check of its own now.
+
+**`sd-1-contrast-marks-but-does-not-paint`** was inert, and the reason is the
+harness — see below.
+
+**`al-2-chat-channel-chosen-silently`** was aimed at an alias. `setSelectedId`
+is assigned one line below `selectChannel` and used by the sidebar; the fallback
+effect calls `selectChannel` directly. The patch applied, changed a real line,
+and the suite came back 28 of 28. Reading the assertion and walking outwards
+from it is the rule; reading the alias and hoping to meet the assertion is what
+that was.
+
+### A conditional check makes the run LENGTH conditional
+
+Every suite compares its check count against `EXPECTED_CHECKS` with `!==`. So
+an `if` whose body calls `check()` and which has no `else` turns a product
+regression into a statement about the harness:
+
+```
+84 passed, 4 failed
+✗ 88 of 92 checks ran — this run stopped early
+```
+
+Those four FAIL lines named the missing AI dock. The headline says the RUN is
+broken, and a person reading it reaches for the harness.
+`vr-4-the-ai-dock-is-only-on-the-ai-page` produced that, and with
+`video-regression`'s G13-10 chain reporting eight checks on every path the same
+patch reddens **nine** and the run reaches its own totals. One of those eight
+sentences — "the AI dock can be opened" — existed ONLY on the branch where
+there was no dock to open, so the path that clicked it never asserted it was
+there.
+
+Five instances in two days, every one found by running a patch:
+`video-regression`'s chain, `emoji-picker`'s retry click, three branches in
+`addressability-live`, six in `panel-collapse`, ten in `syncup-live`, four in
+`task-depth`. It is now `scripts/check-suite-check-branches.mjs` — a heuristic
+that says so in its own output, ratcheted from 55 down — and
+`test/e2e/lib/chain.mjs`, which reports the remainder as FAILED with the reason
+the chain stopped. **A check that did not run is a check nobody knows the
+answer to, and the honest way to say that is to fail it with a sentence
+explaining why.**
+
+The one exception is narrow: a gate on the MACHINE or the DEPLOYMENT, which
+`skipRest` reports as SKIP. It only works where the skip is COUNTED, and that
+is what let `syncup-live` stop being the one suite keeping a floor — see below.
+
+### `syncup-live` kept a floor, and the exception was wrong
+
+Its comment argued the case carefully. Five checks depend on the machine, so 53
+locally and 48 on a headless runner, and *"an exact comparison has to be wrong
+on one of them"*.
+
+There was a third option. A check that cannot run is not ABSENT, it is UNKNOWN,
+and an unknown outcome can be reported and counted like any other. With a
+counted `skip()` the total is the same number on every machine, `!==` catches a
+branch that vanished silently, and a runner with no soundcard still exits 0.
+
+**And the exception named the wrong five.** It said two speaker-picker checks
+and three recording checks. Measured from a run, the five that skip are all one
+gate — the storage chain, because no bucket is configured here. The speaker
+picker and the AI Notes entitlement both ran as real checks. The floor of 48 was
+53 minus five checks that were not the five it described: the stale reason, in
+a comment whose whole job was to justify an exception.
+
+### Six harness defects, four of them silent
+
+1. **The short-run line was never captured.** `wt-break.sh` recorded FAIL lines
+   and the `N passed, M failed` summary. `✗ N of M checks ran` matches neither,
+   so `vr-4` was recorded as "84 passed, 4 failed" with nothing to say four
+   checks never happened, and `break-queue.sh` counted it as a clean reddening.
+2. **`head -4` truncated the FAIL list silently.** A patch reddening seven
+   checks was recorded as reddening four — and every prediction-vs-actual count
+   in every patch header is read off that file.
+3. **A CRASHED run was counted as a reddening.** `emoji-picker-2-data-inlined`
+   killed the suite on an unguarded click, and what `$OUT` held was a patch line
+   with three FAIL lines under it and no totals: byte-identical to a patch that
+   reddened three checks.
+4. **A SHORT BASELINE was accepted as green.** The baseline gate checked for
+   `0 failed` and ignored the short-run line, so a baseline that stopped early
+   would have had every patch measured against a run shorter than the suite.
+5. **The tally double-counted.** Six greps over one file with overlapping
+   patterns, with REDDENED derived by subtraction — so a short run reporting
+   `0 failed` counted as STILL-GREEN *and* as SHORT, taking REDDENED below zero
+   and tripping "PROVED NOTHING" on a set that proved something. One awk pass
+   assigns each patch exactly one outcome now, and the partition is asserted.
+6. **A patch to `packages/**` was applied in the worktree and built from the
+   repo.** The worktrees borrow `node_modules` with an absolute symlink, and
+   pnpm links workspace packages relatively inside it —
+   `@rundesk/ui -> ../../../../packages/ui` — so four levels up from the REPO is
+   the repo. A patch to `packages/ui/src/styles.css` applied cleanly, appeared
+   in `git diff` (which is what triggers the rebuild at all), rebuilt the
+   bundle, and produced a byte-identical one. `PATCH CHANGED NOTHING` cannot
+   catch it: the patch really did change the worktree.
+   `sd-1-contrast-marks-but-does-not-paint` ran green this way, and
+   `folder-create-12-toast-bottom-right` was recorded as reddening three checks
+   unrelated to its claim.
+
+And a seventh found by fixing the sixth: **`dist/` is not tracked, so
+`git checkout -- .` leaves the last patch's BUNDLE on disk.** The restore block
+put the sources, the database and the API binary back and never rebuilt the web
+bundle — and the last patch in a set is usually a web one. A lane could open
+suite B against a bundle still carrying suite A's final patch, and a patch for
+one suite rarely reddens another, which is exactly what makes it silent.
+
+### Two more checkers, and two shared modules
+
+- **`scripts/check-suite-check-branches.mjs`** — the conditional-check ratchet
+  above, in `ci.yml` and preflight.
+- **`check-break-freshness.mjs` now asks the prior question**: is there a log at
+  all? 289 of 792 patches have no surviving run log here. Two causes and it
+  cannot tell them apart, so it does not guess: a set written and never run, or
+  a set that ran before per-run archiving existed and was overwritten —
+  `break-ai-answer-rendering.txt` holds one patch line out of twenty-three that
+  ran.
+- **`check-break-claims.mjs` reports a SECOND `# Reddens:` block**, because
+  `findIndex` reads only the first. Thirteen patches had one, and in two of
+  them the legacy line named a sentence the canonical block does not: `nor does
+  Month, which spans five of them` and `outside the schedule are dimmed`. Both
+  are real checks in real suites, claimed and verified by nothing for as long as
+  the second line existed.
+- **`scripts/lib/claim-match.mjs`** — the claim matcher was copied into two
+  checkers and they had drifted: one had a dash fold and a backtick unescape,
+  the other did not. Two checkers disagreeing about whether the same claim is in
+  the same suite is the duplicated list one level up. Verified by diff:
+  byte-identical output from both before and after the extraction.
+- **`test/e2e/lib/chain.mjs`** — the same thing one level down.
+  `panel-collapse` and `syncup-live` each grew their own `chain()` the same
+  afternoon.
+
+---
+
 ## 9. The misclassified rows, resolved
 
 §6 listed eighteen rows whose recorded status was wrong, four of them marked
