@@ -472,7 +472,12 @@ console.log('\n§1.3  the sidebar collapses to icons')
 {
   const { ctx, page, calls } = await openApp()
   const sidebar = page.locator('[data-testid="workspace-sidebar"]')
-  const widthOf = async () => (await sidebar.boundingBox())?.width ?? 0
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const widthOf = async () => (await sidebar.boundingBox({ timeout: 6000 }).catch(() => null))?.width ?? 0
 
   const expanded = await widthOf()
   check(expanded > 200, `starts expanded (${Math.round(expanded)}px)`)
@@ -513,7 +518,7 @@ console.log('\n§1.3  the sidebar collapses to icons')
   const mainWidth = await page
     .locator('main')
     .first()
-    .boundingBox()
+    .boundingBox({ timeout: 6000 }).catch(() => null)
     .then((b) => b?.width ?? 0)
   check(mainWidth > 1300, `the page takes the space back (${Math.round(mainWidth)}px)`)
 

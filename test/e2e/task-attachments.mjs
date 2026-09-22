@@ -211,8 +211,13 @@ try {
    * card's box would still be "visible" and still be wired to the right id
    * while pointing at the wrong row on screen.
    */
-  const cardBox = await firstCard.boundingBox()
-  const actionsBox = await firstActions.boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const cardBox = await firstCard.boundingBox({ timeout: 6000 }).catch(() => null)
+  const actionsBox = await firstActions.boundingBox({ timeout: 6000 }).catch(() => null)
   chk(
     !!cardBox && !!actionsBox
       && actionsBox.x >= cardBox.x - 1 && actionsBox.y >= cardBox.y - 1

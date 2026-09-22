@@ -240,7 +240,12 @@ try {
   const panel = page.getByTestId('person-panel')
   check(await panel.isVisible().catch(() => false), 'the panel opens')
   check(page.url() === urlBefore, 'over the page you were on — no navigation, no lost place', page.url())
-  const box = await panel.boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const box = await panel.boundingBox({ timeout: 6000 }).catch(() => null)
   check((box?.width ?? 0) > 300, 'and it renders at 1100px, where the old card did not exist', `${box?.width}`)
 
   // ---------------------------------------------------------------------

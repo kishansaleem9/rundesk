@@ -501,7 +501,12 @@ try {
 
   /* Draw a third stroke with the mouse, and ask the SERVER what it got. */
   await signatureRow.getByTestId('cf-signature-pad').scrollIntoViewIfNeeded()
-  const pad = await signatureRow.getByTestId('cf-signature-pad').boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const pad = await signatureRow.getByTestId('cf-signature-pad').boundingBox({ timeout: 6000 }).catch(() => null)
   if (!pad) throw new Error('the signature pad has no box to draw in')
   await page.mouse.move(pad.x + 10, pad.y + pad.height - 10)
   await page.mouse.down()

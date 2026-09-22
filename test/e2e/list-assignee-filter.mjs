@@ -347,7 +347,12 @@ try {
   const faceBox = await page
     .getByTestId(`list-assignee-option-${ME}`)
     .getByTestId('list-assignee-face')
-    .boundingBox()
+    // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+    // element first — and returns null only for one that exists with no box. Every
+    // check below reads the size through `?? 0` or a null test, so absence reports
+    // as zero and reddens; unguarded it spent thirty seconds and ended the section
+    // (ledger §10).
+    .boundingBox({ timeout: 6000 }).catch(() => null)
   chk(
     (faceBox?.width ?? 0) >= 16 && (faceBox?.height ?? 0) >= 16,
     `a person’s row draws a real avatar (${Math.round(faceBox?.width ?? 0)}×${Math.round(faceBox?.height ?? 0)}px)`,

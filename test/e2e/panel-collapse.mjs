@@ -229,7 +229,12 @@ try {
 
   const panel = page.getByTestId('chat-panel')
   check(await panel.isVisible().catch(() => false), 'the channel list starts expanded')
-  const wide = await panel.boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const wide = await panel.boundingBox({ timeout: 6000 }).catch(() => null)
   check(Math.round(wide?.width ?? 0) === 272, 'and is 272px wide — half the double navigation', `${wide?.width}`)
 
   const chatChain = chain(
@@ -245,7 +250,7 @@ try {
     await page.waitForTimeout(1400)
     const rail = page.getByTestId('chat-panel-rail')
     chatChain.step(await rail.isVisible().catch(() => false), '')
-    const narrow = await rail.boundingBox()
+    const narrow = await rail.boundingBox({ timeout: 6000 }).catch(() => null)
     chatChain.step(Math.round(narrow?.width ?? 0) === 56, `${narrow?.width}`)
     chatChain.step(
       Math.round((wide?.width ?? 0) - (narrow?.width ?? 0)) === 216,
@@ -288,12 +293,12 @@ try {
   await page.waitForTimeout(4000)
   const tree = page.getByTestId('docs-tree')
   check(await tree.isVisible().catch(() => false), 'the page tree starts expanded')
-  const treeWide = await tree.boundingBox()
+  const treeWide = await tree.boundingBox({ timeout: 6000 }).catch(() => null)
   check(Math.round(treeWide?.width ?? 0) === 240, 'at 240px', `${treeWide?.width}`)
 
   const collapsedTree = await tryClick(page.getByTestId('docs-tree-collapse'))
   await page.waitForTimeout(1400)
-  const strip = collapsedTree ? await page.getByTestId('docs-tree-rail').boundingBox() : null
+  const strip = collapsedTree ? await page.getByTestId('docs-tree-rail').boundingBox({ timeout: 6000 }).catch(() => null) : null
   check(
     Math.round(strip?.width ?? 0) === 48,
     'collapsing leaves a 48px strip',

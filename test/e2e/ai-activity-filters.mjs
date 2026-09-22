@@ -252,9 +252,14 @@ try {
   )
   chk(listUp, 'the Activity tab lists runs', 'the Activity tab never rendered a row')
 
-  const statusBox = await page.getByTestId('ai-activity-status').boundingBox()
-  const mineBox = await page.getByTestId('ai-activity-mine').boundingBox()
-  const featureBox = await page.getByTestId('ai-activity-feature').boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const statusBox = await page.getByTestId('ai-activity-status').boundingBox({ timeout: 6000 }).catch(() => null)
+  const mineBox = await page.getByTestId('ai-activity-mine').boundingBox({ timeout: 6000 }).catch(() => null)
+  const featureBox = await page.getByTestId('ai-activity-feature').boundingBox({ timeout: 6000 }).catch(() => null)
   chk(
     !!statusBox && !!mineBox && !!featureBox,
     'Status, "My runs" and the feature filter are all on the bar',

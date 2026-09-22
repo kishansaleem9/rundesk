@@ -237,7 +237,12 @@ try {
     `the toast read "${toastText}"`,
   )
 
-  const box = await toast.boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const box = await toast.boundingBox({ timeout: 6000 }).catch(() => null)
   const viewport = page.viewportSize()
   chk(
     !!box && !!viewport && box.y + box.height / 2 > viewport.height / 2,

@@ -335,7 +335,12 @@ try {
    * than an attribute of the toast library — a person cannot read
    * `data-x-position`. Bottom-LEFT, as `08:55` draws both of them.
    */
-  const box = await toast.boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const box = await toast.boundingBox({ timeout: 6000 }).catch(() => null)
   const viewport = page.viewportSize()
   chk(
     !!box && !!viewport &&

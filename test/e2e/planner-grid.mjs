@@ -279,23 +279,37 @@ try {
   })
   await page.waitForTimeout(150)
 
-  const from = await item.boundingBox()
-  const to = await column.boundingBox()
-  await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
-  await page.mouse.down()
+  /*
+   * `boundingBox()` THROWS when the locator matches nothing — it waits for the
+   * element first — and returns null only for one that exists with no box.
+   *
+   * THIS SITE IS NOT LIKE THE OTHERS, and the note I first stamped on it said
+   * it was: the drag DEREFERENCES both boxes to pick its coordinates, so null
+   * would be a TypeError six seconds in rather than a reported failure. The
+   * drag is skipped when either box is missing, and the three checks below then
+   * report what a drag that never happened leaves behind — no ghost, no POST,
+   * no block — which is the honest account of a grid with nothing to drag.
+   */
+  const from = await item.boundingBox({ timeout: 6000 }).catch(() => null)
+  const to = await column.boundingBox({ timeout: 6000 }).catch(() => null)
+  const draggable = !!from && !!to
+  if (draggable) {
+    await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2)
+    await page.mouse.down()
+  }
   /*
    * 127px, not 120. At HOUR_PX 48 a drop 120px down is exactly two and a half
    * hours in, which is already on a quarter — so the rounding check passed
    * with the rounding deleted. 127px lands at :38 unrounded and :45 rounded,
    * which is a question the two answer differently.
    */
-  await page.mouse.move(to.x + to.width / 2, to.y + 127, { steps: 8 })
+  if (draggable) await page.mouse.move(to.x + to.width / 2, to.y + 127, { steps: 8 })
   chk(
     (await page.locator('[data-testid="planner-drag-ghost"]').count()) === 1,
     'the drag shows what is being dragged',
     'nothing followed the pointer — a drag with no feedback is one people do not believe is happening',
   )
-  await page.mouse.up()
+  if (draggable) await page.mouse.up()
   await page.waitForTimeout(900)
 
   const post = calls.filter((c) => c.method === 'POST' && c.url.includes('/blocks')).at(-1)

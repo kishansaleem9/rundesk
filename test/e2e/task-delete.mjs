@@ -179,8 +179,13 @@ try {
    * as the last pair in the menu; a Delete that rendered somewhere else, or an
    * Archive that had quietly become the only row again, both have to fail here.
    */
-  const archiveBox = await page.getByTestId('task-menu-archive').first().boundingBox()
-  const deleteBox = await page.getByTestId('task-menu-delete').first().boundingBox()
+  // `boundingBox()` THROWS when the locator matches nothing — it waits for the
+  // element first — and returns null only for one that exists with no box. Every
+  // check below reads the size through `?? 0` or a null test, so absence reports
+  // as zero and reddens; unguarded it spent thirty seconds and ended the section
+  // (ledger §10).
+  const archiveBox = await page.getByTestId('task-menu-archive').first().boundingBox({ timeout: 6000 }).catch(() => null)
+  const deleteBox = await page.getByTestId('task-menu-delete').first().boundingBox({ timeout: 6000 }).catch(() => null)
   const gap = archiveBox && deleteBox ? deleteBox.y - (archiveBox.y + archiveBox.height) : null
   chk(
     Boolean(archiveBox) && Boolean(deleteBox) && gap !== null && gap >= -2 && gap <= 24,

@@ -134,7 +134,18 @@ page.on('request', (r) => {
 
 const cardFor = (id) => page.locator(`[data-testid="board-task-card"][data-task-id="${id}"]`)
 const coverIn = (id) => cardFor(id).locator('[data-testid="board-card-cover"]')
-const heightOf = async (id) => (await cardFor(id).boundingBox())?.height ?? 0
+/*
+ * `?? 0` COVERS THE WRONG ABSENCE. `boundingBox()` returns null for an element
+ * that exists with no box — `display: contents` — and THROWS when the locator
+ * matches nothing at all, because it waits for it first.
+ * `list-card-cover-1-list-read-drops-cover` takes the cover out of the list
+ * read, so the band is not there, and the read below spent thirty seconds and
+ * ended the run at 12 of 26. Both absences answer null now, and the checks that
+ * measure a height report 0px — which is what a band that is not drawn is
+ * (ledger §10).
+ */
+const boxOf = (loc) => loc.boundingBox({ timeout: 6000 }).catch(() => null)
+const heightOf = async (id) => (await boxOf(cardFor(id)))?.height ?? 0
 const openCustomize = async () => {
   const panel = page.getByTestId('list-customize')
   if (!(await panel.evaluate((el) => el.open))) await panel.locator('summary').first().click()
@@ -238,7 +249,7 @@ try {
     'a task with no cover was given a cover band anyway')
 
   console.log('\n▶ measured, because a band of zero height would pass every check above')
-  const bandBox = await coverIn(made.image).boundingBox()
+  const bandBox = await boxOf(coverIn(made.image))
   chk((bandBox?.height ?? 0) >= 40, 'the band at Medium is a band, not a hairline',
     `the cover band measured ${Math.round(bandBox?.height ?? 0)}px tall`)
   const mediumCovered = await heightOf(made.image)
