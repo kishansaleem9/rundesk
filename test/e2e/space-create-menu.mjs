@@ -410,11 +410,24 @@ try {
   console.log('\n▶ and the thing it creates really lands in this space')
   const PROJECT_NAME = `Menu project ${TAG}`
   await openMenu()
-  await page.getByTestId('space-create-project').click()
-  await page.waitForSelector('[data-testid="quick-create-project-name"]', { timeout: 15_000 })
-  await page.getByTestId('quick-create-project-name').fill(PROJECT_NAME)
-  await page.getByTestId('quick-create-project-space').selectOption(SPACE)
-  await page.locator('form:has([data-testid="quick-create-project-name"]) button[type=submit]').click()
+  /*
+   * EVERY STEP OF THE SEQUENCE, because the first one is the one a patch takes
+   * away. `space-create-menu-3-defaulttab` opens a different tab, so the project
+   * field never appears and this `waitForSelector` threw — the run ended at 23
+   * of 29 and the six checks below, which read the SERVER for what was created,
+   * were never asked. "Nothing was created" is the honest answer and they are
+   * the ones who should give it (ledger §10).
+   */
+  await page.getByTestId('space-create-project').click({ timeout: 8000 }).catch(() => {})
+  await page
+    .waitForSelector('[data-testid="quick-create-project-name"]', { timeout: 15_000 })
+    .catch(() => {})
+  await page.getByTestId('quick-create-project-name').fill(PROJECT_NAME, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-project-space').selectOption(SPACE, { timeout: 8000 }).catch(() => {})
+  await page
+    .locator('form:has([data-testid="quick-create-project-name"]) button[type=submit]')
+    .click({ timeout: 8000 })
+    .catch(() => {})
   await page.waitForTimeout(2500)
 
   const projects = await api(`/projects/space/${SPACE}`)
@@ -464,9 +477,9 @@ try {
    */
   const before = ((await api(`/lists/workspace/${WS}`)).data ?? []).filter((l) => l.spaceId === SPACE)
   await openMenu()
-  await page.getByTestId('space-create-form').click()
-  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 })
-  await page.getByTestId('quick-create-form-space').selectOption(SPACE)
+  await page.getByTestId('space-create-form').click({ timeout: 8000 }).catch(() => {})
+  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('quick-create-form-space').selectOption(SPACE, { timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(900)
   const noListNote = await page.getByTestId('quick-create-form-no-lists').count()
   const disabledWhenEmpty = await page.getByTestId('quick-create-form-submit').isDisabled()
@@ -503,10 +516,10 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForSelector(`[data-testid="space-link-${SPACE}"]`, { timeout: 20_000 })
   await openMenu()
-  await page.getByTestId('space-create-form').click()
-  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 })
-  await page.getByTestId('quick-create-form-title').fill(FORM_NAME)
-  await page.getByTestId('quick-create-form-space').selectOption(SPACE)
+  await page.getByTestId('space-create-form').click({ timeout: 8000 }).catch(() => {})
+  await page.waitForSelector('[data-testid="quick-create-form-title"]', { timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('quick-create-form-title').fill(FORM_NAME, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-form-space').selectOption(SPACE, { timeout: 8000 }).catch(() => {})
   await waitUntil(
     () => page.getByTestId('quick-create-form-list').locator('option').count().then((n) => n > 1),
     { timeoutMs: 10_000 },
