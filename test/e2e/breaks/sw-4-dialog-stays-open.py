@@ -1,5 +1,5 @@
 # The wizard sits there over a Space that now exists, inviting a second one.
-# Reddens: space-wizard: the wizard closes on success
+# Reddens: space-wizard: "the wizard closes on success"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = '      onOpenChange(false)\n      onCreated?.(made.space)\n'

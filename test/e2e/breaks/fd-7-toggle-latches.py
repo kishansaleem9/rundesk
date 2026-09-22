@@ -1,5 +1,5 @@
 # The privacy switch remembers the last answer across dialogs, privatising the next folder unasked.
-# Reddens: folder-dialog: reopening the dialog shows the toggle off again
+# Reddens: folder-dialog: "reopening the dialog shows the toggle off again"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '\n  const [isPrivate, setIsPrivate] = useState(false)\n'

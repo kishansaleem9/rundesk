@@ -1,5 +1,5 @@
 # A refused write says nothing at all, which looks identical to a control that is still thinking.
-# Reddens: create-menu-ai: a refused write reaches the person as a toast
+# Reddens: create-menu-ai: "a refused write reaches the person as a toast"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "    onError: (e) =>\n      toast.error(\n        t('quickCreate.aiWriteFailed', {\n"

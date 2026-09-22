@@ -1,5 +1,5 @@
 # Folder and list templates are offered from the Space dialog, so Use makes a container of the wrong kind.
-# Reddens: space-wizard: lists ONLY the templates that make a Space
+# Reddens: space-wizard: "lists ONLY the templates that make a Space"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = "    () => (templateRows ?? []).filter((tpl) => tpl.targetType === 'space'),\n"

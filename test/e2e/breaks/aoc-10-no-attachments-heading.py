@@ -1,5 +1,5 @@
 # The staged files are listed with nothing saying what the list is.
-# Reddens: attach-on-create: under an Attachments heading, as the frame draws it
+# Reddens: attach-on-create: "under an Attachments heading, as the frame draws it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          <div className="text-[11px] font-medium text-muted-foreground">\n            {t(\'quickCreate.attachmentsHeading\')}\n          </div>\n'

@@ -1,5 +1,5 @@
 # The staged files stop being drawn at all — chosen, invisible, and unremovable.
-# Reddens: attach-on-create: two files staged draw two rows
+# Reddens: attach-on-create: "two files staged draw two rows"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '      {attachments.length > 0 && (\n        <div className="space-y-1.5" data-testid="quick-create-attachments">\n'

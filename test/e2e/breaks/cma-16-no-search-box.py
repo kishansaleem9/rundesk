@@ -1,5 +1,6 @@
 # The create menu opens straight onto the tab strip again, with nothing over it.
-# Reddens: create-menu-ai: the create menu opens with the frame's own sentence over it
+# Reddens: create-menu-ai: "the create menu opens with the frame's own sentence over
+#   it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '            <input\n              value={query}\n              onChange={(e) => setQuery(e.target.value)}\n              data-testid="create-search"\n'

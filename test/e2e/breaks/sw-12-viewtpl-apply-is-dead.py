@@ -1,5 +1,5 @@
 # Applying a view set changes nothing underneath it — a tab of buttons over nothing.
-# Reddens: space-wizard: applying a view set moves the switches underneath it
+# Reddens: space-wizard: "applying a view set moves the switches underneath it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = '                    onClick={() => {\n                      setViews([...p.views])\n                      setDefaultView(p.defaultView)\n                    }}\n'

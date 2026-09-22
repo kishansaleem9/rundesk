@@ -1,5 +1,5 @@
 # Every card applies the first template — a grid of buttons that all do one thing.
-# Reddens: space-wizard: pressing Use applies THAT template, by id
+# Reddens: space-wizard: "pressing Use applies THAT template, by id"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = '                  onClick={() => applyTemplate.mutate(tpl.id)}\n'

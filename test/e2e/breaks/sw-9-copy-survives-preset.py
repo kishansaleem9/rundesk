@@ -1,5 +1,5 @@
 # A copied configuration outlives the card it customised, so the Space is built from a mixture nobody chose.
-# Reddens: space-wizard: choosing a workflow card drops the copy
+# Reddens: space-wizard: "choosing a workflow card drops the copy"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = '    setViews(null); setDefaultView(null); setFeatures(null)\n    // A copied configuration IS a customisation of the old card, so it goes\n'

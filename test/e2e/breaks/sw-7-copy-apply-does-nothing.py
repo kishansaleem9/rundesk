@@ -1,5 +1,5 @@
 # Apply records where it copied from and copies nothing — the mirror of the facade, on screen.
-# Reddens: space-wizard: Apply puts the source Space's own views into this wizard
+# Reddens: space-wizard: "Apply puts the source Space's own views into this wizard"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = "    if (copyParts.includes('views')) {\n"

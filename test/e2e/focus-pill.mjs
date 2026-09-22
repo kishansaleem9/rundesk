@@ -488,7 +488,17 @@ try {
   )
 
   console.log('\n▶ frame `16:10` — a control, not a caption')
-  await pill().click()
+  /*
+   * BOUNDED, BECAUSE A HEADER WITH NO PILL IS THE STATE THIS SUITE IS ABOUT.
+   * This was an unqualified `click()`, so `fp-6-pill-never-rendered` — which
+   * makes `FocusBlockPill` return null — spent Playwright's default thirty
+   * seconds retrying, threw, and ended the run with three of fifteen checks
+   * never reported under a headline about the harness. The patch's own header
+   * said so: "the whole run — the pill never appears, so the fixture throws and
+   * the check count comes up short". A patch whose only evidence is a crash
+   * proves nothing about the check it names.
+   */
+  await pill().click({ timeout: 8000 }).catch(() => {})
   const openedPlanner = await waitUntil(
     async () => (await page.evaluate(() => window.location.pathname)) === `/app/${workspaceId}/calendar`,
     { timeoutMs: 20_000 },
@@ -508,19 +518,32 @@ try {
   })
   await page.reload({ waitUntil: 'domcontentloaded' })
   const showedShort = await waitUntil(async () => (await pill().count()) === 1, { timeoutMs: 25_000 })
-  if (!showedShort) throw new Error('the short block never drew a pill, so its ending proves nothing')
   /*
    * NO RELOAD between here and the assertion. A reload would re-mount into a
    * clean state and "gone" would be free; the bug this catches is a pill that
    * was painted once and never cleared, and that pill survives its block
    * exactly as long as nothing re-mounts.
+   *
+   * AND NO THROW WHEN THE PILL NEVER CAME. This read
+   * `if (!showedShort) throw new Error('...its ending proves nothing')`, which
+   * is the right thought and the wrong way to say it: the run ended there, the
+   * two checks after it were never reported, and `fp-6` was recorded as a short
+   * run rather than as three failures. "Its ending proves nothing" is a reason
+   * a check could not be answered, and the honest place for a reason is the
+   * detail of a failing check — a check that did not run is a check nobody
+   * knows the answer to.
    */
-  const cleared = await waitUntil(async () => (await pill().count()) === 0, { timeoutMs: 60_000 })
+  const cleared = showedShort
+    ? await waitUntil(async () => (await pill().count()) === 0, { timeoutMs: 60_000 })
+    : false
   chk(
     cleared,
     'when the block ends the pill disappears, with no reload to hide behind',
-    `the block ended and ${await pill().count()} pill(s) are still in the header — ` +
-      'a countdown that outlives its block is read as live',
+    showedShort
+      ? `the block ended and ${await pill().count()} pill(s) are still in the header — ` +
+        'a countdown that outlives its block is read as live'
+      : 'the short block never drew a pill, so its ending could not be read at all — reported as failed ' +
+        'because UNKNOWN is not the same as fine',
   )
   await dropBlock(short.id)
 

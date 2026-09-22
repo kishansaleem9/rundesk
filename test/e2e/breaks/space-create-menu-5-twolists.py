@@ -9,17 +9,31 @@
 # baseline since.
 #
 # The defect being modelled is unchanged and is if anything easier to state
-# now: the strip stops reading the shared list and keeps its own. Eight entries
-# where `CREATE_TYPES` has nine — Form, the one this row added, is the one that
+# now: the strip stops reading the shared list and keeps its own. Nine entries
+# where `CREATE_TYPES` has ten — Form, the one this row added, is the one that
 # goes missing, which is exactly how a hand-kept copy drifts.
 #
-# Reddens: space-create-menu: the strip offers every kind in CREATE_TYPES
+# CORRECTED 22 September, AND THE CORRECTION IS THE SAME DEFECT ONE LEVEL UP.
+# The copy this patch wrote listed eight kinds, not nine, so it dropped
+# `reminder` as well as `form` — a hand-kept list, in a patch about hand-kept
+# lists, already drifted by two. It reddened the check, which is why nothing
+# said so. `reminder` is back, because a patch that drops one entry is the
+# mistake somebody makes and a patch that drops two is a patch that was not
+# read.
+#
+# `space` stays in the copy on purpose: the check asks for it SEPARATELY —
+# `tabKinds.includes('space')` beside the `EXPECTED_KINDS.every(...)` — so a
+# copy missing Space would redden the same sentence for a different reason and
+# this patch would stop being about drift.
+#
+# Reddens: space-create-menu: "every kind the space menu offers has a
+#   quick-create tab of the same name, plus Space"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          {shownTypes.map((tab) => (\n'
 b = (
     "          {shownTypes\n"
-    "            .filter((tb) => ['task', 'doc', 'list', 'folder', 'space', 'project', 'whiteboard', 'dashboard'].includes(tb.value))\n"
+    "            .filter((tb) => ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'list', 'folder', 'project', 'space'].includes(tb.value))\n"
     "            .map((tab) => (\n"
 )
 s = io.open(p, encoding='utf-8').read()

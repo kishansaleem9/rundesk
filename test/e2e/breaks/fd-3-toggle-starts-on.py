@@ -1,5 +1,5 @@
 # The dialog opens with privacy already on, so a folder made without touching it vanishes for everybody else.
-# Reddens: folder-dialog: and it starts off
+# Reddens: folder-dialog: "and it starts off"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '\n  const [isPrivate, setIsPrivate] = useState(false)\n'

@@ -1,5 +1,6 @@
 # The same file staged twice draws two rows nobody can tell apart.
-# Reddens: attach-on-create: picking an already-staged file again does not draw a second row
+# Reddens: attach-on-create: "picking an already-staged file again does not draw a
+#   second row"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '        if (seen.has(`${file.name}:${file.size}`)) continue\n'

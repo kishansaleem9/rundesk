@@ -1,5 +1,5 @@
 # A failed upload stops naming the file, so a four-file task cannot be retried.
-# Reddens: attach-on-create: a failed upload names the file it lost
+# Reddens: attach-on-create: "a failed upload names the file it lost"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "          problems.push(t('quickCreate.attachmentFailedNamed', { name: file.name }))\n"

@@ -44,7 +44,10 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 33
+// 34 since 22 September: the Escape that closes the calendar picker was a
+// fixture step on the way to Settings, and `calendar-accounts-1` is aimed at
+// exactly that handler — so its only evidence was a short run.
+const EXPECTED_CHECKS = 34
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -528,10 +531,44 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ §V2-14e Conferencing, frame `13:36` — the Zoom row')
 
+  /*
+   * ESCAPE CLOSES THE PICKER, AND THIS WAS A FIXTURE STEP RATHER THAN A CHECK.
+   *
+   * It was a bare `page.keyboard.press('Escape')` on the way to the Settings
+   * panel. `calendar-accounts-1-calendars-popover-traps-the-page` removes the
+   * keydown handler in `workspace-planner-page.tsx`, and the picker's
+   * `fixed inset-0` click catcher then swallows every press in the planner
+   * header — so the Settings click below timed out, the suite THREW, and the
+   * patch's whole evidence was `31 of 33 checks ran`. Its own header said so.
+   * Frame `13:28` is about a menu a keyboard can get out of, and nothing here
+   * asked whether it could.
+   */
   await page.keyboard.press('Escape')
-  await page.getByTestId('planner-settings').click()
-  await page.getByTestId('planner-settings-nav-accounts').click({ timeout: 10_000 })
-  await page.waitForSelector('[data-testid="planner-conferencing"]', { timeout: 10_000 })
+  const pickerClosed = await waitUntil(
+    async () => (await page.getByTestId('planner-calendars-menu').count()) === 0,
+    { timeoutMs: 5000 },
+  )
+  chk(
+    pickerClosed,
+    'Escape closes the calendar picker, so a keyboard can get out of it',
+    'the picker was still open five seconds after Escape — its click catcher covers the whole header, ' +
+      'so every control behind it is unreachable until a click happens to land on the catcher itself',
+  )
+  if (!pickerClosed) {
+    // Recovered the way a mouse user has to, because the catcher is the one
+    // thing left that can be clicked. The failure is already recorded above;
+    // everything below this line is about Conferencing rather than about
+    // Escape, and it should fail for its own reasons or not at all.
+    await page.mouse.click(5, 5)
+    await waitUntil(async () => (await page.getByTestId('planner-calendars-menu').count()) === 0, {
+      timeoutMs: 5000,
+    })
+  }
+  // Bounded: a Settings panel that will not open is what the two checks below
+  // report, and a thirty-second throw would report it as a broken harness.
+  await page.getByTestId('planner-settings').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('planner-settings-nav-accounts').click({ timeout: 10_000 }).catch(() => {})
+  await page.waitForSelector('[data-testid="planner-conferencing"]', { timeout: 10_000 }).catch(() => {})
 
   chk(
     (await page.getByTestId('planner-conferencing-zoom').count()) === 1 &&
@@ -583,7 +620,10 @@ try {
     conns.status === 200 &&
     (conns.data ?? []).some((c) => c.provider === 'zoom' && c.status === 'connected')
   const rowSaysConnected =
-    (await page.getByTestId('planner-conferencing-zoom').getAttribute('data-connected')) === 'true'
+    (await page
+      .getByTestId('planner-conferencing-zoom')
+      .getAttribute('data-connected')
+      .catch(() => null)) === 'true'
   const started = await A(
     `/workspaces/${workspaceId}/integrations/connections/zoom/oauth/start`,
     { method: 'POST' },

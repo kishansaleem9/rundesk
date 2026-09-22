@@ -1,5 +1,5 @@
 # The description box goes back to its old sentence, which promises no AI and offers none.
-# Reddens: create-menu-ai: the description box carries the frame's placeholder
+# Reddens: create-menu-ai: "the description box carries the frame's placeholder"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = "  'quickCreate.descriptionPlaceholder': 'Add description, or write with ⚡AI',\n"

@@ -1,5 +1,5 @@
 # Confirm posts an empty action list, so the panel reports a run that created nothing.
-# Reddens: create-menu-ai: carrying exactly the actions that were previewed
+# Reddens: create-menu-ai: "carrying exactly the actions that were previewed"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '        body: { workspaceId, actions: plan?.actions ?? [] },\n'

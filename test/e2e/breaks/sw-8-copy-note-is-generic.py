@@ -1,5 +1,5 @@
 # The note stops naming the Space, so you cannot tell which one you copied.
-# Reddens: space-wizard: and says where they came from, by name
+# Reddens: space-wizard: "and says where they came from, by name"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = '    setCopiedFrom(source.name)\n'

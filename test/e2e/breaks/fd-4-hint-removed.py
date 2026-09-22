@@ -1,5 +1,5 @@
 # The switch keeps its label and loses the sentence that says who still has access.
-# Reddens: folder-dialog: with the frame's own sentence under it
+# Reddens: folder-dialog: "with the frame's own sentence under it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          <span className="text-[11px] text-muted-foreground">{t(\'quickCreate.folderPrivateHint\')}</span>\n'

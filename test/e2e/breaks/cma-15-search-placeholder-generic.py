@@ -1,5 +1,6 @@
 # The box loses the frame's sentence and becomes a generic Search, which says nothing about creating.
-# Reddens: create-menu-ai: the create menu opens with the frame's own sentence over it
+# Reddens: create-menu-ai: "the create menu opens with the frame's own sentence over
+#   it"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = '  \'quickCreate.searchPlaceholder\': "Describe anything to create",\n'
