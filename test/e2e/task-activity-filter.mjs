@@ -43,7 +43,11 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 15
+// 16 since 22 September: Clear emptying the search BOX is the fact
+// `taf-8-clear-leaves-the-search-box` breaks, and nothing asserted it — the
+// feed-recovery check beside it is unaffected, because the debounce is keyed on
+// the draft and Clear no longer changes it.
+const EXPECTED_CHECKS = 16
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -330,20 +334,30 @@ try {
     && Number(await count.getAttribute('data-count')) >= 100
   const restored = await waitUntil(wholeFeed, { timeoutMs: 20_000 })
   /*
-   * AND IT HAS TO STAY BACK, which this could not tell.
+   * AND IT HAS TO STAY BACK. Kept because it is a stronger check than a single
+   * read — one second is five debounce windows, so a term that is coming back
+   * has come back by the time this reads the count again.
    *
-   * `taf-8-clear-leaves-the-search-box` removes `setSearchDraft('')` from the
-   * Clear handler: the applied search is cleared, the BOX keeps the term, and
-   * the 200ms debounce puts it straight back — so the feed recovers for a
-   * fraction of a second and then empties again for good. `waitUntil` polls, so
-   * it caught that fraction and returned true, and the patch ran green against
-   * a check whose sentence is exactly the thing that is broken.
+   * IT IS NOT WHAT `taf-8-clear-leaves-the-search-box` BREAKS, and the first
+   * version of this comment said it was. That patch removes `setSearchDraft('')`
+   * from the Clear handler, and the reasoning "the debounce puts the term
+   * straight back" is wrong: the debounce effect is keyed on `[searchDraft]`,
+   * which Clear no longer changes, so the effect never re-runs and `search`
+   * stays empty. The feed really does come back and really does stay back.
    *
-   * One second is five debounce windows, so a term that is coming back has
-   * come back by the time this reads the count again.
+   * What the patch leaves is a STALE BOX — the input still showing a term over
+   * a list that is no longer filtered, and the next keystroke re-applying it.
+   * That is asserted directly below, which is the only place it can be seen.
    */
   await page.waitForTimeout(1000)
   const stayed = restored && (await wholeFeed())
+  chk(
+    (await page.getByTestId('activity-search').inputValue().catch(() => 'x')) === '',
+    'and Clear empties the search box as well as the filter it applied',
+    `the box still reads ${JSON.stringify(
+      await page.getByTestId('activity-search').inputValue().catch(() => null),
+    )} over an unfiltered feed — the next keystroke re-applies a term the person has cleared`,
+  )
   chk(
     stayed,
     'and Clear brings the whole feed back',
