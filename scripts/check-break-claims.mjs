@@ -158,7 +158,10 @@ for (const f of files) {
   }
   if (parsed.refused) cutOff.push(name)
   const block = parsed.block
-  // `unit:` claims point at a *.test.ts, which this does not try to parse.
+  // `unit:` claims point at a *.test.ts, which this does not try to parse —
+  // `check-unit-claims.mjs` applies the patch and runs that file instead, and
+  // requires the run to fail with the quoted test's own name in it. So these
+  // are not unverified, they are verified somewhere this file cannot look.
   if (/^unit\b/i.test(block.trim())) {
     unverifiable++
     continue
@@ -220,7 +223,7 @@ for (const [name, , missing] of noSuite) {
 }
 
 console.log(
-  `\n[break-claims] ${ok} verified · ${crossSuite} verified in another suite · ${unverifiable} unverifiable (unit claims, or no quoted ` +
+  `\n[break-claims] ${ok} verified · ${crossSuite} verified in another suite · ${unverifiable} not verifiable HERE (unit claims, measured by check-unit-claims.mjs; or no quoted ` +
     `sentence) · ${notFound.length} claim a check their suite does not have · ${noSuite.length} ` +
     `quote a sentence no suite contains · ${noClaim.length} make no claim at all`,
 )
