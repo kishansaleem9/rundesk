@@ -93,9 +93,35 @@ function ifBlock(src, at) {
   return { body: src.slice(open + 1, i - 1), end: i }
 }
 
+/*
+ * HOW MANY SUITES WERE ACTUALLY READ, because both verdicts below are zeros.
+ *
+ * The header above says "ZERO NOW, ACROSS ALL 113 SUITES" and nothing made that
+ * true. `SUITES` resolving to an empty or wrong directory gives `total = 0` and
+ * `noCatch = []`, and this prints "0 conditional check block(s) with no else, in
+ * 0 suite(s)" and exits 0 — the same shape `check-no-break-patches.mjs` was
+ * found in, where relative roots meant a clean verdict over nothing.
+ *
+ * So the count is asserted and then PRINTED, so the zero carries its
+ * denominator: "0 … across 113 suite(s) read" is a claim, and "0" on its own
+ * is not. The floor is a floor rather than an equality because suites are still
+ * being added.
+ */
+const MIN_SUITES = 100
+const suiteList = readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()
+if (suiteList.length < MIN_SUITES) {
+  console.error(
+    `\n[check-branches] only ${suiteList.length} suite(s) were found under ${SUITES}, below the ` +
+      `floor of ${MIN_SUITES}.\nBoth verdicts in this file are zeros, so a scan that reads nothing ` +
+      'passes — the zero has to have a\ndenominator. Point this at the suites rather than lowering ' +
+      'the floor to meet an empty scan.',
+  )
+  process.exit(1)
+}
+
 const rows = []
 let total = 0
-for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+for (const file of suiteList) {
   const src = readFileSync(join(SUITES, file), 'utf8')
   const hits = []
   const re = /\bif\s*\(/g
@@ -117,7 +143,8 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
 }
 
 console.log(
-  `[check-branches] ${total} conditional check block(s) with no else, in ${rows.length} suite(s).`,
+  `[check-branches] ${total} conditional check block(s) with no else, in ${rows.length} of ` +
+    `${suiteList.length} suite(s) read.`,
 )
 console.log('                 A heuristic over text: it finds the SHAPE, not whether the')
 console.log('                 condition is ever false. Read each one before changing it.')
@@ -183,7 +210,7 @@ for (const [file, lines] of rows) {
  * top-level `catch`, not whether the catch does anything sensible.
  */
 const noCatch = []
-for (const f of readdirSync(SUITES).filter((x) => x.endsWith('.mjs')).sort()) {
+for (const f of suiteList) {
   const src = readFileSync(join(SUITES, f), 'utf8')
   if (/^try \{/m.test(src) && !/^\} catch\b/m.test(src)) noCatch.push(f.slice(0, -4))
 }

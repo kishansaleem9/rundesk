@@ -5403,3 +5403,52 @@ patches went unmeasured behind a failure that was not about any of them.
 
 **Preflight is 25 steps, 24 green.** The red one is `break runs measured this
 tree`, which is the work list.
+
+### Two more coverage claims that would have passed over nothing
+
+The break-patch guard's relative roots were not a one-off. The same question —
+*would this check notice that it read nothing?* — put to the two remaining
+zero-reporters found two more.
+
+**`check-frame-traceability.mjs` had no floor at all**, and it carries the
+audit's central claim: that every line of the specification is answered
+somewhere. It extracts observations with `^- (\d{2}:\d{2})` — a top-level bullet
+opening with a timestamp — and exits 0 when none is unanswered. Reformat
+`docs/video2-frame-observations.md`, change the bullet character, indent the list
+under a heading, and `distinct` is `[]`, `nowhere` is `[]`, and it reports **"0
+observation(s): 0 named in a suite … 0 nowhere"** and passes. A coverage claim
+over an empty specification.
+
+The other direction is subtler and worse. If `test/e2e` stopped being read, every
+stamp would fall through to the ledger — which mentions all 115, because the
+ledger is where the audit writes about frames — and it would still report 0
+nowhere while claiming nothing was named in a suite. **The distribution is the
+substance of the claim, not the total.**
+
+Five floors, and the break test caught the first version getting one of them
+wrong: flooring `suiteFiles.length` while the corpus itself went empty **passed**
+— 113 files listed, nothing read from them. What the check searches is the TEXT,
+so that is what has to be measured. Both are kept, since a corpus can shrink
+either way. All five paths to a vacuous pass now redden on the floor:
+
+| mutation | caught by |
+|---|---|
+| the bullet pattern stops matching | 115 observations |
+| the suite files stop being listed | 113 suites |
+| the suite text goes empty, list intact | 2,447,535 bytes |
+| the unit tests stop being walked | 167 files / 1,081,317 bytes |
+| the ledger documents stop being read | both readable |
+
+**`check-suite-check-branches.mjs` printed a zero with no denominator.** Its
+header says "ZERO NOW, ACROSS ALL 113 SUITES" and nothing made that true: point
+`SUITES` at the wrong directory and both of its verdicts — the conditional-check
+count and the missing-`catch` list — are empty, and it exits 0. It now asserts
+the suite count and prints it, so the line reads **"0 conditional check block(s)
+with no else, in 0 of 113 suite(s) read"**. A zero with a denominator is a claim;
+a zero on its own is not.
+
+One honest limitation, since a mutation pass found it: emptying the second
+scan's input in isolation changes no answer, because that scan reports 0 anyway
+and now shares the floored `suiteList`. The realistic regression — the directory
+resolving elsewhere — reddens. A mutation of code that cannot realistically be
+written is not a gap; pretending it is would be padding the table above.

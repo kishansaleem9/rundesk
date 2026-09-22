@@ -47,11 +47,48 @@ if (!existsSync(OBS)) {
 const stamps = [...readFileSync(OBS, 'utf8').matchAll(/^- (\d{2}:\d{2})/gm)].map((m) => m[1])
 const distinct = [...new Set(stamps)]
 
+/*
+ * FLOORS, BECAUSE THIS CHECK'S PASSING ANSWER IS A ZERO.
+ *
+ * `nowhere.length === 0` is what it exits 0 on, and there were two ways to
+ * reach that without covering anything:
+ *
+ *   · THE SPEC GOES EMPTY. The regex above is `^- (\d{2}:\d{2})` — a top-level
+ *     bullet opening with a timestamp. Reformat the observations file, change
+ *     the bullet character, indent the list under a heading, and `distinct` is
+ *     `[]`, `nowhere` is `[]`, and this prints "0 observation(s) … 0 nowhere"
+ *     and passes. A coverage claim over an empty specification.
+ *
+ *   · THE EVIDENCE GOES EMPTY. If `test/e2e` stopped being read, every stamp
+ *     would fall through to the ledger — which mentions all of them, because
+ *     the ledger is where the audit writes about frames — and this would still
+ *     report 0 nowhere while claiming nothing was named in a suite. The
+ *     DISTRIBUTION is the substance of the claim, not just the total.
+ *
+ * Both are the shape `check-no-break-patches.mjs` was found in: a control that
+ * passes by looking at nothing. Measured 22 September — 115 observations, 113
+ * suites, 3 answered in a unit test — and the numbers are floors so the tree can
+ * grow. Moving one down is legitimate only when the measurement changed and the
+ * new number is the true one, said here with what changed.
+ *
+ * AND THE FLOORS ARE ON THE TEXT, NOT ON THE FILE COUNT — which the first
+ * version got wrong and the break test caught. Flooring `suiteFiles.length`
+ * while the corpus itself went empty passed: 113 files listed, nothing read
+ * from them. What this check searches is the TEXT, so that is what has to be
+ * measured. Both numbers are kept, because a corpus can shrink either way.
+ *
+ * Measured 22 September: 115 observations · 113 suites, 2,447,535 bytes · 167
+ * unit test files, 1,081,317 bytes.
+ */
+const MIN_OBSERVATIONS = 115
+const MIN_SUITES = 100
+const MIN_SUITE_BYTES = 2_000_000
+const MIN_UNIT_TESTS = 50
+const MIN_UNIT_BYTES = 800_000
+
 const read = (p) => readFileSync(p, 'utf8')
-const suiteText = readdirSync(join(ROOT, 'test/e2e'))
-  .filter((f) => f.endsWith('.mjs'))
-  .map((f) => read(join(ROOT, 'test/e2e', f)))
-  .join('\n')
+const suiteFiles = readdirSync(join(ROOT, 'test/e2e')).filter((f) => f.endsWith('.mjs'))
+const suiteText = suiteFiles.map((f) => read(join(ROOT, 'test/e2e', f))).join('\n')
 
 // Unit tests, wherever they are. `18:20` lives in one.
 const unitText = []
@@ -71,6 +108,42 @@ const docText = ['docs/video2-reaudit.md', 'docs/video2-rundesk-gap-audit.md']
   .join('\n')
 
 const units = unitText.join('\n')
+
+// THE FLOORS, ASKED BEFORE THE QUESTION. A distribution over an empty corpus is
+// not a weaker answer than a real one; it is a different statement entirely, and
+// it comes out of here looking identical.
+const short = [
+  distinct.length < MIN_OBSERVATIONS &&
+    `the specification yielded ${distinct.length} timestamped observation(s), below the floor of ` +
+      `${MIN_OBSERVATIONS}. The bullet pattern is \`^- HH:MM\` — a reformat of ` +
+      'docs/video2-frame-observations.md silently empties this whole check.',
+  suiteFiles.length < MIN_SUITES &&
+    `only ${suiteFiles.length} suite(s) were listed, below the floor of ${MIN_SUITES}. With the ` +
+      'suites unread every stamp falls through to the ledger, which mentions all of them, and ' +
+      '"0 nowhere" would be true and meaningless.',
+  suiteText.length < MIN_SUITE_BYTES &&
+    `the ${suiteFiles.length} suite(s) yielded ${suiteText.length} byte(s), below the floor of ` +
+      `${MIN_SUITE_BYTES}. Listing the files is not reading them — this is the half the first ` +
+      'version of this floor missed.',
+  unitText.length < MIN_UNIT_TESTS &&
+    `only ${unitText.length} unit test file(s) were read, below the floor of ${MIN_UNIT_TESTS}. ` +
+      '`18:20` is answered in one, so an unread corpus moves a real answer into the ledger column.',
+  units.length < MIN_UNIT_BYTES &&
+    `the ${unitText.length} unit test file(s) yielded ${units.length} byte(s), below the floor of ` +
+      `${MIN_UNIT_BYTES}`,
+  !docText.trim() && 'neither ledger document was readable, so the third column is empty by accident',
+].filter(Boolean)
+if (short.length) {
+  console.error(`\n[frames] this check cannot answer anything as it stands:\n`)
+  for (const s of short) console.error(`  · ${s}\n`)
+  console.error(
+    'Each of these makes `0 nowhere` come out of a scan that covered nothing — the same shape as a\n' +
+      'break-patch guard that passes because its roots resolved to nowhere. Fix the scan; do not\n' +
+      'lower a floor to meet it unless the measurement really changed, and then say so here.',
+  )
+  process.exitCode = 1
+}
+
 const inSuite = []
 const inUnit = []
 const inDocs = []
