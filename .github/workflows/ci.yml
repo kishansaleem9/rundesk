@@ -237,8 +237,8 @@ jobs:
       # claims. Nineteen sites had this shape and all nineteen were real — a
       # bare standalone press has no short-circuit to hide behind, which is why
       # this one is mechanical where the same rule over reads is not.
-      - name: No press on a control that may not be there
-        run: node scripts/check-suite-bare-presses.mjs
+      - name: Nothing ends a section on a throw where a check belongs
+        run: node scripts/check-suite-section-enders.mjs
 
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.

@@ -98,7 +98,10 @@ const openAiPage = async (page) => {
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   await page.goto(`${B}/app/${WS}/ai`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('[data-testid="ai-model-tier"]', { timeout: 25_000 })
+  // A GATE THAT REPORTS. This element is the subject of a check below, so a patch
+  // that removes it defeats the gate first and the throw ends the section before
+  // the check can name itself (ledger §10).
+  await page.waitForSelector('[data-testid="ai-model-tier"]', { timeout: 25_000 }).catch(() => {})
   // The trigger is disabled until the stored preference has landed; reading
   // `data-tier` before that would read the loading state, not the preference.
   await waitUntil(

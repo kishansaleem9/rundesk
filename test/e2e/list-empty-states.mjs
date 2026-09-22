@@ -160,7 +160,10 @@ try {
   // ── 1. A list that really is empty ────────────────────────────────────────
   console.log('\n▶ a list with nothing in it says so, and offers to start it')
   await gotoList()
-  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 })
+  // A GATE THAT REPORTS. This element is the subject of a check below, so a patch
+  // that removes it defeats the gate first and the throw ends the section before
+  // the check can name itself (ledger §10).
+  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 }).catch(() => {})
   const sawNone = await waitUntil(() => visible('list-empty-none'), { timeoutMs: 15_000 })
   chk(sawNone, 'the empty-list state renders on a list with no rows',
     'no empty-list state on a list this run created and never wrote to')
@@ -197,7 +200,7 @@ try {
     created.push(made.data.id)
   }
   await gotoList()
-  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 })
+  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 }).catch(() => {})
   const rowsShowing = await waitUntil(() => countOf('list-task-row').then((n) => n === 3), { timeoutMs: 15_000 })
   chk(rowsShowing, 'all three rows are on screen before anything is filtered',
     `the list drew ${await countOf('list-task-row')} rows, not 3`)
@@ -367,7 +370,7 @@ try {
     if (gone.status >= 300) throw new Error(`deleting ${id} returned ${gone.status}`)
   }
   await gotoList()
-  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 })
+  await page.waitForSelector('[data-testid="list-task-search"]', { timeout: 25_000 }).catch(() => {})
   const noneAgain = await waitUntil(() => visible('list-empty-none'), { timeoutMs: 15_000 })
   chk(noneAgain, 'an emptied list says "no tasks yet" again',
     'after the rows were deleted the list still claimed a filter was hiding them')

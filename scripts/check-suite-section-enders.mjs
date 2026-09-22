@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /*
- * A PRESS ON A CONTROL THE CHECK ABOVE IT IS ALLOWED TO FIND ABSENT.
+ * THE TWO INTERACTIONS THAT END A SECTION INSTEAD OF REPORTING.
+ *
+ * RULE ONE — A PRESS ON A CONTROL THE CHECK ABOVE IT IS ALLOWED TO FIND ABSENT.
  *
  * The shape, and it cost more than any other single thing in this sweep:
  *
@@ -28,6 +30,19 @@
  * seconds rather than half a minute) or a `.catch(`. Both are in the tree
  * already; `ai-action-categories.mjs` carries `click({ timeout: 20_000 })
  * .catch(() => {})` and that is the line this check points at.
+ *
+ * RULE TWO — A GATE ON AN ELEMENT SOME CHECK IN THE SAME SUITE IS ABOUT.
+ *
+ *     await page.waitForSelector('[data-testid="create-search"]', { timeout: 20_000 })
+ *     …
+ *     chk((await …getByTestId('create-search').getAttribute('placeholder')) === …)
+ *
+ * `cma-16-no-search-box` renames that testid — which is the check it claims —
+ * and the gate threw twenty seconds later, before one check had run. 4 of 24
+ * reported. A gate whose element nothing asserts is a legitimate page-load wait
+ * and is left alone; there are 61 of those and they are not this. The five that
+ * stood in front of their own check are the whole finding, which is the same
+ * ratio the press rule had: precise because the pairing is the suite's own.
  *
  * Exit 1 with every site named.
  */
@@ -66,18 +81,43 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+// RULE TWO. Every testid any `chk` in the suite is about, against every
+// `waitForSelector` on one of them that cannot fail without throwing.
+let gates = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  const checked = new Set()
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*chk\(/.test(lines[i])) continue
+    for (const m of lines
+      .slice(i, i + 5)
+      .join(' ')
+      .matchAll(/getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)/g))
+      checked.add(m[1] ?? m[2])
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/waitForSelector\(\s*['`]\[data-testid="([^"]+)"\]/)
+    if (!m || /catch/.test(lines[i])) continue
+    if (!checked.has(m[1])) continue // a page-load gate on something nothing asserts
+    gates += 1
+    rows.push({ file, line: i + 1, id: m[1], text: lines[i].trim(), gate: true })
+  }
+}
+
 for (const r of rows) {
-  console.log(`  ${r.file}:${r.line}  ${r.id}`)
+  console.log(`  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}`)
   console.log(`      ${r.text.slice(0, 120)}`)
 }
 console.log(
-  `[bare-presses] ${rows.length} press(es) on a control the check above them may find absent, ` +
-    `across ${new Set(rows.map((r) => r.file)).size} suite(s)`,
+  `[section-enders] ${rows.length - gates} press(es) on a control the check above them may find ` +
+    `absent, and ${gates} gate(s) in front of a check about the same element, across ` +
+    `${new Set(rows.map((r) => r.file)).size} suite(s)`,
 )
 if (rows.length) {
   console.error(
-    '\n[bare-presses] Bound and catch each one — `.click({ timeout: 10_000 }).catch(() => {})` — so the\n' +
-      'checks below it report what happened instead of being replaced by a thirty-second exception.',
+    '\n[section-enders] Bound and catch each one — `.click({ timeout: 10_000 }).catch(() => {})` for a\n' +
+      'press, `.catch(() => {})` for a gate — so the checks below report what happened instead of\n' +
+      'being replaced by a thirty-second exception.',
   )
   process.exit(1)
 }

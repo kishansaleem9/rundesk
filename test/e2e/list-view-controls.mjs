@@ -485,7 +485,10 @@ try {
    */
   console.log('\n▶ the calendar has a Today, and it is the way back')
   await page.getByTestId('work-view-tab-type-calendar').click()
-  await page.waitForSelector('[data-testid="list-calendar"]', { timeout: 20_000 })
+  // A GATE THAT REPORTS. This element is the subject of a check below, so a patch
+  // that removes it defeats the gate first and the throw ends the section before
+  // the check can name itself (ledger §10).
+  await page.waitForSelector('[data-testid="list-calendar"]', { timeout: 20_000 }).catch(() => {})
   const todayBtn = page.getByTestId('list-calendar-today')
   const prevBtn = page.getByTestId('list-calendar-prev')
   const todayBox = await todayBtn.boundingBox().catch(() => null)
