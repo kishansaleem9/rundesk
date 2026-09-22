@@ -392,8 +392,17 @@ try {
    * exists rather than after a sleep.
    */
   const FRESH = `Fresh ${TAG}`
+  // Both, not just the fill. `folder-create-11-dialog-closes-on-error` closes
+  // the dialog on the refusal above — which the check above reports — so
+  // neither the box nor the submit is there for this success path, and the
+  // press spent thirty seconds where the fill had been spared.
+  //
+  // Rule four does not cover this and should not be widened to: it pairs the
+  // SAME locator guarded then bare, and these are two different testids in one
+  // sequence — the shape that can only be stated by reading formatting, left to
+  // measurement on purpose. Measurement found it, in one set, at one line.
   await page.getByTestId('sidebar-folder-name').fill(FRESH, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('sidebar-folder-submit').click()
+  await page.getByTestId('sidebar-folder-submit').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
       async () => !(await page.getByTestId('sidebar-folder-dialog').isVisible().catch(() => false)),

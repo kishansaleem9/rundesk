@@ -182,7 +182,7 @@ try {
   const page = await ctx.newPage()
   const openPlanner = async () => {
     await page.goto(`${BASE}/app/${WS}/calendar`, { waitUntil: 'networkidle' })
-    await page.waitForSelector('[data-testid="planner-page"]', { timeout: 20_000 })
+    await page.waitForSelector('[data-testid="planner-page"]', { timeout: 20_000 }).catch(() => {})
   }
   const panel = () => page.locator('[data-testid="planner-onboarding"]')
   const cardTitle = () => page.locator('[data-testid="planner-onboarding-card-title"]')
@@ -295,7 +295,11 @@ try {
   console.log('\n▶ the carousel, which frame `12:45` proves is not three static cards')
 
   await openPlanner()
-  await page.waitForSelector('[data-testid="planner-onboarding-card"]', { timeout: 15_000 })
+  // `po-1-panel-never-shows` is the patch that removes this panel — the two
+  // checks above report exactly that — so a gate waiting for a card inside it
+  // threw and ended the run. Every press in this file is already bounded for
+  // the same patch; this was the last unguarded wait (ledger §10).
+  await page.waitForSelector('[data-testid="planner-onboarding-card"]', { timeout: 15_000 }).catch(() => {})
   const first = await readCard()
   chk(
     first === CARD_TITLES[0] &&
