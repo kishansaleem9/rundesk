@@ -277,10 +277,14 @@ jobs:
       # that turns a real 0 into a false one while looking like tidying: the
       # checker takes a SUITE_DIR and this points it at fixture suites, one
       # shape per file, then asserts on what it actually prints. `--mutate`
-      # applies ten mutations of the checker and requires each to redden a
-      # case; all ten bite. Its first case found that one physical site was
-      # being reported twice under two labels.
-      - name: Rules one to five hold theirs, and each case bites
+      # applies sixteen mutations of the checker and requires each to redden a
+      # case; all sixteen bite. Its first case found that one physical site was
+      # being reported twice under two labels, and a later one found that every
+      # mutant had been dying on an unresolvable import before running a line —
+      # so the pass had been reporting twelve of twelve while proving nothing.
+      # A mutant now has to walk a fixture and print a summary before its
+      # verdict is read.
+      - name: Every ender rule holds its cases, and each case bites
         run: node scripts/check-suite-enders.mjs --mutate
 
       # And the other direction from the ledger's own reconciliations: does a

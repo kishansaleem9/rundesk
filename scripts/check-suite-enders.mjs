@@ -1,13 +1,13 @@
 #!/usr/bin/env node
 /*
- * RULES ONE TO FIVE, BROKEN ON PURPOSE.
+ * THE LINE-BASED RULES, BROKEN ON PURPOSE.
  *
- * `check-suite-section-enders.mjs` carries six rules. Rule six got a case file
- * the day it was written, because its steady-state answer is zero and "0 failed
- * is not it ran". The five above it had none — each was measured against the
- * tree when it went in (nineteen, five, twenty, three and twenty sites, all
- * real) and then left as a loop that reports 0 forever with nothing able to
- * tell a working rule from a broken one.
+ * `check-suite-section-enders.mjs` carries eight rules. Rule six got a case
+ * file the day it was written, because its steady-state answer is zero and "0
+ * failed is not it ran". The line-based ones had none — each was measured
+ * against the tree when it went in (nineteen, five, twenty, three, twenty and
+ * fifteen sites, all real) and then left as a loop that reports 0 forever with
+ * nothing able to tell a working rule from a broken one.
  *
  * THIS DOES NOT REFACTOR THEM. Pulling five line-based loops out into pure
  * functions is the kind of change that turns a real 0 into a false one while
@@ -44,8 +44,12 @@ const HERE = dirname(fileURLToPath(import.meta.url))
  * SIGKILL; nothing does. A `finally` and a signal handler shrink the window,
  * they do not close it.
  *
- * So the mutation is written to a temp copy and THAT is what runs. The original
- * is only ever read. There is no window to lose, and no restore to forget.
+ * So the mutation is written to a copy and THAT is what runs. The original is
+ * only ever read. There is no window to lose, and no restore to forget.
+ *
+ * The copy is a SIBLING of the original, not a file in a temp directory, and
+ * the paragraph by the mutation loop records what that cost to learn: the
+ * checker imports `./lib/suite-reads.mjs`, so a copy anywhere else cannot load.
  */
 const CHECKER = process.env.ENDERS_CHECKER ?? join(HERE, 'check-suite-section-enders.mjs')
 
@@ -72,13 +76,15 @@ const chk = (cond, good, bad) => {
  * left out of it silently steals from rule one's number.
  */
 const SUMMARY =
-  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition/s
+  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something this section.*?(\d+) use\(s\) of something asserted elsewhere.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition/s
 
-const run = (files) => {
+// `checker` is only ever passed by the mutation pass, to ask a mutant whether
+// it runs at all before its verdict is read.
+const run = (files, checker = CHECKER) => {
   const dir = mkdtempSync(join(tmpdir(), 'enders-'))
   try {
     for (const [name, body] of Object.entries(files)) writeFileSync(join(dir, name), body)
-    const r = spawnSync(process.execPath, [CHECKER], {
+    const r = spawnSync(process.execPath, [checker], {
       encoding: 'utf8',
       env: { ...process.env, SUITE_DIR: dir },
     })
@@ -86,6 +92,7 @@ const run = (files) => {
     return {
       code: r.status,
       stdout: r.stdout ?? '',
+      stderr: r.stderr ?? '',
       sites: m ? +m[1] : null,
       counts: m
         ? {
@@ -94,8 +101,9 @@ const run = (files) => {
             boxes: +m[4],
             sames: +m[5],
             sections: +m[6],
-            messages: +m[7],
-            leads: +m[8],
+            files: +m[7],
+            messages: +m[8],
+            leads: +m[9],
           }
         : null,
     }
@@ -412,9 +420,153 @@ chk(
       '',
     ].join('\n'),
   }).counts?.sections === 0,
-  'the assertion does not carry into the NEXT section — a throw there destroys a different scope',
+  'rule five does not carry an assertion into the NEXT section — a throw there destroys a different scope',
   'the section boundary is not resetting, so the rule spans the whole file',
 )
+
+console.log('\n▶ rule eight — asserted anywhere in this file, then used bare')
+
+{
+  /*
+   * THE SAME FIXTURE RULE FIVE DECLINES, which is the whole point of the pair:
+   * the two scopes have to give DIFFERENT answers about one file, or one of
+   * them is not earning its place. Section says no, file says yes.
+   */
+  const res = run({
+    'next-section.mjs': [
+      `console.log('\\n▶ the section that asserts it')`,
+      `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+      `console.log('\\n▶ a different section, which asserts nothing')`,
+      `const v = await page.getByTestId('row').getAttribute('data-x')`,
+      '',
+    ].join('\n'),
+  })
+  chk(
+    only(res, 'files'),
+    'a bare read in a LATER section than its own check is one site, and only rule eight sees it',
+    `the counts were ${JSON.stringify(res.counts)}`,
+  )
+  chk(
+    res.stdout.includes('next-section.mjs:4'),
+    'named at the line of the use',
+    'the row did not point at the use',
+  )
+}
+
+chk(
+  run({
+    'unasserted.mjs': [
+      `console.log('\\n▶ a section')`,
+      `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+      `console.log('\\n▶ another')`,
+      `await page.getByTestId('something-else').click()`,
+      '',
+    ].join('\n'),
+  }).counts?.files === 0,
+  'a testid NO check in the file asserts is not a site — that is a page-load control, not this',
+  'rule eight paired with an element the suite never says can be absent',
+)
+
+{
+  /*
+   * THE VALUE CHECK NAMES ITS TESTID THE WAY THE RULES READ TESTIDS — through
+   * `getByTestId` — or this fixture proves nothing about the existence gate.
+   *
+   * It was first written as `attrOf('row')`, a helper, and then deleting the
+   * gate from rule one AND from rule eight left every case green: with no
+   * `getByTestId` in the condition there was no testid to over-collect, so the
+   * two mutations had nothing to break. The read is bounded so that rule seven,
+   * which is about a throwing read at the head of a condition, stays out of it.
+   *
+   * Both rules are asserted here, because both carry the same gate and a
+   * regression would most likely be to the phrase they share.
+   */
+  const res = run({
+    'value-check.mjs': [
+      `console.log('\\n▶ a section')`,
+      `chk((await page.getByTestId('row').getAttribute('data-x', { timeout: 8000 }).catch(() => null)) === 'x', 'the row says x', 'it said something else')`,
+      `await page.getByTestId('row').click()`,
+      '',
+    ].join('\n'),
+  })
+  chk(
+    res.counts && Object.values(res.counts).every((v) => v === 0),
+    'a check about a VALUE does not make its testid absent-able — it can fail with the row right there',
+    `the counts were ${JSON.stringify(res.counts)}`,
+  )
+}
+
+{
+  /*
+   * THE GUARD WINDOW, WHICH IS THE BUG THAT MADE THIS RULE FIND THINGS.
+   *
+   * A wrapped `.catch()` is part of THIS call and counts. The next `await` is a
+   * different statement about a different element and must not.
+   */
+  chk(
+    run({
+      'wrapped.mjs': [
+        `console.log('\\n▶ a section')`,
+        `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+        `console.log('\\n▶ another')`,
+        `await page`,
+        `  .getByTestId('row')`,
+        `  .click({ timeout: 8000 })`,
+        `  .catch(() => {})`,
+        '',
+      ].join('\n'),
+    }).counts?.files === 0,
+    'a catch on the next line of the SAME chain counts as this call’s guard',
+    'a wrapped bounded press was reported, so the fix does not fix it',
+  )
+  chk(
+    run({
+      'neighbour.mjs': [
+        `console.log('\\n▶ a section')`,
+        `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+        `console.log('\\n▶ another')`,
+        `await page.getByTestId('row').fill('x')`,
+        `await page.getByTestId('other').selectOption('y', { timeout: 8000 }).catch(() => {})`,
+        '',
+      ].join('\n'),
+    }).counts?.files === 1,
+    'but the NEXT STATEMENT’s guard is not this one’s — that is how a bare fill hid for weeks',
+    'the bare fill borrowed the catch off the line below it',
+  )
+}
+
+{
+  // Containment, not proximity: the `waitUntil` above has closed.
+  chk(
+    run({
+      'closed-waituntil.mjs': [
+        `console.log('\\n▶ a section')`,
+        `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+        `console.log('\\n▶ another')`,
+        `chk(await waitUntil(() => settled('0'), { timeoutMs: 8000 }), 'it emptied', 'it did not')`,
+        `await page.getByTestId('row').click()`,
+        '',
+      ].join('\n'),
+    }).counts?.files === 1,
+    'a press two lines under a CLOSED waitUntil is still a site — nothing is catching for it',
+    'the press was spared by a waitUntil that had already closed',
+  )
+  chk(
+    run({
+      'open-waituntil.mjs': [
+        `console.log('\\n▶ a section')`,
+        `chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')`,
+        `console.log('\\n▶ another')`,
+        `const ok = await waitUntil(async () => {`,
+        `  return (await page.getByTestId('row').getAttribute('data-x')) === 'y'`,
+        `}, { timeoutMs: 8000 })`,
+        '',
+      ].join('\n'),
+    }).counts?.files === 0,
+    'and a read INSIDE an open one is not — waitUntil catches its predicate’s throws',
+    'a read inside a waitUntil predicate was reported',
+  )
+}
 
 chk(
   run({
@@ -554,26 +706,34 @@ console.log(
  * was written to end.
  */
 if (process.argv.includes('--mutate')) {
-/*
-   * A MUTATION HARNESS THAT CANNOT LEAVE THE TREE BROKEN.
+  /*
+   * THE MUTANT LIVES BESIDE THE ORIGINAL, AND THE REASON IS A BUG THIS FOUND
+   * IN ITSELF.
    *
-   * The loop below writes a DELIBERATELY BROKEN copy of the checker, runs the
-   * cases against it, and writes the original back. If anything interrupts it
-   * between those two writes — a kill, a timeout, an exception in the spawn — the
-   * broken copy is what stays on disk.
+   * The paragraph that stood here described restoring the original from a
+   * `finally` and an exit handler. That design is gone — the header at the top
+   * of this file says why, and says the mutation is written to a copy — but the
+   * account of it stayed, so the file carried two contradictory explanations of
+   * one mechanism. The stale one is deleted rather than argued with.
    *
-   * That happened. `check-suite-section-enders.mjs` was found with rule one's
-   * ten-line window deleted — `Math.min(i + 1 + WINDOW, lines.length)` replaced
-   * by `lines.length` — from a mutation that never got restored, and the next
-   * `--mutate` run reported it as an ANCHOR MISS because the text it meant to
-   * replace was already gone. A test harness that corrupts the thing it tests,
-   * and then cannot see that it has, is worse than no harness: it was one commit
-   * away from shipping a rule that silently pairs a press with any check in the
-   * file.
+   * What the copy design got wrong: the copy went to a fresh temp DIRECTORY,
+   * and `check-suite-section-enders.mjs` imports `./lib/suite-reads.mjs`. A
+   * relative import resolves against the importing FILE, so every mutant died
+   * with ERR_MODULE_NOT_FOUND before executing one line of the rule it was
+   * meant to break. All twelve mutations "reddened" — thirty-one cases each,
+   * every time, which is what a crash looks like — and the pass reported 12 of
+   * 12 bite while proving nothing whatsoever about any rule.
    *
-   * So the original is restored from a `finally` AND from an exit handler, and
-   * the handler is registered BEFORE the first write. Belt and braces on purpose:
-   * `finally` covers a throw, the exit handler covers a signal.
+   * That is this audit's own defect class, in its own test harness: a check
+   * that cannot fail, dressed as a passing one. It was invisible because a
+   * crashing mutant reddens MORE cases than a working one, so the number went
+   * the reassuring way.
+   *
+   * Two changes. The mutant is written next to the original so its imports
+   * resolve, under a dotted name nothing globs — never over the original, which
+   * is still only ever read. And a mutant now has to PROVE IT RAN: the clean
+   * fixture is put through it first, and a mutant that cannot produce a summary
+   * line is reported as proving nothing, exactly like one that reddens nothing.
    */
   const ORIGINAL = readFileSync(CHECKER, 'utf8')
   let blind = 0
@@ -588,8 +748,12 @@ if (process.argv.includes('--mutate')) {
     ['rule seven stops requiring the read to be FIRST', "if (/&&|\\|\\||\\?/.test(before)) continue", 'if (false) continue'],
     ['rule seven forgets that waitUntil catches', "if (/waitUntil\\(/.test(cond)) continue", 'if (false) continue'],
     ['rule five forgets the section boundary', "if (/console\\.log\\(['\"`]\\\\n/.test(lines[i])) {", 'if (false) {'],
-    ['rule five forgets that waitUntil catches', "if (/waitUntil\\(/.test(lines.slice(Math.max(0, i - 3), i + 1).join(' '))) continue", 'if (false) continue'],
-    ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - messages', 'rows.length - gates - boxes - sames - sections'],
+    ['rule eight reports nothing at all', 'if (rows.some((r) => r.file === file && r.line === i + 1 && r.section)) break', 'break'],
+    ['rule eight stops asking whether the check is about existence', "if (!/\\.count\\(\\)|isVisible|\\bvisible\\(|waitUntil|appears\\(/.test(cond)) continue\n    for (const m of cond.matchAll(", 'for (const m of cond.matchAll('],
+    ['the guard window borrows the next STATEMENT’s catch again', 'for (let j = i + 1; j < lines.length && /^\\s*\\./.test(lines[j]); j++) out += ` ${lines[j]}`', 'for (let j = i + 1; j < Math.min(i + 2, lines.length); j++) out += ` ${lines[j]}`'],
+    ['“inside a waitUntil” goes back to proximity', "for (const ch of [lines[s].slice(at), ...lines.slice(s + 1, i + 1)].join('\\n'))\n      depth += ch === '(' ? 1 : ch === ')' ? -1 : 0", 'depth = 1'],
+    ['“inside a waitUntil” stops sparing the predicate', 'return depth > 0', 'return false'],
+    ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - files - messages', 'rows.length - gates - boxes - sames - sections - files'],
   ]
   console.log('\n▶ and each mutation of the checker reddens a case')
   for (const [label, from, to] of MUTATIONS) {
@@ -598,18 +762,37 @@ if (process.argv.includes('--mutate')) {
       blind += 1
       continue
     }
-    const mutant = join(mkdtempSync(join(tmpdir(), 'mutant-')), 'check-suite-section-enders.mjs')
-    writeFileSync(mutant, ORIGINAL.split(from).join(to))
-    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-      encoding: 'utf8',
-      env: { ...process.env, ENDERS_CHECKER: mutant },
-    })
-    const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
-    if (r.status === 0) {
-      console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
-      blind += 1
-    } else {
-      console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
+    // Beside the original, never over it: a sibling so `./lib/…` resolves, and
+    // a dotted name so nothing that walks `scripts/` picks it up.
+    const mutant = join(HERE, `.enders-mutant-${label.replace(/\W+/g, '-')}.mjs`)
+    try {
+      writeFileSync(mutant, ORIGINAL.split(from).join(to))
+      /*
+       * DID THE MUTANT RUN? A mutant that crashes reddens every case, which
+       * reads like a strong signal and is the absence of one. So it is asked
+       * the one question the rules cannot answer for it — walk a fixture and
+       * print a summary — before its verdict is believed.
+       */
+      const alive = run({ 'alive.mjs': `console.log('\\n▶ nothing here')\n` }, mutant)
+      if (!alive.counts) {
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — the mutant did not run:`)
+        console.log(`      ${(alive.stderr || alive.stdout || '').trim().split('\n')[0] ?? ''}`)
+        blind += 1
+        continue
+      }
+      const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+        encoding: 'utf8',
+        env: { ...process.env, ENDERS_CHECKER: mutant },
+      })
+      const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
+      if (r.status === 0) {
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
+        blind += 1
+      } else {
+        console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
+      }
+    } finally {
+      rmSync(mutant, { force: true })
     }
   }
   console.log(

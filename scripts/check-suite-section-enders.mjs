@@ -190,13 +190,87 @@ const SUITES = process.env.SUITE_DIR ?? new URL('../test/e2e', import.meta.url).
 // the two are about different things and the pairing would be a guess.
 const WINDOW = 10
 
+/*
+ * TWO WINDOW HELPERS, BOTH WRITTEN BECAUSE THE OLD SPELLING GAVE A WRONG ANSWER
+ * IN A DIRECTION I COULD SEE.
+ *
+ * `stmt` — IS THIS CALL GUARDED? The guard used to be looked for in
+ * `lines[i..i+1]`, and the second of those is usually the next STATEMENT rather
+ * than the rest of this one. So
+ *
+ *     await page.getByTestId('quick-create-new-field-name').fill(SCOPED)
+ *     await page.getByTestId('quick-create-new-field-scope').selectOption('list', { timeout: 8000 }).catch(…)
+ *
+ * reported clean: the fill borrowed the guard off the line below it, which
+ * guards a different element entirely. A chain that wraps continues on lines
+ * beginning with `.` — that is the whole grammar — so the window follows those
+ * and stops. A wrapped `.catch()` still counts; a neighbour never does.
+ *
+ * `insideWaitUntil` — IS THIS READ ALREADY SAFE? `waitUntil` catches its
+ * predicate's throws, so a read inside one is fine. "Inside" was a three-line
+ * lookback for the WORD, which also spared
+ *
+ *     chk(await waitUntil(() => …, { timeoutMs: 8_000 }), …)
+ *     …
+ *     await page.getByTestId('templates-facet-usecase').selectOption('')
+ *
+ * where the `waitUntil` closed two lines before the press. Containment is a
+ * question about parens, so it is asked about parens: find the nearest opener
+ * above and see whether it is still open here.
+ */
+/*
+ * `chkText` — HOW FAR DOES THIS `chk(` REACH? It used to be four lines, flat,
+ * and four lines is a guess that reaches PAST the call whenever the call is
+ * shorter. `check-suite-enders.mjs` caught it with a two-line fixture:
+ *
+ *     chk(await page.getByTestId('row').count() === 1, 'a row is drawn', 'no row')
+ *     console.log('\n▶ another')
+ *     await page.getByTestId('something-else').click()
+ *
+ * The one-line check dragged in the two lines below it, so `something-else`
+ * joined the set of testids "this check asserts" — a testid that appears in no
+ * check at all — and the press on it was reported against a pairing that does
+ * not exist. The same over-reach let a `chk` pull an element out of the NEXT
+ * SECTION, which is precisely the boundary rule five exists to respect.
+ *
+ * A call ends where its parens balance, so that is what is asked. Capped at
+ * twelve lines: the longest `chk` in the tree runs to nine, and an unbalanced
+ * one (a template literal with a stray bracket) must not walk the whole file.
+ */
+const chkText = (lines, i) => {
+  let depth = 0
+  const out = []
+  for (let j = i; j < Math.min(i + 12, lines.length); j++) {
+    out.push(lines[j])
+    for (const ch of lines[j]) depth += ch === '(' ? 1 : ch === ')' ? -1 : 0
+    if (depth <= 0) break
+  }
+  return out.join(' ')
+}
+const stmt = (lines, i) => {
+  let out = lines[i]
+  for (let j = i + 1; j < lines.length && /^\s*\./.test(lines[j]); j++) out += ` ${lines[j]}`
+  return out
+}
+const insideWaitUntil = (lines, i) => {
+  for (let s = i; s >= Math.max(0, i - 8); s--) {
+    const at = lines[s].lastIndexOf('waitUntil(')
+    if (at < 0) continue
+    let depth = 0
+    for (const ch of [lines[s].slice(at), ...lines.slice(s + 1, i + 1)].join('\n'))
+      depth += ch === '(' ? 1 : ch === ')' ? -1 : 0
+    return depth > 0
+  }
+  return false
+}
+
 const rows = []
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
   const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
   for (let i = 0; i < lines.length; i++) {
     if (!/^\s*chk\(/.test(lines[i])) continue
     // The condition, which may run over the next few lines before the message.
-    const cond = lines.slice(i, i + 4).join(' ')
+    const cond = chkText(lines, i)
     // Only checks that ask whether something EXISTS. A check about a value can
     // fail with the element perfectly present, and a press after it is fine.
     if (!/\.count\(\)|isVisible|visible\(|waitUntil/.test(cond)) continue
@@ -295,7 +369,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       continue
     }
     if (/^\s*chk\(/.test(lines[i])) {
-      const cond = lines.slice(i, i + 4).join(' ')
+      const cond = chkText(lines, i)
       if (/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) {
         for (const m of cond.matchAll(
           /getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)|\[data-testid="([^"]+)"\]/g,
@@ -304,15 +378,76 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       }
       continue
     }
-    if (!ANY.test(lines[i]) || /catch/.test(lines.slice(i, i + 2).join(' '))) continue
+    if (!ANY.test(lines[i]) || /catch|timeout/.test(stmt(lines, i))) continue
     // A `waitUntil` predicate catches its own throws.
-    if (/waitUntil\(/.test(lines.slice(Math.max(0, i - 3), i + 1).join(' '))) continue
+    if (insideWaitUntil(lines, i)) continue
     for (const id of asserted) {
       if (!id) continue
       const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       if (!new RegExp(`(?:getByTestId\\(['\`]${q}['\`]\\)|\\[data-testid="${q}"\\])`).test(lines[i])) continue
       sections += 1
       rows.push({ file, line: i + 1, id, text: lines[i].trim(), section: true })
+      break
+    }
+  }
+}
+
+/*
+ * RULE EIGHT. ASSERTED ANYWHERE IN THIS FILE, THEN USED BARE.
+ *
+ * Rule five's scope is the SECTION, and the section is the scope a throw
+ * destroys — which is the right boundary for the damage and the wrong one for
+ * the knowledge. A break patch does not remove an element for one section: it
+ * removes it from the product. So a testid any check in the file asserts the
+ * existence of is a testid every interaction in the file has to survive the
+ * absence of, and the section scope was an under-approximation that happened to
+ * be safe rather than a statement about the defect.
+ *
+ * Widening it found fifteen more, in ten suites rule five reported clean, and
+ * it is the same pairing rule — the suite's own statement about its own
+ * element, no judgement about layout, no window to tune. That is the property
+ * that let rules one and five gate and kept the sequence shape out.
+ *
+ * THREE OF THE FIFTEEN COULD NOT BE FIXED MECHANICALLY, and they are the
+ * reason the message below says what it says. Where the check under a press
+ * passes on ABSENCE — "Cancel closed the row", "no invite row was offered",
+ * "the Save chip went down" — catching the press supplies exactly the absence
+ * the check reads as success. The fix manufactures a confident zero unless the
+ * precondition is measured first and carried into the condition. Rule three's
+ * header says the same thing about a null box and a `< N` comparison; this is
+ * that caveat again, one defect class over.
+ *
+ * Counted separately from rule five so the two scopes stay distinguishable: a
+ * regression that collapses the file scope back to the section scope moves this
+ * number, and `check-suite-enders.mjs` pins it.
+ */
+let files = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  const asserted = new Set()
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*chk\(/.test(lines[i])) continue
+    const cond = chkText(lines, i)
+    if (!/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) continue
+    for (const m of cond.matchAll(
+      /getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)|\[data-testid="([^"]+)"\]/g,
+    ))
+      asserted.add(m[1] ?? m[2] ?? m[3])
+  }
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*chk\(/.test(lines[i])) continue
+    if (!ANY.test(lines[i]) || /catch|timeout/.test(stmt(lines, i))) continue
+    if (insideWaitUntil(lines, i)) continue
+    for (const id of asserted) {
+      if (!id) continue
+      const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (!new RegExp(`(?:getByTestId\\(['\`]${q}['\`]\\)|\\[data-testid="${q}"\\])`).test(lines[i])) continue
+      // Rule five already holds this one, at the narrower scope. One site, one
+      // row: the distinct count below would fold them anyway, but the per-rule
+      // numbers are meant to say which scope found it FIRST.
+      if (rows.some((r) => r.file === file && r.line === i + 1 && r.section)) break
+      files += 1
+      rows.push({ file, line: i + 1, id, text: lines[i].trim(), wholeFile: true })
       break
     }
   }
@@ -419,6 +554,7 @@ for (const r of rows) {
   console.log(
     `  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}` +
       `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}` +
+      `${r.wholeFile ? '  (asserted elsewhere in this file — a patch removes it everywhere)' : ''}` +
       `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}` +
       `${r.lead ? '  (read at the HEAD of a condition — nothing short-circuits it either)' : ''}`,
   )
@@ -445,10 +581,11 @@ for (const r of rows) {
 const distinct = new Set(rows.map((r) => `${r.file}:${r.line}`)).size
 console.log(
   `[section-enders] ${distinct} site(s) across ${new Set(rows.map((r) => r.file)).size} suite(s), ` +
-    `flagged as: ${rows.length - gates - boxes - sames - sections - messages - leadReads.length} press(es) on a ` +
-    `control the check above them may find absent, ${gates} gate(s) in front of a check about the ` +
-    `same element, ${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a ` +
-    `locator guarded one line up, ${sections} use(s) of something this section asserts exists, and ` +
+    `flagged as: ${rows.length - gates - boxes - sames - sections - files - messages - leadReads.length} ` +
+    `press(es) on a control the check above them may find absent, ${gates} gate(s) in front of a ` +
+    `check about the same element, ${boxes} box read(s) that throw when nothing matches, ${sames} ` +
+    `use(s) of a locator guarded one line up, ${sections} use(s) of something this section asserts ` +
+    `exists, ${files} use(s) of something asserted elsewhere in the same file, and ` +
     `${messages} read(s) in a chk message, and ${leadReads.length} at the head of a condition ` +
     '— a site can be more than one of these',
 )
