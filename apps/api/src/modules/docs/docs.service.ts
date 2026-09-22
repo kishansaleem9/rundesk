@@ -308,6 +308,23 @@ export class DocsService {
         plaintext: extractPlaintext(content),
       })
       .returning()
+    /*
+     * THE SAME THREE FOLLOW-UPS `create` DOES, and leaving them out was a real
+     * gap rather than a tidiness point. Without them an imported doc:
+     *
+     *   · is NOT IN THE SEARCH INDEX — you import a document and then cannot
+     *     find it, which is the whole reason to import it;
+     *   · does not appear for anyone already looking at the workspace until
+     *     they reload;
+     *   · has no opening revision, so the first edit has nothing to diff
+     *     against and the document's history starts after its content.
+     *
+     * Found by reading `create` beside this rather than by any test: every one
+     * of these fails SILENTLY. The import returns the row and looks correct.
+     */
+    await this.snapshotRevision(row, userId)
+    this.realtime.emitToWorkspace(workspaceId, { type: 'doc.updated', docId: row.id, patch: { created: true } })
+    void this.indexDocInSearch(row.id)
     return row
   }
 
