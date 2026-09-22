@@ -195,14 +195,7 @@ try {
       `${JSON.stringify(folderPatches.map((p) => p.body)).slice(0, 160)}`,
   )
 
-  console.log('\n▶ a fresh dialog does not remember the last answer')
   await openFolderTab()
-  chk(
-    (await page.getByTestId('quick-create-folder-private').isChecked()) === false,
-    'reopening the dialog shows the toggle off again',
-    'the toggle carried over from the previous folder — a latched privacy switch privatises ' +
-      'the next folder somebody makes without being asked',
-  )
 
   console.log('\n▶ turning it on patches the folder that was just made, and says private')
   await page.getByTestId('quick-create-folder-name').fill(SHUT_NAME)
@@ -213,6 +206,28 @@ try {
     await waitUntil(() => folderPatches.length === 1, { timeoutMs: 20_000 }),
     'exactly one visibility patch goes out',
     `${folderPatches.length} PATCH(es) went out — expected exactly one, for the folder just created`,
+  )
+
+  /*
+   * AND HERE, AFTER A DIALOG THAT HAD IT ON — which is the only place the
+   * question means anything.
+   *
+   * This check used to sit above, between the public create and the private
+   * one, where the PREVIOUS dialog had left the toggle off: there was nothing
+   * to carry over, so "it does not remember" was true of a switch that
+   * remembers perfectly. `fd-7-toggle-latches` makes the control remember its
+   * last answer in a module-level global and ran GREEN for exactly that reason.
+   *
+   * The first dialog's "it starts off" check above is a different fact and
+   * stays where it is.
+   */
+  console.log('\n▶ a fresh dialog does not remember the last answer')
+  await openFolderTab()
+  chk(
+    (await page.getByTestId('quick-create-folder-private').isChecked().catch(() => true)) === false,
+    'reopening the dialog shows the toggle off again',
+    'the toggle carried over from the folder just made private — a latched privacy switch ' +
+      'privatises the next folder somebody makes without being asked',
   )
 
   const folders = await api(`/spaces/${SPACE}/folders`)
