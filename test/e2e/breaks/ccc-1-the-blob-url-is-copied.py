@@ -15,11 +15,15 @@
 # `finished.url` is in scope two lines away and is the URL the inline player
 # already uses, so "we have a url right here" is a very short reasoning path.
 #
-# REDDENS THREE, AND THEY ARE THE THREE ABOUT UPLOADING: the clip is never
-# presigned or PUT, so "pressing it uploads the clip — once" fails, "as a
-# video, not as whatever" has no presign body to read, and the clipboard check
-# fails on the `blob:` prefix. The card, the heading and the three buttons are
-# untouched.
+# IT REDDENS EIGHT, NOT THE THREE PREDICTED, and the cascade is honest: with
+# nothing uploaded, every later check that reads a presign count, a PUT count,
+# a share call or a task description has nothing to read. "Presign 0×, PUT 0×",
+# "it asked to store undefined", the `blob:` clipboard, and no "Link copied"
+# confirmation — and the second-clip and create-task checks go with them.
+#
+# Predicted three because I counted the copy path and not the five later checks
+# that measure the same counters. Third time in this session I have counted one
+# code path and not its readers; the other two were `lus-1` and `td-1`.
 #
 # Reddens: clip-created-card: "and puts the SHARED url on the clipboard, not the blob: one"
 import io
