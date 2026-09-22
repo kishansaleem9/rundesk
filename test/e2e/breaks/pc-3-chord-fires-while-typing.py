@@ -13,17 +13,21 @@
 # hain to it's kind of frustrating" — and a shortcut that fires while you are
 # writing is the same interruption wearing the fix's clothes.
 #
-# ONE CHECK IS WHAT IT SHOULD REDDEN, AND IT REDDENED EIGHT — because the
-# check leaves the sidebar COLLAPSED and every section below it reads a sidebar
-# that is not there. Five of the eight were about favourites and the space
-# tree, and five more checks never ran at all: `43 passed, 8 failed`, `✗ only
-# 51 of 56 checks ran`.
+# PREDICTED ONE, REDDENED EIGHT, AND REDDENS ONE — the prediction was right and
+# the suite was leaking state.
 #
-# Seven of those eight are the suite's state, not the patch's damage. A check
-# that changes a persisted global preference and leaves it changed cascades
-# into everything after it, and that is a defect in the section rather than in
-# this patch — the section now puts the sidebar back through the same store the
-# UI uses and reloads before moving on.
+# The check leaves the sidebar COLLAPSED, and every section below it then read a
+# sidebar that was not there: `43 passed, 8 failed`, `✗ only 51 of 56 checks
+# ran`. Five of the eight were about favourites and the space tree, and five
+# more checks never ran at all. A check that changes a persisted global
+# preference and leaves it changed cascades into everything after it.
+#
+# The first attempt at the reset was wrong in a way worth keeping: it wrote
+# `collapsed: false` into localStorage and reloaded, and the collapse is
+# persisted on the ACCOUNT as well, so the reload re-hydrated it from the server
+# and the cascade survived the fix. It presses the chord until the sidebar
+# reports itself expanded now, which goes through the same store, the same PATCH
+# and the same hydration as everything else. `55 passed, 1 failed`.
 #
 # The one it is aimed at is the half of a keyboard shortcut nobody tests: the
 # two checks before it, that the chord collapses and expands, still pass,

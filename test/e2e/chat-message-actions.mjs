@@ -30,6 +30,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -129,6 +130,8 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+
+const chain = makeChain(check)
 /*
  * How many checks a complete run performs.
  *
@@ -339,15 +342,31 @@ try {
   )
 
   console.log('\n▶ …and it can be marked done')
-  await chip.locator(`[data-testid="assignment-resolve-${other.user.id}"]`).click()
-  await page.waitForTimeout(2000)
-  const stillAssigned = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
-  check(
-    !(stillAssigned.data ?? []).some((a) => a.body === BODY),
+  /*
+   * BOUNDED, AND THE TWO CHECKS REPORT EITHER WAY. This clicked the resolve
+   * control unconditionally, and `cma-1-assign-types-a-mention` leaves no
+   * assignment to resolve — so the click spent thirty seconds retrying, threw,
+   * and the run ended on `12 passed, 5 failed` with `✗ only 17 of 73 checks
+   * ran`. Fifty-six checks did not run, under a headline about the harness.
+   */
+  const resolve = chain(
     'resolving takes it off the assignee’s list',
+    'the resolved assignment stays on the message',
   )
-  // Resolved, not deleted: who did it is a fact worth keeping.
-  check(await chip.isVisible().catch(() => false), 'the resolved assignment stays on the message')
+  const resolved = await chip
+    .locator(`[data-testid="assignment-resolve-${other.user.id}"]`)
+    .click({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
+  if (!resolved) {
+    resolve.rest('skipped: there was no assignment chip to resolve')
+  } else {
+    await page.waitForTimeout(2000)
+    const stillAssigned = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+    resolve.step(!(stillAssigned.data ?? []).some((a) => a.body === BODY), '')
+    // Resolved, not deleted: who did it is a fact worth keeping.
+    resolve.step(await chip.isVisible().catch(() => false), 'the chip went away instead of staying resolved')
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [15:19] — a reminder on the message')
