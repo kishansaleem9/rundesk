@@ -44,7 +44,25 @@
  * stood in front of their own check are the whole finding, which is the same
  * ratio the press rule had: precise because the pairing is the suite's own.
  *
- * AND A THIRD RULE THAT IS NOT A GATE, on purpose.
+ * RULE THREE — A BOX READ THAT CAN THROW.
+ *
+ *     const bandBox = await coverIn(made.image).boundingBox()
+ *     chk((bandBox?.height ?? 0) >= 40, 'the band at Medium is a band, not a hairline', …)
+ *
+ * `boundingBox()` THROWS when its locator matches nothing, because it waits for
+ * the element first; it returns null only for an element that exists with no
+ * box, which is the case the `?? 0` beside it was written for.
+ * `list-card-cover-1-list-read-drops-cover` takes the cover out of the list
+ * read and that run ended at 12 of 26.
+ *
+ * Twenty of these, all real, and unlike the sequence rule below this one is a
+ * single call — no window, no formatting. THE CAVEAT IS IN THE MESSAGE, because
+ * catching a box read is only safe while the check below reddens on absence:
+ * every one of the twenty compares with `>=`, `>` or `===` through `?? 0`, so
+ * zero fails. A `< N` comparison would PASS on a null box, and then the catch
+ * has to come with a `!!box &&` rather than on its own.
+ *
+ * AND A FOURTH RULE THAT IS NOT A GATE, on purpose.
  *
  * The real lesson of `list-view-controls-42-empty-group-no-add` is that its
  * press had been bounded FOR IT, by name, in a comment — and the run still
@@ -126,20 +144,35 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+// RULE THREE. An unguarded `boundingBox()` — no timeout, no catch.
+let boxes = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    if (!/\.boundingBox\(\s*\)/.test(lines[i])) continue
+    if (/catch/.test(lines.slice(i, i + 3).join(' '))) continue
+    boxes += 1
+    rows.push({ file, line: i + 1, id: 'boundingBox', text: lines[i].trim(), box: true })
+  }
+}
+
 for (const r of rows) {
-  console.log(`  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}`)
+  console.log(`  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}`)
   console.log(`      ${r.text.slice(0, 120)}`)
 }
 console.log(
-  `[section-enders] ${rows.length - gates} press(es) on a control the check above them may find ` +
-    `absent, and ${gates} gate(s) in front of a check about the same element, across ` +
+  `[section-enders] ${rows.length - gates - boxes} press(es) on a control the check above them ` +
+    `may find absent, ${gates} gate(s) in front of a check about the same element, and ${boxes} ` +
+    `box read(s) that throw when nothing matches, across ` +
     `${new Set(rows.map((r) => r.file)).size} suite(s)`,
 )
 if (rows.length) {
   console.error(
     '\n[section-enders] Bound and catch each one — `.click({ timeout: 10_000 }).catch(() => {})` for a\n' +
-      'press, `.catch(() => {})` for a gate — so the checks below report what happened instead of\n' +
-      'being replaced by a thirty-second exception.',
+      'press, `.catch(() => {})` for a gate or a box read — so the checks below report what happened\n' +
+      'instead of being replaced by a thirty-second exception. For a box read, check that the\n' +
+      'assertion under it REDDENS on a null box: `>= N` does, `< N` does not, and that one needs a\n' +
+      '`!!box &&` beside the catch.',
   )
   process.exit(1)
 }
