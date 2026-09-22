@@ -241,17 +241,16 @@ try {
    * sheet being open; the title is then read from the sheet rather than from
    * the document.
    */
-  const sheetOpen = await page
-    .getByTestId('task-tab-overview')
-    .first()
+  const sheet = page.getByTestId('task-sheet').first()
+  const sheetOpen = await sheet
     .waitFor({ timeout: 8000 })
     .then(() => true)
     .catch(() => false)
-  const sheetText = sheetOpen
-    ? await page.locator('[data-testid="task-tab-overview"]').first().evaluate(
-        (el) => el.closest('[role="dialog"], aside, section')?.innerText ?? '',
-      ).catch(() => '')
-    : ''
+  // Read off the sheet's own root, not off an ancestor found by `closest` from
+  // a tab button — the first version of this walked up to `[role="dialog"],
+  // aside, section` and got back an empty string, and the harness refused the
+  // whole set on a red baseline rather than letting it pass as a result.
+  const sheetText = sheetOpen ? await sheet.innerText().catch(() => '') : ''
   check(
     sheetOpen && sheetText.includes('Quarterly planning'),
     'and that address reopens the same task',
