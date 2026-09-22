@@ -5821,3 +5821,30 @@ Not gated. A rule matching reads on any variable would have to know which
 variables are locators, and the only honest way to know that is to resolve them
 — which is a parser, not a text rule. The measurement found it, which is what
 the sweep is for.
+
+### `task-cover-12-upload-commits-anyway`, deleted: it aims past a door that never opens
+
+It moves `commit({ kind: 'stored', storageKey })` to BEFORE the `PUT`, so a
+cover is committed whether or not the upload worked. A real defect to guard
+against — and unprovable on this machine, because `presignPutObject` throws
+`Storage is not configured` two lines earlier and **neither the commit nor the
+PUT is ever reached.** 32 passed, 0 failed: the check "and the cover is left
+exactly as it was" passed because nothing happened at all.
+
+Its two siblings show exactly where the line falls. `task-cover-11-upload-fails-
+silently` and `task-cover-13-no-file-chooser` both redden, because they target
+the REACHABLE half — the chooser, and the sentence that says the upload failed,
+which is what a run with no storage still produces. Everything past the presign
+is dead code in this environment.
+
+So it is deleted rather than declared. `break-report.sh`'s own header is
+explicit that **only SHORT may be declared** — "a patch that reddens nothing,
+crashes, does not build, is not found, or leaves the tree identical is never
+expected… a tool that let a header wave one through would be the suppression
+list this audit keeps deleting." Keeping it against a zero ceiling would be a
+suppression list with one entry, which is the same sentence `aar-24` was deleted
+under.
+
+809 → 808 patches. The `accounted` floor of 759 is untouched and still well
+under the measured number; it is named here because a deletion is the one reason
+that floor's own comment warns about.
