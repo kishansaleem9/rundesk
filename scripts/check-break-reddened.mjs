@@ -229,6 +229,8 @@ const drifted = []
 const noClaim = []
 const unitClaim = []
 let reddened = 0
+// Collected only so `NAMES=1` can print them; the count above is what gates.
+const reddenedNames = []
 
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const name = f.slice(0, -3)
@@ -252,13 +254,43 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
     noClaim.push(name)
     continue
   }
-  const log = join(LOGS, `brk-${name}.log`)
-  if (!existsSync(log)) {
+  const text = readFileSync(join(BREAKS, f), 'utf8')
+  const suite = suiteOf(name, text)
+  /*
+   * THE PER-SUITE RECORD IS ASKED FIRST, AND THAT ORDER IS A FIX.
+   *
+   * There are two files per measurement: `brk-<patch>.log` is the suite's raw
+   * output, and `break-<suite>.txt` is the run that names the patch and the
+   * commit it ran at. This asked `existsSync(brk-…)` first — so a `brk-` file
+   * left behind by a run whose per-suite log has since been truncated read as a
+   * measurement, and fell through to the drift check, where a missing record
+   * comes back as `<no run log>` and landed it in DRIFTED.
+   *
+   * Four patches were in exactly that state: `teams-carousel-1` through `-4`,
+   * with `brk-` logs from 21 September at 20:55 and no line in any per-suite
+   * log, before or since. `never-run-plan.mjs` reads the per-suite logs and
+   * called them unmeasured — correctly — while this file called them measured
+   * against a tree that had moved. TWO ANSWERS TO "HAS THIS BEEN MEASURED?",
+   * which is the duplicated list this audit keeps finding, this time in the
+   * audit's own instruments. `check-plan-population.mjs` now asserts the two
+   * agree patch for patch, in both directions.
+   *
+   * A `brk-` file with no per-suite provenance is not a measurement: nothing
+   * can say which tree it is about, which is the one question that has to be
+   * answered before any other. So it is "no run log here" — UNKNOWN, counted,
+   * and on the plan — rather than a drifted number a reader would take for a
+   * measurement that merely needs repeating.
+   */
+  const rec = measured.get(name)
+  if (!rec) {
     unknown.push(`${name} — no run log here`)
     continue
   }
-  const text = readFileSync(join(BREAKS, f), 'utf8')
-  const suite = suiteOf(name, text)
+  const log = join(LOGS, `brk-${name}.log`)
+  if (!existsSync(log)) {
+    unknown.push(`${name} — a run was recorded for it, but its own output log is gone`)
+    continue
+  }
   /*
    * WHICH TREE FIRST, AND EVERY OTHER QUESTION AFTER IT.
    *
@@ -276,7 +308,6 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * raw output — so the sha comes from the per-suite log that named this patch
    * in the same run, which is what `measuredAt` reads.
    */
-  const rec = measured.get(name)
   const moved = notCurrent(rec, patchDeps(text, suite), { name, text })
   if (moved.length) {
     drifted.push(
@@ -387,6 +418,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const notInPasses = claims.filter((c) => !lines(raw, 'PASS').includes(c))
   if (inFails.length || notInPasses.length) {
     reddened += 1
+    reddenedNames.push(name)
     provenSuites.add(suite)
     continue
   }
@@ -408,6 +440,33 @@ console.log(
   `[break-reddened] ${provenSuites.size} of ${withChecks.length} suite(s) have a patch measured ` +
     `against this tree to redden a check it names${unproved.length ? `; ${unproved.length} do not yet` : ''}`,
 )
+
+/*
+ * `NAMES=1` PRINTS EVERY BUCKET'S MEMBERS, ONE PATCH PER LINE, UNTRUNCATED.
+ *
+ * `check-plan-population.mjs` needs this: it compares THE TOOLS' OUTPUTS rather
+ * than re-deriving the answer from the same libraries, which would agree with
+ * itself by construction. Without it the only way to reconcile a one-patch
+ * disagreement between this file and `never-run-plan.mjs` is to open eight
+ * hundred patch files, and a number nobody can reconcile is a number this audit
+ * has learnt to distrust.
+ *
+ * The `show` blocks below truncate at 40 for a person reading a failure. This
+ * does not truncate, because a diff of two sets cannot be taken on a prefix.
+ */
+if (process.env.NAMES) {
+  const buckets = {
+    reddened: reddenedNames,
+    drifted: drifted.map((d) => d.split(' — ')[0]),
+    unknown: unknown.map((d) => d.split(' — ')[0]),
+    green: green.map((d) => d.split(' — ')[0]),
+    unproven: unproven.map((d) => d.split(' — ')[0]),
+    noClaim,
+    unitClaim,
+  }
+  for (const [bucket, names] of Object.entries(buckets))
+    for (const n of names) console.log(`NAME ${bucket} ${n}`)
+}
 
 const show = (label, rows, why) => {
   if (!rows.length) return
@@ -468,4 +527,19 @@ if (unknown.length) {
       '`scripts/e2e-lanes/never-run-plan.mjs` for what that leaves to measure.',
   )
 }
-process.exit(bad)
+/*
+ * `exitCode`, NOT `exit()`, AND THE DIFFERENCE IS MOST OF THE OUTPUT.
+ *
+ * `console.log` to a PIPE is asynchronous in Node — to a terminal or a file it
+ * is synchronous — and `process.exit()` tears the process down without draining
+ * what is still buffered. Run in a shell this printed all 809 `NAME` lines; run
+ * from `check-plan-population.mjs` through `spawnSync`, the same command
+ * returned 8,263 bytes and 168 of them, with `status: 0`, `signal: null` and no
+ * error. A truncated answer, indistinguishable from a complete one.
+ *
+ * That is the shape of the two exit codes I read off a pipeline earlier in this
+ * audit and had to re-measure: output through a pipe does not behave like output
+ * to a terminal, and the difference is silent in both directions. Setting
+ * `exitCode` lets Node exit once the writes have landed.
+ */
+process.exitCode = bad

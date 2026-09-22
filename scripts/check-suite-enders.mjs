@@ -473,4 +473,4 @@ if (fail) {
   console.error(`\n[suite-enders] ${fail} case(s) did not hold:`)
   for (const f of failures) console.error(`  · ${f}`)
 }
-process.exit(fail === 0 ? 0 : 1)
+process.exitCode = fail === 0 ? 0 : 1

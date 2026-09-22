@@ -187,4 +187,4 @@ if (reddened.length < BASELINE.reddened) {
   )
   bad = 1
 }
-process.exit(bad)
+process.exitCode = bad

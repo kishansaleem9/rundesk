@@ -50,6 +50,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const chromium = await resolveChromium()
 const argOf = (name, fallback) => {
@@ -183,7 +184,31 @@ try {
   await page.getByTestId('space-wizard-row-views').click()
   await page.waitForSelector('[data-testid="space-wizard-views"]', { timeout: 15_000 })
 
-  const rowKeys = await page.locator('[data-testid^="space-wizard-viewrow-"]').evaluateAll((els) =>
+  /*
+   * WAIT FOR THE ROWS, NOT FOR THE PANEL THEY LIVE IN.
+   *
+   * The `waitForSelector` above waits for `space-wizard-views`, which is the
+   * container; the rows inside it are drawn from `GET /space-presets` and
+   * arrive later. So this read could and did happen first, and the check
+   * reported "the panel drew 0: []" as though the panel and the server
+   * disagreed about the view set. The baseline had been green at 15 of 15 and
+   * went red at `3aaee334` with nothing in that commit — or the six before it —
+   * touching the space wizard: it is a race, and the whole set REFUSED on it,
+   * so six patches went unmeasured behind a failure that was not about them.
+   *
+   * Same shape as `ths-4-wraps-round` one commit earlier: a wait satisfied by a
+   * state that is not the answer. There the empty string meant both "resolved
+   * to nothing" and "not loaded yet"; here an empty container meant both
+   * "the server serves no views" and "the rows have not arrived".
+   *
+   * `waitUntil` rather than a hard wait, and the read stays afterwards: if the
+   * rows never reach the expected count the check still runs and still reports
+   * what was drawn, which is the honest failure and the one a break patch that
+   * removes a row needs.
+   */
+  const rowsIn = page.locator('[data-testid^="space-wizard-viewrow-"]')
+  await waitUntil(async () => (await rowsIn.count()) >= EXPECTED_VIEWS.length, { timeoutMs: 15_000 })
+  const rowKeys = await rowsIn.evaluateAll((els) =>
     els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-viewrow-', '')),
   )
   chk(

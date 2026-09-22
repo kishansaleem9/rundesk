@@ -32,6 +32,7 @@ step "every break patch finds its line" python3 scripts/check-break-patches.py
 step "break runs measured this tree"    node scripts/check-break-freshness.mjs
 step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "and reddened the one they name"   node scripts/check-break-reddened.mjs
+step "the plan asks for what is unmeasured" node scripts/check-plan-population.mjs
 step "and the unit claims redden too"   node scripts/check-unit-claims.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs

@@ -308,4 +308,4 @@ if (shrank.length) {
   console.log('\n[break-claims] better than the baseline — lower it in this file:')
   for (const k of shrank) console.log(`  ${k}: ${BASELINE[k]} → ${actual[k]}`)
 }
-process.exit(0)
+process.exitCode = 0

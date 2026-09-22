@@ -135,4 +135,4 @@ is(
 )
 
 console.log(`\n${failed === 0 ? '[claim-match] all assertions hold' : `[claim-match] ${failed} FAILED`}`)
-process.exit(failed === 0 ? 0 : 1)
+process.exitCode = failed === 0 ? 0 : 1

@@ -80,8 +80,32 @@ for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
   const rec = ran.get(name)
   if (!DRIFTED && rec) continue
   const text = readFileSync(join(BREAKS, f), 'utf8')
+  /*
+   * A `unit:` CLAIM IS ASKED FOR BY NAME, NOT INFERRED FROM `suiteOf`.
+   *
+   * The line below used to be the whole exclusion — `if (!suite) continue // a
+   * unit: claim, or nothing that names a suite at all` — and it worked for
+   * three of the four unit claims BY ACCIDENT OF NAMING. `ts-9-dedupe-dropped`,
+   * `amp-2-opus-unpriced` and `aar-17-views-hardcoded` use abbreviated prefixes
+   * that match no suite file, so `suiteOf` answered nothing and they fell out.
+   * `planner-priorities-1-two-cache-keys-again` prefix-matches
+   * `test/e2e/planner-priorities.mjs`, so `suiteOf`'s name fallback handed it a
+   * suite and the plan scheduled it.
+   *
+   * An e2e run can never settle it. Its evidence is `use-priorities.test.ts`,
+   * `check-unit-claims.mjs` measures it every preflight, and the per-suite log
+   * for `planner-priorities` will never carry a verdict about a query key that
+   * nothing in that suite is about. So every round asked for it again, and the
+   * chain would have ended at "no progress, stopping" rather than at "nothing
+   * left — every log on disk measured the current tree". The sweep's own
+   * terminal sentence, unreachable, because of one patch's name.
+   *
+   * `check-plan-population.mjs` is what found it and is what keeps this and
+   * `check-break-reddened.mjs` answering the same question the same way.
+   */
+  if (/^#\s*Reddens:\s*unit\b/im.test(text)) continue
   const suite = suiteOf(name, text)
-  if (!suite) continue // a `unit:` claim, or nothing that names a suite at all
+  if (!suite) continue // nothing that names a suite at all
   if (DRIFTED) {
     if (!rec) continue // the default mode's business, not this one
     // A log from before `wt-break.sh` recorded what it synced to cannot be

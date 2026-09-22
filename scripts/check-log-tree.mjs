@@ -235,4 +235,4 @@ ok(
 )
 
 console.log(failed === 0 ? `\n${'ok'} log-tree: every case holds` : `\n${failed} FAILED`)
-process.exit(failed === 0 ? 0 : 1)
+process.exitCode = failed === 0 ? 0 : 1

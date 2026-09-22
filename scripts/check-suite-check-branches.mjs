@@ -208,4 +208,4 @@ if (total > BASELINE) {
 if (total < BASELINE) {
   console.log(`\n[check-branches] better — lower the baseline in this file to ${total}`)
 }
-process.exit(0)
+process.exitCode = 0

@@ -256,4 +256,4 @@ if (uncovered.length > BASELINE_UNCOVERED) {
 if (uncovered.length < BASELINE_UNCOVERED) {
   console.log(`\n[break-coverage] better — lower the baseline in this file to ${uncovered.length}`)
 }
-process.exit(0)
+process.exitCode = 0

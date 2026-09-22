@@ -189,4 +189,4 @@ console.log(
   `\n${fail === 0 ? '\x1b[32mok\x1b[0m' : '\x1b[31mnot ok\x1b[0m'} suite-reads: ` +
     `${pass} case(s) held, ${fail} did not`,
 )
-process.exit(fail === 0 ? 0 : 1)
+process.exitCode = fail === 0 ? 0 : 1

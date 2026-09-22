@@ -126,4 +126,4 @@ console.log('\n4. a label override replaces the sentence at a valid index')
 }
 
 console.log(`\n${failed === 0 ? '[chain-helper] all assertions hold' : `[chain-helper] ${failed} FAILED`}`)
-process.exit(failed === 0 ? 0 : 1)
+process.exitCode = failed === 0 ? 0 : 1

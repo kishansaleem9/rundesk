@@ -331,11 +331,32 @@ const suiteOf = makeSuiteOf({
     .filter((f) => f.endsWith('.mjs'))
     .map((f) => f.slice(0, -4)),
 })
+/*
+ * A `unit:` CLAIM IS COUNTED SEPARATELY, NOT FOLDED INTO "NO SURVIVING RUN LOG".
+ *
+ * Its evidence is a `*.test.ts` and `check-unit-claims.mjs` measures all four
+ * every preflight — so "no e2e log here" is true of them and means nothing.
+ * They were being added to the no-log pile, where two of them showed up as
+ * `(no suite named)` and this printed "9 patch(es) … have NO SURVIVING RUN LOG"
+ * against the plan's 7. Same question, two answers, and the header of
+ * `never-run-plan.mjs` promises the opposite: "the number printed here has to
+ * be the number printed there."
+ *
+ * Counted rather than dropped, because a patch measured somewhere else is not a
+ * patch nothing measures — that is the counted-skip rule this file applies to
+ * its own UNKNOWNs two paragraphs up, turned on itself. The line names the tool
+ * that does measure them, so the number can be followed rather than trusted.
+ */
 const neverRan = new Map()
+const unitClaims = []
 for (const f of readdirSync(join(ROOT, 'test/e2e/breaks')).filter((f) => f.endsWith('.py'))) {
   const name = f.slice(0, -3)
   if (everRun.has(name)) continue
   const text = readFileSync(join(ROOT, 'test/e2e/breaks', f), 'utf8')
+  if (/^#\s*Reddens:\s*unit\b/im.test(text)) {
+    unitClaims.push(name)
+    continue
+  }
   const suite = suiteOf(name, text) ?? '(no suite named)'
   neverRan.set(suite, (neverRan.get(suite) ?? 0) + 1)
 }
@@ -350,6 +371,18 @@ if (neverRan.size) {
     console.log(`                    ${String(n).padStart(3)}  ${s}`)
   }
   console.log('                  Coverage counts all of them as aimed at. Nothing here proves any ran.')
+}
+if (unitClaims.length) {
+  console.log(
+    `\n[break-freshness] and ${unitClaims.length} patch(es) with no e2e log claim a UNIT test, ` +
+      'which is where their evidence is:',
+  )
+  for (const n of unitClaims.sort()) console.log(`                    ${n}`)
+  console.log(
+    '                  `check-unit-claims.mjs` applies each one and requires the named test to\n' +
+      '                  fail, every preflight. Counted here rather than left out, and kept out of\n' +
+      '                  the pile above because no e2e run could ever settle them.',
+  )
 }
 
 if (

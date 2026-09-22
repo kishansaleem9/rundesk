@@ -5311,3 +5311,95 @@ version could not tell them apart in either direction.
 **Still to measure.** All three lanes were busy when this was written, so
 whether `ths-4` now reddens comes from the chain's next pass over the suite.
 It is recorded here as a fix awaiting its own measurement, not as one.
+
+### The sweep's own terminal sentence was unreachable
+
+Everything here is aimed at one line, printed by `chain-plan.sh`:
+
+> `round N: nothing left — every log on disk measured the current tree`
+
+And nothing was checking that it could be earned. The sentence comes from
+`never-run-plan.mjs` returning no lines; the numbers anyone would quote it
+against come from `check-break-reddened.mjs`. **Two instruments, one question:
+has this patch been measured against this tree.** They disagreed three ways.
+
+**One: the plan scheduled a patch no e2e run can settle.**
+`planner-priorities-1-two-cache-keys-again` claims a `unit:` check — its
+evidence is `use-priorities.test.ts`, which `check-unit-claims.mjs` measures
+every preflight — and the plan listed it anyway. Every round would have asked
+for it again, the run would have changed nothing, and the chain would have
+ended at **"no progress, stopping"** rather than at "nothing left". The sweep's
+terminal sentence, unreachable, because of one patch's name.
+
+The exclusion was there and worked by accident: `if (!suite) continue // a
+`unit:` claim`. Three of the four unit claims — `ts-9-dedupe-dropped`,
+`amp-2-opus-unpriced`, `aar-17-views-hardcoded` — use abbreviated prefixes that
+match no suite file, so `suiteOf` answered nothing and they fell out.
+`planner-priorities-1` prefix-matches `test/e2e/planner-priorities.mjs`, so the
+name fallback handed it a suite. Now the claim is read directly.
+
+**Two: four patches were called measured and unmeasured at once.**
+`teams-carousel-1` through `-4` have `brk-<patch>.log` files from 21 September
+at 20:55 and no line in any per-suite log, ever. The reddened checker asked
+`existsSync(brk-…)` first, found one, and a missing per-suite record came back
+from the drift check as `<no run log>` — filing them under *"measured against a
+tree that has moved."* The record is asked first now: **a `brk-` file with no
+per-suite provenance is not a measurement**, because nothing can say which tree
+it is about.
+
+**Three: freshness counted 9 where the plan counted 7**, the difference being
+two unit claims folded into "no surviving run log". They are counted on their
+own line now, naming the tool that does measure them — a counted skip, the rule
+this file applies to its own UNKNOWNs, turned on itself.
+
+`scripts/check-plan-population.mjs` keeps all three closed. It compares **the
+tools' output, not their libraries** — both read `lib/log-tree.mjs`, so
+re-deriving the answer would agree with itself by construction. And the union
+comparison was not enough: `teams-carousel` sat in two buckets that both mean
+"needs a run", so the sets agreed and only the sub-counts disagreed. It now also
+asserts that no patch is called NEVER RUN by one tool and DRIFTED by the other —
+contradictory claims, since a patch with no measurement has no tree to have
+drifted from. Both directions break-tested: re-introducing either bug reddens
+it, naming the patches.
+
+### And `console.log` to a pipe is not `console.log` to a terminal
+
+Adding `NAMES=1` to the reddened checker so the comparison could be made exposed
+this. Run in a shell it printed all 809 lines. Run through `spawnSync` it
+returned **8,263 bytes and 168 of them, with `status: 0`, `signal: null` and no
+error** — a truncated answer indistinguishable from a complete one.
+
+`console.log` to a pipe is asynchronous in Node; to a terminal or a file it is
+synchronous. `process.exit()` tears the process down without draining what is
+still buffered. This is the same shape as the two exit codes I read off a
+pipeline earlier in this audit and had to re-measure: **output through a pipe
+does not behave like output to a terminal, and the difference is silent in both
+directions.**
+
+Eleven checkers ended in `process.exit(…)` after printing. All eleven now set
+`process.exitCode`, and the fix was verified by measurement rather than by
+reasoning: each checker's piped byte count compared against its redirected byte
+count, across all nineteen. **No checker loses output through a pipe.**
+Preflight was never affected — a redirect to a file is a synchronous write — so
+no number reported from it was wrong.
+
+### `space-wizard-views` REFUSED on a race, and took six patches with it
+
+`14 passed, 1 failed` at `3aaee334`, on *"the panel drew 0: [] — the panel and
+the server disagree about the view set"*. The baseline had been green at 15 of
+15, and nothing in that commit or the six before it touches the space wizard.
+
+The suite waits for `space-wizard-views` — the CONTAINER — and then reads the
+`viewrow-*` elements inside it, which are drawn from `GET /space-presets` and
+arrive later. **Same shape as `ths-4` one commit earlier: a wait satisfied by a
+state that is not the answer.** There the empty string meant both "resolved to
+nothing" and "not loaded yet"; here an empty container meant both "the server
+serves no views" and "the rows have not arrived". It now waits for the row count
+and reads afterwards — and the read stays after the wait, so a patch that
+removes a row still fails the check with the count printed.
+
+A refusal is the expensive kind of false negative: the whole set stops, so six
+patches went unmeasured behind a failure that was not about any of them.
+
+**Preflight is 25 steps, 24 green.** The red one is `break runs measured this
+tree`, which is the work list.

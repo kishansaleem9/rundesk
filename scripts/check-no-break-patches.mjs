@@ -177,4 +177,4 @@ console.error(
     'the patch’s inverse — not from `git checkout`, which would take the real work\n' +
     'with it — and re-run the patch deliberately when the tree is quiet.\n',
 )
-process.exit(1)
+process.exitCode = 1
