@@ -23,43 +23,48 @@
  * Re-running a measured patch costs a full suite run to reprint a number that
  * is already on disk.
  *
- * AND `--stale` IS THE OTHER HALF OF THE SAME QUESTION. A patch with a log that
- * predates a change to its suite is in the same position as one with no log at
- * all: the number on disk is a statement about a file that has changed, which
- * is `check-break-freshness.mjs`'s whole premise. Making seventy suites print
- * their check's sentence on failure put seventy-one sets in that state at once,
- * so the work needed a list rather than a count.
+ * AND `--drifted` IS THE OTHER HALF OF THE SAME QUESTION. A patch measured
+ * against a tree that has since changed under it is in the same position as one
+ * with no log at all: the number on disk is a statement about files that have
+ * moved, which is `check-break-freshness.mjs`'s whole premise. Making seventy
+ * suites print their check's sentence on failure put seventy-one sets in that
+ * state at once, so the work needed a list rather than a count.
  *
- * The two modes do not overlap: `--stale` takes suites whose canonical log is
- * older than the suite file, with every patch attributed to them; the default
- * takes patches with no log anywhere, whatever their suite's age.
+ * This was `--stale`, and it asked the question by the CLOCK: the suite file's
+ * last commit against the canonical log's mtime. Two ways that reads wrong, both
+ * of which cost me the measurement I most needed — a suite fix committed while
+ * its own set was still running looks newer than the suite, and a green fixed in
+ * the PRODUCT never touches the suite file at all. `scripts/lib/log-tree.mjs`
+ * carries the reckoning; the short of it is that the log names the commit it
+ * measured, so nothing here has to be inferred from a timestamp.
+ *
+ * The two modes do not overlap: `--drifted` takes patches whose newest log is
+ * about a tree that has since changed in the suite or in the product files the
+ * patch edits; the default takes patches with no log anywhere, whatever the age
+ * of the tree around them.
  *
  *   node scripts/e2e-lanes/never-run-plan.mjs            # unmeasured, largest first
- *   node scripts/e2e-lanes/never-run-plan.mjs --stale    # measured against an older suite
+ *   node scripts/e2e-lanes/never-run-plan.mjs --drifted  # measured against a tree that moved
  *   node scripts/e2e-lanes/never-run-plan.mjs --max 6    # only sets of 6 or fewer
  */
-import { readdirSync, readFileSync, statSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { execFileSync } from 'node:child_process'
 import { makeSuiteOf } from '../lib/suite-of-patch.mjs'
+import { measuredAt, patchDeps, makeDriftCheck } from '../lib/log-tree.mjs'
 
 const ROOT = new URL('../..', import.meta.url).pathname
 const LOGS = '/tmp/claude-0'
 const BREAKS = join(ROOT, 'test/e2e/breaks')
 const maxAt = process.argv.indexOf('--max')
 const MAX = maxAt === -1 ? Infinity : Number(process.argv[maxAt + 1])
-const STALE = process.argv.includes('--stale')
+const DRIFTED = process.argv.includes('--drifted')
 
 // Every patch name that appears as a `== <name>` line in any log, archives
 // included — the same scan freshness uses, for the same reason: patches are
-// named after the feature, not the suite.
-const everRun = new Set()
-for (const f of readdirSync(LOGS).filter((f) => /^break-.+\.txt$/.test(f))) {
-  for (const line of readFileSync(join(LOGS, f), 'utf8').split('\n')) {
-    const m = line.match(/^== ([a-z0-9][a-z0-9-]*)\b/)
-    if (m) everRun.add(m[1])
-  }
-}
+// named after the feature, not the suite. `measuredAt` carries the sha each one
+// was measured at, which is what `--drifted` reads.
+const ran = measuredAt(LOGS)
+const drifted = makeDriftCheck({ root: ROOT })
 
 const SUITES = join(ROOT, 'test/e2e')
 const suiteOf = makeSuiteOf({
@@ -67,37 +72,23 @@ const suiteOf = makeSuiteOf({
   candidates: readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4)),
 })
 
-// Stale mode: the suite file's last commit is later than its canonical log, so
-// every number in that log is about a file that has since changed. Committed
-// date rather than mtime, for the same reason freshness uses it — a checkout
-// touches every file.
-const staleSuites = new Set()
-if (STALE) {
-  for (const n of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4))) {
-    const log = join(LOGS, `break-${n}.txt`)
-    if (!existsSync(log)) continue
-    let changed = null
-    try {
-      const iso = execFileSync('git', ['log', '-1', '--format=%cI', '--', `test/e2e/${n}.mjs`], {
-        cwd: ROOT,
-        encoding: 'utf8',
-      }).trim()
-      if (iso) changed = new Date(iso)
-    } catch {
-      /* untracked */
-    }
-    if (changed && changed > statSync(log).mtime) staleSuites.add(n)
-  }
-}
-
 const bySuite = new Map()
+let nosha = 0
 for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
   const name = f.slice(0, -3)
-  if (!STALE && everRun.has(name)) continue
+  const rec = ran.get(name)
+  if (!DRIFTED && rec) continue
   const text = readFileSync(join(BREAKS, f), 'utf8')
   const suite = suiteOf(name, text)
   if (!suite) continue // a `unit:` claim, or nothing that names a suite at all
-  if (STALE && !staleSuites.has(suite)) continue
+  if (DRIFTED) {
+    if (!rec) continue // the default mode's business, not this one
+    // A log from before `wt-break.sh` recorded what it synced to cannot be
+    // placed in the history at all. UNKNOWN is not CURRENT, so it goes in the
+    // work list and is counted out loud rather than passed over in silence.
+    if (!rec.sha) nosha++
+    else if (!drifted(rec.sha, patchDeps(text, suite)).length) continue
+  }
   if (!bySuite.has(suite)) bySuite.set(suite, [])
   bySuite.get(suite).push(name)
 }
@@ -111,5 +102,6 @@ for (const [suite, names] of rows) {
 }
 console.error(
   `[never-run-plan] ${patches} patch(es) across ${rows.filter((r) => r[1].length <= MAX).length} ` +
-    `${STALE ? 'STALE' : 'unmeasured'} suite(s)${MAX === Infinity ? '' : ` of ${MAX} or fewer`}`,
+    `${DRIFTED ? 'DRIFTED' : 'unmeasured'} suite(s)${MAX === Infinity ? '' : ` of ${MAX} or fewer`}` +
+    `${nosha ? `, ${nosha} of them from a log that never recorded its commit` : ''}`,
 )

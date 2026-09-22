@@ -221,6 +221,15 @@ jobs:
       - name: The patch-to-suite attribution holds its contract
         run: node scripts/check-suite-of-patch.mjs
 
+      # And the module that decides WHICH TREE a recorded number is about. The
+      # rule it replaced compared the suite file's commit date against the log's
+      # mtime, and a suite fix committed while its own set was still running
+      # passed that test while every patch in the run had already been measured
+      # against the unfixed file. Two greens went unmeasured for a day behind a
+      # row that called their logs current.
+      - name: The break-log provenance reader holds its contract
+        run: node scripts/check-log-tree.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks

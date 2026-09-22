@@ -15,8 +15,25 @@
 // simply not about the thing it named. So the comparison gets a script, because
 // the version I do by eye is the version that produced the 10.
 //
-// For every suite with a break log: compare the log's mtime against the commit
-// date of the last change to the suite file. Later suite than run = STALE.
+// For every suite with a break log: take the commit the run SYNCED TO, which
+// `wt-break.sh` writes as its first line, and ask git whether anything the run
+// depended on has changed between that commit and HEAD. Anything = STALE.
+//
+// THIS USED TO BE A QUESTION ABOUT THE CLOCK — the suite file's commit date
+// against the log's mtime — and the clock got it wrong twice, both times on the
+// measurement I most needed:
+//
+//  - A suite fix committed WHILE its own set was still running dates AFTER the
+//    run started and BEFORE the log was last appended to. `folder-dialog` was
+//    fixed at 06:29:10 under a log stamped 06:29:50, and `fd-7-toggle-latches`
+//    had been measured at 06:27 against the unfixed suite. The row said fresh.
+//  - A green fixed in the PRODUCT never touches the suite file, so no rule about
+//    suite dates can see it. `folder-create-12-toast-bottom-right` sat UNPROVEN
+//    for a day under a row that called its log current.
+//
+// The sha is a statement about the tree instead of about when someone typed, and
+// the deps are the suite that did the measuring plus the product files each
+// patch in the log edits. `scripts/lib/log-tree.mjs` carries the reckoning.
 //
 // THIS IS A LOCAL CHECK AND BELONGS IN PREFLIGHT, NOT IN CI. Its evidence is
 // the run logs under /tmp on the machine that did the running, and a CI box has
@@ -27,9 +44,10 @@
 //
 // Exit 1 if any set is stale.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, statSync, readFileSync } from 'node:fs'
+import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
+import { patchDeps, makeDriftCheck, CONTROL } from './lib/log-tree.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const BREAKS = '/tmp/claude-0'
@@ -56,6 +74,8 @@ const lastChanged = (name) => {
     return null /* not a tracked suite file */
   }
 }
+
+const drifted = makeDriftCheck({ root: ROOT })
 
 const rows = []
 for (const log of logs) {
@@ -91,7 +111,6 @@ for (const log of logs) {
     rows.push({ suite, verdict: 'NO SUITE FILE', detail: `no tracked suite file for ${suite} or any prefix of it` })
     continue
   }
-  const runMtime = statSync(join(BREAKS, log)).mtime
   const text = readFileSync(join(BREAKS, log), 'utf8')
   // COUNT PATCHES BY WHAT A PATCH LINE IS NOT, never by the suite's own name.
   // The first version of this script counted `^== <suite>-`, and patches are
@@ -100,7 +119,6 @@ for (const log of logs) {
   // `ai-model-picker`'s are `mp-*`. It reported 0 for six sets that had run
   // fully, which would have read as the ledger inventing numbers. A confident
   // zero, produced by the very script written to catch confident numbers.
-  const CONTROL = /^== (syncing|BASELINE|restoring|REFUSING)/
   const patchLines = text.split('\n').filter((l) => l.startsWith('== ') && !CONTROL.test(l))
   const patches = patchLines.length
   const buildFailed = patchLines.filter((l) => /BUILD FAILED|PATCH FAILED/.test(l)).length
@@ -120,7 +138,7 @@ for (const log of logs) {
   const refused = /^== REFUSING TO BREAK-TEST/m.test(text)
   const done = /^DONE /m.test(text)
 
-  // The working tree can hold an edit the commit date does not know about.
+  // The working tree can hold an edit no commit knows about.
   let dirty = false
   try {
     dirty = execFileSync('git', ['status', '--porcelain', '--', `test/e2e/${named}.mjs`], {
@@ -131,10 +149,36 @@ for (const log of logs) {
     /* ignore */
   }
 
-  const stale = suiteMtime > runMtime || dirty
+  // EVERY sha in the file, not the first. A log that holds two runs is current
+  // only if BOTH trees are — the earlier run's numbers are still in it, and
+  // reading line one would date the whole file by whichever run came first.
+  const shas = [...text.matchAll(/^== syncing \S+ to ([0-9a-f]{7,40})/gm)].map((m) => m[1])
+  // The deps: the suite that did the measuring, and the product files that each
+  // patch NAMED IN THIS LOG edits. The patch files themselves are left out —
+  // they are re-worded constantly and `check-break-reddened.mjs` re-reads every
+  // claim against the log's own text, so a comment edit is not a re-measurement.
+  const deps = new Set([`test/e2e/${named}.mjs`])
+  for (const line of patchLines) {
+    const name = line.slice(3).split(/\s/)[0]
+    const file = join(ROOT, 'test/e2e/breaks', `${name}.py`)
+    if (existsSync(file)) for (const d of patchDeps(readFileSync(file, 'utf8'), null)) deps.add(d)
+  }
+  const moved = [...new Set(shas.flatMap((sha) => drifted(sha, [...deps])))]
+
+  // NO SHA IS NOT NO DRIFT. Logs from before `wt-break.sh` recorded what it
+  // synced to cannot be placed in the history at all, and a check that cannot
+  // run reports UNKNOWN rather than passing: 73 of these would otherwise be 73
+  // silent "fresh" rows resting on a line that was never written.
+  const verdict = refused
+    ? 'REFUSED'
+    : dirty || moved.length
+      ? 'STALE'
+      : shas.length
+        ? 'fresh'
+        : 'UNKNOWN'
   rows.push({
     suite,
-    verdict: refused ? 'REFUSED' : stale ? 'STALE' : 'fresh',
+    verdict,
     patches,
     buildFailed,
     missing,
@@ -144,16 +188,25 @@ for (const log of logs) {
       (sliceOf ? `slice of ${sliceOf}: ` : '') +
       (dirty
         ? 'suite has UNCOMMITTED edits — the run cannot be about this file'
-        : stale
-          ? `suite changed ${suiteMtime.toISOString().slice(5, 16)} AFTER the run ${runMtime
-              .toISOString()
-              .slice(5, 16)}`
-          : `run ${runMtime.toISOString().slice(5, 16)} ≥ suite ${suiteMtime.toISOString().slice(5, 16)}`),
+        : moved.length
+          ? `measured at ${shas.join(',')}, since when ${moved.length} file(s) it depended on changed: ${moved
+              .slice(0, 3)
+              .map((p) => p.replace(/^(apps|packages)\//, ''))
+              .join(' ')}${moved.length > 3 ? ' …' : ''}`
+          : shas.length
+            ? `measured at ${shas.join(',')}, nothing it depended on has changed since`
+            : 'the log records no commit — nothing can be said about which tree it measured'),
   })
 }
 
 rows.sort((a, b) => a.verdict.localeCompare(b.verdict) || a.suite.localeCompare(b.suite))
-const TAGS = { fresh: '  ok  ', STALE: ' STALE', REFUSED: 'REFUSED', 'NO SUITE FILE': '  ??  ' }
+const TAGS = {
+  fresh: '  ok  ',
+  STALE: ' STALE',
+  REFUSED: 'REFUSED',
+  UNKNOWN: 'UNKNOWN',
+  'NO SUITE FILE': '  ??  ',
+}
 for (const r of rows) {
   const bf = r.buildFailed ? `  ${r.buildFailed} BUILD/PATCH FAILED` : ''
   const ms = r.missing ? `  ${r.missing} MISSING` : ''
@@ -177,11 +230,19 @@ for (const r of refusedSets) console.error(`\n[break-freshness] ${r.suite}: the 
 for (const r of broken) console.error(`[break-freshness] ${r.suite}: ${r.buildFailed} patch(es) never built — they prove nothing about the checks they aimed at`)
 for (const r of absent) console.error(`[break-freshness] ${r.suite}: ${r.missing} patch file(s) were never found — that set opened nothing`)
 for (const r of inert) console.error(`[break-freshness] ${r.suite}: ${r.noChange} patch(es) left the tree identical — applied and inert`)
+const unknown = rows.filter((r) => r.verdict === 'UNKNOWN')
 if (stale.length) {
   console.error(
-    `\n[break-freshness] ${stale.length} break set(s) were measured against a suite that has since changed.`,
+    `\n[break-freshness] ${stale.length} break set(s) were measured against a tree that has since changed.`,
   )
   console.error('Re-run them, or the ledger is reporting numbers about files that no longer exist.')
+  console.error('   node scripts/e2e-lanes/never-run-plan.mjs --drifted > /tmp/claude-0/plan.txt')
+}
+if (unknown.length) {
+  console.error(
+    `\n[break-freshness] ${unknown.length} log(s) record no commit, so whether they are current cannot be answered.`,
+  )
+  console.error('They are counted here rather than passed over — a check that cannot run is UNKNOWN, not clean.')
 }
 /*
  * AND THE PATCHES WHOSE RUN LOG IS NOT ON THIS MACHINE AT ALL.
@@ -267,7 +328,15 @@ if (neverRan.size) {
   console.log('                  Coverage counts all of them as aimed at. Nothing here proves any ran.')
 }
 
-if (stale.length || refusedSets.length || broken.length || absent.length || inert.length) process.exit(1)
+if (
+  stale.length ||
+  unknown.length ||
+  refusedSets.length ||
+  broken.length ||
+  absent.length ||
+  inert.length
+)
+  process.exit(1)
 // A row with no suite file was never COMPARED to anything, so it cannot be
 // folded into "all N postdate their suite" — that sentence is the whole output
 // most readers see, and counting an unmeasured log inside it is how a total

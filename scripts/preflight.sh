@@ -27,7 +27,7 @@ step "migration guardrail"              node scripts/check-migration-order.mjs
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
 step "every break patch finds its line" python3 scripts/check-break-patches.py
-step "break runs postdate their suites" node scripts/check-break-freshness.mjs
+step "break runs measured this tree"    node scripts/check-break-freshness.mjs
 step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
@@ -35,6 +35,7 @@ step "no conditional check has no else" node scripts/check-suite-check-branches.
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs
+step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"
