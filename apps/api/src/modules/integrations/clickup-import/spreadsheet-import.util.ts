@@ -260,8 +260,20 @@ export const UNSUPPORTED_SOURCES: ReadonlyArray<{ key: string; label: string; re
   {
     key: 'documents',
     label: 'Document files',
+    /*
+     * THIS REASON WAS TRUE AND STOPPED BEING TRUE, which is worse than a
+     * missing one: it said "no document parser is built, so no control is
+     * drawn for it" and a parser was then built, so the sentence kept
+     * explaining an absence that had been filled. A person reading it would
+     * have gone looking for a feature that is one tab away.
+     *
+     * The row stays in THIS list because it is still not a spreadsheet preset —
+     * it writes Docs rather than task rows, which is the whole reason it needs
+     * its own tab — and the sentence now points at that tab instead of
+     * apologising for it.
+     */
     reason:
-      'Document import writes Rundesk Docs, not tasks. No document parser is built, so no control is drawn for it.',
+      'Document import writes Rundesk Docs, not task rows, so it is not a spreadsheet preset. It has its own tab above, which reads Markdown and plain text.',
   },
 ] as const
 
