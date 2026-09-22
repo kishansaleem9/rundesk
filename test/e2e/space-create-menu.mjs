@@ -55,7 +55,11 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 28
+// 29 since 22 September: one check compares this suite's list of in-space kinds
+// against `create-types.ts`, which is what a DERIVED list was briefly used for
+// — until `space-create-menu-4-spaceinspace` patched that file and the run came
+// back 29 of 28, because a derived fixture makes the length depend on the patch.
+const EXPECTED_CHECKS = 29
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -98,18 +102,28 @@ const TAG = `scm-${Date.now()}`
  * separately below, which is the distinction the checks are built on.
  */
 const CREATE_TYPES_SRC = path.resolve(REPO, 'apps/web/src/lib/create-types.ts')
-const EXPECTED_KINDS = readFileSync(CREATE_TYPES_SRC, 'utf8')
+/*
+ * DECLARED HERE, AND CHECKED AGAINST THE SOURCE — not derived from it.
+ *
+ * Deriving it was the obvious fix when `create-menu-ai`'s hand-kept twin went
+ * stale, and it was wrong for a reason the first run found:
+ * `space-create-menu-4-spaceinspace` PATCHES `create-types.ts` to make Space
+ * in-space, so a derived list gained an entry, the loop below ran a tenth
+ * iteration, and the run reported `ran 29 checks, expected 28`. A fixture read
+ * out of a file a patch edits makes the run's LENGTH depend on the product,
+ * which is the same defect as a conditional check wearing different clothes.
+ *
+ * So the list is declared, the count is fixed, and a CHECK compares it against
+ * the product's own — which is what the comment on the old hand-kept array
+ * promised ("the place that says so out loud") and could not deliver, because
+ * nothing compared the two. A tenth in-space kind reddens that check now
+ * instead of changing how many checks there are.
+ */
+const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'form', 'list', 'folder', 'project']
+const IN_SPACE_IN_SOURCE = readFileSync(CREATE_TYPES_SRC, 'utf8')
   .split('\n')
   .filter((l) => /^\s*\{\s*value:\s*'/.test(l) && /inSpace:\s*true/.test(l))
   .map((l) => l.match(/value:\s*'([a-z-]+)'/)[1])
-// A parse that came back short would let every check below pass against a list
-// of nothing.
-if (EXPECTED_KINDS.length < 8) {
-  throw new Error(
-    `only ${EXPECTED_KINDS.length} in-space creatable types could be read out of ` +
-      `${CREATE_TYPES_SRC} — the shape of that file changed and this fixture reads the wrong thing`,
-  )
-}
 
 /**
  * The frame's bottom group, under its own rule: `[12:04]` "IMPORT — kuch aur
@@ -326,6 +340,13 @@ try {
    */
   const itemLabel = async (kind) =>
     ((await page.getByTestId(`space-create-label-${kind}`).textContent()) ?? '').trim()
+  chk(
+    JSON.stringify(IN_SPACE_IN_SOURCE) === JSON.stringify(EXPECTED_KINDS),
+    `the product's own in-space kinds are the ${EXPECTED_KINDS.length} this suite knows, in its order`,
+    `create-types.ts marks ${JSON.stringify(IN_SPACE_IN_SOURCE)} as in-space where this suite expects ` +
+      `${JSON.stringify(EXPECTED_KINDS)} — one of the two has moved, and every check below this line ` +
+      'is about the list this suite carries rather than the one the product ships',
+  )
   const seen = {}
   for (const kind of EXPECTED_KINDS) {
     const text = (await itemLabel(kind).catch(() => '')) || ''
@@ -352,8 +373,13 @@ try {
    */
   const landOn = async (kind) => {
     await openMenu()
-    await page.getByTestId(`space-create-${kind}`).click()
-    await page.waitForSelector(`[data-testid="create-tab-${kind}"]`, { timeout: 15_000 })
+    // Bounded: `space-create-menu-3-defaulttab` and `-5-twolists` both leave a
+    // tab unreachable, and these two lines threw — the runs ended at 22 and 20
+    // of 28 with the checks below never asked.
+    await page.getByTestId(`space-create-${kind}`).click({ timeout: 8000 }).catch(() => {})
+    await page
+      .waitForSelector(`[data-testid="create-tab-${kind}"]`, { timeout: 15_000 })
+      .catch(() => {})
     const pressed = await page
       .locator('[data-testid^="create-tab-"][aria-pressed="true"]')
       .evaluateAll((els) => els.map((e) => (e.getAttribute('data-testid') ?? '').replace('create-tab-', '')))

@@ -66,7 +66,10 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 23
+// 24 since 22 September: one check compares this suite's list of creatable kinds
+// against `create-types.ts`, which a DERIVED list cannot do — a patch that edits
+// that file would move the expectation with the product.
+const EXPECTED_CHECKS = 24
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -90,17 +93,27 @@ const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
  * `space-create-menu-5-twolists` does.
  */
 const CREATE_TYPES_SRC = path.resolve(REPO, 'apps/web/src/lib/create-types.ts')
+/*
+ * DECLARED, AND CHECKED AGAINST THE SOURCE — the second correction in a day.
+ *
+ * The hand-kept array went stale when `form` was added and the baseline went
+ * red; deriving it from `create-types.ts` fixed that and introduced a worse
+ * problem, because that file is a file PATCHES EDIT. `form-1-not-offered`
+ * removes the `form` entry, so a derived list loses it too and the comparison
+ * below compares a patched strip against a patched expectation — a check that
+ * cannot fail. `space-create-menu` hit the other half of the same mistake and
+ * came back `ran 29 checks, expected 28`.
+ *
+ * So: declared, with a CHECK that the product's list matches. That is what the
+ * original comment promised — "the place that says so out loud" — and what a
+ * bare array could not do, because nothing compared the two.
+ */
 const EXPECTED_KINDS = [
+  'task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'form', 'list', 'folder', 'project', 'space',
+]
+const KINDS_IN_SOURCE = [
   ...readFileSync(CREATE_TYPES_SRC, 'utf8').matchAll(/^\s*\{\s*value:\s*'([a-z-]+)'/gm),
 ].map((m) => m[1])
-// A parse that came back short would make every check below pass against a
-// list of nothing.
-if (EXPECTED_KINDS.length < 8) {
-  throw new Error(
-    `only ${EXPECTED_KINDS.length} creatable types could be read out of ${CREATE_TYPES_SRC} — ` +
-      'the shape of that file changed and this fixture is reading the wrong thing',
-  )
-}
 
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
@@ -194,6 +207,14 @@ try {
     (await page.getByTestId('create-search').getAttribute('placeholder')) === 'Describe anything to create',
     'the create menu opens with the frame\'s own sentence over it',
     `the placeholder read ${JSON.stringify(await page.getByTestId('create-search').getAttribute('placeholder'))}`,
+  )
+
+  chk(
+    JSON.stringify(KINDS_IN_SOURCE) === JSON.stringify(EXPECTED_KINDS),
+    `lib/create-types.ts declares the ${EXPECTED_KINDS.length} kinds this suite knows, in its order`,
+    `create-types.ts declares ${JSON.stringify(KINDS_IN_SOURCE)} where this suite expects ` +
+      `${JSON.stringify(EXPECTED_KINDS)} — one of the two has moved, and every comparison below is ` +
+      'against the list this suite carries rather than the one the product ships',
   )
 
   const whole = await tabKinds(page)
