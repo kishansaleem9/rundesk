@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, asc, isNull, desc, inArray, isNotNull, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces, taskDocLinks, tasks } from '@rundesk/db'
@@ -9,7 +9,7 @@ import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
-import { tiptapToMarkdown, tiptapToPlainLines } from './tiptap-markdown'
+import { tiptapToMarkdown, tiptapToPlainLines, splitTitleFromMarkdown } from './tiptap-markdown'
 import { renderReportPdf } from '../reports/pdf'
 
 type TiptapNode = { type: string; content?: TiptapNode[]; text?: string; attrs?: Record<string, unknown> }
@@ -269,6 +269,46 @@ export class DocsService {
     const markdown = body.startsWith('# ') ? body : `# ${doc.title}\n\n${body}`
     const base = (doc.title || 'document').replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80) || 'document'
     return { fileName: `${base}.md`, markdown }
+  }
+
+  /**
+   * §V2-S13 frame `12:05` — Imports › **Document files**.
+   *
+   * THE INVERSE OF `exportDocMarkdown` ABOVE, deliberately and line for line.
+   * That method prepends `# <title>` when the body does not already start with
+   * an H1, so this one CONSUMES a leading H1 as the title — otherwise a doc
+   * exported and imported back would grow a duplicate heading each trip, which
+   * is the kind of drift nobody notices until the third round.
+   *
+   * With no leading H1 the file name carries the title, because that is the
+   * only other thing a plain `.md` on disk tells us about itself. `Untitled`
+   * is the last resort rather than the first: a doc named after its content is
+   * findable, and a wall of "Untitled" is not.
+   */
+  async importDocFromMarkdown(
+    workspaceId: string,
+    userId: string,
+    opts: { fileName?: string; markdown: string; spaceId?: string | null },
+  ) {
+    const raw = typeof opts.markdown === 'string' ? opts.markdown : ''
+    if (!raw.trim()) throw new BadRequestException('The file is empty, so there is nothing to import')
+
+    // The title rule lives in `tiptap-markdown.ts` beside both converters, so
+    // the unit test exercises the rule this uses rather than a copy of it.
+    const { title, content } = splitTitleFromMarkdown(raw, opts.fileName ?? '')
+
+    const [row] = await this.db
+      .insert(docs)
+      .values({
+        workspaceId,
+        spaceId: opts.spaceId ?? null,
+        title,
+        createdById: userId,
+        content: content as unknown as Record<string, unknown>,
+        plaintext: extractPlaintext(content),
+      })
+      .returning()
+    return row
   }
 
   /** Export a doc as a (line-based) PDF. Access-checked. */

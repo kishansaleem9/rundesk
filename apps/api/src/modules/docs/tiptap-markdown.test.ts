@@ -24,7 +24,7 @@
  */
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { markdownToTiptap, tiptapToMarkdown } from './tiptap-markdown'
+import { markdownToTiptap, tiptapToMarkdown, splitTitleFromMarkdown } from './tiptap-markdown'
 
 /** markdown → tiptap → markdown, with the trailing newline the exporter adds. */
 const round = (md: string) => tiptapToMarkdown(markdownToTiptap(md))
@@ -149,4 +149,81 @@ test('a whole document round trips', () => {
     '',
   ].join('\n')
   assert.equal(round(md), md)
+})
+
+/*
+ * ─── THE DOC-LEVEL ROUND TRIP ─────────────────────────────────────────────
+ *
+ * The cases above prove the two CONVERTERS agree. They cannot prove the two
+ * ENDPOINTS do, because a doc's title lives outside its content:
+ * `exportDocMarkdown` prepends `# <title>` when the body has no leading H1, so
+ * an importer that did not consume one would give the doc a duplicate heading —
+ * and every further export/import cycle would add another. The content round
+ * trip stays green throughout, because the content really is preserved. It is
+ * the DOCUMENT that drifts.
+ *
+ * These assert the title rule directly, against the same pure functions the
+ * service uses, so the property is pinned without needing a database.
+ */
+
+/** What `exportDocMarkdown` produces for a doc: `# title` then the body. */
+const exported = (title: string, content: unknown) => {
+  const body = tiptapToMarkdown(content)
+  return body.startsWith('# ') ? body : `# ${title}\n\n${body}`
+}
+
+/*
+ * THE REAL RULE, imported rather than re-stated. This block first carried a
+ * COPY of the service's title logic, which is the duplicated list: the two
+ * could drift apart and every case here would still pass while the endpoint
+ * was wrong. `splitTitleFromMarkdown` is now exported from the module the
+ * service calls, so these cases exercise the rule that actually runs.
+ */
+const imported = (fileName: string, md: string) => splitTitleFromMarkdown(md, fileName)
+
+test('a doc survives export → import with its title intact and no duplicate heading', () => {
+  const content = markdownToTiptap('Some prose.\n\n## A section\n\n- a point\n')
+  const md = exported('Release notes', content)
+  const back = imported('release-notes.md', md)
+  assert.equal(back.title, 'Release notes')
+  assert.equal(
+    tiptapToMarkdown(back.content),
+    tiptapToMarkdown(content),
+    'the body came back changed — most likely the title heading was kept as content',
+  )
+})
+
+test('and survives a SECOND cycle, which is where a duplicate heading shows', () => {
+  const content = markdownToTiptap('Some prose.\n')
+  const once = imported('x.md', exported('Title', content))
+  const twice = imported('x.md', exported(once.title, once.content))
+  assert.equal(twice.title, 'Title')
+  assert.equal(tiptapToMarkdown(twice.content), tiptapToMarkdown(content))
+})
+
+test('a file with no leading H1 takes its title from the file name', () => {
+  const back = imported('Meeting notes.md', 'Just prose, no heading.\n')
+  assert.equal(back.title, 'Meeting notes')
+})
+
+test('with no H1 and no file name the title is Untitled, not empty', () => {
+  // A doc whose title is '' is unfindable and renders as a blank row. Untitled
+  // is the LAST resort rather than the first, which is why the two cases above
+  // exist — but it has to be there.
+  assert.equal(imported('', 'Just prose.\n').title, 'Untitled')
+})
+
+test('a leading H2 is not promoted to the title', () => {
+  // Only an H1 is the title, because only an H1 is what export writes. A rule
+  // of "the first heading" would rename a doc whose first section is an H2.
+  const back = imported('quarterly.md', '## Summary\n\nBody.\n')
+  assert.equal(back.title, 'quarterly')
+  assert.match(tiptapToMarkdown(back.content), /## Summary/)
+})
+
+test('a heading further down is NOT taken as the title', () => {
+  // Taking it would silently reorder the reader's own headings.
+  const back = imported('notes.md', 'Opening line.\n\n# Later heading\n')
+  assert.equal(back.title, 'notes')
+  assert.match(tiptapToMarkdown(back.content), /# Later heading/)
 })

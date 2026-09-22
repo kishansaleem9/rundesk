@@ -519,3 +519,37 @@ export function markdownToTiptap(md: string): { type: 'doc'; content: Node[] } {
 
   return { type: 'doc', content }
 }
+
+/**
+ * Split an imported file into the doc's TITLE and its remaining content.
+ *
+ * Lives here, beside both converters, because it is the half of the round trip
+ * that neither of them covers: a doc's title is stored outside its content, so
+ * `exportDocMarkdown` prepends `# <title>` when the body has no leading H1 and
+ * this must consume one. An importer that did not would give the doc a
+ * duplicate heading, and every further export/import cycle would add another —
+ * while the CONTENT round trip stayed green throughout, because the content
+ * really is preserved. It is the document that drifts.
+ *
+ * EXPORTED RATHER THAN INLINED IN THE SERVICE so the test exercises the rule
+ * the service actually uses. A test that re-implements the rule it is checking
+ * is the duplicated list: the two copies can disagree and the test still
+ * passes. This was written the wrong way round first.
+ *
+ * Only a LEADING h1 counts. A `# ` further down is a section of the document,
+ * and promoting it would silently reorder the reader's own headings.
+ */
+export function splitTitleFromMarkdown(
+  md: string,
+  fileName = '',
+): { title: string; content: { type: 'doc'; content: Node[] } } {
+  const content = markdownToTiptap(md)
+  let title = ''
+  const first = content.content[0]
+  if (first?.type === 'heading' && Number(first.attrs?.level) === 1) {
+    content.content.shift()
+    title = (first.content ?? []).map((n) => n.text ?? '').join('').trim()
+  }
+  if (!title) title = String(fileName ?? '').replace(/\.(md|markdown|txt)$/i, '').trim()
+  return { title: title || 'Untitled', content }
+}

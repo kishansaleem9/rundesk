@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Res, UseGuards } from '@nestjs/common'
+import { Controller, Get, Post, Patch, Delete, Param, Body, Query, Res, UseGuards, BadRequestException } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -147,6 +147,36 @@ export class DocsController {
     res.header('Content-Type', 'text/markdown; charset=utf-8')
     res.header('Content-Disposition', `attachment; filename="${fileName}"`)
     res.send(markdown)
+  }
+
+  /**
+   * §V2-S13 frame `12:05` — Imports › **Document files**.
+   *
+   * The file arrives as TEXT in the body rather than as multipart, because the
+   * formats this accepts are text by definition and the browser has already
+   * read them: `attachment-text.ts` settled which formats those are for the
+   * knowledge indexer — `text/*`, and explicitly NOT PDF, Word, Excel or
+   * PowerPoint, which "would require a heavy parser dependency". Accepting a
+   * `.docx` here and producing a doc full of XML would be worse than refusing
+   * it, so the extension is checked and the refusal says which formats work.
+   */
+  @Post('workspaces/:workspaceId/docs/import')
+  importDoc(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { fileName?: string; markdown: string; spaceId?: string | null },
+  ) {
+    const name = body?.fileName ?? ''
+    if (name && !/\.(md|markdown|txt)$/i.test(name)) {
+      throw new BadRequestException(
+        `Rundesk imports Markdown and plain text (.md, .markdown, .txt). "${name}" is not one of those.`,
+      )
+    }
+    return this.docs.importDocFromMarkdown(workspaceId, user.id, {
+      fileName: name,
+      markdown: body?.markdown ?? '',
+      spaceId: body?.spaceId ?? null,
+    })
   }
 
   @Patch('docs/:docId')
