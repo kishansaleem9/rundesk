@@ -225,15 +225,32 @@ try {
    * a check that only asserted Google exists would pass on a panel that had
    * quietly grown a third — or lost Outlook.
    */
-  const providerIds = await page
+  /*
+   * OFFERED MEANS PRESSABLE, and this counted anything in the DOM.
+   * `po-3-one-provider` hides the Outlook button with a `hidden` attribute —
+   * the element stays attached, `evaluateAll` still saw it, and the patch ran
+   * GREEN against the sentence that counts the providers. A button nobody can
+   * press is not one of the two the frame offers.
+   *
+   * The whole list is kept so the failure can say WHICH of the two it is:
+   * absent and hidden are different mistakes, and a detail reading
+   * `[{"id":"…outlook","shown":false}]` names the second one exactly.
+   */
+  const providerRows = await page
     .locator('[data-testid="planner-onboarding"] [data-testid^="planner-onboarding-connect-"]')
-    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid')))
+    .evaluateAll((els) =>
+      els.map((el) => ({
+        id: el.getAttribute('data-testid'),
+        shown: el.checkVisibility ? el.checkVisibility() : el.offsetParent !== null,
+      })),
+    )
+  const providerIds = providerRows.filter((r) => r.shown).map((r) => r.id)
   chk(
     JSON.stringify(providerIds) ===
       JSON.stringify(['planner-onboarding-connect-gcal', 'planner-onboarding-connect-outlook']),
     'over "Get started with" and exactly the frame\'s two providers, in its order',
-    `the panel offered ${JSON.stringify(providerIds)} — frame \`12:40\` has Google Calendar ` +
-      'then Microsoft Outlook and nothing else',
+    `the panel offered ${JSON.stringify(providerRows)} — frame \`12:40\` has Google Calendar ` +
+      'then Microsoft Outlook and nothing else, and a row with shown:false is there but unpressable',
   )
 
   // ───────────────────────────────────────────────────────────────────────────

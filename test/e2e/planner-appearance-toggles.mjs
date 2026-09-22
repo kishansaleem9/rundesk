@@ -244,12 +244,27 @@ try {
   await page.goto(`${BASE}/app/${WS}/calendar`, { waitUntil: 'networkidle' })
   await page.waitForSelector('[data-testid="planner-page"]', { timeout: 20_000 })
 
+  /*
+   * EVERY CONTROL THIS SUITE PRESSES IS ONE OF ITS OWN PATCHES' TARGETS, so an
+   * unqualified `.click()` is thirty seconds and a run that ends where it stood.
+   * `planner-appearance-toggles-1-weeknumber-reader` stopped this suite at
+   * 2 of 20 — one check reported, eighteen never asked.
+   *
+   * Bounded, and it answers a boolean: a caller that ignores it goes on to find
+   * the setting unchanged, which is the honest failure.
+   */
+  const press = (testId) =>
+    page
+      .locator(`[data-testid="${testId}"]`)
+      .click({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false)
   const openSettings = async (nav) => {
     if ((await page.locator('[data-testid="planner-settings-dialog"]').count()) === 0) {
-      await page.locator('[data-testid="planner-settings"]').click()
-      await page.waitForSelector('[data-testid="planner-settings-dialog"]', { timeout: 10_000 })
+      await press('planner-settings')
+      await page.waitForSelector('[data-testid="planner-settings-dialog"]', { timeout: 10_000 }).catch(() => {})
     }
-    await page.locator(`[data-testid="planner-settings-nav-${nav}"]`).click()
+    await press(`planner-settings-nav-${nav}`)
   }
   const closeSettings = async () => {
     await page.keyboard.press('Escape')
@@ -270,9 +285,11 @@ try {
   )
 
   await openSettings('appearance')
-  await page.locator('[data-testid="planner-show-week-numbers"]').click()
+  await press('planner-show-week-numbers')
   const numberArrived = await waitUntil(async () => (await weekNumbers().count()) === 1, { timeoutMs: 8000 })
-  const shown = await weekNumbers().first().getAttribute('data-week')
+  // Read only if it arrived: with the reader gone `numberArrived` is already
+  // false, and this `getAttribute` then waited out the default timeout and threw.
+  const shown = numberArrived ? await weekNumbers().first().getAttribute('data-week').catch(() => null) : null
   const expectedWeek = isoWeek(now)
   chk(
     numberArrived && Number(shown) === expectedWeek,
@@ -287,19 +304,19 @@ try {
    * is a different claim, and over a Month grid it is simply wrong.
    */
   await closeSettings()
-  await page.getByTestId('planner-view-day').click()
+  await press('planner-view-day')
   chk(
     await waitUntil(async () => (await weekNumbers().count()) === 0, { timeoutMs: 8000 }),
     'and Day view draws none of it, as the frame’s own helper text requires',
     `Day view still showed ${await weekNumbers().count()} week numbers`,
   )
-  await page.getByTestId('planner-view-month').click()
+  await press('planner-view-month')
   chk(
     await waitUntil(async () => (await weekNumbers().count()) === 0, { timeoutMs: 8000 }),
     'nor does Month, which spans five of them',
     `Month view showed ${await weekNumbers().count()} week numbers`,
   )
-  await page.getByTestId('planner-view-week').click()
+  await press('planner-view-week')
   await waitUntil(async () => (await weekNumbers().count()) === 1, { timeoutMs: 8000 })
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -344,7 +361,7 @@ try {
   )
 
   await openSettings('appearance')
-  await page.locator('[data-testid="planner-darken-non-working"]').click()
+  await press('planner-darken-non-working')
   await closeSettings()
   await scrollGridHome(page)
 
@@ -407,7 +424,7 @@ try {
 
   const realBefore = await realBlocks().count()
   await openSettings('timeBlocking')
-  await page.locator('[data-testid="planner-show-recurring"]').click()
+  await press('planner-show-recurring')
   const projectionsGone = await waitUntil(async () => (await projected().count()) === 0, { timeoutMs: 8000 })
   chk(
     projectionsGone && (await realBlocks().count()) === realBefore,
@@ -477,7 +494,7 @@ try {
   )
 
   await openSettings('appearance')
-  await page.locator('[data-testid="planner-save-personal-quickly"]').click()
+  await press('planner-save-personal-quickly')
   await closeSettings()
   await scrollGridHome(page)
 
@@ -494,7 +511,7 @@ try {
       `posts since: ${posted.length - beforeOff} (a confirmation that posts anyway is decoration)`,
   )
 
-  await page.locator('[data-testid="planner-event-save"]').click()
+  await press('planner-event-save')
   const confirmedSave = await waitUntil(() => posted.length === beforeOff + 1, { timeoutMs: 8000 })
   chk(
     confirmedSave && posted.at(-1)?.title === `School run ${TAG}`,
@@ -549,7 +566,7 @@ try {
   const defaultGap = await hourGap()
 
   await openSettings('appearance')
-  await page.locator('[data-testid="planner-grid-size-large"]').click()
+  await press('planner-grid-size-large')
   await closeSettings()
   const grew = await waitUntil(async () => (await hourGap()) > defaultGap, { timeoutMs: 8000 })
   const largeGap = await hourGap()
