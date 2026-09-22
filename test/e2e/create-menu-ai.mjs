@@ -120,6 +120,25 @@ const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
 
+/*
+ * A GATE THAT REPORTS, AND A READ THAT REPORTS, because this suite's three
+ * section openings were both.
+ *
+ * `cma-16-no-search-box` renames the search box's testid — which is precisely
+ * the check the patch claims — and `page.waitForSelector` threw after twenty
+ * seconds before a single check had run. Four of 24 checks reported. The read
+ * underneath it would have thrown for another thirty on its own.
+ *
+ * `appears` answers false where it used to throw, and `attrOf` answers null, so
+ * the check below each gate reddens with the placeholder it actually found.
+ */
+const appears = (selector, timeoutMs = 20_000) =>
+  page
+    .waitForSelector(selector, { timeout: timeoutMs })
+    .then(() => true)
+    .catch(() => false)
+const attrOf = (loc, name) => loc.getAttribute(name, { timeout: 3_000 }).catch(() => null)
+
 const TAG = `e2e-cma-${Date.now()}`
 const SPACE_NAME = `AI ${TAG}`
 const LIST_NAME = `ailist-${TAG}`
@@ -200,13 +219,14 @@ try {
 
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
-  await page.waitForSelector('[data-testid="create-search"]', { timeout: 20_000 })
+  await appears('[data-testid="create-search"]')
 
   console.log('\n▶ the box frame `06:40` draws, and what it says')
+  const placeholder = await attrOf(page.getByTestId('create-search'), 'placeholder')
   chk(
-    (await page.getByTestId('create-search').getAttribute('placeholder')) === 'Describe anything to create',
+    placeholder === 'Describe anything to create',
     'the create menu opens with the frame\'s own sentence over it',
-    `the placeholder read ${JSON.stringify(await page.getByTestId('create-search').getAttribute('placeholder'))}`,
+    `the placeholder read ${JSON.stringify(placeholder)}`,
   )
 
   chk(
@@ -333,7 +353,7 @@ try {
   )
 
   await page.getByTestId('create-ai-open').click()
-  await page.waitForSelector('[data-testid="create-ai-confirm"]', { timeout: 20_000 })
+  await appears('[data-testid="create-ai-confirm"]')
   chk(
     (await readText(page.getByTestId('create-ai-step-0'))).includes('Set that up') &&
       (await page.locator('[data-testid="create-ai-step-1"]').count()) === 0,
@@ -421,13 +441,13 @@ try {
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('quick-create-open').click({ timeout: 25_000 })
   await page.getByTestId('create-tab-task').click({ timeout: 20_000 })
-  await page.waitForSelector('[data-testid="quick-create-description"]', { timeout: 20_000 })
+  await appears('[data-testid="quick-create-description"]')
 
+  const descPlaceholder = await attrOf(page.getByTestId('quick-create-description'), 'placeholder')
   chk(
-    (await page.getByTestId('quick-create-description').getAttribute('placeholder')) ===
-      'Add description, or write with ⚡AI',
+    descPlaceholder === 'Add description, or write with ⚡AI',
     'the description box carries the frame\'s placeholder',
-    `it read ${JSON.stringify(await page.getByTestId('quick-create-description').getAttribute('placeholder'))}`,
+    `it read ${JSON.stringify(descPlaceholder)}`,
   )
   chk(
     await page.getByTestId('quick-create-describe-ai').isDisabled(),
