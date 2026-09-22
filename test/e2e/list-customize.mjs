@@ -198,7 +198,11 @@ try {
    * matches several and Playwright refuses in strict mode, correctly.
    */
   const openDetails = async (details, settleMs = 400) => {
-    if (!(await details.evaluate((el) => el.open))) await details.locator('> summary').click()
+    // Bounded: a `<details>` a patch has removed is a failing check below, not
+    // thirty seconds and a dead run.
+    if (!(await details.evaluate((el) => el.open).catch(() => true))) {
+      await details.locator('> summary').click({ timeout: 8000 }).catch(() => {})
+    }
     await page.waitForTimeout(settleMs)
   }
   const panel = () => page.getByTestId('list-customize')
@@ -207,11 +211,30 @@ try {
     await panel().evaluate((el) => { el.open = false })
     await page.waitForTimeout(250)
   }
+  /*
+   * BOUNDED, AND IT REPORTS RATHER THAN THROWS.
+   *
+   * Every switch this suite is about is a switch one of its patches removes, so
+   * an unqualified click here is thirty seconds and an exception that ends the
+   * run. Four patches did exactly that — `list-trio-1-no-trio` reported
+   * `3 passed, 4 failed` with `ran 6 checks, expected exactly 37`, thirty-one
+   * checks never reported under a headline about the harness.
+   *
+   * Returning a boolean rather than throwing means a caller that ignores it
+   * simply goes on to find the setting unchanged, which is the honest failure:
+   * the check that reads the setting reports its own sentence and the run
+   * reaches its own totals.
+   */
   const flip = async (testId) => {
     await openPanel()
-    await page.getByTestId(testId).click()
+    const clicked = await page
+      .getByTestId(testId)
+      .click({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false)
     await page.waitForTimeout(500)
     await closePanel()
+    return clicked
   }
 
   const card = (id) => page.locator(`[data-testid="board-task-card"][data-task-id="${id}"]`)
@@ -224,7 +247,7 @@ try {
    * that only the fields land in it.
    */
   const fieldsOf = (id) => card(id).locator('[data-testid^="board-card-field-"]')
-  const heightOf = async (id) => (await card(id).boundingBox())?.height ?? 0
+  const heightOf = async (id) => (await card(id).boundingBox().catch(() => null))?.height ?? 0
   const lane = (key) => page.locator(`[data-testid="board-column"][data-status="${key}"]`)
 
   await openBoard()
@@ -311,7 +334,8 @@ try {
    * where the panel writes into the chip's state and never reads it back.
    */
   console.log('\n▶ `11:00` + `11:41` — the Closed switch and the Closed chip are one setting')
-  const chipActive = () => page.getByTestId('list-toggle-closed').getAttribute('data-active')
+  const chipActive = () =>
+    page.getByTestId('list-toggle-closed').getAttribute('data-active').catch(() => null)
   /*
    * AN EMPTY CLOSED GROUP IS NOT DRAWN AT ALL, and the first version of this
    * check did not know that. `GroupedListView` filters its groups with
@@ -453,9 +477,11 @@ try {
   const flatHeight = await heightOf(fullId)
   await flip('list-board-stack-fields')
   chk(
-    await meta(fullId).getAttribute('data-stacked') === 'true',
+    (await meta(fullId).getAttribute('data-stacked').catch(() => null)) === 'true',
     'switching it on reaches the card’s field block',
-    `the card’s meta block reported data-stacked=${JSON.stringify(await meta(fullId).getAttribute('data-stacked'))}`,
+    `the card’s meta block reported data-stacked=${JSON.stringify(
+      await meta(fullId).getAttribute('data-stacked').catch(() => null),
+    )}`,
   )
   const stackedTops = await fieldsOf(fullId).evaluateAll((els) =>
     els.map((e) => Math.round(e.getBoundingClientRect().top)),
@@ -556,7 +582,7 @@ try {
    * never having been drawn.
    */
   const openBodyHeight =
-    (await lane(emptyLane).getByTestId('board-column-body').boundingBox())?.height ?? 0
+    (await lane(emptyLane).getByTestId('board-column-body').boundingBox().catch(() => null))?.height ?? 0
   await flip('list-board-collapse-empty')
   chk(
     await lane(emptyLane).getAttribute('data-collapsed') === 'true',
