@@ -16,11 +16,18 @@
 # and fourteen chances to forget." Deleting the clause is taking that decision
 # back and handing it to fourteen call sites, none of which make it.
 #
-# ONE CHECK IN THIS SUITE, and it is the check written for exactly this. The
-# creation still works, the guard still resolves, tasks and search still find
-# the list, and the sidebar tree — which reads a different endpoint — still
-# hides it. Only the endpoint that answers "what projects are in this space"
-# starts naming it.
+# IT REDDENS THREE, NOT THE ONE PREDICTED, AND ALL THREE ARE HONEST. The
+# container is counted among the visible projects, it is found by identity in
+# that listing, and the sidebar tree names it too — the tree reads
+# `space-tree`, which has its own `isDefaultContainer = false` clause, but the
+# TREE TEXT check greps for a top-level line reading "Lists", and the leaked
+# project now appears in the project listing the tree also consults. Three
+# surfaces, one filter, which is exactly what the comment on that filter
+# claims: "all fourteen at once".
+#
+# The prediction was too narrow because I counted the endpoint and not its
+# readers. Recorded, because a prediction that is too low is the one that hides
+# reasoning nobody did.
 #
 # Reddens: list-under-space: "and the container it really went into is offered to nobody"
 import io

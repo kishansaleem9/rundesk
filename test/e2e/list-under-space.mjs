@@ -31,7 +31,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran": a selector matching nothing reports a clean sweep. */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 13
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -85,6 +85,35 @@ try {
   })
   const spaceId = space.data?.id
   if (!spaceId) throw new Error(`could not create a space: ${space.status} ${JSON.stringify(space.error)}`)
+  /*
+   * A list in an ORDINARY project in the same space, so "belongs to the space"
+   * has something it must NOT include.
+   *
+   * `lus-3-the-space-listing-reads-every-project` makes `getListsBySpace`
+   * return everything under the space and ran GREEN, because the check below
+   * asked only whether the space-level list was among the rows — which it is,
+   * in a listing that returns everything. A check that names only what SHOULD
+   * be there cannot see a filter that has stopped filtering; the absence is
+   * the claim. Fourth instance of that shape in this audit.
+   *
+   * STAGED BEFORE `projectsBefore` IS READ, on purpose. This project is one
+   * anybody can see, so creating it after that read would make the
+   * "making one did not add a Project anybody can see" check below fail
+   * against a correct build — a fixture breaking a check three screens away,
+   * which is the trap this document already records twice.
+   */
+  const ordinaryProject = await A('/projects', {
+    method: 'POST', body: { spaceId, name: `Ordinary project ${stamp}` },
+  })
+  const projectList = ordinaryProject.data?.id
+    ? await A('/lists', { method: 'POST', body: { projectId: ordinaryProject.data.id, name: `In a project ${stamp}` } })
+    : { data: null }
+  chk(
+    !!projectList.data?.id,
+    'a list can also be made the ordinary way, inside a Project',
+    `could not stage a project-level list: project ${ordinaryProject.status}, list ${projectList.status}`,
+  )
+
   const projectsBefore = (await A(`/projects/space/${spaceId}`)).data ?? []
 
   console.log('\n▶ §G15-10 — a List that lives in a Space')
@@ -106,6 +135,12 @@ try {
     spaceLists.some((l) => l.id === listId),
     'and the space can be asked for the lists that belong to it',
     `GET /lists/space returned ${spaceLists.length} rows, none of them the new one`,
+  )
+  chk(
+    !!projectList.data?.id && !spaceLists.some((l) => l.id === projectList.data.id),
+    'and it answers about the space DIRECTLY — a list inside a Project is not in it',
+    `GET /lists/space returned ${JSON.stringify(spaceLists.map((l) => l.name))}, which ` +
+      'includes a list that lives in a Project — the two levels have collapsed into one bag',
   )
 
   // ── The container stays invisible ─────────────────────────────────────────
