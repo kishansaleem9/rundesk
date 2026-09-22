@@ -264,7 +264,11 @@ try {
   )
 
   console.log('\n▶ the X removes the row it sits on, and only that one')
-  await page.getByTestId('quick-create-attachremove-0').click()
+  // `aoc-1-filelist-read-late` stages the files somewhere with no Attachments
+  // section — which the check above reports — so the X that sits on a row of
+  // that section is not there, and this press ended the run at 6 of 14
+  // (ledger §10).
+  await page.getByTestId('quick-create-attachremove-0').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const now = await rowNames(page)
@@ -297,7 +301,7 @@ try {
   await page.getByTestId('quick-create-project').selectOption(PROJECT)
   await page.getByTestId('quick-create-list').selectOption(LIST)
   await page.getByTestId('quick-create-task-title').fill(TITLE)
-  await page.getByTestId('quick-create-submit').click()
+  await page.getByTestId('quick-create-submit').click({ timeout: 8000 }).catch(() => {})
 
   chk(
     await waitUntil(() => wire.filter((w) => w.kind === 'presign').length === 2, { timeoutMs: 25_000 }),
