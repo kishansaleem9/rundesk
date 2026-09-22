@@ -216,6 +216,14 @@ jobs:
       - name: No new suite gets a conditional check with no else
         run: node scripts/check-suite-check-branches.mjs
 
+      # And that THAT rule can fail at all. It gates, its steady-state answer is
+      # zero, and until check-branches-cases.mjs it had nothing able to tell a
+      # working rule from a broken one — the position section-enders was in, and
+      # the one three mutation harnesses turned out to be in even after they had
+      # one. 13 cases over fixture suites, 6 of 6 mutations redden one.
+      - name: The conditional-check rule can fail, and each case bites
+        run: node scripts/check-branches-cases.mjs --mutate
+
       # And the module those suites were rewritten onto. It is load-bearing in
       # eleven of them, and within an hour of being written it had a hole of
       # exactly the shape it exists to prevent: `step` past the end of its
@@ -223,7 +231,7 @@ jobs:
       # undefined` and counted towards the total. Found by calling `step` three
       # times on a chain of two; invisible by reading.
       - name: The chain helper holds its contract
-        run: node scripts/check-chain-helper.mjs
+        run: node scripts/check-chain-helper.mjs --mutate
 
       # And the matcher that decides whether a claim counts as verified, for 798
       # patches across two checkers. Every one of its rules is a LOOSENING that

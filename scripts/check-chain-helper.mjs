@@ -27,7 +27,19 @@
  *      uncounted skip is the short run the module exists to prevent;
  *   5. a label override replaces the sentence at a valid index.
  */
-import { makeChain } from '../test/e2e/lib/chain.mjs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { proveMutationsBite } from './lib/mutate.mjs'
+
+/*
+ * DYNAMIC, so `--mutate` can aim these cases at a broken copy. Every suite that
+ * uses a chain depends on this counting exactly right: a chain that quietly
+ * stops counting is the short run the whole module exists to prevent.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SUBJECT = process.env.CHAIN_LIB ?? '../test/e2e/lib/chain.mjs'
+const { makeChain } = await import(SUBJECT)
 
 let failed = 0
 let ran = 0
@@ -117,6 +129,25 @@ throws(
   is(a.out.map((r) => r[0]), [true, 'skip'], 'with one, the remainder is SKIPPED not failed')
   is(a.out[1][2], 'no soundcard', 'and carries the reason')
 }
+{
+  /*
+   * MORE THAN ONE LEFT, because every case above left exactly one and so
+   * covered nothing about the LOOP. `--mutate` found it: making `skipRest`
+   * advance past the end after a single skip — recording one of three — left
+   * every case green. A counted skip that counts one of three is the short run
+   * this module exists to prevent, wearing the fix.
+   */
+  const a = rec()
+  const c = makeChain(a.check, a.skip)('one', 'two', 'three')
+  c.step(true)
+  c.skipRest('no soundcard')
+  is(
+    a.out.map((r) => r[0]),
+    [true, 'skip', 'skip'],
+    'and with TWO left it skips both — the remainder is every remaining label, not the next one',
+  )
+  is(a.out.map((r) => r[1]), ['one', 'two', 'three'], 'each named by its own sentence')
+}
 
 console.log('\n4. a label override replaces the sentence at a valid index')
 {
@@ -142,6 +173,35 @@ console.log('\n4. a label override replaces the sentence at a valid index')
  * `0 failed` for checks it never reached.
  */
 let short = false
+/*
+ * AND THAT EACH CASE BITES. Every mutation here is a way a chain could stop
+ * counting — which is the failure this module was written for, and the one a
+ * suite's `EXPECTED_CHECKS` would otherwise catch hours later in a break run.
+ */
+if (process.argv.includes('--mutate')) {
+  failed += proveMutationsBite({
+    subject: join(HERE, '../test/e2e/lib/chain.mjs'),
+    caseFile: fileURLToPath(import.meta.url),
+    envVar: 'CHAIN_LIB',
+    label: 'the chain helper',
+    alive: (mutant) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(mutant)})`], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      return { ok: r.status === 0, why: (r.stderr ?? '').trim() }
+    },
+    mutations: [
+      ['a step past the end reports `undefined` again instead of throwing', 'if (at >= labels.length) {', 'if (false) {'],
+      ['an overriding label ADDS an index rather than replacing one', 'const l = label ?? labels[at]\n        at += 1', 'const l = label ?? labels[at]\n        if (!label) at += 1'],
+      ['`rest` stops reporting the checks that never ran', 'while (at < labels.length) {\n          check(false, labels[at], why)', 'while (false) {\n          check(false, labels[at], why)'],
+      ['`rest` reports the remainder as PASSING', 'check(false, labels[at], why)', 'check(true, labels[at], why)'],
+      ['`skipRest` runs with no skip function, so the skips go uncounted', 'if (!skip) {', 'if (false) {'],
+      ['`skipRest` stops advancing, so it never terminates or never counts', 'skip(labels[at], why)\n          at += 1', 'skip(labels[at], why)\n          at += labels.length + 1'],
+    ],
+  })
+}
+
 const MIN_ASSERTIONS = 10
 if (ran < MIN_ASSERTIONS) {
   console.error(

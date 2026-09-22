@@ -54,13 +54,32 @@
  * five storage skips is what let it stop keeping a floor and compare exactly.
  * A skip reachable by a PRODUCT regression is a check that cannot fail.
  */
+/*
+ * `process.exitCode`, NOT `process.exit()`. Writing to a PIPE is asynchronous,
+ * and `process.exit` discards whatever has not been flushed — eleven checkers
+ * in this tree were found truncating their own output that way, one of them
+ * losing 8,263 bytes and 641 of 809 lines while exiting 0. A checker whose
+ * explanation is cut off is a checker nobody can act on.
+ */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
-const SUITES = join(ROOT, 'test/e2e')
+/*
+ * `SUITE_DIR` EXISTS SO THIS RULE CAN BE TESTED AT ALL, and nothing in the
+ * audit reads it but `check-branches-cases.mjs`. The same seam
+ * `check-suite-section-enders.mjs` carries, for the same reason: this file's
+ * steady-state answer is zero, and "0 failed is not it ran". With the floor
+ * below satisfied by the real directory and no fixture able to reach it, a
+ * regression in the brace matching or in the `else` test would be invisible.
+ */
+const SUITES = process.env.SUITE_DIR ?? join(ROOT, 'test/e2e')
 const CHECK_CALL = /\b(chk|check)\s*\(/
+
+// Set by every refusal below. The file used to `process.exit(1)` at each of
+// them; with that gone, the final line must not clobber the code they set.
+let fatal = false
 
 /**
  * Walk from the `(` of an `if` to the block's closing `}`.
@@ -107,7 +126,10 @@ function ifBlock(src, at) {
  * is not. The floor is a floor rather than an equality because suites are still
  * being added.
  */
-const MIN_SUITES = 100
+// A fixture directory holds a handful of files on purpose, so the denominator
+// floor applies to the REAL scan only. `check-branches-cases.mjs` asserts that
+// the floor still fires when it should.
+const MIN_SUITES = Number(process.env.BRANCHES_MIN_SUITES ?? (process.env.SUITE_DIR ? 1 : 100))
 const suiteList = readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()
 if (suiteList.length < MIN_SUITES) {
   console.error(
@@ -116,7 +138,8 @@ if (suiteList.length < MIN_SUITES) {
       'passes — the zero has to have a\ndenominator. Point this at the suites rather than lowering ' +
       'the floor to meet an empty scan.',
   )
-  process.exit(1)
+  process.exitCode = 1
+  fatal = true
 }
 
 const rows = []
@@ -221,7 +244,8 @@ if (noCatch.length) {
       'that says nothing about a patch at all:',
   )
   for (const n of noCatch) console.error(`    ${n}`)
-  process.exit(1)
+  process.exitCode = 1
+  fatal = true
 }
 
 /*
@@ -275,18 +299,28 @@ if (noGuard.length) {
       '  what makes that a reported failure instead. Exact, not a range: a skip that should count\n' +
       '  towards the total belongs in the total (see `skipRest`), not in a loosened comparison.',
   )
-  process.exit(1)
+  process.exitCode = 1
+  fatal = true
 }
 
-const BASELINE = 0
+/*
+ * `BRANCHES_MAX` is set by `check-branches-cases.mjs` and by nothing else, the
+ * same seam `SUITE_DIR` is. Without it a fixture cannot exercise the ratchet
+ * at all: every fixture with a finding is above a baseline of 0, so "at the
+ * ratchet" and "above it" would be the same case.
+ */
+const BASELINE = process.env.BRANCHES_MAX ? Number(process.env.BRANCHES_MAX) : 0
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
   console.error('  A conditional check makes the run length conditional, and EXPECTED_CHECKS is')
   console.error('  compared with !==. Give the `if` an `else` that fails the same checks with the')
   console.error('  reason, rather than raising this number.')
-  process.exit(1)
+  process.exitCode = 1
+  fatal = true
 }
 if (total < BASELINE) {
   console.log(`\n[check-branches] better — lower the baseline in this file to ${total}`)
 }
-process.exitCode = 0
+// Never an unconditional 0: four refusals above set the code, and this line
+// used to be reached only because each of them called `process.exit`.
+process.exitCode = fatal ? 1 : 0
