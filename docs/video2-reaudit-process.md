@@ -804,6 +804,27 @@ as the same defects one level up.
   to start at the assertion and walk outwards, not start at the feature and
   hope to meet it.
 
+  **AND THE FIXTURE CAN BE A COMPONENT'S LIFECYCLE.** The sixth instance cost
+  two attempts at one property. `planner-priorities` claims the Planner rail
+  and the person panel share one React Query key. The first check called the
+  endpoint directly — nowhere near a cache. The second really did open the
+  panel through the app after writing in the rail, and the patch that gives
+  the panel its own key **still ran green**: the panel MOUNTS when it opens,
+  which is after the write, and a `useQuery` whose key holds no data fetches on
+  mount. With React Query's default `staleTime: 0`, even a populated key
+  refetches on remount.
+
+  So there was no moment at which that screen could show a stale panel. **A
+  cache-staleness check needs the reader to be mounted BEFORE the write and
+  still mounted after it** — and a modal that opens over the writer can never
+  be. The property was not observable from a browser at all; it went to a unit
+  test, and the patch was re-aimed there and verified by running it.
+
+  The rule: before writing a check about stale state, name the moment the
+  reader holds the stale value. If that moment does not exist, the check is a
+  sentence about a mechanism rather than a test of one — and it will be green
+  for as long as nobody asks.
+
   **AND WALKING OUTWARDS MEANS THE FIXTURE TOO, NOT ONLY THE SELECTOR.** The
   fifth instance was `no-dead-ends-1`, where I did read the assertion —
   `escape.locator('a[href="/app"]').count() > 0` — and then made the link
