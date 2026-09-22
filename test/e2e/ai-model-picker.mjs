@@ -470,8 +470,19 @@ try {
     'with the Preferred badge on that row and on no other',
     `${await page2.locator('[data-testid^="ai-model-preferred-badge-"]').count()} rows claimed to be preferred`,
   )
+  /*
+   * This read led the condition, so nothing stood in front of it to
+   * short-circuit: a missing button spent the full default timeout and threw,
+   * taking the rest of the run with it. Bounded and caught, absence arrives as
+   * null — and a null must FAIL this check, not be compared, so the test is
+   * for `=== true` rather than for truthiness.
+   */
+  const setPreferredDisabled = await page2
+    .getByTestId('ai-model-set-preferred')
+    .isDisabled({ timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page2.getByTestId('ai-model-set-preferred').isDisabled(),
+    setPreferredDisabled === true,
     'and "Set as preferred" is spent, because it already is',
     'the button offers to set a preference that is already set',
   )

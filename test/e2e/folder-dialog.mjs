@@ -127,11 +127,37 @@ try {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
   page = await ctx.newPage()
 
+  /*
+   * THE CREATE IS RECORDED FROM THE RESPONSE, THE PATCH FROM THE REQUEST, AND
+   * THE DIFFERENCE IS A REFUSAL THIS SUITE CAUSED.
+   *
+   * `folderPosts` used to be filled on `page.on('request')`, so the check below
+   * asserted that a POST LEFT THE BROWSER and nothing about whether the server
+   * took it. A create that leaves and fails passed it — and the only thing that
+   * ever noticed was a read forty lines down, which then reported "the public
+   * folder is not in this space at all" and refused a set of sixteen. The
+   * request standing as evidence for itself is the facade's mirror.
+   *
+   * So creates are recorded on `response`, with the status the server actually
+   * answered. `page.on('response')` fires after the exchange completes, which is
+   * also what the `waitUntil` below now waits for — a stronger wait than
+   * "a request was dispatched".
+   *
+   * The PATCHes stay on `request`, deliberately: those checks are about what the
+   * browser SENT — whether a visibility patch carried `private`, and whether one
+   * was sent at all — and a response carries no body of the request's. Two
+   * events for two different questions, rather than one for both.
+   */
   const folderPosts = []
   const folderPatches = []
+  page.on('response', (res) => {
+    const req = res.request()
+    if (req.method() === 'POST' && /\/spaces\/[^/]+\/folders$/.test(res.url())) {
+      folderPosts.push({ url: res.url(), status: res.status() })
+    }
+  })
   page.on('request', (r) => {
     const url = r.url()
-    if (r.method() === 'POST' && /\/spaces\/[^/]+\/folders$/.test(url)) folderPosts.push(url)
     if (r.method() === 'PATCH' && /\/spaces\/[^/]+\/folders\/[^/]+$/.test(url)) {
       folderPatches.push({ url, body: r.postData() ?? '' })
     }
@@ -185,10 +211,17 @@ try {
   const postsBefore = folderPosts.length
   await page.getByTestId('quick-create-folder-submit').click()
   const madeOpen = await waitUntil(() => folderPosts.length > postsBefore, { timeoutMs: 20_000 })
+  // ACCEPTED, not merely sent. `madeOpen` says a create round-trip completed;
+  // this says the server took it. A 4xx satisfies the first and not the second,
+  // and it was the gap between them that refused this whole set.
+  const createStatus = folderPosts.at(-1)?.status ?? null
   chk(
-    madeOpen,
+    madeOpen && createStatus !== null && createStatus < 300,
     'the Folder tab really asks the server to create it',
-    'no POST to /spaces/:id/folders left the browser',
+    madeOpen
+      ? `the create POST came back ${createStatus} — the dialog asked and the server refused, ` +
+        'which every check below would otherwise blame on the wrong thing'
+      : 'no POST to /spaces/:id/folders left the browser',
   )
   // NON-EMPTY FIRST, in the same check: "no patch carried private" is vacuously
   // true of a run in which nothing was created either.
@@ -261,17 +294,22 @@ try {
    * folder is not in this space at all"*, refusing a set of sixteen. It had been
    * 21 of 21 all day.
    *
-   * The check that covers that create asserts `folderPosts.length > postsBefore`
-   * — that a POST LEFT THE BROWSER. It says nothing about whether the server
-   * accepted it, so a create that left and failed passes it, and the only thing
-   * that notices is this read forty lines later. That is the facade's mirror:
-   * the request is evidence for itself.
+   * The check that covers that create USED TO ASSERT only
+   * `folderPosts.length > postsBefore` — that a POST LEFT THE BROWSER. It said
+   * nothing about whether the server accepted it, so a create that left and
+   * failed passed it, and the only thing that noticed was this read forty lines
+   * later, which then blamed the wrong moment. That is the facade's mirror: the
+   * request standing as evidence for itself.
    *
-   * A single un-polled `GET` cannot tell a create that failed from one that had
-   * not committed yet. This waits for both rows by name, bounded, and then reads
-   * ONCE — so a create that genuinely never lands still fails the checks below
-   * with the same sentence, after a real wait rather than possibly before the
-   * write.
+   * THAT HALF IS FIXED — creates are recorded from the `response` now and the
+   * status is asserted, so a refused create fails where it happens. This wait
+   * stays, because it answers the OTHER question: a single un-polled `GET`
+   * cannot tell a create that FAILED from one that had not COMMITTED yet, and
+   * only one of those two is the product's fault.
+   *
+   * So this waits for both rows by name, bounded, then reads ONCE — and a create
+   * that genuinely never lands still fails the checks below with the same
+   * sentence, after a real wait rather than possibly before the write.
    */
   await waitUntil(
     async () => {

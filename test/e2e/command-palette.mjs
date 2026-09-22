@@ -585,8 +585,17 @@ try {
     'a thumbs up reaches the server as an opinion, not just a colour change',
     `feedback calls: ${JSON.stringify(feedbackStubCalls)}`,
   )
+  // This read opens the condition, so nothing stands in front of it to
+  // short-circuit: a missing thumb would sit out the default timeout and take
+  // the rest of the run down with it. Read it once, bounded, and let a missing
+  // thumb come back null — compared against 'true' that reads as a failure,
+  // which is exactly what an absent thumb is.
+  const upThumbActive = await page
+    .getByTestId('palette-ai-up')
+    .getAttribute('data-active', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    (await page.getByTestId('palette-ai-up').getAttribute('data-active')) === 'true',
+    upThumbActive === 'true',
     'and the thumb it pressed is the one that lights up',
     'thumb did not report itself active',
   )

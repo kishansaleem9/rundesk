@@ -451,8 +451,16 @@ try {
     'and it offers exactly two choices, as frame `04:16` does',
     `it offered ${choices} — "Insert as text" is the tooltip on Transcribe, not a third button`,
   )
+  /*
+   * Bounded and caught: this read opens the condition, so there is no `&&` in
+   * front of it to short-circuit — a Transcribe button that is gone would wait
+   * out the full thirty seconds and take every check below with it. null is
+   * absence, and the `===` against the tooltip makes absence fail on its own.
+   */
+  const transcribeTooltip = await page.getByTestId('comment-recording-transcribe')
+    .getAttribute('title', { timeout: 8000 }).catch(() => null)
   chk(
-    (await page.getByTestId('comment-recording-transcribe').getAttribute('title')) === 'بطور متن داخل کریں',
+    transcribeTooltip === 'بطور متن داخل کریں',
     'with "Insert as text" as the tooltip on Transcribe',
     'Transcribe carries no tooltip — the frame shows one, and it is what explains the button',
   )
@@ -512,8 +520,16 @@ try {
   )
   chk(attached, 'keeping it as a voice note attaches the recorded file',
     'no file appeared in the composer after choosing Voice note')
+  /*
+   * Bounded and caught: the read is first in the condition, so nothing
+   * short-circuits it and a missing post button would burn thirty seconds and
+   * silence every check after this one. null is absence — `=== true` makes it
+   * fail, where a bare truthy would have let it through unexamined.
+   */
+  const postEnabled = await page.getByTestId('comment-post')
+    .isEnabled({ timeout: 8000 }).catch(() => null)
   chk(
-    await page.getByTestId('comment-post').isEnabled(),
+    postEnabled === true,
     'and the comment can be posted with no words at all',
     'the post button is disabled — the voice note of `[04:45]` could be recorded and never sent',
   )

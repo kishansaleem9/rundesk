@@ -316,10 +316,18 @@ try {
     `the requests after the toggle were ${JSON.stringify(calls.slice(beforeToggle))} — ` +
       'the toggle is still UI-only',
   )
+  /*
+   * The read opened this condition, so there was no `&&` in front of it to
+   * short-circuit: an absent toggle sat out the default wait and threw, taking
+   * every report below it with it. `attrOf` answers null instead, and the
+   * comparison to 'true' fails on null rather than accepting absence.
+   */
+  const mineOn = await attrOf(page.getByTestId('ai-activity-mine'), 'data-on')
   chk(
-    (await page.getByTestId('ai-activity-mine').getAttribute('data-on')) === 'true',
+    mineOn === 'true',
     'and the toggle shows itself as on',
-    'the toggle sent the parameter without showing that it is on',
+    `the toggle sent the parameter but reads data-on=${JSON.stringify(mineOn)} ` +
+      '— it never showed that it is on',
   )
   /*
    * AND OFF AGAIN. A control that keys its effect on a value rather than on the
