@@ -9,14 +9,30 @@
 # behaves identically.
 #
 # It also puts 34 kB of emoji names in the bundle every visitor downloads before
-# the login screen paints. The two checks that notice are the ones that look at
-# the NETWORK rather than the screen: no `emoji-data` chunk is ever requested,
-# so neither "fetched on open" nor "came back as JavaScript" has anything to
-# find. "the 1,914-emoji chunk has not been downloaded yet" still passes,
-# correctly — it never was downloaded, because it never existed.
+# the login screen paints. The checks that notice are the ones that look at the
+# NETWORK rather than the screen: no `emoji-data` chunk is ever requested, so
+# neither "fetched on open" nor "came back as JavaScript" has anything to find.
+# "the 1,914-emoji chunk has not been downloaded yet" still passes, correctly —
+# it never was downloaded, because it never existed.
+#
+# PREDICTED TWO, AND THE FIRST RUN CRASHED THE SUITE. With the list in the main
+# bundle there is no chunk to abort, so the picker loads perfectly and section
+# 7's failure state never appears — and the unguarded
+# `locator('[data-testid="emoji-retry"]').click()` below it threw an uncaught
+# TimeoutError thirty seconds later that killed the process. No totals, no
+# `checks ran` line: the harness recorded a patch line with three FAIL lines
+# under it, which is byte-identical to a patch that reddened three checks.
+#
+# That is one suite defect and one harness defect, both now fixed — the section
+# reports its three remaining checks as skipped rather than throwing, and
+# `break-queue.sh` counts a run with no summary as CRASHED rather than as
+# REDDENED. Against the fixed suite this reddens SIX: the two network checks,
+# the failure state that never appears, and the three that say plainly they
+# could not be evaluated.
 #
 # Reddens: emoji-picker: "the emoji chunk was fetched on open, not before" and
-#   "and came back as JavaScript"
+#   "and came back as JavaScript" and
+#   "a chunk that never arrives is reported, not spun on forever"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/emoji-picker.ts'
 a = "    const pending = import('./emoji-data').then((mod) => {\n"

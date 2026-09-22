@@ -318,11 +318,26 @@ for b in "$@"; do
     #    nothing to say four checks never happened. `break-queue.sh` counted it
     #    as a clean reddening, which is exactly the shape this whole audit
     #    calls the confident zero.
+    #  - AND A RUN THAT CRASHED PRINTED NO SUMMARY AT ALL, which was recorded as
+    #    a patch line with some FAIL lines under it and nothing else — the exact
+    #    shape of a patch that reddened. `emoji-picker-2-data-inlined` makes the
+    #    picker load successfully, so the suite's failure-state section finds no
+    #    Try again button, and an unguarded `locator.click()` threw an uncaught
+    #    TimeoutError that killed the process before the totals were printed.
+    #    A crash is not a proof: the checks after the throw did not run, and the
+    #    ones before it were measured against a process that then died. Named
+    #    here so `break-queue.sh` can count it as its own outcome.
     NFAIL=$(grep -cE '\bFAIL\b' "/tmp/claude-0/brk-$b.log")
+    SUMMARY=$(grep -E 'passed,' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
     { echo "== $b"
       grep -E '\bFAIL\b' "/tmp/claude-0/brk-$b.log" | sed 's/\x1b\[[0-9;]*m//g' | head -12
       [ "$NFAIL" -gt 12 ] && echo "  … and $((NFAIL - 12)) more FAIL lines not shown"
-      grep -E 'passed,' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g'
+      if [ -n "$SUMMARY" ]; then
+        echo "$SUMMARY"
+      else
+        echo "  NO SUMMARY: the run printed no 'N passed, M failed' line — it died before the totals"
+        tail -4 "/tmp/claude-0/brk-$b.log" | sed 's/\x1b\[[0-9;]*m//g' | sed 's/^/    /'
+      fi
       grep -E 'checks ran' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g' \
         | sed 's/^/  SHORT RUN: /'
     } >> "$OUT"

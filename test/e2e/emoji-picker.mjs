@@ -28,7 +28,7 @@ import { createRequire } from 'node:module'
  * failures and exits 0. This suite had no such constant at all until the count
  * was observed from a green run and written here.
  */
-const EXPECTED_CHECKS = 24
+const EXPECTED_CHECKS = 25
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
@@ -254,17 +254,48 @@ console.log('\n5. picking one puts it in the message')
 // ---------------------------------------------------------------------------
 await page.fill('[data-testid="emoji-search"]', '')
 await page.waitForTimeout(200)
-const firstFrequent = page.locator('[data-testid="emoji-section-frequent"] button[data-emoji]').first()
-const picked = await firstFrequent.getAttribute('data-emoji')
-await firstFrequent.click()
+/*
+ * NOT THE ONE THAT IS ALREADY FIRST, and the first version of this took exactly
+ * that one.
+ *
+ * `.first()` picks whatever already leads Frequently Used, so "and it leads
+ * Frequently Used next time" was satisfied by the emoji not moving — true of a
+ * row that remembers and equally true of a row rebuilt from the built-in order
+ * every time. `emoji-picker-5-frequent-not-persisted`, which deletes
+ * `writeFrequent` outright, ran GREEN against it.
+ *
+ * The second one is chosen instead: it leads afterwards only if the click was
+ * counted and the count survived, which is the claim.
+ */
+const frequentButtons = page.locator('[data-testid="emoji-section-frequent"] button[data-emoji]')
+const leadBefore = await frequentButtons.first().getAttribute('data-emoji')
+const second = frequentButtons.nth(1)
+const picked = await second.getAttribute('data-emoji')
+check(
+  !!picked && picked !== leadBefore,
+  `Frequently Used offers a second emoji to pick (${picked}, behind ${leadBefore})`,
+  `the row leads with ${leadBefore} and offered no distinct second entry`,
+)
+await second.click()
 await page.waitForTimeout(300)
 const draft = await page.locator('textarea').first().inputValue().catch(() => '')
 check(draft.includes(picked), `picking ${picked} inserts it into the draft`, `the draft is ${JSON.stringify(draft)}`)
 
-// Frequently Used is per-person and remembered. Re-opening must show it first.
-await trigger.click()
-await page.waitForTimeout(200)
-await trigger.click()
+/*
+ * Frequently Used is per-person and REMEMBERED, so the re-open has to be a
+ * fresh mount — a reload, not a second click on the trigger.
+ *
+ * Closing and re-opening the popover was not enough to tell the two apart. The
+ * component's count lives in `useState(() => readFrequent())`, which only reads
+ * storage when it mounts, and the running total is held in a ref beside it — so
+ * a picker that never wrote anything down still shows the right order for as
+ * long as it stays mounted. This is the third time in this audit that a
+ * persistence check has been satisfied by an in-memory copy.
+ */
+await page.reload({ waitUntil: 'networkidle' })
+const triggerAgain = page.locator('button[title="Emoji"]').first()
+await triggerAgain.waitFor({ timeout: 20000 }).catch(() => {})
+await triggerAgain.click()
 await page.locator('[data-testid="emoji-section-frequent"]').waitFor({ timeout: 10000 }).catch(() => {})
 const nowFirst = await page
   .locator('[data-testid="emoji-section-frequent"] button[data-emoji]')
@@ -348,11 +379,40 @@ console.log('\n7. the chunk does not arrive — and Try again actually tries')
   await freshTrigger.click()
   const failure = fresh.locator('[data-testid="emoji-load-failed"]')
   await failure.waitFor({ timeout: 15000 }).catch(() => {})
+  const reported = await failure.isVisible().catch(() => false)
   check(
-    await failure.isVisible().catch(() => false),
+    reported,
     'a chunk that never arrives is reported, not spun on forever',
     `the picker showed no failure state; it asked for the chunk ${asked.length} time(s)`,
   )
+
+  /*
+   * THE REST OF THIS SECTION ONLY EXISTS IF THERE IS A FAILURE STATE TO RETRY,
+   * and it used to assume there was.
+   *
+   * `emoji-picker-2-data-inlined` makes the emoji list part of the main bundle,
+   * so there is no chunk to abort and the picker loads perfectly. The check
+   * above fails, correctly — and then `locator('[data-testid="emoji-retry"]')
+   * .click()` threw an uncaught TimeoutError thirty seconds later and killed
+   * the process. No totals, no `checks ran` line, nothing: the break harness
+   * recorded a patch line with three FAIL lines under it, which is
+   * byte-identical to a patch that reddened three checks.
+   *
+   * A crash is not a result. The three remaining checks report as failed with
+   * the reason, so the run reaches its own summary and the count still comes to
+   * `EXPECTED_CHECKS` — which is the same rule the rest of this directory
+   * follows: every branch reports the same number of checks.
+   */
+  if (!reported) {
+    for (const [label, why] of [
+      ['Try again reloads rather than re-importing a module the browser has already given up on', 'skipped: there was no failure state to retry'],
+      ['and does not pretend to re-fetch in the dead document', 'skipped: there was no failure state to retry'],
+      ['and the list is there after it', 'skipped: there was no failure state to retry'],
+    ]) {
+      check(false, label, why)
+    }
+    await fresh.close()
+  } else {
 
   /*
    * Trying again in place is IMPOSSIBLE, and this is where that was learned.
@@ -395,6 +455,7 @@ console.log('\n7. the chunk does not arrive — and Try again actually tries')
   const recovered = await fresh.locator('[data-testid="emoji-section-people"] button').count()
   check(recovered > 300, `and the list is there after it (${recovered})`, `only ${recovered} rendered after the reload`)
   await fresh.close()
+  }
 }
 
 await browser.close()

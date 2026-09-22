@@ -9,12 +9,22 @@
 # is statically imported by `chat-composer.tsx`, so module scope here IS page
 # load.
 #
-# The check it reddens is the one that only ever looks BEFORE the click. Nothing
-# else in the suite can see this: the list still arrives, search still works,
-# every count is still right, and the picker is faster. A suite that only
-# checked the picker worked would call this a win.
+# The check it reddens is the one that only ever looks BEFORE the click. The
+# list still arrives, search still works, every count is still right, and the
+# picker is faster. A suite that only checked the picker worked would call this
+# a win.
+#
+# PREDICTED ONE AND IT IS TWO, and the second is honest rather than a miscount
+# in the suite. Section 7 opens a fresh page with `**/emoji-data*.js` aborted,
+# measures `asked.length` just before pressing Try again, and asserts no
+# further request is made in the dead document. Warming at module scope means
+# the RELOADED document fetches the chunk on load rather than on open, and that
+# request lands inside the window the check is watching. The check is right: a
+# request really was made in that window. It is the eager load that moved it
+# there.
 #
 # Reddens: emoji-picker: "and the 1,914-emoji chunk has not been downloaded yet"
+#   and "and does not pretend to re-fetch in the dead document"
 import io
 p = '/home/user/rundesk/apps/web/src/components/emoji/emoji-picker.tsx'
 a = "import { reloadForStaleChunks } from '../../lib/chunk-reload'\n"

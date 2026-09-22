@@ -81,33 +81,40 @@ while IFS= read -r line; do
       if      (hdr ~ / MISSING/)                 missing++
       else if (hdr ~ /(BUILD|PATCH) FAILED/)     unbuilt++
       else if (hdr ~ /PATCH CHANGED NOTHING/)    nochange++
+      else if (nosummary)                       crashed++
       else if (isshort)                          short++
       else if (isgreen)                          green++
       else                                       red++
       inpatch = 0
     }
     /^== (syncing|BASELINE|restoring|REFUSING)/ { flush(); next }
-    /^== / { flush(); inpatch = 1; hdr = $0; isshort = 0; isgreen = 0; next }
-    inpatch && /^  SHORT RUN:/ { isshort = 1; next }
-    inpatch && /, 0 failed/    { isgreen = 1; next }
+    /^== / { flush(); inpatch = 1; hdr = $0; isshort = 0; isgreen = 0; nosummary = 0; next }
+    inpatch && /^  NO SUMMARY:/ { nosummary = 1; next }
+    inpatch && /^  SHORT RUN:/  { isshort = 1; next }
+    inpatch && /, 0 failed/     { isgreen = 1; next }
     END {
       flush()
-      printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d RED=%d\n",
-        missing+unbuilt+nochange+short+green+red, green+0, unbuilt+0, missing+0,
-        nochange+0, short+0, red+0
+      printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d CRASHED=%d RED=%d\n",
+        missing+unbuilt+nochange+short+crashed+green+red, green+0, unbuilt+0, missing+0,
+        nochange+0, short+0, crashed+0, red+0
     }
   ' "$RES" 2>/dev/null)"
-  : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${RED:=0}"
-  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE · SHORT $SHORT" >> "$OUT"
+  : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${CRASHED:=0}" "${RED:=0}"
+  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE · SHORT $SHORT · CRASHED $CRASHED" >> "$OUT"
   # THE PARTITION IS ASSERTED, NOT TRUSTED. The whole reason the old arithmetic
   # was wrong is that nothing checked whether the columns accounted for the
   # patches, so a double-counted patch showed up as a plausible smaller number.
-  SUM=$((RED + GREEN + UNBUILT + MISSING + NOCHANGE + SHORT))
+  SUM=$((RED + GREEN + UNBUILT + MISSING + NOCHANGE + SHORT + CRASHED))
   [ "$SUM" -ne "$RAN" ] && echo "== $SUITE TALLY IS BROKEN — $SUM accounted for, $RAN patches ran; do not read the line above" >> "$OUT"
   # A SHORT RUN IS NOT A PROOF. Such a patch reddens some checks AND makes
   # others unreachable, and only the first half is evidence: the ones that never
   # ran are exactly as unproven as they were before it applied.
   [ "$SHORT" -gt 0 ] && echo "== $SUITE has $SHORT patch(es) whose run STOPPED EARLY — those runs prove nothing about the checks that never happened" >> "$OUT"
+  # A CRASH IS NOT A PROOF EITHER, and it looked most like one: a patch line with
+  # FAIL lines under it and no totals is byte-identical to a patch that reddened.
+  # `emoji-picker-2-data-inlined` killed the suite on an unguarded click, and the
+  # first version of this tally counted it as REDDENED.
+  [ "$CRASHED" -gt 0 ] && echo "== $SUITE has $CRASHED patch(es) whose run CRASHED before printing totals — fix the suite, then re-run" >> "$OUT"
   # SAY IT TWICE WHEN NOTHING RAN. A set is a claim about patches that
   # executed, and a line reading "patches 4" for four files nobody opened is
   # the claim without the thing it is about.
