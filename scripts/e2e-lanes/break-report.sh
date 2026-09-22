@@ -112,7 +112,21 @@ for f in "${files[@]}"; do
   printf '%-34s %2d patches  %2d reddened  baseline %-28s%s\n' \
     "$suite" "$RAN" "$RED" "${base:-—}" "$note"
   if [ -n "${NAMES:-}" ] && [ -n "$note" ]; then
-    awk -v names=1 -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^(RED|RAN=)' | sed 's/^/      /'
+    # AND WHY, for the rows where "why" is one line in a file this script
+    # already knows the name of. Every SHORT row cost the same three steps —
+    # read the row, open `brk-<patch>.log`, find the throw — and the throw is
+    # what says whether the patch cascaded honestly or a bare `.click()` ended
+    # the run. Five of these were diagnosed this morning and all five turned on
+    # that one line.
+    while read -r verdict patch; do
+      [ -z "${patch:-}" ] && continue
+      printf '      %-9s %s\n' "$verdict" "$patch"
+      log="$LOGS/brk-$patch.log"
+      [ -f "$log" ] || continue
+      sed 's/\x1b\[[0-9;]*m//g' "$log" \
+        | grep -m1 -E 'threw: |^✗ [0-9]+ of [0-9]+ checks ran|FAIL ran [0-9]+ checks' \
+        | sed 's/^[[:space:]]*/                  /' | cut -c1-150
+    done < <(awk -v names=1 -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^(RED|RAN=)')
   fi
 done
 
