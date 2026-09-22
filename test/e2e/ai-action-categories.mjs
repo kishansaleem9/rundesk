@@ -358,7 +358,13 @@ try {
   )
   const reasons = []
   for (const id of UNSUPPORTED) {
-    reasons.push((await page.getByTestId(`ai-value-category-reason-${id}`).innerText()).trim())
+    // `.catch` because `ac-3-hide-empty-tiles` removes the tiles these sentences
+    // live on: an empty string fails the check below on its own terms, where an
+    // unqualified `innerText` waited out the default timeout and ended the run
+    // at 25 of 29.
+    reasons.push(
+      (await page.getByTestId(`ai-value-category-reason-${id}`).innerText().catch(() => '')).trim(),
+    )
   }
   chk(
     reasons.every((r) => r.length > 0) && new Set(reasons).size === 3,
@@ -367,9 +373,14 @@ try {
   )
   chk(
     (await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()) === 3 &&
-      !/\d/.test(await page.getByTestId('ai-value-category-images').innerText()),
+      !/\d/.test(await page.getByTestId('ai-value-category-images').innerText().catch(() => '0')),
     'and none of them prints a number a person could mistake for a count',
-    `the Images tile reads ${JSON.stringify((await page.getByTestId('ai-value-category-images').innerText()).replace(/\s+/g, ' '))}`,
+    `the Images tile reads ${JSON.stringify(
+      (await page.getByTestId('ai-value-category-images').innerText().catch(() => '<no tile>')).replace(
+        /\s+/g,
+        ' ',
+      ),
+    )}`,
   )
 
   console.log('\n▶ the tiles show what the server computed, not their own arithmetic')

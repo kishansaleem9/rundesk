@@ -107,8 +107,15 @@ const SESSION = {
 const TAG = `team-${Date.now().toString(36)}`
 const SARA = { userId: 'u-sara', displayName: `Sara ${TAG}`, email: `sara.${TAG}@rundesk.test` }
 const OMAR = { userId: 'u-omar', displayName: `Omar ${TAG}`, email: `omar.${TAG}@rundesk.test` }
-/** A third, never picked: the columns must come from the selection, not from
- *  the roster. Without them, "draws a column per member" would pass. */
+/**
+ * A third, never picked: the columns must come from the selection, not from the
+ * roster. Without them, "draws a column per member" would pass.
+ *
+ * AND NEVER PICKED IS NOT ENOUGH ON ITS OWN. Noor guards against a column per
+ * ROSTER member; a column per PAYLOAD entry is a different mistake, and the
+ * stub answering exactly the ids it was asked for made the two indistinguishable.
+ * The stub volunteers Noor in every answer now — see the note there.
+ */
 const NOOR = { userId: 'u-noor', displayName: `Noor ${TAG}`, email: `noor.${TAG}@rundesk.test` }
 const MEMBERS = [SARA, OMAR, NOOR]
 
@@ -172,12 +179,31 @@ try {
        * gets the wrong set back, and the checks notice.
        */
       return reply({
-        people: ids.map((id) => ({
-          userId: id,
-          meetings: [],
-          busy: breakOmar && id === OMAR.userId ? [] : (table[id] ?? []),
-          error: breakOmar && id === OMAR.userId ? 'Could not read that calendar' : null,
-        })),
+        people: [
+          ...ids.map((id) => ({
+            userId: id,
+            meetings: [],
+            busy: breakOmar && id === OMAR.userId ? [] : (table[id] ?? []),
+            error: breakOmar && id === OMAR.userId ? 'Could not read that calendar' : null,
+          })),
+          /*
+           * AND ONE PERSON THE SERVER VOLUNTEERS, WHICH IS THE OTHER HALF.
+           *
+           * Answering the asked-for ids catches a page that ignores `userIds`.
+           * It cannot catch a page that draws its COLUMNS from this payload
+           * instead of from the selection, because a faithful answer makes the
+           * two identical — `ts-3-columns-from-roster` swapped `order.map` for
+           * `columns.map` and ran GREEN for exactly that reason, against a
+           * check whose sentence is "in the order they were picked".
+           *
+           * Noor is never picked and is always in here now, so the selection
+           * and the payload differ by one and the two readings are told apart.
+           * A page reading the payload draws three columns where two were
+           * chosen; a page reading the selection is unaffected, which is why
+           * every other check in this suite is unchanged by this line.
+           */
+          { userId: NOOR.userId, meetings: [], busy: table[NOOR.userId] ?? [], error: null },
+        ],
       })
     }
     if (url.includes('/calendar-sync/accounts')) return reply([{ id: 'acct-1', status: 'connected' }])
