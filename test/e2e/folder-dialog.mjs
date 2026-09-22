@@ -254,6 +254,32 @@ try {
       'privatises the next folder somebody makes without being asked',
   )
 
+  /*
+   * WAIT FOR BOTH ROWS BEFORE READING, and the reason is a refusal.
+   *
+   * The baseline came back `20 passed, 1 failed` at `3ca9f19d` on *"the public
+   * folder is not in this space at all"*, refusing a set of sixteen. It had been
+   * 21 of 21 all day.
+   *
+   * The check that covers that create asserts `folderPosts.length > postsBefore`
+   * — that a POST LEFT THE BROWSER. It says nothing about whether the server
+   * accepted it, so a create that left and failed passes it, and the only thing
+   * that notices is this read forty lines later. That is the facade's mirror:
+   * the request is evidence for itself.
+   *
+   * A single un-polled `GET` cannot tell a create that failed from one that had
+   * not committed yet. This waits for both rows by name, bounded, and then reads
+   * ONCE — so a create that genuinely never lands still fails the checks below
+   * with the same sentence, after a real wait rather than possibly before the
+   * write.
+   */
+  await waitUntil(
+    async () => {
+      const seen = (await api(`/spaces/${SPACE}/folders`)).data ?? []
+      return seen.some((f) => f.name === OPEN_NAME) && seen.some((f) => f.name === SHUT_NAME)
+    },
+    { timeoutMs: 15_000 },
+  )
   const folders = await api(`/spaces/${SPACE}/folders`)
   chk(
     folders.status < 300,

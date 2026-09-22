@@ -5848,3 +5848,31 @@ under.
 809 → 808 patches. The `accounted` floor of 759 is untouched and still well
 under the measured number; it is named here because a deletion is the one reason
 that floor's own comment warns about.
+
+### A refusal on a check that asserts the request, not the result
+
+`folder-dialog` refused at `3ca9f19d` — `20 passed, 1 failed` on *"the public
+folder is not in this space at all"* — after being 21 of 21 all day, and took a
+set of sixteen down with it.
+
+**Not the edit in that commit.** The only change to this suite was bounding a
+`.check()` on the PRIVATE toggle, and the private folder came back correct — it
+is the PUBLIC one, created forty lines earlier, that is missing.
+
+The check covering that create asserts `folderPosts.length > postsBefore`:
+**that a POST left the browser.** It says nothing about whether the server took
+it. A create that leaves and fails passes that check, and the only thing that
+ever notices is a read forty lines later, by which point the sentence blames the
+wrong moment. The request standing as evidence for itself is the facade's
+mirror, and it is why this failure reads as a mystery rather than as a create
+that did not land.
+
+The read was also a single un-polled `GET`, which cannot tell a create that
+FAILED from one that had not COMMITTED yet. It waits for both rows by name now,
+bounded, then reads once — so a create that genuinely never lands still fails
+with the same sentence, after a real wait rather than possibly before the write.
+
+Left deliberately: the request-only check is not strengthened to assert the
+response. The listener records requests, not replies, and rewiring it is a
+change to the suite's fixture rather than to a check — recorded here as the
+better fix when the tree is quiet.
