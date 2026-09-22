@@ -24,6 +24,7 @@ step "typecheck (turbo run typecheck)"  bash -c 'pnpm exec turbo run typecheck >
 step "api unit tests"                   bash -c 'cd apps/api && pnpm exec tsx --test $(find src -name "*.test.ts") > /tmp/preflight-api.log 2>&1'
 step "web unit tests"                   bash -c 'cd apps/web && ../../packages/db/node_modules/.bin/tsx --test $(find src -name "*.test.ts" -o -name "*.test.tsx" | tr "\n" " ") > /tmp/preflight-web.log 2>&1'
 step "migration guardrail"              node scripts/check-migration-order.mjs
+step "every workspace write is guarded" node scripts/check-workspace-guards.mjs
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "and that guard actually looks"    node scripts/check-patch-guard.mjs --mutate
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
