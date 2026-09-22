@@ -33,7 +33,21 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const GUARD = join(HERE, 'check-no-break-patches.mjs')
+/*
+ * THE FILE UNDER TEST IS NEVER WRITTEN. `GUARD_UNDER_TEST` points this at a COPY.
+ *
+ * The mutation pass used to write a deliberately-broken version of the real
+ * checker, run, and write the original back — and that is a design that can
+ * lose. It did: `check-suite-section-enders.mjs` was twice found with rule
+ * one's ten-line window deleted, once from an interrupted run and once from a
+ * SIGKILL test proving the point. `process.on('exit')` does not fire on
+ * SIGKILL; nothing does. A `finally` and a signal handler shrink the window,
+ * they do not close it.
+ *
+ * So the mutation is written to a temp copy and THAT is what runs. The original
+ * is only ever read. There is no window to lose, and no restore to forget.
+ */
+const GUARD = process.env.GUARD_UNDER_TEST ?? join(HERE, 'check-no-break-patches.mjs')
 
 let pass = 0
 let fail = 0
@@ -276,7 +290,29 @@ console.log(
  * mutation worth running; it is a line worth explaining.
  */
 if (process.argv.includes('--mutate')) {
+/*
+   * A MUTATION HARNESS THAT CANNOT LEAVE THE TREE BROKEN.
+   *
+   * The loop below writes a DELIBERATELY BROKEN copy of the checker, runs the
+   * cases against it, and writes the original back. If anything interrupts it
+   * between those two writes — a kill, a timeout, an exception in the spawn — the
+   * broken copy is what stays on disk.
+   *
+   * That happened. `check-suite-section-enders.mjs` was found with rule one's
+   * ten-line window deleted — `Math.min(i + 1 + WINDOW, lines.length)` replaced
+   * by `lines.length` — from a mutation that never got restored, and the next
+   * `--mutate` run reported it as an ANCHOR MISS because the text it meant to
+   * replace was already gone. A test harness that corrupts the thing it tests,
+   * and then cannot see that it has, is worse than no harness: it was one commit
+   * away from shipping a rule that silently pairs a press with any check in the
+   * file.
+   *
+   * So the original is restored from a `finally` AND from an exit handler, and
+   * the handler is registered BEFORE the first write. Belt and braces on purpose:
+   * `finally` covers a throw, the exit handler covers a signal.
+   */
   const ORIGINAL = readFileSync(GUARD, 'utf8')
+  let blind = 0
   const MUTATIONS = [
     [
       'the roots go back to being relative',
@@ -299,16 +335,18 @@ if (process.argv.includes('--mutate')) {
     ],
   ]
   console.log('\n▶ and each mutation of the guard reddens a case')
-  let blind = 0
   for (const [label, from, to] of MUTATIONS) {
     if (ORIGINAL.split(from).length - 1 !== 1) {
       console.log(`  \x1b[31mANCHOR MISS\x1b[0m ${label}`)
       blind += 1
       continue
     }
-    writeFileSync(GUARD, ORIGINAL.split(from).join(to))
-    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], { encoding: 'utf8' })
-    writeFileSync(GUARD, ORIGINAL)
+    const mutant = join(mkdtempSync(join(tmpdir(), 'mutant-')), 'check-no-break-patches.mjs')
+    writeFileSync(mutant, ORIGINAL.split(from).join(to))
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+      encoding: 'utf8',
+      env: { ...process.env, GUARD_UNDER_TEST: mutant },
+    })
     const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
     if (r.status === 0) {
       console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
@@ -317,7 +355,6 @@ if (process.argv.includes('--mutate')) {
       console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
     }
   }
-  writeFileSync(GUARD, ORIGINAL)
   console.log(
     `\n${blind === 0 ? '\x1b[32mok\x1b[0m' : '\x1b[31mnot ok\x1b[0m'} mutations: ` +
       `${MUTATIONS.length - blind} of ${MUTATIONS.length} bite`,

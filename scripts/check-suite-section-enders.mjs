@@ -165,7 +165,7 @@
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { messageReads } from './lib/suite-reads.mjs'
+import { messageReads, topLevelArgs, THROWS, locatorVars } from './lib/suite-reads.mjs'
 
 /*
  * `SUITE_DIR` EXISTS SO THE FIVE LINE-BASED RULES CAN BE TESTED AT ALL.
@@ -342,6 +342,67 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+/*
+ * RULE SEVEN. A THROWING READ AT THE HEAD OF A CONDITION.
+ *
+ * Rule one's header rejected a broad scan over reads in conditions, and the
+ * reason was exact: six of its nine candidates were guarded by `&&`
+ * short-circuiting, "which is the idiom these suites use and which a text rule
+ * cannot see". That objection is about reads with something IN FRONT of them.
+ *
+ * A read that is the FIRST operand of a condition has nothing in front of it.
+ * No `&&` can spare it, for the same reason none can spare a message — and
+ * unlike a message, this one also decides the verdict, so it cannot simply be
+ * caught: the value it produces has to fail the check. Fourteen of these, and
+ * two were surfaced by agents fixing rule six's sites next door, which is how
+ * the shape came up at all.
+ *
+ * NOT the same as rule six. That one is about text nobody reads unless the
+ * check fails; this is about the check itself. They are gated together because
+ * the failure is identical — thirty seconds and a dead section — but the fix
+ * differs: a message takes `.catch(() => null)` and prints it, a condition
+ * takes `.catch(() => null)` and must then REJECT null rather than compare it.
+ */
+const leadReads = []
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const src = readFileSync(join(SUITES, file), 'utf8')
+  const vars = [...locatorVars(src)]
+  for (let i = src.indexOf('chk('); i !== -1; i = src.indexOf('chk(', i + 1)) {
+    let d = 0
+    let end = i + 3
+    for (; end < src.length; end++) {
+      if (src[end] === '(') d += 1
+      else if (src[end] === ')') {
+        d -= 1
+        if (d === 0) break
+      }
+    }
+    if (d !== 0) continue
+    const cond = topLevelArgs(src.slice(i + 4, end))[0] ?? ''
+    if (!THROWS.test(cond)) continue
+    if (/\.catch\(|timeout:/.test(cond)) continue
+    // A `waitUntil` predicate catches its own throws.
+    if (/waitUntil\(/.test(cond)) continue
+    const m = cond.match(THROWS)
+    const before = cond.slice(0, m.index)
+    // Anything that could short-circuit means this is the shape rule one's
+    // header declined to gate, and it stays declined.
+    if (/&&|\|\||\?/.test(before)) continue
+    const onLocator =
+      /getByTestId\(|data-testid/.test(cond.slice(0, m.index + 40)) ||
+      vars.some((v) => new RegExp(`\\b${v}\\s*\\.[\\w().'"\\[\\]-]*$`).test(before.trimEnd()))
+    if (!onLocator) continue
+    leadReads.push({
+      file,
+      line: src.slice(0, i).split('\n').length,
+      id: m[1],
+      text: cond.trim().replace(/\s+/g, ' ').slice(0, 100),
+      lead: true,
+    })
+  }
+}
+for (const r of leadReads) rows.push(r)
+
 // RULE SIX. A throwing read on a testid locator inside a `chk` MESSAGE. The
 // reader lives in `lib/suite-reads.mjs` so `check-suite-reads.mjs` can break
 // its two fragile parts — the comma splitter and the argument index — and
@@ -358,7 +419,8 @@ for (const r of rows) {
   console.log(
     `  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}` +
       `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}` +
-      `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}`,
+      `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}` +
+      `${r.lead ? '  (read at the HEAD of a condition — nothing short-circuits it either)' : ''}`,
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
@@ -383,11 +445,12 @@ for (const r of rows) {
 const distinct = new Set(rows.map((r) => `${r.file}:${r.line}`)).size
 console.log(
   `[section-enders] ${distinct} site(s) across ${new Set(rows.map((r) => r.file)).size} suite(s), ` +
-    `flagged as: ${rows.length - gates - boxes - sames - sections - messages} press(es) on a ` +
+    `flagged as: ${rows.length - gates - boxes - sames - sections - messages - leadReads.length} press(es) on a ` +
     `control the check above them may find absent, ${gates} gate(s) in front of a check about the ` +
     `same element, ${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a ` +
     `locator guarded one line up, ${sections} use(s) of something this section asserts exists, and ` +
-    `${messages} read(s) in a chk message — a site can be more than one of these`,
+    `${messages} read(s) in a chk message, and ${leadReads.length} at the head of a condition ` +
+    '— a site can be more than one of these',
 )
 if (rows.length) {
   console.error(

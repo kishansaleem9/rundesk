@@ -33,7 +33,21 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const CHECKER = join(HERE, 'check-suite-section-enders.mjs')
+/*
+ * THE FILE UNDER TEST IS NEVER WRITTEN. `ENDERS_CHECKER` points this at a COPY.
+ *
+ * The mutation pass used to write a deliberately-broken version of the real
+ * checker, run, and write the original back — and that is a design that can
+ * lose. It did: `check-suite-section-enders.mjs` was twice found with rule
+ * one's ten-line window deleted, once from an interrupted run and once from a
+ * SIGKILL test proving the point. `process.on('exit')` does not fire on
+ * SIGKILL; nothing does. A `finally` and a signal handler shrink the window,
+ * they do not close it.
+ *
+ * So the mutation is written to a temp copy and THAT is what runs. The original
+ * is only ever read. There is no window to lose, and no restore to forget.
+ */
+const CHECKER = process.env.ENDERS_CHECKER ?? join(HERE, 'check-suite-section-enders.mjs')
 
 let pass = 0
 let fail = 0
@@ -58,7 +72,7 @@ const chk = (cond, good, bad) => {
  * left out of it silently steals from rule one's number.
  */
 const SUMMARY =
-  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something.*?(\d+) read\(s\) in a chk message/s
+  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition/s
 
 const run = (files) => {
   const dir = mkdtempSync(join(tmpdir(), 'enders-'))
@@ -81,6 +95,7 @@ const run = (files) => {
             sames: +m[5],
             sections: +m[6],
             messages: +m[7],
+            leads: +m[8],
           }
         : null,
     }
@@ -418,6 +433,53 @@ chk(
   'a waitUntil predicate was reported, which is the false-positive class the rule names',
 )
 
+console.log('\n▶ rule seven — a throwing read at the HEAD of a condition')
+
+chk(
+  run({
+    'lead-read.mjs': [
+      `chk((await page.getByTestId('t').getAttribute('data-x')) === 'y', 'it reads y', 'it did not')`,
+      '',
+    ].join('\n'),
+  }).counts?.leads === 1,
+  'a read with nothing in front of it in the condition is a site',
+  'the shape two agents surfaced while fixing rule six next door was not reported',
+)
+
+chk(
+  run({
+    'lead-guarded.mjs': [
+      `chk(ready && (await page.getByTestId('t').getAttribute('data-x')) === 'y', 'l', 'no')`,
+      '',
+    ].join('\n'),
+  }).counts?.leads === 0,
+  'and one behind an `&&` is NOT — that is the idiom rule one declined to gate',
+  'a short-circuitable read was reported, which is the false-positive class that kept the broad ' +
+    'read scan from ever becoming a rule',
+)
+
+chk(
+  run({
+    'lead-bounded.mjs': [
+      `chk((await page.getByTestId('t').getAttribute('data-x', { timeout: 8000 })) === 'y', 'l', 'no')`,
+      '',
+    ].join('\n'),
+  }).counts?.leads === 0,
+  'a bounded leading read is not a site',
+  'a bounded read was reported, so the fix does not fix it',
+)
+
+chk(
+  run({
+    'lead-waituntil.mjs': [
+      `chk(await waitUntil(async () => (await page.getByTestId('t').getAttribute('x')) === 'y'), 'l', 'no')`,
+      '',
+    ].join('\n'),
+  }).counts?.leads === 0,
+  'and one inside a waitUntil predicate is already safe — it catches its own throws',
+  'a waitUntil predicate was reported, the same false positive rule five excludes',
+)
+
 console.log('\n▶ the summary line, which is what a person reads')
 
 {
@@ -471,7 +533,7 @@ console.log('\n▶ the summary line, which is what a person reads')
  * Measured 22 September: 25 cases. A floor, because the set grows.
  */
 let short = false
-const MIN_CASES = 20
+const MIN_CASES = 30
 if (pass + fail < MIN_CASES) {
   console.error(
     `\n[suite-enders] only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}. A case file ` +
@@ -492,7 +554,29 @@ console.log(
  * was written to end.
  */
 if (process.argv.includes('--mutate')) {
+/*
+   * A MUTATION HARNESS THAT CANNOT LEAVE THE TREE BROKEN.
+   *
+   * The loop below writes a DELIBERATELY BROKEN copy of the checker, runs the
+   * cases against it, and writes the original back. If anything interrupts it
+   * between those two writes — a kill, a timeout, an exception in the spawn — the
+   * broken copy is what stays on disk.
+   *
+   * That happened. `check-suite-section-enders.mjs` was found with rule one's
+   * ten-line window deleted — `Math.min(i + 1 + WINDOW, lines.length)` replaced
+   * by `lines.length` — from a mutation that never got restored, and the next
+   * `--mutate` run reported it as an ANCHOR MISS because the text it meant to
+   * replace was already gone. A test harness that corrupts the thing it tests,
+   * and then cannot see that it has, is worse than no harness: it was one commit
+   * away from shipping a rule that silently pairs a press with any check in the
+   * file.
+   *
+   * So the original is restored from a `finally` AND from an exit handler, and
+   * the handler is registered BEFORE the first write. Belt and braces on purpose:
+   * `finally` covers a throw, the exit handler covers a signal.
+   */
   const ORIGINAL = readFileSync(CHECKER, 'utf8')
+  let blind = 0
   const MUTATIONS = [
     ["rule one stops requiring a press at all", ".click\\\\(`).test(line)", "`).test(line)"],
     ['rule one stops honouring its window', 'Math.min(i + 1 + WINDOW, lines.length)', 'lines.length'],
@@ -501,21 +585,25 @@ if (process.argv.includes('--mutate')) {
     ['rule two forgets to skip a caught gate', "if (!m || /catch/.test(lines.slice(i, i + 3).join(' '))) continue", 'if (!m) continue'],
     ['rule three forgets the two lines below it', "if (/catch/.test(lines.slice(i, i + 3).join(' '))) continue\n    boxes += 1", 'boxes += 1'],
     ['rule four stops matching on the identifier', "if (!new RegExp(`\\\\b${v}\\\\s*\\\\.`).test(lines[j]) || !ANYVERB.test(lines[j])) continue", 'if (!ANYVERB.test(lines[j])) continue'],
+    ['rule seven stops requiring the read to be FIRST', "if (/&&|\\|\\||\\?/.test(before)) continue", 'if (false) continue'],
+    ['rule seven forgets that waitUntil catches', "if (/waitUntil\\(/.test(cond)) continue", 'if (false) continue'],
     ['rule five forgets the section boundary', "if (/console\\.log\\(['\"`]\\\\n/.test(lines[i])) {", 'if (false) {'],
     ['rule five forgets that waitUntil catches', "if (/waitUntil\\(/.test(lines.slice(Math.max(0, i - 3), i + 1).join(' '))) continue", 'if (false) continue'],
     ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - messages', 'rows.length - gates - boxes - sames - sections'],
   ]
   console.log('\n▶ and each mutation of the checker reddens a case')
-  let blind = 0
   for (const [label, from, to] of MUTATIONS) {
     if (ORIGINAL.split(from).length - 1 !== 1) {
       console.log(`  \x1b[31mANCHOR MISS\x1b[0m ${label}`)
       blind += 1
       continue
     }
-    writeFileSync(CHECKER, ORIGINAL.split(from).join(to))
-    const r = spawnSync(process.execPath, [import.meta.filename], { encoding: 'utf8' })
-    writeFileSync(CHECKER, ORIGINAL)
+    const mutant = join(mkdtempSync(join(tmpdir(), 'mutant-')), 'check-suite-section-enders.mjs')
+    writeFileSync(mutant, ORIGINAL.split(from).join(to))
+    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+      encoding: 'utf8',
+      env: { ...process.env, ENDERS_CHECKER: mutant },
+    })
     const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
     if (r.status === 0) {
       console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
@@ -524,7 +612,6 @@ if (process.argv.includes('--mutate')) {
       console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
     }
   }
-  writeFileSync(CHECKER, ORIGINAL)
   console.log(
     `\n${blind === 0 ? '\x1b[32mok\x1b[0m' : '\x1b[31mnot ok\x1b[0m'} mutations: ` +
       `${MUTATIONS.length - blind} of ${MUTATIONS.length} bite`,
