@@ -4926,3 +4926,38 @@ absent; a gate in front of a check about the same element; a `boundingBox()`
 that throws when nothing matches; the same locator guarded on one line and bare
 on the next; and this one. What stays out, with its reasoning in the file: the
 sequence shape, and any rule over reads that cannot see `&&` short-circuiting.
+
+### All six of frame `03:05`'s cover tabs, accounted for
+
+The frame is explicit: **Gallery | Upload | Link | Search | Attachments |
+Remove**. At the start of today the suite exercised Gallery and its Custom
+swatch, asserted Search's absence with its reasoning, and checked that the Link
+and Attachments tabs EXISTED. Where they stand now:
+
+| tab | state |
+|---|---|
+| Gallery | checked, including the Custom swatch reading back byte for byte |
+| Upload | half measured, and the limit is written down (below) |
+| Link | six checks; it worked and was simply unverified |
+| Search | asserted ABSENT, with the re-checked reason in the suite |
+| Attachments | five checks — and the tab could never list a file until today |
+| Remove | checked on all three fields a cover can be set in |
+
+**Upload is the one that cannot be finished here.** `R2Service` logs "R2 is not
+fully configured. File and clip uploads are disabled" and `presignPutObject`
+throws `Storage is not configured`, so presign → PUT → commit cannot run without
+credentials this repository does not hold. That is recorded as unmeasurable
+rather than skipped, the same way the eight language-model field types are.
+
+The measurable half is the one the component's own comment says was missing:
+*"the version of this tab that shipped before had no handler at all, so a failed
+upload and a successful one looked the same: nothing happened either way."* So
+three checks — the tab offers a way to choose a file, choosing one when storage
+is unconfigured SAYS so in words, and the cover is left exactly as it was. 32 of
+32 green, and `task-cover-11-upload-fails-silently` reddens the middle one and
+only it: 31 of 32, with the cover check still passing, which is why both exist.
+
+The cover picker is where the testid question paid for itself twice: nine of its
+eighteen testids were named by no suite this morning, and the two holes that
+hunt pointed at were a tab that could never list a file and a tab nobody had
+pressed.
