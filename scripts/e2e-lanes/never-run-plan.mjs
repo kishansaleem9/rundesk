@@ -50,7 +50,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from '../lib/suite-of-patch.mjs'
-import { measuredAt, patchDeps, makeDriftCheck } from '../lib/log-tree.mjs'
+import { measuredAt, patchDeps, makeDriftCheck, declaresRerun } from '../lib/log-tree.mjs'
 
 const ROOT = new URL('../..', import.meta.url).pathname
 const LOGS = '/tmp/claude-0'
@@ -74,6 +74,7 @@ const suiteOf = makeSuiteOf({
 
 const bySuite = new Map()
 let nosha = 0
+let declared = 0
 for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
   const name = f.slice(0, -3)
   const rec = ran.get(name)
@@ -87,6 +88,7 @@ for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
     // placed in the history at all. UNKNOWN is not CURRENT, so it goes in the
     // work list and is counted out loud rather than passed over in silence.
     if (!rec.sha) nosha++
+    else if (declaresRerun(text) && drifted(rec.sha, [`test/e2e/breaks/${name}.py`]).length) declared++
     else if (!drifted(rec.sha, patchDeps(text, suite)).length) continue
   }
   if (!bySuite.has(suite)) bySuite.set(suite, [])
@@ -103,5 +105,6 @@ for (const [suite, names] of rows) {
 console.error(
   `[never-run-plan] ${patches} patch(es) across ${rows.filter((r) => r[1].length <= MAX).length} ` +
     `${DRIFTED ? 'DRIFTED' : 'unmeasured'} suite(s)${MAX === Infinity ? '' : ` of ${MAX} or fewer`}` +
-    `${nosha ? `, ${nosha} of them from a log that never recorded its commit` : ''}`,
+    `${nosha ? `, ${nosha} of them from a log that never recorded its commit` : ''}` +
+    `${declared ? `, ${declared} by a \`# Re-run:\` line in the patch` : ''}`,
 )

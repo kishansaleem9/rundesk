@@ -18,7 +18,7 @@ import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
-import { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck } from './lib/log-tree.mjs'
+import { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck, declaresRerun } from './lib/log-tree.mjs'
 
 let failed = 0
 const ok = (cond, what) => {
@@ -163,6 +163,17 @@ ok(bad[0] === '<unknown commit>', 'it says so in words a row can print')
 // nothing to compare, and asking git for a diff with no pathspec would return
 // the whole commit range — every log would be stale forever.
 ok(drift(first, []).length === 0, 'a patch with no deps at all is not stale by default')
+
+console.log('▶ a patch that says its own log is not evidence')
+
+ok(declaresRerun('# Re-run: the runner built the wrong copy\nimport io\n'), 'a reason after the line counts')
+ok(!declaresRerun('# Reddens: folder-create: "a sentence"\nimport io\n'), 'and `Reddens:` is not it — one hyphen apart')
+ok(!declaresRerun('# Re-run:\nimport io\n'), 'a declaration with no reason is not a declaration')
+ok(!declaresRerun('# nothing here\nimport io\n'), 'and a header that says nothing declares nothing')
+ok(
+  declaresRerun('# The toaster is bottom-right again.\n#\n# Re-run: measured under the old runner\n'),
+  'the line is found anywhere in the header, not only first',
+)
 
 console.log('▶ and the same question about a whole measurement')
 

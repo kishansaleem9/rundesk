@@ -80,6 +80,37 @@ export function measuredAt(logsDir) {
   return at
 }
 
+// A PATCH MAY SAY THAT ITS OWN LOG IS NOT EVIDENCE, with a header line
+//
+//     # Re-run: <why>
+//
+// and then it is in the work list until it has been measured after that line
+// was written. One patch has needed it:
+// `folder-create-12-toast-bottom-right` edits `packages/ui`, and it was run
+// while `wt-break.sh` applied `packages/**` patches in the worktree and built
+// from the repo — so the change never reached the app, the position check it
+// aims at passed, and three checks about a 409 message failed for reasons a
+// toast-position patch cannot cause. Nothing in the TREE changed to fix that;
+// the RUNNER did, and a rule about files cannot see it.
+//
+// Its header already said "the fix is a re-run, not a re-aim, and `folder-create`
+// is in the stale plan". That sentence was false — the plan's rule could not
+// see this patch at all — and a claim in a header that nothing checks is the
+// stale reason this audit keeps finding. This makes the sentence true by making
+// it mechanical.
+//
+// IT IS SPENT BY BEING MEASURED, not by being deleted. The declaration counts
+// while the patch file has changed since the run that measured it: I edited the
+// patch to say "this needs re-running", so any measurement older than that edit
+// predates the declaration. Once it re-runs, the new log's commit is at or
+// after the edit, the diff is empty, and the patch leaves the list on its own.
+// A declaration that could never be spent would keep a chain of rounds running
+// forever on one row.
+// `[ \t]` rather than `\s`, because `\s` matches the NEWLINE: `# Re-run:` with
+// nothing after it read as a declaration whose reason was the first word of the
+// next line, so a patch could be put back in the work list by an empty label.
+export const declaresRerun = (text) => /^#[ \t]*Re-run:[ \t]*\S/im.test(text)
+
 // The product files a patch edits, as the patch itself names them. Patches
 // address the checkout absolutely (`p = '/home/user/rundesk/apps/web/...'`), so
 // the repo-relative tail is what git wants.

@@ -8,8 +8,16 @@
 # worktree and built from the repo, and the ledger records this patch by name as
 # one that "was recorded as reddening three checks unrelated to its claim".
 #
-# Left alone deliberately: the fix is a re-run, not a re-aim, and
-# `folder-create` is in the stale plan.
+# Left alone deliberately: the fix is a re-run, not a re-aim. The sentence that
+# stood here said `folder-create` was "in the stale plan", and it was not —
+# nothing in the tree changed to fix a RUNNER bug, so no rule about files could
+# see this patch, and the claim sat in the header unchecked for a day. The line
+# below is the same claim, made mechanical: the plan generator honours it until
+# this patch has been measured at a commit later than this edit.
+#
+# Re-run: measured while `wt-break.sh` built `packages/**` patches from the repo
+#   rather than the worktree, so the toaster this patch edits was never the one
+#   under test.
 #
 # Reddens: folder-create: "and it sits bottom-left, where frame `08:55` stacks them"
 import io, re
