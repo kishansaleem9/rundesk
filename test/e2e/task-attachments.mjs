@@ -301,7 +301,11 @@ try {
   chk(
     (await rail.isVisible().catch(() => false))
       && ((await rail.getAttribute('title')) ?? '').toLowerCase().includes('related'),
-    `the icon is there and its tooltip reads "${await rail.getAttribute('title')}"`,
+    // THE PASS MESSAGE IS EVALUATED EVEN WHEN THE CHECK FAILS, because it is an
+    // argument. The FAIL message below already reads the title through a catch;
+    // this one did not, so an absent rail threw here — out of the sentence
+    // describing the rail being present.
+    `the icon is there and its tooltip reads "${await rail.getAttribute('title', { timeout: 3_000 }).catch(() => '—')}"`,
     `the rail icon is ${(await rail.isVisible().catch(() => false)) ? 'present' : 'absent'} with title ` +
       `"${await rail.getAttribute('title').catch(() => '—')}"`,
   )

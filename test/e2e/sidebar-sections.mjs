@@ -303,7 +303,10 @@ try {
     'the AI Chats section is drawn',
     'no AI Chats section',
   )
-  const total = Number(await chats.getAttribute('data-total'))
+  // `null` reads as NaN, and every comparison below it is then false rather
+  // than a thirty-second throw that ends the section — the section's own
+  // "is it drawn" check above is allowed to fail.
+  const total = Number(await chats.getAttribute('data-total', { timeout: 3_000 }).catch(() => null))
   const chatRows = page.locator('[data-testid^="ai-chat-"]')
   chk(
     total >= SEEDED_THREADS && (await chatRows.count()) === 5,

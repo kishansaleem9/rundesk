@@ -92,9 +92,18 @@ try {
   await p.locator('input[type=datetime-local]').fill('2026-08-04T09:30')
   await p.getByPlaceholder('https://…').fill('https://example.com/rec/a61.mp4')
   const chip = p.locator('button[aria-pressed]').filter({ hasText: new RegExp(DM_NAME) }).first()
-  chk(await chip.count() > 0, 'workspace members are offered as attendees', 'no attendee chips')
-  await chip.click()
-  chk(await chip.getAttribute('aria-pressed') === 'true', 'an attendee can be picked', 'the chip did not toggle on')
+  const haveChip = (await chip.count()) > 0
+  chk(haveChip, 'workspace members are offered as attendees', 'no attendee chips')
+  // A PRESS AND A READ ON A CHIP THAT IS NOT THERE END THE SECTION. The check
+  // above is allowed to fail, and `click()` on an empty locator waits
+  // Playwright's thirty seconds and throws — which takes the twelve checks
+  // below it with it, and reports as a shorter run rather than as this failure.
+  if (haveChip) await chip.click({ timeout: 15_000 })
+  chk(
+    haveChip && (await chip.getAttribute('aria-pressed', { timeout: 3_000 }).catch(() => null)) === 'true',
+    'an attendee can be picked',
+    'the chip did not toggle on',
+  )
 
   await p.locator('textarea').first().fill(NOTES)
   await p.getByRole('button', { name: /^Save meeting$/ }).click()
