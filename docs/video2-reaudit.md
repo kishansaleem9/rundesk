@@ -3613,7 +3613,7 @@ why, so the raise cannot be used as cover later.
 | `settings-depth` | 4 | 2·1·1·1 | the workspace-package resolution bug |
 | `chat-message-actions` | 4 | 6·3·1·1 | a check that named "local" and read only the format, in a UTC container; an unbounded click |
 | `task-depth` | 4 | 6·2·1·3 | four unbalanced branches; an unguarded dereference |
-| `video1-fast-items` | 4 | not measured until 22 September | fifteen unbalanced branches — and four patches with no surviving run log at all, which is what the freshness check was written to find |
+| `video1-fast-items` | 4 | 2·3·1·1 | fifteen unbalanced branches — and four patches with no surviving run log at all until 22 September, which is what the freshness check was written to find |
 | `ui-sweep` | 4 | 1·1·1·2 | a literal `check(true, …)`; a level-hint check scanning the whole dialog |
 
 ### The four patches that ran GREEN
@@ -4064,11 +4064,12 @@ Every set that has run since the denominator was corrected, with its baseline:
 | `settings-depth` | 61 · 0 | 2 · 1 · 1 · 1 |
 | `chat-message-actions` | 73 · 0 | 6 · 3 · 1 · 1 |
 | `task-depth` | 91 · 0 | 6 · 2 · 1 · 3 |
-| `video1-fast-items` | 92 · 0 | — |
+| `video1-fast-items` | 92 · 0 | 2 · 3 · 1 · 1 |
 | `video-regression` | 93 · 0 | 3 · 2 · 1 · 9 |
 | `ui-sweep` | 107 · 0 | 1 · 1 · 1 · 2 |
 | `person-panel` | 59 · 0 | 2 · 2 · 1 · 1 |
 | `command-palette` | 43 · 0 | 1 · 7 · 2 · 1 |
+| `calendar-accounts` | 36 · 0 | 3 · 2 · 1 · 2 · 1 · 1 · 1 |
 
 Where a cell reads `—` the patch ran green and is dealt with above. Where a
 baseline is not `N · 0` the set was refused, which is the harness declining to
