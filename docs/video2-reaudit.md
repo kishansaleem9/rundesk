@@ -5555,3 +5555,29 @@ It was caught by measurement rather than by reading: printing the counts showed
 22 and 11 sitting under floors of 30 and 20 with a green exit. The floors now
 set a flag the final verdict reads, and all seven redden when their assertions
 are removed.
+
+### A hunt that found nine suites and no defects
+
+With conditional checks at zero it looked as though a static property should
+hold: **a suite cannot declare fewer checks than it statically calls**, since
+every call site runs. Nine suites fail it — `chat-message-actions` declares 73
+and calls 97, `panel-collapse` 56 against 71, `emoji-picker` 25 against 26.
+
+All nine are correct, and the reason is in the tree already. `emoji-picker`
+line 400:
+
+> *"The three remaining checks report as failed with the reason, so the run
+> reaches its own summary and the count still comes to `EXPECTED_CHECKS` — which
+> is the same rule the rest of this directory follows: **every branch reports the
+> same number of checks.**"*
+
+A static call count bounds nothing in either direction. A **loop** multiplies
+one call site into many — that one is three. A **branch** divides several call
+sites into one path taken; `check-suite-check-branches.mjs` requires the `else`
+precisely so both paths report, which makes the alternatives visible statically
+and uncountable statically at the same time.
+
+So the property is real and it is enforced dynamically, by `EXPECTED_CHECKS`
+being compared with `!==` on every run. A static version would add nothing and
+would report nine working suites as defects — the same trade that kept the broad
+read scan from becoming a rule. Written down so the scan is not built twice.
