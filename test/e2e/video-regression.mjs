@@ -823,12 +823,52 @@ try {
     await aiPage.goto(`${BASE}/app/${WS}`, { waitUntil: 'domcontentloaded' })
     await aiPage.waitForTimeout(3500)
 
-    const aiToggle = aiPage.getByTestId('ai-dock-toggle')
-    if ((await aiToggle.count()) === 0) {
-      chk(false, 'the AI dock can be opened', 'no ai-dock-toggle on the top bar')
-      chk(false, 'so the trace was never checked', 'skipped')
-      chk(false, 'and neither was the answer', 'skipped')
-    } else {
+    /*
+     * EIGHT CHECKS, WHICHEVER WAY THIS GOES — AND IT USED TO BE THREE, FOUR OR
+     * SEVEN, DEPENDING ON THE BRANCH.
+     *
+     * This chain is written so a missing entry point reports a cause and then
+     * says plainly that the rest could not be evaluated, rather than passing
+     * vacuously or throwing. That instinct was right and the arithmetic was
+     * not: the no-toggle branch emitted 3 checks, composer-disabled emitted 4,
+     * and the full path 7 — one of which ("the AI dock can be opened") existed
+     * ONLY in the no-toggle branch, so the path that actually clicked the dock
+     * never asserted it was there.
+     *
+     * `EXPECTED_CHECKS` is compared with `!==`, so any short branch makes the
+     * suite exit 1 with `✗ 88 of 92 checks ran` — and that is the headline a
+     * real regression produces. `vr-4-the-ai-dock-is-only-on-the-ai-page`
+     * removes the dock handle: the three FAIL lines were right there, under a
+     * summary declaring the RUN broken rather than the product. A person
+     * reading that reaches for the harness.
+     *
+     * So the sentences live in one list, each branch reports the one it
+     * reached, and whatever is left over is reported as failed with the reason
+     * the chain stopped. Eight by construction — a branch that forgets a check
+     * cannot shorten the run, it fails that check with its own sentence.
+     */
+    const G13 = [
+      ['the AI dock can be opened', 'no ai-dock-toggle on the top bar'],
+      ['the AI composer is usable once the model is available', 'the composer stayed disabled'],
+      ['the answer arrives', 'the answer never rendered'],
+      ['and the trace of what it read stays with it', 'no trace survived the answer'],
+      ['naming the workspace read the server reported', 'the workspace step never rendered'],
+      ['and the answer offers next steps drawn from it', 'no follow-up chips under the answer'],
+      ['phrased as something you could say back', 'the chip did not read as something to say'],
+      ['and clicking one actually asks it', 'the chip did not send its suggestion'],
+    ]
+    let emitted = 0
+    const g13 = (cond, why) => {
+      const [good, bad] = G13[emitted++]
+      chk(cond, good, why ?? bad)
+    }
+    let stopped = ''
+    await (async () => {
+      const aiToggle = aiPage.getByTestId('ai-dock-toggle')
+      const haveToggle = (await aiToggle.count()) > 0
+      g13(haveToggle)
+      if (!haveToggle) return (stopped = 'skipped: there was no dock handle to open')
+
       await aiToggle.click()
       await aiPage.waitForTimeout(1500)
       const composer = aiPage.locator('input[placeholder*="Ask Rundesk" i]').first()
@@ -836,72 +876,50 @@ try {
       // and `fill` would then time out 30s into a failure whose message says
       // nothing about why.
       const enabled = !(await composer.isDisabled().catch(() => true))
-      chk(enabled, 'the AI composer is usable once the model is available', 'the composer stayed disabled')
-      if (enabled) {
-        await composer.fill('what am I working on?')
-        await composer.press('Enter')
-        const answered = await aiPage
-          .locator('text=You have three tasks due today.')
-          .first()
-          .waitFor({ timeout: 15000 })
-          .then(() => true)
-          .catch(() => false)
-        chk(answered, 'the answer arrives', 'the answer never rendered')
-        /*
-         * Read AFTER the answer, on purpose. A first version looked while the
-         * turn was still streaming and found nothing, because the trace was
-         * transient — which meant a fast turn showed no trace at all, exactly
-         * when you would want to check whether it read your data. The trace
-         * now belongs to the message and stays with it.
-         */
-        chk(
-          (await aiPage.getByTestId('ai-trace').count()) > 0,
-          'and the trace of what it read stays with it',
-          'no trace survived the answer',
-        )
-        chk(
-          (await aiPage.getByTestId('ai-trace-step-workspace').count()) > 0,
-          'naming the workspace read the server reported',
-          'the workspace step never rendered',
-        )
+      g13(enabled)
+      if (!enabled) return (stopped = 'skipped: the composer never became usable')
 
-        /*
-         * G13-9 [18:42] — "Follow ups", under the answer they came from.
-         *
-         * Ours were a static five-item menu shown only while the thread was
-         * empty, so the moment you asked anything the guided path vanished —
-         * and she drives the whole demo by clicking one of these.
-         */
-        const chip = aiPage.locator('[data-testid^="ai-followup-"]').first()
-        chk(
-          (await chip.count()) > 0,
-          'and the answer offers next steps drawn from it',
-          'no follow-up chips under the answer',
-        )
-        if ((await chip.count()) > 0) {
-          chk(
-            (await chip.innerText()).trim() === 'Show me the overdue one',
-            'phrased as something you could say back',
-            await chip.innerText().catch(() => '(unreadable)'),
-          )
-          // A chip that does not ask the question is a label.
-          await chip.click()
-          await aiPage.waitForTimeout(2000)
-          chk(
-            (await aiPage.locator('text=Show me the overdue one').count()) >= 2,
-            'and clicking one actually asks it',
-            'the chip did not send its suggestion',
-          )
-        } else {
-          chk(false, 'phrased as something you could say back', 'no chip')
-          chk(false, 'and clicking one actually asks it', 'no chip')
-        }
-      } else {
-        chk(false, 'the answer arrives', 'composer disabled')
-        chk(false, 'and the trace of what it read stays with it', 'composer disabled')
-        chk(false, 'naming the workspace read the server reported', 'composer disabled')
-      }
-    }
+      await composer.fill('what am I working on?')
+      await composer.press('Enter')
+      const answered = await aiPage
+        .locator('text=You have three tasks due today.')
+        .first()
+        .waitFor({ timeout: 15000 })
+        .then(() => true)
+        .catch(() => false)
+      g13(answered)
+      /*
+       * Read AFTER the answer, on purpose. A first version looked while the
+       * turn was still streaming and found nothing, because the trace was
+       * transient — which meant a fast turn showed no trace at all, exactly
+       * when you would want to check whether it read your data. The trace
+       * now belongs to the message and stays with it.
+       */
+      g13((await aiPage.getByTestId('ai-trace').count()) > 0)
+      g13((await aiPage.getByTestId('ai-trace-step-workspace').count()) > 0)
+
+      /*
+       * G13-9 [18:42] — "Follow ups", under the answer they came from.
+       *
+       * Ours were a static five-item menu shown only while the thread was
+       * empty, so the moment you asked anything the guided path vanished —
+       * and she drives the whole demo by clicking one of these.
+       */
+      const chip = aiPage.locator('[data-testid^="ai-followup-"]').first()
+      const haveChip = (await chip.count()) > 0
+      g13(haveChip)
+      if (!haveChip) return (stopped = 'skipped: there was no chip to read or click')
+
+      g13(
+        (await chip.innerText()).trim() === 'Show me the overdue one',
+        await chip.innerText().catch(() => '(unreadable)'),
+      )
+      // A chip that does not ask the question is a label.
+      await chip.click()
+      await aiPage.waitForTimeout(2000)
+      g13((await aiPage.locator('text=Show me the overdue one').count()) >= 2)
+    })()
+    while (emitted < G13.length) g13(false, stopped || 'skipped: the chain stopped earlier')
     await aiCtx.close()
   }
 
@@ -947,11 +965,18 @@ console.log(`\n\x1b[1m${results.length - failed.length} passed, ${failed.length}
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
  * branch that silently skipped becomes a shorter run that still reports zero
- * failures and exits 0. Ninety-two checks walking the whole product is a lot
+ * failures and exits 0. Ninety-three checks walking the whole product is a lot
  * of places to stop quietly. Observed from a green run, not guessed — the
  * ninth and last suite in this directory to get one.
+ *
+ * 92 → 93 WHEN THE G13-10 CHAIN STOPPED CHANGING LENGTH. Its three branches
+ * reported three, four and seven checks, so a real regression in the AI dock
+ * made this line declare the RUN broken instead of the product — and "the AI
+ * dock can be opened" was asserted only on the branch where there was no dock
+ * to open. It reports eight on every path now, one of which is new. See the
+ * block itself: this constant moving is the visible half of that fix.
  */
-const EXPECTED_CHECKS = 92
+const EXPECTED_CHECKS = 93
 if (results.length !== EXPECTED_CHECKS) {
   console.log(
     `\n\x1b[31m✗ ${results.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +

@@ -181,11 +181,29 @@ case "$BASE" in
   *)
     { echo "== REFUSING TO BREAK-TEST — the unpatched suite is not green, so no patch below"
       echo "   could be told apart from what is already broken. Fix the baseline first."
-      grep -E 'FAIL' "/tmp/claude-0/brk-$SUITE-baseline.log" | sed 's/\x1b\[[0-9;]*m//g' | head -6
+      grep -E '\bFAIL\b' "/tmp/claude-0/brk-$SUITE-baseline.log" | sed 's/\x1b\[[0-9;]*m//g' | head -6
     } >> "$OUT"
     exit 5
   ;;
 esac
+# "0 FAILED IS NOT IT RAN" — AND THIS HARNESS WAS THE ONE PLACE THAT STILL
+# BELIEVED IT.
+#
+# Every suite carries an `EXPECTED_CHECKS` constant compared with `!==`, and
+# prints `✗ N of M checks ran` and exits 1 when a run stopped early. The line
+# matches neither `FAIL` nor `passed,`, so nothing here has ever read it: a
+# baseline that took a short branch, reported `84 passed, 0 failed` and exited
+# 1 would be accepted as green, and every patch measured against it compared
+# against a run four checks shorter than the suite.
+SHORT_LINE=$(grep -E 'checks ran' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
+if [ -n "$SHORT_LINE" ]; then
+  { echo "== REFUSING TO BREAK-TEST — the baseline run was SHORT, so the summary above"
+    echo "   describes only the part it reached. A patch measured against it cannot be"
+    echo "   told from a patch that shortened it further."
+    echo "  $SHORT_LINE"
+  } >> "$OUT"
+  exit 5
+fi
 
 # Was the PREVIOUS patch a web one? If so its bundle is still on disk, and an
 # API-only patch that follows would run against it — so every later check would
@@ -282,9 +300,31 @@ for b in "$@"; do
     API_DIRTY="$NEEDS_API"
     timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
       > "/tmp/claude-0/brk-$b.log" 2>&1
+    # WHAT THIS FILE RECORDS IS THE ONLY THING ANYBODY READS, and it was
+    # under-reporting in two ways that both look like a clean result.
+    #
+    #  - `head -4` silently truncated the list. A patch reddening seven checks
+    #    was recorded as reddening four, and the prediction-vs-actual counts in
+    #    every patch header are read off this file. The cap stays — an OUT file
+    #    with ninety FAIL lines in it is not read by anyone — but it now says
+    #    how many it withheld, so a truncated list cannot be mistaken for a
+    #    complete one.
+    #  - `grep -E 'FAIL'` also matched the `FAILURES` banner suites print above
+    #    their summary, so the count was one too many. `\bFAIL\b` does not.
+    #  - THE SHORT-RUN LINE WAS NEVER CAPTURED AT ALL. `vr-4` took a branch of
+    #    `video-regression`'s G13-10 block that reports three checks where the
+    #    other branch reports seven; the suite printed `✗ 88 of 92 checks ran`
+    #    and exited 1, and this file recorded `84 passed, 4 failed` with
+    #    nothing to say four checks never happened. `break-queue.sh` counted it
+    #    as a clean reddening, which is exactly the shape this whole audit
+    #    calls the confident zero.
+    NFAIL=$(grep -cE '\bFAIL\b' "/tmp/claude-0/brk-$b.log")
     { echo "== $b"
-      grep -E 'FAIL' "/tmp/claude-0/brk-$b.log" | sed 's/\x1b\[[0-9;]*m//g' | head -4
+      grep -E '\bFAIL\b' "/tmp/claude-0/brk-$b.log" | sed 's/\x1b\[[0-9;]*m//g' | head -12
+      [ "$NFAIL" -gt 12 ] && echo "  … and $((NFAIL - 12)) more FAIL lines not shown"
       grep -E 'passed,' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g'
+      grep -E 'checks ran' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g' \
+        | sed 's/^/  SHORT RUN: /'
     } >> "$OUT"
   else
     { echo "== $b BUILD FAILED"; tail -3 "/tmp/claude-0/wt$LANE-api.log" "/tmp/claude-0/wt$LANE-web.log" 2>/dev/null; } >> "$OUT"

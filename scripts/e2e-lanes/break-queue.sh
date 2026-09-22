@@ -58,50 +58,56 @@ while IFS= read -r line; do
   RC=$?
   RES="/tmp/claude-0/break-$SUITE.txt"
   BASE=$(grep -m1 '^== BASELINE' "$RES" 2>/dev/null)
-  RAN=$(grep -E '^== ' "$RES" 2>/dev/null | grep -vcE '^== (syncing|BASELINE|restoring|REFUSING)')
-  # A STILL-GREEN PATCH IS A PATCH LINE FOLLOWED IMMEDIATELY BY ITS RESULT —
-  # `wt-break.sh` prints any FAIL lines in between, so adjacency IS the test.
+  # ONE PASS, ONE OUTCOME PER PATCH, AND THE COLUMNS ADD UP BY CONSTRUCTION.
   #
-  # The first version was `grep -A1 -E '^== '`, which also matches the BASELINE
-  # line, and a green baseline reads "58 passed, 0 failed". So every set came
-  # back claiming one more still-green patch than it had, and the first set it
-  # ran reported STILL-GREEN 1 for five patches that all reddened. A wrong
-  # number in the metric this script exists to report honestly.
-  GREEN=$(awk '
-    /^== (syncing|BASELINE|restoring|REFUSING)/ { patch=0; next }
-    /^== / { patch=1; next }
-    patch && /, 0 failed/ { n++ }
-    { patch=0 }
-    END { print n+0 }
-  ' "$RES" 2>/dev/null)
-  UNBUILT=$(grep -cE '^== .*(BUILD|PATCH) FAILED' "$RES" 2>/dev/null)
-  # AND MISSING IS A THIRD THING, which this line learned the same way it
-  # learned the second.
+  # This was six greps over the same file with overlapping patterns, and it grew
+  # a column every time a category was found falling between the ones it had:
+  # STILL-GREEN, then UNBUILT, then MISSING, then NO-CHANGE, then SHORT. Each
+  # addition was right and the SHAPE was wrong — `RED` was whatever was left
+  # after subtracting five independently-counted sets, so any patch matching two
+  # of them was subtracted twice. A short run that also reports `0 failed` was
+  # counted as still-green AND as short, which takes REDDENED below zero and
+  # trips "PROVED NOTHING" on a set that proved something.
   #
-  # `wt-break.sh` prints "== <name> MISSING" for a patch file it cannot find.
-  # That matches `^== `, so it counted towards `patches`; it is followed by no
-  # result line, so it did not count as still-green; and it says neither BUILD
-  # nor PATCH FAILED, so it did not count as unbuilt. Two sets of four came
-  # back reading "patches 4 · STILL-GREEN 0 · UNBUILT 0" — byte-identical to
-  # four patches that all reddened — having run nothing at all.
-  #
-  # That is the confident zero, in the script whose entire purpose is to report
-  # these numbers honestly, and it is the second time this line has had to grow
-  # a column rather than let a category fall between the ones it had.
-  MISSING=$(grep -cE '^== .* MISSING' "$RES" 2>/dev/null)
-  # `PATCH CHANGED NOTHING` is a fourth one, and it fell through the same gap:
-  # `wt-break.sh` prints it when a patch applied and left the tree identical,
-  # which is not a build failure and not a MISSING file. Counted here rather
-  # than discovered later, because the lesson of the line above is that every
-  # outcome needs a column of its own the first time it is noticed.
-  NOCHANGE=$(grep -cE '^== .*PATCH CHANGED NOTHING' "$RES" 2>/dev/null)
-  # STILL-GREEN, UNBUILT AND MISSING ARE REPORTED SEPARATELY, ALWAYS. A patch
-  # that never built prints no "N passed, M failed" line, so it is not counted
-  # as still green — which is exactly what a patch that reddened looks like.
-  # Reporting only still-green counted five unbuilt patches across five sets as
-  # proven.
-  RED=$((RAN - GREEN - UNBUILT - MISSING - NOCHANGE))
-  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE" >> "$OUT"
+  # That is the duplicated list, in the script whose entire purpose is to report
+  # these numbers honestly — five patterns describing one partition, drifting
+  # apart. So each patch block is classified exactly once, in the order a reader
+  # would: the header says MISSING, FAILED or CHANGED NOTHING, else the body
+  # says the run stopped early, else the summary says 0 failed, else it
+  # reddened. The sum is asserted below rather than assumed.
+  eval "$(awk '
+    function flush() {
+      if (!inpatch) return
+      if      (hdr ~ / MISSING/)                 missing++
+      else if (hdr ~ /(BUILD|PATCH) FAILED/)     unbuilt++
+      else if (hdr ~ /PATCH CHANGED NOTHING/)    nochange++
+      else if (isshort)                          short++
+      else if (isgreen)                          green++
+      else                                       red++
+      inpatch = 0
+    }
+    /^== (syncing|BASELINE|restoring|REFUSING)/ { flush(); next }
+    /^== / { flush(); inpatch = 1; hdr = $0; isshort = 0; isgreen = 0; next }
+    inpatch && /^  SHORT RUN:/ { isshort = 1; next }
+    inpatch && /, 0 failed/    { isgreen = 1; next }
+    END {
+      flush()
+      printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d RED=%d\n",
+        missing+unbuilt+nochange+short+green+red, green+0, unbuilt+0, missing+0,
+        nochange+0, short+0, red+0
+    }
+  ' "$RES" 2>/dev/null)"
+  : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${RED:=0}"
+  echo "== $SUITE done rc=$RC · $BASE · patches $RAN · REDDENED $RED · STILL-GREEN $GREEN · UNBUILT $UNBUILT · MISSING $MISSING · NO-CHANGE $NOCHANGE · SHORT $SHORT" >> "$OUT"
+  # THE PARTITION IS ASSERTED, NOT TRUSTED. The whole reason the old arithmetic
+  # was wrong is that nothing checked whether the columns accounted for the
+  # patches, so a double-counted patch showed up as a plausible smaller number.
+  SUM=$((RED + GREEN + UNBUILT + MISSING + NOCHANGE + SHORT))
+  [ "$SUM" -ne "$RAN" ] && echo "== $SUITE TALLY IS BROKEN — $SUM accounted for, $RAN patches ran; do not read the line above" >> "$OUT"
+  # A SHORT RUN IS NOT A PROOF. Such a patch reddens some checks AND makes
+  # others unreachable, and only the first half is evidence: the ones that never
+  # ran are exactly as unproven as they were before it applied.
+  [ "$SHORT" -gt 0 ] && echo "== $SUITE has $SHORT patch(es) whose run STOPPED EARLY — those runs prove nothing about the checks that never happened" >> "$OUT"
   # SAY IT TWICE WHEN NOTHING RAN. A set is a claim about patches that
   # executed, and a line reading "patches 4" for four files nobody opened is
   # the claim without the thing it is about.

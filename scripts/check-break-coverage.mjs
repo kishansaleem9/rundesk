@@ -24,19 +24,29 @@
  * `malformed-ids`, `trending-sort`, `undo-delete`, `task-provenance`,
  * `search-sources`, `bookmarks`, `list-statuses-seeded`, `list-save-view`,
  * `replies-inline-thread`, `request-access`, `planner-priorities`,
- * `space-features` and `assign-to-priorities` among them — so the ratchet
- * stands at 1. The count printed is always the current one; the paragraph
- * above is what it was when anybody first looked.
+ * `space-features` and `assign-to-priorities` among them — and then all 47.
+ * The count printed is always the current one; the paragraph above is what it
+ * was when anybody first looked, and the one below is what happened when the
+ * denominator was finally checked too.
  *
  * KEEP THIS PARAGRAPH IN STEP WITH THE CONSTANT. It said 37 while the constant
  * said 27, which is the stale-reason defect in the file that exists to stop a
  * number describing something it no longer describes.
  *
- * IT IS ZERO NOW, and that changes what this ratchet is for. It no longer
- * measures a backlog; it holds a floor. Every one of the 101 suites has at
- * least one patch aimed at it, so a NEW suite arriving without one is the only
- * thing that can move this number — which is exactly the moment the check is
- * worth failing on.
+ * IT REACHED ZERO, AND THE ZERO WAS FALSE. Every one of the 101 suites this
+ * file could SEE had a patch aimed at it — and it could see 101 of 113, because
+ * the count came from grepping `\bchk\(` and eleven suites name their helper
+ * `check(`. 633 checks in `ui-sweep`, `task-depth`, `video1-fast-items`,
+ * `chat-message-actions`, `settings-depth`, `panel-collapse`, `syncup-live`,
+ * `addressability-live`, `stale-chunk-recovery`, `loading-states` and
+ * `emoji-picker` were outside the denominator, so they could not appear in the
+ * uncovered list however long nobody wrote a patch for them.
+ *
+ * The count is each suite's own `EXPECTED_CHECKS` now, for the reasons written
+ * above it, and the real numbers are **113 suites · 2726 checks · 11
+ * uncovered**. 47 → 0 → 11 is one number being corrected, not two regressions;
+ * the ratchet's own comment at the bottom says which of those moves is
+ * legitimate and why.
  *
  * AND ZERO HERE STILL DOES NOT MEAN "IT WORKS". Read the paragraph below about
  * `save-comment`: this counts aim, and the ledger's §8 counts what reddened.
@@ -81,9 +91,37 @@ const suiteNames = readdirSync(SUITES)
   .filter((f) => f.endsWith('.mjs'))
   .map((f) => f.slice(0, -4))
 
+/*
+ * THE CHECK COUNT IS THE SUITE'S OWN `EXPECTED_CHECKS`, AND COUNTING `chk(`
+ * INSTEAD HID TWELVE WHOLE SUITES.
+ *
+ * This grepped for `\bchk\(` and gated everything on `checksIn[n] > 0`, so a
+ * suite whose helper is called something else counted zero checks and was
+ * dropped from `withChecks` — which means it could not appear in the uncovered
+ * list either. Twelve TRACKED suites name theirs `check(`:
+ * `ui-sweep` (107), `task-depth` (91), `video1-fast-items` (92),
+ * `chat-message-actions` (73), `settings-depth` (61), `person-panel` (59),
+ * `panel-collapse` (56), `syncup-live` (48), `addressability-live` (28),
+ * `stale-chunk-recovery` (27), `loading-states` (26), `emoji-picker` (24) —
+ * 692 checks. **"0 suites have NO break patch at all" was true of the 101 this
+ * file could see and silent about those twelve.** A confident zero produced by
+ * the identifier a helper happens to be named.
+ *
+ * `EXPECTED_CHECKS` is a better denominator than any grep for a call site. All
+ * 113 files here declare one, it is the EXACT runtime count rather than a
+ * static approximation, and each suite compares its own result against it with
+ * `!==` on every run — so unlike a `chk(` tally it cannot drift from what the
+ * suite actually does. It also stops counting a wrapper: `video-regression`
+ * routes fourteen of its checks through a local `g13()` that reports one of
+ * eight fixed sentences, and the grep saw 67 where the suite runs 93.
+ *
+ * A file that declares no `EXPECTED_CHECKS` counts zero and is skipped, which
+ * is the same gate as before for anything in here that is not a suite.
+ */
 const checksIn = {}
 for (const n of suiteNames) {
-  checksIn[n] = (readFileSync(join(SUITES, `${n}.mjs`), 'utf8').match(/\bchk\(/g) || []).length
+  const src = readFileSync(join(SUITES, `${n}.mjs`), 'utf8')
+  checksIn[n] = Number(src.match(/^const EXPECTED_CHECKS = (\d+)/m)?.[1] ?? 0)
 }
 
 // The longest prefix of a patch's filename that is a suite — step two of the
@@ -180,8 +218,30 @@ if (unattributedNames.length) {
   for (const n of unattributedNames) console.log(`    ${n}`)
 }
 
-// THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 0
+/*
+ * THE RATCHET. Lower it when a suite is covered; never raise it to pass.
+ *
+ * IT WENT 47 → 0 AND IS NOW 11, AND THAT IS NOT THE RATCHET BEING RAISED TO
+ * PASS. READ THIS BEFORE TOUCHING THE NUMBER.
+ *
+ * The zero was measured with a `chk(` grep, which cannot see a suite whose
+ * helper is called `check(`. Eleven tracked suites carrying 633 checks —
+ * `ui-sweep`, `video1-fast-items`, `task-depth`, `chat-message-actions`,
+ * `settings-depth`, `panel-collapse`, `syncup-live`, `addressability-live`,
+ * `stale-chunk-recovery`, `loading-states`, `emoji-picker` — were not in the
+ * denominator, so they could not be in the uncovered list. The 47 that were
+ * closed were really closed; the eleven were never counted.
+ *
+ * So the number did not get worse. It got MEASURED. The distinction that
+ * matters, and the one this paragraph exists to stop anybody hiding behind:
+ * raising this constant is legitimate ONLY when the measurement changed and
+ * the new number is the true one, said out loud, with the suites named. It is
+ * never legitimate for a suite that had a patch and lost it — that is the
+ * regression this check exists to catch, and it still fails on it.
+ *
+ * 11 → 0 is the work in front of this, and each suite closed lowers it by one.
+ */
+const BASELINE_UNCOVERED = 11
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
