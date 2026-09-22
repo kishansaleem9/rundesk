@@ -6124,7 +6124,7 @@ able to check.
 
 ---
 
-## §12 — What is left, and the order measurement says to do it in
+## §12 — What is left, and the order the evidence says to do it in
 
 The four freeze items are closed, so the remaining work is video 2's own. The
 `P` and `M` rows were read against the tree rather than recalled, and they split
@@ -6162,11 +6162,34 @@ disk:
 
 Forty times the cost between the cheapest and the dearest, and `task-detail-
 sheet.tsx` is the most-patched file in the tree. Threads first would drift 80
-patches and buy a second full sweep; View types first costs two. So: **View
-types → Document import → Create Folder description → Threads**, and every edit
-to one file goes in together, because a file that drifts twice is measured
-twice.
+patches and buy a second full sweep; View types first costs two.
 
-This is written down because the number that decides it — 80 — is not something
-anyone would guess, and because a container reclaim has already cost this
+### AND DRIFT ALONE IS THE WRONG ORDER, which took reading the frames to see
+
+The paragraph above originally ended "so: View types → Document import → Create
+Folder description → Threads", ranked purely on that table. Then the frames were
+read for each item rather than the ledger's summary of them, and the cheapest
+item turned out to be the least specified:
+
+| item | drift | what the frames actually show |
+|---|---|---|
+| Create Folder description | ~25 | **`08:25` — the field, its placeholder *"Tell us a bit about your Folder (optional)"*, and its position between Name and Location.** Fully specified |
+| Threads | 80 | **`05:50` — the panel header *"Thread by \<name\>"*, the comment with its reactions, the *"Reply to comment…"* composer.** Fully specified |
+| View types | 2 | `07:10` lists Activity and Workload in the wizard's toggle list. **No frame opens either view.** Half specified |
+| Document import | 21 | `12:05` lists *Document files* as a submenu row. **No frame shows the flow, the formats, or what it produces.** Barely specified |
+
+THE WALKTHROUGH IS THE SPECIFICATION, and two of these four have one. The other
+two have a row in a menu and nothing behind it — and the ledger already refuses
+that trade for Map, Mind Map and Timeline, on the grounds that "a view you can
+tick but not render is a stored value no reader honours". Building an Activity
+view from an invented design would be the same mistake wearing a tick.
+
+So: **Create Folder description → Threads**, both fully evidenced, batched per
+file. View types and Document import are held, not abandoned: what an Activity
+view or a document importer should DO is a decision the walkthrough does not
+make, and inventing one is how a facade gets built with good intentions.
+
+This is written down because the number that decides half of it — 80 — is not
+something anyone would guess, because the other half needed the frames rather
+than a summary of them, and because a container reclaim has already cost this
 engagement its unpushed work once.
