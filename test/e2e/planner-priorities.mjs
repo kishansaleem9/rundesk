@@ -229,6 +229,27 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ ticking one off, and dropping one')
 
+  /*
+   * `row` IS UNDEFINED WHEN THE WRITE DID NOT LAND, which is the whole point of
+   * `planner-priorities-2-the-rail-is-a-readout-again`. It makes the rail a
+   * readout, the four checks above redden exactly as claimed — and then
+   * `row.id` threw `TypeError: Cannot read properties of undefined` and the run
+   * ended at 7 of 10.
+   *
+   * Reported rather than thrown, so both paths report four checks and
+   * `EXPECTED_CHECKS` stays exact. Same shape as `list-statuses-seeded`, and
+   * the same reason it is not `skipRest`: a rail that cannot write is a product
+   * regression, not a gate on the machine.
+   */
+  const NOTHING_WRITTEN = row?.id
+    ? null
+    : 'the rail never wrote a priority to the server, so there was nothing to tick off or remove'
+  if (NOTHING_WRITTEN) {
+    chk(false, 'ticking it marks it done on the server', NOTHING_WRITTEN)
+    chk(false, 'and it leaves the open list', NOTHING_WRITTEN)
+    chk(false, 'a second priority is added', NOTHING_WRITTEN)
+    chk(false, 'and removing it really removes it', NOTHING_WRITTEN)
+  } else {
   await page.getByTestId(`planner-priority-done-${row.id}`).click()
   chk(
     await waitUntil(async () => {
@@ -262,15 +283,22 @@ try {
   }, { timeoutMs: 15_000 })
   chk(!!second, 'a second priority is added', 'the second add never reached the server')
 
-  await page.getByTestId(`planner-priority-remove-${second.id}`).click()
-  chk(
-    await waitUntil(async () => {
-      const after = (await mine()).data ?? []
-      return !after.some((p) => p.id === second.id)
-    }, { timeoutMs: 15_000 }),
-    'and removing it really removes it',
-    'the ✕ removed the row from the screen and left it on the server',
-  )
+  // And the same guard one step down: the check above is allowed to find that
+  // the add never landed, and `second.id` would then throw where it stands.
+  if (!second?.id) {
+    chk(false, 'and removing it really removes it', 'the second add never reached the server, so there was nothing to remove')
+  } else {
+    await page.getByTestId(`planner-priority-remove-${second.id}`).click()
+    chk(
+      await waitUntil(async () => {
+        const after = (await mine()).data ?? []
+        return !after.some((p) => p.id === second.id)
+      }, { timeoutMs: 15_000 }),
+      'and removing it really removes it',
+      'the ✕ removed the row from the screen and left it on the server',
+    )
+  }
+  }
 } catch (err) {
   failed += 1
   console.error('\n\x1b[31mSUITE ERROR\x1b[0m', err)

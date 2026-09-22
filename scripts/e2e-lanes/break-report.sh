@@ -69,12 +69,23 @@ while IFS=$'\t' read -r verdict suite tree; do
   [ -n "${suite:-}" ] && CURRENT["$suite"]="$tree"
 done < <(node "$REPO/scripts/check-break-freshness.mjs" --porcelain 2>/dev/null)
 
+# EVERY `unit:` CLAIM, ONCE, FOR THE CLASSIFIER.
+#
+# Their evidence is a `*.test.ts` and `check-unit-claims.mjs` measures all of
+# them every preflight, so `0 failed` in an e2e log is silence rather than a
+# green. `check-break-reddened.mjs` has always counted them in their own
+# column; this file did not, and reported `planner-priorities-1-two-cache-keys-
+# again` as GREEN while the checker beside it called the same patch a unit
+# claim. Two answers to one question, in the two places a person reads.
+UNITS=$(grep -lE '^#[[:space:]]*Reddens:[[:space:]]*unit\b' "$REPO"/test/e2e/breaks/*.py 2>/dev/null \
+  | sed 's|.*/||;s|\.py$||' | paste -sd, -)
+
 bad=0
 for f in "${files[@]}"; do
   [ -f "$f" ] || { printf '%-34s no log on this machine\n' "$(basename "$f" .txt | sed 's/^break-//')"; bad=1; continue; }
   suite=$(basename "$f" .txt | sed 's/^break-//')
-  eval "$(awk -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null)"
-  : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${CRASHED:=0}" "${RED:=0}"
+  eval "$(awk -v units="$UNITS" -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null)"
+  : "${RAN:=0}" "${GREEN:=0}" "${UNBUILT:=0}" "${MISSING:=0}" "${NOCHANGE:=0}" "${SHORT:=0}" "${CRASHED:=0}" "${RED:=0}" "${UNIT:=0}"
   base=$(grep -m1 '^== BASELINE' "$f" 2>/dev/null | sed 's/^== BASELINE (no patch) //')
   refused=$(grep -c '^== REFUSING' "$f" 2>/dev/null || true)
   note=''
@@ -91,8 +102,11 @@ for f in "${files[@]}"; do
     elif [ "$verdict" = SHORT ];                    then undeclared=$((undeclared + 1))
     elif [ "$expects" = 1 ];                        then stale_expect=$((stale_expect + 1))
     fi
-  done < <(awk -v names=1 -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^RAN=')
+  done < <(awk -v names=1 -v units="$UNITS" -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^RAN=')
   [ "$GREEN"        != 0 ] && note="$note  GREEN $GREEN"
+  # Named, not silent: a unit claim in an e2e set is measured elsewhere, and
+  # saying so is what stops it being read as a green a second time.
+  [ "$UNIT"         != 0 ] && note="$note  (unit claim $UNIT — see check-unit-claims.mjs)"
   [ "$undeclared"   != 0 ] && note="$note  SHORT $undeclared"
   [ "$declared"     != 0 ] && note="$note  (short by declaration $declared)"
   [ "$stale_expect" != 0 ] && note="$note  STALE Expect: SHORT $stale_expect"
@@ -126,7 +140,7 @@ for f in "${files[@]}"; do
       sed 's/\x1b\[[0-9;]*m//g' "$log" \
         | grep -m1 -E 'threw: |^✗ [0-9]+ of [0-9]+ checks ran|FAIL ran [0-9]+ checks' \
         | sed 's/^[[:space:]]*/                  /' | cut -c1-150
-    done < <(awk -v names=1 -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^(RED|RAN=)')
+    done < <(awk -v names=1 -v units="$UNITS" -f "$HERE/classify-break-log.awk" "$f" 2>/dev/null | grep -vE '^(RED|RAN=)')
   fi
 done
 

@@ -21,13 +21,34 @@
 #   awk -f classify-break-log.awk /tmp/claude-0/break-<suite>.txt
 #
 # Set `-v names=1` to also print one line per patch with its outcome.
-function flush() {
+#
+# AND `-v units=<comma-separated patch names>`, WHICH IS NOT COSMETIC.
+#
+# A `unit:` claim's evidence is a `*.test.ts`; `check-unit-claims.mjs` applies it
+# and requires the named test to fail, every preflight. The e2e log its patch
+# happens to appear in cannot speak to it either way, so `0 failed` there is
+# SILENCE, not a green.
+#
+# `check-break-reddened.mjs` has counted them in their own column since it was
+# written. This file did not, so `planner-priorities-1-two-cache-keys-again`
+# showed up as `GREEN` in the report while the checker beside it called the
+# same patch a unit claim — two answers to one question, in the two places a
+# person reads. It cost a real investigation before it cost anything else.
+function inunits(name,   n, parts, i) {
+  if (units == "") return 0
+  n = split(units, parts, ",")
+  for (i = 1; i <= n; i++) if (parts[i] == name) return 1
+  return 0
+}
+function flush(   name) {
   if (!inpatch) return
+  name = substr(hdr, 4)
   if      (hdr ~ / MISSING/)              { missing++; verdict = "MISSING" }
   else if (hdr ~ /(BUILD|PATCH) FAILED/)  { unbuilt++; verdict = "UNBUILT" }
   else if (hdr ~ /PATCH CHANGED NOTHING/) { nochange++; verdict = "NOCHANGE" }
   else if (nosummary)                     { crashed++; verdict = "CRASHED" }
   else if (isshort)                       { short++; verdict = "SHORT" }
+  else if (inunits(name))                 { unit++; verdict = "UNIT" }
   else if (isgreen)                       { green++; verdict = "GREEN" }
   else                                    { red++; verdict = "RED" }
   if (names) printf "%-9s %s\n", verdict, substr(hdr, 4)
@@ -53,7 +74,7 @@ inpatch && /FAIL ran [0-9]+ checks, expected/ { isshort = 1; next }
 inpatch && /, 0 failed/     { isgreen = 1; next }
 END {
   flush()
-  printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d CRASHED=%d RED=%d\n",
-    missing+unbuilt+nochange+short+crashed+green+red, green+0, unbuilt+0, missing+0,
-    nochange+0, short+0, crashed+0, red+0
+  printf "RAN=%d GREEN=%d UNBUILT=%d MISSING=%d NOCHANGE=%d SHORT=%d CRASHED=%d RED=%d UNIT=%d\n",
+    missing+unbuilt+nochange+short+crashed+green+red+unit, green+0, unbuilt+0, missing+0,
+    nochange+0, short+0, crashed+0, red+0, unit+0
 }
