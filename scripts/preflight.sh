@@ -32,6 +32,7 @@ step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
+step "no press on a maybe-absent control" node scripts/check-suite-bare-presses.mjs
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs

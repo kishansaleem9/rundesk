@@ -230,6 +230,16 @@ jobs:
       - name: The break-log provenance reader holds its contract
         run: node scripts/check-log-tree.mjs
 
+      # And a press on a control the check above it is allowed to find absent.
+      # `imports-3-deadpreset` leaves Start disabled and its run reported 7 of
+      # 19 checks: twelve checks about what the import wrote, silenced by one
+      # unbounded click, under a row crediting the patch with the reddening it
+      # claims. Nineteen sites had this shape and all nineteen were real — a
+      # bare standalone press has no short-circuit to hide behind, which is why
+      # this one is mechanical where the same rule over reads is not.
+      - name: No press on a control that may not be there
+        run: node scripts/check-suite-bare-presses.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks
