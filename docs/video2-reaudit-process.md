@@ -502,6 +502,18 @@ green "confirmations" that meant nothing until they were found.
   which is why a schema patch is safe; nothing covers a row a patch quietly
   edited on its way past.
 
+  **"IT CLEANS THEM UP" IS A CLAIM TO CHECK, NOT AN ASSUMPTION.**
+  `request-access` signs up a new person and adds them to the workspace, and
+  its removal sat at the end of the `try`, after eight checks. Every run that
+  threw earlier left another "Asking Member &lt;stamp&gt;" in the roster for
+  good — and this document already records what an accumulating roster cost:
+  `ui-sweep`'s reports-to picker failed on ten identically-named people.
+  Break-testing is what makes this bite, because a patch's whole job is to make
+  a run fail, and a suite that tidies up only on the happy path turns every red
+  patch into a fixture leak. **Cleanup belongs in `finally`.** The assertion
+  that the cleanup worked can stay in the `try`; they are different things and
+  only one of them is a test.
+
 ### When a patch runs GREEN, read the code before you blame the check
 
 **SEVEN** still-green patches this session and not one of them was a worthless

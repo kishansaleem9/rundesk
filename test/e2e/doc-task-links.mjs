@@ -73,6 +73,22 @@ const chromium = await resolveChromium()
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 
+/*
+ * TIDY-UP RUNS WHATEVER HAPPENED.
+ *
+ * These three deletes — two tasks and a signed-up member — used to sit at the
+ * end of the `try`, after all thirteen checks, so any run that threw earlier
+ * left them behind. This suite signs a person up and puts them in a real
+ * workspace, and `request-access` already showed what accumulating those
+ * costs: `ui-sweep`'s reports-to picker failed on ten identically-named
+ * people. Break-testing makes it bite, because a patch's whole job is to make
+ * a run fail.
+ *
+ * Each step is pushed as it becomes possible, so a run that dies half way
+ * removes exactly what it had made by then.
+ */
+const cleanup = []
+
 try {
   const auth = await signInApi(API, ME.email, ME.password)
   const A = apiAs(auth.accessToken)
@@ -101,6 +117,8 @@ try {
 
   const open = (await A('/tasks', { method: 'POST', body: { listId, title: `Public linked ${stamp}` } })).data
   const secret = (await A('/tasks', { method: 'POST', body: { listId, title: `Private linked ${stamp}` } })).data
+  cleanup.push(() => A(`/tasks/${open.id}`, { method: 'DELETE' }))
+  cleanup.push(() => A(`/tasks/${secret.id}`, { method: 'DELETE' }))
   await A(`/tasks/${secret.id}`, { method: 'PATCH', body: { visibility: 'private' } })
 
   console.log('\n▶ §V2-10 — the doc end of the link')
@@ -145,6 +163,7 @@ try {
     },
   })
   if (!signup.data?.accessToken) throw new Error(`signup failed: ${signup.status}`)
+  cleanup.push(() => A(`/workspaces/${workspaceId}/members/${signup.data.user?.id}`, { method: 'DELETE' }))
   const added = await A(`/workspaces/${workspaceId}/members`, {
     method: 'POST', body: { email: outsider.email, role: 'member' },
   })
@@ -242,14 +261,12 @@ try {
     'the doc was still listed under Relationships, so the tabs show the same thing',
   )
 
-  // Tidy up — this runs against a real workspace.
-  await A(`/tasks/${open.id}`, { method: 'DELETE' }).catch(() => {})
-  await A(`/tasks/${secret.id}`, { method: 'DELETE' }).catch(() => {})
-  await A(`/workspaces/${workspaceId}/members/${signup.data.user?.id}`, { method: 'DELETE' }).catch(() => {})
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  // Newest first, so a task goes before the member who could see it.
+  for (const fn of cleanup.reverse()) await fn().catch(() => {})
   await browser.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
