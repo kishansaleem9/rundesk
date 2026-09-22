@@ -195,6 +195,15 @@ jobs:
       - name: No new suite gets a conditional check with no else
         run: node scripts/check-suite-check-branches.mjs
 
+      # And the module those suites were rewritten onto. It is load-bearing in
+      # eleven of them, and within an hour of being written it had a hole of
+      # exactly the shape it exists to prevent: `step` past the end of its
+      # label list emitted a check with NO SENTENCE, which printed `PASS
+      # undefined` and counted towards the total. Found by calling `step` three
+      # times on a chain of two; invisible by reading.
+      - name: The chain helper holds its contract
+        run: node scripts/check-chain-helper.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks

@@ -54,8 +54,33 @@ export function makeChain(check, skip) {
   return (...labels) => {
     let at = 0
     return {
-      /** Report the next check in the chain. `label` overrides for a template literal. */
+      /**
+       * Report the next check in the chain. `label` overrides for a template
+       * literal.
+       *
+       * IT THROWS PAST THE END, AND IT DID NOT WHEN THIS WAS WRITTEN. With
+       * more `step` calls than labels, `labels[at]` is `undefined` and the
+       * check went out with NO SENTENCE — printing `PASS undefined` and
+       * counting towards the total, so a chain used past its length silently
+       * inflates the count with a nameless check. That is the defect this
+       * whole module exists to prevent, in the module itself; it was found by
+       * calling `step` three times on a chain of two.
+       *
+       * A suite wraps its body, so the throw arrives as a failure carrying
+       * this message — which is worth incomparably more than a nameless pass.
+       */
       step: (cond, detail = '', label) => {
+        // Regardless of the override. A label replaces the sentence AT a valid
+        // index; it does not add one, because `rest` and the suite's own
+        // `EXPECTED_CHECKS` both depend on the declared length being the
+        // chain's real length.
+        if (at >= labels.length) {
+          throw new Error(
+            `chain(${labels.length} labels) got step #${at + 1} — the chain is out of ` +
+              `sentences, so this check would report as \`undefined\` and inflate the count. ` +
+              `Labels: ${JSON.stringify(labels)}`,
+          )
+        }
         const l = label ?? labels[at]
         at += 1
         check(cond, l, detail)
