@@ -707,7 +707,12 @@ try {
   // `aar-18-starters-are-a-fixed-list` replaces the card set, so this card is
   // gone and this read was the throw that cost that patch six checks.
   const pressedTitle = ((await textOf(pressed)) ?? '').split('\n')[0].trim()
-  await pressed.click()
+  // AND THE PRESS, not only the read. I guarded the read for this same patch
+  // this morning and left the press one line under it, which is precisely the
+  // shape that keeps turning up: `aar-18-starters-are-a-fixed-list` replaces
+  // the card set, so this card is gone, and the click spent its thirty seconds
+  // and ended the section — the read above it having been spared (ledger §10).
+  await pressed.click({ timeout: 8000 }).catch(() => {})
   const asked = await waitUntil(
     async () => (await page.locator('[data-testid^="ai-question-"]').count()) > 0,
     { timeoutMs: 15_000 },
