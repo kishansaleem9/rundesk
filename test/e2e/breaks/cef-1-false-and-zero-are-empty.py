@@ -13,17 +13,23 @@
 # the comment is there for. A patch of exactly this shape hides a "Blocked: no"
 # and a "Cost: 0" from a page whose point is to show what a task says.
 #
-# WHAT IT COSTS IN THE SUITE. The checks that count fields with values before
-# and after are the ones that fail: this collapse is eating real data, not
-# blanks, which is failure mode 1 of the three the suite's header enumerates.
-# The reload check and the required-field check stay green, because neither
-# turns on what counts as empty.
+# IT RAN GREEN THE FIRST TIME, AND THE SUITE WAS THE REASON. Every custom
+# field in the fixture was `type: 'text'` with a non-empty string in the filled
+# one, and the built-in grid has no falsy-but-present case — so nothing on the
+# task held `false` or `0`, and a predicate that mishandles exactly those two
+# values could not be observed. The unit test saw it (2 pass / 2 fail); the
+# browser suite had proven the predicate's OTHER cases and no reader of these.
+#
+# The fixture now carries a checkbox set to "no" and a number field holding
+# zero, with a check for each on the Fields tab. This patch reddens those two,
+# and nothing else: the reload check, the count and the required-field check
+# do not turn on what counts as empty.
 #
 # ALSO CAUGHT BY `collapse-empty-fields.test.ts`, 2 pass / 2 fail — the two
 # cases the comment exists for have unit assertions of their own. Measured in
 # the foreground with nothing else touching the tree.
 #
-# Reddens: collapse-empty-fields: "and every field that had a value stays"
+# Reddens: collapse-empty-fields: "a checkbox set to \"no\" stays — false is an answer, not a blank"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/collapse-empty-fields.ts'
 a = """  if (value === null || value === undefined) return true

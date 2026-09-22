@@ -5,11 +5,18 @@
 # "A view preference that resets on every reload is a control that appears to
 # work and does nothing, which is this codebase's most common defect class."
 #
-# The toggle still works perfectly within the session — `setCollapseEmptyFields`
-# still notifies every listener, so both surfaces re-render and the fields go —
-# and the whole thing is forgotten on reload. Somebody who collapses the grid
-# once has to collapse it again on every task they open, which is how a
-# preference becomes a chore.
+# I WROTE THAT IT STILL WORKS WITHIN THE SESSION. IT DOES NOT, AND THE RUN SAID
+# SO. Predicted to redden one check, it reddened four. There is no in-memory
+# copy of this flag: `useSyncExternalStore`'s snapshot IS `read()`, which reads
+# `localStorage`. Delete the write and the notification fires, every reader
+# re-reads, and every reader gets the old value — so the toggle does nothing at
+# all, on any surface, immediately. Not a preference that forgets between
+# sessions: a control that never worked.
+#
+# Corrected here rather than quietly, because the sentence was a claim about
+# behaviour and the number underneath it disagreed. That is the same reading
+# error as a check whose comment describes something the code does not do; the
+# only difference is which file it is in.
 #
 # The write sits inside a try/catch whose comment explains that failing to
 # PERSIST is survivable — "the toggle should work for this session even where it
@@ -17,9 +24,11 @@
 # makes deleting the write look harmless. It is harmless per session and
 # useless across them.
 #
-# ONE CHECK, THE RELOAD. Collapsing works, the count is shown, the fields with
-# values stay, the Fields tab agrees, and the required field is still visible.
-# Only the check that does a full page load fails.
+# FOUR CHECKS: the empty fields never go, the count never appears, the reload
+# check fails for the same reason, and the Fields tab does not collapse either.
+# The checks about fields with values stay green, because nothing is hidden
+# from anywhere — which is the tell that separates this from a patch about what
+# counts as empty.
 #
 # Reddens: collapse-empty-fields: "the empty fields are still hidden after a full page load"
 import io

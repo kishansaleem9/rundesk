@@ -45,7 +45,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 11
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -104,11 +104,11 @@ try {
    * Three custom fields: one that will hold a value, one empty and optional,
    * one empty and REQUIRED. Only the middle one may ever be hidden.
    */
-  const mkField = async (name, isRequired) => {
+  const mkField = async (name, isRequired, type = 'text') => {
     // Definitions are PROJECT-scoped: `POST /workspaces/:id/projects/:id/custom-fields`.
     const res = await A(`/workspaces/${workspaceId}/projects/${project.id}/custom-fields`, {
       method: 'POST',
-      body: { name: `${name} ${TAG}`, type: 'text', isRequired },
+      body: { name: `${name} ${TAG}`, type, isRequired },
     })
     if (!res.data?.id) throw new Error(`could not create field ${name}: ${JSON.stringify(res.error)}`)
     createdFieldIds.push(res.data.id)
@@ -117,9 +117,34 @@ try {
   const filledField = await mkField('Filled', false)
   await mkField('Blank optional', false)
   await mkField('Blank required', true)
+  /*
+   * AND THE TWO VALUES THAT ARE NOT EMPTY AND LOOK LIKE IT.
+   *
+   * `isEmptyFieldValue` ends with `return false` and its comment is entirely
+   * about these two: "An unticked checkbox that has never been touched arrives
+   * as null; one somebody deliberately set to 'no' arrives as `false`, and
+   * hiding that would hide an answer. Same for a number field holding zero —
+   * zero is a measurement, not the absence of one."
+   *
+   * Every field in this fixture used to be `type: 'text'` with a non-empty
+   * string in the filled one, so `cef-1-false-and-zero-are-empty` — which
+   * replaces that predicate with `!value` — ran GREEN through the whole suite.
+   * The unit test sees it; nothing here could, because the suite never put
+   * either value on a task. The predicate was proven and no READER of it was.
+   */
+  const noField = await mkField('Said no', false, 'checkbox')
+  const zeroField = await mkField('Measured zero', false, 'number')
   await A(`/workspaces/${workspaceId}/tasks/${task.id}/custom-fields/${filledField}`, {
     method: 'PUT',
     body: { value: `has a value ${TAG}` },
+  })
+  await A(`/workspaces/${workspaceId}/tasks/${task.id}/custom-fields/${noField}`, {
+    method: 'PUT',
+    body: { value: false },
+  })
+  await A(`/workspaces/${workspaceId}/tasks/${task.id}/custom-fields/${zeroField}`, {
+    method: 'PUT',
+    body: { value: 0 },
   })
 
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
@@ -212,6 +237,23 @@ try {
     !collapsedRows.some((r) => r.includes('blank optional')),
     'the empty optional field is hidden — one preference, both surfaces',
     'the Fields tab kept its own idea of the setting: two copies of one preference is two bugs',
+  )
+  /*
+   * THE TWO ANSWERS THAT LOOK LIKE BLANKS. A checkbox somebody deliberately set
+   * to "no" and a number field holding zero are values, and a collapse that
+   * ate them would be hiding what the task says rather than what it does not.
+   * Asserted on the Fields tab because that is where a custom field's value
+   * lives; the Overview grid's built-ins have no falsy-but-present case.
+   */
+  chk(
+    collapsedRows.some((r) => r.includes('said no')),
+    'a checkbox set to "no" stays — false is an answer, not a blank',
+    `the custom fields on screen were: ${collapsedRows.join(' | ')}`,
+  )
+  chk(
+    collapsedRows.some((r) => r.includes('measured zero')),
+    'and a number field holding zero stays — zero is a measurement',
+    `the custom fields on screen were: ${collapsedRows.join(' | ')}`,
   )
   /*
    * The exemption. An empty REQUIRED field is the one blank on the page that
