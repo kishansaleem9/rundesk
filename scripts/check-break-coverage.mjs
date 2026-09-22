@@ -25,7 +25,7 @@
  * `search-sources`, `bookmarks`, `list-statuses-seeded`, `list-save-view`,
  * `replies-inline-thread`, `request-access`, `planner-priorities`,
  * `space-features` and `assign-to-priorities` among them — so the ratchet
- * stands at 3. The count printed is always the current one; the paragraph
+ * stands at 2. The count printed is always the current one; the paragraph
  * above is what it was when anybody first looked.
  *
  * KEEP THIS PARAGRAPH IN STEP WITH THE CONSTANT. It said 37 while the constant
@@ -174,7 +174,7 @@ if (unattributedNames.length) {
 }
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 3
+const BASELINE_UNCOVERED = 2
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
