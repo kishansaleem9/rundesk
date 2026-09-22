@@ -384,14 +384,29 @@ try {
   )
 
   console.log('\n▶ the tiles show what the server computed, not their own arithmetic')
-  const shownTasks = await page.getByTestId('ai-value-category-tasks').getAttribute('data-runs')
+  /*
+   * BOUNDED, AND THE NULL REJECTED BEFORE THE COMPARISON. `Number(null)` is
+   * ZERO, so `Number(shownTasks) === serverTasks` would PASS on a missing tile
+   * every time the server's own answer was 0 — a confident zero manufactured
+   * by the catch. `typeof … === 'string'` first is what keeps absence failing.
+   */
+  const shownTasks = await page
+    .getByTestId('ai-value-category-tasks')
+    .getAttribute('data-runs', { timeout: 8000 })
+    .catch(() => null)
   const serverTasks = runsByCategory((await value()).data).tasks
   chk(
-    Number(shownTasks) === serverTasks,
+    typeof shownTasks === 'string' && Number(shownTasks) === serverTasks,
     'the Tasks tile renders the server’s number exactly',
     `the tile shows ${shownTasks} and the API says ${serverTasks}`,
   )
-  const visibleTasks = (await page.getByTestId('ai-value-category-tasks').innerText()).trim()
+  // Bounded and caught, then `?? ''`: a caught null would throw on `.trim()`,
+  // which turns a read that could not find its element into a section-ender by
+  // a different route. An empty string fails the regex below, which is the
+  // honest answer for a card that is not on screen.
+  const visibleTasks = (
+    (await page.getByTestId('ai-value-category-tasks').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  ).trim()
   chk(
     new RegExp(`(^|\\D)${serverTasks}(\\D|$)`).test(visibleTasks),
     'and a person can read that number on the tile',

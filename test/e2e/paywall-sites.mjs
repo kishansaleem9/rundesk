@@ -298,11 +298,25 @@ try {
    * "this is locked" card behind a "this is locked" modal is still a tab that
    * navigated when it was told not to.
    */
-  const teamTabCurrent = await page.getByTestId('work-view-tab-type-team').getAttribute('aria-current')
+  /*
+   * BOUNDED, WITH THE TAB'S EXISTENCE CARRIED INTO THE CHECK.
+   *
+   * The check below asserts a NEGATIVE — the Team tab is not current and no
+   * team view was drawn. Unbounded, an absent tab threw and ended the
+   * section; caught, `null !== 'true'` is TRUE and the whole condition
+   * passes on a page that never rendered the tab at all. Trading a thrown
+   * section for a vacuous pass is the confident zero, so the tab being THERE
+   * is measured and required: it is the tab this section just pressed.
+   */
+  const teamTabThere = (await page.getByTestId('work-view-tab-type-team').count()) === 1
+  const teamTabCurrent = await page
+    .getByTestId('work-view-tab-type-team')
+    .getAttribute('aria-current', { timeout: 8000 })
+    .catch(() => null)
   const drewTeam = await page.getByTestId('team-view').count()
   const drewLocked = await page.getByTestId('team-view-locked').count()
   chk(
-    teamTabCurrent !== 'true' && drewTeam === 0 && drewLocked === 0,
+    teamTabThere && teamTabCurrent !== 'true' && drewTeam === 0 && drewLocked === 0,
     'and leaves you where you were rather than on an empty view',
     `the tab reported aria-current=${JSON.stringify(teamTabCurrent)} with ${drewTeam} team view(s) and ` +
       `${drewLocked} locked placeholder(s) on screen — the tab switched and the modal is decoration over it`,

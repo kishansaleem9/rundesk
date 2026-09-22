@@ -332,9 +332,19 @@ try {
   )
   // The tab must not have become current either: a locked placeholder behind a
   // locked modal is still a tab that navigated when it was told not to.
-  const blockedTabCurrent = await page.getByTestId('work-view-tab-type-team').getAttribute('aria-current')
+  /*
+   * Bounded, and the tab's existence required alongside — for the reason
+   * `paywall-sites` carries at the same shape. This check asserts the tab is
+   * NOT current, and a caught null satisfies that on a page with no tab,
+   * which would pass on exactly the failure it is written to catch.
+   */
+  const blockedTabThere = (await page.getByTestId('work-view-tab-type-team').count()) === 1
+  const blockedTabCurrent = await page
+    .getByTestId('work-view-tab-type-team')
+    .getAttribute('aria-current', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    blockedTabCurrent !== 'true' && (await page.getByTestId('team-view').count()) === 0,
+    blockedTabThere && blockedTabCurrent !== 'true' && (await page.getByTestId('team-view').count()) === 0,
     'with the view itself still not on screen, and the tab still not current',
     `aria-current was ${JSON.stringify(blockedTabCurrent)} — the modal is decoration over a feature handed over anyway`,
   )

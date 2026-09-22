@@ -283,7 +283,11 @@ try {
    * the words themselves, because a row could be drawn under some other key and
    * still be a tick-box that leads nowhere.
    */
-  const panelText = (await page.getByTestId('space-wizard-views').innerText()).replace(/\s+/g, ' ')
+  // `?? ''` before `.replace`: with the panel gone the loop below finds no
+  // ghost views in an empty string, which is what it should report.
+  const panelText = (
+    (await page.getByTestId('space-wizard-views').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  ).replace(/\s+/g, ' ')
   const offeredGhosts = []
   for (const v of FRAME_ONLY) {
     if ((await page.locator(`[data-testid="space-wizard-viewrow-${v}"]`).count()) > 0) offeredGhosts.push(v)

@@ -803,7 +803,11 @@ try {
     )
 
     if ((await eleventh.count()) === 1) {
-      const targetId = (await eleventh.first().getAttribute('data-testid')).replace('forward-target-', '')
+      // `?? ''` before `.replace`: the row is one a check above may find
+      // absent, and `.replace` on a caught null throws.
+      const targetId = (
+        (await eleventh.first().getAttribute('data-testid', { timeout: 8000 }).catch(() => null)) ?? ''
+      ).replace('forward-target-', '')
       await eleventh.first().click()
       await page.getByTestId('forward-note').fill('sharing this for context')
       await page.waitForTimeout(300)

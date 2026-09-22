@@ -332,8 +332,15 @@ try {
     'pressing it reveals exactly the two unreachable providers',
     `${await hidden.count()} unavailable rows appeared`,
   )
-  const openAiReason = (await page.getByTestId('ai-model-reason-openai').innerText()).trim()
-  const googleReason = (await page.getByTestId('ai-model-reason-google').innerText()).trim()
+  // Both bounded and caught, then `?? ''` before `.trim()`. The checks below
+  // require a non-empty sentence, so an absent row answers '' and fails them
+  // rather than ending the section thirty seconds later.
+  const openAiReason = (
+    (await page.getByTestId('ai-model-reason-openai').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  ).trim()
+  const googleReason = (
+    (await page.getByTestId('ai-model-reason-google').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+  ).trim()
   /*
    * A REASON EACH, AND DIFFERENT ONES. A missing i18n key falls back to a
    * sibling's string, so "a reason is present" would pass on exactly that bug

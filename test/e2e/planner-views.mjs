@@ -252,7 +252,13 @@ try {
    * `preventDefault`, so an unguarded shortcut EATS the character: on the
    * broken build this field reads "eek ahea".
    */
-  const arrived = await page.getByTestId('planner-priority-input').inputValue()
+  // Bounded and caught. The check below is `arrived === TYPED`, and null is
+  // not TYPED, so a box that is not there fails it rather than ending the
+  // section — no further guard needed.
+  const arrived = await page
+    .getByTestId('planner-priority-input')
+    .inputValue({ timeout: 8000 })
+    .catch(() => null)
   chk(
     arrived === TYPED,
     `typing "${TYPED}" into the rail types "${TYPED}" — the shortcuts stay out of the way`,
