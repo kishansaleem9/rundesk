@@ -1,7 +1,7 @@
 # ONE OUTCOME PER PATCH, AND THE COLUMNS ADD UP BY CONSTRUCTION.
 #
 # This was six greps over the same file with overlapping patterns inside
-# `break-queue.sh`, and it grew a column every time a category was found falling
+# the queue runner, and it grew a column every time a category was found falling
 # between the ones it had: STILL-GREEN, then UNBUILT, then MISSING, then
 # NO-CHANGE, then SHORT. Each addition was right and the SHAPE was wrong — `RED`
 # was whatever was left after subtracting five independently-counted sets, so

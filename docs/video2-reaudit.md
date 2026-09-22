@@ -4169,7 +4169,9 @@ outcome changes.
 
 **The cost, stated rather than absorbed: 66 break sets are now measured against
 suite files that have changed**, so `check-break-freshness.mjs` fails until they
-are re-run, and `never-run-plan.mjs --stale` prints that work as a plan. It is
+are re-run, and `never-run-plan.mjs --drifted` prints that work as a plan (it
+was `--stale` when this was written, and asked the question by the clock; §10
+carries what that cost). It is
 the other half of the question that file already answered: a patch whose log
 predates a change to its suite is in the same position as one with no log at
 all. 390 patches there, 241 with no log, three lanes, unattended.

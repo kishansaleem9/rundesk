@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /*
- * WHAT IS LEFT TO MEASURE, as a list `break-queue.sh` can be fed.
+ * WHAT IS LEFT TO MEASURE, as a list `run-plan.sh` can be fed.
  *
  * `check-break-freshness.mjs` answers "is there a log?" and prints a count per
  * suite. A count is the right thing for a check and the wrong thing for doing
