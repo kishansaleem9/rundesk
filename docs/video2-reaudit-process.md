@@ -113,6 +113,27 @@ all the warning that is needed once the shape is familiar.
 
 ### Checks that cannot fail
 
+- **NAMING ONLY WHAT SHOULD BE THERE, when the claim is that something is
+  FILTERED, SCOPED or NARROWED.** Four suites in one session, four mechanisms,
+  one sentence — the most productive single shape this audit has found:
+
+  | suite | the check | why it could not fail |
+  | --- | --- | --- |
+  | `comment-slash-commands` | typing `/quo` shows Quote | `matchBlocks` returns every block for a blank query, so Quote shows in an unfiltered menu too |
+  | `assignee-picker` | searching for the twelfth member finds them | that member sorted inside the first eight, so the old cap-at-eight build found them as well |
+  | `space-features` | a shut space hides Priority | both fixtures had a COMPLETE or an ABSENT feature map, so `{...ALL, ...stored}` and `stored` gave the same answer |
+  | `list-under-space` | the space listing holds the new list | it does, in a listing that returns every list under the space |
+
+  **The absence is the claim.** A filter is only proven by something that does
+  not match being gone; a scope by another person's row being missing; a
+  narrowing by the item that should have been excluded. Add the negative
+  assertion and name the thing it excludes — `comment-slash-table`,
+  `restBefore[1]`, a list inside a Project — because a count alone can be right
+  for the wrong reason too.
+
+  Three of the four were found by a break patch running GREEN and one by a
+  patch reddening fewer checks than predicted. None was visible by reading the
+  suite: every one of them looks like a perfectly ordinary assertion.
 - **Reading an element outside the thing under test to prove the thing under
   test opened.** A panel's presence proved by an element that renders whether or
   not the panel opened.
