@@ -247,8 +247,13 @@ try {
   // reads are bounded and caught above the call, off a locator held in a variable.
   const expandTarget = await expand.getAttribute('target', { timeout: 8000 }).catch(() => null)
   const expandHref = await expand.getAttribute('href', { timeout: 8000 }).catch(() => null)
+  // `!!expandHref` first: both sides of the url comparison can be absent — the
+  // read answers null for an anchor with no href, and `firstRow?.url` answers
+  // undefined for a row that was never seeded — and a check that compares two
+  // absences is a check that passes on the defect. The sibling above carries
+  // the same guard as `!!dlHref`.
   chk(
-    expandTarget === '_blank' && expandHref === firstRow?.url,
+    expandTarget === '_blank' && !!expandHref && expandHref === firstRow?.url,
     'and Expand opens the same file in a new tab',
     `the expand anchor is href=${JSON.stringify(expandHref)} target=${JSON.stringify(expandTarget)}`,
   )

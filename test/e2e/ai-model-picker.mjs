@@ -350,7 +350,10 @@ try {
    * unreachable provider that can be selected is the facade, whatever it says
    * underneath.
    */
-  const tierBefore = await trigger.getAttribute('data-tier')
+  // Bounded too. Left unbounded, a patch that removes the trigger stalls
+  // thirty seconds HERE and the check below never reports — the fix one line
+  // down would have moved the exception one line up.
+  const tierBefore = await trigger.getAttribute('data-tier', { timeout: 8000 }).catch(() => null)
   await page.getByTestId('ai-model-option-google').click({ force: true })
   await page.waitForTimeout(400)
   // Bounded and caught for the same reason: the message runs on the passing
@@ -359,10 +362,24 @@ try {
   const tierAfterUnavailable = await trigger
     .getAttribute('data-tier', { timeout: 8000 })
     .catch(() => null)
+  /*
+   * `!== null` FIRST, AND IT IS NOT BELT-AND-BRACES.
+   *
+   * Both reads answer `null` for an element that exists with no `data-tier` on
+   * it — which is what a patch stripping the attribute produces — and
+   * `null === null` is TRUE. So the bounding alone would have made this check
+   * PASS on exactly the facade it exists to refuse: a composer whose tier is
+   * unreadable, twice, reported as a tier that did not move.
+   *
+   * That is the confident zero in its purest form, and it arrives THROUGH the
+   * fix rather than despite it: catching a throw turns a loud failure into a
+   * quiet value, and a quiet value has to be compared against something that
+   * rejects it.
+   */
   chk(
-    tierAfterUnavailable === tierBefore,
+    tierAfterUnavailable !== null && tierAfterUnavailable === tierBefore,
     'and clicking one does not change the model in use',
-    `the composer moved from "${tierBefore}" to ${JSON.stringify(tierAfterUnavailable)} ` +
+    `the composer moved from ${JSON.stringify(tierBefore)} to ${JSON.stringify(tierAfterUnavailable)} ` +
       'after a provider with no client was clicked',
   )
 

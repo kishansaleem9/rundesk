@@ -161,11 +161,10 @@ try {
 
   await openTask()
   /*
-   * A chk message is evaluated whether the check passes or fails, so the read
-   * is hoisted, bounded and caught — under a break patch that takes the field
-   * away it would otherwise wait out the default thirty seconds, throw, and
-   * end the run. The box is a locator held in a variable, which is the shape
-   * rule six could not see until it learnt to track locator variables.
+   * A chk message is evaluated whether the check passes or fails, so this read
+   * is hoisted, bounded and caught — a missing field would otherwise wait out
+   * the default thirty seconds and end the run here. The box is a locator held
+   * in a variable: the shape rule six could not see until it learnt to track them.
    */
   const readBack = await box.inputValue({ timeout: 8000 })
     .then((t) => t?.trim() ?? null).catch(() => null)
@@ -187,10 +186,15 @@ try {
     `the task holds ${await storedSeconds(task.id)}s for "90m" — 5400 was expected`,
   )
   await openTask()
+  // Hoisted and bounded for the same reason: the message runs on a pass too,
+  // and this is a locator in a variable, so an absent box must read back as
+  // `null` and fail the check rather than hang the run.
+  const ninetyReadBack = await box.inputValue({ timeout: 8000 })
+    .then((t) => t?.trim() ?? null).catch(() => null)
   chk(
-    (await box.inputValue()).trim() === '1h 30m',
+    ninetyReadBack === '1h 30m',
     'and reads back as 1h 30m',
-    `the box reads "${await box.inputValue()}"`,
+    `the box reads ${JSON.stringify(ninetyReadBack)}`,
   )
 
   await box.click()
@@ -220,10 +224,15 @@ try {
     'typing a word leaves the estimate alone',
     `the estimate went from ${before}s to ${await storedSeconds(task.id)}s because "soon" was typed`,
   )
+  // Same again — the message is printed either way, so the read is bounded and
+  // caught. A locator held in a variable; `null` means the box was never there,
+  // which is a failure, not a match.
+  const restored = await box.inputValue({ timeout: 8000 })
+    .then((t) => t?.trim() ?? null).catch(() => null)
   chk(
-    (await box.inputValue()).trim() === '2h 15m',
+    restored === '2h 15m',
     'and the box puts back what is really stored',
-    `the box is left reading "${await box.inputValue()}"`,
+    `the box is left reading ${JSON.stringify(restored)}`,
   )
   chk(
     !(await page.getByTestId('task-estimate-suggestion').isVisible().catch(() => false)),
