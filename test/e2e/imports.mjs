@@ -273,8 +273,16 @@ try {
   // ══ 3. THE REFUSALS, BEFORE ANYTHING IS WRITTEN ════════════════════════════
   console.log('\n▶ four rows in, two importable, two refused — said before the import runs')
 
+  /*
+   * NaN WHERE THERE IS NO STAT, rather than thirty seconds and a throw. Every
+   * caller compares the number with `===` against something real, so an absent
+   * stat reddens the check that reads it — and `imports-3-deadpreset` is why:
+   * with nothing importable the import never runs, so the REPORT is not drawn,
+   * and this read ended the run at 17 of 20 with the five checks under it
+   * unreported (ledger §10).
+   */
   const statValue = async (testid) =>
-    Number(await page.getByTestId(testid).getAttribute('data-value'))
+    Number(await page.getByTestId(testid).getAttribute('data-value', { timeout: 6000 }).catch(() => null))
   const total = await statValue('import-sheet-total')
   const importable = await statValue('import-sheet-importable')
   const rejected = await statValue('import-sheet-rejected')

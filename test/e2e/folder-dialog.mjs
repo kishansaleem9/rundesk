@@ -169,7 +169,12 @@ try {
       'still has access to guesswork',
   )
   chk(
-    (await page.getByTestId('quick-create-folder-private').isChecked()) === false,
+    // `.catch(() => true)` reads an absent control as ON, which REDDENS: with
+    // no control at all there is no evidence it starts off, and
+    // `fd-8-no-private-control` removes it, so a bare `isChecked()` spent
+    // thirty seconds and ended the run (ledger §10). The check below it reads
+    // the same control the same way, and has since it was written.
+    (await page.getByTestId('quick-create-folder-private').isChecked().catch(() => true)) === false,
     'and it starts off — a create surface must not hide a folder by surprise',
     'the toggle was already on, so a folder made without touching it would vanish for everybody else',
   )

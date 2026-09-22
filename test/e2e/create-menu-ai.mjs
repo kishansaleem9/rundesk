@@ -245,7 +245,11 @@ try {
   )
 
   console.log('\n▶ and it narrows — to a set, not merely to fewer')
-  await page.getByTestId('create-search').fill('fold')
+  // `cma-16-no-search-box` renames this box's testid — which is what the
+  // placeholder check above reports — so every read and fill of it here is on
+  // something that is not there. Bounded, the narrowing checks below report
+  // the strip they actually find (ledger §10).
+  await page.getByTestId('create-search').fill('fold', { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const now = await tabKinds(page)
@@ -256,7 +260,7 @@ try {
       'from under its own form',
   )
 
-  await page.getByTestId('create-search').fill('zzzqq')
+  await page.getByTestId('create-search').fill('zzzqq', { timeout: 8000 }).catch(() => {})
   chk(
     (await page.locator('[data-testid="create-search-empty"]').count()) === 1 &&
       JSON.stringify(await tabKinds(page)) === JSON.stringify(['task']),
@@ -265,7 +269,7 @@ try {
       `${await page.locator('[data-testid="create-search-empty"]').count()} explanation(s)`,
   )
 
-  await page.getByTestId('create-search-clear').click()
+  await page.getByTestId('create-search-clear').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => JSON.stringify(await tabKinds(page)) === JSON.stringify(EXPECTED_KINDS), { timeoutMs: 8000 }),
     'clearing the box brings every type back — the narrowing goes both ways',
@@ -282,7 +286,7 @@ try {
       'whatever came back',
   )
 
-  await page.getByTestId('create-search').fill(`create a list called ${LIST_NAME} in ${SPACE_NAME}`)
+  await page.getByTestId('create-search').fill(`create a list called ${LIST_NAME} in ${SPACE_NAME}`, { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => !(await page.getByTestId('create-ai-open').isDisabled()), { timeoutMs: 8000 }),
     'and it becomes pressable once there is something to describe',
