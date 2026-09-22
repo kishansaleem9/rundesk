@@ -62,7 +62,25 @@
  * zero fails. A `< N` comparison would PASS on a null box, and then the catch
  * has to come with a `!!box &&` rather than on its own.
  *
- * AND A FOURTH RULE THAT IS NOT A GATE, on purpose.
+ * RULE FOUR — THE SAME LOCATOR, GUARDED AND THEN BARE.
+ *
+ *     const pressedTitle = ((await textOf(pressed)) ?? '').split('\n')[0].trim()
+ *     await pressed.click()
+ *
+ * I wrote the first line FOR `aar-18-starters-are-a-fixed-list`, whose patch
+ * removes that card, and left the second — so the read was spared and the press
+ * spent the thirty seconds instead. The run came back SHORT on the same patch,
+ * in the same section, hours later.
+ *
+ * This is the narrow, checkable core of the sequence shape below: the same
+ * IDENTIFIER, used through a guard on one line and bare within the next two. It
+ * needs no judgement about what "above" means — the variable ties the two lines
+ * together — and it found the other two instances in the tree, both real:
+ * `task-mentions` bounding a press and leaving the typing, and
+ * `video-regression` reading a chip through a catch in the MESSAGE while the
+ * CONDITION read it bare.
+ *
+ * AND A FIFTH SHAPE THAT IS NOT A GATE, on purpose.
  *
  * The real lesson of `list-view-controls-42-empty-group-no-add` is that its
  * press had been bounded FOR IT, by name, in a comment — and the run still
@@ -156,15 +174,42 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+// RULE FOUR. The same locator variable: through a guard, then bare.
+const ANYVERB = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|boundingBox)\(/
+let sames = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    const guarded = [
+      ...lines[i].matchAll(/\b(?:textOf|attrOf|boxOf)\(\s*([a-z][A-Za-z0-9_]*)\b/g),
+      ...(/catch|timeout/.test(lines[i])
+        ? lines[i].matchAll(/\b([a-z][A-Za-z0-9_]*)\s*\.(?:click|fill|innerText|getAttribute|boundingBox)\(/g)
+        : []),
+    ].map((m) => m[1])
+    if (!guarded.length) continue
+    for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+      if (/catch|timeout/.test(lines[j])) continue
+      for (const v of new Set(guarded)) {
+        if (!new RegExp(`\\b${v}\\s*\\.`).test(lines[j]) || !ANYVERB.test(lines[j])) continue
+        sames += 1
+        rows.push({ file, line: j + 1, id: v, text: lines[j].trim(), same: true })
+      }
+    }
+  }
+}
+
 for (const r of rows) {
-  console.log(`  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}`)
+  console.log(
+    `  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}` +
+      `${r.same ? '  (same locator, guarded above)' : ''}`,
+  )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
 console.log(
-  `[section-enders] ${rows.length - gates - boxes} press(es) on a control the check above them ` +
-    `may find absent, ${gates} gate(s) in front of a check about the same element, and ${boxes} ` +
-    `box read(s) that throw when nothing matches, across ` +
-    `${new Set(rows.map((r) => r.file)).size} suite(s)`,
+  `[section-enders] ${rows.length - gates - boxes - sames} press(es) on a control the check above ` +
+    `them may find absent, ${gates} gate(s) in front of a check about the same element, ${boxes} ` +
+    `box read(s) that throw when nothing matches, and ${sames} use(s) of a locator that is guarded ` +
+    `one line up, across ${new Set(rows.map((r) => r.file)).size} suite(s)`,
 )
 if (rows.length) {
   console.error(

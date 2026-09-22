@@ -188,8 +188,11 @@ try {
   }
 
   const picker = page.getByTestId('comment-mention-picker')
+  // GUARDED ON BOTH LINES. The press was bounded and the typing under it was
+  // not, which only moves the thirty seconds along — the shape that has turned
+  // up five times in this sweep (ledger §10).
   await input.click({ timeout: 8000 }).catch(() => {})
-  await input.fill('@')
+  await input.fill('@', { timeout: 8000 }).catch(() => {})
   if (!(await waitUntil(() => picker.isVisible().catch(() => false), { timeoutMs: 15_000 }))) {
     throw new Error('the @ picker never opened')
   }

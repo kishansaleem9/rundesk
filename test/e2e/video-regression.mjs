@@ -987,12 +987,13 @@ try {
       g13(haveChip)
       if (!haveChip) return (stopped = 'skipped: there was no chip to read or click')
 
-      g13(
-        (await chip.innerText()).trim() === 'Show me the overdue one',
-        await chip.innerText().catch(() => '(unreadable)'),
-      )
+      // The MESSAGE read the chip through a catch and the CONDITION did not, so
+      // an absent chip threw out of the assertion describing it — and the press
+      // below was bare as well.
+      const chipText = await chip.innerText({ timeout: 6000 }).catch(() => null)
+      g13(chipText?.trim() === 'Show me the overdue one', chipText ?? '(unreadable)')
       // A chip that does not ask the question is a label.
-      await chip.click()
+      await chip.click({ timeout: 8000 }).catch(() => {})
       await aiPage.waitForTimeout(2000)
       g13((await aiPage.locator('text=Show me the overdue one').count()) >= 2)
     })()
