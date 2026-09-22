@@ -160,10 +160,19 @@ try {
   console.log('\n▶ frame `01:45` — the field reads back `12h`, not `12`')
 
   await openTask()
+  /*
+   * A chk message is evaluated whether the check passes or fails, so the read
+   * is hoisted, bounded and caught — under a break patch that takes the field
+   * away it would otherwise wait out the default thirty seconds, throw, and
+   * end the run. The box is a locator held in a variable, which is the shape
+   * rule six could not see until it learnt to track locator variables.
+   */
+  const readBack = await box.inputValue({ timeout: 8000 })
+    .then((t) => t?.trim() ?? null).catch(() => null)
   chk(
-    (await box.inputValue()).trim() === '12h',
+    readBack === '12h',
     'the stored estimate reads back with its unit',
-    `the box reads "${await box.inputValue()}" — a number with no unit beside it is a question`,
+    `the box reads ${JSON.stringify(readBack)} — a number with no unit beside it is a question`,
   )
 
   // -------------------------------------------------------------------------

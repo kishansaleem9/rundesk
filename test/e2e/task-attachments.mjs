@@ -229,19 +229,28 @@ try {
 
   const firstRow = seededRows.find((r) => (r.fileName ?? '').includes('file-0-'))
   const download = page.getByTestId('attachment-download').first()
-  const dlHref = await download.getAttribute('href')
+  // A chk MESSAGE is an argument, so it is evaluated on a pass as well as a fail:
+  // both reads are bounded and caught up here rather than inside the call. The
+  // anchor is a locator held in a variable — the shape rule six could not see
+  // until it learnt to track locator variables.
+  const dlHref = await download.getAttribute('href', { timeout: 8000 }).catch(() => null)
+  const dlDownload = await download.getAttribute('download', { timeout: 8000 }).catch(() => null)
   chk(
-    (await download.getAttribute('download')) !== null && !!dlHref && dlHref !== '#' && dlHref === firstRow?.url,
+    dlDownload !== null && !!dlHref && dlHref !== '#' && dlHref === firstRow?.url,
     'Download is a real anchor with a `download` attribute, pointing at THIS attachment\'s url',
-    `the download anchor points at "${dlHref}" with download=${await download.getAttribute('download')}; ` +
+    `the download anchor points at ${JSON.stringify(dlHref)} with download=${JSON.stringify(dlDownload)}; ` +
       `the attachment's own url is "${firstRow?.url}"`,
   )
 
   const expand = page.getByTestId('attachment-expand').first()
+  // The same shape, and the same reason: the message runs either way, so these
+  // reads are bounded and caught above the call, off a locator held in a variable.
+  const expandTarget = await expand.getAttribute('target', { timeout: 8000 }).catch(() => null)
+  const expandHref = await expand.getAttribute('href', { timeout: 8000 }).catch(() => null)
   chk(
-    (await expand.getAttribute('target')) === '_blank' && (await expand.getAttribute('href')) === firstRow?.url,
+    expandTarget === '_blank' && expandHref === firstRow?.url,
     'and Expand opens the same file in a new tab',
-    `the expand anchor is href="${await expand.getAttribute('href')}" target="${await expand.getAttribute('target')}"`,
+    `the expand anchor is href=${JSON.stringify(expandHref)} target=${JSON.stringify(expandTarget)}`,
   )
 
   /*
@@ -292,10 +301,15 @@ try {
       : 'the attachment "more" menu never opened, so Remove could not be tried at all',
   )
 
+  // The message is evaluated either way, so the count is read once, bounded and
+  // caught. `header` is a locator held in a variable — the shape rule six could
+  // not see until it learnt to track locator variables. A missing header reads
+  // as null, which is not `String(SEEDED - 1)`, so absence reddens.
+  const headerCountAfter = await header.getAttribute('data-count', { timeout: 8000 }).catch(() => null)
   chk(
-    (await header.getAttribute('data-count')) === String(SEEDED - 1),
+    headerCountAfter === String(SEEDED - 1),
     'and the header\'s count follows the removal rather than staying where it was drawn',
-    `the header still reads ${await header.getAttribute('data-count')} after a removal — a count that is rendered ` +
+    `the header still reads ${JSON.stringify(headerCountAfter)} after a removal — a count that is rendered ` +
       'once and never recomputed is the facade this audit names first',
   )
 
@@ -323,12 +337,16 @@ try {
    * strip already opens; a second copy of it would be the duplicated-list bug
    * with an icon on it, and both copies would look right in a screenshot.
    */
+  // And here too: the message runs on a pass as well as a fail, so the pressed
+  // state is read once, bounded and caught, off `rail` — a locator held in a
+  // variable, the shape rule six could not see until it learnt to track them.
+  const railPressed = await rail.getAttribute('aria-pressed', { timeout: 8000 }).catch(() => null)
   chk(
-    opened && (await panel.count()) === 1 && (await rail.getAttribute('aria-pressed')) === 'true',
+    opened && (await panel.count()) === 1 && railPressed === 'true',
     'pressing it opens the one Related Items panel the tab already opens — one panel in the document, not two',
     opened
       ? `${await panel.count()} Related Items panels are in the document, and the icon reports ` +
-        `aria-pressed=${await rail.getAttribute('aria-pressed')}`
+        `aria-pressed=${JSON.stringify(railPressed)}`
       : 'the icon did not open the panel: a tooltip over a dead control',
   )
 } catch (err) {

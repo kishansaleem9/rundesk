@@ -235,10 +235,17 @@ try {
     async () => (await carousel.getAttribute('data-index')) === '0',
     { timeoutMs: 8000 },
   )
+  /*
+   * Read once, bounded: a chk message is evaluated on the pass as well as on the
+   * failure, so an unbounded read here would wait out the default timeout and end
+   * the run when a patch removes the carousel. The locator sits in a variable —
+   * the shape rule six could not see until it learnt to track locator variables.
+   */
+  const idxWrapped = await carousel.getAttribute('data-index', { timeout: 8000 }).catch(() => null)
   chk(
     wrapped,
     'and it wraps rather than stopping dead on an arrow that still looks live',
-    `after three presses it sits at ${await carousel.getAttribute('data-index')}, not back at 0`,
+    `after three presses it sits at ${JSON.stringify(idxWrapped)}, not back at 0`,
   )
 
   const cardOne = flat(await readText(cards.nth(0)))
