@@ -15,10 +15,15 @@
 # touched; losing it in a success handler that already does four other things
 # is unremarkable.
 #
-# REDDENS TWO, AND THE SECOND IS THE CONSEQUENCE: the button never becomes
-# Update, and "Start a new one" is only rendered `{meetingId && …}`, so the
-# check that presses it cannot find it and the title-clears check fails with
-# it. The reload checks pass — the first save really did create the row.
+# REDDENS TWO, AND THE SECOND WAS NOT THE ONE PREDICTED. The button never
+# becomes Update, as expected. The other failure is "the recording link is kept
+# and offered" — `Open recording` renders from the loaded meeting, and without
+# `meetingId` there is nothing loaded, so the link the person just pasted
+# disappears from the panel the moment they save it. I predicted the
+# title-clears check instead, which is further down and never reached.
+#
+# The reload checks pass, which is the tell: the first save really did create
+# the row, with the recording url on it. Only the panel has forgotten.
 #
 # Reddens: a61-meeting-record: "saving switches the button to Update — the row exists now"
 import io
