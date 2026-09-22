@@ -133,11 +133,17 @@ for (const [file, lines] of rows) {
  * coverage checker could not see, and for the same reason. A suite with no
  * break patch is a suite whose conditions have never been made false.
  *
- * 7 now — all of them in `ui-sweep`, the last suite left. Balanced so far:
- * `video1-fast-items` (fifteen), `syncup-live` (ten), `video-regression`
- * (nine), `panel-collapse` (six), `task-depth` (four), `addressability-live`
- * (four), `person-panel` (two), and one each in `emoji-picker`,
- * `loading-states` and `stale-chunk-recovery`. The fix is
+ * ZERO NOW, ACROSS ALL 113 SUITES, so this holds a floor rather than measuring
+ * a backlog. Balanced: `video1-fast-items` (fifteen), `syncup-live` (ten),
+ * `video-regression` (nine), `ui-sweep` (seven), `panel-collapse` (six),
+ * `task-depth` (four), `addressability-live` (four), `person-panel` (two), and
+ * one each in `emoji-picker`, `loading-states` and `stale-chunk-recovery`.
+ *
+ * The last one found a check whose SENTENCE was a statement about the fixture:
+ * `ui-sweep`'s "two members with unambiguous names to drive the cycle with"
+ * failed when the workspace could not supply a pair, naming nothing in the
+ * product and leaving the run a check shorter than the path beside it. A reason
+ * belongs in the detail, not in the claim. The fix is
  * `test/e2e/lib/chain.mjs` — `step` for the next check, `rest` to report the
  * remainder as failed with the reason, and `skipRest` for a gate on the
  * machine rather than on the product, which is the narrow case where the
@@ -158,7 +164,7 @@ for (const [file, lines] of rows) {
  * about. `syncup-live` is the one that moved, 48 → 59, and it moved because a
  * floor became an exact count with skips included.
  */
-const BASELINE = 7
+const BASELINE = 0
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
   console.error('  A conditional check makes the run length conditional, and EXPECTED_CHECKS is')

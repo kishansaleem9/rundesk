@@ -11,6 +11,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -78,6 +79,18 @@ const ok = (m) => { results.push(['PASS', section, m]); console.log(`  \x1b[32mP
 const bad = (m) => { results.push(['FAIL', section, m]); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const skip = (m) => { results.push(['SKIP', section, m]); console.log(`  \x1b[2mSKIP\x1b[0m ${m}`) }
 const check = (c, g, b) => (c ? ok(g) : bad(b))
+
+/*
+ * A CHAIN THAT REPORTS THE SAME NUMBER OF CHECKS WHICHEVER WAY IT GOES.
+ *
+ * Seven `if`s in this file guarded follow-up checks with no `else`, and
+ * `EXPECTED_CHECKS` is compared with `!==` — so losing a dialog made the run
+ * SHORTER and the headline a statement about the harness. See
+ * `test/e2e/lib/chain.mjs`.
+ */
+// `skip` here takes one string, so the reason is folded into it — a counted
+// skip with no reason on it is a line nobody can act on.
+const chain = makeChain(check, (label, why) => skip(`${label} — ${why}`))
 const say = (s) => { section = s; console.log(`\n\x1b[1;36m▶ ${s}\x1b[0m`) }
 const uniq = (p) => `${p}-${Math.random().toString(36).slice(2, 8)}`
 
@@ -233,8 +246,25 @@ try {
   await page.getByText(/^Fields \(\d+\/\d+\)$/).last().click()
   await page.waitForTimeout(900)
   const searchBox = page.locator('input[placeholder*="earch" i]:visible').last()
-  check(await searchBox.count() > 0, 'the fields picker opens with a search box', 'no search box in the fields picker')
-  if (await searchBox.count()) {
+  const fieldsPicker = chain(
+    'the fields picker opens with a search box',
+    'it lists the workspace fields',
+    'found a term unique to one field',
+    'searching',
+    'and a term matching nothing shows nothing',
+    'the picker offers create-new inline (V2)',
+    'create-new offers the Text type',
+    'create-new offers the Number type',
+    'create-new offers the Date type',
+    'create-new offers the Checkbox type',
+    'create-new offers the URL type',
+    'create-new offers the Dropdown type',
+  )
+  const haveSearchBox = (await searchBox.count()) > 0
+  fieldsPicker.step(haveSearchBox, 'no search box in the fields picker')
+  if (!haveSearchBox) {
+    fieldsPicker.rest('skipped: the picker never opened a search box, so nothing in it could be narrowed')
+  } else {
     let before = await page.locator('label:visible').allInnerTexts()
     if (before.length < 2) {
       // A project with no custom fields is a legitimate state, and asserting
@@ -252,8 +282,9 @@ try {
         }
       }
       before = await page.locator('label:visible').allInnerTexts()
-      check(before.length > 1, `seeded fields to search against (${before.length})`,
-        `the picker lists ${before.length} field(s) and create-new did not add more`)
+      fieldsPicker.step(before.length > 1,
+        `the picker lists ${before.length} field(s) and create-new did not add more`,
+        `seeded fields to search against (${before.length})`)
     } else {
       /*
        * THE SAME PROPERTY AS THE BRANCH ABOVE, READ RATHER THAN ASSERTED.
@@ -267,8 +298,9 @@ try {
        * a picker that lists one field fails here rather than sailing through to
        * fail the narrowing check for a reason that reads like a search bug.
        */
-      check(before.length > 1, `it lists the workspace fields (${before.length})`,
-        `the picker lists ${before.length} field(s), which cannot be narrowed`)
+      fieldsPicker.step(before.length > 1,
+        `the picker lists ${before.length} field(s), which cannot be narrowed`,
+        `it lists the workspace fields (${before.length})`)
     }
     /*
      * Search against a term this workspace actually has: one that matches
@@ -295,26 +327,26 @@ try {
       return ''
     }
     const term = distinctiveTerm()
-    check(term.length > 0, `found a term unique to one field ("${term}")`,
-      `no term distinguishes these fields: ${JSON.stringify(before)}`)
+    fieldsPicker.step(term.length > 0, `no term distinguishes these fields: ${JSON.stringify(before)}`,
+      `found a term unique to one field ("${term}")`)
     await searchBox.fill(term)
     await page.waitForTimeout(800)
     const after = await page.locator('label:visible').allInnerTexts()
-    check(after.length > 0 && after.length < before.length && after.every((f) => f.toLowerCase().includes(term.toLowerCase())),
-      `searching "${term}" narrows ${before.length} fields to ${after.length}: ${JSON.stringify(after)}`,
-      `search for "${term}" gave ${JSON.stringify(after)} out of ${JSON.stringify(before)}`)
+    fieldsPicker.step(
+      after.length > 0 && after.length < before.length && after.every((f) => f.toLowerCase().includes(term.toLowerCase())),
+      `search for "${term}" gave ${JSON.stringify(after)} out of ${JSON.stringify(before)}`,
+      `searching "${term}" narrows ${before.length} fields to ${after.length}: ${JSON.stringify(after)}`)
     await searchBox.fill('zzzznomatch')
     await page.waitForTimeout(700)
-    check((await page.locator('label:visible').allInnerTexts()).length === 0,
-      'and a term matching nothing shows nothing', 'a non-matching term still listed fields')
+    fieldsPicker.step((await page.locator('label:visible').allInnerTexts()).length === 0,
+      'a non-matching term still listed fields')
     await searchBox.fill('')
     await page.waitForTimeout(600)
     // V2's other half: create a new field without leaving the picker.
     const picker = await page.locator('body').innerText()
-    check(/CREATE NEW FIELD/i.test(picker), 'the picker offers create-new inline (V2)',
-      'no create-new section in the fields picker')
+    fieldsPicker.step(/CREATE NEW FIELD/i.test(picker), 'no create-new section in the fields picker')
     for (const ty of ['Text', 'Number', 'Date', 'Checkbox', 'URL', 'Dropdown']) {
-      check(picker.includes(ty), `create-new offers the ${ty} type`, `${ty} not offered`)
+      fieldsPicker.step(picker.includes(ty), `${ty} not offered`)
     }
   }
   await page.keyboard.press('Escape')
@@ -357,16 +389,24 @@ try {
     await bell.click()
     await page.waitForTimeout(1200)
     const dlg = page.locator('[role=dialog]:visible')
-    check(await dlg.count() > 0, 'the followers dialog opens from the header bell', 'no followers dialog')
-    if (await dlg.count()) {
+    const followers = chain(
+      'the followers dialog opens from the header bell',
+      'it shows the follower count',
+      'and a control to change your own follow state',
+      'and a way to add a teammate as a follower',
+    )
+    const haveDlg = (await dlg.count()) > 0
+    followers.step(haveDlg, 'no followers dialog')
+    if (!haveDlg) {
+      followers.rest('skipped: the dialog never opened, so nothing in it could be read')
+    } else {
       const body = await dlg.innerText()
-      check(/\d+ watcher/i.test(body), `it shows the follower count: ${(body.match(/\d+ watchers?/i) || [])[0]}`,
-        `no watcher count in the dialog: ${body.slice(0, 120)}`)
-      check(/Watch task|Unwatch/i.test(body),
-        `and a control to change your own follow state (${(body.match(/Watch task|Unwatch/i) || [])[0]})`,
-        `no self-follow control: ${body.slice(0, 120)}`)
-      check(/Add teammate/i.test(body), 'and a way to add a teammate as a follower',
-        `no add-teammate control: ${body.slice(0, 140)}`)
+      followers.step(/\d+ watcher/i.test(body), `no watcher count in the dialog: ${body.slice(0, 120)}`,
+        `it shows the follower count: ${(body.match(/\d+ watchers?/i) || [])[0]}`)
+      followers.step(/Watch task|Unwatch/i.test(body),
+        `no self-follow control: ${body.slice(0, 120)}`,
+        `and a control to change your own follow state (${(body.match(/Watch task|Unwatch/i) || [])[0]})`)
+      followers.step(/Add teammate/i.test(body), `no add-teammate control: ${body.slice(0, 140)}`)
       await page.keyboard.press('Escape')
       await page.waitForTimeout(800)
     }
@@ -421,14 +461,45 @@ try {
   await page.getByRole('button', { name: 'Share', exact: true }).first().click()
   await page.waitForTimeout(1400)
   const shareDlg = page.locator('[role=dialog]:visible')
-  check(await shareDlg.count() > 0, 'the share dialog opens', 'the share dialog did not open')
-  if (await shareDlg.count()) {
+  const share = chain(
+    'the share dialog opens',
+    'the View level is offered with an explanation',
+    'the Comment level is offered with an explanation',
+    'the Edit level is offered with an explanation',
+    'the Full edit level is offered with an explanation',
+    'each level carries a one-line meaning',
+  )
+  const haveShare = (await shareDlg.count()) > 0
+  share.step(haveShare, 'the share dialog did not open')
+  if (!haveShare) {
+    share.rest('skipped: the dialog never opened, so no level could be read')
+  } else {
     const t = await shareDlg.innerText()
     for (const lvl of ['View', 'Comment', 'Edit', 'Full edit']) {
-      check(t.includes(lvl), `the ${lvl} level is offered with an explanation`, `${lvl} missing from the panel`)
+      share.step(t.includes(lvl), `${lvl} missing from the panel`)
     }
-    check(/only|explan|can |may /i.test(t), 'each level carries a one-line meaning',
-      'the levels are listed without explanations')
+    /*
+     * EACH LEVEL, NOT "SOME PROSE SOMEWHERE IN THE DIALOG".
+     *
+     * This was `/only|explan|can |may /i.test(t)` over the whole panel text,
+     * and `us-3-share-levels-lose-their-meaning` — which deletes the hint after
+     * every level's label and leaves the four labels — ran GREEN against it.
+     * Four loose substrings scanned across a dialog that also holds a title, a
+     * member list and a Copy link button will match something whatever the
+     * levels say; the check could not tell a per-level explanation from any
+     * sentence anywhere on screen.
+     *
+     * The levels are rendered as `<label> — <hint>`, so the claim is that each
+     * label is FOLLOWED by an explanation. Read per level, off the level's own
+     * row, and the failure names the ones that are bare — which is the
+     * difference between "add explanations" and "add the two you dropped".
+     */
+    const bare = []
+    for (const lvl of ['View', 'Comment', 'Edit', 'Full edit']) {
+      const row = new RegExp(`${lvl}\\s*[\u2014-]\\s*\\S`, 'i')
+      if (!row.test(t)) bare.push(lvl)
+    }
+    share.step(bare.length === 0, `listed without an explanation: ${bare.join(', ') || '(none)'}`)
     await page.keyboard.press('Escape')
     await page.waitForTimeout(700)
   }
@@ -438,13 +509,35 @@ try {
   await page.keyboard.press('Control+k')
   await page.waitForTimeout(1200)
   const palette = page.locator('[role=dialog]:visible, [cmdk-root]').first()
-  check(await palette.count() > 0, 'the palette opens on Ctrl+K', 'Ctrl+K did not open the palette')
-  if (await palette.count()) {
+  const pal = chain(
+    'the palette opens on Ctrl+K',
+    'it returns results',
+    'the Tasks type chip is on the bar',
+    'the Docs type chip is on the bar',
+    'the Files type chip is on the bar',
+    'the People type chip is on the bar',
+    'and a ⋯ for the rest',
+    'comment is reachable from the ⋯',
+    'channel is reachable from the ⋯',
+    'message is reachable from the ⋯',
+    'and choosing one promotes it onto the bar',
+    'the "Relevance" sort chip is offered',
+    'the "Last updated" sort chip is offered',
+    'the "Last created" sort chip is offered',
+    'selecting Docs alone drops the task results',
+    'adding Tasks brings them back alongside Docs — multi-select works',
+    'switching sort keeps results on screen',
+  )
+  const havePalette = (await palette.count()) > 0
+  pal.step(havePalette, 'Ctrl+K did not open the palette')
+  if (!havePalette) {
+    pal.rest('skipped: the palette never opened, so nothing in it could be read')
+  } else {
     const input = page.locator('input:visible').last()
     await input.fill('task')
     await page.waitForTimeout(1800)
     const pt = await palette.innerText()
-    check(pt.length > 40, 'it returns results', `palette body: ${pt.slice(0, 120)}`)
+    pal.step(pt.length > 40, `palette body: ${pt.slice(0, 120)}`)
     // The type and sort chips live behind a "Filters" toggle rather than
     // always-on chrome — open it before asserting they exist.
     await palette.getByRole('button', { name: 'Filters', exact: true }).click()
@@ -461,27 +554,32 @@ try {
      * the bar, and the others are one ⋯ away.
      */
     for (const ty of ['Tasks', 'Docs', 'Files', 'People']) {
-      check(chips.includes(ty), `the ${ty} type chip is on the bar`, `no ${ty} chip: ${JSON.stringify(chips.slice(0, 14))}`)
+      pal.step(chips.includes(ty), `no ${ty} chip: ${JSON.stringify(chips.slice(0, 14))}`)
     }
     const more = palette.locator('[data-testid=palette-more-types]')
-    check(await more.count() > 0, 'and a ⋯ for the rest', 'no overflow control for the other types')
-    if (await more.count()) {
+    const haveMore = (await more.count()) > 0
+    pal.step(haveMore, 'no overflow control for the other types')
+    if (!haveMore) {
+      // Four checks depend on the ⋯: the three types behind it and the
+      // promotion. Reported, not skipped — see the chain note at the top.
+      for (let n = 0; n < 4; n += 1) pal.step(false, 'skipped: there was no ⋯ to open')
+    } else {
       await more.click()
       await page.waitForTimeout(900)
       for (const ty of ['comment', 'channel', 'message']) {
         const entry = palette.locator(`[data-testid=palette-add-type-${ty}]`)
-        check(await entry.count() > 0, `${ty} is reachable from the ⋯`, `${ty} is offered nowhere`)
+        pal.step((await entry.count()) > 0, `${ty} is offered nowhere`)
       }
       // Promoting one has to actually put it on the bar, or the ⋯ is a menu
       // that leads nowhere — which is the failure this section exists to catch.
       await palette.locator('[data-testid=palette-add-type-comment]').first().click().catch(() => {})
       await page.waitForTimeout(1200)
       const promoted = await palette.locator('button:visible').allInnerTexts()
-      check(promoted.includes('Comments'), 'and choosing one promotes it onto the bar',
+      pal.step(promoted.includes('Comments'),
         `Comments never appeared: ${JSON.stringify(promoted.slice(0, 14))}`)
     }
     for (const so of ['Relevance', 'Last updated', 'Last created']) {
-      check(chips.includes(so), `the "${so}" sort chip is offered`, `no "${so}" chip`)
+      pal.step(chips.includes(so), `no "${so}" chip`)
     }
 
     // Multi-select is the case that was broken in production — prove the chips
@@ -490,13 +588,11 @@ try {
     await palette.getByRole('button', { name: 'Docs', exact: true }).click()
     await page.waitForTimeout(1600)
     const afterDocs = await palette.innerText()
-    check(!/^TASKS$/m.test(afterDocs), 'selecting Docs alone drops the task results',
-      'tasks still listed with only Docs selected')
+    pal.step(!/^TASKS$/m.test(afterDocs), 'tasks still listed with only Docs selected')
     await palette.getByRole('button', { name: 'Tasks', exact: true }).click()
     await page.waitForTimeout(1600)
     const both = await palette.innerText()
-    check(/^TASKS$/m.test(both), 'adding Tasks brings them back alongside Docs — multi-select works',
-      `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
+    pal.step(/^TASKS$/m.test(both), `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
     // By testid: Status and Priority now offer their own "All" chip, so a
     // click matched on the visible label alone is ambiguous between three
     // buttons and throws on strict mode. This one means the TYPE group.
@@ -505,8 +601,7 @@ try {
 
     await palette.getByRole('button', { name: 'Last updated', exact: true }).click()
     await page.waitForTimeout(1600)
-    check((await palette.innerText()).length > 60, 'switching sort keeps results on screen',
-      'sorting emptied the palette')
+    pal.step((await palette.innerText()).length > 60, 'sorting emptied the palette')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(700)
   }
@@ -565,8 +660,15 @@ try {
   await page.waitForTimeout(2400)
   const pickers = page.locator('select[title="Reports to"]')
   const n = await pickers.count()
-  check(n > 1, `a reports-to picker on each member row (${n})`, `only ${n} picker(s)`)
-  if (n > 1) {
+  const reportsTo = chain(
+    'a reports-to picker on each member row',
+    'the reporting tree appears once someone has a manager',
+    'a reporting cycle is refused with a message',
+  )
+  reportsTo.step(n > 1, `only ${n} picker(s)`, `a reports-to picker on each member row (${n})`)
+  if (n <= 1) {
+    reportsTo.rest('skipped: fewer than two member rows, so no manager could be set')
+  } else {
     /*
      * Address rows by whose they are, not by position — and identify them by
      * EMAIL rather than by display name.
@@ -611,19 +713,28 @@ try {
     }
 
     if (distinct.length < 2) {
-      // Said out loud and skipped, rather than driven with an ambiguous pair.
-      // The rest of the sweep still runs: one unusable fixture must not cost
-      // the twenty-five sections that follow.
-      check(false, 'two members with unambiguous names to drive the cycle with',
-        `this workspace has ${rows.length} member(s) but fewer than two distinct display names, ` +
-          'so a reporting cycle cannot be addressed unambiguously')
+      /*
+       * TWO CHECKS, REPORTED WITH THE FIXTURE'S REASON — and it used to be one,
+       * with the reason itself as the check's SENTENCE. "two members with
+       * unambiguous names to drive the cycle with" is a statement about this
+       * workspace, not a claim about the product, so it read as a failing
+       * check that named nothing in the feature and left the run a check
+       * shorter than the path beside it. The reason belongs in the detail.
+       *
+       * The rest of the sweep still runs: one unusable fixture must not cost
+       * the twenty-five sections that follow.
+       */
+      reportsTo.rest(
+        `skipped: this workspace has ${rows.length} member(s) but fewer than two distinct ` +
+          'display names, so a reporting cycle cannot be addressed unambiguously',
+      )
     } else {
       const [personA, personB] = distinct
 
       await pickerFor(personA).selectOption({ label: personB.name })
       await page.waitForTimeout(2000)
-      check(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
-        'the reporting tree appears once someone has a manager', 'the tree did not appear')
+      reportsTo.step(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
+        'the tree did not appear')
       await pickerFor(personB).selectOption({ label: personA.name })
       // The refusal arrives as a toast, which is gone a few seconds later —
       // sampling the page once races it.
@@ -634,8 +745,8 @@ try {
         if (hit) { cycleMsg = hit[0].trim(); break }
         await page.waitForTimeout(500)
       }
-      check(Boolean(cycleMsg), `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`,
-        'the cycle produced no message')
+      reportsTo.step(Boolean(cycleMsg), 'the cycle produced no message',
+        `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`)
       await pickerFor(personA).selectOption({ label: 'No manager' }).catch(() => {})
       await page.waitForTimeout(1400)
     }
@@ -662,12 +773,19 @@ try {
   await openAnyTask()
   await page.waitForTimeout(2400)
   const tp = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
-  check(await tp.count() > 0, 'the type picker appears in the task header now that a type exists',
-    'no type picker in the task header')
-  if (await tp.count()) {
+  const typePicker = chain(
+    'the type picker appears in the task header now that a type exists',
+    'the new type is offered',
+    'the applied type survives a reload',
+  )
+  const haveTp = (await tp.count()) > 0
+  typePicker.step(haveTp, 'no type picker in the task header')
+  if (!haveTp) {
+    typePicker.rest('skipped: there was no picker to read options from or apply')
+  } else {
     const opts = await tp.locator('option').allTextContents()
-    check(opts.some((o) => o.includes(TYPE)), `the new type is offered: ${JSON.stringify(opts)}`,
-      `the new type is not offered: ${JSON.stringify(opts)}`)
+    typePicker.step(opts.some((o) => o.includes(TYPE)), `the new type is not offered: ${JSON.stringify(opts)}`,
+      `the new type is offered: ${JSON.stringify(opts)}`)
     await tp.selectOption({ label: `🚀 ${TYPE}` })
     await page.waitForTimeout(1800)
     await page.reload({ waitUntil: 'domcontentloaded' })
@@ -676,8 +794,8 @@ try {
     await page.waitForTimeout(2400)
     const after = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
     const sel = await after.locator('option:checked').innerText().catch(() => '')
-    check(sel.includes(TYPE), `the applied type survives a reload (${sel.trim()})`,
-      `after reload the picker shows "${sel.trim()}"`)
+    typePicker.step(sel.includes(TYPE), `after reload the picker shows "${sel.trim()}"`,
+      `the applied type survives a reload (${sel.trim()})`)
     await after.selectOption({ label: 'No type' })
     await page.waitForTimeout(1200)
   }

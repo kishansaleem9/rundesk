@@ -12,12 +12,23 @@
 # invisible at the moment they choose. The one that can delete looks like the
 # generous version of the one that cannot.
 #
-# ONE CHECK, AND THE SUITE SPLIT IT OUT FROM THE FOUR LABEL CHECKS FOR THIS
-# REASON: each `the <level> level is offered with an explanation` reads the
-# panel for that word and passes, because the words are all there. Only `each
-# level carries a one-line meaning` looks for the explanation, and it looks for
-# it as prose — `/only|explan|can |may /i` — rather than for a testid, because
-# what matters is that a sentence is there to read.
+# PREDICTED ONE AND IT RAN GREEN, WHICH FOUND THE CHECK SCANNING THE WRONG
+# THING. `each level carries a one-line meaning` was
+# `/only|explan|can |may /i.test(t)` over the WHOLE dialog text — and a dialog
+# that also holds a title, a member list and a Copy link button will match one
+# of four loose substrings whatever the levels say. It could not tell a
+# per-level explanation from any sentence anywhere on screen.
+#
+# The levels render as `<label> — <hint>`, so the claim is that each label is
+# FOLLOWED by an explanation. Read per level now, off the level's own row, with
+# the bare ones named in the failure — which is the difference between "add
+# explanations" and "add the two you dropped". Verified both ways against the
+# real panel text before re-running: four bare with the hints gone, none with
+# them.
+#
+# The four `the <level> level is offered with an explanation` checks still pass,
+# because the words are all there; that is what makes this the one check in the
+# section that can see the difference.
 #
 # Reddens: ui-sweep: "each level carries a one-line meaning"
 import io
