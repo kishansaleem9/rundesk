@@ -31,7 +31,9 @@ import { makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
 const dir = mkdtempSync(join(tmpdir(), 'suite-of-patch-'))
 let passed = 0
 let failed = 0
+let ran = 0
 const is = (got, want, what) => {
+  ran += 1
   if (got === want) {
     passed += 1
     console.log(`  \x1b[32mPASS\x1b[0m ${what}`)
@@ -140,4 +142,27 @@ if (failed) {
   console.error('[suite-of-patch] the attribution contract is broken')
   process.exit(1)
 }
-console.log('[suite-of-patch] all assertions hold')
+/*
+ * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true
+ * of no assertions at all.
+ *
+ * Measured 22 September: with every assertion in this file commented out, it
+ * printed exactly the line below and exited 0. All four contract tests did. The
+ * ledger had said they "cannot go vacuous without going to zero cases" — which
+ * is the failure itself, written down as though it were protection.
+ *
+ * So the count is asserted and then printed beside the verdict. A verdict that
+ * does not say what it is about is the same shape as a suite reporting
+ * `0 failed` for checks it never reached.
+ */
+let short = false
+const MIN_ASSERTIONS = 18
+if (ran < MIN_ASSERTIONS) {
+  console.error(
+    `\n[suite-of-patch] only ${ran} assertion(s) ran, below the floor of ${MIN_ASSERTIONS}. ` +
+      'A contract test that asserts nothing passes; this line is what stops it saying so.',
+  )
+  short = true
+}
+console.log(`[suite-of-patch] all ${ran} assertions hold`)
+process.exitCode = failed === 0 && !short ? 0 : 1

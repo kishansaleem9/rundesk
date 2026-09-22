@@ -30,13 +30,16 @@
 import { makeChain } from '../test/e2e/lib/chain.mjs'
 
 let failed = 0
+let ran = 0
 const is = (got, want, what) => {
+  ran += 1
   const ok = JSON.stringify(got) === JSON.stringify(want)
   if (!ok) failed++
   console.log(`  ${ok ? 'PASS' : 'FAIL'}  ${what}`)
   if (!ok) console.log(`        got  ${JSON.stringify(got)}\n        want ${JSON.stringify(want)}`)
 }
 const throws = (fn, needle, what) => {
+  ran += 1
   let msg = null
   try {
     fn()
@@ -125,5 +128,29 @@ console.log('\n4. a label override replaces the sentence at a valid index')
   is(a.out.map((r) => r[1]), ['the count is right (7)', 'unused'], 'and rest continues from the next slot')
 }
 
-console.log(`\n${failed === 0 ? '[chain-helper] all assertions hold' : `[chain-helper] ${failed} FAILED`}`)
-process.exitCode = failed === 0 ? 0 : 1
+/*
+ * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true
+ * of no assertions at all.
+ *
+ * Measured 22 September: with every assertion in this file commented out, it
+ * printed exactly the line below and exited 0. All four contract tests did. The
+ * ledger had said they "cannot go vacuous without going to zero cases" — which
+ * is the failure itself, written down as though it were protection.
+ *
+ * So the count is asserted and then printed beside the verdict. A verdict that
+ * does not say what it is about is the same shape as a suite reporting
+ * `0 failed` for checks it never reached.
+ */
+let short = false
+const MIN_ASSERTIONS = 10
+if (ran < MIN_ASSERTIONS) {
+  console.error(
+    `\n[chain-helper] only ${ran} assertion(s) ran, below the floor of ${MIN_ASSERTIONS}. ` +
+      'A contract test that asserts nothing passes; this line is what stops it saying so.',
+  )
+  short = true
+}
+console.log(
+  `\n${failed === 0 ? `[chain-helper] all ${ran} assertions hold` : `[chain-helper] ${failed} of ${ran} FAILED`}`,
+)
+process.exitCode = failed === 0 && !short ? 0 : 1

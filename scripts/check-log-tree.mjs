@@ -21,7 +21,9 @@ import { execFileSync } from 'node:child_process'
 import { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck, declaresRerun } from './lib/log-tree.mjs'
 
 let failed = 0
+let ran = 0
 const ok = (cond, what) => {
+  ran += 1
   console.log(`${cond ? '  PASS' : '  FAIL'} ${what}`)
   if (!cond) failed++
 }
@@ -234,5 +236,29 @@ ok(
   'and a moved dependency still answers first',
 )
 
-console.log(failed === 0 ? `\n${'ok'} log-tree: every case holds` : `\n${failed} FAILED`)
-process.exitCode = failed === 0 ? 0 : 1
+/*
+ * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true
+ * of no assertions at all.
+ *
+ * Measured 22 September: with every assertion in this file commented out, it
+ * printed exactly the line below and exited 0. All four contract tests did. The
+ * ledger had said they "cannot go vacuous without going to zero cases" — which
+ * is the failure itself, written down as though it were protection.
+ *
+ * So the count is asserted and then printed beside the verdict. A verdict that
+ * does not say what it is about is the same shape as a suite reporting
+ * `0 failed` for checks it never reached.
+ */
+let short = false
+const MIN_ASSERTIONS = 30
+if (ran < MIN_ASSERTIONS) {
+  console.error(
+    `\nlog-tree only ${ran} assertion(s) ran, below the floor of ${MIN_ASSERTIONS}. ` +
+      'A contract test that asserts nothing passes; this line is what stops it saying so.',
+  )
+  short = true
+}
+console.log(
+  failed === 0 ? `\nok log-tree: all ${ran} cases hold` : `\n${failed} of ${ran} FAILED`,
+)
+process.exitCode = failed === 0 && !short ? 0 : 1

@@ -185,8 +185,26 @@ chk(
   'a verb that throws on an absent element is missing from the list',
 )
 
+/*
+ * AND A FLOOR ON THE CASE COUNT. `17 case(s) held, 0 did not` is what this
+ * prints when it works; `0 case(s) held, 0 did not` is what it would print with
+ * every case deleted, and it exited 0 either way. The four older contract tests
+ * had the same hole and the ledger had described it as protection.
+ *
+ * Measured 22 September: 17 cases. A floor, because the set grows.
+ */
+let short = false
+const MIN_CASES = 15
+if (pass + fail < MIN_CASES) {
+  console.error(
+    `\n[suite-reads] only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}. A case file ` +
+      'that asserts nothing passes; this line is what stops it saying so.',
+  )
+  short = true
+}
+
 console.log(
   `\n${fail === 0 ? '\x1b[32mok\x1b[0m' : '\x1b[31mnot ok\x1b[0m'} suite-reads: ` +
     `${pass} case(s) held, ${fail} did not`,
 )
-process.exitCode = fail === 0 ? 0 : 1
+process.exitCode = fail === 0 && !short ? 0 : 1

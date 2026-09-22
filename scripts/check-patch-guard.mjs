@@ -241,6 +241,24 @@ console.log('\n▶ and it does not care where it was run from — which is the d
   )
 }
 
+/*
+ * AND A FLOOR ON THE CASE COUNT. `14 case(s) held, 0 did not` is what this
+ * prints when it works; `0 case(s) held, 0 did not` is what it would print with
+ * every case deleted, and it exited 0 either way. The four older contract tests
+ * had the same hole and the ledger had described it as protection.
+ *
+ * Measured 22 September: 14 cases. A floor, because the set grows.
+ */
+let short = false
+const MIN_CASES = 12
+if (pass + fail < MIN_CASES) {
+  console.error(
+    `\n[patch-guard] only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}. A case file ` +
+      'that asserts nothing passes; this line is what stops it saying so.',
+  )
+  short = true
+}
+
 console.log(
   `\n${fail === 0 ? '\x1b[32mok\x1b[0m' : '\x1b[31mnot ok\x1b[0m'} patch-guard: ` +
     `${pass} case(s) held, ${fail} did not`,
@@ -310,4 +328,4 @@ if (fail) {
   console.error(`\n[patch-guard] ${fail} case(s) did not hold:`)
   for (const f of failures) console.error(`  · ${f}`)
 }
-process.exitCode = fail === 0 ? 0 : 1
+process.exitCode = fail === 0 && !short ? 0 : 1

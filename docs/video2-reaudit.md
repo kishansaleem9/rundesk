@@ -5494,10 +5494,64 @@ handoff was not compared.
 
 `check-migration-order.mjs` ("160 files, contiguous sequences 0000..0159, each
 present in the journal") and `check-break-claims.mjs` (whose population sum I
-added earlier today) already carry their denominators. The four contract tests —
-`check-chain-helper`, `check-claim-match`, `check-suite-of-patch`,
-`check-log-tree` — report "N cases held", which is a count of work done rather
-than of defects not found, and cannot go vacuous without going to zero cases.
-And no checker other than the break-patch guard resolved a path against the
-working directory; `check-video2-counts.mjs` did, but a missing ledger throws
-ENOENT and kills the run, which is loud. Both are anchored now anyway.
+added earlier today) already carry their denominators. And no checker other than
+the break-patch guard resolved a path against the working directory;
+`check-video2-counts.mjs` did, but a missing ledger throws ENOENT and kills the
+run, which is loud. Both are anchored now anyway.
+
+**And one sentence that stood here was wrong.** It read: *"The four contract
+tests — `check-chain-helper`, `check-claim-match`, `check-suite-of-patch`,
+`check-log-tree` — report 'N cases held', which is a count of work done rather
+than of defects not found, and cannot go vacuous without going to zero cases."*
+
+They do not report N cases. They report **"all assertions hold"** with no number
+in it, and going to zero cases is not a bound on the failure — it IS the
+failure. Measured: with every assertion commented out, all four printed exactly
+the line they print when they pass, and exited 0.
+
+That paragraph was written to record what the probe did NOT find, which makes it
+the worst place to guess. The correction is the finding: **seven more, not
+four.**
+
+### Seven more, including the four I had just cleared
+
+The paragraph above recorded what the probe did not find, and it was wrong about
+half of it. Put the same question to the contract tests — *would this notice
+having no cases?* — and all four answered no:
+
+```
+check-claim-match.mjs      with every assertion commented out → exit=0  [claim-match] all assertions hold
+check-chain-helper.mjs     with every assertion commented out → exit=0  [chain-helper] all assertions hold
+check-suite-of-patch.mjs   with every assertion commented out → exit=0  [suite-of-patch] all assertions hold
+check-log-tree.mjs         with every assertion commented out → exit=0  ok log-tree: every case holds
+```
+
+"All assertions hold" is true of no assertions. Each now counts what ran,
+asserts a floor, and **prints the number beside the verdict** — `all 22
+assertions hold`, `all 11`, `all 20`, `all 36 cases`. A verdict that does not
+say what it is about is the same shape as a suite reporting `0 failed` for
+checks it never reached.
+
+**And the three case files written today had it too.** `17 case(s) held, 0 did
+not` becomes `0 case(s) held, 0 did not` with every case deleted, and exits 0
+either way. Floored, all three.
+
+#### The floor that did not floor
+
+Worth writing down because it is the exact defect class this audit is named for.
+The first version of the four guards set `process.exitCode = 1` — and every one
+of those files ends with
+
+```js
+process.exitCode = failed === 0 ? 0 : 1
+```
+
+which runs afterwards and **overwrites it back to 0**. Two of the four were
+given floors ABOVE their real count (30 against 22, 20 against 11) and both
+still exited 0. A guard that cannot fail, inside the guards written to stop
+checks that cannot fail.
+
+It was caught by measurement rather than by reading: printing the counts showed
+22 and 11 sitting under floors of 30 and 20 with a green exit. The floors now
+set a flag the final verdict reads, and all seven redden when their assertions
+are removed.
