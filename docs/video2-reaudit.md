@@ -3358,6 +3358,79 @@ breakage. Both are now in the process doc's trap list, because a break test
 that cannot break anything is the same defect this audit exists to find,
 one level up.
 
+### Closing uncovered suites: 47 → 27, and what the patches found on the way
+
+The coverage script's ratchet has come down in stages. What follows is the
+current batch, and the point of writing it out is that **four of the six
+suites gave back something the suite did not know about itself.**
+
+| suite | patches | reddened | what it cost to find out |
+| --- | --- | --- | --- |
+| `malformed-ids` | 4 | 4 | — |
+| `trending-sort` | 4 | 4 | a check that could not fail for its own reason |
+| `undo-delete` | 4 | 4 | three checks asserting a restore by its status code |
+| `task-provenance` | 3 | — | a fourth patch that had to not be written |
+| `search-sources` | 4 | — | — |
+
+**`undo-delete` said one thing in its header and did another.** Its second
+paragraph reads *"every check here reads the list back FROM THE API after
+pressing it"* — and the three checks that call `POST …/restore` directly
+asserted `status < 300` and nothing else. `undo-delete-3` removes `restore`'s
+`type === 'space'` branch: an if/else chain over a union has no exhaustiveness
+check, so the space falls through every branch, the method writes nothing, logs
+its audit event and answers **201**. The old *"and so can a space"* would have
+passed. Each of the three now reads its row back (8 → 11 checks), and the run
+shows exactly that split — `undo-delete-2` prints
+
+```
+FAIL restore returned 201 and is_archived is still true — a 200 is not a restore
+```
+
+three times, beside three status checks that are still green.
+
+**`trending-sort` lost a check to arithmetic nobody had done.** `trending-sort-1`
+scores every hit zero and was predicted to redden three checks. It reddened
+two: *"a colleague's opens move the workspace list"* passed. The colleague
+opened `restBefore[0]` — whatever relevance had already put first — so under a
+build with no trending sort at all it is still first. The check asserted that
+engagement moved the list and proved only that the list had not been shuffled.
+It opens `restBefore[1]` now.
+
+That one is worth the paragraph for a reason beyond itself: it was found by a
+patch reddening **fewer** checks than predicted, not more. Predicting the set
+before the run is the whole of the method, and this is the first time the
+prediction being too high was the finding.
+
+**`task-provenance`'s fourth patch was dropped before it was written.** It
+would have cleared the `origin` marker when a type is renamed — and the suite
+renames the seeded type, so the column would have come back `null` for good.
+`git checkout -- .` reverts the source and not the lane's Postgres: every later
+run of that suite on that lane would have failed its baseline for a reason
+nothing in the tree could explain. The rule is now in the process doc. *Does
+the patch write something the suite did not create?*
+
+**And the runner had been reading from the wrong directory.** Break patches
+lived in `/tmp/claude-0/breaks` before they were committed; `wt-break.sh` was
+never moved to the tracked copy. Twelve patches written straight into
+`test/e2e/breaks` came back `== <name> MISSING`, and `break-queue.sh` — whose
+entire purpose is to report these numbers honestly — printed
+
+```
+patches 4 · STILL-GREEN 0 · UNBUILT 0
+```
+
+for two sets that had opened no file at all. A `MISSING` line starts with
+`== `, is not a control line, is followed by no result line and says neither
+BUILD nor PATCH FAILED, so it fell through every category the summary had.
+**A summary that cannot say "nothing ran" will say "nothing went wrong"
+instead.** All three scripts now count it, `check-break-freshness.mjs` fails on
+it, and `PATCH CHANGED NOTHING` got its own column in the same edit — before it
+had cost anything, because it was sitting in the identical gap.
+
+The two directories held 614 byte-identical files, which is the only reason
+nothing already recorded describes the wrong patch. That is luck, not a
+property: it held only because no patch had yet been edited in place.
+
 ---
 
 ## 9. The misclassified rows, resolved
