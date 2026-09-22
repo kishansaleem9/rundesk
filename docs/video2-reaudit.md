@@ -6185,7 +6185,37 @@ tick but not render is a stored value no reader honours". Building an Activity
 view from an invented design would be the same mistake wearing a tick.
 
 So: **Create Folder description → Threads**, both fully evidenced, batched per
-file. View types and Document import are held, not abandoned: what an Activity
+file.
+
+### The folder description, surveyed so the build is mechanical
+
+The row records it as *blocked rather than pending* — `folders` has no column
+and `FoldersService` whitelists `{name, color}`, so a description typed there
+would store into nothing. That is the right refusal and it is not the end of the
+question: the fix is the column **and a reader**, which is what this schema
+already demands of itself. `folders.statusScope` carries a comment naming its
+reader and saying why it is not a fourth status table — "a folder that held a
+status set nothing read would be the mirror defect".
+
+**The reader turns out to be built already.** `container-edit-dialog.tsx` is the
+shared dialog for spaces, folders, projects and lists; it has a `description`
+field behind a `fields.description` flag, and projects already pass it. So
+whoever types a description can reopen the folder and read it back — the round
+trip is real, not a someday.
+
+Five pieces, and the last one is what makes the other four honest:
+
+1. a migration adding `description` to `folders`;
+2. the column in `schema/folders.ts`, with a comment naming its reader;
+3. `FoldersService` widened past `{name, color}` on create AND update — a
+   description that can be set once and never changed is half a field;
+4. the Create Folder dialog, with frame `08:25`'s own placeholder
+   *"Tell us a bit about your Folder (optional)"*, between Name and Location
+   where the frame puts it;
+5. `fields.description` enabled for folders in the edit dialog — the reader.
+
+Drift stays at the estimate: `folders.service.ts` is 9 patches and the create
+dialog 16, while `container-edit-dialog.tsx` is **0**. View types and Document import are held, not abandoned: what an Activity
 view or a document importer should DO is a decision the walkthrough does not
 make, and inventing one is how a facade gets built with good intentions.
 
