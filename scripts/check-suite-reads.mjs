@@ -24,7 +24,7 @@
  *
  *   node scripts/check-suite-reads.mjs
  */
-import { messageReads, topLevelArgs, THROWS } from './lib/suite-reads.mjs'
+import { messageReads, topLevelArgs, THROWS, locatorVars } from './lib/suite-reads.mjs'
 
 let pass = 0
 let fail = 0
@@ -95,6 +95,54 @@ chk(
   messageReads(`chk(ok, 'l', \`\${(await page.locator('main').innerText()).trim()}\`)`).length === 0,
   'and a read on something that is not a testid is left alone',
   'a read on `main` was reported — the element a suite cannot remove',
+)
+
+console.log('\n▶ a locator held in a VARIABLE is still a locator')
+
+chk(
+  messageReads(
+    `const section = page.getByTestId('s')\nchk(ok, 'l', \`it said \${await section.getAttribute('data-count')}\`)`,
+  ).length === 1,
+  'a variable assigned from getByTestId is tracked, and a read on it in a message is a site',
+  'the shape `sidebar-dms-1-no-section` ended a run at 10 of 14 on was not reported',
+)
+
+chk(
+  messageReads(
+    `const box = page.locator('[data-testid="b"]')\nchk(ok, 'l', \`it read \${await box.inputValue()}\`)`,
+  ).length === 1,
+  'and one assigned from page.locator too',
+  'only getByTestId was tracked, so half the suites write this shape invisibly',
+)
+
+chk(
+  messageReads(
+    `const section = page.getByTestId('s')\nchk((await section.getAttribute('x')) === 'y', 'l', 'plain')`,
+  ).length === 0,
+  'a variable read only in the CONDITION is not this rule — that is what `&&` can guard',
+  'a condition read on a variable was reported, which is the false-positive class rule six avoids',
+)
+
+chk(
+  messageReads(
+    `const n = someNumber()\nchk(ok, 'l', \`it was \${await n.getAttribute('x')}\`)`,
+  ).length === 0,
+  'and a variable NOT assigned from a locator factory is left alone',
+  'any identifier with a matching method name was treated as a locator — a rule to argue with',
+)
+
+chk(
+  messageReads(
+    `const section = page.getByTestId('s')\nchk(ok, 'l', \`\${await section.getAttribute('x').catch(() => null)}\`)`,
+  ).length === 0,
+  'a caught read on a variable is not a site',
+  'a caught variable read was reported, which would make the fix unfixable',
+)
+
+chk(
+  [...locatorVars(`const a = page.getByTestId('x')\nconst b = page2.locator('y')\nlet c = await page.getByRole('button')`)].length === 3,
+  'locatorVars finds const, let, a numbered page, and an awaited factory',
+  'a locator assignment shape the suites actually use was missed',
 )
 
 console.log('\n▶ the comma splitter, which decides which argument is which')
@@ -194,7 +242,7 @@ chk(
  * Measured 22 September: 17 cases. A floor, because the set grows.
  */
 let short = false
-const MIN_CASES = 15
+const MIN_CASES = 20
 if (pass + fail < MIN_CASES) {
   console.error(
     `\n[suite-reads] only ${pass + fail} case(s) ran, below the floor of ${MIN_CASES}. A case file ` +

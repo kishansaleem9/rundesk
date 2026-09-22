@@ -58,8 +58,39 @@ export const topLevelArgs = (inner) => {
 }
 
 /*
- * Every `chk` in `src` whose MESSAGE reads a testid locator with a verb that
- * throws, and whose message has no `.catch` of its own.
+ * A LOCATOR HELD IN A VARIABLE IS STILL A LOCATOR.
+ *
+ * `const section = page.getByTestId('sidebar-dms-section')` and then
+ * `section.getAttribute('data-count')` is the same read as writing the factory
+ * call inline, and it throws the same way. Rule six matched the LITERAL, so it
+ * could not see it: `sidebar-dms-1-no-section` removes that section, the read
+ * threw, and the run ended at 10 of 14 with four checks unreported. Rule four
+ * pairs a guarded identifier with a bare one and here NEITHER use was guarded,
+ * so it had nothing to pair. Two rules, one blind spot each, and the site sat
+ * between them.
+ *
+ * I recorded that as needing a parser. IT DOES NOT. A variable assigned from a
+ * locator factory IN THE SAME FILE is a text match, and the scope is the only
+ * thing that has to be right: a name assigned from `page.getByTestId(…)` or
+ * `page.locator(…)` anywhere in the file is a locator everywhere in it, because
+ * these suites are single-scope scripts rather than modules with shadowing.
+ *
+ * Deliberately NOT tracking re-assignment or shadowing. Both would need scope
+ * analysis, and a name reused for a non-locator would produce a false positive
+ * — which is the one outcome worse than a missed site, since it makes the rule
+ * something to argue with. Measured: 19 message sites across 12 files, and 5
+ * more that read a variable only in the CONDITION, where an `&&` can guard them
+ * and this rule correctly says nothing.
+ */
+const LOCATOR_VAR =
+  /(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w.]*\bpage\d*\s*\.\s*(?:getByTestId|locator|getByRole|getByText|getByLabel|getByPlaceholder)\(/g
+
+export const locatorVars = (src) => new Set([...src.matchAll(LOCATOR_VAR)].map((m) => m[1]))
+
+/*
+ * Every `chk` in `src` whose MESSAGE reads a locator with a verb that throws,
+ * and whose message has no `.catch` of its own — whether the locator is written
+ * inline as a testid or held in a variable assigned from a locator factory.
  *
  * Returns `{ line, verb, text }` per site, one per `chk` — a message that reads
  * two absent elements still only ends the section once, and naming the first is
@@ -67,6 +98,14 @@ export const topLevelArgs = (inner) => {
  */
 export const messageReads = (src) => {
   const out = []
+  const vars = locatorVars(src)
+  const readsAVar = (arg) =>
+    [...vars].some((v) =>
+      new RegExp(
+        `\\b${v.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\\\$&')}\\s*\\.(?:[\\w]+\\([^()]*\\)\\s*\\.)*?` +
+          '(?:innerText|textContent|inputValue|isDisabled|isEnabled|isChecked|isEditable|getAttribute|boundingBox)\\(',
+      ).test(arg),
+    )
   for (let i = src.indexOf('chk('); i !== -1; i = src.indexOf('chk(', i + 1)) {
     let depth = 0
     let end = i + 3
@@ -82,7 +121,10 @@ export const messageReads = (src) => {
     // argument list.
     if (depth !== 0) continue
     for (const arg of topLevelArgs(src.slice(i + 4, end)).slice(2)) {
-      if (!THROWS.test(arg) || !/getByTestId\(|data-testid/.test(arg)) continue
+      if (!THROWS.test(arg)) continue
+      // Written inline as a testid, OR held in a variable assigned from a
+      // locator factory in this file. Same read, same throw.
+      if (!/getByTestId\(|data-testid/.test(arg) && !readsAVar(arg)) continue
       if (/\.catch\(/.test(arg)) continue
       out.push({
         line: src.slice(0, i).split('\n').length,
