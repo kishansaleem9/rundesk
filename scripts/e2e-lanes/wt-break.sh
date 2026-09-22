@@ -97,6 +97,59 @@ trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; rmdir "$LOCK" 2>/dev/null' EXIT
 # run that legitimately holds it.
 : > "$OUT"
 
+# ── AND THE WORKTREE HAS TO RESOLVE ITS OWN WORKSPACE PACKAGES. ───────────
+#
+# A PATCH TO `packages/**` WAS APPLIED IN THE WORKTREE AND BUILT FROM THE REPO.
+#
+# These worktrees borrow node_modules with an absolute symlink —
+# `wt3/apps/web/node_modules -> /home/user/rundesk/apps/web/node_modules` — and
+# pnpm links workspace packages RELATIVELY inside it:
+# `@rundesk/ui -> ../../../../packages/ui`. Four levels up from the repo's
+# directory is the repo, so `@rundesk/ui` resolved to
+# `/home/user/rundesk/packages/ui` no matter which tree was building.
+#
+# So a patch editing `packages/ui/src/styles.css` applied cleanly, showed up in
+# `git diff` (which is what makes this rebuild the bundle at all), triggered the
+# rebuild — and the bundle came out byte-identical, because vite read the
+# unpatched file through the symlink. `PATCH CHANGED NOTHING` cannot catch it:
+# the patch really did change the worktree.
+#
+# `sd-1-contrast-marks-but-does-not-paint` ran GREEN this way, and
+# `folder-create-12-toast-bottom-right` was recorded as reddening three checks
+# that have nothing to do with its claim. Four patches in the repository touch
+# `packages/**`; two of them go through this path, and both were inert.
+#
+# Fixed by giving each worktree its own tiny node_modules: a real directory of
+# symlinks to the repo's entries — 27 for web, 33 for api, 4 at the root, since
+# pnpm keeps only direct dependencies there — with `@rundesk/*` pointed at THIS
+# tree's packages. Idempotent, and re-done on every sync so a package added
+# upstream cannot go missing.
+link_own_packages() {
+  for dir in . apps/web apps/api; do
+    src="$REPO/$dir/node_modules"
+    dst="$WT/$dir/node_modules"
+    [ -d "$src" ] || continue
+    # Only replace a symlink we can see is borrowed; a real directory here was
+    # installed on purpose and is left alone.
+    [ -L "$dst" ] || continue
+    rm -f "$dst"
+    mkdir -p "$dst"
+    for entry in "$src"/* "$src"/.bin; do
+      [ -e "$entry" ] || continue
+      name="$(basename "$entry")"
+      [ "$name" = "@rundesk" ] && continue
+      ln -sfn "$entry" "$dst/$name"
+    done
+    if [ -d "$src/@rundesk" ]; then
+      mkdir -p "$dst/@rundesk"
+      for pkg in "$src"/@rundesk/*; do
+        [ -e "$pkg" ] || continue
+        ln -sfn "$WT/packages/$(basename "$pkg")" "$dst/@rundesk/$(basename "$pkg")"
+      done
+    fi
+  done
+}
+
 # ── THE WORKTREE HAS TO BE AT HEAD, AND THE SUITE HAS TO BE GREEN WITHOUT A
 #    PATCH, OR EVERYTHING BELOW IS UNREADABLE. ──────────────────────────────
 #
@@ -122,6 +175,7 @@ if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
     echo "== CANNOT SYNC WORKTREE — refusing to run, results would be about the wrong tree" >> "$OUT"
     exit 4
   fi
+  link_own_packages
   ( cd "$WT/packages/db"
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
     yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 )
@@ -155,6 +209,9 @@ if [ ! -f "$WT/apps/web/dist/index.html" ]; then
   fi
 fi
 
+# Also here, not only under the sync: a worktree already at HEAD skips the block
+# above entirely, and that is exactly the state the borrowed symlink survived in.
+link_own_packages
 timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
   > "/tmp/claude-0/brk-$SUITE-baseline.log" 2>&1
 BASE=$(grep -E 'passed,' "/tmp/claude-0/brk-$SUITE-baseline.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
