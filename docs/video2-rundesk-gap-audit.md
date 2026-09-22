@@ -85,7 +85,9 @@ Ordered by how much of the video they account for, not by size.
 **Ask** `[00:12]` *"humein ek task ke andar aur bhi option chahiye … hum woh
 FIELD ke through add kar sakte hain"*, `[00:24]` she creates **"Progress"**.
 
-**Frames** `00:20`/`00:40` show a **searchable field-type picker** of ~29 types:
+**Frames** `00:20`/`00:40` show a **searchable field-type picker**. The two
+shots hold 16 rows each and overlap on Progress (Auto) · Email · Phone, so what
+the transcription records is 29 rows, listed here in the order they appear:
 Text area (Long Text), Number, Labels, Checkbox, Money, Website, Formula,
 Custom Text, Summary, Progress Updates, Files, Relationship, People,
 **Progress (Auto)**, Email, Phone, Categorize, Custom Dropdown, Translation,
@@ -180,14 +182,24 @@ comes back as `[]` rather than null, so no reader has to treat "none yet" and
 — a template that silently dropped a task's people field would restore a task
 that looks complete and is not.
 
-**NOT BUILT, and said plainly rather than quietly skipped.** **Files** is a
-reference into the attachments module, not a value; a half-built one is a field
-you can define and never fill. **Voting** needs to know *who* voted, and
-`setValue` has no actor because every other type's value is the same for
-everybody — per-user state is a feature, not a field type. **Formula** and the
-AI four (Summary, Translation, Sentiment, Action Items) are features wearing a
-type's clothing. That leaves Rundesk at seventeen of the frame's twenty-nine,
-with the remaining twelve named rather than forgotten.
+**NOT BUILT, and said plainly rather than quietly skipped.** The list is in
+`docs/video2-reaudit.md` §4's field-types row and is not repeated here, because
+this paragraph used to repeat it and went stale: it named **Files**, **Voting**
+and **Formula** as features wearing a type's clothing, and all three were built
+afterwards — Files and Voting in `0145`, Formula with Tasks and Signature in
+`0158`, the last three closed by `custom-field-types.mjs` at 32 checks with
+every one of its 32 patches reddening the check it names. It also said
+"seventeen of the frame's twenty-nine", where **19** of those 29 are now built
+and the 10 that are not are named there with a reason each. Rundesk holds 22
+types in all — the 19 plus **text**, **dropdown** and **date**, which the
+frames' transcription does not name.
+
+Two documents holding one count is the duplicated list, and the copy nobody
+re-derives is the one that rots. The ten that remain are recorded there with a
+reason each — eight need a language model and `ANTHROPIC_API_KEY` is empty here
+and in CI, **Relationship** would be a second store for what `task_doc_links`
+already holds, and **Button** stores no value at all with no manual trigger to
+wire it to.
 
 ---
 
