@@ -772,6 +772,25 @@ as the same defects one level up.
   the exit code. Every assertion added to these scripts gets the same treatment:
   break it, see it fail, restore it, see it pass. Twice today that found an
   assertion that had never once run.
+- **AN UNGUARDED LOCATOR ACTION AFTER A FAILED PRECONDITION DOES NOT FAIL THE
+  CHECK, IT KILLS THE RUN — AND THE HARNESS READS THAT AS A REDDENING.**
+  `emoji-picker`'s section 7 checked that a missing chunk is reported, and then
+  clicked `[data-testid="emoji-retry"]` unconditionally. `emoji-picker-2-data-inlined`
+  makes the picker load fine, so there is no failure state and no retry button;
+  the click threw an uncaught TimeoutError thirty seconds later and the process
+  died before printing its totals. What `$OUT` recorded was a patch line with
+  three FAIL lines under it and nothing else — byte-identical to a patch that
+  reddened three checks, and counted as one. Two rules out of it: a section
+  whose later checks depend on an earlier one reports them as failed with the
+  reason (same as any other branch, same number of checks), and the harness
+  names a run that printed no summary instead of inferring one.
+- **A CLAIM MUST QUOTE THE LITERAL PART OF A TEMPLATE-LITERAL CHECK, NOT THE
+  RENDERED SENTENCE.** `${script} publishes through publish_web_dist` is in the
+  file as `publishes through publish_web_dist`; a claim quoting
+  `"deploy/deploy-prod.sh publishes through publish_web_dist"` is a sentence no
+  suite contains, and the interpolated subject belongs outside the quotes.
+  `check-break-claims.mjs` catches this on the spot, which is the only reason it
+  costs a minute rather than a wrong attribution.
 - **A PATCH THAT BREAKS THE GATE HAS NO CHECK SENTENCE TO NAME, AND QUOTING THE
   THROWN LINE IS NOT ONE.** `aoc-4-attach-input-unnamed` removes the testid the
   suite's opening `waitForSelector` waits for, so the run throws before its
@@ -913,6 +932,24 @@ as the same defects one level up.
   reader holds the stale value. If that moment does not exist, the check is a
   sentence about a mechanism rather than a test of one — and it will be green
   for as long as nobody asks.
+
+  **THE MIRROR OF IT: A PERSISTENCE CHECK NEEDS THE READER TO HAVE REMOUNTED.**
+  Third instance, `emoji-picker`. "and it leads Frequently Used next time"
+  re-opened the picker by clicking its trigger twice, which closes and opens a
+  popover and does not remount anything. The count lives in
+  `useState(() => readFrequent())` — storage read once, at mount — with the
+  running total in a ref beside it, so a picker that had stopped writing
+  anything down still showed the right order for as long as it stayed open.
+  `emoji-picker-5-frequent-not-persisted` deletes `writeFrequent` outright and
+  ran GREEN. **A reload, a fresh page or a fresh context; a second click is not
+  a new mount.**
+
+  And the same check was vacuous a second way, which is worth stating on its
+  own because it is cheaper to make than the lifecycle mistake: it picked
+  `.first()` — the entry that already led the row — so "it leads next time" was
+  satisfied by nothing happening. **Pick the one that has to MOVE.** The
+  `trending-sort-1` "already-first colleague" is the same defect in a different
+  suite.
 
   **AND WALKING OUTWARDS MEANS THE FIXTURE TOO, NOT ONLY THE SELECTOR.** The
   fifth instance was `no-dead-ends-1`, where I did read the assertion —

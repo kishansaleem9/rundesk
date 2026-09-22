@@ -185,11 +185,22 @@ try {
   const escape = page.locator('[data-testid="sidebar-no-workspace"]')
   check((await escape.count()) > 0, 'and the sidebar offers a way back')
   const backLink = escape.locator(`a[href="/app/${WS}"]`).first()
-  check((await backLink.count()) > 0, 'naming the workspace you came from')
-  if ((await backLink.count()) > 0) {
+  const haveBackLink = (await backLink.count()) > 0
+  check(haveBackLink, 'naming the workspace you came from')
+  /*
+   * THE `if` USED TO HAVE NO `else`, which made a missing back link a SHORTER
+   * RUN rather than two failures. `EXPECTED_CHECKS` is compared with `!==`, so
+   * the suite then reports `✗ 27 of 28 checks ran` — a headline that reads as
+   * the harness breaking rather than as the escape hatch being gone. Third
+   * suite in this audit with this shape; the rule is that every branch reports
+   * the same number of checks.
+   */
+  if (haveBackLink) {
     await backLink.click()
     await page.waitForTimeout(2500)
     check(page.url().endsWith(`/app/${WS}`), 'and clicking it returns there', page.url())
+  } else {
+    check(false, 'and clicking it returns there', 'skipped: there was no back link to click')
   }
 
   // ── 3. the profile tab is an address ─────────────────────────────────────
@@ -216,9 +227,35 @@ try {
   check(taskUrl.includes(`task=${bodyTask.data?.id}`), 'opening one names it in the address', taskUrl)
   await page.goto(taskUrl, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3200)
+  /*
+   * THE SHEET, NOT THE TITLE ANYWHERE ON THE PAGE.
+   *
+   * This read `body.innerText().includes('Quarterly planning')`, and the list
+   * grid behind the sheet renders that title in a row — so the check passed
+   * whether or not the address reopened anything. A patch that drops `task=`
+   * from the URL entirely leaves the bare list URL, which still shows the row,
+   * which still contains the words. Naming only what should be there, when the
+   * claim is that a specific thing OPENED.
+   *
+   * The tab strip only exists inside the detail sheet, so its presence is the
+   * sheet being open; the title is then read from the sheet rather than from
+   * the document.
+   */
+  const sheetOpen = await page
+    .getByTestId('task-tab-overview')
+    .first()
+    .waitFor({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
+  const sheetText = sheetOpen
+    ? await page.locator('[data-testid="task-tab-overview"]').first().evaluate(
+        (el) => el.closest('[role="dialog"], aside, section')?.innerText ?? '',
+      ).catch(() => '')
+    : ''
   check(
-    (await page.locator('body').innerText()).includes('Quarterly planning'),
+    sheetOpen && sheetText.includes('Quarterly planning'),
     'and that address reopens the same task',
+    sheetOpen ? `the sheet opened on ${JSON.stringify(sheetText.slice(0, 80))}` : 'no task sheet opened at all',
   )
 
   // ── 5. sprints is reachable ──────────────────────────────────────────────
@@ -226,11 +263,15 @@ try {
   await page.goto(`${origin}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
   const sprint = page.locator('[data-testid="workspace-sidebar"] a[href$="/sprints"]').first()
-  check((await sprint.count()) > 0, 'the sidebar carries a Sprints entry')
-  if ((await sprint.count()) > 0) {
+  const haveSprint = (await sprint.count()) > 0
+  check(haveSprint, 'the sidebar carries a Sprints entry')
+  if (haveSprint) {
     await sprint.click()
     await page.waitForTimeout(2800)
     check(/\/sprints$/.test(new URL(page.url()).pathname), 'and it opens the sprints page', page.url())
+  } else {
+    // Reported, not skipped — see the note on the back link above.
+    check(false, 'and it opens the sprints page', 'skipped: there was no Sprints entry to click')
   }
 
   // ── 6. chat: channel and thread ──────────────────────────────────────────
@@ -253,7 +294,15 @@ try {
   await page.waitForTimeout(4000)
   check(/[?&]doc=/.test(page.url()), 'landing on docs names the doc it opened', page.url())
   if (!secondDoc.data?.id) {
-    check(false, 'could not create a second doc to switch to')
+    // Two checks, not one — see the note on the back link above. Without the
+    // second doc neither claim can be made, and saying so twice keeps the run
+    // the same length as one that could.
+    check(false, 'switching doc changes the address', 'skipped: no second doc could be created')
+    check(
+      false,
+      'and coming back to that address reopens THAT doc, not the first one',
+      'skipped: no second doc could be created',
+    )
   } else {
     await page.getByTestId(`docs-tree-item-${secondDoc.data.id}`).first().click()
     await page.waitForTimeout(2000)
