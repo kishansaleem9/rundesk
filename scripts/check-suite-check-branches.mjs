@@ -133,15 +133,23 @@ for (const [file, lines] of rows) {
  * coverage checker could not see, and for the same reason. A suite with no
  * break patch is a suite whose conditions have never been made false.
  *
- * 39 now: `syncup-live`'s ten and `panel-collapse`'s six are balanced, and
- * `addressability-live`'s three and `emoji-picker`'s one before them. The fix
- * is `test/e2e/lib/chain.mjs` — `step` for the next check, `rest` to report
- * the remainder as failed with the reason, and `skipRest` for a gate on the
+ * 20 now, and the balanced ones are `syncup-live` (ten), `panel-collapse`
+ * (six), `video1-fast-items` (fifteen), `task-depth` (four),
+ * `addressability-live` (three) and `emoji-picker` (one). The fix is
+ * `test/e2e/lib/chain.mjs` — `step` for the next check, `rest` to report the
+ * remainder as failed with the reason, and `skipRest` for a gate on the
  * machine rather than on the product, which is the narrow case where the
  * honest answer is "unknown" rather than "broken". Keep this paragraph in step
  * with the constant.
+ *
+ * EVERY BALANCED SUITE WAS RE-RUN AND ITS COUNT HELD. `video1-fast-items` is
+ * 92 of 92, `task-depth` 91, `panel-collapse` 56, `ui-sweep` 107 — the point of
+ * the fix is that the happy path reports the same number it always did, and a
+ * refactor that quietly changed it would be the defect this whole sweep is
+ * about. `syncup-live` is the one that moved, 48 → 59, and it moved because a
+ * floor became an exact count with skips included.
  */
-const BASELINE = 39
+const BASELINE = 20
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
   console.error('  A conditional check makes the run length conditional, and EXPECTED_CHECKS is')

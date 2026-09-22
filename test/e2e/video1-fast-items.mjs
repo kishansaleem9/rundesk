@@ -19,6 +19,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const WEB = path.join(REPO, 'apps/web')
@@ -57,6 +58,17 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+
+/*
+ * A CHAIN THAT REPORTS THE SAME NUMBER OF CHECKS WHICHEVER WAY IT GOES.
+ *
+ * Fifteen `if`s in this file guarded follow-up checks with no `else` — more
+ * than any other suite in the directory — so losing a control made the run
+ * SHORTER rather than failing the checks that depend on it. `EXPECTED_CHECKS`
+ * is compared with `!==`, so that reads as the harness breaking rather than
+ * the feature being gone. See `test/e2e/lib/chain.mjs`.
+ */
+const chain = makeChain(check)
 let DIST = argOf('--dist')
 if (!DIST) {
   console.log('building apps/web…')
@@ -274,9 +286,19 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   await page.goto(`${BASE}/app/profile`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1200)
   const toggle = page.locator('[data-testid="topbar-toggle-notifications"]')
-  check((await toggle.count()) > 0, 'a member can configure the top bar from their profile')
-  if ((await toggle.count()) > 0) {
-    check(!(await toggle.isChecked()), 'and the bell shows as off there')
+  const bellPref = chain(
+    'a member can configure the top bar from their profile',
+    'and the bell shows as off there',
+    'turning it on saves the preference to the member, not the browser',
+    'and the bell is removed from the hidden set',
+    'and the control reflects the saved state',
+  )
+  const haveToggle = (await toggle.count()) > 0
+  bellPref.step(haveToggle, 'no top-bar control on the profile page')
+  if (!haveToggle) {
+    bellPref.rest('skipped: there was no control to read or click')
+  } else {
+    bellPref.step(!(await toggle.isChecked()), 'the bell already shows as on')
     const before = calls.length
     // click + wait, not .check(): .check() asserts the box is checked the
     // instant the click returns, which is a claim about round-trip latency
@@ -286,12 +308,8 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
       calls.slice(before).some((c) => c.method === 'PATCH' && c.body.includes('topbarHidden')),
     )
     const patches = calls.slice(before).filter((c) => c.method === 'PATCH')
-    check(
-      patches.length > 0,
-      'turning it on saves the preference to the member, not the browser',
-      calls.slice(before).map((c) => c.method).join(','),
-    )
-    check(
+    bellPref.step(patches.length > 0, calls.slice(before).map((c) => c.method).join(','))
+    bellPref.step(
       patches.some((c) => {
         try {
           return !JSON.parse(c.body || '{}').topbarHidden?.includes('notifications')
@@ -299,13 +317,9 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
           return false
         }
       }),
-      'and the bell is removed from the hidden set',
       patches.map((c) => c.body).join(' | ').slice(0, 120),
     )
-    check(
-      await waitUntil(async () => await toggle.isChecked()),
-      'and the control reflects the saved state',
-    )
+    bellPref.step(await waitUntil(async () => await toggle.isChecked()), 'the control did not update')
   }
   await ctx.close()
 }
@@ -379,48 +393,65 @@ console.log('\n§2.2  the Inbox "Other" chip is gone')
   await page.goto(`${BASE}/app/${WS}/inbox?filter=primary`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1000)
   const customise = page.locator('[data-testid="primary-customise"]')
-  check((await customise.count()) > 0, 'Primary offers the customise control')
-  if ((await customise.count()) > 0) {
+  const primary = chain(
+    'Primary offers the customise control',
+    'and it opens a list of what can show there',
+    'offering the long list she described',
+    'with the choice this member made already ticked',
+    'and what they left off, off',
+    'ticking one saves it',
+  )
+  const haveCustomise = (await customise.count()) > 0
+  primary.step(haveCustomise, 'no customise control on Primary')
+  if (!haveCustomise) {
+    primary.rest('skipped: there was no customise control to open')
+  } else {
     await customise.click()
     const panel = page.locator('[data-testid="primary-customise-panel"]')
-    check(
-      await waitUntil(async () => (await panel.count()) > 0),
-      'and it opens a list of what can show there',
-    )
-    const boxes = await panel.locator('input[type="checkbox"]').count()
-    check(boxes >= 8, `offering the long list she described (${boxes} kinds)`)
-    // The stub says this member chose mentions + chat, so those are ticked and
-    // the rest are not — the panel reflects the stored choice, not a default.
-    check(
-      await page.locator('[data-testid="primary-type-task_mentioned"]').isChecked(),
-      'with the choice this member made already ticked',
-    )
-    check(
-      !(await page.locator('[data-testid="primary-type-task_overdue"]').isChecked()),
-      'and what they left off, off',
-    )
-    const before = calls.length
-    await page.locator('[data-testid="primary-type-task_overdue"]').click()
-    check(
-      await waitUntil(async () =>
-        calls
-          .slice(before)
-          .some((c) => c.method === 'POST' && c.body.includes('primaryTypes')),
-      ),
-      'ticking one saves it',
-    )
+    const opened = await waitUntil(async () => (await panel.count()) > 0)
+    primary.step(opened, 'the control opened nothing')
+    if (!opened) {
+      primary.rest('skipped: the panel never opened, so nothing in it could be read')
+    } else {
+      const boxes = await panel.locator('input[type="checkbox"]').count()
+      primary.step(boxes >= 8, '', `offering the long list she described (${boxes} kinds)`)
+      // The stub says this member chose mentions + chat, so those are ticked and
+      // the rest are not — the panel reflects the stored choice, not a default.
+      primary.step(
+        await page.locator('[data-testid="primary-type-task_mentioned"]').isChecked(),
+        'the stored choice is not reflected',
+      )
+      primary.step(
+        !(await page.locator('[data-testid="primary-type-task_overdue"]').isChecked()),
+        'something they left off is ticked',
+      )
+      const before = calls.length
+      await page.locator('[data-testid="primary-type-task_overdue"]').click()
+      primary.step(
+        await waitUntil(async () =>
+          calls
+            .slice(before)
+            .some((c) => c.method === 'POST' && c.body.includes('primaryTypes')),
+        ),
+        'nothing was posted',
+      )
+    }
   }
 
   // §2.2 — "Later mein SAVED messages show hote hain."
   await page.goto(`${BASE}/app/${WS}/inbox?view=later`, { waitUntil: 'networkidle' })
   await page.waitForTimeout(1200)
   const saved = page.locator('[data-testid="later-saved-messages"]')
-  check((await saved.count()) > 0, 'Later shows the messages she saved')
-  if ((await saved.count()) > 0) {
-    check(
-      /the one she starred/.test(await saved.innerText()),
-      'with the message itself, not just a count',
-    )
+  const later = chain(
+    'Later shows the messages she saved',
+    'with the message itself, not just a count',
+  )
+  const haveSaved = (await saved.count()) > 0
+  later.step(haveSaved, 'no saved-messages panel under Later')
+  if (!haveSaved) {
+    later.rest('skipped: there was no panel to read the message out of')
+  } else {
+    later.step(/the one she starred/.test(await saved.innerText()), 'the panel showed no message')
   }
 
   // A bookmark to the removed filter must not strand anyone.
@@ -558,11 +589,20 @@ console.log('\n§1.1  task type at create time, and as a search filter')
   await page.waitForTimeout(900)
   const typeSelect = page.locator('[data-testid="quick-create-task-type"]')
   const hasSelect = (await typeSelect.count()) > 0
-  check(hasSelect, 'the create modal offers a task type')
-  if (hasSelect) {
+  const createType = chain(
+    'the create modal offers a task type',
+    "the workspace's types are listed",
+    'creating posts to /tasks',
+    'and the chosen type is in the request body',
+  )
+  createType.step(hasSelect, 'no task-type select in the create modal')
+  if (!hasSelect) {
+    createType.rest('skipped: there was no type to choose, so nothing could be sent')
+  } else {
     const options = await typeSelect.locator('option').allInnerTexts()
-    check(
+    createType.step(
       options.some((o) => /milestone/i.test(o)),
+      '',
       `the workspace's types are listed (${options.join(', ')})`,
     )
 
@@ -583,12 +623,8 @@ console.log('\n§1.1  task type at create time, and as a search filter')
     const post = calls
       .slice(before)
       .find((c) => c.method === 'POST' && /\/tasks(\?|$)/.test(c.url))
-    check(!!post, 'creating posts to /tasks', calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
-    check(
-      !!post && post.body.includes('tt-milestone'),
-      'and the chosen type is in the request body',
-      post?.body?.slice(0, 120),
-    )
+    createType.step(!!post, calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
+    createType.step(!!post && post.body.includes('tt-milestone'), post?.body?.slice(0, 120))
   }
   await ctx.close()
 }
@@ -604,15 +640,21 @@ console.log('\n§1.1  task type at create time, and as a search filter')
 
   const typeFilter = page.locator('[data-testid="palette-task-type-filter"]')
   const hasFilter = (await typeFilter.count()) > 0
-  check(hasFilter, 'search offers a Task type filter')
-  if (hasFilter) {
+  const searchType = chain(
+    'search offers a Task type filter',
+    'and choosing one narrows the search request',
+  )
+  searchType.step(hasFilter, 'no Task type filter in the palette')
+  if (!hasFilter) {
+    searchType.rest('skipped: there was no filter to choose from')
+  } else {
     const before = calls.length
     await typeFilter.selectOption('tt-milestone')
     await page.waitForTimeout(1500)
     const search = calls
       .slice(before)
       .find((c) => c.url.includes('/search') && c.url.includes('taskTypeId=tt-milestone'))
-    check(!!search, 'and choosing one narrows the search request', calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+    searchType.step(!!search, calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
   }
   await ctx.close()
 }
@@ -639,25 +681,37 @@ console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock 
   )
   check(nested === 0, 'no link is nested inside a button', `${nested} found`)
 
-  if ((await toggle.count()) > 0) {
+  const tree = chain(
+    'the chevron opens the space',
+    'and closes it again',
+    'and opens it a second time',
+  )
+  if ((await toggle.count()) === 0) {
+    tree.rest('skipped: there was no expand control to click')
+  } else {
     await toggle.click()
     await page.waitForTimeout(800)
-    const openedOnce = (await child.count()) > 0
-    check(openedOnce, 'the chevron opens the space')
+    tree.step((await child.count()) > 0, 'the space did not open')
 
     await toggle.click()
     await page.waitForTimeout(800)
-    check((await child.count()) === 0, 'and closes it again')
+    tree.step((await child.count()) === 0, 'the space did not close')
 
     // The reported bug: closing was easy, reopening was not.
     await toggle.click()
     await page.waitForTimeout(800)
-    check((await child.count()) > 0, 'and opens it a second time')
+    tree.step((await child.count()) > 0, 'the space would not reopen')
   }
 
   // Opening a space must never fold it away. Navigating to something and having
   // it disappear underneath you is how the tree became unusable.
-  if ((await link.count()) > 0) {
+  if ((await link.count()) === 0) {
+    check(
+      false,
+      'clicking the name opens the space, never closes it',
+      'skipped: the name was not a separate target to click',
+    )
+  } else {
     await link.click()
     await page.waitForTimeout(1200)
     check((await child.count()) > 0, 'clicking the name opens the space, never closes it')
@@ -722,30 +776,42 @@ console.log('\n§2  the search bar she walked through')
    * ooper click kar ke." — two steps: reveal, then select.
    */
   const more = page.locator('[data-testid="palette-more-types"]')
-  check((await more.count()) > 0, 'there is a ⋯ for the rest')
-  if ((await more.count()) > 0) {
+  const overflow = chain(
+    'there is a ⋯ for the rest',
+    'and Folders is offered in it',
+    'choosing it makes the chip appear in the bar',
+    'and clicking it searches in folders',
+  )
+  const haveMore = (await more.count()) > 0
+  overflow.step(haveMore, 'no ⋯ in the type bar')
+  if (!haveMore) {
+    overflow.rest('skipped: there was no ⋯ to open')
+  } else {
     await more.click()
     await page.waitForTimeout(500)
     const addFolder = page.locator('[data-testid="palette-add-type-folder"]')
-    check((await addFolder.count()) > 0, 'and Folders is offered in it')
-    if ((await addFolder.count()) > 0) {
+    const haveAdd = (await addFolder.count()) > 0
+    overflow.step(haveAdd, 'Folders was not in the ⋯')
+    if (!haveAdd) {
+      overflow.rest('skipped: Folders could not be revealed, so nothing followed from it')
+    } else {
       await addFolder.click()
       await page.waitForTimeout(500)
       const chip = page.locator('[data-testid="palette-type-folder"]')
-      check((await chip.count()) > 0, 'choosing it makes the chip appear in the bar')
-
-      // Revealed but not yet searched — the second click is what narrows.
-      const before = calls.length
-      await chip.click()
-      await page.waitForTimeout(1500)
-      const req = calls
-        .slice(before)
-        .find((c) => c.url.includes('/search/') && c.url.includes('types=') && c.url.includes('folder'))
-      check(
-        !!req,
-        'and clicking it searches in folders',
-        calls.slice(before).map((c) => c.url).slice(-3).join(' | '),
-      )
+      const haveChip = (await chip.count()) > 0
+      overflow.step(haveChip, 'no chip appeared in the bar')
+      if (!haveChip) {
+        overflow.rest('skipped: there was no chip to click')
+      } else {
+        // Revealed but not yet searched — the second click is what narrows.
+        const before = calls.length
+        await chip.click()
+        await page.waitForTimeout(1500)
+        const req = calls
+          .slice(before)
+          .find((c) => c.url.includes('/search/') && c.url.includes('types=') && c.url.includes('folder'))
+        overflow.step(!!req, calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+      }
     }
   }
   await ctx.close()
@@ -762,13 +828,22 @@ console.log('\n§2  the search bar she walked through')
   // [02:35] "LOCATION ka matlab yeh hota hai ke woh kis space mein para hai,
   // ya kis list mein para hai."
   const space = page.locator('[data-testid="palette-space-filter"]')
-  check((await space.count()) > 0, 'Location offers a space')
-  if ((await space.count()) > 0) {
+  const location = chain(
+    'Location offers a space',
+    'and choosing one narrows the search by space',
+    'the folder step is offered once a space is chosen',
+    'the lists for that space are offered',
+  )
+  const haveSpace = (await space.count()) > 0
+  location.step(haveSpace, 'Location offered no space')
+  if (!haveSpace) {
+    location.rest('skipped: no space could be chosen, so nothing below it applies')
+  } else {
     const before = calls.length
     await space.selectOption('sp-1')
     await page.waitForTimeout(1600)
     const req = calls.slice(before).find((c) => c.url.includes('/search/') && c.url.includes('spaceId=sp-1'))
-    check(!!req, 'and choosing one narrows the search by space', calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
+    location.step(!!req, calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
 
     // The folder step between space and list — "a space, folder or list".
     const folder = page.locator('[data-testid="palette-folder-filter"]')
@@ -776,15 +851,15 @@ console.log('\n§2  the search bar she walked through')
       const beforeF = calls.length
       await folder.selectOption({ index: 1 }).catch(() => {})
       await page.waitForTimeout(1600)
-      check(
+      location.step(
         calls.slice(beforeF).some((c) => c.url.includes('folderId=')),
-        'and by folder',
         calls.slice(beforeF).map((c) => c.url).slice(-3).join(' | '),
+        'and by folder',
       )
     } else {
       // The stub space has no folders, so there is nothing to pick. Said out
       // loud rather than passing on a control that never rendered.
-      check(false, 'the folder step is offered once a space is chosen')
+      location.step(false, 'the folder select never rendered')
     }
 
     // The list options only mean anything once a space is chosen.
@@ -794,25 +869,28 @@ console.log('\n§2  the search bar she walked through')
       await list.selectOption('li-1')
       await page.waitForTimeout(1600)
       const req2 = calls.slice(before2).find((c) => c.url.includes('listId=li-1'))
-      check(!!req2, 'and by list', calls.slice(before2).map((c) => c.url).slice(-3).join(' | '))
+      location.step(!!req2, calls.slice(before2).map((c) => c.url).slice(-3).join(' | '), 'and by list')
     } else {
-      check(false, 'the lists for that space are offered')
+      location.step(false, 'the list select never rendered')
     }
   }
 
   // [04:00] "last created date kya thi — dates ke lehaz par".
   const created = page.locator('[data-testid="palette-created-after"]')
-  check((await created.count()) > 0, 'there is a created-date filter')
-  if ((await created.count()) > 0) {
+  const createdFilter = chain(
+    'there is a created-date filter',
+    'and it reaches the request as createdAfter, not dueAfter',
+  )
+  const haveCreated = (await created.count()) > 0
+  createdFilter.step(haveCreated, 'no created-date filter in the palette')
+  if (!haveCreated) {
+    createdFilter.rest('skipped: there was no date field to fill')
+  } else {
     const before = calls.length
     await created.fill('2026-01-01')
     await page.waitForTimeout(1600)
     const req = calls.slice(before).find((c) => c.url.includes('createdAfter=2026-01-01'))
-    check(
-      !!req,
-      'and it reaches the request as createdAfter, not dueAfter',
-      calls.slice(before).map((c) => c.url).slice(-3).join(' | '),
-    )
+    createdFilter.step(!!req, calls.slice(before).map((c) => c.url).slice(-3).join(' | '))
   }
   await ctx.close()
 }
@@ -831,8 +909,16 @@ console.log('\n§6  pinning a tool puts it in the top bar')
   )
 
   const box = page.locator('[data-testid="topbar-toggle-docs"]')
-  check((await box.count()) > 0, 'the picker offers Docs — "yeh document ka" [07:58]')
-  if ((await box.count()) > 0) {
+  const pinning = chain(
+    'the picker offers Docs — "yeh document ka" [07:58]',
+    'pinning writes topbarPinned',
+    'and names the tool that was pinned',
+  )
+  const haveBox = (await box.count()) > 0
+  pinning.step(haveBox, 'Docs is not offered in the picker')
+  if (!haveBox) {
+    pinning.rest('skipped: there was no box to tick, so nothing was pinned')
+  } else {
     const before = calls.length
     await box.check()
     await page.waitForTimeout(1500)
@@ -842,12 +928,8 @@ console.log('\n§6  pinning a tool puts it in the top bar')
     const patch = calls
       .slice(before)
       .find((c) => c.method === 'PATCH' && c.url.includes('/users/me') && c.body.includes('topbarPinned'))
-    check(!!patch, 'pinning writes topbarPinned', calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
-    check(
-      !!patch && patch.body.includes('docs'),
-      'and names the tool that was pinned',
-      patch?.body?.slice(0, 140),
-    )
+    pinning.step(!!patch, calls.slice(before).map((c) => c.method + ' ' + c.url).join(' | '))
+    pinning.step(!!patch && patch.body.includes('docs'), patch?.body?.slice(0, 140))
   }
   await ctx.close()
 }
@@ -865,11 +947,18 @@ console.log('\n§6  pinning a tool puts it in the top bar')
   for (const tool of ['docs', 'whiteboards', 'dashboards']) {
     const el = page.locator(`[data-testid="topbar-tool-${tool}"]`)
     const there = (await el.count()) > 0
-    check(there, `a pinned ${tool} shows in the bar`)
-    if (there) {
+    // Two checks per tool whichever way it goes: a pinned tool missing from the
+    // bar used to shorten the run by one rather than failing the claim that it
+    // leads somewhere.
+    const pinned = chain(`a pinned ${tool} shows in the bar`, 'and points into the workspace')
+    pinned.step(there, `no ${tool} in the bar`)
+    if (!there) {
+      pinned.rest(`skipped: ${tool} is not in the bar, so it points nowhere`)
+    } else {
       const href = await el.first().getAttribute('href')
-      check(
+      pinned.step(
         !!href && href.startsWith(`/app/${WS}/`),
+        '',
         `and points into the workspace (${href})`,
       )
     }
@@ -909,12 +998,20 @@ console.log('\n§6b  pinning from the avatar menu, where she does it')
   await page.locator('[data-testid="user-menu"]').click()
   await page.waitForTimeout(800)
   const pinDocs = page.locator('[data-testid="menu-pin-docs"]')
-  check((await pinDocs.count()) > 0, 'the avatar menu offers Tools')
-
-  if ((await pinDocs.count()) > 0) {
-    check(
+  const menuPin = chain(
+    'the avatar menu offers Tools',
+    'and shows docs as pinned',
+    'unpinning writes the preference',
+    'and it leaves the top bar straight away',
+  )
+  const havePinDocs = (await pinDocs.count()) > 0
+  menuPin.step(havePinDocs, 'no Tools entry in the avatar menu')
+  if (!havePinDocs) {
+    menuPin.rest('skipped: there was no menu entry to read or click')
+  } else {
+    menuPin.step(
       (await pinDocs.getAttribute('aria-pressed')) === 'true',
-      'and shows docs as pinned',
+      'the menu does not show docs as pinned',
     )
     const before = calls.length
     await pinDocs.click()
@@ -925,14 +1022,14 @@ console.log('\n§6b  pinning from the avatar menu, where she does it')
           .some((c) => c.method === 'PATCH' && c.url.includes('/users/me') && c.body.includes('topbarPinned')),
       { timeoutMs: 10000 },
     )
-    check(wrote, 'unpinning writes the preference', calls.slice(before).map((c) => c.method + ' ' + c.url).slice(-3).join(' | '))
+    menuPin.step(wrote, calls.slice(before).map((c) => c.method + ' ' + c.url).slice(-3).join(' | '))
 
     // "ooper se saare ke saare jo hain woh khatam ho gaye hain" — off the bar.
     const gone = await waitUntil(
       async () => (await page.locator('[data-testid="topbar-tool-docs"]').count()) === 0,
       { timeoutMs: 8000 },
     )
-    check(gone, 'and it leaves the top bar straight away')
+    menuPin.step(gone, 'docs is still in the bar')
   }
   await ctx.close()
 }
@@ -1067,16 +1164,24 @@ console.log('\n§14  you can tell what is unread without opening the chat')
 
   const unreadRow = page.locator('[data-testid="notif-n-unread"]')
   const readRow = page.locator('[data-testid="notif-n-read"]')
-  check((await unreadRow.count()) > 0 && (await readRow.count()) > 0, 'both replies show in the Inbox')
-
-  if ((await unreadRow.count()) > 0 && (await readRow.count()) > 0) {
-    check(
+  const glance = chain(
+    'both replies show in the Inbox',
+    'the unread one is marked unread',
+    'and the read one is not',
+    'and they are painted differently — the glance she describes',
+  )
+  const bothRows = (await unreadRow.count()) > 0 && (await readRow.count()) > 0
+  glance.step(bothRows, 'one or both rows are missing from the Inbox')
+  if (!bothRows) {
+    glance.rest('skipped: without both rows there is nothing to tell apart')
+  } else {
+    glance.step(
       (await unreadRow.getAttribute('data-unread')) === 'true',
-      'the unread one is marked unread',
+      'the unread row is not marked unread',
     )
-    check(
+    glance.step(
       (await readRow.getAttribute('data-unread')) === 'false',
-      'and the read one is not',
+      'the read row is marked unread',
     )
 
     // Marked is not the same as *looking* different. Compare what is painted.
@@ -1088,9 +1193,8 @@ console.log('\n§14  you can tell what is unread without opening the chat')
       }
       return [pick('n-unread'), pick('n-read')]
     })
-    check(
+    glance.step(
       !!unreadStyle && !!readStyle && JSON.stringify(unreadStyle) !== JSON.stringify(readStyle),
-      'and they are painted differently — the glance she describes',
       `unread ${JSON.stringify(unreadStyle)} vs read ${JSON.stringify(readStyle)}`,
     )
 
