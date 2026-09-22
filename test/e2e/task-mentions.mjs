@@ -195,7 +195,10 @@ try {
   }
 
   const tabIds = await page.locator('[data-testid^="mention-tab-"]').evaluateAll((els) =>
-    els.map((el) => el.getAttribute('data-testid').replace('mention-tab-', '')),
+    // `?? ''` because a tab without the attribute would throw a TypeError
+    // INSIDE the page, which arrives as an unhelpful evaluation error rather
+    // than a failing check.
+    els.map((el) => (el.getAttribute('data-testid') ?? '').replace('mention-tab-', '')),
   )
   chk(
     tabIds.join(',') === 'people,tasks,docs,whiteboards,locations,channels',
@@ -222,7 +225,9 @@ try {
   )
 
   /** Which section is showing, read off the picker itself rather than guessed. */
-  const tabNow = () => picker.getAttribute('data-tab')
+  // `.catch` because `tmn-5-picker-gated-on-people` gates the picker away, and
+  // this read then waited out the default timeout and ended the run at 8 of 17.
+  const tabNow = () => picker.getAttribute('data-tab').catch(() => null)
 
   await input.fill('@@@@')
   const onBoards = await waitUntil(async () => (await tabNow()) === 'whiteboards', { timeoutMs: 10_000 })
@@ -370,11 +375,12 @@ try {
   )
 
   chk(
-    (await commentItem.getAttribute('data-selected')) === 'yes'
-      && (await emailItem.getAttribute('data-available')) === 'no',
+    (await commentItem.getAttribute('data-selected').catch(() => null)) === 'yes'
+      && (await emailItem.getAttribute('data-available').catch(() => null)) === 'no',
     'Comment carries the tick and Email is not selectable',
-    `Comment is marked "${await commentItem.getAttribute('data-selected')}" and Email is marked ` +
-      `"${await emailItem.getAttribute('data-available')}" — an Email mode you can choose is a mode that cannot post`,
+    `Comment is marked "${await commentItem.getAttribute('data-selected').catch(() => null)}" and ` +
+      `Email is marked "${await emailItem.getAttribute('data-available').catch(() => null)}" — an ` +
+      'Email mode you can choose is a mode that cannot post',
   )
 
   const reason = (await page.getByTestId('comment-mode-reason-email').textContent()) ?? ''
