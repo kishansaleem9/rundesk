@@ -41,6 +41,7 @@
  *   node test/e2e/space-create-menu.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
@@ -84,7 +85,31 @@ const TAG = `scm-${Date.now()}`
  *     without one, because a form with no destination takes replies and makes
  *     nothing.
  */
-const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'form', 'list', 'folder', 'project']
+/*
+ * READ FROM `create-types.ts` RATHER THAN KEPT BESIDE IT, and the reason is a
+ * suite next door. `create-menu-ai` held the same list by hand under a comment
+ * saying it was "the place that says so out loud" when a tenth type arrived;
+ * `form` arrived, the line said nothing, the baseline went red, and because
+ * that suite's break set had never been run the refusal sat on disk unread.
+ *
+ * The space menu is `CREATE_TYPES.filter((t) => t.inSpace)` — one line in the
+ * product — so that is what this reads: the entries whose `inSpace` is true, in
+ * file order. `space` is excluded by the product's own filter and asserted
+ * separately below, which is the distinction the checks are built on.
+ */
+const CREATE_TYPES_SRC = path.resolve(REPO, 'apps/web/src/lib/create-types.ts')
+const EXPECTED_KINDS = readFileSync(CREATE_TYPES_SRC, 'utf8')
+  .split('\n')
+  .filter((l) => /^\s*\{\s*value:\s*'/.test(l) && /inSpace:\s*true/.test(l))
+  .map((l) => l.match(/value:\s*'([a-z-]+)'/)[1])
+// A parse that came back short would let every check below pass against a list
+// of nothing.
+if (EXPECTED_KINDS.length < 8) {
+  throw new Error(
+    `only ${EXPECTED_KINDS.length} in-space creatable types could be read out of ` +
+      `${CREATE_TYPES_SRC} — the shape of that file changed and this fixture reads the wrong thing`,
+  )
+}
 
 /**
  * The frame's bottom group, under its own rule: `[12:04]` "IMPORT — kuch aur

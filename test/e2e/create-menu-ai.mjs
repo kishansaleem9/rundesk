@@ -53,6 +53,7 @@
  *   node test/e2e/create-menu-ai.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
+import { readFileSync } from 'node:fs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
@@ -72,12 +73,34 @@ const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
 
 /**
- * `lib/create-types.ts`, in its order. Exact on purpose: the ledger's claim is
- * that the strip and the space "+" menu are ONE list, so a type appearing in
- * one and not the other has to redden something. If a tenth creatable type is
- * ever added, this line is the place that says so out loud.
+ * `lib/create-types.ts`, in its order — READ FROM IT rather than kept beside it.
+ *
+ * This was a hand-written array of nine, under a comment saying "if a tenth
+ * creatable type is ever added, this line is the place that says so out loud".
+ * A tenth was added — `form` — and the line said nothing out loud: it went RED,
+ * in a suite whose break set had never been run, so
+ * `21 passed, 2 failed` sat on disk for days and the set refused itself. The
+ * comment described an intention the mechanism could not carry out, which is
+ * the stale reason with the fixture underneath it.
+ *
+ * Parsed out of the source, so the day a kind is added this suite tracks it and
+ * the check keeps the meaning it was written for: the strip renders from
+ * `CREATE_TYPES` at runtime, so a strip given its OWN copy of the list drifts
+ * from the file and this still reddens — which is exactly what
+ * `space-create-menu-5-twolists` does.
  */
-const EXPECTED_KINDS = ['task', 'doc', 'reminder', 'whiteboard', 'dashboard', 'list', 'folder', 'project', 'space']
+const CREATE_TYPES_SRC = path.resolve(REPO, 'apps/web/src/lib/create-types.ts')
+const EXPECTED_KINDS = [
+  ...readFileSync(CREATE_TYPES_SRC, 'utf8').matchAll(/^\s*\{\s*value:\s*'([a-z-]+)'/gm),
+].map((m) => m[1])
+// A parse that came back short would make every check below pass against a
+// list of nothing.
+if (EXPECTED_KINDS.length < 8) {
+  throw new Error(
+    `only ${EXPECTED_KINDS.length} creatable types could be read out of ${CREATE_TYPES_SRC} — ` +
+      'the shape of that file changed and this fixture is reading the wrong thing',
+  )
+}
 
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
