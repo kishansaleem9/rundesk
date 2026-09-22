@@ -27,8 +27,9 @@
 //
 // Exit 1 if any set is stale.
 import { execFileSync } from 'node:child_process'
-import { readdirSync, statSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, statSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { makeSuiteOf } from './lib/suite-of-patch.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
 const BREAKS = '/tmp/claude-0'
@@ -225,13 +226,32 @@ for (const f of readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f))) {
     if (m) everRun.add(m[1])
   }
 }
+/*
+ * ATTRIBUTED THE WAY COVERAGE ATTRIBUTES, because the two numbers are read
+ * side by side and this one was smaller for a reason that had nothing to do
+ * with the patches.
+ *
+ * This kept step one only, with `[,:—-]` as the delimiter — and
+ * `# Reddens: sidebar-dms "the workspace tree has a Direct Messages section"`
+ * separates with a SPACE, so the regex matched `sidebar` and used the hyphen
+ * as its delimiter. Nine `sidebar-dms-*`, five `teams-empty-state-*` and eight
+ * `list-customize-*` came out as "(no suite named)" while coverage attributed
+ * every one of them, and the run plan built from this list could not schedule
+ * them. A patch that cannot be scheduled is a patch that stays unmeasured,
+ * which is this report's whole subject.
+ */
+const suiteOf = makeSuiteOf({
+  suiteDir: join(ROOT, 'test/e2e'),
+  candidates: readdirSync(join(ROOT, 'test/e2e'))
+    .filter((f) => f.endsWith('.mjs'))
+    .map((f) => f.slice(0, -4)),
+})
 const neverRan = new Map()
 for (const f of readdirSync(join(ROOT, 'test/e2e/breaks')).filter((f) => f.endsWith('.py'))) {
   const name = f.slice(0, -3)
   if (everRun.has(name)) continue
   const text = readFileSync(join(ROOT, 'test/e2e/breaks', f), 'utf8')
-  const named = (text.match(/^#\s*Reddens:\s*([a-z0-9][a-z0-9-]*)\s*[,:—-]/im) || [])[1]
-  const suite = named && existsSync(join(ROOT, 'test/e2e', `${named}.mjs`)) ? named : '(no suite named)'
+  const suite = suiteOf(name, text) ?? '(no suite named)'
   neverRan.set(suite, (neverRan.get(suite) ?? 0) + 1)
 }
 if (neverRan.size) {

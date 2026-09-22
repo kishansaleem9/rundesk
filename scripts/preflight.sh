@@ -33,6 +33,7 @@ step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
+step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"

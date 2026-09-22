@@ -26,8 +26,9 @@
  *   node scripts/e2e-lanes/never-run-plan.mjs            # every suite, largest first
  *   node scripts/e2e-lanes/never-run-plan.mjs --max 6    # only sets of 6 or fewer
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { makeSuiteOf } from '../lib/suite-of-patch.mjs'
 
 const ROOT = new URL('../..', import.meta.url).pathname
 const LOGS = '/tmp/claude-0'
@@ -46,14 +47,19 @@ for (const f of readdirSync(LOGS).filter((f) => /^break-.+\.txt$/.test(f))) {
   }
 }
 
+const SUITES = join(ROOT, 'test/e2e')
+const suiteOf = makeSuiteOf({
+  suiteDir: SUITES,
+  candidates: readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4)),
+})
+
 const bySuite = new Map()
 for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
   const name = f.slice(0, -3)
   if (everRun.has(name)) continue
   const text = readFileSync(join(BREAKS, f), 'utf8')
-  const named = (text.match(/^#\s*Reddens:\s*([a-z0-9][a-z0-9-]*)\s*[,:—-]/im) || [])[1]
-  const suite = named && existsSync(join(ROOT, 'test/e2e', `${named}.mjs`)) ? named : null
-  if (!suite) continue // reported by freshness as "(no suite named)"; nothing to run
+  const suite = suiteOf(name, text)
+  if (!suite) continue // a `unit:` claim, or nothing that names a suite at all
   if (!bySuite.has(suite)) bySuite.set(suite, [])
   bySuite.get(suite).push(name)
 }

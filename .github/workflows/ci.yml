@@ -213,6 +213,14 @@ jobs:
       - name: The claim matcher holds its contract
         run: node scripts/check-claim-match.mjs
 
+      # And the module that decides WHICH SUITE a patch is about. There were
+      # four copies of that decision and they disagreed: one truncated
+      # `sidebar-dms` to `sidebar` at the first hyphen, so 24 patches came out
+      # attributed in one report and "(no suite named)" in another — and a patch
+      # that cannot be attributed cannot be scheduled to run.
+      - name: The patch-to-suite attribution holds its contract
+        run: node scripts/check-suite-of-patch.mjs
+
       # Two generations of hashed chunks must survive a publish, or a tab open
       # across a deploy 404s on every lazy import.
       - name: Web publish keeps the previous release's chunks

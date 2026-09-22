@@ -79,10 +79,10 @@
  * Registered as a ratchet: the count of uncovered suites may fall and may not
  * rise, so a new suite arrives with a patch or fails the build that brings it.
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
+import { makeSuiteOf } from './lib/suite-of-patch.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SUITES = join(ROOT, 'test/e2e')
@@ -125,16 +125,6 @@ for (const n of suiteNames) {
   checksIn[n] = Number(src.match(/^const EXPECTED_CHECKS = (\d+)/m)?.[1] ?? 0)
 }
 
-// The longest prefix of a patch's filename that is a suite — step two of the
-// three below.
-const prefixSuite = (name) => {
-  const p = name.split('-')
-  for (let i = p.length; i > 0; i--) {
-    const c = p.slice(0, i).join('-')
-    if (existsSync(join(SUITES, `${c}.mjs`))) return c
-  }
-  return null
-}
 
 /*
  * ATTRIBUTION HAS THREE STEPS, AND THE FIRST VERSION HAD ONE AND A HALF.
@@ -160,32 +150,21 @@ const prefixSuite = (name) => {
  * could disagree about whether the same claim is in the same suite while each
  * printed a number that looked authoritative on its own.
  */
-const hayOf = new Map()
-const hayFor = (s) => {
-  if (!hayOf.has(s)) hayOf.set(s, norm(readFileSync(join(SUITES, `${s}.mjs`), 'utf8')))
-  return hayOf.get(s)
-}
+// ALL THREE STEPS LIVE IN `scripts/lib/suite-of-patch.mjs` NOW, because they
+// lived here and in three other files and the four had drifted. Freshness kept
+// only step one, with a delimiter set that truncated `sidebar-dms` to
+// `sidebar` — so 24 patches this file attributes were reported there as naming
+// no suite, and the run plan built from that list could not schedule them.
+const suiteOf = makeSuiteOf({
+  suiteDir: SUITES,
+  candidates: suiteNames.filter((n) => checksIn[n] > 0),
+})
 
 const patches = {}
 const unattributedNames = []
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py'))) {
   const text = readFileSync(join(BREAKS, f), 'utf8')
-  // A colon, an em dash or a hyphen after the suite name — all three are in use.
-  const named = (text.match(/^#\s*Reddens:\s*([a-z0-9][a-z0-9-]*)\s*[:\u2014-]/im) || [])[1]
-  let suite =
-    (named && existsSync(join(SUITES, `${named}.mjs`)) && named) || prefixSuite(f.slice(0, -3))
-  if (!suite) {
-    // The sentence decides. Only when exactly one suite holds it, because two
-    // would be a guess and a guess in a coverage number is how this went wrong.
-    const block = text.match(/^#\s*Reddens:[\s\S]*?(?=^[^#]|^#\s*$)/m)?.[0] ?? ''
-    for (const q of quotedIn(block)) {
-      const hits = suiteNames.filter((n) => checksIn[n] > 0 && findsClaim(hayFor(n), q))
-      if (hits.length === 1) {
-        suite = hits[0]
-        break
-      }
-    }
-  }
+  const suite = suiteOf(f.slice(0, -3), text)
   if (suite) patches[suite] = (patches[suite] ?? 0) + 1
   else unattributedNames.push(f.slice(0, -3))
 }

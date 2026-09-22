@@ -29,10 +29,11 @@
  *
  * It is a RATCHET rather than a verdict; the reasoning is at the bottom.
  */
-import { readdirSync, readFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
+import { makeSuiteOf } from './lib/suite-of-patch.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -107,14 +108,11 @@ const hayFor = (s) => {
   if (!hayOf.has(s)) hayOf.set(s, norm(readFileSync(join(SUITES, `${s}.mjs`), 'utf8')))
   return hayOf.get(s)
 }
-const prefixSuite = (name) => {
-  const parts = name.split('-')
-  for (let n = parts.length; n > 0; n--) {
-    const cand = parts.slice(0, n).join('-')
-    if (existsSync(join(SUITES, `${cand}.mjs`))) return cand
-  }
-  return null
-}
+// Steps one and two of the attribution, shared with coverage and freshness —
+// `scripts/lib/suite-of-patch.mjs`. There were four copies of this question and
+// they gave different answers; step three (the sentence decides) is left off
+// here, because the cross-suite report below is this file's own answer to it.
+const suiteOf = makeSuiteOf({ suiteDir: SUITES })
 const suitesContaining = (q) =>
   suiteFiles.map((f) => f.slice(0, -4)).filter((s) => findsClaim(hayFor(s), q))
 
@@ -149,9 +147,7 @@ for (const f of files) {
     unverifiable++
     continue
   }
-  const named = (block.match(/^([a-z0-9][a-z0-9-]*)\s*:/i) || [])[1]
-  const suite =
-    (named && existsSync(join(SUITES, `${named}.mjs`)) && named) || prefixSuite(name) || null
+  const suite = suiteOf(name, lines.join('\n'))
 
   if (suite) {
     const hay = hayFor(suite)

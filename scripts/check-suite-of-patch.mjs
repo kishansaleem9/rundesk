@@ -1,0 +1,131 @@
+#!/usr/bin/env node
+/*
+ * THE ATTRIBUTION CONTRACT, ASSERTED.
+ *
+ * `scripts/lib/suite-of-patch.mjs` decides which suite a break patch is about,
+ * and four separate copies of that decision used to disagree — which is how 24
+ * patches came out as "(no suite named)" in one report and attributed in
+ * another. A shared module removes the disagreement; it does not by itself make
+ * the one remaining answer right.
+ *
+ * So this pins the shape of every step, in both directions where a direction
+ * exists. The suites are written into a temporary directory rather than read
+ * from `test/e2e`, because an assertion about a real suite's sentence is an
+ * assertion about a file somebody will edit, and a test that goes red when a
+ * check is reworded is a test people delete.
+ *
+ * THE ONE THAT MATTERS MOST is the truncation: `# Reddens: sidebar-dms "…"`
+ * separates with a SPACE, and the regex this replaces matched `sidebar` and
+ * treated the hyphen as its delimiter. A suite name silently cut at the first
+ * hyphen is the shape of every confident-wrong answer in this audit.
+ *
+ * Break-tested three ways: drop the walk-back in step one, drop the `unit:`
+ * guard in step three, and let step three answer when two suites match. Each
+ * turns at least one line below red.
+ */
+import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
+import { makeSuiteOf } from './lib/suite-of-patch.mjs'
+
+const dir = mkdtempSync(join(tmpdir(), 'suite-of-patch-'))
+let passed = 0
+let failed = 0
+const is = (got, want, what) => {
+  if (got === want) {
+    passed += 1
+    console.log(`  \x1b[32mPASS\x1b[0m ${what}`)
+  } else {
+    failed += 1
+    console.log(`  \x1b[31mFAIL\x1b[0m ${what} — got ${JSON.stringify(got)}, wanted ${JSON.stringify(want)}`)
+  }
+}
+
+try {
+  writeFileSync(join(dir, 'sidebar-dms.mjs'), "check(x, 'the workspace tree has a Direct Messages section')\n")
+  writeFileSync(join(dir, 'sidebar.mjs'), "check(x, 'a sidebar exists and it is not this one')\n")
+  writeFileSync(join(dir, 'list-customize.mjs'), "chk(x, 'the open export dialog carries the plan caption')\n")
+  writeFileSync(join(dir, 'ui-sweep.mjs'), "chk(x, 'each level carries a one-line meaning of its own')\n")
+  writeFileSync(join(dir, 'other-sweep.mjs'), "chk(x, 'each level carries a one-line meaning of its own')\n")
+  const candidates = ['sidebar-dms', 'sidebar', 'list-customize', 'ui-sweep', 'other-sweep']
+  const suiteOf = makeSuiteOf({ suiteDir: dir, candidates })
+  const bare = makeSuiteOf({ suiteDir: dir })
+
+  console.log('\n1. step one: the suite the header names, whatever follows it')
+  is(suiteOf('zzz-1', '# Reddens: sidebar-dms: "a"\n'), 'sidebar-dms', 'a colon')
+  is(suiteOf('zzz-1', '# Reddens: sidebar-dms — "a"\n'), 'sidebar-dms', 'an em dash')
+  is(suiteOf('zzz-1', '# Reddens: sidebar-dms, "a"\n'), 'sidebar-dms', 'a comma')
+  is(
+    suiteOf('zzz-1', '# Reddens: sidebar-dms "the workspace tree has a Direct Messages section"\n'),
+    'sidebar-dms',
+    'and a bare SPACE before the quote — the shape that used to truncate',
+  )
+
+  console.log('\n2. and it does not answer with a shorter name that happens to exist')
+  // `sidebar.mjs` is right there, so a walk-back that ran unconditionally, or a
+  // regex that treated the hyphen as a delimiter, would answer `sidebar` — a
+  // real file, a real-looking answer, and the wrong suite.
+  is(
+    suiteOf('sidebar-dms-1-no-section', '# Reddens: sidebar-dms "a"\n'),
+    'sidebar-dms',
+    'the longest name that exists wins over its own prefix',
+  )
+  is(
+    suiteOf('zzz-1', '# Reddens: sidebar-dms-nonesuch: "a"\n'),
+    'sidebar-dms',
+    'and an unknown suffix walks back only as far as something real',
+  )
+  is(suiteOf('zzz-1', '# Reddens: nothing-like-this: "a"\n'), null, 'while a name with no real prefix is null')
+
+  console.log('\n3. step two: the longest prefix of the filename')
+  is(
+    suiteOf('list-customize-10-no-caption', '# Reddens: "the open export dialog carries the plan caption"\n'),
+    'list-customize',
+    'a header that names no suite falls back to the filename',
+  )
+  is(suiteOf('acc-9-breakdown', '# Reddens: "something else entirely"\n'), null, 'and an abbreviated prefix does not')
+
+  console.log('\n4. step three: the sentence decides, and only when it decides alone')
+  is(
+    suiteOf('tfc-1-whatever', '# Reddens: "the open export dialog carries the plan caption"\n'),
+    'list-customize',
+    'one suite holds the sentence',
+  )
+  is(
+    suiteOf('tfc-1-whatever', '# Reddens: "each level carries a one-line meaning of its own"\n'),
+    null,
+    'two suites hold it, so it answers nothing rather than guessing',
+  )
+  is(
+    bare('tfc-1-whatever', '# Reddens: "the open export dialog carries the plan caption"\n'),
+    null,
+    'and with no candidates step three is off, which is how claims uses it',
+  )
+
+  console.log('\n5. a `unit:` claim is not attributed by a fragment of its sentence')
+  // `aar-17-views-hardcoded` names a `*.test.ts` sentence that exists in no
+  // suite, and step three attributed it to an e2e suite anyway, because
+  // `findsClaim` falls back to a five-word fragment.
+  is(
+    suiteOf('tfc-1-whatever', '# Reddens: unit: some.test.ts "the open export dialog carries the plan caption"\n'),
+    null,
+    'a unit claim resolves to no e2e suite',
+  )
+  is(
+    suiteOf('list-customize-9-caption', '# Reddens: unit: some.test.ts "anything at all"\n'),
+    'list-customize',
+    'though its own filename still places it, which is a convention and not a sentence',
+  )
+
+  console.log('\n6. and no Reddens line at all')
+  is(suiteOf('zzz-1', '# just a comment\n'), null, 'is null rather than a throw')
+} finally {
+  rmSync(dir, { recursive: true, force: true })
+}
+
+console.log(`\n${passed} passed, ${failed} failed`)
+if (failed) {
+  console.error('[suite-of-patch] the attribution contract is broken')
+  process.exit(1)
+}
+console.log('[suite-of-patch] all assertions hold')
