@@ -486,6 +486,21 @@ green "confirmations" that meant nothing until they were found.
   re-run erases the full set's record. Six suites show one patch on disk for runs
   that did happen, and six ledger rows had to be withdrawn because nothing could
   support them any more. Per-run files, or an appended run header, cost nothing.
+- **`git checkout -- .` REVERTS THE SOURCE. IT DOES NOT REVERT THE DATABASE.**
+  A patch whose damage lands in the lane's Postgres outlives the patch, and the
+  next baseline on that lane is measured against it. Caught before it was
+  written, not after: a fourth `task-provenance` patch was going to clear the
+  `origin` marker when a type is renamed — the suite renames the seeded type,
+  so the column would have come back `null` for good and every later run of
+  that suite on that lane would have failed its baseline for a reason nothing
+  in the tree could explain.
+
+  The test to apply before writing a patch: **does it write something the suite
+  did not create?** Rows the suite makes itself are fine — it cleans them up,
+  and a stray untyped task harms nobody. Seeded data, workspace settings and
+  anything the baseline reads are not. The schema push covers `packages/db`,
+  which is why a schema patch is safe; nothing covers a row a patch quietly
+  edited on its way past.
 
 ### When a patch runs GREEN, read the code before you blame the check
 
