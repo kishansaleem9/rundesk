@@ -49,7 +49,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 19
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -262,7 +262,35 @@ try {
 
   const types = (await A(`/workspaces/${workspaceId}/task-types`)).data ?? []
   if (types.length === 0) throw new Error('this workspace seeds no task types, so the picker renders nothing')
+  /*
+   * THE TASK IS MOVED OFF THE FIRST TYPE BEFORE ANY OF THIS, or the check below
+   * cannot see the thing it is about.
+   *
+   * `tai-6-fill-rounds-to-first` adds exactly the fallback that check rules out
+   * — a refused classification quietly writing `types[0]` — and it ran GREEN
+   * twice. Not a race, and not the wrong handler: every workspace seeds Task ·
+   * Milestone · Form Response · Meeting Note in that order, and a freshly
+   * created task ALREADY CARRIES `Task`. The fallback wrote the value the task
+   * already had, so before and after were identical and the check passed on a
+   * product that had rounded a guess to a decision.
+   *
+   * Standing on Milestone, the same fallback is a visible move back to Task.
+   * The precondition is asserted rather than assumed: if it did not take, the
+   * check under it would pass for a reason that has nothing to do with the
+   * product.
+   */
+  const moved = types.length > 1
+    ? await A(`/tasks/${task.id}/task-type`, { method: 'PATCH', body: { taskTypeId: types[1].id } })
+    : { status: 0 }
   const typeBefore = (await A(`/tasks/${task.id}`)).data?.taskTypeId ?? null
+  chk(
+    types.length > 1 && moved.status < 400 && typeBefore === types[1].id,
+    `the task stands on ${types[1]?.name ?? '(a second type)'} first, so a fallback to the first type would show`,
+    `the workspace has ${types.length} type(s) and the task holds ` +
+      `${JSON.stringify(typeBefore)} against ${JSON.stringify(types[1]?.id ?? null)} — with the task ` +
+      'already on the first type, a fallback to the first type writes what is already there and this ' +
+      'check cannot see it',
+  )
 
   chk(
     await page.getByTestId('task-type-fill-ai').isVisible().catch(() => false),

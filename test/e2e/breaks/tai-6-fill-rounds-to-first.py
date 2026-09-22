@@ -13,6 +13,14 @@
 # changes, so an unawaited write has somewhere to land and a type that never
 # changes still leaves the loop with the value the check wants.
 #
+# AND IT RAN GREEN AGAIN AFTER THAT, for a reason that had nothing to do with
+# timing. Every workspace seeds Task · Milestone · Form Response · Meeting Note
+# in that order and a freshly created task ALREADY CARRIES `Task` — so the
+# fallback wrote the value the task already had, before and after were
+# identical, and the check passed on a product that had just rounded a guess
+# to a decision. The suite stands the task on Milestone first now, and asserts
+# that it took, because a precondition nobody checks is how this hid twice.
+#
 # PREDICTED ONE.
 #
 # Reddens: task-ai-bar -- 'a refused classification changes the task type to NOTHING'
