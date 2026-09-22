@@ -12,6 +12,14 @@
  * check here reads the list back FROM THE API after pressing it. A suite that
  * asserted "a toast appeared" would pass against a button wired to nothing.
  *
+ * AND THAT WAS TRUE OF THE TOAST AND FALSE OF THE THREE RESTORES. The three
+ * checks that called `POST …/restore` directly asserted `status < 300` and
+ * nothing else, so a restore that answered 200 without clearing `isArchived` —
+ * or one that had lost the branch for a type entirely, since the branches are
+ * an if/else chain that falls through in silence — passed all three while the
+ * item stayed in the bin. Each now reads its row back. The rule this file
+ * states in its second paragraph is now the rule it follows.
+ *
  *   node test/e2e/undo-delete.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -28,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 11
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -102,10 +110,29 @@ try {
     `the list row is ${stillThere.length === 0 ? 'gone entirely' : JSON.stringify(stillThere[0])} — ` +
       'an Undo over a hard delete would be a button that apologises',
   )
+  const probeRestore = await A(`/workspaces/${workspaceId}/trash/list/${probe}/restore`, { method: 'POST' })
   chk(
-    (await A(`/workspaces/${workspaceId}/trash/list/${probe}/restore`, { method: 'POST' })).status < 300,
-    'and the trash endpoint puts it back',
+    probeRestore.status < 300,
+    'and the trash endpoint answers the restore',
     'restore failed on a freshly deleted list — the undo has nothing to call',
+  )
+  /*
+   * AND THE ROW IS READ BACK, because a 200 is not a restore.
+   *
+   * This check, and the two like it below, were `status < 300` alone. This
+   * file's own header says "every check here reads the list back FROM THE API
+   * after pressing it" — and three of its eight checks did not read anything
+   * back, so a `restore` that cleared `archivedAt` and left `isArchived` set,
+   * or one whose branch for this type had quietly gone missing, answered 200
+   * and passed all three. That is the exact facade the suite exists to catch,
+   * asserted by its status code.
+   */
+  const probeBack = await sql`select is_archived from lists where id = ${probe}`
+  chk(
+    probeBack[0]?.is_archived === false,
+    'and the row is un-archived afterwards, not merely answered for',
+    `restore returned ${probeRestore.status} and is_archived is still ` +
+      `${JSON.stringify(probeBack[0]?.is_archived)} — a 200 is not a restore`,
   )
 
   // ── In the browser ───────────────────────────────────────────────────────
@@ -190,6 +217,13 @@ try {
     'a project can be deleted and restored by the same pair',
     `restoring a project returned ${projBack.status}`,
   )
+  const projRow = await sql`select is_archived from projects where id = ${proj2.id}`
+  chk(
+    projRow[0]?.is_archived === false,
+    'and the project row comes back un-archived',
+    `the project restore returned ${projBack.status} and is_archived is ` +
+      `${JSON.stringify(projRow[0]?.is_archived)}`,
+  )
 
   const [space2] = await sql`
     insert into spaces (workspace_id, name) values (${workspaceId}, ${`Space2 ${TAG}`}) returning id`
@@ -199,6 +233,13 @@ try {
     spaceBack.status < 300,
     'and so can a space',
     `restoring a space returned ${spaceBack.status}`,
+  )
+  const spaceRow = await sql`select is_archived from spaces where id = ${space2.id}`
+  chk(
+    spaceRow[0]?.is_archived === false,
+    'and the space row comes back un-archived too',
+    `the space restore returned ${spaceBack.status} and is_archived is ` +
+      `${JSON.stringify(spaceRow[0]?.is_archived)}`,
   )
 
   await page.close()
