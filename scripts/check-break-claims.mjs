@@ -270,6 +270,32 @@ const actual = {
   twoBlocks: twoBlocks.length,
   cutOff: cutOff.length,
 }
+/*
+ * AND THE BUCKETS HAVE TO ADD UP TO THE POPULATION.
+ *
+ * Every number above counts patches that fell into one bucket, and a patch that
+ * falls into NONE is invisible here. The arithmetic reads 797 + 5 + 4 = 806
+ * today and nothing checked that 806 is every patch file on disk — a reader
+ * adds the columns and trusts them because they look complete. That is the
+ * confident zero one level up from the checks it is written to catch.
+ */
+const bucketed =
+  ok +
+  crossSuite +
+  unverifiable +
+  twoBlocks.length +
+  noClaim.length +
+  noSuite.length +
+  notFound.length
+if (bucketed !== files.length) {
+  console.error(
+    `\n[break-claims] ${bucketed} patch(es) are accounted for out of ${files.length} on disk — ` +
+      `${Math.abs(files.length - bucketed)} fell into no column at all, so every number above is ` +
+      'about a subset nobody named.',
+  )
+  process.exit(1)
+}
+
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {
   console.error('\n[break-claims] THIS IS WORSE THAN THE BASELINE:')
