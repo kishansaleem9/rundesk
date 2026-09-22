@@ -44,10 +44,14 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-// 34 since 22 September: the Escape that closes the calendar picker was a
+// 36 since 22 September, and both additions were facts a patch was aimed at
+// with nothing asserting them. The Escape that closes the calendar picker was a
 // fixture step on the way to Settings, and `calendar-accounts-1` is aimed at
-// exactly that handler — so its only evidence was a short run.
-const EXPECTED_CHECKS = 34
+// exactly that handler — so its only evidence was a short run. The Holidays
+// checkbox was checked against the count badge and the stored row, and
+// `ca-3-hiding-is-not-honoured` forces the chips onto the grid regardless: it
+// ran green, because the grid was the one surface nothing read.
+const EXPECTED_CHECKS = 36
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -79,6 +83,11 @@ const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 let sql = null
 const TAG = `e2e-cal-${Date.now()}`
+// Out here so the cleanup can reach them. A holiday left behind puts a chip on
+// every later run of every planner suite, and a staged Zoom connection would
+// tell the next person that an integration they do not have is live.
+let holidayId = null
+let stagedZoomId = null
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -127,6 +136,37 @@ try {
     'a second workspace connection inserted cleanly — then the eviction this item fixes ' +
       'was never real, and the reasoning behind the new table is wrong',
   )
+
+  /*
+   * A CONNECTED ZOOM, STAGED HERE, BECAUSE `false === false` IS NOT AGREEMENT.
+   *
+   * §V2-14e below asserts that the Conferencing row agrees with the App Center
+   * about whether Zoom is live. `ca-5-its-own-connection-state` replaces the
+   * row's read of the connections list with a constant `false` and ran GREEN:
+   * this deployment has no Zoom credentials, so the App Center says false too,
+   * and the comparison held for the one reason that proves nothing. A row can
+   * only be shown to agree if there is something to agree with.
+   *
+   * Inserted directly, the way this suite already stages calendar grants —
+   * there is no Zoom OAuth grant to be had here — and staged UP HERE rather
+   * than beside the check so no cached `connections` query can be holding the
+   * empty answer by the time the dialog reads it. Skipped if the workspace
+   * already has a zoom row: overwriting somebody's real connection is not a
+   * thing a suite may do, and the check still compares two live values.
+   */
+  const zoomAlready = await sql`
+    select id from workspace_integration_connections
+     where workspace_id = ${workspaceId} and provider = 'zoom'
+     limit 1
+  `
+  if (!zoomAlready.length) {
+    const staged = await sql`
+      insert into workspace_integration_connections (workspace_id, provider, status)
+      values (${workspaceId}, 'zoom', 'connected')
+      returning id
+    `
+    stagedZoomId = staged[0]?.id ?? null
+  }
 
   console.log('\n▶ a person can connect more than one')
   const first = (await stage('a', `work-${TAG}@example.com`))[0]
@@ -428,6 +468,45 @@ try {
   await meet(`Alpha ${TAG}`, todayAt(0), todayAt(1.5))
   await meet(`Beta ${TAG}`, todayAt(1), todayAt(2))
 
+  /*
+   * A HOLIDAY ON THE GRID, BECAUSE THE PICKER'S HOLIDAYS ROW HAD NOTHING
+   * DOWNSTREAM OF IT.
+   *
+   * `ca-3-hiding-is-not-honoured` forces the chips on regardless of the
+   * checkbox — `{holidayCalendarOn &&` becomes `{true &&` — and it ran GREEN.
+   * The check beside it reads the COUNT BADGE and the STORED ROW, and neither
+   * of those is the grid, so the one thing unticking Holidays is FOR was
+   * asserted nowhere. That is the mirror defect with the suite standing in for
+   * the missing reader: a value written correctly, and the surface it exists to
+   * change never consulted.
+   *
+   * Seeded for TODAY so it falls inside whatever week the planner opens at, and
+   * matched by its own NAME rather than by a date attribute — the chip carries
+   * `title={h.name}`, and identity beats arithmetic about which local day a
+   * `YYYY-MM-DD` lands on. `addHoliday` refuses a date that is already a
+   * holiday with a 409, so a fixture collision falls back to whatever is
+   * already there instead of reporting the product broken.
+   */
+  const dd = (n) => String(n).padStart(2, '0')
+  const todayKey = `${noon.getFullYear()}-${dd(noon.getMonth() + 1)}-${dd(noon.getDate())}`
+  let holidayLabel = null
+  const seededHoliday = await A(`/workspaces/${workspaceId}/holidays`, {
+    method: 'POST',
+    body: { day: todayKey, name: `Holiday ${TAG}` },
+  })
+  if (seededHoliday.status < 400) {
+    holidayId = seededHoliday.data?.id ?? null
+    holidayLabel = `Holiday ${TAG}`
+  } else {
+    const sched = await A(`/workspaces/${workspaceId}/work-schedule`)
+    holidayLabel =
+      (sched.data?.holidays ?? []).find((h) => String(h.day).slice(0, 10) === todayKey)?.name ?? null
+  }
+  const holidayChips = () =>
+    holidayLabel
+      ? page.locator(`[data-testid="planner-holiday-chip"][title="${holidayLabel}"]`).count()
+      : Promise.resolve(0)
+
   await page.goto(`${stack.base}/app/${workspaceId}/calendar`, { waitUntil: 'domcontentloaded' })
   await page.waitForSelector('[data-testid="planner-page"]', { timeout: 20_000 })
   // The needle is whatever the page itself would show for me, because the
@@ -513,19 +592,58 @@ try {
   /* Unticking one has to STICK and has to move the chip — a checkbox whose
    * only effect is local state is the dead control, and one whose only effect
    * is a stored row is its mirror. */
-  await page.getByTestId('planner-calendar-check-workspace:holidays').click()
-  const chipFell = await waitUntil(
-    async () =>
-      Number((await page.getByTestId('planner-calendars-count').textContent())?.trim()) ===
-      chipBefore - 1,
-    { timeoutMs: 10_000 },
+  // The grid half of the Holidays row, read BEFORE the untick so "gone" below
+  // is a change rather than a state.
+  const chipsShown = await waitUntil(async () => (await holidayChips()) >= 1, { timeoutMs: 10_000 })
+  chk(
+    chipsShown,
+    'the Holidays calendar puts the day on the grid, not just a row in the picker',
+    holidayLabel
+      ? `no chip titled ${JSON.stringify(holidayLabel)} on the grid with Holidays ticked — ` +
+        `POST /holidays answered ${seededHoliday.status}`
+      : `neither seeding a holiday for ${todayKey} nor finding one worked, so the grid could not be ` +
+        `read at all — POST /holidays answered ${seededHoliday.status}`,
   )
+
+  /*
+   * BOUNDED, BECAUSE AN EMPTY WORKSPACE GROUP IS WHAT `ca-1` MAKES.
+   * `ca-1-no-workspace-calendars` empties `WORKSPACE_CALENDAR_IDS`, so there is
+   * no Holidays row to click — and this unqualified click spent Playwright's
+   * default thirty seconds retrying, threw, and ended the run on `29 passed,
+   * 2 failed` with `31 of 34 checks ran`. The two failures it did find were
+   * right, and they arrived under a headline about the harness.
+   */
+  const untickable = await page
+    .getByTestId('planner-calendar-check-workspace:holidays')
+    .click({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
+  const chipFell =
+    untickable &&
+    (await waitUntil(
+      async () =>
+        Number((await page.getByTestId('planner-calendars-count').textContent())?.trim()) ===
+        chipBefore - 1,
+      { timeoutMs: 10_000 },
+    ))
   const stored = (await A(`/planner/${workspaceId}/settings`)).data ?? {}
   chk(
     chipFell && (stored.hiddenCalendarIds ?? []).includes('workspace:holidays'),
     'unticking Holidays drops the chip by one and is remembered on the account',
-    `the chip read ${(await page.getByTestId('planner-calendars-count').textContent())?.trim()} and the ` +
-      `stored settings were ${JSON.stringify(stored.hiddenCalendarIds ?? null)}`,
+    untickable
+      ? `the chip read ${(await page.getByTestId('planner-calendars-count').textContent())?.trim()} and the ` +
+        `stored settings were ${JSON.stringify(stored.hiddenCalendarIds ?? null)}`
+      : 'there was no Holidays row in the picker to untick, so whether unticking sticks could not be ' +
+        'read at all — reported as failed because UNKNOWN is not the same as fine',
+  )
+  // And the reader honours it. The stored row and the badge both moved above;
+  // this is the surface the checkbox exists to change.
+  const chipsCleared = await waitUntil(async () => (await holidayChips()) === 0, { timeoutMs: 15_000 })
+  chk(
+    chipsCleared,
+    'and unticking it takes the day off the grid — the checkbox is read, not just stored',
+    `${await holidayChips()} chip(s) titled ${JSON.stringify(holidayLabel)} still on the grid after ` +
+      'Holidays was unticked — a value written correctly and read by nobody is the mirror of the facade',
   )
 
   // ───────────────────────────────────────────────────────────────────────────
@@ -654,6 +772,16 @@ try {
   if (sql) {
     await sql`delete from user_calendar_accounts where external_account_id like ${TAG + '%'}`.catch(() => {})
     await sql`delete from workspace_integration_connections where provider like ${TAG + '%'}`.catch(() => {})
+    // Only the one this run created. A holiday on today's date would put a chip
+    // on the grid for every later planner suite, and `addHoliday` refuses a
+    // second one for the same day — so leaving it behind breaks the NEXT run of
+    // this suite too.
+    if (holidayId) {
+      await sql`delete from workspace_holidays where id = ${holidayId}`.catch(() => {})
+    }
+    if (stagedZoomId) {
+      await sql`delete from workspace_integration_connections where id = ${stagedZoomId}`.catch(() => {})
+    }
     // Attendees first: the fixture meetings are tagged, and leaving them behind
     // would put busy time on this user's calendar in every later run.
     await sql`

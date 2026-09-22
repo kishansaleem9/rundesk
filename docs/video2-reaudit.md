@@ -3830,6 +3830,49 @@ fourteen model calls. That last one is the failure that shows up on an invoice
 rather than in a screenshot, and the only check that can see it is the one
 counting requests.
 
+### Fifty claims that were correct and never compared to anything
+
+A third instance of the shape above, and the largest. Fifty patch headers named
+their check in PROSE — `# Reddens: attach-on-create: the file input accepts
+several files at once` — and the matcher only reads quoted spans, so fifty
+correct claims had never been compared to their suites at all. Forty-six verify
+verbatim the moment they are quoted, across `attach-on-create`,
+`create-menu-ai`, `folder-dialog` and `space-wizard`.
+
+**Claims: 741 → 789. Unverifiable: 53 → 5** — three `unit:` claims pointing at
+a `*.test.ts`, and two headers that deliberately say there is no check sentence.
+
+The four that did not verify were not check sentences, and reading them found
+two more things.
+
+**A patch about hand-kept lists kept its own, and it had drifted.**
+`space-create-menu-5-twolists` claimed "the strip offers every kind in
+`CREATE_TYPES`", which no suite says; the real sentence is *"every kind the
+space menu offers has a quick-create tab of the same name, plus Space"*. Going
+to look at it showed the patch's replacement list dropped `reminder` as well as
+`form` — eight kinds where `CREATE_TYPES` has ten. It reddened the check either
+way, which is exactly why nothing said so. A patch that drops one entry is the
+mistake somebody makes; a patch that drops two is a patch that was not read.
+
+**And two patches whose whole evidence was that the suite stopped.**
+`fp-6-pill-never-rendered` and
+`calendar-accounts-1-calendars-popover-traps-the-page` both claimed "the whole
+run". `focus-pill` clicked the pill unqualified, so a patch that removes the
+pill spent thirty seconds retrying and threw with three of fifteen checks
+unreported — and it threw outright when a short block drew no pill, where *"its
+ending proves nothing"* is a reason that belongs in a failing check's detail.
+
+`calendar-accounts` is the more interesting half: it pressed Escape as a
+**fixture step**, with nothing asserting it, and that handler is precisely what
+its patch removes. So there was no check for the patch to redden and nothing to
+report but the wreckage — the picker's `fixed inset-0` catcher swallowed the
+Settings click below and the suite threw. It asks the question now (33 → 34
+checks), bounds the two Settings clicks, and recovers the way a mouse user has
+to, so the Conferencing checks below fail for their own reasons or not at all.
+Running it then found a second unbounded click in the same suite — `ca-1`
+empties the workspace calendar group, so there is no Holidays row to untick —
+which is the same fix and was invisible until the first one stopped hiding it.
+
 ### The claims that were correct and unread
 
 `check-break-claims.mjs` reported 87 patches as "unverifiable (unit claims, or
