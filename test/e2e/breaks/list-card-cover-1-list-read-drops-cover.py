@@ -9,6 +9,8 @@
 # for byte", "the card carries a cover band", "the image it draws is the one
 # that was set", "the colour-covered card draws a colour band" and both
 # measured checks.
+#
+# Reddens: list-card-cover: "a linked cover comes back from the list read byte for byte"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = "      coverUrl: coverUrlByTask.get(r.id) ?? null,\n"

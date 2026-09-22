@@ -1,6 +1,8 @@
 # Check 10 — the archive restore refuses a task that is in the Trash. Remove
 # the guard, and un-archiving makes the task live while the Trash still offers
 # to destroy it: live and deleted at once.
+#
+# Reddens: task-delete: "the archive restore refuses a task that is in the Trash (409), leaving it binned"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -7,6 +7,8 @@
 #
 # Reddens list-card-cover: "a task with no cover comes back with none — not its
 # neighbour's" and "the coverless card draws nothing".
+#
+# Reddens: list-card-cover: "and a task with no cover comes back with none"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = "      coverUrl: coverUrlByTask.get(r.id) ?? null,"

@@ -6,6 +6,8 @@
 # nothing. That is the code being more robust than the patch assumed, not the
 # check being weak — but a break patch that cannot break anything is exactly
 # what this step exists to catch, so it now removes both.
+#
+# Reddens: task-delete: "the deleted task leaves the list and the untouched one stays"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

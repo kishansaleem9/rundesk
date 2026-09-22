@@ -6,6 +6,8 @@
 #
 # Reddens list-card-cover: "the covered card grows with the size" and "and so
 # does a card with no cover".
+#
+# Reddens: list-card-cover: "three options drawing the same card is a picker that demos perfectly"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = """  small:  { pad: 'p-1.5', title: 'text-[12px]', cover: 'h-10', coverPx: 40, estimate: 60 },

@@ -12,6 +12,8 @@
 # NOTE: re-anchored after the module grew a shared one-second ticker
 # (`subscribeSecond`) for the header pill. The subscription is what is removed;
 # the cleanup still calls `stop()`, so check 10 is untouched.
+#
+# Reddens: tab-title-countdown: "the countdown MOVES while you watch it"
 import io, sys
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

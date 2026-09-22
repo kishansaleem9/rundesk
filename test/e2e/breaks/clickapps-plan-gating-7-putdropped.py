@@ -1,5 +1,7 @@
 # `features` back to being declared by the controller and dropped by the
 # service: PUT /spaces/:id answers 200 and changes nothing.
+#
+# Reddens: clickapps-plan-gating: "and an ALLOWED change through PUT is actually written"
 import io
 p='/home/user/rundesk/apps/api/src/modules/spaces/spaces.service.ts'
 s=io.open(p,encoding='utf-8').read()

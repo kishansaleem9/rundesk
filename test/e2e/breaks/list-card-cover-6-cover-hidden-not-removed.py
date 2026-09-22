@@ -7,6 +7,8 @@
 #
 # Reddens list-card-cover: "and the card collapses to the height of one with no
 # cover".
+#
+# Reddens: list-card-cover: "and the card collapses to the height of one with no cover"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "      <div className={cn(hasCover && dims.pad)}>\n"

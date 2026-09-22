@@ -6,6 +6,8 @@
 # 3, 4, 5, 7 and 10 all stay green. The only thing wrong is the direction, and
 # "· 0m 12s left" going UP is the kind of thing a person reads three times
 # before believing.
+#
+# Reddens: tab-title-countdown: "a countdown that does not decrease is a clock"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

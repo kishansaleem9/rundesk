@@ -1,5 +1,7 @@
 # Check 2 — the confirmation names the Trash and the 30-day window. Reword it
 # to the vague sentence a delete usually ships with.
+#
+# Reddens: task-delete: "the confirmation names the Trash and the 30-day window"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 s = io.open(p, encoding='utf-8').read()

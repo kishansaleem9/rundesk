@@ -1,5 +1,7 @@
 # Check 3 — Delete stamps the DELETE columns and leaves the ARCHIVE ones empty.
 # Make it stamp archived_at too, so one deletion shows up as both states.
+#
+# Reddens: task-delete: "what the server actually recorded"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

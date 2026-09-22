@@ -7,6 +7,8 @@
 #
 # Reddens list-card-cover: "and Card cover reads \"Image\", as the frame shows",
 # "choosing Large changes what the row says it is set to", "and the row says so".
+#
+# Reddens: list-card-cover: "choosing Large changes what the row says it is set to"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "          <span data-testid={`${testId}-value`}>{labelOf(value)}</span>"

@@ -1,6 +1,8 @@
 # The facet counts taken over the SELECTED set instead of the corpus — i.e.
 # counting the array the page is about to be handed. Every count still looks
 # right until a box is ticked, at which point the siblings report 0.
+#
+# Reddens: template-center: "the type counts do NOT move — they count the corpus, not the grid"
 import io
 p='/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 s=io.open(p,encoding='utf-8').read()

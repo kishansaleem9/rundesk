@@ -8,6 +8,8 @@
 #
 # Check 2 is the one that names it ("it asked for a window that contains right
 # now"); 3–8 fall over behind it, because there is nothing to count down.
+#
+# Reddens: tab-title-countdown: "and it asked the server for a window that contains right now"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

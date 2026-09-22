@@ -1,5 +1,7 @@
 # Check 1 — Delete is drawn directly UNDER Archive. Swap the two rows so the
 # measured gap goes sharply negative.
+#
+# Reddens: task-delete: "the menu draws Archive and Delete as adjacent rows, Delete under Archive"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 s = io.open(p, encoding='utf-8').read()

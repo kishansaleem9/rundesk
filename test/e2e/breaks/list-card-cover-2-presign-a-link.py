@@ -7,6 +7,8 @@
 #
 # Reddens list-card-cover: "a linked cover comes back from the list read byte
 # for byte" and "the image it draws is the one that was set".
+#
+# Reddens: list-card-cover: "the image it draws is the one that was set, byte for byte"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = """        if (!r.coverStorageKey) {

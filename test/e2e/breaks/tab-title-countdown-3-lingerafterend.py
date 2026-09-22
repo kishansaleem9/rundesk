@@ -5,6 +5,8 @@
 # app still hands the title back when you leave it (check 10 stays green) — the
 # only thing that breaks is the moment the block is over, which is the moment
 # the number on screen becomes a lie.
+#
+# Reddens: tab-title-countdown: "when the block ends the tab returns to the title index.html shipped"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

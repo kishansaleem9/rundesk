@@ -1,5 +1,7 @@
 # The padlock drawn and the switch still live — the panel offers a choice the
 # server will refuse, which is worse than not offering it.
+#
+# Reddens: clickapps-plan-gating: "the panel padlocks exactly the four this plan cannot reach"
 import io
 p='/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 s=io.open(p,encoding='utf-8').read()

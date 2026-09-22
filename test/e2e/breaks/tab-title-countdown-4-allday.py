@@ -5,6 +5,8 @@
 # counting down to midnight: "Work on … · 23h 41m left". Every number is
 # correct and the tab is useless, which is the version of this bug that would
 # survive review.
+#
+# Reddens: tab-title-countdown: "an all-day block puts no countdown in the tab"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

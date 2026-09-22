@@ -1,5 +1,7 @@
 # The gate applies at the moment of choosing and never again: a downgrade
 # changes nothing anybody can see.
+#
+# Reddens: clickapps-plan-gating: "the gate applies to rea"
 import io
 p='/home/user/rundesk/apps/api/src/modules/spaces/spaces.service.ts'
 s=io.open(p,encoding='utf-8').read()

@@ -4,6 +4,8 @@
 # not "dbgdh 2h 55m left": the prefix is the person's own setting and it is
 # what tells you the line is about a plan rather than about the task. Losing it
 # is a one-word regression that no screenshot comparison would catch.
+#
+# Reddens: tab-title-countdown: "runningTitle.includes(expectedLabel)"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

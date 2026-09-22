@@ -1,5 +1,7 @@
 # A preset treated as an explicit request: three of frame 07:06's four cards
 # become un-clickable on free, and the person gets blamed for choosing one.
+#
+# Reddens: clickapps-plan-gating: "a preset that wants a gated ClickApp is narrowed, not refused"
 import io
 p='/home/user/rundesk/apps/api/src/modules/spaces/spaces.service.ts'
 s=io.open(p,encoding='utf-8').read()

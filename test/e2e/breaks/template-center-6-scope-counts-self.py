@@ -1,6 +1,8 @@
 # The scope rail counting inside its own scope: standing in Built-in, "Workspace
 # 10" becomes "Workspace 0" and the rail agrees with itself about nothing being
 # anywhere.
+#
+# Reddens: template-center: "and the rail still knows there are ten in the other scope"
 import io
 p='/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 s=io.open(p,encoding='utf-8').read()

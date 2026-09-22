@@ -15,6 +15,8 @@
 # reported `PATCH FAILED` rather than counting it among the confirmed. That is
 # the harness behaving correctly; this is the patch catching up. The anchor is
 # now the two lines alone, at their own indent, which is unique in the file.
+#
+# Reddens: list-card-cover: "and saving the view writes cardSize with it"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = """

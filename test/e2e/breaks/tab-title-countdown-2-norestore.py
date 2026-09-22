@@ -12,6 +12,8 @@
 # covering for the line this patch deletes — two code paths satisfying one
 # check is one check. The duplicate is gone, so this patch now has nothing
 # standing behind it.
+#
+# Reddens: tab-title-countdown: "met the navigation, and the tab reads"
 import io, sys
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,7 @@
 # Check 14 — delete-forever refuses a task that was never deleted. Remove the
 # guard and the endpoint hard-deletes a live task, which is what it did before.
+#
+# Reddens: task-delete: "and it refuses a task that was never deleted (404), leaving the row alone"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/trash/trash.service.ts'
 s = io.open(p, encoding='utf-8').read()

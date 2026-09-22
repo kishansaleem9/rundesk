@@ -1,5 +1,7 @@
 # Check 13 — "Delete forever" removes the row itself. Make it a soft touch
 # instead: the Trash empties, the row survives, and nothing says so.
+#
+# Reddens: task-delete: "Delete forever removes the row itself — nothing left in the table or the Trash"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/trash/trash.service.ts'
 s = io.open(p, encoding='utf-8').read()

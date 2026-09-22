@@ -1,6 +1,8 @@
 # The type facet filtered IN THE BROWSER and the parameter never sent. The grid
 # still narrows to five, the cards are still all folders, and nothing left the
 # page — which is exactly the shape this suite exists to catch.
+#
+# Reddens: template-center: "and the page asked the SERVER for them"
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-templates-page.tsx'
 s=io.open(p,encoding='utf-8').read()

@@ -1,6 +1,8 @@
 # Check 12 — restoring from the Trash clears BOTH flags. Clear only deleted_at,
 # which takes the task out of the Trash and leaves it invisible everywhere —
 # worse than the state it was in.
+#
+# Reddens: task-delete: "and the task is back in the list"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/trash/trash.service.ts'
 s = io.open(p, encoding='utf-8').read()

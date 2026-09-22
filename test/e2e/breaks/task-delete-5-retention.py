@@ -1,5 +1,7 @@
 # Check 5 — the delete response quotes the SAME retention the Trash does.
 # Replace the shared constant with a second copy that has drifted.
+#
+# Reddens: task-delete: "retentionDays"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()
