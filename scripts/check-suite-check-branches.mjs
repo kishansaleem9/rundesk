@@ -164,6 +164,39 @@ for (const [file, lines] of rows) {
  * about. `syncup-live` is the one that moved, 48 → 59, and it moved because a
  * floor became an exact count with skips included.
  */
+/*
+ * AND THE SAME FAMILY, ONE LEVEL WORSE: A SUITE THAT CANNOT REPORT A FAILURE.
+ *
+ * Everything above is about a run that reports the WRONG NUMBER of checks.
+ * `planner-onboarding` reported none at all — `try { … } finally { … }` with no
+ * catch, so `po-1-panel-never-shows` left the process on an uncaught
+ * TimeoutError before the totals line and before the `EXPECTED_CHECKS` guard.
+ * `wt-break.sh` recorded `NO SUMMARY: … it died before the totals`, which is
+ * the one outcome that says nothing whatsoever about a patch.
+ *
+ * Three of the 113 were in that state — `planner-onboarding`,
+ * `planner-command-bar`, `team-schedules` — and all three were in a running
+ * plan at the time. A suite with a top-level `try` must have a `catch` that
+ * records the throw, so the totals and the guard always print.
+ *
+ * TEXT, LIKE THE REST OF THIS FILE: it asks whether a top-level `try` has a
+ * top-level `catch`, not whether the catch does anything sensible.
+ */
+const noCatch = []
+for (const f of readdirSync(SUITES).filter((x) => x.endsWith('.mjs')).sort()) {
+  const src = readFileSync(join(SUITES, f), 'utf8')
+  if (/^try \{/m.test(src) && !/^\} catch\b/m.test(src)) noCatch.push(f.slice(0, -4))
+}
+if (noCatch.length) {
+  console.error(
+    `\n[check-branches] ${noCatch.length} suite(s) have a top-level \`try\` and no \`catch\`, so a ` +
+      'throw ends the process before the totals and the EXPECTED_CHECKS guard — the one outcome ' +
+      'that says nothing about a patch at all:',
+  )
+  for (const n of noCatch) console.error(`    ${n}`)
+  process.exit(1)
+}
+
 const BASELINE = 0
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
