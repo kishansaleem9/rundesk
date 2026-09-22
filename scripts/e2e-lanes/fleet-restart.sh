@@ -21,6 +21,8 @@
 set -u
 R=/home/user/rundesk
 TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
+# Storage, in one place — see lane-env.sh for why it is not inlined here.
+. "/home/user/rundesk/scripts/e2e-lanes/lane-env.sh"
 export PGPASSWORD=rundesk
 
 # A LIST, ALWAYS. NEVER A COUNT.
@@ -110,6 +112,11 @@ for k in "${LANES[@]}"; do
   # matches this script).
   PIDS=$(lsof -t -i ":$PORT" -sTCP:LISTEN 2>/dev/null)
   [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+  # The store has to BE up, not merely be pointed at. `lane_store_up` keeps a
+  # running one and its objects — a restart that emptied the bucket would make
+  # a suite's second run differ from its first for a reason nothing in the
+  # suite mentions.
+  lane_store_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -117,6 +124,10 @@ for k in "${LANES[@]}"; do
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/$DB"
     export JWT_ACCESS_SECRET=ci-access-secret-min-32-chars-aaaaaaaaaaaa
     export JWT_REFRESH_SECRET=ci-refresh-secret-min-32-chars-bbbbbbbbbb
+    # Storage, from the one place that defines it — see lane-env.sh. Without
+    # this the lane comes up with R2 unconfigured and every upload check
+    # measures the refusal path instead of the real one.
+    lane_store_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &

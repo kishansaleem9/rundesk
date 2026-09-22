@@ -21,6 +21,8 @@ set -u
 R=/home/user/rundesk
 export PGPASSWORD=rundesk
 TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
+# Storage, in one place — see lane-env.sh for why it is not inlined here.
+. "$R/scripts/e2e-lanes/lane-env.sh"
 
 ARG=${1:-4}
 case "$ARG" in
@@ -37,13 +39,33 @@ pg_isready >/dev/null || { echo "POSTGRES DOWN"; exit 1; }
 # pristine database has picked up since. Cheap — the dump is under a megabyte.
 pg_dump -h 127.0.0.1 -U rundesk -d rundesk_pristine -Fc -f /tmp/claude-0/pristine.dump || exit 1
 
+# A STORE PER LANE, so the upload path is something a suite can measure.
+#
+# The ledger had the cover picker's Upload tab down as unmeasurable for want of
+# credentials. It was not credentials — `R2Service` reads `R2_ENDPOINT` and sets
+# `forcePathStyle: true`, so any S3-compatible endpoint finishes the path with
+# no product change. `s3-stub.mjs` is that endpoint, and it is per-lane for the
+# same reason the database is: two lanes sharing one bucket would let one
+# suite's objects answer another's reads, and its arranged-failure seam would
+# fire on whichever PUT arrived first. Lane k gets port 91<k>.
+#
+# `check-s3-stub.mjs` drives the real SDK against this file every preflight, so
+# a stub that stopped being faithful is caught there rather than by a suite
+# going quietly green.
 for k in "${LANES[@]}"; do
-  DB="rundesk_v$k"; PORT=$((3020 + k))
+  DB="rundesk_v$k"; PORT=$((3020 + k)); S3PORT=$((9100 + k))
   pkill -f "PORTMARK=$k " 2>/dev/null
+  # Killed HERE as well as inside `lane_store_up`, and on purpose: this script
+  # re-creates the database, so the lane must start with an EMPTY bucket. The
+  # helper on its own would keep a running store and its objects, which is the
+  # right behaviour for `fleet-restart.sh` and the wrong one here.
+  pkill -f "s3-stub.mjs --port $S3PORT " 2>/dev/null
+  : > "/tmp/claude-0/s3-v$k.log"
   sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" 2>/dev/null
   sudo -u postgres psql -q -c "CREATE DATABASE $DB OWNER rundesk" 2>/dev/null
   pg_restore -h 127.0.0.1 -U rundesk -d "$DB" --no-owner --role=rundesk \
     /tmp/claude-0/pristine.dump > "/tmp/claude-0/restore-v$k.log" 2>&1
+  lane_store_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -51,6 +73,9 @@ for k in "${LANES[@]}"; do
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/$DB"
     export JWT_ACCESS_SECRET=ci-access-secret-min-32-chars-aaaaaaaaaaaa
     export JWT_REFRESH_SECRET=ci-refresh-secret-min-32-chars-bbbbbbbbbb
+    # The four variables that turn "Storage is not configured" into a working
+    # presign. No product change; `R2Service` has read these all along.
+    lane_store_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &
@@ -65,7 +90,14 @@ for k in "${LANES[@]}"; do
     if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health"; then up=yes; break; fi
     sleep 2
   done
-  if [ -n "$up" ]; then echo "lane $k: UP on $PORT (rundesk_v$k)"; ok=$((ok+1))
+  # The store is reported separately, because an API that is up with storage
+  # unconfigured is exactly the state the upload checks used to be written
+  # against — a lane in that state would go green on the wrong path rather than
+  # fail, which is the kind of quiet the rest of this harness exists to stop.
+  S3PORT=$((9100 + k))
+  s3=$(grep -o '"ready":true' "/tmp/claude-0/s3-v$k.log" 2>/dev/null | head -1)
+  if [ -n "$up" ] && [ -n "$s3" ]; then echo "lane $k: UP on $PORT (rundesk_v$k), store on $S3PORT"; ok=$((ok+1))
+  elif [ -n "$up" ]; then echo "lane $k: API UP on $PORT but NO STORE on $S3PORT — uploads will not be measurable"; tail -3 "/tmp/claude-0/s3-v$k.log" 2>/dev/null
   else echo "lane $k: DID NOT COME UP"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok/${#LANES[@]} lanes up"

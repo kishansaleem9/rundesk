@@ -37,6 +37,8 @@ OUT_RUN="/tmp/claude-0/break-$SUITE-$(date +%Y%m%d-%H%M%S).txt"
 # patches themselves carry (those are rewritten into the worktree below).
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TSX="/home/user/rundesk/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
+# Storage, in one place — see lane-env.sh for why it is not inlined here.
+. "/home/user/rundesk/scripts/e2e-lanes/lane-env.sh"
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export E2E_EMAIL=admin@rundesk.internal
 export E2E_PASSWORD='Admin@123!'
@@ -95,12 +97,21 @@ restart() {
     [ -n "$pids" ] && kill -9 $pids 2>/dev/null
     sleep 2
   fi
+  # The store has to BE up, not merely be pointed at. `lane_store_up` keeps a
+  # running one and its objects — a restart that emptied the bucket would make
+  # a suite's second run differ from its first for a reason nothing in the
+  # suite mentions.
+  lane_store_up "$LANE"
   (
     cd "$WT/apps/api"
     export PORT="$PORT" PORTMARK="$LANE"
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
     export JWT_ACCESS_SECRET=ci-access-secret-min-32-chars-aaaaaaaaaaaa
     export JWT_REFRESH_SECRET=ci-refresh-secret-min-32-chars-bbbbbbbbbb
+    # Storage, from the one place that defines it — see lane-env.sh. Without
+    # this the lane comes up with R2 unconfigured and every upload check
+    # measures the refusal path instead of the real one.
+    lane_store_env "$LANE"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$LANE.log" 2>&1 &
