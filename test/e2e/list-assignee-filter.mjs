@@ -488,7 +488,10 @@ try {
 
   // ── the ✕, and the two surfaces staying one filter ────────────────────────
   console.log('\n▶ the ✕ on the face puts the whole list back')
-  await page.getByTestId('list-assignee-clear').click()
+  // Bounded and caught: `list-assignee-filter-12-picker-own-state` leaves the
+  // face off the chip, so the ✕ that lives on it is never drawn — an unbounded
+  // press ended the run at 27 of 29 (ledger §10).
+  await page.getByTestId('list-assignee-clear').click({ timeout: 10_000 }).catch(() => {})
   chk(
     await rowsBecome(everything),
     'clearing the face restores every row',

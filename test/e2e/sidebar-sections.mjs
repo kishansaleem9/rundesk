@@ -275,7 +275,11 @@ try {
       : 'a direct message was drawn in the Channels section',
   )
 
-  await page.getByTestId(`sidebar-channel-${myChannels[0].id}`).click()
+  // Bounded and caught: `sidebar-sections-1-no-channels-section` removes the
+  // section this row lives in, and an unbounded press on a row that is not
+  // drawn threw after thirty seconds and ended the run at 5 of 25 checks. The
+  // check below now reports the address it was left at instead (ledger §10).
+  await page.getByTestId(`sidebar-channel-${myChannels[0].id}`).click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(() => page.url().includes(`channel=${myChannels[0].id}`), { timeoutMs: 15_000 }),
     'a channel row opens that conversation, by its id',
