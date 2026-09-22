@@ -454,7 +454,6 @@ for (const who of [A, B]) {
 // ---------------------------------------------------------------------------
 console.log('\n2. starting a SyncUp')
 // ---------------------------------------------------------------------------
-const startedAtMs = Date.now()
 const startBtn = A.page.locator('[data-testid="call-start-button"]')
 await startBtn.waitFor({ timeout: 15000 }).catch(() => {})
 check(await startBtn.isVisible().catch(() => false), 'the channel header offers Start SyncUp', 'no start control in the channel header')
@@ -1193,17 +1192,46 @@ for (let i = 0; i < 30; i += 1) {
 }
 check(!after?.data?.id, 'the last person out ends the call', `still live: ${JSON.stringify(after?.data)?.slice(0, 120)}`)
 
-// Pinned to THIS call rather than "the newest meeting": the database keeps
-// every run, and picking the top row makes a failure here impossible to tell
-// apart from having read somebody else's record.
+/*
+ * PINNED BY THE CALL'S OWN RECORD ID — AND THE TIME WINDOW THAT WAS HERE WAS
+ * NOT A PIN.
+ *
+ * It read the meetings list and took the first row whose start was at or after
+ * this call's, under a comment claiming that was "pinned to THIS call rather
+ * than the newest meeting". The list is ordered `startsAt DESC`, and a meeting
+ * SCHEDULED IN THE FUTURE by any earlier suite sharing the lane database
+ * outranks a call that ended a second ago. So the row this read was
+ * `A39 Sprint sync with colleague`, dated tomorrow, with one attendee — and
+ * `naming everyone who was there (1)` failed against a record this call never
+ * wrote, while the call's own record sat below it with both people in it. The
+ * tidy-up in §7 then DELETED the other suite's meeting.
+ *
+ * Every green run before this one was luck about what else the database held.
+ *
+ * `end` is idempotent by contract — "Ended AND the record is there: nothing
+ * left to do" returns the id — so asking for it after the UI has already ended
+ * the call changes nothing and answers with the identity the time window was
+ * standing in for. `pending: true` is the named state where the id is still
+ * coming, which is why this polls rather than reading once.
+ *
+ * It is not allowed to stand in for the UI. If a regression stopped the last
+ * person out from ending the call, this POST would end it — so the check ABOVE
+ * is the one that reads the product, and it has already run and already failed
+ * by the time this asks for the id. What this buys is that the rest of the
+ * section still measures the right record instead of reporting nothing.
+ */
 let record = null
+let recordId = null
 for (let i = 0; i < 30; i += 1) {
-  const meetings = await api(admin.accessToken, 'GET', `/workspaces/${WS}/meetings`)
-  record = (meetings.data ?? []).find((m) => new Date(m.startsAt ?? m.createdAt).getTime() >= startedAtMs - 5000)
-  if (record?.attendees?.length) break
+  const ended = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/end`, {})
+  recordId = ended.data?.meetingId ?? null
+  if (recordId) break
   await new Promise((r) => setTimeout(r, 500))
 }
-check(!!record, 'and it left a meeting record behind', `no meeting started after this call did`)
+if (recordId) {
+  record = (await api(admin.accessToken, 'GET', `/workspaces/${WS}/meetings/${recordId}`)).data ?? null
+}
+check(!!record, 'and it left a meeting record behind', `the call named no record of itself`)
 check(
   (record?.attendees?.length ?? 0) >= 2,
   `naming everyone who was there (${record?.attendees?.length ?? 0})`,
