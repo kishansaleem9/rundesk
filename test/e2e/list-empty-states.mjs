@@ -114,6 +114,16 @@ const textOfId = async (testId) =>
 const attrOf = async (selector, name) =>
   (await page.locator(selector).evaluateAll((els, n) => els.map((e) => e.getAttribute(n)), name))[0] ?? null
 
+/** Press Clear if it is there. It reports nothing — the checks do that. */
+const clickClear = async () => {
+  const clear = page.getByTestId('list-empty-clear-filters')
+  if ((await clear.count()) === 0) return false
+  return clear
+    .click({ timeout: 10_000 })
+    .then(() => true)
+    .catch(() => false)
+}
+
 /**
  * WHAT IS ACTUALLY NARROWING THE LIST, for a failure to say on sight.
  *
@@ -226,11 +236,16 @@ try {
     'the search term itself is on screen',
     `the filtered state never named the search: ${JSON.stringify(filteredText)}`,
   )
-  const axes = (await page.getByTestId('list-empty-filtered').getAttribute('data-filters')) ?? ''
+  // `attrOf` rather than the locator: this suite BUILT that helper because
+  // `getAttribute` on a selector matching nothing blocks for thirty seconds and
+  // then throws, and five call sites went on using the locator anyway.
+  // `list-empty-states-1-one-empty-state` is what that cost — the state is not
+  // drawn, so the read threw and took nine checks with it.
+  const axes = (await attrOf('[data-testid="list-empty-filtered"]', 'data-filters')) ?? ''
   chk(axes.split(',').filter(Boolean).join(',') === 'search',
     'and the search is the only narrowing it claims',
     `it reported the active narrowings as ${JSON.stringify(axes)}`)
-  const hiddenAttr = await page.getByTestId('list-empty-filtered').getAttribute('data-hidden-count')
+  const hiddenAttr = await attrOf('[data-testid="list-empty-filtered"]', 'data-hidden-count')
   chk(hiddenAttr === '3', 'it reports the three rows the filter is hiding',
     `it said ${JSON.stringify(hiddenAttr)} rows were hidden, out of 3 this run created`)
   chk((await textOfId('list-empty-filtered-count')).includes('3'),
@@ -240,14 +255,19 @@ try {
   console.log('\n▶ and it offers the way back')
   chk(await visible('list-empty-clear-filters'), 'there is a control to clear the filters',
     'the filtered empty state has no undo — the frame\'s "turn off Me Mode" has no equivalent')
-  await page.getByTestId('list-empty-clear-filters').click()
+  // A CLEAR THAT IS NOT THERE CANNOT BE PRESSED, and pressing it anyway is a
+  // thirty-second throw standing where the checks below have something to say.
+  // `list-empty-states-2-same-copy` removes the undo, and this ended its run.
+  await clickClear()
   const backAgain = await waitUntil(() => countOf('list-task-row').then((n) => n === 3), { timeoutMs: 10_000 })
   chk(backAgain, 'pressing it puts all three rows back',
     `the SEARCH clear left: ${await narrowState()} — expected 3 rows`)
-  chk(await page.getByTestId('list-task-search').inputValue() === '',
+  // Read the way `narrowState` above reads it: a box that is not there is
+  // `<absent>` rather than a thirty-second throw.
+  const searchAfter = await page.getByTestId('list-task-search').inputValue().catch(() => '<absent>')
+  chk(searchAfter === '',
     'and empties the search box it was complaining about',
-    `the search box still holds ${JSON.stringify(await page.getByTestId('list-task-search').inputValue())} — ` +
-      'the rows came back for some other reason')
+    `the search box still holds ${JSON.stringify(searchAfter)} — the rows came back for some other reason`)
 
   // ── 3. More than one axis at once ─────────────────────────────────────────
   /*
@@ -261,15 +281,15 @@ try {
   await page.getByTestId('list-assignee-filter').selectOption('__unassigned__').catch(() => {})
   const twoAxes = await waitUntil(async () => {
     if (!(await visible('list-empty-filtered'))) return false
-    const a = (await page.getByTestId('list-empty-filtered').getAttribute('data-filters')) ?? ''
+    const a = (await attrOf('[data-testid="list-empty-filtered"]', 'data-filters')) ?? ''
     return a.includes('search') && a.includes('assignees')
   }, { timeoutMs: 10_000 })
   chk(twoAxes, 'both the search and the assignee filter are named',
-    `the narrowings were ${JSON.stringify(await page.getByTestId('list-empty-filtered').getAttribute('data-filters'))}`)
-  await page.getByTestId('list-empty-clear-filters').click()
+    `the narrowings were ${JSON.stringify(await attrOf('[data-testid="list-empty-filtered"]', 'data-filters'))}`)
+  await clickClear()
   const bothCleared = await waitUntil(async () => {
-    const search = await page.getByTestId('list-task-search').inputValue()
-    const assignee = await page.getByTestId('list-assignee-filter').inputValue()
+    const search = await page.getByTestId('list-task-search').inputValue().catch(() => '<absent>')
+    const assignee = await page.getByTestId('list-assignee-filter').inputValue().catch(() => '<absent>')
     return search === '' && assignee === ''
   }, { timeoutMs: 10_000 })
   chk(bothCleared, 'and one press clears both of them',
@@ -315,11 +335,11 @@ try {
     const closedEmpty = await waitUntil(() => visible('list-empty-filtered'), { timeoutMs: 10_000 })
     chk(closedEmpty, 'switching closed tasks off gives the filtered state, not the empty-list one',
       'a list of finished work reported itself as a list that had never had anything in it')
-    const closedAxes = (await page.getByTestId('list-empty-filtered').getAttribute('data-filters')) ?? ''
+    const closedAxes = (await attrOf('[data-testid="list-empty-filtered"]', 'data-filters')) ?? ''
     chk(closedAxes.split(',').filter(Boolean).join(',') === 'closed',
       'and names the Closed toggle as the reason',
       `it reported ${JSON.stringify(closedAxes)}`)
-    await page.getByTestId('list-empty-clear-filters').click()
+    await clickClear()
     const restored = await waitUntil(
       async () => !(await visible('list-empty-filtered')) && (await closedGroupCount()) === '3',
       { timeoutMs: 10_000 },
