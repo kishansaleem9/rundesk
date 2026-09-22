@@ -63,7 +63,7 @@ type Job = {
   result: ImportSummary | null
 }
 
-type ImportTab = 'clickup' | 'sheet'
+type ImportTab = 'clickup' | 'sheet' | 'doc'
 
 /**
  * §V2-S13 frame `12:08` — Create › **Imports** ›.
@@ -98,6 +98,19 @@ export function ImportPage() {
           icon={<Table2 className="h-4 w-4" />}
           label={t('import.tabSheet')}
         />
+        {/*
+          §V2-S13 frame `12:05` — the submenu's SECOND row, "Document files".
+          A row that opened nothing would be the facade this page's header
+          refuses for the ten named tools; this one imports the formats
+          Rundesk can genuinely read and says plainly which it cannot.
+        */}
+        <TabButton
+          testid="import-tab-doc"
+          active={tab === 'doc'}
+          onClick={() => setTab('doc')}
+          icon={<FileText className="h-4 w-4" />}
+          label={t('import.tabDoc')}
+        />
         <TabButton
           testid="import-tab-clickup"
           active={tab === 'clickup'}
@@ -107,7 +120,7 @@ export function ImportPage() {
         />
       </div>
 
-      {tab === 'sheet' ? <SpreadsheetImportPanel /> : <ClickUpImportPanel />}
+      {tab === 'sheet' ? <SpreadsheetImportPanel /> : tab === 'doc' ? <DocImportPanel /> : <ClickUpImportPanel />}
     </div>
   )
 }
@@ -144,6 +157,127 @@ function TabButton({
 // ═══ Spreadsheet files ════════════════════════════════════════════════════════
 
 const slug = (s: string) => s.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'col'
+
+/**
+ * §V2-S13 frame `12:05` — Imports › **Document files**.
+ *
+ * WHAT A DOCUMENT IMPORT SHOULD DO WAS IN NO FRAME, so it was decided from what
+ * this product already does: `docs/tiptap-markdown.ts` turns a Doc into
+ * GitHub-flavoured Markdown and the export endpoint serves it. Import is that
+ * run backwards, which makes the round trip — export a doc, import the file,
+ * get the same doc — the check a facade cannot pass.
+ *
+ * THE REFUSAL NAMES THE FORMATS, because "unsupported file" tells somebody
+ * holding a .docx nothing about what to do next. `attachment-text.ts` already
+ * decided binary documents are out of scope — "a heavy parser dependency" —
+ * so the honest answer is which extensions work, not an apology.
+ *
+ * The file is read in the BROWSER and sent as text: these formats are text by
+ * definition, so multipart would buy nothing but a second code path.
+ */
+function DocImportPanel() {
+  const { t } = useTranslation()
+  const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
+  const [error, setError] = useState<string | null>(null)
+  const [made, setMade] = useState<{ id: string; title: string } | null>(null)
+
+  const upload = useMutation({
+    mutationFn: async (file: File) => {
+      const markdown = await file.text()
+      return api<{ id: string; title: string }>(`/workspaces/${workspaceId}/docs/import`, {
+        method: 'POST',
+        body: { fileName: file.name, markdown },
+      })
+    },
+    onSuccess: (doc) => {
+      setError(null)
+      setMade(doc)
+    },
+    // The server's sentence, not a generic one: it names the file and the
+    // formats that work, and replacing it here would throw that away.
+    onError: (e) => {
+      setMade(null)
+      setError(e instanceof Error ? e.message : String(e))
+    },
+  })
+
+  return (
+    <div className="space-y-6" data-testid="import-doc-panel">
+      <Card className="p-6 space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold">{t('import.docTitle')}</h2>
+          <p className="text-sm text-muted-foreground mt-1" data-testid="import-doc-blurb">
+            {t('import.docBlurb')}
+          </p>
+        </div>
+
+        <input
+          type="file"
+          accept=".md,.markdown,.txt,text/markdown,text/plain"
+          className="hidden"
+          id="import-doc-file"
+          data-testid="import-doc-file"
+          onChange={(e) => {
+            const file = e.target.files?.[0]
+            if (file) upload.mutate(file)
+            // Cleared so choosing the SAME file twice fires a second change
+            // event; without this a retry after an error looks like a dead
+            // control.
+            e.target.value = ''
+          }}
+        />
+        <Button
+          type="button"
+          variant="outline"
+          data-testid="import-doc-choose"
+          disabled={upload.isPending}
+          onClick={() => document.getElementById('import-doc-file')?.click()}
+        >
+          {upload.isPending ? (
+            <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+          ) : (
+            <FileText className="h-4 w-4 mr-2" />
+          )}
+          {t('import.docChoose')}
+        </Button>
+
+        <p className="text-xs text-muted-foreground" data-testid="import-doc-accepted">
+          {t('import.docAccepted')}
+        </p>
+
+        {error && (
+          <div className="flex items-start gap-2 text-sm text-destructive" data-testid="import-doc-error">
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+            <span>{error}</span>
+          </div>
+        )}
+
+        {made && (
+          <div
+            className="flex items-center gap-2 text-sm"
+            data-testid="import-doc-result"
+            data-doc-id={made.id}
+          >
+            <CheckCircle2 className="h-4 w-4 text-green-600 shrink-0" />
+            <span className="text-muted-foreground">{t('import.docImported')}</span>
+            {/*
+              A LINK TO THE THING THAT WAS MADE, not just a note that something
+              was. An import whose only evidence is a sentence is one the
+              person has to go hunting for.
+            */}
+            <a
+              className="font-medium underline underline-offset-2"
+              href={`/app/${workspaceId}/docs/${made.id}`}
+              data-testid="import-doc-open"
+            >
+              {made.title}
+            </a>
+          </div>
+        )}
+      </Card>
+    </div>
+  )
+}
 
 function SpreadsheetImportPanel() {
   const { t, tCount } = useTranslation()

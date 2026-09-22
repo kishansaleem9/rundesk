@@ -411,10 +411,30 @@ try {
    * true when the attribute is ABSENT — `null !== ''` — so that spelling of
    * this check would pass on exactly the bug it is meant to catch.
    */
+  /*
+   * BOUNDED AND CAUGHT, and this one was proved by a break run rather than by
+   * a rule. `af-3-no-failure-recorded` stops a failure being recorded, so no
+   * row carries `data-status="failed"`, so this locator matches nothing — and
+   * an unbounded `getAttribute` waits Playwright's full thirty seconds and
+   * throws. The run ended at 29 of 34 with `threw: locator.getAttribute:
+   * Timeout 30000ms exceeded`, five checks silenced by the patch it was
+   * measuring.
+   *
+   * THE EIGHT SECTION-ENDER RULES ALL MISS THIS SHAPE. It is not in a chk
+   * message (rule six), not at the head of a condition (rule seven), and no
+   * check in the file asserts that testid EXISTS, so the two pairing rules
+   * have nothing to pair it with. It is a standalone assignment — and nothing
+   * can short-circuit an assignment, which is the same argument that let rules
+   * six and seven gate.
+   *
+   * null is safe here without further guarding: the check below asks
+   * `typeof badgeTitle === 'string'`, and `typeof null` is `'object'`.
+   */
   const badgeTitle = await page
     .locator('[data-testid="ai-activity-row-status"][data-status="failed"]')
     .first()
-    .getAttribute('title')
+    .getAttribute('title', { timeout: 8000 })
+    .catch(() => null)
   chk(
     typeof badgeTitle === 'string' && badgeTitle.trim().length > 0,
     'and its badge carries the failure’s own sentence',
