@@ -848,8 +848,7 @@ checks, not about a run.**
 | — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
 | M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
-| B | Live focus countdown in the header |
-| B | Countdown in the browser tab title — closed by `tab-title-countdown.mjs`, 10 checks. A title set once is a screenshot rather than a countdown, so the suite reads it twice and requires the remainder to have decreased; it also leaves the app and requires the title to be restored, because a countdown that outlives the page it belongs to is read as live |
+| B | Live focus countdown in the header — `FocusBlockPill` in `app-topbar.tsx`, frame `15:20`'s moon glyph and *"Work on … 2h 56m left"* right of the workspace switcher. It reads `useRunningFocusBlock`, sharing its fetch, its choice of block and its one-second clock with the tab-title writer, so there is no second countdown in the file. Testid `focus-block-pill`, measured by `test/e2e/focus-pill.mjs` |
 | M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |
 | M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck |
 | B | Skills; Recent Chats with auto-derived names |
@@ -895,7 +894,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**174 rows: 145 built · 15 partial · 14 missing.**
+**173 rows: 144 built · 15 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -931,14 +930,36 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 113 | 11 | 9 | 133 |
+| §2, the sections table | 112 | 11 | 9 | 132 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **145** | **15** | **14** | **174** |
+| **consolidated** | **144** | **15** | **14** | **173** |
 
-§2's 113 built includes the four marked `B*` — built, but the row also records
+§2's 112 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.
+
+**AND IT IS 112 RATHER THAN 113 BECAUSE ONE ROW WAS STRUCK, NOT CLOSED.**
+*Countdown in the browser tab title* is built and has a ten-check suite — and it
+answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
+countdown anywhere in the walkthrough; the row existed only because of the
+documentation error at `docs/video2-frame-observations.md:383`. §5 and §6 each
+recommended striking it and neither had been acted on, so the headline counted a
+frame requirement that does not exist.
+
+The work is not lost and is not being disowned: `use-focus-tab-title.ts`,
+`routes/app.tsx:125`, `tabTitle.focusCountdown` in all four catalogs and
+`test/e2e/tab-title-countdown.mjs` all stand, and the suite still runs and is
+still break-tested. What changed is only that it stopped being counted as an
+answer to the specification, because **the walkthrough is the specification** and
+this answers a line of it that was never there. A count of work done against a
+spec has to exclude work the spec did not ask for, or the number stops meaning
+what its own headline says.
+
+§5's separate argument for the strike — *"closing it as `B` records a frame
+requirement that does not exist while the header pill stays open"* — no longer
+applies: the header pill was built, and its row now names the evidence. The
+doc-error ground stands on its own.
 
 Sixteen of §5's rows closed after it was written, each named with the suite
 that proves it — see the `closed by:` line on the row itself. A row is not
@@ -2765,8 +2786,8 @@ cannot reveal and a schema comment actively conceals.
 > whose whole job is to catch it.
 >
 > Every row below was re-checked against the tree on the day this note was
-> added, and now carries its state. **Eighteen rows: five were built since · ten
-> were applied to §2 · three are still open.** The evidence is named in each row rather than
+> added, and now carries its state. **Eighteen rows: five were built since · eleven
+> were applied to §2 · one is withdrawn · one is still open.** The evidence is named in each row rather than
 > asserted, so the next reader can re-check it the same way instead of trusting
 > this paragraph either.
 
@@ -2777,11 +2798,11 @@ cannot reveal and a schema comment actively conceals.
 | `B` App Center with categories | **P** | **BUILT since.** The facet rail is "all FOURTEEN of it", and a facet cannot outlive its apps: the set is derived from the integrations rather than hand-listed, so an empty facet cannot exist. | Nine facets (`workspace-integrations-page.tsx:109-119`) against the frame's fourteen |
 | `B` …Recent Chats with auto-derived names | **P** | **BUILT since.** The `⋯ More` is there — `expanded` local state over `all.slice(0, AI_CHATS_PREVIEW)`, with `data-total` and `data-shown` on the section. Expanding is local, not a refetch, because the rows were already on the client. | `workspace-sidebar.tsx:2724` hard-slices to five with no "More", while `GET /ai-chats` returns all of them. Conversation six onward is unreachable in the UI |
 | `B` Error toasts; list names unique; both create paths report failure | **P** | **BUILT since.** Migration `0157` adds a partial, case-insensitive unique index on `(space_id, lower(name)) where is_archived = false`, and `folders.service.ts` turns the violation into a 409 carrying words rather than a Postgres 500. | True of lists, false of folders. `quick-create-modal.tsx:1394-1404` has no `onError` — the same defect `88830db` fixed on the List tab beside it — `workspace-sidebar.tsx:446-457` is still `window.prompt`/`window.alert`, and `folders.service.ts:38-49` accepts duplicate names with no index behind it |
-| `B` Connect Google / Outlook; **two-way scope** | **P** | **STILL OPEN.** §2's row is unchanged and still reads "two-way scope". | Right about the OAuth grant; it was read as two-way *sync*, which is a button on another page |
+| `B` Connect Google / Outlook; **two-way scope** | ~~**P**~~ **withdrawn** | **WITHDRAWN — the proposal was the error, not the row.** "Two-way scope" is the OAuth GRANT frame `13:00` shows, and Rundesk requests read/write on both providers: `gcal: 'https://www.googleapis.com/auth/calendar.events'` and `outlook: 'Calendars.ReadWrite'`. It was read here as two-way *sync*, which is a different feature and a button on another page. §2's `B` stands, and §5 had already said so — this table repeated a downgrade its own file elsewhere refutes, which is why leaving a findings list unreconciled is expensive. | Right about the OAuth grant; it was read as two-way *sync*, which is a button on another page |
 | `B` Attachments "Drop files here" | evidence stale | **APPLIED.** §2's row now states the handler exists and says which guard it uses; the false parenthetical is gone. | There is a real `onDrop`/`onDragOver` now; the row's stated reason no longer describes the code |
 | `M` Cover: Search tab; Gallery "Custom" swatch | **split** | **APPLIED.** §2 now carries `P` for Cover — Gallery "Custom" swatch built, Search tab still absent, with the Search reason re-checked rather than trusted. | The Custom swatch is built — pipette, native colour input, apply, with testids. Only the Search tab is missing, and its recorded reason still holds |
 | `P` View types — 5 of 11 | stale | **APPLIED.** `SPACE_VIEW_KEYS` holds six and §2 reads `6 of 11`, with Map / Mind Map / Timeline recorded as deliberately not offered. | `SPACE_VIEW_KEYS` has six, and this file carries a `B` row for Team view that contradicts it |
-| `M` Countdown in the browser tab title | **struck, not closed** | **STILL OPEN.** §2 still closes it as `B` with a 10-check suite. The recommendation was to STRIKE it — it is built, but it rests on a doc error, and closing a row no frame asks for counts work the video never called for. | It is built, but it rests on a doc error: no frame shows a countdown in the tab. See §7 |
+| `M` Countdown in the browser tab title | **struck, not closed** | **APPLIED.** Struck from §2 and the counts moved with it: §2 112/11/9, consolidated 144/15/14, **173 rows**. The work stands and is still break-tested; it simply stopped being counted as an answer to a specification that never asked for it. | It is built, but it rests on a doc error: no frame shows a countdown in the tab. See §7 |
 | `M` Credits entirely | bundling warning | **STILL OPEN.** The decision to skip credits is respected and re-checked; what is unresolved is that the usage-trend chart is bundled into it and is separable. | The usage-trend chart is in dollars and needs no currency; retiring it with the credits decision would lose a thing that is neither credits nor out of scope |
 | + six rows built this session | **B** | **APPLIED.** Moved in §2. | already moved in §2 |
 | `M` Appearance: Grid size | **B** | **APPLIED.** §2 carries `B` with the reader named. | Stale, not missing. Control, API validation and reader all present — `const hourPx = GRID_SIZES[gridSize]`, with `GRID_SIZES` imported from the dialog so the swatch and the grid cannot disagree. `planner-appearance-toggles.mjs` covers it in 3 checks and was re-run green at HEAD |
