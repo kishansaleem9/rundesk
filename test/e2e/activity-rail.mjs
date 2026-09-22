@@ -14,9 +14,16 @@
  *     and reading the fields two different screens — so "You estimated 12
  *     hours" could never be read beside the estimate it changed.
  *
- * THE CHECK THAT MATTERS MOST is the last one: the field grid and an activity
+ * THE CHECK THAT MATTERS MOST is the last pair: the field grid and an activity
  * entry visible AT THE SAME MOMENT. Everything else here could pass on a build
- * that just renamed the tab, and that check could not.
+ * that just renamed the tab.
+ *
+ * IT WAS ONE CHECK AND IT COULD PASS ON EXACTLY THAT BUILD. It counted rendered
+ * field cells and matched text inside the rail, which is true of a rail sitting
+ * 965px down a 1000px viewport with 35 pixels of itself on screen —
+ * `arail-3-the-rail-goes-under-the-fields` walked through it. Rendered is not
+ * readable, and below the fold is the tab again with extra scrolling. So it is
+ * two checks now: both rendered, and both inside the viewport.
  *
  * AND THE ONE THAT PROTECTS THE CHIP. A chip reading "Created <today>" passes
  * any presence check while being wrong for every task older than this morning.
@@ -38,7 +45,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 12
+const EXPECTED_CHECKS = 13
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -295,9 +302,37 @@ try {
   }, { timeoutMs: 20_000 })
   chk(
     bothAtOnce,
-    'the field grid and the activity feed are on screen together',
+    'the field grid and the activity feed are both rendered at once',
     'the rail is up but the fields are not showing beside it — which is the tab ' +
       'again, with a different name',
+  )
+
+  /*
+   * AND BOTH ARE ON SCREEN, which is what "at once" meant and what this check
+   * did not measure.
+   *
+   * The comment above claims "readable in the same instant" and said "every
+   * check above could pass on a build that simply renamed the Activity tab;
+   * this one cannot". It could. `arail-3-the-rail-goes-under-the-fields`
+   * deletes `lg:flex-row` and the rail lands at y≈965 in a 1000px viewport —
+   * 35 pixels of it on screen, below a field grid that fills the rest. Both
+   * elements RENDER, both match, and the check passed. Rendered is not
+   * readable, and below the fold is the tab again with extra scrolling.
+   *
+   * So the geometry is asserted: a readable strip of the rail inside the
+   * viewport, with the fields inside it too.
+   */
+  const vp = page.viewportSize()
+  const fieldBox = await page.getByTestId('task-field').first().boundingBox().catch(() => null)
+  const railOnScreen = await page.getByTestId('task-activity-rail').boundingBox().catch(() => null)
+  const STRIP = 80
+  chk(
+    !!vp && !!fieldBox && !!railOnScreen &&
+      fieldBox.y >= 0 && fieldBox.y < vp.height &&
+      railOnScreen.y >= 0 && railOnScreen.y + STRIP <= vp.height,
+    `and both are inside the ${vp?.height}px viewport without scrolling`,
+    `fields at y=${fieldBox?.y}, rail at y=${railOnScreen?.y} in a ${vp?.height}px viewport — ` +
+      'a rail below the fold is the Activity tab with extra steps',
   )
 
   // -------------------------------------------------------------------------

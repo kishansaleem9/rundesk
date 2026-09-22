@@ -12,11 +12,19 @@
 # nothing about it looks like a behaviour change: the rail is still rendered,
 # still complete, still in the DOM in the right order.
 #
-# REDDENS TWO, AND THEY ARE THE TWO THAT MEASURE GEOMETRY: "it sits BESIDE the
-# panel rather than under it", and "the field grid and the activity feed are on
-# screen together" — which the suite calls the check that matters most, because
-# "everything else here could pass on a build that just renamed the tab, and
-# that check could not." The tab-strip check and the reload check stay green.
+# IT REDDENED ONE, NOT TWO, AND THAT FOUND THE LOAD-BEARING CHECK BEING WEAKER
+# THAN ITS OWN COMMENT. "It sits BESIDE the panel rather than under it" failed
+# on the boxes: panel at y=383 h=566, rail at y=965 h=258. "The field grid and
+# the activity feed are on screen together" PASSED — it counted rendered field
+# cells and matched text inside the rail, and both are true of a rail sitting
+# 965px down a 1000px viewport with 35 pixels of itself visible.
+#
+# That check's comment says "readable in the same instant" and "every check
+# above could pass on a build that simply renamed the Activity tab; this one
+# cannot". It could: below the fold IS the tab again, with extra scrolling. It
+# is renamed to what it measures — both rendered — and a new check asserts the
+# geometry: a readable strip of the rail inside the viewport with the fields
+# inside it too. This patch reddens that one as well.
 #
 # Reddens: activity-rail: "and it sits BESIDE the panel rather than under it"
 import io
