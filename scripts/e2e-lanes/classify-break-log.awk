@@ -44,6 +44,12 @@ inpatch && /^  SHORT RUN:/  { isshort = 1; next }
 # classified RED — a patch credited with reddening four checks, three of which
 # it never reached. One partition, two spellings, and only one was being read.
 inpatch && /FAIL ran [0-9]+ checks, expected/ { isshort = 1; next }
+# AND "SHORT" MEANS "NOT THE SUITE'S OWN NUMBER", IN EITHER DIRECTION. The name
+# is short because that is the case that keeps happening, but the same line
+# catches a run that reported MORE: `space-create-menu-4-spaceinspace` came back
+# `ran 29 checks, expected 28`, because a fixture derived from the file that
+# patch edits gained an entry and a loop ran a tenth time. A run that did not do
+# what it says is not a measurement whichever way it missed.
 inpatch && /, 0 failed/     { isgreen = 1; next }
 END {
   flush()
