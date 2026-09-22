@@ -132,7 +132,11 @@ try {
   await page.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
   await page.getByRole('button', { name: /^Accept$/ }).click().catch(() => {})
   await page.goto(`${B}/app/${WS}/${fixture.listPath}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForSelector('[data-testid="list-view-controls"]', { timeout: 25_000 })
+  // A GATE THAT REPORTS. `list-view-controls` is the subject of checks below,
+  // so a patch that removes it defeats this wait first and the throw ends the
+  // run before one check can name itself. Caught, so the checks below report
+  // the absence instead of being replaced by a twenty-five-second exception.
+  await page.waitForSelector('[data-testid="list-view-controls"]', { timeout: 25_000 }).catch(() => {})
   // A saved default view from another run could land this on Board, where two
   // of the three chips deliberately do not exist. Say which view we are on.
   await page.getByTestId('work-view-tab-type-list').click()

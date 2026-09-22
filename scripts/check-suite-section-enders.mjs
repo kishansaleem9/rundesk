@@ -201,8 +201,8 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     // fail with the element perfectly present, and a press after it is fine.
     if (!/\.count\(\)|isVisible|visible\(|waitUntil/.test(cond)) continue
     const ids = [
-      ...cond.matchAll(/getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)/g),
-    ].map((m) => m[1] ?? m[2])
+      ...cond.matchAll(/getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)|\[data-testid="([^"]+)"\]/g),
+    ].map((m) => m[1] ?? m[2] ?? m[3])
     if (!ids.length) continue
     for (let j = i + 1; j < Math.min(i + 1 + WINDOW, lines.length); j++) {
       const line = lines[j]
@@ -226,7 +226,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
          * both halves: an options object with no timeout IS a site, and one
          * with a timeout is not.
          */
-        if (!new RegExp(`getByTestId\\(['\`]${quoted}['\`]\\)[^\\n]*\\.click\\(`).test(line)) continue
+        if (!new RegExp(`(?:getByTestId\\(['\`]${quoted}['\`]\\)|\\[data-testid="${quoted}"\\])[^\\n]*\\.click\\(`).test(line)) continue
         rows.push({ file, line: j + 1, id, text: line.trim() })
       }
     }
@@ -244,12 +244,27 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     for (const m of lines
       .slice(i, i + 5)
       .join(' ')
-      .matchAll(/getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)/g))
-      checked.add(m[1] ?? m[2])
+      .matchAll(/getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)|\[data-testid="([^"]+)"\]/g))
+      checked.add(m[1] ?? m[2] ?? m[3])
   }
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(/waitForSelector\(\s*['`]\[data-testid="([^"]+)"\]/)
-    if (!m || /catch/.test(lines[i])) continue
+    /*
+     * THE CATCH IS LOOKED FOR OVER THREE LINES, as rule three does, because the
+     * tree writes these chains wrapped:
+     *
+     *     const attachThere = await page
+     *       .waitForSelector('[data-testid="quick-create-attach"]', { … })
+     *       .then(() => true)
+     *       .catch(() => false)
+     *
+     * Testing `lines[i]` alone reported `attach-on-create.mjs:193` — a site
+     * whose own header records it as the gate `aoc-4` proved, and which was
+     * fixed for exactly that. A rule that reports the fix as the defect is
+     * worse than no rule, and it surfaced the moment rule two was taught the
+     * `[data-testid="…"]` spelling and started reaching lines it never had.
+     */
+    if (!m || /catch/.test(lines.slice(i, i + 3).join(' '))) continue
     if (!checked.has(m[1])) continue // a page-load gate on something nothing asserts
     gates += 1
     rows.push({ file, line: i + 1, id: m[1], text: lines[i].trim(), gate: true })
@@ -283,9 +298,9 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       const cond = lines.slice(i, i + 4).join(' ')
       if (/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) {
         for (const m of cond.matchAll(
-          /getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)/g,
+          /getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)|\[data-testid="([^"]+)"\]/g,
         ))
-          asserted.add(m[1] ?? m[2])
+          asserted.add(m[1] ?? m[2] ?? m[3])
       }
       continue
     }
@@ -295,7 +310,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     for (const id of asserted) {
       if (!id) continue
       const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-      if (!new RegExp(`getByTestId\\(['\`]${q}['\`]\\)`).test(lines[i])) continue
+      if (!new RegExp(`(?:getByTestId\\(['\`]${q}['\`]\\)|\\[data-testid="${q}"\\])`).test(lines[i])) continue
       sections += 1
       rows.push({ file, line: i + 1, id, text: lines[i].trim(), section: true })
       break

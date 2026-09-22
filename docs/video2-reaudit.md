@@ -5581,3 +5581,98 @@ So the property is real and it is enforced dynamically, by `EXPECTED_CHECKS`
 being compared with `!==` on every run. A static version would add nothing and
 would report nine working suites as defects — the same trade that kept the broad
 read scan from becoming a rule. Written down so the scan is not built twice.
+
+### The line every number here rests on, ungated until now
+
+Each suite ends with a version of
+
+```js
+if (results.length !== EXPECTED_CHECKS) { … }
+```
+
+and that `!==` is the whole reason "0 failed is not it ran" is enforceable
+rather than a slogan. A run that stops early prints `0 failed` for the checks it
+never reached, and the break harness credits the patch with every one of them —
+which is the defect the `SHORT` column, the counted skip, the section-ender
+rules and half this ledger exist to prevent. **Nothing was checking that the
+line was there.**
+
+A suite added without the constant, or with the comparison written `<` because
+it expects a skip, would report a truncated run as clean. Measured: all 113
+declare it and all 113 compare with `!==`. It is a GATE rather than a ratchet,
+because unlike the conditional-check heuristic beside it, the presence of a
+constant and the operator next to it are not a guess about text — they are the
+text.
+
+Three failure modes, each break-tested against a real suite and each naming it:
+
+| mutation | reported as |
+|---|---|
+| the constant is renamed away | `emoji-picker — declares no EXPECTED_CHECKS at all` |
+| the comparison becomes `<` | `emoji-picker — compares it with < — not \`!==\`` |
+| the comparison is removed | `emoji-picker — declares EXPECTED_CHECKS and never compares it` |
+
+`>=` and `<` are called out separately from a missing constant on purpose: they
+are the plausible mistake. A suite with a conditional skip reaches for a range
+comparison, and that is precisely the suite whose length cannot be trusted — the
+skip that should count towards the total belongs in the total, which is what
+`skipRest` is for, not in a loosened comparison.
+
+### The spelling rule one could not see, and two short runs
+
+`check-plan-population.mjs` — six hours old — fired for the first time, and it
+was right. Two patches the reddened checker had under `unknown` that the plan
+would never schedule: **`list-save-view-4-grouping-is-not-part-of-the-view`**
+and **`list-statuses-seeded-1-starter-list-unseeded`**. Neither is stale
+evidence. Both are complete, current runs that stopped early — 4 of 7 and 4 of
+10 — so a re-run reproduces them exactly. They needed a fix, not a round.
+
+**`list-save-view` is rule one's shape in a spelling rule one was blind to.**
+
+```
+chk((await page.locator('[data-testid="list-save-view"]').count()) === 1, 'changing the view raises the chip', …)
+…
+await page.locator('[data-testid="list-save-view"]').click()
+```
+
+The rule extracts testids with `getByTestId\(['\`]([^'\`]+)['\`]\)` and matches
+presses the same way. Both lines here use `page.locator('[data-testid="x"]')`,
+so neither the id nor the press was visible to it, and the press waited out
+thirty seconds with three checks about what the save actually SENT unreported.
+
+Taught the second spelling, rules one, two and five found **four sites across
+four suites** — and one of the four was a false positive that mattered:
+
+- `folder-dialog.mjs:297` — a bare press under a check written in the other
+  form. Real, and invisible until now for exactly the same reason.
+- `list-view-controls.mjs:135` — an uncaught gate on an element checks below it
+  are about. Real.
+- `attach-on-create.mjs:193` — **already guarded**, with `.catch(() => false)`
+  two lines down the chain, and its own header records it as the gate `aoc-4`
+  proved. Rule two tested `lines[i]` alone, so widening its reach turned the FIX
+  into a reported defect. Its catch window is three lines now, as rule three's
+  has always been — a rule that reports the fix as the defect is worse than no
+  rule.
+
+#### And a throw that cost six checks
+
+`list-statuses-seeded` ended with `if (!closed?.key) throw`. The patch takes the
+starter list's statuses away — the check two lines above, exactly as claimed —
+and the throw then ended the run at 4 of 10.
+
+**Three of the six skipped checks do not need a closed status at all.** A new
+task still starts open, the work preview still lists it while open, and
+`POST /lists` still seeds a pipeline whose length can be compared with the
+starter's — and that third one FAILS under this patch, `viaService.length ===
+statuses.length && viaService.length > 0` against a starter list of zero. A
+genuine consequence the throw was hiding.
+
+The four that do need it are now reported as FAILED with the reason, so both
+paths report the same number and `EXPECTED_CHECKS` stays exact. **Not
+`skipRest`**: that is for a gate on the machine, and its own header says a skip
+reachable by a product regression is a check that cannot fail. A starter list
+with no closed status is a product regression — this patch is what causes it.
+
+The population checker was built this morning to guard the sweep's final
+sentence. Its first real firing found two suites, one blind spot in rule one and
+one false-positive class in rule two.

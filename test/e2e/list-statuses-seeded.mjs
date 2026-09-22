@@ -113,7 +113,36 @@ try {
     `and one of them means closed (${closed?.key})`,
     `no status on the starter list has category "closed": ${statuses.map((s) => `${s.key}:${s.category}`).join(', ')}`,
   )
-  if (!closed?.key) throw new Error('without a closed status there is no way to finish anything here')
+  /*
+   * NO THROW HERE. `list-statuses-seeded-1-starter-list-unseeded` takes the
+   * starter list's statuses away — which is the check two lines above, exactly
+   * as claimed — and this `throw` then ended the run at 4 of 10, with six
+   * checks unreported under a row crediting the patch with the one reddening
+   * it names.
+   *
+   * Three of those six do not need a closed status at all: a new task still
+   * starts open, the work preview still lists it while it is open, and
+   * `POST /lists` still seeds a pipeline whose length can be compared with the
+   * starter's. They run now, and the third of them FAILS under this patch —
+   * `viaService.length === statuses.length && viaService.length > 0` against a
+   * starter list of zero — which is a genuine consequence the run was hiding.
+   *
+   * The four that do need it are reported as FAILED with the reason, so both
+   * paths report the same number of checks and `EXPECTED_CHECKS` stays exact.
+   * That is this directory's rule, stated in `emoji-picker`: a check that did
+   * not run is a check nobody knows the answer to, and the honest way to say so
+   * is to fail it with a sentence.
+   *
+   * NOT `skipRest`, deliberately. That is for a gate on the MACHINE — no
+   * storage configured, no audio output — and its own header says a skip
+   * reachable by a PRODUCT regression is a check that cannot fail. A starter
+   * list with no closed status is a product regression; this patch is what
+   * causes it.
+   */
+  const NO_CLOSED = closed?.key
+    ? null
+    : `the starter list has no status in category "closed" (${statuses.length} status(es): ` +
+      `${statuses.map((s) => `${s.key}:${s.category}`).join(', ') || 'none'}), so this could not be asked`
 
   /*
    * ASSIGNED TO ME, and that is not a detail.
@@ -157,40 +186,50 @@ try {
       'so its absence after closing would prove nothing',
   )
 
-  const patched = await A(`/tasks/${taskId}`, { method: 'PATCH', body: { status: closed.key } })
-  chk(
-    patched.status === 200,
-    `setting it to ${closed.key} is accepted`,
-    `the PATCH answered ${patched.status} — the checks below would be about the wrong thing`,
-  )
+  if (NO_CLOSED) {
+    // The four checks below cannot be asked without a closed key. Reported as
+    // failed with the reason rather than skipped, so the count is the same on
+    // both paths and the run reaches its own totals.
+    chk(false, 'setting it to the closed status is accepted', NO_CLOSED)
+    chk(false, 'and the stored status is the key that was asked for', NO_CLOSED)
+    chk(false, 'and the stored CATEGORY says closed — the half that used to disagree', NO_CLOSED)
+    chk(false, 'and a reader that reasons on the category no longer counts it as current work', NO_CLOSED)
+  } else {
+    const patched = await A(`/tasks/${taskId}`, { method: 'PATCH', body: { status: closed.key } })
+    chk(
+      patched.status === 200,
+      `setting it to ${closed.key} is accepted`,
+      `the PATCH answered ${patched.status} — the checks below would be about the wrong thing`,
+    )
 
-  /*
-   * READ BACK, rather than trusting the PATCH response. The bug lived in what
-   * was STORED, and a response echoing the request would have hidden it.
-   */
-  const after = (await A(`/tasks/${taskId}`)).data
-  chk(
-    after?.status === closed.key,
-    'and the stored status is the key that was asked for',
-    `stored status is "${after?.status}", asked for "${closed.key}"`,
-  )
-  chk(
-    after?.statusCategory === 'closed',
-    'and the stored CATEGORY says closed — the half that used to disagree',
-    `status is "${after?.status}" but statusCategory is "${after?.statusCategory}" — the two disagree, which is the defect`,
-  )
+    /*
+     * READ BACK, rather than trusting the PATCH response. The bug lived in what
+     * was STORED, and a response echoing the request would have hidden it.
+     */
+    const after = (await A(`/tasks/${taskId}`)).data
+    chk(
+      after?.status === closed.key,
+      'and the stored status is the key that was asked for',
+      `stored status is "${after?.status}", asked for "${closed.key}"`,
+    )
+    chk(
+      after?.statusCategory === 'closed',
+      'and the stored CATEGORY says closed — the half that used to disagree',
+      `status is "${after?.status}" but statusCategory is "${after?.statusCategory}" — the two disagree, which is the defect`,
+    )
 
-  /*
-   * A reader that reasons on the category, rather than a second look at the
-   * same column. The teams work preview lists a person's OPEN work; a task
-   * stored as done-but-open shows up there forever.
-   */
-  const afterClose = await titlesIn()
-  chk(
-    afterClose.status === 200 && !afterClose.titles.includes(`done-check ${TAG}`),
-    'and a reader that reasons on the category no longer counts it as current work',
-    `the work preview (${afterClose.status}) still lists it: ${JSON.stringify(afterClose.titles)}`,
-  )
+    /*
+     * A reader that reasons on the category, rather than a second look at the
+     * same column. The teams work preview lists a person's OPEN work; a task
+     * stored as done-but-open shows up there forever.
+     */
+    const afterClose = await titlesIn()
+    chk(
+      afterClose.status === 200 && !afterClose.titles.includes(`done-check ${TAG}`),
+      'and a reader that reasons on the category no longer counts it as current work',
+      `the work preview (${afterClose.status}) still lists it: ${JSON.stringify(afterClose.titles)}`,
+    )
+  }
 
   /*
    * The path that was always correct, asserted so a future "simplification"

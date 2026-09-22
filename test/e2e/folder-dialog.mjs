@@ -294,7 +294,11 @@ try {
     'the Folder tab carries a templates entry point, as the frame\'s footer draws',
     'the Folder tab offers no way to start from a template',
   )
-  await page.getByTestId('create-footer-templates').click()
+  // Bounded and caught: the check directly above is allowed to find this
+  // footer entry absent, and a press on something that is not there waits out
+  // the default thirty seconds and ends the section. Invisible to rule one
+  // until it learnt the `[data-testid="…"]` spelling the check above uses.
+  await page.getByTestId('create-footer-templates').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => /\/templates\b/.test(page.url()), { timeoutMs: 15_000 }),
     'and it lands on the Template Center rather than being a label',

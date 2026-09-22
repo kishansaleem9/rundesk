@@ -189,6 +189,32 @@ chk(
 
 chk(
   run({
+    'press-locator-spelling.mjs': [
+      `chk((await page.locator('[data-testid="thing"]').count()) === 1, 'the chip is raised', 'no chip')`,
+      `await page.locator('[data-testid="thing"]').click()`,
+      '',
+    ].join('\n'),
+  }).counts?.presses === 1,
+  'the `[data-testid="x"]` spelling is the same press as `getByTestId(\'x\')`',
+  'a press written with page.locator was missed — the spelling rule one was blind to until ' +
+    '`list-save-view-4` ended a run at 4 of 7 on exactly it',
+)
+
+chk(
+  run({
+    'press-mixed-spelling.mjs': [
+      `chk((await page.locator('[data-testid="thing"]').count()) === 1, 'the chip is raised', 'no chip')`,
+      `await page.getByTestId('thing').click()`,
+      '',
+    ].join('\n'),
+  }).counts?.presses === 1,
+  'and the two spellings pair with each other — a check in one, a press in the other',
+  'the rule only pairs a press with a check written the same way, which is how `folder-dialog` ' +
+    'hid a bare press under a check that used the other form',
+)
+
+chk(
+  run({
     'press-value-check.mjs': [
       `chk((await textOfSomething()) === 'x', 'it reads x', 'it read something else')`,
       `await page.getByTestId('thing').click()`,
@@ -247,6 +273,25 @@ chk(
   }).counts?.gates === 0,
   'and a caught gate is not a site',
   'a caught gate was reported',
+)
+
+chk(
+  run({
+    // The shape `attach-on-create.mjs:193` is written in, and its own header
+    // records it as the gate `aoc-4` proved and which was fixed for it. Rule
+    // two tested `lines[i]` alone and reported the FIX as the defect, the
+    // moment it was taught the second spelling and started reaching this line.
+    'gate-caught-wrapped.mjs': [
+      `const there = await page`,
+      `  .waitForSelector('[data-testid="gated"]', { state: 'attached', timeout: 20_000 })`,
+      `  .then(() => true)`,
+      `  .catch(() => false)`,
+      `chk(there && (await page.getByTestId('gated').count()) === 1, 'it is drawn', 'it is not')`,
+      '',
+    ].join('\n'),
+  }).counts?.gates === 0,
+  'a gate caught two lines down the chain is guarded too — the tree writes them wrapped',
+  'a wrapped-and-caught gate was reported as a defect, which is worse than no rule',
 )
 
 console.log('\n▶ rule three — a box read that throws when nothing matches')

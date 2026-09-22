@@ -224,6 +224,60 @@ if (noCatch.length) {
   process.exit(1)
 }
 
+/*
+ * AND THE GUARD THAT EVERY RULE IN THIS FILE RESTS ON.
+ *
+ * Everything above is about a run's LENGTH being honest, and the reason length
+ * matters at all is one line each suite carries:
+ *
+ *     if (results.length !== EXPECTED_CHECKS) { … }
+ *
+ * That `!==` is what turns a short run into a reported failure instead of a
+ * `0 failed` nobody questions. It is the single assumption the whole sweep
+ * stands on — "0 failed is not it ran" — and NOTHING WAS CHECKING IT. A suite
+ * added without the constant, or with the comparison written `<` because a
+ * skip was expected, would report a truncated run as a clean one and every
+ * patch measured against it would be credited for checks that never ran.
+ *
+ * Measured 22 September: all 113 declare it and all 113 compare with `!==`.
+ * This is a gate rather than a ratchet, because unlike the heuristic above,
+ * the presence of a constant and the operator beside it are not a guess about
+ * text — they are the text.
+ *
+ * `>=` and `<` are called out separately from a missing constant because they
+ * are the plausible mistake: a suite with a conditional skip reaches for a
+ * range comparison, and that is exactly the suite whose length cannot be
+ * trusted.
+ */
+const noGuard = []
+for (const file of suiteList) {
+  const src = readFileSync(join(SUITES, file), 'utf8')
+  const name = file.slice(0, -4)
+  if (!/^const EXPECTED_CHECKS = \d+/m.test(src)) {
+    noGuard.push([name, 'declares no EXPECTED_CHECKS at all'])
+    continue
+  }
+  const ops = [
+    ...src.matchAll(/\w+(?:\.length)?\s*(!==|===|<=|>=|<|>)\s*EXPECTED_CHECKS|EXPECTED_CHECKS\s*(!==|===|<=|>=|<|>)/g),
+  ].map((m) => m[1] ?? m[2])
+  if (!ops.length) noGuard.push([name, 'declares EXPECTED_CHECKS and never compares it'])
+  else if (!ops.includes('!==')) noGuard.push([name, `compares it with ${[...new Set(ops)].join(', ')} — not \`!==\``])
+}
+if (noGuard.length) {
+  console.error(
+    `\n[check-branches] ${noGuard.length} suite(s) cannot report a short run, which is the one ` +
+      'thing every number\nin this audit depends on:',
+  )
+  for (const [n, why] of noGuard) console.error(`    ${n} — ${why}`)
+  console.error(
+    '\n  A run that stops early prints `0 failed` for the checks it never reached, and the break\n' +
+      '  harness credits the patch with every one of them. `EXPECTED_CHECKS` compared with `!==` is\n' +
+      '  what makes that a reported failure instead. Exact, not a range: a skip that should count\n' +
+      '  towards the total belongs in the total (see `skipRest`), not in a loosened comparison.',
+  )
+  process.exit(1)
+}
+
 const BASELINE = 0
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)

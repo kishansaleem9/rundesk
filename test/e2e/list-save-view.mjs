@@ -190,7 +190,23 @@ try {
   )
 
   const before = calls.filter((c) => c.method === 'PATCH' && c.url.includes(`/views/${VIEW}`)).length
-  await page.locator('[data-testid="list-save-view"]').click()
+  /*
+   * BOUNDED AND CAUGHT — rule one's shape, in the spelling rule one could not
+   * see. The check directly above is ALLOWED to find this chip absent; that is
+   * what `list-save-view-4-grouping-is-not-part-of-the-view` makes happen, and
+   * this press then waited out the default thirty seconds and ended the run at
+   * 4 of 7 with three checks about what the save actually SENT unreported.
+   *
+   * Rule one matched `getByTestId('x')` only, and both the check and the press
+   * here use `page.locator('[data-testid="x"]')`, so neither the id nor the
+   * press was visible to it. Taught the second spelling, the rule finds this,
+   * `folder-dialog` and one gate — and a fourth site that turned out to be
+   * already guarded, which is how rule two's catch window came to be widened.
+   *
+   * Catching it changes no verdict: the check below counts the PATCH requests
+   * the page actually made, so a press that never landed fails it.
+   */
+  await page.locator('[data-testid="list-save-view"]').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1200)
 
   const patches = calls.filter((c) => c.method === 'PATCH' && c.url.includes(`/views/${VIEW}`))

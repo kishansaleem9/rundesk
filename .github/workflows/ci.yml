@@ -206,6 +206,13 @@ jobs:
       # sitting underneath it. Four instances in two days, every one found by
       # running a patch. A heuristic and a ratchet, both said out loud in the
       # script: it finds the shape, not whether the condition is ever false.
+      #
+      # It also gates the assumption every number in this audit rests on: that
+      # each suite declares EXPECTED_CHECKS and compares it with `!==`. That
+      # line is what turns a run which stopped early into a reported failure
+      # instead of a `0 failed` nobody questions, and nothing was checking it.
+      # All 113 have it; a suite arriving without it, or reaching for `<`
+      # because it expects a skip, fails the build that brings it.
       - name: No new suite gets a conditional check with no else
         run: node scripts/check-suite-check-branches.mjs
 
