@@ -248,6 +248,9 @@ const chkText = (lines, i) => {
   }
   return out.join(' ')
 }
+// Rule nine reads a whole ASSIGNMENT, which wraps across lines the same way a
+// call does, so it shares `stmt`'s grammar: continuations begin with `.`.
+const stmt9 = (lines, i) => stmt(lines, i)
 const stmt = (lines, i) => {
   let out = lines[i]
   for (let j = i + 1; j < lines.length && /^\s*\./.test(lines[j]); j++) out += ` ${lines[j]}`
@@ -454,6 +457,70 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+/*
+ * RULE NINE. A THROWING READ IN A STANDALONE ASSIGNMENT.
+ *
+ * FOUND BY A BREAK RUN, NOT BY A RULE, which is the whole reason it exists.
+ * `af-3-no-failure-recorded` stops a failure being recorded, so no row carries
+ * `data-status="failed"`, so this matched nothing:
+ *
+ *     const badgeTitle = await page
+ *       .locator('[data-testid="ai-activity-row-status"][data-status="failed"]')
+ *       .first()
+ *       .getAttribute('title')
+ *
+ * Thirty seconds, a throw, `ran 29 checks, expected 34`. Five checks silenced
+ * by the patch that was measuring them — and the EIGHT rules above all miss it.
+ * Not in a chk message (six), not at the head of a condition (seven), and no
+ * check in that file asserts the testid exists, so neither pairing rule has
+ * anything to pair it with.
+ *
+ * WHY THIS GATES WHERE THE BROAD READ SCAN DID NOT, which is rule six's
+ * argument one step further. Rule one refused a scan over reads because six of
+ * its nine candidates were guarded by `&&` short-circuiting, "the idiom these
+ * suites use and which a text rule cannot see". A STANDALONE ASSIGNMENT HAS NO
+ * CONDITION AT ALL. There is nothing in front of it to short-circuit, exactly
+ * as there is nothing in front of a message, so the objection cannot apply.
+ *
+ * FOUR EXCLUSIONS, each measured rather than assumed, taking 55 candidates to
+ * 21 real ones:
+ *
+ *   · `locator('body')` — body always exists, so the read cannot wait or
+ *     throw. Twenty-odd of the candidates were `body.innerText()`.
+ *   · a TERNARY in front of the read — `asked ? await read() : ''` is the
+ *     short-circuit rule one declined to gate, and it still declines.
+ *     `ai-answer-rendering` guards its read with a `waitUntil` on the count.
+ *   · `evaluateAll` — it runs over the matched SET and answers [] when empty.
+ *     It does not auto-wait, so it cannot throw on absence.
+ *   · inside a `waitUntil` predicate, which catches its own throws. Asked by
+ *     CONTAINMENT, as rules five and eight ask it.
+ *
+ * All 21 are fixed, and the null semantics were read one at a time rather than
+ * bounded en masse: four chained `.trim()` or `.replace()` onto the result
+ * (a caught null throws — `?? ''` goes in front), one compared through
+ * `Number()`, where `Number(null)` is ZERO and the check would have passed on
+ * a missing tile whenever the server said 0, and three assert a NEGATIVE that
+ * a caught null satisfies vacuously, so each now requires its element to BE
+ * there.
+ */
+let assigns = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  for (let i = 0; i < lines.length; i++) {
+    if (!/^\s*(const|let)\s+[A-Za-z_$][\w$]*\s*=\s*/.test(lines[i])) continue
+    const stmt = stmt9(lines, i)
+    if (!THROWS.test(stmt)) continue
+    if (/\.catch\(|timeout:/.test(stmt)) continue
+    if (/locator\(\s*['"`]body['"`]\s*\)/.test(stmt)) continue
+    if (/\?\s*[('"`\w]*\s*(await\s+)?[\w.]*page/.test(stmt)) continue
+    if (/\.evaluateAll\(/.test(stmt)) continue
+    if (!/getByTestId\(|data-testid/.test(stmt)) continue
+    if (insideWaitUntil(lines, i)) continue
+    assigns += 1
+    rows.push({ file, line: i + 1, id: stmt.match(THROWS)[1], text: stmt.trim().replace(/\s+/g, ' '), assign: true })
+  }
+}
+
 // RULE FOUR. The same locator variable: through a guard, then bare.
 const ANYVERB = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|boundingBox)\(/
 let sames = 0
@@ -557,7 +624,8 @@ for (const r of rows) {
       `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}` +
       `${r.wholeFile ? '  (asserted elsewhere in this file — a patch removes it everywhere)' : ''}` +
       `${r.message ? '  (read in a chk message — nothing short-circuits it)' : ''}` +
-      `${r.lead ? '  (read at the HEAD of a condition — nothing short-circuits it either)' : ''}`,
+      `${r.lead ? '  (read at the HEAD of a condition — nothing short-circuits it either)' : ''}` +
+      `${r.assign ? '  (a standalone assignment — there is no condition to short-circuit)' : ''}`,
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
@@ -582,12 +650,13 @@ for (const r of rows) {
 const distinct = new Set(rows.map((r) => `${r.file}:${r.line}`)).size
 console.log(
   `[section-enders] ${distinct} site(s) across ${new Set(rows.map((r) => r.file)).size} suite(s), ` +
-    `flagged as: ${rows.length - gates - boxes - sames - sections - files - messages - leadReads.length} ` +
+    `flagged as: ${rows.length - gates - boxes - sames - sections - files - messages - leadReads.length - assigns} ` +
     `press(es) on a control the check above them may find absent, ${gates} gate(s) in front of a ` +
     `check about the same element, ${boxes} box read(s) that throw when nothing matches, ${sames} ` +
     `use(s) of a locator guarded one line up, ${sections} use(s) of something this section asserts ` +
     `exists, ${files} use(s) of something asserted elsewhere in the same file, and ` +
-    `${messages} read(s) in a chk message, and ${leadReads.length} at the head of a condition ` +
+    `${messages} read(s) in a chk message, ${leadReads.length} at the head of a condition, and ` +
+    `${assigns} in a standalone assignment ` +
     '— a site can be more than one of these',
 )
 if (rows.length) {

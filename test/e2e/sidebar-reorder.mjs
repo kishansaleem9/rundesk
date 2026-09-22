@@ -446,11 +446,25 @@ try {
     const el = document.querySelector(s)
     el.dispatchEvent(new DragEvent('dragover', { dataTransfer: window.__dt, bubbles: true, cancelable: true }))
   }, `[data-testid="tree-gap-project-${space.id}-0"]`)
+  /*
+   * BOUNDED, WITH THE STRIP'S EXISTENCE REQUIRED ALONGSIDE.
+   *
+   * The check below asserts a NEGATIVE — the project strip did not arm for a
+   * list in flight. Unbounded, an absent strip threw and ended the section;
+   * caught, `null !== 'true'` is TRUE and the check passes on a tree that
+   * never drew the strip at all, which is a strictly worse failure than the
+   * one it was written to catch. So the strip being THERE is measured and
+   * carried in: it is the thing the drag is over.
+   */
+  const wrongKindStrip = await page
+    .locator(`[data-testid="tree-gap-project-${space.id}-0"]`)
+    .count()
   const wrongKindArmed = await page
     .locator(`[data-testid="tree-gap-project-${space.id}-0"]`)
-    .getAttribute('data-drop-active')
+    .getAttribute('data-drop-active', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    wrongKindArmed !== 'true',
+    wrongKindStrip === 1 && wrongKindArmed !== 'true',
     'a list over a project strip does not arm it',
     'the project strip armed for a list — the strip accepts anything in flight, so the ' +
       'next drop would reorder a container with an id that is not one of its children',

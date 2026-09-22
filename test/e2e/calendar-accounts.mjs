@@ -595,7 +595,12 @@ try {
    * badge rendering the NUMBER OF ROWS is the facade class — correct-looking,
    * and incapable of ever saying anything else.
    */
-  const chipBefore = Number((await page.getByTestId('planner-calendars-count').textContent())?.trim())
+  // Bounded and caught. `Number(undefined)` is NaN and every comparison with
+  // NaN is false, so an absent chip fails the checks below rather than
+  // reading as a number.
+  const chipBefore = Number(
+    (await page.getByTestId('planner-calendars-count').textContent({ timeout: 8000 }).catch(() => null))?.trim(),
+  )
   const tickedBefore = await page
     .locator('[data-testid="planner-calendar-row"][data-checked="true"]')
     .count()

@@ -269,7 +269,15 @@ try {
    * Colour-by. The block points at an URGENT task, so switching from "nothing"
    * to "priority" has to change the class the block is drawn with.
    */
-  const toneBefore = await page.locator('[data-testid="planner-block"]').first().getAttribute('class')
+  // Bounded and caught: nothing short-circuits a standalone assignment, so an
+  // absent element spends Playwright's default thirty seconds here and ends
+  // the section. The consumer below already treats the caught value as a
+  // miss, so absence reports rather than throws.
+  const toneBefore = await page
+    .locator('[data-testid="planner-block"]')
+    .first()
+    .getAttribute('class', { timeout: 8000 })
+    .catch(() => null)
   await page.locator('[data-testid="planner-color-by"]').selectOption('priority')
   const recoloured = await waitUntil(async () => {
     const c = await page.locator('[data-testid="planner-block"]').first().getAttribute('class')
@@ -280,7 +288,15 @@ try {
     'colouring tasks by priority actually recolours an urgent block',
     'the block kept its class — the setting saved and the grid ignored it',
   )
-  const urgentTone = await page.locator('[data-testid="planner-block"]').first().getAttribute('class')
+  // Bounded and caught: nothing short-circuits a standalone assignment, so an
+  // absent element spends Playwright's default thirty seconds here and ends
+  // the section. The consumer below already treats the caught value as a
+  // miss, so absence reports rather than throws.
+  const urgentTone = await page
+    .locator('[data-testid="planner-block"]')
+    .first()
+    .getAttribute('class', { timeout: 8000 })
+    .catch(() => null)
   chk(
     /rose/.test(urgentTone ?? ''),
     'and an urgent task is drawn in the urgent colour',

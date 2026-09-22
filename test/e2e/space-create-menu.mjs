@@ -273,7 +273,13 @@ try {
    * the catalogue supplies and a translator edits; the capitals are the design
    * system's business. `textContent` is that string.
    */
-  const heading = ((await page.getByTestId('space-create-menu-title').textContent()) ?? '').trim()
+  // Bounded and caught: nothing short-circuits a standalone assignment, so an
+  // absent element spends Playwright's default thirty seconds here and ends
+  // the section. The consumer below already treats the caught value as a
+  // miss, so absence reports rather than throws.
+  const heading = (
+    (await page.getByTestId('space-create-menu-title').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
+  ).trim()
   chk(
     heading === 'Create',
     'the "+" opens a menu headed "Create", as frame `08:00` heads it (drawn capitalised by the menu-label style)',

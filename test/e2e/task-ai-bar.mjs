@@ -357,7 +357,12 @@ try {
    * `textContent`, not `innerText`: this hint is not transformed, but the rule
    * that bit `activity-rail` is to say which one you mean.
    */
-  const hint = (await page.getByTestId('comment-composer-hint').textContent()) ?? ''
+  // Bounded and caught: nothing short-circuits a standalone assignment, so an
+  // absent element spends Playwright's default thirty seconds here and ends
+  // the section. The consumer below already treats the caught value as a
+  // miss, so absence reports rather than throws.
+  const hint =
+    (await page.getByTestId('comment-composer-hint').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
   chk(
     hint.includes('space') && hint.includes('/'),
     `the hint reads "${hint.trim()}" — both halves, because both halves now do something`,

@@ -386,7 +386,12 @@ try {
       'Email mode you can choose is a mode that cannot post',
   )
 
-  const reason = (await page.getByTestId('comment-mode-reason-email').textContent()) ?? ''
+  // Bounded and caught: nothing short-circuits a standalone assignment, so an
+  // absent element spends Playwright's default thirty seconds here and ends
+  // the section. The consumer below already treats the caught value as a
+  // miss, so absence reports rather than throws.
+  const reason =
+    (await page.getByTestId('comment-mode-reason-email').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
   chk(
     reason.toLowerCase().includes('email') && reason.trim().length > 30,
     `and the row itself says why: "${reason.trim().slice(0, 80)}…"`,

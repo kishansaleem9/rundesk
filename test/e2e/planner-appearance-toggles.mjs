@@ -635,7 +635,15 @@ try {
      * apart, which is the same shape as `waitUntil` for a value rather than
      * for a condition.
      */
-    const read = () => p2.locator('[data-testid="planner-day-column"]').first().getAttribute('data-day')
+    // Bounded and caught INSIDE the helper, so both calls below inherit it.
+    // The loop compares two reads for agreement; two caught nulls agree, and
+    // the caller's own comparison is what reports a column that never drew.
+    const read = () =>
+      p2
+        .locator('[data-testid="planner-day-column"]')
+        .first()
+        .getAttribute('data-day', { timeout: 8000 })
+        .catch(() => null)
     let key = await read()
     for (let i = 0; i < 20; i += 1) {
       await p2.waitForTimeout(300)

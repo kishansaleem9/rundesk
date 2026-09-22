@@ -291,8 +291,8 @@ jobs:
       # that turns a real 0 into a false one while looking like tidying: the
       # checker takes a SUITE_DIR and this points it at fixture suites, one
       # shape per file, then asserts on what it actually prints. `--mutate`
-      # applies sixteen mutations of the checker and requires each to redden a
-      # case; all sixteen bite. Its first case found that one physical site was
+      # applies nineteen mutations of the checker and requires each to redden a
+      # case; all nineteen bite. Its first case found that one physical site was
       # being reported twice under two labels, and a later one found that every
       # mutant had been dying on an unresolvable import before running a line —
       # so the pass had been reporting twelve of twelve while proving nothing.

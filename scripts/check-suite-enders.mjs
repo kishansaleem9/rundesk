@@ -80,7 +80,7 @@ const chk = (cond, good, bad) => {
  * left out of it silently steals from rule one's number.
  */
 const SUMMARY =
-  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something this section.*?(\d+) use\(s\) of something asserted elsewhere.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition/s
+  /(\d+) site\(s\).*?(\d+) press\(es\).*?(\d+) gate\(s\).*?(\d+) box read\(s\).*?(\d+) use\(s\) of a locator.*?(\d+) use\(s\) of something this section.*?(\d+) use\(s\) of something asserted elsewhere.*?(\d+) read\(s\) in a chk message.*?(\d+) at the head of a condition.*?(\d+) in a standalone assignment/s
 
 // `checker` is only ever passed by the mutation pass, to ask a mutant whether
 // it runs at all before its verdict is read.
@@ -108,6 +108,7 @@ const run = (files, checker = CHECKER) => {
             files: +m[7],
             messages: +m[8],
             leads: +m[9],
+            assigns: +m[10],
           }
         : null,
     }
@@ -410,7 +411,18 @@ console.log('\n▶ rule five — asserted in this section, then used bare in it'
       '',
     ].join('\n'),
   })
-  chk(only(res, 'sections'), 'a bare read thirty lines below its own check is one site', `the counts were ${JSON.stringify(res.counts)}`)
+  /*
+   * RULE NINE FIRES ON THIS TOO, and is right to: the fixture's bare read is a
+   * standalone assignment, which is exactly what nine is about. The same
+   * overlap rule one and rule five have — two labels, one physical site, which
+   * the distinct count folds. Asserting exclusivity here would be asserting
+   * that one of the two rules is wrong.
+   */
+  chk(
+    res.counts?.sections === 1 && res.counts?.assigns === 1,
+    'a bare read thirty lines below its own check is one site, flagged by five AND nine',
+    `the counts were ${JSON.stringify(res.counts)}`,
+  )
 }
 
 chk(
@@ -446,8 +458,8 @@ console.log('\n▶ rule eight — asserted anywhere in this file, then used bare
     ].join('\n'),
   })
   chk(
-    only(res, 'files'),
-    'a bare read in a LATER section than its own check is one site, and only rule eight sees it',
+    res.counts?.files === 1 && res.counts?.sections === 0 && res.counts?.assigns === 1,
+    'a bare read in a LATER section than its own check is rule eight’s, not rule five’s — and rule nine sees it too',
     `the counts were ${JSON.stringify(res.counts)}`,
   )
   chk(
@@ -587,6 +599,76 @@ chk(
   }).counts?.sections === 0,
   'and a read inside a `waitUntil` predicate is already safe — it catches its own throws',
   'a waitUntil predicate was reported, which is the false-positive class the rule names',
+)
+
+console.log('\n▶ rule nine — a throwing read in a standalone assignment')
+
+{
+  const res = run({
+    'assign.mjs': [
+      `console.log('\\n▶ a section')`,
+      `const badge = await page.getByTestId('row-status').getAttribute('title')`,
+      `chk(typeof badge === 'string', 'the badge says why', 'it did not')`,
+      '',
+    ].join('\n'),
+  })
+  chk(only(res, 'assigns'), 'a bare read assigned to a const is one site', `the counts were ${JSON.stringify(res.counts)}`)
+}
+
+chk(
+  run({
+    'assign-bounded.mjs': [
+      `const badge = await page.getByTestId('row-status').getAttribute('title', { timeout: 8000 }).catch(() => null)`,
+      `chk(typeof badge === 'string', 'the badge says why', 'it did not')`,
+      '',
+    ].join('\n'),
+  }).counts?.assigns === 0,
+  'a bounded and caught one is not',
+  'a guarded assignment was reported',
+)
+
+chk(
+  run({
+    'assign-body.mjs': [`const text = await page.locator('body').innerText()`, ''].join('\n'),
+  }).counts?.assigns === 0,
+  'and a read on `body` is not — body always exists, so it cannot wait or throw',
+  'a read on body was reported',
+)
+
+chk(
+  run({
+    'assign-ternary.mjs': [
+      `const t = there ? (await page.getByTestId('row').innerText()).trim() : ''`,
+      '',
+    ].join('\n'),
+  }).counts?.assigns === 0,
+  'nor one behind a ternary — that IS the short-circuit rule one declined to gate',
+  'a ternary-guarded read was reported',
+)
+
+chk(
+  run({
+    'assign-evalall.mjs': [
+      `const ids = await page.locator('[data-testid^="row-"]').evaluateAll((els) => els.map((e) => e.getAttribute('id')))`,
+      '',
+    ].join('\n'),
+  }).counts?.assigns === 0,
+  'nor an evaluateAll, which answers [] on no match rather than waiting',
+  'an evaluateAll was reported',
+)
+
+chk(
+  run({
+    'assign-wait.mjs': [
+      `const ok = await waitUntil(async () => {`,
+      `  const c = await page.getByTestId('row').getAttribute('class')`,
+      `  return c !== null`,
+      `}, { timeoutMs: 8000 })`,
+      '',
+    ].join('\n'),
+  }).counts?.assigns === 0,
+  'nor one inside a waitUntil predicate, which catches its own throws',
+  'a read inside a waitUntil predicate was reported',
 )
 
 console.log('\n▶ rule seven — a throwing read at the HEAD of a condition')
@@ -757,7 +839,10 @@ if (process.argv.includes('--mutate')) {
     ['the guard window borrows the next STATEMENT’s catch again', 'for (let j = i + 1; j < lines.length && /^\\s*\\./.test(lines[j]); j++) out += ` ${lines[j]}`', 'for (let j = i + 1; j < Math.min(i + 2, lines.length); j++) out += ` ${lines[j]}`'],
     ['“inside a waitUntil” goes back to proximity', "for (const ch of [lines[s].slice(at), ...lines.slice(s + 1, i + 1)].join('\\n'))\n      depth += ch === '(' ? 1 : ch === ')' ? -1 : 0", 'depth = 1'],
     ['“inside a waitUntil” stops sparing the predicate', 'return depth > 0', 'return false'],
-    ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - files - messages', 'rows.length - gates - boxes - sames - sections - files'],
+    ['rule nine stops requiring the read to throw', "if (!THROWS.test(stmt)) continue\n    if (/\\.catch\\(|timeout:/.test(stmt)) continue\n    if (/locator\\(\\s*['\"`]body['\"`]\\s*\\)/.test(stmt)) continue", 'if (!THROWS.test(stmt)) continue'],
+    ['rule nine forgets that a ternary short-circuits', "if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page/.test(stmt)) continue", 'if (false) continue'],
+    ['rule nine forgets that evaluateAll cannot throw', "if (/\\.evaluateAll\\(/.test(stmt)) continue", 'if (false) continue'],
+    ['the summary drops a rule from the press subtraction', 'rows.length - gates - boxes - sames - sections - files - messages - leadReads.length - assigns', 'rows.length - gates - boxes - sames - sections - files - messages - leadReads.length'],
   ]
   console.log('\n▶ and each mutation of the checker reddens a case')
   for (const [label, from, to] of MUTATIONS) {
