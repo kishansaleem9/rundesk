@@ -194,7 +194,7 @@ try {
   const complete = page.getByTestId('task-status-complete')
   // The statuses arrive over the wire; poll the attribute the check reads
   // rather than a container that is rendered either way.
-  await waitUntil(async () => (await next.getAttribute('data-next-status')) === 'cooking', { timeoutMs: 20_000 })
+  await waitUntil(async () => (await next.getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)) === 'cooking', { timeoutMs: 20_000 })
 
   console.log('\n▶ frame `15:20` — the ▶ and the ✓ exist at all')
   chk(
@@ -209,14 +209,16 @@ try {
   )
 
   console.log("\n▶ and both resolve against THIS LIST's pipeline")
-  const nextKey = await next.getAttribute('data-next-status')
+  // `.catch` because `ths-7-buttons-absent` removes the buttons these read, and
+  // the run ended at 6 of 15 on the first of them.
+  const nextKey = await next.getAttribute('data-next-status').catch(() => null)
   chk(
     nextKey === 'cooking',
     'the advance button will write `cooking` — the list\'s own second status',
     `it will write "${nextKey}"; on a list of Icebox/Cooking/Shipped/Binned the only ` +
       'right answer from Icebox is `cooking`',
   )
-  const completeKey = await complete.getAttribute('data-complete-status')
+  const completeKey = await complete.getAttribute('data-complete-status').catch(() => null)
   chk(
     completeKey === 'shipped',
     'and the ✓ will write `shipped` — the FIRST status in the closed category',
@@ -248,8 +250,8 @@ try {
    * pass the check above and write `cooking` again here. The second press has
    * to land on `shipped`, which is a different key from the first.
    */
-  await waitUntil(async () => (await next.getAttribute('data-next-status')) === 'shipped', { timeoutMs: 15_000 })
-  const secondKey = await next.getAttribute('data-next-status')
+  await waitUntil(async () => (await next.getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)) === 'shipped', { timeoutMs: 15_000 })
+  const secondKey = await next.getAttribute('data-next-status').catch(() => null)
   chk(
     secondKey === 'shipped',
     'from `cooking` the same button now offers `shipped` — it reads the current status, not a constant',
@@ -264,9 +266,9 @@ try {
     `the second press left the server on "${(await A(`/tasks/${task.id}`)).data?.status}"`)
 
   console.log('\n▶ the ✓ is off once the task is already closed, and the ▶ stops at the end')
-  await waitUntil(async () => (await complete.getAttribute('data-already-complete')) === 'true', { timeoutMs: 15_000 })
+  await waitUntil(async () => (await complete.getAttribute('data-already-complete', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 15_000 })
   chk(
-    (await complete.getAttribute('data-already-complete')) === 'true'
+    (await complete.getAttribute('data-already-complete').catch(() => null)) === 'true'
       && (await complete.isDisabled().catch(() => false)),
     'a task on a closed status cannot be "marked complete" again',
     'the ✓ is still live on a closed task, so pressing it writes the status it already has',
@@ -279,7 +281,7 @@ try {
     `PATCH to "${binned.key}" answered ${moved.status} ${moved.error ?? ''}`)
   await openTask()
   const atEnd = await waitUntil(
-    async () => (await page.getByTestId('task-status-next').getAttribute('data-next-status')) === '',
+    async () => (await page.getByTestId('task-status-next').getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)) === '',
     { timeoutMs: 20_000 },
   )
   chk(
