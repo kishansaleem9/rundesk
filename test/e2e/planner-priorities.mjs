@@ -19,10 +19,19 @@
  * codebase's most productive bug, so both surfaces now go through
  * `lib/use-priorities`. They were ALSO reading the same endpoint under two
  * different React Query keys — `person-priorities` and `planner-priorities` —
- * so a write in one left the other stale; that is now one key, and this suite
- * checks it by writing in the rail and reading the person panel — through the
- * APP, in the same page, which is the only reading that can see a cache key at
- * all. It used to say that and call the endpoint directly instead.
+ * so a write in one left the other stale; that is now one key.
+ *
+ * THE KEY ITSELF IS PINNED BY A UNIT TEST, not by this suite, and that is a
+ * correction of two earlier attempts. The first claimed to read "the person
+ * panel's own query through the app" and called the endpoint directly, which
+ * goes nowhere near a cache. The second really did read the panel through the
+ * app — and a break patch that gave the panel its own key ran GREEN, because
+ * the panel MOUNTS when it opens, which is after the write, and a fresh mount
+ * fetches. There is no moment at which this screen can show a stale panel.
+ * `apps/web/src/lib/use-priorities.test.ts` asserts the one key instead.
+ *
+ * What this suite proves is that both surfaces answer about the same list, and
+ * that every control in the rail reaches the server.
  *
  * AGAINST THE REAL STACK: every assertion is about a row that survived the
  * round trip, which is the whole difference between a control and a readout.
@@ -171,9 +180,28 @@ try {
   )
 
   /*
-   * And this one is the cache's: the person panel, opened in the same page
-   * with no reload, showing what the rail wrote. Two query keys over one
-   * endpoint fail here and nowhere else.
+   * And this one is the panel's: opened in the same page, with no reload,
+   * showing what the rail wrote.
+   *
+   * IT IS NOT THE CACHE-KEY CHECK, AND THE FIRST VERSION OF THIS COMMENT SAID
+   * IT WAS. `planner-priorities-1` — which puts the panel back on its own
+   * React Query key — ran GREEN against it, and the reason is the panel's
+   * lifecycle rather than anything about keys: the panel is MOUNTED when it
+   * opens, which is after the write, and a `useQuery` whose key holds no data
+   * fetches on mount. With React Query's default `staleTime: 0` even a
+   * populated key refetches on remount. There is no moment at which this
+   * screen can show a stale panel, because the panel does not exist until
+   * after the thing that would have made it stale.
+   *
+   * So "one cache entry, not two" is not observable from a browser here at
+   * all, and a check that claims it would be a stale reason of exactly the
+   * kind this audit exists to find. The key is pinned by a unit test instead —
+   * `apps/web/src/lib/use-priorities.test.ts` — which is where a fact about
+   * source belongs.
+   *
+   * What this check does prove is worth keeping on its own: the panel and the
+   * rail answer about the same list, so a panel pointed at a different
+   * endpoint, or reading a different person, fails here.
    */
   await page.getByTestId('user-menu').click()
   await page.waitForTimeout(700)
@@ -183,7 +211,7 @@ try {
       async () => (await readText(page.getByTestId('person-priorities'))).includes(TITLE),
       { timeoutMs: 12_000 },
     ),
-    'and the person panel shows it without a reload — one cache entry, not two',
+    'and the person panel lists it too — both surfaces answer about the same list',
     'the panel opened on a list that does not have the priority the rail just wrote',
   )
   await page.keyboard.press('Escape')

@@ -31,7 +31,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 12
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const WEB = path.join(ROOT, 'apps/web')
@@ -73,6 +73,18 @@ const BASE = `http://127.0.0.1:${server.address().port}`
 const WS = '5a842aa9-cede-423a-ae26-bb4ba074849f'
 const OPEN_SPACE = '11111111-1111-4111-8111-111111111111'
 const SHUT_SPACE = '99999999-9999-4999-8999-999999999999'
+/*
+ * A space whose stored map PREDATES some of the keys — written when `priority`
+ * was the only switch there was.
+ *
+ * `useSpaceFeatures` merges the stored map over ALL_SPACE_FEATURES rather than
+ * using it directly, and says why: "a stored map written before a new feature
+ * key existed must not read as 'that new feature is off'." Nothing exercised
+ * that. Both fixtures above carry either NO map or a COMPLETE one, so
+ * `{ ...ALL, ...stored }` and `stored` are the same answer for each of them —
+ * the merge could have been deleted with this suite green.
+ */
+const PARTIAL_SPACE = '77777777-7777-4777-8777-777777777777'
 const PROJECT = '22222222-2222-4222-8222-222222222222'
 const LIST = '33333333-3333-4333-8333-333333333333'
 
@@ -96,6 +108,8 @@ const SPACES = [
     id: SHUT_SPACE, name: 'Shut', workspaceId: WS, viewConfig: null,
     features: { priority: false, tags: false, customFields: false, milestones: false, wipLimits: false, listEmail: false },
   },
+  // One key, switched off. Every other key is ABSENT, not false.
+  { id: PARTIAL_SPACE, name: 'Partial', workspaceId: WS, viewConfig: null, features: { priority: false } },
 ]
 
 const TASKS = [
@@ -200,6 +214,31 @@ try {
     shut.toolbar.includes('Backlog'),
     'and it is still the same list',
     'the list name was not on screen — this run was not looking at the list',
+  )
+
+  /*
+   * ── A STORED MAP THAT PREDATES A KEY ──────────────────────────────────────
+   *
+   * `useSpaceFeatures` merges over ALL_SPACE_FEATURES so an ABSENT key reads as
+   * ON, and the two fixtures above could not tell that apart from using the
+   * stored map directly: one has no map and the other has a complete one. The
+   * merge could have been deleted with this suite green — the same defect as a
+   * switch that writes a column nobody reads, one level in.
+   *
+   * This space says `{ priority: false }` and nothing else, which is what a row
+   * written before `listEmail` existed looks like.
+   */
+  console.log('\n▶ and a map written before a key existed does not switch it off')
+  const partial = await inspect(PARTIAL_SPACE)
+  chk(
+    !partial.groupOptions.some((o) => /priorit/i.test(o)),
+    'the key the map names is honoured — Priority is gone',
+    `the group-by still offered ${JSON.stringify(partial.groupOptions)}`,
+  )
+  chk(
+    partial.emailButton === 1,
+    'and a key the map never mentions stays ON — Email to List is still there',
+    'an absent key read as "off", so every space stored before a new switch shipped loses it',
   )
 } catch (e) {
   failed += 1

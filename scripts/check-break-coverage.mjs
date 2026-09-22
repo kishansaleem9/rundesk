@@ -17,13 +17,20 @@
  * patches were counted as having none. The pile of unattributed patches was
  * sitting in the output the whole time as a number in brackets.
  *
- * Fifteen have been closed since — `task-menu`, `custom-field-progress`,
- * `list-export`, `task-merge`, `comment-recording`, `view-visibility` and
- * `list-name-taken`, `checklists`, `ai-value`, `planner-blocks` and
- * `login-workspace-binding`, `space-presets` and `doc-task-links` — so the
- * ratchet stands at 37. The count printed is always
- * the current one; the paragraph above is what it was when anybody first
- * looked.
+ * Twenty-eight have been closed since — `task-menu`, `custom-field-progress`,
+ * `list-export`, `task-merge`, `comment-recording`, `view-visibility`,
+ * `list-name-taken`, `checklists`, `ai-value`, `planner-blocks`,
+ * `login-workspace-binding`, `space-presets`, `doc-task-links`,
+ * `malformed-ids`, `trending-sort`, `undo-delete`, `task-provenance`,
+ * `search-sources`, `bookmarks`, `list-statuses-seeded`, `list-save-view`,
+ * `replies-inline-thread`, `request-access`, `planner-priorities`,
+ * `space-features` and `assign-to-priorities` among them — so the ratchet
+ * stands at 19. The count printed is always the current one; the paragraph
+ * above is what it was when anybody first looked.
+ *
+ * KEEP THIS PARAGRAPH IN STEP WITH THE CONSTANT. It said 37 while the constant
+ * said 27, which is the stale-reason defect in the file that exists to stop a
+ * number describing something it no longer describes.
  *
  * A suite with no patch is not a suite that failed. It is a suite about which
  * nothing is known: every one of its checks may be a facade, and being green
@@ -167,7 +174,7 @@ if (unattributedNames.length) {
 }
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 27
+const BASELINE_UNCOVERED = 19
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
