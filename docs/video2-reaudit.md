@@ -3784,6 +3784,77 @@ fourteen model calls. That last one is the failure that shows up on an invoice
 rather than in a screenshot, and the only check that can see it is the one
 counting requests.
 
+### The claims that were correct and unread
+
+`check-break-claims.mjs` reported 87 patches as "unverifiable (unit claims, or
+no quoted sentence)". Asking what those 87 actually contain turned up two
+separate reasons a CORRECT claim went unchecked, and only three of the 87 were
+what the label said.
+
+**Eleven claims were truncated.** `reddensBlock` treats a `#` line with two or
+more spaces of indent as a continuation, which is what keeps a following
+paragraph out of the block. Eleven patches wrote theirs with ONE space, so the
+parser stopped at the first line:
+`teams-person-cards-2-confident-zero`'s block ended
+`"the first person's row holds the first person's` — an unterminated quote — and
+the two further sentences on the next line were never read. Re-indented, six of
+the eleven became VERIFIED with no change to what they claim.
+
+**Twenty-nine quoted with single quotes.** `tai-*`, `tat-*` and `tmn-*` write
+`# Reddens: task-mentions -- 'the row itself says why'`, which is a quoted check
+sentence by any reading, and the matcher only looked for double quotes.
+Twenty-six of the twenty-nine verified the moment it was allowed to see them —
+no rewriting at all. **A claim that is quoted, correct and unread is the worst
+of the three states here: it looks checked.**
+
+The apostrophe is why that was not done first, and the hazard is real — `the
+first person's row holds the first person's work` has two, and a naive scan
+reads the span between them. An opening `'` must follow the start, whitespace or
+a bracket; a closing one must precede the end, whitespace or punctuation. A
+possessive fails both, because it sits against word characters on the inside.
+Measured over all 798 patches: it finds the 29 and none of the possessives.
+
+The three that still did not verify were each eliding an interpolation.
+`tmn-4` wrote `Whiteboard:Board TAG` where the file has `Whiteboard:Board
+${TAG}`; `tai-8` wrote `the hint reads ... both halves`, the ellipsis standing
+in for the value the sentence interpolates. Both now quote the literal part.
+
+**740 verified, up from 706; 53 unverifiable, down from 87.** Five ratchet
+numbers, all at zero, two of them new and both break-tested.
+
+### Conditional check blocks: 55 → 0
+
+Every one of the 113 suites now reports the same number of checks whichever way
+it goes. `video1-fast-items` had fifteen, `syncup-live` ten, `video-regression`
+nine, `ui-sweep` seven, `panel-collapse` six, `task-depth` four,
+`addressability-live` four, `person-panel` two, and one each in `emoji-picker`,
+`loading-states` and `stale-chunk-recovery`.
+
+Every balanced suite was re-run and its count held — `video1-fast-items` 92,
+`task-depth` 91, `ui-sweep` 107, `panel-collapse` 56, `video-regression` 93,
+`person-panel` 59, `loading-states` 26. That is the point of the fix: the happy
+path reports the number it always did, and a refactor that quietly changed it
+would be the defect this sweep is about. `syncup-live` is the one that moved,
+48 → 59, because a floor became an exact count with skips included.
+
+Three things turned up on the way that were not the shape being fixed:
+
+- **A heuristic that cannot see a fix keeps reporting one.**
+  `loading-states` balanced its panel loop with an early `continue` rather than
+  an `else`, and the checker kept flagging it because it matches the SHAPE.
+  Written as `if/else` instead — the alternative is a permanent known-false
+  entry in a list whose whole value is that every line in it is worth reading.
+- **A check whose sentence was a statement about the fixture.** `ui-sweep`'s
+  "two members with unambiguous names to drive the cycle with" failed when the
+  workspace could not supply a pair, naming nothing in the product and leaving
+  the run a check shorter than the path beside it. A reason belongs in the
+  detail.
+- **A counted skip for a gate on the INVOCATION.** `video-regression`'s `API`
+  client only exists when the suite discovered the workspace itself, so given
+  `WS` in the environment two checks could not be arranged — and the run's
+  length then depended on how it was invoked, which under `!==` means one of
+  the two invocations had to be wrong about the count.
+
 ### Two more checkers, and two shared modules
 
 - **`scripts/check-suite-check-branches.mjs`** — the conditional-check ratchet

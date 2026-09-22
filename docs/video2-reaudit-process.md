@@ -784,6 +784,29 @@ as the same defects one level up.
   whose later checks depend on an earlier one reports them as failed with the
   reason (same as any other branch, same number of checks), and the harness
   names a run that printed no summary instead of inferring one.
+- **A CLAIM THAT IS QUOTED, CORRECT AND UNREAD IS THE WORST OF THE THREE
+  STATES: IT LOOKS CHECKED.** 87 patches were reported as "no quoted sentence"
+  and only three of them were. Eleven had their claim TRUNCATED, because
+  `reddensBlock` wants two spaces of indent on a continuation line and they
+  used one — `teams-person-cards-2`'s block ended on an unterminated quote and
+  the rest of the sentence was never read. Twenty-nine QUOTED WITH SINGLE
+  QUOTES, and 26 verified the moment the matcher was allowed to see them, with
+  no rewriting. **When a checker reports a large "cannot tell" bucket, read the
+  bucket.** The label is a hypothesis about its contents, and here it was wrong
+  about 96% of them.
+- **AND A SINGLE-QUOTE SCAN MUST GUARD THE APOSTROPHE.** `the first person's
+  row holds the first person's work` has two, and a naive scan reads the span
+  BETWEEN them — `s row holds the first person`, which is not a sentence and
+  would be reported as a claim no suite contains. An opening `'` must follow
+  the start, whitespace or a bracket; a closing one must precede the end,
+  whitespace or punctuation. A possessive fails both, because it sits against
+  word characters on the inside.
+- **A CHECK WHOSE SENTENCE IS A STATEMENT ABOUT THE FIXTURE IS NOT A CHECK.**
+  `ui-sweep` had `check(false, 'two members with unambiguous names to drive the
+  cycle with', …)` in the branch where the workspace could not supply a pair.
+  It names nothing in the product, it fails for a reason the reader cannot act
+  on, and it left the run a check shorter than the path beside it. **The reason
+  goes in the detail; the claim stays a claim about the product.**
 - **A CLAIM MUST QUOTE THE LITERAL PART OF A TEMPLATE-LITERAL CHECK, NOT THE
   RENDERED SENTENCE.** `${script} publishes through publish_web_dist` is in the
   file as `publishes through publish_web_dist`; a claim quoting
