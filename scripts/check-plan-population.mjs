@@ -39,6 +39,19 @@
  * nothing, agree perfectly, and this would exit 0 — a check that cannot fail
  * dressed as a passing one.
  *
+ * IT READS TWO TOOLS AT TWO INSTANTS, so while a sweep is in flight it can
+ * disagree with itself. `wt-break.sh` truncates `brk-<patch>.log` at the start
+ * of each patch run and appends to the per-suite log at the end, so a patch can
+ * be in one state when `never-run-plan.mjs` reads it and another when
+ * `check-break-reddened.mjs` does a second later. Observed once: exit 1 with no
+ * difference printed, then exit 0 immediately after.
+ *
+ * NOT FIXED BY SNAPSHOTTING, because the thing being compared is what the two
+ * tools SAY, and freezing their input would mean re-deriving it here — which is
+ * the one thing this file must not do. The final preflight runs against a quiet
+ * tree, where there is nothing to race. A failure here while the chain is
+ * running is worth re-running once before believing.
+ *
  *   node scripts/check-plan-population.mjs
  */
 import { spawnSync } from 'node:child_process'
