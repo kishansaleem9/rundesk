@@ -39,6 +39,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -162,6 +163,7 @@ const LAUNCH = {
 
 let passed = 0
 let failed = 0
+let skipped = 0
 const check = (ok, label, detail = '') => {
   if (ok) {
     passed++
@@ -171,52 +173,91 @@ const check = (ok, label, detail = '') => {
     console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`)
   }
 }
+
 /*
- * How many checks a complete run performs.
+ * A SKIPPED CHECK IS COUNTED, AND THAT IS WHAT LETS THIS SUITE COMPARE EXACTLY.
+ *
+ * This file used to be the one suite in `test/e2e` keeping a FLOOR (`<`) rather
+ * than an exact count, and its own comment argued the exception at length: five
+ * checks are conditional on the MACHINE rather than on the app — two speaker
+ * checks that need a routable audio output, the recording checks that need a
+ * configured bucket — so 53 here and 48 on a headless runner, and "an exact
+ * comparison has to be wrong on one of them".
+ *
+ * There was a third option it did not consider. A check that cannot run is not
+ * ABSENT, it is UNKNOWN, and an unknown outcome can be reported and counted
+ * like any other. So a skip goes into the run total and prints as SKIP: the
+ * total is the same number on every machine, `!==` catches a branch that
+ * vanished silently, and a soundcard-less runner still exits 0 because a skip
+ * is not a failure.
+ *
+ * ONLY FOR THE MACHINE, NEVER FOR THE PRODUCT. If the speaker picker is absent
+ * from a browser that HAS outputs, that is a defect and it fails; if the
+ * browser has no outputs, nothing can be asked. The distinction is the whole
+ * value of the mechanism — a skip reachable by a product regression is a check
+ * that cannot fail, which is what the floor was.
+ */
+const skip = (label, why) => {
+  skipped++
+  console.log(`  SKIP  ${label} — ${why}`)
+}
+
+const chain = makeChain(check, skip)
+
+/*
+ * How many checks a complete run performs — EXACTLY, compared with `!==`.
  *
  * "0 failed" is not the same as "it ran". A suite that bails out early — a
  * selector that silently matched nothing, a page that never loaded, an exit
  * taken before the interesting half — reports a clean sweep of whatever it
- * managed to reach, and that reads exactly like success. This run took
- * thirteen seconds on a CI runner and forty here, which is a difference nobody
- * should have to squint at a stopwatch to interpret.
+ * managed to reach, and that reads exactly like success.
  *
- * Raise this when checks are added. Failing on the floor is the point: a suite
- * that quietly shrinks is the most expensive kind of green.
+ * THIS USED TO BE THE ONE SUITE KEEPING A FLOOR, AND THE EXCEPTION WAS WRONG.
+ * The argument was careful and it reached the wrong conclusion. Five checks are
+ * conditional on the machine rather than on the app, so a full local run did 53
+ * and a headless runner 48, and the comment concluded: "If you are tempted to
+ * make this exact: the number is not one number. It is 48 on a headless runner
+ * and 53 here, and an exact comparison has to be wrong on one of them."
  *
- * A full local run performs 53. The floor is five lower because five of them
- * are conditional on the machine rather than on the app, and skipping those is
- * not the suite shrinking: two speaker-picker checks that need a routable audio
- * output, and three recording checks that need the AI Notes entitlement. Set
- * the floor at 53 and a perfectly healthy CI runner fails for having no
- * soundcard.
+ * There was a third option. A check that cannot run is not ABSENT, it is
+ * UNKNOWN — and an unknown outcome can be reported and COUNTED like any other.
+ * `skip()` above does that, so the total is 58 on every machine and `!==`
+ * works. A soundcard-less runner still exits 0, because a skip is not a
+ * failure; a branch that vanished silently now fails, which is what the floor
+ * could never do.
  *
- * THIS IS THE ONE SUITE THAT KEEPS A FLOOR, AND IT IS DELIBERATE. Every other
- * suite in `test/e2e` compares with `!==`, because `<` lets a run that skipped
- * a branch report "0 failed" — the trap `docs/video2-reaudit-process.md` names
- * first. A sweep converted all 65 to exact; this file was the only one where
- * that was wrong, and it failed with "only 53 of 48 checks ran" while being
- * perfectly healthy, because the local machine HAS a soundcard and the
- * entitlement. The five conditional checks are the reason, and they are named
- * above so the exception can be checked rather than believed.
+ * AND THE EXCEPTION NAMED THE WRONG FIVE. It said "two speaker-picker checks
+ * that need a routable audio output, and three recording checks that need the
+ * AI Notes entitlement". Observed from a run on this machine, the five that
+ * skip are all ONE gate — the storage chain, because no bucket is configured
+ * (`upload-url -> 400`). The speaker picker and the recording entitlement both
+ * ran as real checks. The floor of 48 was 53 minus five checks that were not
+ * the five it described, which is the stale reason in a comment that exists to
+ * justify an exception.
  *
- * If you are tempted to make this exact: the number is not one number. It is
- * 48 on a headless runner and 53 here, and an exact comparison has to be wrong
- * on one of them.
+ * 58 = 53 checks that ran plus the 5 the deployment cannot answer. Observed,
+ * not derived: `53 passed, 0 failed, 5 skipped`. Raise it when checks are
+ * added, and add a `skip` for any new gate on the machine so it stays one
+ * number.
  */
-const EXPECTED_CHECKS = 48
+const EXPECTED_CHECKS = 58
 
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
   stack?.close()
-  const ran = passed + failed
-  console.log(`\n${passed} passed, ${failed} failed`)
-  // A FLOOR, not an equality — see the comment on EXPECTED_CHECKS. Running
-  // MORE than the floor is the healthy machine doing the five conditional
-  // checks as well; running fewer is the suite shrinking.
-  if (ran < EXPECTED_CHECKS) {
+  const ran = passed + failed + skipped
+  console.log(`\n${passed} passed, ${failed} failed${skipped ? `, ${skipped} skipped` : ''}`)
+  /*
+   * EXACT, NOT A FLOOR, and a skipped check is what makes that possible — see
+   * the comment on `skip` above. `ran` counts skips, so the total is the same
+   * number on a machine with a soundcard and one without, and `!==` catches a
+   * branch that vanished silently rather than reporting on whatever half it
+   * reached. The `N passed, M failed` prefix is kept exactly as it was because
+   * `scripts/e2e-lanes/break-queue.sh` parses it.
+   */
+  if (ran !== EXPECTED_CHECKS) {
     console.log(
-      `\n✗ only ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
+      `\n✗ ${ran} of ${EXPECTED_CHECKS} checks ran — this run stopped early, ` +
         'so "0 failed" describes the part it reached and nothing else.',
     )
     process.exit(1)
@@ -453,18 +494,26 @@ const routable = await A.page.evaluate(async () => {
   if (!supported) return 0
   return (await navigator.mediaDevices.enumerateDevices()).filter((d) => d.kind === 'audiooutput').length
 })
-if (routable > 0) {
+const speakerChain = chain(
+  'and offers a speaker beside the mic and camera',
+  'with the outputs this machine actually has',
+)
+if (routable === 0) {
+  // THE MACHINE, not the product — counted as SKIP so the total is the same
+  // number here and on a runner with no soundcard. See `skip` above.
+  speakerChain.skipRest('no routable audio output in this browser, so nothing can be asked')
+} else {
   const speaker = A.page.locator('[data-testid="call-prejoin-speaker-select"]')
   const hasSpeaker = await speaker.isVisible().catch(() => false)
-  check(hasSpeaker, 'and offers a speaker beside the mic and camera', 'no output picker in the pre-join')
-  if (hasSpeaker) {
+  speakerChain.step(hasSpeaker, 'no output picker in the pre-join')
+  if (!hasSpeaker) {
+    // The product, not the machine: this browser HAS outputs and the app is
+    // not offering them. That is a failure, not an unknown.
+    speakerChain.rest('skipped: there was no output picker to read')
+  } else {
     const options = await speaker.locator('option').count()
-    check(options > 1, 'with the outputs this machine actually has', `only ${options} option in the speaker list`)
+    speakerChain.step(options > 1, `only ${options} option in the speaker list`)
   }
-} else {
-  // Said out loud rather than skipped silently: a run that never checked is
-  // not a run that passed, and a green line here would claim otherwise.
-  console.log('  · no routable audio outputs in this browser — speaker picker not applicable')
 }
 
 /*
@@ -477,14 +526,20 @@ if (routable > 0) {
  */
 const micMeter = A.page.locator('[data-testid="call-prejoin-mic-level"]')
 const hasMeter = await micMeter.isVisible().catch(() => false)
-check(hasMeter, 'and shows whether the microphone is hearing you', 'no input-level meter in the pre-join')
-if (hasMeter) {
+const meterChain = chain(
+  'and shows whether the microphone is hearing you',
+  'with a level that moves with the input',
+)
+meterChain.step(hasMeter, 'no input-level meter in the pre-join')
+if (!hasMeter) {
+  meterChain.rest('skipped: there was no meter to watch')
+} else {
   let peak = 0
   for (let i = 0; i < 20 && peak === 0; i += 1) {
     peak = Number(await micMeter.getAttribute('aria-valuenow')) || 0
     if (peak === 0) await A.page.waitForTimeout(150)
   }
-  check(peak > 0, `with a level that moves with the input (${peak}%)`, 'the meter never left zero')
+  meterChain.step(peak > 0, 'the meter never left zero', `with a level that moves with the input (${peak}%)`)
 }
 
 /*
@@ -505,12 +560,27 @@ if (hasMeter) {
  */
 const bgPicker = A.page.locator('[data-testid="call-prejoin-backgrounds"]')
 const hasBgPicker = await bgPicker.isVisible().catch(() => false)
-check(hasBgPicker, 'the pre-join offers a background to choose', 'no background picker in the pre-join')
+/*
+ * FOUR CHECKS, AND THE LAST OF THEM IS IN THE NEXT SECTION.
+ *
+ * "and the background chosen in the pre-join survives into the call" is the
+ * half nothing else sees — a picker that works and a call that ignores it is a
+ * feature that demos perfectly and does nothing. It was guarded by
+ * `if (hasBgPicker && surfaced)`, so losing the picker took the check with it
+ * rather than failing it, which is the shape that hides exactly this defect.
+ */
+const bgChain = chain(
+  'the pre-join offers a background to choose',
+  'with more than one to pick from',
+  'and choosing one changes the preview',
+  'and the background chosen in the pre-join survives into the call',
+)
+bgChain.step(hasBgPicker, 'no background picker in the pre-join')
 
 const PREJOIN_TINT = 'rgb(12, 33, 93)' // #0c215d — BACKGROUND_TINT.navy
 if (hasBgPicker) {
   const swatches = await bgPicker.locator('button').count()
-  check(swatches >= 3, `with more than one to pick from (${swatches})`, `only ${swatches} background swatch(es)`)
+  bgChain.step(swatches >= 3, `only ${swatches} background swatch(es)`, `with more than one to pick from (${swatches})`)
 
   // The preview's own container is what carries the tint.
   const previewTint = () =>
@@ -532,7 +602,7 @@ if (hasBgPicker) {
     )
     .then(() => true)
     .catch(() => false)
-  check(applied, 'and choosing one changes the preview', `preview stayed ${before} — picking Navy painted nothing`)
+  bgChain.step(applied, `preview stayed ${before} — picking Navy painted nothing`)
 }
 
 await A.page.locator('[data-testid="call-prejoin-join"]').click()
@@ -578,7 +648,13 @@ if (hasBgPicker && surfaced) {
     )
     .then(() => true)
     .catch(() => false)
-  check(carried, 'and the background chosen in the pre-join survives into the call', 'the call ignored the pre-join choice')
+  bgChain.step(carried, 'the call ignored the pre-join choice')
+} else {
+  bgChain.rest(
+    hasBgPicker
+      ? 'skipped: the call surface never rendered, so the tint could not be looked for'
+      : 'skipped: there was no picker, so nothing was chosen to carry',
+  )
 }
 
 // ---------------------------------------------------------------------------
@@ -769,14 +845,24 @@ const isScreen = (label) => !!label && /screen|window|display|tab/i.test(label)
 
 const shareBtn = A.page.locator('[data-testid="call-share"]')
 const hasShare = await shareBtn.isVisible().catch(() => false)
-check(hasShare, 'the call offers screen share', 'no share control in the call footer')
+const shareChain = chain(
+  'the call offers screen share',
+  'A is sending their camera before sharing',
+  'and sharing puts the screen on the wire, not just on the button',
+  'with the control showing that it is on',
+  'and B never loses the picture while the track is swapped',
+  'and stopping the share gives the camera back',
+)
+shareChain.step(hasShare, 'no share control in the call footer')
 
-if (hasShare) {
+if (!hasShare) {
+  shareChain.rest('skipped: there was no share control to press')
+} else {
   const camLabel = await outgoingVideoLabel(A.page)
-  check(
+  shareChain.step(
     camLabel !== null && !isScreen(camLabel),
-    `A is sending their camera before sharing (${camLabel ?? 'no sender'})`,
     'no outgoing video sender to swap — the rest of this section would prove nothing',
+    `A is sending their camera before sharing (${camLabel ?? 'no sender'})`,
   )
 
   await shareBtn.click()
@@ -789,14 +875,13 @@ if (hasShare) {
     if (isScreen(shareLabel)) break
     await A.page.waitForTimeout(250)
   }
-  check(
+  shareChain.step(
     isScreen(shareLabel),
-    `and sharing puts the screen on the wire, not just on the button (${shareLabel ?? 'no sender'})`,
     `the outgoing track is still ${shareLabel ?? 'missing'} — nothing was shared with anyone`,
+    `and sharing puts the screen on the wire, not just on the button (${shareLabel ?? 'no sender'})`,
   )
-  check(
+  shareChain.step(
     (await shareBtn.getAttribute('aria-pressed')) === 'true',
-    'with the control showing that it is on',
     'the share button does not report its own state',
   )
 
@@ -812,7 +897,7 @@ if (hasShare) {
     )
     .then(() => true)
     .catch(() => false)
-  check(stillPainting, 'and B never loses the picture while the track is swapped', 'B went black when A shared')
+  shareChain.step(stillPainting, 'B went black when A shared')
 
   await shareBtn.click()
   let backLabel = null
@@ -821,10 +906,10 @@ if (hasShare) {
     if (backLabel !== null && !isScreen(backLabel)) break
     await A.page.waitForTimeout(250)
   }
-  check(
+  shareChain.step(
     backLabel !== null && !isScreen(backLabel),
-    `and stopping the share gives the camera back (${backLabel ?? 'no sender'})`,
     `still sending ${backLabel ?? 'nothing'} after stopping — the camera never came back`,
+    `and stopping the share gives the camera back (${backLabel ?? 'no sender'})`,
   )
 }
 
@@ -838,15 +923,26 @@ if (hasShare) {
  */
 const reactBtn = A.page.locator('[data-testid="call-react"]')
 const hasReact = await reactBtn.isVisible().catch(() => false)
-check(hasReact, 'the call offers reactions', 'no reaction control in the call footer')
+const reactChain = chain(
+  'the call offers reactions',
+  'and opens a picker over the tiles',
+  'with emoji in it to choose from',
+  'A sees their own reaction',
+  'and it reaches the other person in the call',
+)
+reactChain.step(hasReact, 'no reaction control in the call footer')
 
-if (hasReact) {
+if (!hasReact) {
+  reactChain.rest('skipped: there was no reaction control to press')
+} else {
   await reactBtn.click()
   const picker = A.page.locator('[data-testid="call-reaction-picker"]')
   const pickerUp = await picker.waitFor({ timeout: 8000 }).then(() => true).catch(() => false)
-  check(pickerUp, 'and opens a picker over the tiles', 'the reaction picker never appeared')
+  reactChain.step(pickerUp, 'the reaction picker never appeared')
 
-  if (pickerUp) {
+  if (!pickerUp) {
+    reactChain.rest('skipped: the picker never opened')
+  } else {
     /*
      * `button[data-emoji]`, not `button` — the first button in this picker is
      * the skin-tone control, and clicking it opens a submenu and sends nothing.
@@ -859,7 +955,7 @@ if (hasReact) {
      */
     const firstEmoji = picker.locator('button[data-emoji]').first()
     const gridReady = await firstEmoji.waitFor({ timeout: 15000 }).then(() => true).catch(() => false)
-    check(gridReady, 'with emoji in it to choose from', 'the picker opened but its catalog never loaded')
+    reactChain.step(gridReady, 'the picker opened but its catalog never loaded')
 
     // The rendered character, which is what gets sent — `data-emoji` is the
     // base, and a skin tone is applied on the way out.
@@ -880,10 +976,13 @@ if (hasReact) {
         .then(() => true)
         .catch(() => false)
 
-    check(await overlayHas(A.page), `A sees their own reaction (${emoji || 'an emoji'})`, 'nothing floated over A’s tiles')
-    check(
+    reactChain.step(
+      await overlayHas(A.page),
+      'nothing floated over A’s tiles',
+      `A sees their own reaction (${emoji || 'an emoji'})`,
+    )
+    reactChain.step(
       await overlayHas(B.page),
-      'and it reaches the other person in the call',
       'the reaction never left the sender — everybody else saw nothing',
     )
   }
@@ -900,20 +999,29 @@ if (hasReact) {
  */
 const minBtn = A.page.locator('[data-testid="call-minimise"]')
 const hasMin = await minBtn.isVisible().catch(() => false)
-check(hasMin, 'the call can be minimised', 'no minimise control in the call header')
+const minChain = chain(
+  'the call can be minimised',
+  'and it docks into the corner',
+  'with the full-screen call out of the way',
+  'and the docked tile is live rather than a black box',
+  'and the call is still running while minimised',
+  'and expanding brings the call back',
+)
+minChain.step(hasMin, 'no minimise control in the call header')
 
-if (hasMin) {
+if (!hasMin) {
+  minChain.rest('skipped: there was no minimise control to press')
+} else {
   await minBtn.click()
   const docked = await A.page
     .locator('[data-testid="call-minimised"]')
     .waitFor({ timeout: 8000 })
     .then(() => true)
     .catch(() => false)
-  check(docked, 'and it docks into the corner', 'no minimised dock appeared')
+  minChain.step(docked, 'no minimised dock appeared')
 
-  check(
+  minChain.step(
     !(await A.page.locator('[data-testid="call-surface"]').isVisible().catch(() => false)),
-    'with the full-screen call out of the way',
     'the full call surface is still covering the app',
   )
 
@@ -927,10 +1035,10 @@ if (hasMin) {
     )
     .then(() => true)
     .catch(() => false)
-  check(dockPainting, 'and the docked tile is live rather than a black box', 'the minimised preview never painted a frame')
+  minChain.step(dockPainting, 'the minimised preview never painted a frame')
 
   const stillLive = await api(admin.accessToken, 'GET', `/workspaces/${WS}/calls/live?channelId=${CHANNEL}`)
-  check(stillLive.data?.id === callId, 'and the call is still running while minimised', `live -> ${JSON.stringify(stillLive.data)?.slice(0, 120)}`)
+  minChain.step(stillLive.data?.id === callId, `live -> ${JSON.stringify(stillLive.data)?.slice(0, 120)}`)
 
   await A.page.locator('[data-testid="call-expand"]').click().catch(() => {})
   const restored = await A.page
@@ -938,7 +1046,7 @@ if (hasMin) {
     .waitFor({ timeout: 8000 })
     .then(() => true)
     .catch(() => false)
-  check(restored, 'and expanding brings the call back', 'the call could be minimised but not restored')
+  minChain.step(restored, 'the call could be minimised but not restored')
 }
 
 // ---------------------------------------------------------------------------
@@ -951,6 +1059,11 @@ console.log('\n5. recording announces itself to everyone')
  * but the announcement is the part that must not be able to fail, and it is
  * pure signalling.
  */
+const recordChain = chain(
+  'the person recording sees the banner',
+  'and so does everybody else in the call',
+  'and the call row says it is recording',
+)
 const recordBtn = A.page.locator('[data-testid="call-record"], button[title*="Record" i]').first()
 if (await recordBtn.isVisible().catch(() => false)) {
   await recordBtn.click().catch(() => {})
@@ -958,12 +1071,15 @@ if (await recordBtn.isVisible().catch(() => false)) {
   if (await consent.isVisible({ timeout: 4000 }).catch(() => false)) await consent.click().catch(() => {})
   const bannerA = await A.page.locator('[data-testid="call-recording-banner"]').waitFor({ timeout: 10000 }).then(() => true).catch(() => false)
   const bannerB = await B.page.locator('[data-testid="call-recording-banner"]').waitFor({ timeout: 10000 }).then(() => true).catch(() => false)
-  check(bannerA, 'the person recording sees the banner')
-  check(bannerB, 'and so does everybody else in the call', 'somebody was being recorded without being told')
+  recordChain.step(bannerA, 'the person recording was not told either')
+  recordChain.step(bannerB, 'somebody was being recorded without being told')
   const flag = await api(admin.accessToken, 'GET', `/workspaces/${WS}/calls/live?channelId=${CHANNEL}`)
-  check(flag.data?.recording === true, 'and the call row says it is recording', `recording: ${flag.data?.recording}`)
+  recordChain.step(flag.data?.recording === true, `recording: ${flag.data?.recording}`)
 } else {
-  console.log('  SKIP  recording control not offered (AI Notes entitlement is off for this workspace)')
+  // THE TENANT, not the product: with AI Notes off there is no control to
+  // press, so nothing can be asked. Counted as SKIP, so the run total is the
+  // same number on a workspace that has the entitlement and one that does not.
+  recordChain.skipRest('the AI Notes entitlement is off for this workspace, so there is no control')
 }
 
 // ---------------------------------------------------------------------------
@@ -987,15 +1103,25 @@ console.log('\n5b. the recording reaches storage, from the browser')
  * report a verdict it did not reach.
  */
 let storageChecked = false
+const storageChain = chain(
+  'a pre-signed upload URL is issued',
+  'the browser can PUT the recording to storage',
+  'and the call keeps the key it landed under',
+  'the record offers the piece that was uploaded',
+  'and it plays back the bytes that were stored',
+)
 {
   const up = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/upload-url`, {
     contentType: 'audio/webm',
   })
   if (up.status >= 400) {
-    console.log(`  SKIP  object storage is not configured here (upload-url -> ${up.status}) — not checked, not passed`)
+    // THE DEPLOYMENT, not the product: with no bucket configured there is
+    // nothing to upload to. Counted as SKIP rather than left absent, so the
+    // run total is the same number here and where storage is set up.
+    storageChain.skipRest(`object storage is not configured here (upload-url -> ${up.status})`)
   } else {
     storageChecked = true
-    check(Boolean(up.data?.uploadUrl && up.data?.storageKey), 'a pre-signed upload URL is issued', JSON.stringify(up.data)?.slice(0, 140))
+    storageChain.step(Boolean(up.data?.uploadUrl && up.data?.storageKey), JSON.stringify(up.data)?.slice(0, 140))
 
     const SIZE = 2048
     const put = await A.page.evaluate(async ([url, size]) => {
@@ -1007,16 +1133,16 @@ let storageChecked = false
         return { ok: false, error: String(e) }
       }
     }, [up.data.uploadUrl, SIZE])
-    check(
+    storageChain.step(
       put.ok === true,
-      `the browser can PUT the recording to storage (${put.status ?? ''})`,
       `${put.error ?? `HTTP ${put.status}`} — this is what bucket CORS refusing the app's origin looks like; every server-side check still passes`,
+      `the browser can PUT the recording to storage (${put.status ?? ''})`,
     )
 
     const attached = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, {
       storageKey: up.data.storageKey,
     })
-    check(attached.status < 400, 'and the call keeps the key it landed under', `attach -> ${attached.status}`)
+    storageChain.step(attached.status < 400, `attach -> ${attached.status}`)
     globalThis.__expectBytes = SIZE
   }
 }
@@ -1061,10 +1187,16 @@ check(Array.isArray(record?.recordings), 'with a place for every piece of its re
 
 // And the bytes come back — read from the page, so playback is exercised
 // across the same origin boundary the app plays them across.
-if (storageChecked) {
+if (!storageChecked) {
+  // Already skipped above, with the reason; nothing left to do here.
+} else {
   const url = (record?.recordings ?? [])[0]
-  check(typeof url === 'string' && url.length > 0, 'the record offers the piece that was uploaded', `recordings: ${JSON.stringify(record?.recordings)?.slice(0, 160)}`)
-  if (url) {
+  storageChain.step(typeof url === 'string' && url.length > 0, `recordings: ${JSON.stringify(record?.recordings)?.slice(0, 160)}`)
+  if (!url) {
+    // The product, not the deployment: the upload succeeded above and the
+    // record does not name it, so this is a failure rather than an unknown.
+    storageChain.rest('skipped: the record named no recording to fetch')
+  } else {
     const got = await A.page.evaluate(async ([u]) => {
       try {
         const r = await fetch(u)
@@ -1074,10 +1206,10 @@ if (storageChecked) {
         return { ok: false, error: String(e) }
       }
     }, [url])
-    check(
+    storageChain.step(
       got.ok === true && got.len === globalThis.__expectBytes,
-      `and it plays back the bytes that were stored (${got.len ?? got.error})`,
       `${got.error ?? `HTTP miss, ${got.len} bytes`} — stored but not retrievable is the same as lost`,
+      `and it plays back the bytes that were stored (${got.len ?? got.error})`,
     )
   }
 }

@@ -25,6 +25,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -116,6 +117,8 @@ const check = (ok, label, detail = '') => {
   }
 }
 
+const chain = makeChain(check)
+
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
 const EXPECTED_CHECKS = 56
 
@@ -204,24 +207,53 @@ try {
   await page.goto(`${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(4000)
 
+  /*
+   * A CLICK ON A CONTROL THAT IS NOT THERE THROWS, AND THE THROW ENDS THE RUN.
+   *
+   * `pc-1-chat-rail-collapses-to-zero` hides the collapsed rail, which takes
+   * the expand button inside it with it — and `getByTestId('chat-panel-expand')
+   * .click()` then spent thirty seconds retrying and threw. The suite reported
+   * `3 passed, 5 failed` with `✗ only 8 of 56 checks ran`, so a patch that
+   * reddens five checks and takes out the other forty-eight is indistinguishable
+   * from one that reddens five.
+   *
+   * Bounded and told-you-so instead: eight seconds, and the checks that needed
+   * the click report as failed with the reason. Same rule as every branch in
+   * this file — the run reports its full length whichever way it goes.
+   */
+  const tryClick = (locator) =>
+    locator
+      .click({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false)
+
   const panel = page.getByTestId('chat-panel')
   check(await panel.isVisible().catch(() => false), 'the channel list starts expanded')
   const wide = await panel.boundingBox()
   check(Math.round(wide?.width ?? 0) === 272, 'and is 272px wide — half the double navigation', `${wide?.width}`)
 
-  await page.getByTestId('chat-panel-collapse').click()
-  await page.waitForTimeout(1400)
-  const rail = page.getByTestId('chat-panel-rail')
-  check(await rail.isVisible().catch(() => false), 'collapsing leaves a rail')
-  const narrow = await rail.boundingBox()
-  check(Math.round(narrow?.width ?? 0) === 56, 'at 56px, not zero — channels stay one click away', `${narrow?.width}`)
-  check(
-    Math.round((wide?.width ?? 0) - (narrow?.width ?? 0)) === 216,
+  const chatChain = chain(
+    'collapsing leaves a rail',
+    'at 56px, not zero — channels stay one click away',
     'reclaiming 216px of chrome, which is the whole complaint',
-    `${wide?.width} -> ${narrow?.width}`,
+    'and the rail still carries the channels',
   )
-  const railButtons = await page.locator('[data-testid="chat-panel-rail"] button').count()
-  check(railButtons > 1, 'and the rail still carries the channels', `${railButtons} buttons`)
+  const collapsedChat = await tryClick(page.getByTestId('chat-panel-collapse'))
+  if (!collapsedChat) {
+    chatChain.rest('skipped: the collapse control could not be clicked')
+  } else {
+    await page.waitForTimeout(1400)
+    const rail = page.getByTestId('chat-panel-rail')
+    chatChain.step(await rail.isVisible().catch(() => false), '')
+    const narrow = await rail.boundingBox()
+    chatChain.step(Math.round(narrow?.width ?? 0) === 56, `${narrow?.width}`)
+    chatChain.step(
+      Math.round((wide?.width ?? 0) - (narrow?.width ?? 0)) === 216,
+      `${wide?.width} -> ${narrow?.width}`,
+    )
+    const railButtons = await page.locator('[data-testid="chat-panel-rail"] button').count()
+    chatChain.step(railButtons > 1, `${railButtons} buttons`)
+  }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ …and a SECOND browser opens it collapsed')
@@ -241,9 +273,13 @@ try {
   )
   await other.close()
 
-  await page.getByTestId('chat-panel-expand').click()
+  const expandedChat = await tryClick(page.getByTestId('chat-panel-expand'))
   await page.waitForTimeout(1400)
-  check(await page.getByTestId('chat-panel').isVisible().catch(() => false), 'and it expands again')
+  check(
+    expandedChat && (await page.getByTestId('chat-panel').isVisible().catch(() => false)),
+    'and it expands again',
+    expandedChat ? 'the panel did not come back' : 'there was no expand control to click',
+  )
 
   // ---------------------------------------------------------------------
   console.log('\n▶ the docs tree collapses independently')
@@ -255,10 +291,14 @@ try {
   const treeWide = await tree.boundingBox()
   check(Math.round(treeWide?.width ?? 0) === 240, 'at 240px', `${treeWide?.width}`)
 
-  await page.getByTestId('docs-tree-collapse').click()
+  const collapsedTree = await tryClick(page.getByTestId('docs-tree-collapse'))
   await page.waitForTimeout(1400)
-  const strip = await page.getByTestId('docs-tree-rail').boundingBox()
-  check(Math.round(strip?.width ?? 0) === 48, 'collapsing leaves a 48px strip', `${strip?.width}`)
+  const strip = collapsedTree ? await page.getByTestId('docs-tree-rail').boundingBox() : null
+  check(
+    Math.round(strip?.width ?? 0) === 48,
+    'collapsing leaves a 48px strip',
+    collapsedTree ? `${strip?.width}` : 'there was no collapse control to click',
+  )
 
   await page.waitForTimeout(1500)
   const me = await A('/users/me')
@@ -268,9 +308,13 @@ try {
     JSON.stringify(me.data?.panelsCollapsed),
   )
 
-  await page.getByTestId('docs-tree-expand').click()
+  const expandedTree = await tryClick(page.getByTestId('docs-tree-expand'))
   await page.waitForTimeout(1400)
-  check(await page.getByTestId('docs-tree').isVisible().catch(() => false), 'and the tree comes back')
+  check(
+    expandedTree && (await page.getByTestId('docs-tree').isVisible().catch(() => false)),
+    'and the tree comes back',
+    expandedTree ? 'the tree did not come back' : 'there was no expand control to click',
+  )
 
   // ---------------------------------------------------------------------
   console.log('\n▶ Which doc is open is an address')
