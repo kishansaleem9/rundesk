@@ -3742,6 +3742,48 @@ bundle — and the last patch in a set is usually a web one. A lane could open
 suite B against a bundle still carrying suite A's final patch, and a patch for
 one suite rarely reddens another, which is exactly what makes it silent.
 
+### And the number that says where this is still shallow
+
+With every suite covered, the honest next question is how deeply. Measured
+across all 113: **2738 checks and 798 patches, 3.5 checks per patch.** The
+eleven just closed sit at 15 to 27 — a seventh of that density — and two suites
+sat much further out:
+
+| suite | checks | patches | checks per patch |
+| --- | --- | --- | --- |
+| `person-panel` | 59 | 1 | 59 |
+| `command-palette` | 43 | 1 | 43 |
+| `ui-sweep` | 107 | 4 | 26.8 |
+| `video-regression` | 93 | 4 | 23.3 |
+| `video1-fast-items` | 92 | 4 | 23 |
+| `task-depth` | 91 | 4 | 22.8 |
+
+One patch clears the ratchet. It does not make 59 checks break-tested, and
+saying otherwise is the same overclaim as the zero that started this section.
+So the two thinnest were deepened first — six more patches, and the choice of
+what to aim them at was made the way step 6 says: read the assertion, not the
+feature.
+
+`person-panel` gained three. Ticking a priority off DELETES the row, which is
+what most checklists do and is the one thing `[05:54]`'s "I did that today"
+rules out. The local-time clock becomes the zone NAME — more precise, never
+stale, and it asks the reader to do the arithmetic, which is what the question
+was. And a person with no manager gets a blank, which the reader cannot tell
+from "has not loaded yet".
+
+`command-palette` gained three. `shouldFilter: false` is deleted — one line
+with no comment at its call site, and a `<Command>` that does not filter reads
+like a component being used wrong, which is precisely how the original defect
+shipped: cmdk re-filters by visible text, so a row matched on a word in its
+DESCRIPTION is dropped and a palette holding four results says "No matches".
+Clear filters stops resetting the two created-date fields, in a handler whose
+own comment describes exactly that regression. And the 700ms assistant debounce
+goes, which looks redundant beside a search that deliberately re-keys per
+keystroke — nothing on screen changes, and a fourteen-character query becomes
+fourteen model calls. That last one is the failure that shows up on an invoice
+rather than in a screenshot, and the only check that can see it is the one
+counting requests.
+
 ### Two more checkers, and two shared modules
 
 - **`scripts/check-suite-check-branches.mjs`** — the conditional-check ratchet
