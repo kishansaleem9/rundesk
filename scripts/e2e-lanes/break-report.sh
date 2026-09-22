@@ -16,8 +16,10 @@
 #   NAMES=1 bash scripts/e2e-lanes/break-report.sh      # and name every non-RED patch
 #
 # Exit 1 if any set holds a green, short, crashed, missing, unbuilt or
-# changed-nothing patch, or refused its baseline — so it can gate a sweep's
-# handover rather than being read optimistically.
+# changed-nothing patch, refused its baseline, or was measured against a tree
+# that has since moved (`OLDER TREE`) or one that cannot be identified at all
+# (`TREE UNKNOWN`) — so it can gate a sweep's handover rather than being read
+# optimistically.
 #
 # A PATCH MAY DECLARE THAT A SHORT RUN IS ITS HONEST OUTCOME, with a line
 #
@@ -52,6 +54,21 @@ else
   mapfile -t files < <(ls -1 "$LOGS"/break-*.txt 2>/dev/null | grep -Ev -- "$ARCHIVE")
 fi
 
+# AND WHETHER EACH ROW IS EVIDENCE ABOUT THE TREE AS IT IS NOW.
+#
+# A REFUSED baseline or a GREEN patch from an older tree is a row whose fix may
+# already be in, and reading one as live is not hypothetical: `create-menu-ai`'s
+# refusal named a type filter that offered ten kinds where nine were expected,
+# and the suite had been corrected hours before I read it. Two of those in five
+# minutes is a column, not an anecdote.
+#
+# `check-break-freshness.mjs --porcelain` is the one answer to that question,
+# asked once here rather than re-derived per row.
+declare -A CURRENT=()
+while IFS=$'\t' read -r verdict suite tree; do
+  [ -n "${suite:-}" ] && CURRENT["$suite"]="$tree"
+done < <(node "$REPO/scripts/check-break-freshness.mjs" --porcelain 2>/dev/null)
+
 bad=0
 for f in "${files[@]}"; do
   [ -f "$f" ] || { printf '%-34s no log on this machine\n' "$(basename "$f" .txt | sed 's/^break-//')"; bad=1; continue; }
@@ -84,6 +101,10 @@ for f in "${files[@]}"; do
   [ "$UNBUILT"  != 0 ] && note="$note  UNBUILT $UNBUILT"
   [ "$NOCHANGE" != 0 ] && note="$note  CHANGED-NOTHING $NOCHANGE"
   [ "$refused"  != 0 ] && note="$note  REFUSED"
+  case "${CURRENT[$suite]:-}" in
+    older)   note="$note  OLDER TREE" ;;
+    unknown) note="$note  TREE UNKNOWN" ;;
+  esac
   # A declaration alone is not a finding, so it does not gate.
   gating="$note"
   gating="${gating//  (short by declaration $declared)/}"

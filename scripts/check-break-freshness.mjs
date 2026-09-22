@@ -169,16 +169,23 @@ for (const log of logs) {
   // synced to cannot be placed in the history at all, and a check that cannot
   // run reports UNKNOWN rather than passing: 73 of these would otherwise be 73
   // silent "fresh" rows resting on a line that was never written.
+  // WHICH TREE, AND WHAT HAPPENED, ARE TWO FACTS. They were one field, with
+  // REFUSED winning, and that lost the only thing worth knowing about a
+  // refusal: `ai-assign` and `create-menu-ai` both refused their baselines
+  // against suites that have since been fixed, and both printed as live
+  // failures with nothing to say they were about a tree from this morning.
+  const tree = dirty || moved.length ? 'older' : shas.length ? 'current' : 'unknown'
   const verdict = refused
     ? 'REFUSED'
-    : dirty || moved.length
+    : tree === 'older'
       ? 'STALE'
-      : shas.length
-        ? 'fresh'
-        : 'UNKNOWN'
+      : tree === 'unknown'
+        ? 'UNKNOWN'
+        : 'fresh'
   rows.push({
     suite,
     verdict,
+    tree,
     patches,
     buildFailed,
     missing,
@@ -200,6 +207,23 @@ for (const log of logs) {
 }
 
 rows.sort((a, b) => a.verdict.localeCompare(b.verdict) || a.suite.localeCompare(b.suite))
+
+// `--porcelain` is this answer for another program to read, and it exits 0
+// because it is a lookup rather than a gate. `break-report.sh` marks each of
+// its rows with it: a REFUSED baseline or a GREEN patch measured against an
+// older tree is a row whose fix may already be in, and I diagnosed
+// `create-menu-ai`'s type filter as a live product defect off exactly such a
+// row — the suite had been expecting nine kinds where the product shipped ten,
+// and the suite was corrected hours before I read the log.
+//
+// One implementation, two readers, for the reason every other shared module in
+// here exists: two answers to "is this current?" would disagree eventually, and
+// the disagreement would be invisible.
+if (process.argv.includes('--porcelain')) {
+  for (const r of rows) console.log(`${r.verdict}\t${r.suite}\t${r.tree ?? 'unknown'}`)
+  process.exit(0)
+}
+
 const TAGS = {
   fresh: '  ok  ',
   STALE: ' STALE',
@@ -221,7 +245,7 @@ for (const r of rows) {
 // "the unpatched suite is not green" — under a ledger row reading 7 of 7, and
 // `gantt-controls`'s holds one patch that BUILD FAILED under a row reading
 // 12 of 12. Neither number is supported by anything currently on disk.
-const stale = rows.filter((r) => r.verdict === 'STALE')
+const stale = rows.filter((r) => r.tree === 'older')
 const refusedSets = rows.filter((r) => r.verdict === 'REFUSED')
 const broken = rows.filter((r) => r.buildFailed > 0)
 const absent = rows.filter((r) => r.missing > 0)
@@ -230,7 +254,7 @@ for (const r of refusedSets) console.error(`\n[break-freshness] ${r.suite}: the 
 for (const r of broken) console.error(`[break-freshness] ${r.suite}: ${r.buildFailed} patch(es) never built — they prove nothing about the checks they aimed at`)
 for (const r of absent) console.error(`[break-freshness] ${r.suite}: ${r.missing} patch file(s) were never found — that set opened nothing`)
 for (const r of inert) console.error(`[break-freshness] ${r.suite}: ${r.noChange} patch(es) left the tree identical — applied and inert`)
-const unknown = rows.filter((r) => r.verdict === 'UNKNOWN')
+const unknown = rows.filter((r) => r.tree === 'unknown')
 if (stale.length) {
   console.error(
     `\n[break-freshness] ${stale.length} break set(s) were measured against a tree that has since changed.`,
