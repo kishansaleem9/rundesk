@@ -144,7 +144,21 @@ try {
   await sql`
     insert into task_checklist_items (checklist_id, content, is_done)
     values (${cl.id}, ${'done item'}, true), (${cl.id}, ${'open item'}, false)`
-  // 2 of 4 now: one closed subtask, one ticked item.
+  /*
+   * 2 of 4 now: one closed subtask, one ticked item.
+   *
+   * AND AT THIS FIXTURE POOLING AND AVERAGING AGREE, which is worth saying out
+   * loud beside a check whose sentence is about the difference. One of two
+   * subtasks and one of two items is 50% either way — pooled 2/4, or the mean
+   * of 50 and 50 — so `custom-field-progress-2-average-of-percentages` leaves
+   * this number untouched and passes here. What it does break is every
+   * asymmetric count that follows: the five checks from "a resolved assigned
+   * comment counts as done" onwards, where the two groups are different sizes.
+   *
+   * The even split is not an accident to correct: it is the simplest case, and
+   * a reader looking at the sentence should know which check can actually tell
+   * the two computations apart.
+   */
   chk(
     (await progressOf()) === 50,
     'checklist items join the same pool rather than forming their own average',
