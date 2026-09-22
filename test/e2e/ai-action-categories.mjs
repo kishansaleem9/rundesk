@@ -288,7 +288,7 @@ try {
   )
   const boxes = []
   for (const id of ORDER) {
-    const b = await page.getByTestId(`ai-value-category-${id}`).boundingBox()
+    const b = await page.getByTestId(`ai-value-category-${id}`).boundingBox().catch(() => null)
     boxes.push({ id, ...(b ?? { x: -1, y: -1, width: 0, height: 0 }) })
   }
   chk(

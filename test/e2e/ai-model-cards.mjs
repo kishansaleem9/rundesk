@@ -238,8 +238,12 @@ try {
    * the popover's right edge rather than over the list it is describing. A card
    * covering the rows would make the comparison it exists for impossible.
    */
-  const rowBox = await fastRow.boundingBox()
-  const cardBox = await fastCard.boundingBox()
+  // `.catch` because the check below already treats a null box as its failing
+  // case, and `amc-6-card-under-option-prefix` moves the card out from under the
+  // testid this reads: an unqualified `boundingBox` waited out the default
+  // timeout and ended the run at 14 of 24 instead.
+  const rowBox = await fastRow.boundingBox().catch(() => null)
+  const cardBox = await fastCard.boundingBox().catch(() => null)
   chk(
     !!rowBox && !!cardBox && cardBox.x >= rowBox.x + rowBox.width - 1,
     'and drawn beside the row rather than over the list',
@@ -251,7 +255,7 @@ try {
   const widthOf = async (testid) => {
     const bar = page.getByTestId(testid)
     if (!(await bar.isVisible().catch(() => false))) return 0
-    return (await bar.boundingBox())?.width ?? 0
+    return (await bar.boundingBox().catch(() => null))?.width ?? 0
   }
   const fastSpeed = await widthOf('ai-model-bar-speed-fast')
   const fastIq = await widthOf('ai-model-bar-intelligence-fast')

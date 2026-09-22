@@ -211,10 +211,10 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ where it sits, measured')
 
-  const barBox = await bar().boundingBox()
-  const pageBox = await page.locator('[data-testid="planner-page"]').boundingBox()
-  const firstCol = await page.locator('[data-testid="planner-day-column"]').first().boundingBox()
-  const lastCol = await page.locator('[data-testid="planner-day-column"]').last().boundingBox()
+  const barBox = await bar().boundingBox().catch(() => null)
+  const pageBox = await page.locator('[data-testid="planner-page"]').boundingBox().catch(() => null)
+  const firstCol = await page.locator('[data-testid="planner-day-column"]').first().boundingBox().catch(() => null)
+  const lastCol = await page.locator('[data-testid="planner-day-column"]').last().boundingBox().catch(() => null)
 
   /*
    * CENTRED OVER THE GRID, NOT OVER THE VIEWPORT. In the frame the bar's
@@ -243,7 +243,7 @@ try {
    * at the same height. A full-width bar would photograph the same and swallow
    * clicks on both.
    */
-  const railRight = (await page.locator('[data-testid="planner-priorities"]').boundingBox())?.x ?? 0
+  const railRight = (await page.locator('[data-testid="planner-priorities"]').boundingBox().catch(() => null))?.x ?? 0
   chk(
     barBox !== null && barBox.x > railRight,
     `its left edge (${Math.round(barBox?.x ?? 0)}px) is clear of the rail`,

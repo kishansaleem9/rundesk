@@ -108,7 +108,7 @@ page.on('request', (r) => {
   if (u.includes(`/tasks/list/${fixture.listId}`) && !u.includes('/export')) listCalls.push(u)
 })
 
-const chipBox = (testId) => page.getByTestId(testId).boundingBox()
+const chipBox = (testId) => page.getByTestId(testId).boundingBox().catch(() => null)
 const rowFor = (id) => page.locator(`[data-testid="list-task-row"][data-task-id="${id}"]`)
 const childVisible = () =>
   page.getByText(CHILD_TITLE, { exact: true }).first().isVisible().catch(() => false)
@@ -454,8 +454,8 @@ try {
   await page.waitForSelector('[data-testid="list-calendar"]', { timeout: 20_000 })
   const todayBtn = page.getByTestId('list-calendar-today')
   const prevBtn = page.getByTestId('list-calendar-prev')
-  const todayBox = await todayBtn.boundingBox()
-  const prevBox = await prevBtn.boundingBox()
+  const todayBox = await todayBtn.boundingBox().catch(() => null)
+  const prevBox = await prevBtn.boundingBox().catch(() => null)
   chk(!!todayBox && !!prevBox && todayBox.x < prevBox.x,
     'Today is on the toolbar, and leftmost as the frame draws it',
     `Today at ${todayBox ? Math.round(todayBox.x) : 'absent'}, Prev at ${prevBox ? Math.round(prevBox.x) : 'absent'}`)

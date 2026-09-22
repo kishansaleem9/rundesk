@@ -471,7 +471,7 @@ try {
   const newEvent = async (title) => {
     // Re-measured every time: the grid is re-rendered between the two events
     // and a box captured before a toggle is a box from a different layout.
-    const box = await column.boundingBox()
+    const box = await column.boundingBox().catch(() => null)
     await page.mouse.click(box.x + box.width / 2, box.y + 140)
     await page.waitForSelector('[data-testid="planner-event-title"]', { timeout: 8000 })
     await page.locator('[data-testid="planner-event-title"]').fill(title)
