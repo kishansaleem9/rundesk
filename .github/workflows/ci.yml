@@ -287,6 +287,19 @@ jobs:
       - name: Every ender rule holds its cases, and each case bites
         run: node scripts/check-suite-enders.mjs --mutate
 
+      # The ledger recorded the cover picker's Upload tab as UNMEASURABLE
+      # because presign → PUT → commit "cannot run without credentials this
+      # repository does not hold". That reason was wrong: `R2Service` already
+      # reads `R2_ENDPOINT` and already sets `forcePathStyle: true`, so a local
+      # S3-compatible server finishes the path with no product change at all.
+      # `scripts/e2e-lanes/s3-stub.mjs` is that server, and this drives THE
+      # PRODUCT'S OWN CLIENT against it — real SDK, real SigV4, nothing mocked
+      # — because a test double that quietly stops being faithful turns every
+      # suite built on it green while measuring nothing. 14 cases, 8 of 8
+      # mutations of the stub redden one.
+      - name: The S3 stub is faithful to the SDK, and each case bites
+        run: node scripts/check-s3-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
