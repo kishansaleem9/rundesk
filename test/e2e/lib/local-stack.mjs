@@ -126,7 +126,52 @@ async function proxyLogin(req, res, apiPort) {
  *   Vite dev server's port. Serving the BUILT bundle there lets them run
  *   against a real API without each of them learning a new address.
  */
+/*
+ * A BUNDLE OLDER THAN THE SOURCE IS NOT THE PRODUCT UNDER TEST.
+ *
+ * `apps/web/dist` is not in git, so nothing rebuilds it when a suite is run by
+ * hand — and a suite driving a stale bundle reports failures about code that no
+ * longer exists. I read three of them as a regression from my own edits:
+ * `ai-answer-rendering` came back 48 of 51 against a dist twelve hours older
+ * than `apps/web/src`, and the three failures were all in the AI panel, whose
+ * fix had landed in that window.
+ *
+ * It is the same mistake the break logs had all morning, one layer down: a
+ * measurement of a tree that is not this one. `wt-break.sh` builds before every
+ * set so it never sees this; a suite run straight from the checkout does.
+ *
+ * mtime, deliberately, because this is a question about a BUILD rather than
+ * about history: the dist is a product of the files as they are on disk, and a
+ * source file the build has not seen is newer than everything in it. (A fresh
+ * clone has no dist at all, so there is nothing to be wrong about.) Refused
+ * rather than warned, because a warning above fifty PASS lines is a warning
+ * nobody reads.
+ */
+function refuseStaleBundle(dist) {
+  const newest = (dir) => {
+    let latest = 0
+    for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+      if (e.name === 'node_modules' || e.name.startsWith('.')) continue
+      const p = path.join(dir, e.name)
+      latest = Math.max(latest, e.isDirectory() ? newest(p) : fs.statSync(p).mtimeMs)
+    }
+    return latest
+  }
+  const src = path.resolve(dist, '../src')
+  if (!fs.existsSync(dist) || !fs.existsSync(src)) return
+  const built = newest(dist)
+  const written = newest(src)
+  if (written <= built) return
+  const ago = Math.round((written - built) / 60_000)
+  throw new Error(
+    `apps/web/dist is ${ago} minute(s) older than apps/web/src — this bundle is not the product ` +
+      'under test. Run `pnpm --filter @rundesk/web build` first; every failure until then is about ' +
+      'code that has already changed.',
+  )
+}
+
 export async function startLocalStack({ dist, apiPort, port: bindPort = 0 }) {
+  refuseStaleBundle(dist)
   const server = http.createServer((req, res) => {
     if (isApi(req.url)) {
       if (isLogin(req)) {
