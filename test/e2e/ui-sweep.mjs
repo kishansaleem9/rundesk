@@ -255,7 +255,20 @@ try {
       check(before.length > 1, `seeded fields to search against (${before.length})`,
         `the picker lists ${before.length} field(s) and create-new did not add more`)
     } else {
-      check(true, `it lists the workspace fields (${before.length})`, '')
+      /*
+       * THE SAME PROPERTY AS THE BRANCH ABOVE, READ RATHER THAN ASSERTED.
+       *
+       * This was `check(true, …)` — a check that cannot fail, written to keep
+       * the two branches the same length, which is the right instinct and the
+       * wrong implementation. Both paths are claiming one thing: there is more
+       * than one field for the search below to narrow. Where the workspace
+       * already has them, that is true by construction — and reading
+       * `before.length` says so from the value instead of from a literal, so
+       * a picker that lists one field fails here rather than sailing through to
+       * fail the narrowing check for a reason that reads like a search bug.
+       */
+      check(before.length > 1, `it lists the workspace fields (${before.length})`,
+        `the picker lists ${before.length} field(s), which cannot be narrowed`)
     }
     /*
      * Search against a term this workspace actually has: one that matches

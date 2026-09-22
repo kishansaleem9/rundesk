@@ -240,14 +240,26 @@ if (unattributedNames.length) {
  * never legitimate for a suite that had a patch and lost it — that is the
  * regression this check exists to catch, and it still fails on it.
  *
- * 11 → 0 is the work in front of this, and each suite closed lowers it by one.
- * Four are closed — `emoji-picker`, `loading-states`, `stale-chunk-recovery`
- * and `addressability-live` — so it stands at 7. The seven left are the big
- * ones: `ui-sweep` (107 checks), `video1-fast-items` (92), `task-depth` (91),
- * `chat-message-actions` (73), `settings-depth` (61), `panel-collapse` (56)
- * and `syncup-live` (48).
+ * 11 → 0, AND THIS ONE IS MEASURED AGAINST THE WHOLE DENOMINATOR. All eleven
+ * are closed: `emoji-picker`, `loading-states`, `stale-chunk-recovery`,
+ * `addressability-live`, `panel-collapse`, `syncup-live`, `settings-depth`,
+ * `chat-message-actions`, `task-depth`, `video1-fast-items` and `ui-sweep` —
+ * 633 checks that were outside the count when the zero above was declared, and
+ * the largest suites in the repository.
+ *
+ * So the number is zero again and it means something different: every one of
+ * the 113 suites has at least one patch aimed at it, counted by each suite's
+ * own `EXPECTED_CHECKS` rather than by grepping for a helper's name. A NEW
+ * suite arriving without a patch is the only thing that can move it, which is
+ * exactly the moment this check is worth failing on.
+ *
+ * AND ZERO STILL DOES NOT MEAN "IT WORKS" — read the `save-comment` paragraph
+ * below. This counts aim. What reddened is in the ledger's §8, and of the
+ * eleven sets written to reach this zero, four patches ran GREEN on their first
+ * run and every one of those four was a defect in the CHECK rather than in the
+ * patch.
  */
-const BASELINE_UNCOVERED = 7
+const BASELINE_UNCOVERED = 0
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
