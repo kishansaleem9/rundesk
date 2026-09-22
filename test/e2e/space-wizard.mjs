@@ -212,11 +212,29 @@ try {
    * already stubs successfully.
    */
   const page = await ctx.newPage()
+  /*
+   * EVERY CONTROL THIS SUITE CLICKS IS ONE OF ITS OWN PATCHES' TARGETS, so an
+   * unqualified `.click()` here is thirty seconds and a run that ends where it
+   * stood. `sw-1-no-templates-footer` removes the Use Templates button and
+   * reported `only 2 of 23 checks ran`; `sw-10-one-tab-only` removes the
+   * templates TAB and reported 16 of 23. In both cases the check immediately
+   * above the click had already said the control was missing, and then the run
+   * died instead of reporting the twenty-one or seven checks that follow.
+   *
+   * Bounded, and it answers a boolean: a caller that ignores it goes on to find
+   * nothing changed, which is the honest failure.
+   */
+  const press = (testId) =>
+    page
+      .locator(`[data-testid="${testId}"]`)
+      .click({ timeout: 8000 })
+      .then(() => true)
+      .catch(() => false)
   const openWizard = async () => {
     await page.goto(`${BASE}/app/${WS}/${SPACE}/${PROJECT}/${LIST}`, { waitUntil: 'networkidle' })
     // Reached the way a person reaches it: the topbar "+".
-    await page.locator('[data-testid="quick-create-open"]').click()
-    await page.locator('[data-testid="create-tab-space"]').click()
+    await press('quick-create-open')
+    await press('create-tab-space')
     await page.waitForSelector('[data-testid="space-wizard-step1"]', { timeout: 20_000 })
   }
 
@@ -233,7 +251,7 @@ try {
       'offering was the one place that did not offer it',
   )
 
-  await page.locator('[data-testid="space-wizard-use-templates"]').click()
+  await press('space-wizard-use-templates')
   await page.waitForSelector('[data-testid="space-wizard-templates"]', { timeout: 15_000 })
   const offered = await page.locator('[data-testid^="space-wizard-tplcard-"]').evaluateAll((els) =>
     els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-tplcard-', '')),
@@ -246,7 +264,7 @@ try {
   )
 
   const applyBefore = calls.length
-  await page.locator('[data-testid="space-wizard-tplgo-tpl-space-2"]').click()
+  await press('space-wizard-tplgo-tpl-space-2')
   const applied = await waitUntil(
     () => calls.slice(applyBefore).some((c) => c.method === 'POST' && c.url.includes('/project-templates/apply')),
     { timeoutMs: 15_000 },
@@ -285,8 +303,8 @@ try {
   await page.locator('[data-testid="space-wizard-name"]').fill('Rundex')
   await page.locator('[data-testid="space-wizard-description"]').fill('Made by the wizard')
   await page.locator('[data-testid="space-wizard-permission"]').selectOption('comment')
-  await page.locator('[data-testid="space-wizard-private"]').click()
-  await page.locator('[data-testid="space-wizard-continue"]').click()
+  await press('space-wizard-private')
+  await press('space-wizard-continue')
 
   console.log('\n▶ step two is the workflow presets `[frame 07:06]`')
   await page.waitForSelector('[data-testid="space-wizard-step2"]', { timeout: 10_000 })
@@ -315,14 +333,16 @@ try {
       `${await page.locator('[data-testid="space-wizard-copy-source"]').count()} source picker(s)`,
   )
 
-  await page.locator('[data-testid="space-wizard-copy-hide"]').click()
+  await press('space-wizard-copy-hide')
   const wentAway = await waitUntil(
     async () =>
       (await page.locator('[data-testid="space-wizard-copy"]').count()) === 0 &&
       (await page.locator('[data-testid="space-wizard-copy-show"]').count()) === 1,
     { timeoutMs: 8000 },
   )
-  await page.locator('[data-testid="space-wizard-copy-show"]').click().catch(() => {})
+  // `press` rather than a bare `.catch`: the catch swallowed the error and still
+  // waited out the default thirty seconds to get it.
+  await press('space-wizard-copy-show')
   const cameBack = await waitUntil(
     async () => (await page.locator('[data-testid="space-wizard-copy"]').count()) === 1,
     { timeoutMs: 8000 },
@@ -334,7 +354,7 @@ try {
   )
 
   await page.locator('[data-testid="space-wizard-copy-source"]').selectOption(SOURCE)
-  await page.locator('[data-testid="space-wizard-copy-apply"]').click()
+  await press('space-wizard-copy-apply')
   chk(
     await waitUntil(async () => {
       const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
@@ -349,7 +369,7 @@ try {
     'nothing on screen named the Space the configuration was taken from',
   )
 
-  await page.locator('[data-testid="space-wizard-preset-marketing"]').click()
+  await press('space-wizard-preset-marketing')
   chk(
     await waitUntil(async () => {
       const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
@@ -361,7 +381,7 @@ try {
   )
 
   // The Required-views panel: List cannot be turned off.
-  await page.locator('[data-testid="space-wizard-row-views"]').click()
+  await press('space-wizard-row-views')
   await page.waitForSelector('[data-testid="space-wizard-views"]', { timeout: 10_000 })
 
   console.log('\n▶ the views panel has the frame\'s TWO tabs `[frame 07:12]`')
@@ -372,7 +392,7 @@ try {
     'the second tab is missing or misnamed — Rundesk drew only the switch list',
   )
 
-  await page.locator('[data-testid="space-wizard-viewstab-templates"]').click()
+  await press('space-wizard-viewstab-templates')
   const tplKeys = await page.locator('[data-testid^="space-wizard-viewtplcard-"]').evaluateAll((els) =>
     els.map((e) => (e.getAttribute('data-testid') ?? '').replace('space-wizard-viewtplcard-', '')),
   )
@@ -413,14 +433,14 @@ try {
    */
   const applyViewTemplate = async (key) => {
     const preset = PRESETS.presets.find((p) => p.key === key)
-    await page.locator('[data-testid="space-wizard-viewstab-templates"]').click()
+    await press('space-wizard-viewstab-templates')
     const already = await page
       .locator(`[data-testid="space-wizard-viewtplcard-${key}"]`)
       .getAttribute('data-applied')
       .catch(() => null)
     if (already !== 'false') return false
-    await page.locator(`[data-testid="space-wizard-viewtplgo-${key}"]`).click()
-    await page.locator('[data-testid="space-wizard-viewstab-required"]').click()
+    await press(`space-wizard-viewtplgo-${key}`)
+    await press('space-wizard-viewstab-required')
     return waitUntil(async () => {
       for (const view of PRESETS.views) {
         const on =
@@ -433,7 +453,7 @@ try {
 
   const wentToProject = await applyViewTemplate('project')
   const cameBackToMarketing = await applyViewTemplate('marketing')
-  await page.locator('[data-testid="space-wizard-viewstab-required"]').click()
+  await press('space-wizard-viewstab-required')
   chk(
     markedApplied && wentToProject && cameBackToMarketing,
     'applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them ' +
@@ -449,20 +469,20 @@ try {
     'List is Required and cannot be switched off `[frame 07:12]`',
     'the List view could be turned off — every list falls back to it, so the space would render nothing',
   )
-  await page.locator('[data-testid="space-wizard-view-calendar"]').click() // marketing has it on → off
-  await page.locator('[data-testid="space-wizard-views-done"]').click()
+  await press('space-wizard-view-calendar') // marketing has it on → off
+  await press('space-wizard-views-done')
 
   // The ClickApps grid.
-  await page.locator('[data-testid="space-wizard-row-features"]').click()
+  await press('space-wizard-row-features')
   await page.waitForSelector('[data-testid="space-wizard-features"]', { timeout: 10_000 })
   const tiles = await page.locator('[data-testid^="space-wizard-feature-"]').count()
   chk(tiles === PRESETS.features.length, 'every feature the server offers has a switch',
     `the grid drew ${tiles} of ${PRESETS.features.length}`)
-  await page.locator('[data-testid="space-wizard-feature-milestones"]').click() // off → on
-  await page.locator('[data-testid="space-wizard-features-done"]').click()
+  await press('space-wizard-feature-milestones') // off → on
+  await press('space-wizard-features-done')
 
   console.log('\n▶ and what it POSTs is what was chosen, not just the name')
-  await page.locator('[data-testid="space-wizard-create"]').click()
+  await press('space-wizard-create')
   await page.waitForTimeout(1500)
 
   const post = calls.filter((c) => c.method === 'POST' && /\/spaces(\?|$)/.test(c.url)).at(-1)
