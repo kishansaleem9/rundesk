@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 24
+const EXPECTED_CHECKS = 29
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -340,6 +340,99 @@ try {
     `the task holds coverColor=${JSON.stringify(linkedRow?.coverColor ?? null)} and ` +
       `coverStorageKey=${JSON.stringify(linkedRow?.coverStorageKey ?? null)} beside the link — ` +
       'two covers set at once is one of them drawn and the other a surprise later',
+  )
+
+  /*
+   * ── The Attachments tab, frame `03:10` ───────────────────────────────
+   *
+   * *"the Attachments tab offers files already on the task as a cover"*. The tab
+   * was asserted to EXIST four sections above and nothing in it was ever
+   * listed — and it could not have been: the picker filtered the task's
+   * attachments on `contentType`, which the API does not return. It answers
+   * `mimeType`, every other reader in the app takes `mimeType`, and this one
+   * compared `undefined` to `image/` for every row. The tab drew its empty
+   * state on every task, however many images were on it.
+   *
+   * Found by asking which product testids no suite names: 342 of 1063, and
+   * `cover-attachment-option` was one of the nine in this component.
+   */
+  console.log('\n▶ the Attachments tab offers the task\'s own images, and one becomes the cover')
+  await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-tab-attachments').click({ timeout: 10_000 }).catch(() => {})
+  chk(
+    await appears(page.getByTestId('cover-attachments-empty'), 6000),
+    'with nothing on the task it says so, rather than drawing an empty grid',
+    'the Attachments tab on a task with no files drew neither an option nor an explanation',
+  )
+
+  // An image the API itself accepts, added the product's own second way — by
+  // URL rather than by upload, which `task-attachments.mjs` seeds the same way.
+  const IMAGE = `https://example.invalid/cover-${stamp}.png`
+  const added = await A(`/tasks/${task.id}/attachments`, {
+    method: 'POST',
+    body: { fileName: `cover-${stamp}.png`, url: IMAGE, contentType: 'image/png', sizeBytes: 64 },
+  })
+  chk(
+    added.status < 400,
+    'the suite can put an image on the task to offer',
+    `POST /tasks/:id/attachments answered ${added.status}`,
+  )
+  /*
+   * A FRESH VISIT, because the list is fetched once per one. The picker clears
+   * `attachments` when the dialog closes and fetches again on the next open,
+   * which is right — and my first version of this check switched tabs inside the
+   * SAME visit, read the `[]` cached from the empty-state check above, and
+   * reported the product broken after I had just fixed it.
+   */
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-tab-attachments').click({ timeout: 10_000 }).catch(() => {})
+  const option = page.getByTestId('cover-attachment-option')
+  chk(
+    await waitUntil(async () => (await option.count()) === 1, { timeoutMs: 8000 }),
+    'once one is there it is offered, exactly once',
+    `the tab offered ${await option.count()} option(s) for one image attachment, and an empty ` +
+      `state is on screen ${await page.getByTestId('cover-attachments-empty').count()} time(s)`,
+  )
+  await option.first().click({ timeout: 10_000 }).catch(() => {})
+  const fromFile = await waitUntil(
+    async () => ((await T()).data?.coverStorageKey ?? '') === IMAGE,
+    { timeoutMs: 8000 },
+  )
+  const storedRow = (await T()).data
+  chk(
+    fromFile && storedRow?.coverStorageKey === IMAGE,
+    'and choosing it sets the cover from that file',
+    `after choosing the only option the task holds coverStorageKey=` +
+      `${JSON.stringify(storedRow?.coverStorageKey ?? null)}, expected ${JSON.stringify(IMAGE)}`,
+  )
+
+  /*
+   * ── Remove, which frame `03:05` draws as the sixth tab ─────────────────
+   *
+   * ALL THREE FIELDS, not "the cover went". A task can carry a colour, a stored
+   * file and a link, and a Remove that clears the one currently drawn leaves the
+   * other two to surface the next time something reads the row — a template, an
+   * export, or a board card.
+   */
+  console.log('\n▶ Remove takes the cover off, in every way a cover can be set')
+  await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-remove').click({ timeout: 10_000 }).catch(() => {})
+  const gone = await waitUntil(
+    async () => {
+      const r = (await T()).data
+      return !r?.coverColor && !r?.coverStorageKey && !r?.coverImageUrl
+    },
+    { timeoutMs: 8000 },
+  )
+  const bare = (await T()).data
+  chk(
+    gone,
+    'pressing Remove clears the colour, the stored file and the link together',
+    `the task still holds coverColor=${JSON.stringify(bare?.coverColor ?? null)}, ` +
+      `coverStorageKey=${JSON.stringify(bare?.coverStorageKey ?? null)}, ` +
+      `coverImageUrl=${JSON.stringify(bare?.coverImageUrl ?? null)}`,
   )
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })

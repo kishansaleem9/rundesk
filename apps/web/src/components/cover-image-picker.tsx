@@ -88,7 +88,19 @@ export type CoverChoice =
   | { kind: 'link'; url: string }
   | { kind: 'none' }
 
-type Attachment = { id: string; fileName: string; contentType: string; storageKey: string; url?: string | null }
+/*
+ * `mimeType`, WHICH IS WHAT THE API ANSWERS WITH. This read `contentType`,
+ * which `GET /tasks/:id/attachments` does not return — `tasks.service.ts` maps
+ * its own `row.contentType` to `mimeType` on the way out, and every other
+ * reader in the app takes it as `mimeType`. So the filter below compared
+ * `undefined` to `image/` for every row and the Attachments tab drew its
+ * empty state on every task, however many images were on it. Frame `03:10`
+ * says this tab offers the files already on the task; it could not.
+ *
+ * The presign POST still SENDS `contentType`, because that is the request's
+ * own shape. Only the read was wrong.
+ */
+type Attachment = { id: string; fileName: string; mimeType?: string | null; storageKey: string; url?: string | null }
 
 export function CoverImagePicker({
   open,
@@ -134,7 +146,7 @@ export function CoverImagePicker({
     let cancelled = false
     void api<Attachment[]>(`/tasks/${taskId}/attachments`)
       .then((rows) => {
-        if (!cancelled) setAttachments(rows.filter((r) => (r.contentType ?? '').startsWith('image/')))
+        if (!cancelled) setAttachments(rows.filter((r) => (r.mimeType ?? '').startsWith('image/')))
       })
       .catch(() => {
         if (!cancelled) setAttachments([])
