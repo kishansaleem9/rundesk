@@ -40,11 +40,19 @@
  * code as the proof — a suite whose branches are balanced can be shown to be,
  * by breaking the condition and watching the count stay put.
  *
- * The fix is always the same and always cheap: give the `if` an `else` that
- * reports the same checks as failed, with the reason the branch was not taken.
- * "Skipped" is not a third outcome these suites have. A check that did not run
- * is a check nobody knows the answer to, and the honest way to say that is to
- * fail it with a sentence explaining why.
+ * The fix is `test/e2e/lib/chain.mjs`: give the `if` an `else` that reports the
+ * same checks as FAILED, with the reason the branch was not taken. A check that
+ * did not run is a check nobody knows the answer to, and the honest way to say
+ * that is to fail it with a sentence explaining why.
+ *
+ * THE ONE EXCEPTION IS A GATE ON THE MACHINE, NOT ON THE PRODUCT — no routable
+ * audio output, no object storage configured, an entitlement the tenant does
+ * not have. Those are genuinely unknown rather than broken, and `skipRest`
+ * reports them as SKIP. It only works where the suite has a `skip` that COUNTS
+ * towards the run total, because an uncounted skip is the short run this file
+ * exists to find; `syncup-live` is the suite that needed it, and counting its
+ * five storage skips is what let it stop keeping a floor and compare exactly.
+ * A skip reachable by a PRODUCT regression is a check that cannot fail.
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
@@ -124,8 +132,16 @@ for (const [file, lines] of rows) {
  * ever exercised — which is very nearly the same list as the eleven suites the
  * coverage checker could not see, and for the same reason. A suite with no
  * break patch is a suite whose conditions have never been made false.
+ *
+ * 39 now: `syncup-live`'s ten and `panel-collapse`'s six are balanced, and
+ * `addressability-live`'s three and `emoji-picker`'s one before them. The fix
+ * is `test/e2e/lib/chain.mjs` — `step` for the next check, `rest` to report
+ * the remainder as failed with the reason, and `skipRest` for a gate on the
+ * machine rather than on the product, which is the narrow case where the
+ * honest answer is "unknown" rather than "broken". Keep this paragraph in step
+ * with the constant.
  */
-const BASELINE = 55
+const BASELINE = 39
 if (total > BASELINE) {
   console.error(`\n[check-branches] WORSE: ${BASELINE} → ${total}.`)
   console.error('  A conditional check makes the run length conditional, and EXPECTED_CHECKS is')

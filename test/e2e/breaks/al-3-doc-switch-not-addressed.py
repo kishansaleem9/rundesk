@@ -18,11 +18,24 @@
 # defect, and the suite's own comment says so. The second doc is the one that
 # has to appear in the URL and then come back.
 #
-# "landing on docs names the doc it opened" stays GREEN, correctly: the
-# auto-select is a different call site and this does not touch it.
+# PREDICTED TWO AND IT IS THREE, and the prediction was wrong about the code
+# rather than about the suite. It said "landing on docs names the doc it opened"
+# would stay green because the arrival write is a different call site. It is
+# not: the auto-select goes through `setSelectedDocId` like every other
+# selection, so moving that one writer to local state takes the arrival with
+# it. The URL is now never written at all, which makes this blunter than the
+# header claimed — the drift it describes ("right exactly once, then silently
+# naming a doc you are no longer reading") is what the SPLIT would produce, and
+# this patch removes the write outright.
+#
+# Left as it is, with the miscount recorded, because three real failures from
+# one deleted writer is the honest shape of "the address is not written". A
+# narrower patch that reddened only the switch would have to leave the arrival
+# call site alone, and there is only one writer to leave alone.
 #
 # Reddens: addressability-live: "switching doc changes the address" and
-#   "and coming back to that address reopens THAT doc, not the first one"
+#   "and coming back to that address reopens THAT doc, not the first one" and
+#   "landing on docs names the doc it opened"
 import io
 p = '/home/user/rundesk/apps/web/src/components/docs-panel.tsx'
 a = """  const selectedDocId = search.doc ?? null
