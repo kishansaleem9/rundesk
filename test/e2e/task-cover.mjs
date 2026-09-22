@@ -39,7 +39,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 32
+const EXPECTED_CHECKS = 37
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -457,21 +457,37 @@ try {
   /*
    * ── The Upload tab, frame `03:05`'s second tab ───────────────────────────
    *
-   * WHAT CAN BE MEASURED HERE IS THE REFUSAL, and that is the half worth
-   * having. `R2Service` logs "R2 is not fully configured. File and clip uploads
-   * are disabled." in this environment and `presignPutObject` throws
-   * `Storage is not configured`, so the happy path — presign, PUT, commit the
-   * storage key — cannot run without credentials this repository does not hold.
-   * Recorded as unmeasurable rather than skipped, the same way the
-   * language-model decisions are.
+   * THIS USED TO MEASURE THE REFUSAL, and the reason it gave was wrong.
    *
-   * The refusal is exactly what `cover-image-picker.tsx`'s own comment says was
-   * missing: "the version of this tab that shipped before had no handler at all,
-   * so a failed upload and a successful one looked the same: nothing happened
-   * either way." So: choosing a file must say something, in words, and must
-   * leave the cover alone.
+   * What stood here said the happy path "cannot run without credentials this
+   * repository does not hold", and recorded the tab as half-measured on that
+   * basis. `R2Service` reads `R2_ENDPOINT` and sets `forcePathStyle: true` — it
+   * speaks plain S3 — so what was missing was never credentials, it was
+   * somewhere to PUT to. `scripts/e2e-lanes/s3-stub.mjs` is that somewhere,
+   * every lane now starts one, and the whole path runs with NO product change:
+   * presign, PUT, commit the storage key, serve it back signed.
+   *
+   * SO THIS SECTION ASSERTS THE BYTES, not the words about the bytes. The file
+   * chosen in the browser has to arrive in storage and come back out of the
+   * cover's own URL identical. That is the only version of this check a facade
+   * cannot pass: a handler that sets a plausible key without uploading anything
+   * fails on the round trip.
+   *
+   * AND THE REFUSAL IS STILL MEASURED, because it is still the thing
+   * `cover-image-picker.tsx`'s own comment describes as having shipped broken —
+   * "no handler at all, so a failed upload and a successful one looked the same:
+   * nothing happened either way". It is no longer measured by starving the
+   * environment, which would have retired the behaviour along with the reason:
+   * the store is ASKED to refuse one PUT, so a genuine failure is arranged
+   * against working storage.
+   *
+   * THE STORE IS A COUNTED PRECONDITION, not a silent one. A lane without one
+   * comes up with R2 unconfigured, every upload takes the refusal path, and a
+   * suite that branched on that would report the same sentences while measuring
+   * something else entirely. So its presence is its own check: no store, one
+   * failure that names it, and the rest report what they actually found.
    */
-  console.log('\n▶ the Upload tab says when an upload cannot work, and changes nothing')
+  console.log('\n▶ the Upload tab really uploads — presign, PUT, and the bytes back out')
   await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
   await page.getByTestId('cover-tab-upload').click({ timeout: 10_000 }).catch(() => {})
   const chooser = page.getByTestId('cover-upload-input')
@@ -479,6 +495,28 @@ try {
     (await page.getByTestId('cover-upload-button').count()) === 1 && (await chooser.count()) === 1,
     'the Upload tab offers a way to choose a file',
     'the Upload tab drew no way to choose anything — a tab named after an action that cannot start',
+  )
+
+  // Lane k runs its API on 302k and its store on 91k, so one follows from the
+  // other; `--store` overrides for a lane laid out differently.
+  const STORE_PORT = Number(argOf('--store', process.env.E2E_STORE_PORT ?? 9100 + (API_PORT - 3020)))
+  const STORE = `http://127.0.0.1:${STORE_PORT}`
+  /*
+   * DISARMED AT THE START, not trusted to have been cleaned up at the end of
+   * the last run. The store outlives any one run of this suite, and an
+   * arranged failure that was armed but never fired stays armed: a run did
+   * exactly that, and the NEXT run's first upload came back 500 with nothing
+   * in that run to explain it. Asking at the start costs one request and makes
+   * this section's starting state something the section itself establishes.
+   */
+  const storeUp = await fetch(`${STORE}/__control/reset`, { method: 'POST' })
+    .then((r) => r.ok)
+    .catch(() => false)
+  chk(
+    storeUp,
+    'the lane has an object store, so this section measures the upload and not its refusal',
+    `nothing answered on ${STORE} — without a store every check below takes the "Storage is not ` +
+      'configured" path while printing sentences about uploading, which is the one outcome worth refusing',
   )
 
   // A real file, because `setInputFiles` dispatches a change event whatever the
@@ -489,28 +527,127 @@ try {
   )
   const pngPath = `/tmp/claude-0/cover-upload-${stamp}.png`
   writeFileSync(pngPath, TINY_PNG)
+
+  /*
+   * RESPONSES, NOT REQUESTS. A request leaving says the code ran; a response
+   * says the exchange landed. `folder-dialog` learnt this the expensive way —
+   * a check that a POST was SENT stayed green through a patch that made the
+   * server reject every one of them.
+   */
+  const presigns = []
+  const puts = []
+  page.on('response', (res) => {
+    const req = res.request()
+    if (req.method() === 'POST' && /\/attachments\/presign$/.test(res.url()))
+      presigns.push(res.status())
+    if (req.method() === 'PUT' && res.url().startsWith(STORE)) puts.push(res.status())
+  })
+
   const beforeUpload = (await T()).data
   await chooser.setInputFiles(pngPath, { timeout: 8000 }).catch(() => {})
+  const keyArrived = await waitUntil(
+    async () => ((await T()).data?.coverStorageKey ?? null) !== (beforeUpload?.coverStorageKey ?? null),
+    { timeoutMs: 20_000 },
+  )
+  const uploaded = (await T()).data
+
+  chk(
+    presigns.length > 0 && presigns.every((s) => s < 300),
+    'choosing a file asks the server to presign, and the server answers',
+    `the presign responses were ${JSON.stringify(presigns)} — nothing under 300 means the upload ` +
+      'never got a URL to send to',
+  )
+  chk(
+    puts.length > 0 && puts.at(-1) < 300,
+    'and the file itself is PUT to the URL that came back',
+    `the PUTs to the store answered ${JSON.stringify(puts)} — a presign nobody uploads to is the ` +
+      'facade this tab shipped as',
+  )
+  chk(
+    keyArrived && typeof uploaded?.coverStorageKey === 'string' && uploaded.coverStorageKey.length > 0,
+    'and the cover becomes a STORED key, not a link to somewhere else',
+    `the cover ended as coverStorageKey=${JSON.stringify(uploaded?.coverStorageKey ?? null)}, ` +
+      `coverImageUrl=${JSON.stringify(uploaded?.coverImageUrl ?? null)}`,
+  )
+  /*
+   * THE ROUND TRIP, which is the check a facade cannot pass. Everything above
+   * can be faked by a handler that writes a plausible key; only the bytes
+   * coming back out of the cover's OWN url — signed by the product, served by
+   * the store — say the file that was chosen is the file that is there.
+   */
+  const servedBytes = uploaded?.coverUrl
+    ? await fetch(uploaded.coverUrl)
+        .then(async (r) => (r.ok ? Buffer.from(await r.arrayBuffer()) : null))
+        .catch(() => null)
+    : null
+  chk(
+    servedBytes !== null && servedBytes.equals(TINY_PNG),
+    'and the cover serves back the very bytes that were chosen, not a plausible key',
+    servedBytes === null
+      ? `the cover url ${JSON.stringify(uploaded?.coverUrl ?? null)} served nothing`
+      : `the cover served ${servedBytes.length} bytes against the file's ${TINY_PNG.length}`,
+  )
+
+  /*
+   * NOW THE REFUSAL, arranged rather than starved. One PUT is refused by the
+   * store; the product has to say so and leave the cover alone. This is the
+   * behaviour `task-cover-11-upload-fails-silently` reddens, and it survives
+   * storage being configured because failure is no longer a property of the
+   * environment.
+   */
+  const armed = await fetch(`${STORE}/__control/fail-next-put`, { method: 'POST' })
+    .then((r) => r.ok)
+    .catch(() => false)
+  /*
+   * REOPENED ONLY IF IT IS SHUT, and the condition is the whole lesson.
+   *
+   * A successful commit CLOSES the picker, so after the upload above there is
+   * nothing to choose a file in — reusing the chooser typed into a detached
+   * input and the check read "the tab reported nothing at all" as a product
+   * defect. But `cover-change` is a TOGGLE: pressing it unconditionally shut a
+   * picker that a FAILED upload had correctly left open, and the same check
+   * failed again for the opposite reason. Ask first.
+   */
+  /*
+   * ASKED OF THE BUTTON, NOT THE INPUT. `cover-upload-input` carries
+   * `className="hidden"` — it is the file input the visible button opens — so
+   * `isVisible()` on it is false whether the picker is open or shut, and a
+   * condition written on it never fires. The tab's visible half is the button.
+   */
+  const uploadTabOpen = () => page.getByTestId('cover-upload-button').isVisible().catch(() => false)
+  if (!(await uploadTabOpen())) {
+    await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+    await page.getByTestId('cover-tab-upload').click({ timeout: 10_000 }).catch(() => {})
+  }
+  const reopened = await appears(page.getByTestId('cover-upload-button'), 8000)
+  const beforeRefused = (await T()).data
+  const secondPng = `/tmp/claude-0/cover-upload-refused-${stamp}.png`
+  writeFileSync(secondPng, Buffer.concat([TINY_PNG, Buffer.from('second')]))
+  await chooser.setInputFiles(secondPng, { timeout: 8000 }).catch(() => {})
   const said = await waitUntil(
     async () => (await page.getByTestId('cover-upload-error').count()) === 1,
-    { timeoutMs: 12_000 },
+    { timeoutMs: 15_000 },
   )
   const errText = said
     ? (await page.getByTestId('cover-upload-error').innerText({ timeout: 6000 }).catch(() => '')).trim()
     : ''
   chk(
-    said && errText.length > 0,
-    'choosing a file when storage is unconfigured SAYS so, rather than doing nothing visible',
-    `the tab reported ${said ? JSON.stringify(errText) : 'nothing at all'} — a failed upload and a ` +
-      'successful one looking the same is the state this tab shipped in',
+    armed && reopened && said && errText.length > 0,
+    'an upload that FAILS says so in words, rather than doing nothing visible',
+    !armed
+      ? 'the store would not arrange a failure, so nothing here was a failing upload'
+      : !reopened
+        ? 'the picker did not reopen, so no file was chosen and there was no upload to fail'
+        : `the tab reported ${said ? JSON.stringify(errText) : 'nothing at all'} — a failed upload and ` +
+          'a successful one looking the same is the state this tab shipped in',
   )
-  const afterUpload = (await T()).data
+  const afterRefused = (await T()).data
   chk(
-    (afterUpload?.coverStorageKey ?? null) === (beforeUpload?.coverStorageKey ?? null) &&
-      (afterUpload?.coverImageUrl ?? null) === (beforeUpload?.coverImageUrl ?? null),
+    (afterRefused?.coverStorageKey ?? null) === (beforeRefused?.coverStorageKey ?? null) &&
+      (afterRefused?.coverImageUrl ?? null) === (beforeRefused?.coverImageUrl ?? null),
     'and the cover is left exactly as it was',
-    `the cover moved to coverStorageKey=${JSON.stringify(afterUpload?.coverStorageKey ?? null)}, ` +
-      `coverImageUrl=${JSON.stringify(afterUpload?.coverImageUrl ?? null)} on an upload that failed`,
+    `the cover moved to coverStorageKey=${JSON.stringify(afterRefused?.coverStorageKey ?? null)}, ` +
+      `coverImageUrl=${JSON.stringify(afterRefused?.coverImageUrl ?? null)} on an upload that failed`,
   )
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })

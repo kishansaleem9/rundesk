@@ -125,6 +125,57 @@ const server = createServer(async (req, res) => {
     return res.end(JSON.stringify({ failNextPut }))
   }
 
+  /*
+   * AND A WAY TO DISARM IT, WHICH THE FIRST VERSION DID NOT HAVE.
+   *
+   * "Consumed when it fires" is only half a guarantee: an arranged failure
+   * that is armed and never fires stays armed, and the stub outlives any one
+   * suite run. That happened — a run arranged a failure, the press that should
+   * have triggered it never reached the page, and the NEXT run's first upload
+   * came back 500 with nothing in that run to explain it. A suite reading a
+   * leftover from the run before is the worst kind of flake, because it is
+   * reproducible in the wrong direction.
+   *
+   * So a caller can say "whatever was arranged, forget it", and the discipline
+   * is to say it at the START of a section rather than trusting the end of the
+   * last one.
+   */
+  if (url.pathname === '/__control/reset' && req.method === 'POST') {
+    failNextPut = false
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ failNextPut, objects: objects.size }))
+  }
+
+  /*
+   * CORS, BECAUSE THE UPLOAD IS MADE BY A BROWSER AND A BROWSER ASKS FIRST.
+   *
+   * The presigned PUT is sent by the web app, from the app's own origin, with a
+   * `content-type` header — which makes it a request Chromium will not send
+   * until an `OPTIONS` preflight says it may. Without this the stub answered
+   * 405 to that preflight and the PUT never left: the suite reported a presign
+   * that succeeded and "the PUTs to the store answered []", which is precisely
+   * the facade shape it was written to catch, manufactured by the double.
+   *
+   * This is not a liberty the stub is taking. A bucket that serves browser
+   * uploads must be configured with exactly this, and R2's own documentation
+   * makes it the first step of the presigned-upload recipe. A stub that refused
+   * it would be modelling a MISCONFIGURED bucket and calling the product broken
+   * for it. `*` is right here and nowhere else: this binds loopback and refuses
+   * to start without RUNDESK_S3_STUB=1.
+   */
+  const cors = {
+    'access-control-allow-origin': req.headers.origin ?? '*',
+    'access-control-allow-methods': 'GET,PUT,HEAD,DELETE,OPTIONS',
+    'access-control-allow-headers': req.headers['access-control-request-headers'] ?? '*',
+    'access-control-expose-headers': 'etag',
+    'access-control-max-age': '600',
+  }
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204, cors)
+    return res.end()
+  }
+  for (const [k, v] of Object.entries(cors)) res.setHeader(k, v)
+
   if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
 
   // ListObjectsV2 — bucket-scoped, no key.
