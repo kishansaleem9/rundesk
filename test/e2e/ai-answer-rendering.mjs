@@ -432,7 +432,11 @@ try {
    * AND IT ACTUALLY GOES. An `href` proves the attribute; only a click proves
    * the router accepts it. Done last in this block, because it leaves the page.
    */
-  await viewBoard.click()
+  // `aar-7-list-refs-never-sent` stops the list references being sent, so there
+  // is no view chip to press — the two checks above say exactly that, and this
+  // press then spent its thirty seconds and ended the run at 21 of 51. Bounded,
+  // the check below reports the address the browser is actually at (ledger §10).
+  await viewBoard.click({ timeout: 8000 }).catch(() => {})
   const landed = await waitUntil(
     () => Promise.resolve(page.url().includes(listId) && page.url().includes('view=board')),
     { timeoutMs: 15_000 },
@@ -798,7 +802,7 @@ try {
     'a half-typed word is COMPLETED from what the product can be asked to do',
     `mid-word it offered ${JSON.stringify(await wordsNow())}`,
   )
-  await page.getByTestId('ai-word-suggestion-folder').click()
+  await page.getByTestId('ai-word-suggestion-folder').click({ timeout: 8000 }).catch(() => {})
   const filled = await waitUntil(async () => (await box.inputValue()) === 'create a folder ', { timeoutMs: 8_000 })
   chk(
     filled,

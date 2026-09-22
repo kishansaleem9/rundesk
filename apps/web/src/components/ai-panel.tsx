@@ -1084,6 +1084,24 @@ export function AiPanel({
    * replacing it. Nothing is duplicated: the seed runs once per thread, so the
    * server's own copy of the turn is never shown beside the local one, and the
    * local one is dropped at the next thread switch.
+   *
+   * AND THE PARAGRAPH ABOVE OVERSTATED WHAT THIS FIXED, which is worth leaving
+   * in rather than quietly editing. Two things were changed together to make
+   * that suite green — an unbounded `innerText()` was bounded, and this seed
+   * stopped replacing a turn it had not seen — and the measurement says the
+   * first was the whole of it. `aar-24-history-seed-replaces-the-turn` restored
+   * the wholesale replace and all 52 checks still passed, through three
+   * different attempts to catch it: a delayed request (the server then answers
+   * late, with the turn already in the history it returns), a stale snapshot
+   * served three seconds after the answer lands, and the same again reading
+   * only the FINALISED answer rather than the streaming element. The stale
+   * history was verified to have actually been served in the last of those, so
+   * the race was staged and the turn survived it.
+   *
+   * The merge stays, because "a turn already on screen is not removed" is the
+   * behaviour a reader expects and the seed runs once per thread so it cannot
+   * duplicate. But it is a conservative choice that nothing measures, not a fix
+   * for the check above, and the audit does not get to claim it as one.
    */
   useEffect(() => {
     if (!threadId) {

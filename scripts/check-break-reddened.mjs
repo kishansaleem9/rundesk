@@ -155,6 +155,15 @@ for (const n of suiteNames) {
  * taken it from 620 to 51 exactly as before — and that is the failure this floor
  * is for.
  *
+ * AND 760 → 759 BECAUSE A PATCH WAS DELETED, said out loud because that is the
+ * one reason this floor's own message warns about. `aar-24-history-seed-
+ * replaces-the-turn` aimed at a product change nothing can observe: three
+ * constructions of the race it models all came back green, the last of them
+ * verifying that the stale history really was served. A patch that reddens
+ * nothing after that is not evidence, and keeping it against a zero ceiling
+ * would be a suppression list with one entry. §10 carries the whole
+ * investigation.
+ *
  * `green` goes 1 → 0 by the same accounting, and it is the more interesting
  * number. All nine greens turned out to be measurements of trees from before
  * their own fixes — `fd-7-toggle-latches` at 06:27 against a check its suite
@@ -162,7 +171,7 @@ for (const n of suiteNames) {
  * UNKNOWN, which is what they always were, so 0 is both the strictest floor and
  * the honest one: a patch that reddens nothing on THIS tree has not been aimed.
  */
-const BASELINE = { accounted: 760, green: 0, unproven: 1 }
+const BASELINE = { accounted: 759, green: 0, unproven: 1 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')

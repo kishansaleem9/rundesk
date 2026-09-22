@@ -220,9 +220,26 @@ try {
    *
    * The first dialog's "it starts off" check above is a different fact and
    * stays where it is.
+   *
+   * AND IT REOPENS IN THE SAME SESSION, which is both what a person does and
+   * the only way this check can see the defect. `openFolderTab` navigates, and
+   * a navigation wipes `globalThis` — so the module-level latch the patch adds
+   * was gone before the toggle could be read, and the patch ran green a second
+   * time for a second reason. Somebody making two folders in a row does not
+   * reload the page between them.
    */
   console.log('\n▶ a fresh dialog does not remember the last answer')
-  await openFolderTab()
+  await page.keyboard.press('Escape')
+  await waitUntil(
+    async () => (await page.getByTestId('quick-create-folder-name').count()) === 0,
+    { timeoutMs: 8000 },
+  )
+  await page.getByTestId('quick-create-open').click({ timeout: 20_000 }).catch(() => {})
+  await page.getByTestId('create-tab-folder').click({ timeout: 20_000 }).catch(() => {})
+  await waitUntil(
+    async () => (await page.getByTestId('quick-create-folder-private').count()) === 1,
+    { timeoutMs: 20_000 },
+  )
   chk(
     (await page.getByTestId('quick-create-folder-private').isChecked().catch(() => true)) === false,
     'reopening the dialog shows the toggle off again',

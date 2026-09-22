@@ -4443,6 +4443,12 @@ step log above it explaining what it did. Nothing is broken afterwards; the next
 thread switch loads the stored copy. The answer simply vanishes off the screen.
 It is merged by id now.
 
+**AND THAT PARAGRAPH CLAIMS MORE THAN ANYTHING MEASURES — see §10.** The merge
+is a conservative choice that no check distinguishes; the bounded read below is
+what made the suite green, and three separate attempts to catch the seed all
+came back green. Left standing rather than edited away, because the correction
+is the point.
+
 `ai-answer-rendering` is where that surfaced, and the suite had **never once run
 to its declared length** — the check after the failing one read `innerText()`
 unconditionally on an element the check above had just found absent, so the run
@@ -4841,3 +4847,45 @@ mention, a patch that leaves its test passing, and the restore deliberately
 disabled, which is the one that matters: a checker that leaves a break patch
 applied would put it in the next commit, arriving through the tool that was
 supposed to be careful.
+
+### The merge I could not make a check fail without
+
+`aar-24-history-seed-replaces-the-turn` existed because a product fix had no
+patch aimed at it. Two things were changed together this morning to get
+`ai-answer-rendering` to its declared length — an unbounded `innerText()` was
+bounded, and the thread-history seed stopped REPLACING a turn the mount had
+produced — and a green baseline does not say which mattered. The patch restores
+the wholesale replace, and its header wrote the prediction down first: *"if this
+reddens the trace check, the merge is what made the suite green and the bounded
+read only stopped the crash. If it stays green, the bounded read was the whole
+of it."*
+
+It stayed green. Three constructions, each correcting the last:
+
+1. **A delayed request.** Holding the GET for three seconds makes the SERVER
+   answer late — and by then the turn has persisted its own messages, so the
+   history it returns already contains the answer. Replacing with a superset is
+   harmless. This would have shipped a check that cannot fail.
+2. **A stale snapshot, served late.** Capture the history before the turn and
+   fulfil the held route with it. Closer, and still green — because the selector
+   `[data-testid^="ai-answer-"]` also matches `ai-answer-streaming`, which
+   renders from the stream buffer rather than from `messages` and so cannot be
+   touched by the seed.
+3. **The finalised answer only,** with the route counting its own hits so a
+   check that never staged the race reports UNKNOWN instead of passing. The
+   stale history was verified served, the race was staged — and the turn
+   survived it with the replace restored.
+
+So the merge is not what keeps the answer, and the comment in `ai-panel.tsx`
+saying it fixed the trace check overstated it. Corrected there and here, with
+the original paragraph left standing above rather than edited away.
+
+**What was done about it.** The merge stays — "a turn already on screen is not
+removed" is the behaviour a reader expects, and the seed runs once per thread so
+it cannot duplicate — but it is recorded as a conservative choice nothing
+measures rather than as a fix. `aar-24` is DELETED: a patch that reddens nothing
+after three honest attempts is not evidence, and keeping it as a permanent green
+against a zero ceiling would be a suppression list with one entry. The check I
+wrote to catch it is deleted too, because a check no patch can redden is the
+same problem one level up. `accounted` falls by one, visibly, which is what a
+floor is for.
