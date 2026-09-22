@@ -637,7 +637,14 @@ try {
   await flip('list-board-stack-fields')
   await page.evaluate(() => { window.prompt = () => 'stacked board' })
   const before = viewWrites.length
-  await page.getByTestId('list-save-view').click()
+  /*
+   * Bounded, and the chip's state recorded FIRST — because the check two below
+   * asserts the chip goes DOWN, and a chip that was never there is down. With
+   * the press caught rather than throwing, that absence would have read as a
+   * successful save. `chipWasUp` is what tells the two apart.
+   */
+  const chipWasUp = await page.getByTestId('list-save-view').isVisible().catch(() => false)
+  await page.getByTestId('list-save-view').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
       () => viewWrites.slice(before).some((b) => b?.config?.stackFields === true),
@@ -647,9 +654,12 @@ try {
     `the view writes carried ${JSON.stringify(viewWrites.slice(before).map((b) => b?.config?.stackFields))}`,
   )
   chk(
-    await waitUntil(() => page.getByTestId('list-save-view').isVisible().catch(() => false).then((v) => !v), { timeoutMs: 8_000 }),
+    chipWasUp &&
+      (await waitUntil(() => page.getByTestId('list-save-view').isVisible().catch(() => false).then((v) => !v), { timeoutMs: 8_000 })),
     'and the Save chip goes down once it is saved',
-    'the Save view chip stayed up after a successful save, so the check below cannot mean anything',
+    chipWasUp
+      ? 'the Save view chip stayed up after a successful save, so the check below cannot mean anything'
+      : 'the Save view chip was never up, so it going down says nothing about saving',
   )
   await flip('list-board-collapse-empty')
   chk(

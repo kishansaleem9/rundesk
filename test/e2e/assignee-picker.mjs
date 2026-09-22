@@ -211,7 +211,11 @@ try {
       'a list that silently stops is the defect this replaced',
   )
 
-  await page.getByTestId('assignee-search').fill(lastMate.displayName)
+  // Bounded: a check in this suite asserts the search box exists, so it is an
+  // element a patch can remove. The `waitUntil` below requires the row to be
+  // VISIBLE and the count to be exactly one, so a fill that never landed fails
+  // it — the catch costs no verdict and saves the thirty seconds.
+  await page.getByTestId('assignee-search').fill(lastMate.displayName, { timeout: 8000 }).catch(() => {})
   const row = page.getByTestId(`assign-member-${lastMate.userId}`)
   chk(
     await waitUntil(async () => (await row.isVisible().catch(() => false)) && (await rowCount()) === 1,
@@ -274,12 +278,24 @@ try {
    * A NAME that matches nobody is NOT an invitation — it is a miss. Offering to
    * "invite Zzzz Nobody" would be offering to email a person's name.
    */
-  await page.getByTestId('assignee-search').fill('Zzzz Nobody At All')
+  /*
+   * THE CHECK BELOW PASSES ON ABSENCE, so bounding the fill needed a guard.
+   *
+   * It asserts that NO invite row appears. A picker that is gone shows no
+   * invite row either — and with the fill caught rather than throwing, that
+   * emptiness would be read as the product behaving correctly. So the search
+   * box is measured first and carried into the condition: no box, no typing,
+   * and the absent invite row proves nothing.
+   */
+  const searchThere = await page.getByTestId('assignee-search').isVisible().catch(() => false)
+  await page.getByTestId('assignee-search').fill('Zzzz Nobody At All', { timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(600)
   chk(
-    !(await page.getByTestId('assignee-invite').isVisible().catch(() => false)),
+    searchThere && !(await page.getByTestId('assignee-invite').isVisible().catch(() => false)),
     'a name that matches nobody is a miss, not an invitation',
-    'it offered to invite something that is not an email address',
+    searchThere
+      ? 'it offered to invite something that is not an email address'
+      : 'the search box was gone, so nothing was typed — an absent invite row says nothing here',
   )
 } catch (err) {
   failed += 1

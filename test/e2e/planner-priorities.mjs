@@ -274,8 +274,13 @@ try {
 
   // Add a second one to remove, since the first is now done and out of view.
   const SECOND = `Drop me ${TAG}`
-  await page.getByTestId('planner-priority-input').fill(SECOND)
-  await page.getByTestId('planner-priority-add').click()
+  // Both bounded: the Add control is asserted to exist by a check in this
+  // suite, and bounding the press alone would move the thirty seconds onto —
+  // or leave it on — the fill above it. `second` below is read from the
+  // SERVER, so an add that never happened fails that check rather than this
+  // line, which is the guard the comment further down already describes.
+  await page.getByTestId('planner-priority-input').fill(SECOND, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('planner-priority-add').click({ timeout: 8000 }).catch(() => {})
   let second = null
   await waitUntil(async () => {
     second = ((await mine()).data ?? []).find((p) => p.title === SECOND)

@@ -149,7 +149,11 @@ try {
     `the row reads "${suggestionText}" — the frame offers "12 hours"`,
   )
 
-  await page.getByTestId('task-estimate-suggestion').click()
+  // Bounded: a check in this suite asserts the suggestion row exists, so it is
+  // an element a patch can remove. The check below reads the TASK's stored
+  // seconds, so a press that never landed fails there — no estimate is written
+  // and it reports what the task actually holds.
+  await page.getByTestId('task-estimate-suggestion').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await storedSeconds(task.id)) === 12 * 3600, { timeoutMs: 20_000 }),
     'choosing it stores twelve hours',

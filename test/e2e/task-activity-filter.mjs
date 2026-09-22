@@ -320,7 +320,11 @@ try {
   )
 
   console.log('\n▶ a search that matches nothing still leaves you a way out')
-  await page.getByTestId('activity-search').fill(`absent-${TAG}`)
+  // Bounded to the same standard as the Clear press below: the search box is
+  // asserted to exist by a check in this suite, so it is an element a patch can
+  // take away. `emptied` is what reports a fill that never landed — the feed
+  // does not go to zero on its own — and the check below requires it.
+  await page.getByTestId('activity-search').fill(`absent-${TAG}`, { timeout: 8000 }).catch(() => {})
   const emptied = await waitUntil(() => settled('0'), { timeoutMs: 20_000 })
   chk(
     emptied && (await page.getByTestId('activity-filter-clear').isVisible().catch(() => false)),

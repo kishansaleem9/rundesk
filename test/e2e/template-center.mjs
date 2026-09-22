@@ -305,7 +305,14 @@ try {
    * a request is guaranteed by construction rather than by timing.
    */
   mark = browseCalls.length
-  await page.getByTestId('templates-facet-type-list').click()
+  /*
+   * Bounded because a check in this suite asserts this facet EXISTS, which is
+   * the suite saying a patch can take it away — and every press here is
+   * followed by a `settle(N)` that reports what the grid did. Caught, a missing
+   * facet fails those checks; bare, it spends thirty seconds and ends the
+   * section with them unrun.
+   */
+  await page.getByTestId('templates-facet-type-list').click({ timeout: 8000 }).catch(() => {})
   chk(await settle(3), 'ticking List instead leaves the three list templates',
     `the grid drew ${await cards().count()} cards`)
   const afterList = sinceLast(mark)
@@ -314,7 +321,7 @@ try {
       !afterList.some((u) => /[?&]type=[^&]*folder/.test(u)),
     'and it asks the server for List ALONE — the untick removed Folder from the state, it did not just stop drawing it',
     `the requests were ${JSON.stringify(afterList)}`)
-  await page.getByTestId('templates-facet-type-list').click()
+  await page.getByTestId('templates-facet-type-list').click({ timeout: 8000 }).catch(() => {})
   chk(await settle(ALL_SHOWN), 'and unticking List brings them back again',
     `the grid drew ${await cards().count()} cards`)
 
@@ -334,13 +341,18 @@ try {
 
   console.log('\n▶ Use Cases — the frame\'s top-bar dropdown')
   mark = browseCalls.length
-  await page.getByTestId('templates-facet-usecase').selectOption('onboarding')
+  // Bounded for the reason above: `templates-facet-usecase` is asserted to
+  // exist by a check in this suite, so it is an element that can be taken away.
+  await page
+    .getByTestId('templates-facet-usecase')
+    .selectOption('onboarding', { timeout: 8000 })
+    .catch(() => {})
   chk(await settle(1), 'choosing Onboarding leaves the one template that has it',
     `the grid drew ${await cards().count()} cards`)
   chk(await waitUntil(() => sinceLast(mark).some((u) => /[?&]useCase=onboarding(&|$)/.test(u)), { timeoutMs: 8_000 }),
     'and useCase=onboarding went to the server',
     `no request carried useCase=onboarding: ${JSON.stringify(sinceLast(mark))}`)
-  await page.getByTestId('templates-facet-usecase').selectOption('')
+  await page.getByTestId('templates-facet-usecase').selectOption('', { timeout: 8000 }).catch(() => {})
   chk(await settle(ALL_SHOWN), 'and clearing it restores the nine', `the grid drew ${await cards().count()} cards`)
 
   console.log('\n▶ categories — sections with counts, and a "See N more" that means it')
@@ -435,7 +447,10 @@ try {
    * carries all four values, which is what lets all four be switched on at once
    * without the grid changing under the sequence.
    */
-  await page.getByTestId('templates-facet-usecase').selectOption('support')
+  await page
+    .getByTestId('templates-facet-usecase')
+    .selectOption('support', { timeout: 8000 })
+    .catch(() => {})
   await waitUntil(() => page.getByTestId('templates-category-engineering').count().then((n) => n === 1),
     { timeoutMs: 8_000 })
   await page.getByTestId('templates-category-engineering').click({ timeout: 8000 }).catch(() => {})

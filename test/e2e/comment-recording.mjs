@@ -471,13 +471,23 @@ try {
    * OTHER tooltip, so a copy-paste that gave both buttons the same words fails
    * here rather than reading as two working tooltips.
    */
-  const attachTitle = await page.getByTestId('comment-recording-attach').getAttribute('title')
-  const transcribeTitle = await page.getByTestId('comment-recording-transcribe').getAttribute('title')
+  const attachTitle = await page
+    .getByTestId('comment-recording-attach')
+    .getAttribute('title', { timeout: 8000 })
+    .catch(() => null)
+  /*
+   * Transcribe's tooltip is READ ONCE, twelve lines up, and reused here. It was
+   * read a second time on its own line, unbounded — a Transcribe button the
+   * check above is allowed to find absent, pressed for its attribute thirty
+   * seconds later with nothing to short-circuit in front of it. The second read
+   * also answered a question already on the page: two reads of one attribute
+   * can disagree, and then the pair of checks disagree about the same button.
+   */
   chk(
-    !!attachTitle && attachTitle !== transcribeTitle,
+    !!attachTitle && attachTitle !== transcribeTooltip,
     'and "Attach as audio file" as the tooltip on the voice-note button',
     `the voice-note button's tooltip was ${JSON.stringify(attachTitle)} against Transcribe's ` +
-      `${JSON.stringify(transcribeTitle)} — absent means the frame's tooltip is missing, equal ` +
+      `${JSON.stringify(transcribeTooltip)} — absent means the frame's tooltip is missing, equal ` +
       'means both buttons claim to do the same thing',
   )
   chk(
@@ -486,8 +496,11 @@ try {
     'no player on the finished recording — the person cannot hear what they are about to send',
   )
 
-  // Transcribe → the words land in the box, after what was already typed.
-  await page.getByTestId('comment-recording-transcribe').click()
+  // Transcribe → the words land in the box, after what was already typed. The
+  // press is bounded and swallowed because two checks in this file already say
+  // Transcribe may be absent; unbounded it spends thirty seconds and ends the
+  // section, where caught it lets `transcribed` below report the absence.
+  await page.getByTestId('comment-recording-transcribe').click({ timeout: 8000 }).catch(() => {})
   const transcribed = await waitUntil(
     async () => (await page.locator('textarea').first().inputValue()).includes('SPOKEN WORDS'),
     { timeoutMs: 10_000 },
@@ -504,9 +517,12 @@ try {
   // ── Voice note → an attachment, and a comment that needs no words ────────
   console.log('\n▶ Voice note attaches the audio instead')
   await page.locator('textarea').first().fill('')
-  await page.getByTestId('comment-record-voice').click()
+  // Bounded to the same standard as the attach press below: the gates between
+  // them already report rather than throw, so leaving these two bare left the
+  // thirty seconds on the first control a patch removes.
+  await page.getByTestId('comment-record-voice').click({ timeout: 8000 }).catch(() => {})
   await waitUntil(() => page.getByTestId('comment-recording-active').isVisible().catch(() => false), { timeoutMs: 10_000 })
-  await page.getByTestId('comment-recording-stop').click()
+  await page.getByTestId('comment-recording-stop').click({ timeout: 8000 }).catch(() => {})
   await waitUntil(() => page.getByTestId('comment-recording-ready').isVisible().catch(() => false), { timeoutMs: 10_000 })
   // Bounded and caught: what stands above it — a check, or a gate whose answer
   // nobody reads — is allowed to fail, so this has to report rather than throw.
@@ -549,7 +565,10 @@ try {
    * accommodate a UI change would have been the wrong repair; walking the new
    * path is the right one.
    */
-  await page.getByTestId('comment-record-clip').click()
+  // Bounded: a check above is allowed to find this button absent, and the
+  // `panelUp` throw below already says so in words. Unbounded the press spends
+  // thirty seconds first and raises Playwright's message instead of that one.
+  await page.getByTestId('comment-record-clip').click({ timeout: 8000 }).catch(() => {})
   const panelUp = await waitUntil(
     () => page.getByTestId('clip-setup-panel').isVisible().catch(() => false),
     { timeoutMs: 15_000 },

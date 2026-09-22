@@ -327,8 +327,13 @@ try {
   )
 
   const BODY = `assigned on post ${TAG}`
-  await page.getByTestId('comment-input').fill(BODY)
-  await page.getByTestId('comment-post').click()
+  // Both bounded: a check in this suite asserts the composer exists, so it can
+  // be taken away, and bounding the fill alone would move the thirty seconds
+  // onto the post beneath it. The check below reads the DATABASE for this
+  // exact body, so neither press decides it — nothing typed, nothing posted,
+  // no row, and it fails on the row.
+  await page.getByTestId('comment-input').fill(BODY, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('comment-post').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(async () => {
       const rows = await sql`

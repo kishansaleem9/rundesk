@@ -592,9 +592,25 @@ try {
     'there is no way to create a field while creating a task — she does exactly that at [00:16]',
   )
 
-  await page.getByTestId('quick-create-new-field').click()
-  await page.getByTestId('quick-create-new-field-name').fill(`Made inline ${TAG}`)
-  await page.getByTestId('quick-create-new-field-type').selectOption('labels')
+  /*
+   * THE WHOLE OPENING SEQUENCE IS BOUNDED, not the one line a rule named.
+   *
+   * A check further down this file waits for `quick-create-new-field-name` to
+   * GO, which is the suite saying that row can be absent — so the fill on it
+   * was the flagged line. Bounding only the fill moves the thirty seconds onto
+   * the `selectOption` beneath it and ends the same section one line later.
+   * With all three caught, `wantsOptions` below comes back false and the check
+   * reports it, which is what a missing row should look like.
+   */
+  await page.getByTestId('quick-create-new-field').click({ timeout: 8000 }).catch(() => {})
+  await page
+    .getByTestId('quick-create-new-field-name')
+    .fill(`Made inline ${TAG}`, { timeout: 8000 })
+    .catch(() => {})
+  await page
+    .getByTestId('quick-create-new-field-type')
+    .selectOption('labels', { timeout: 8000 })
+    .catch(() => {})
   const wantsOptions = await waitUntil(
     () => page.getByTestId('quick-create-new-field-options').isVisible().catch(() => false),
     { timeoutMs: 10_000 },
@@ -631,14 +647,26 @@ try {
   console.log('\n▶ frame `00:25` — Field name*, and a way out')
 
   const REQUIRED_NAME = `Needs filling ${TAG}`
-  await page.getByTestId('quick-create-new-field').click()
-  await page.getByTestId('quick-create-new-field-name').fill(REQUIRED_NAME)
+  // Every step bounded, for the reason given at the first of these sequences:
+  // the row this types into is one the suite elsewhere waits to see GO, so it
+  // can be absent, and a sequence is only as bounded as its last unguarded
+  // line. The check below reads the DATABASE, so nothing here decides it —
+  // with the row missing, no definition is written and it fails on the row
+  // count, which is the honest verdict.
+  await page.getByTestId('quick-create-new-field').click({ timeout: 8000 }).catch(() => {})
+  await page
+    .getByTestId('quick-create-new-field-name')
+    .fill(REQUIRED_NAME, { timeout: 8000 })
+    .catch(() => {})
   // Type named explicitly: this section is about the required flag, and
   // inheriting the previous section's Labels type would leave Create disabled
   // for want of options — which is how this check first failed.
-  await page.getByTestId('quick-create-new-field-type').selectOption('text')
-  await page.getByTestId('quick-create-new-field-required').check()
-  await page.getByTestId('quick-create-new-field-save').click()
+  await page
+    .getByTestId('quick-create-new-field-type')
+    .selectOption('text', { timeout: 8000 })
+    .catch(() => {})
+  await page.getByTestId('quick-create-new-field-required').check({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-new-field-save').click({ timeout: 8000 }).catch(() => {})
 
   chk(
     await waitUntil(async () => {
@@ -655,17 +683,40 @@ try {
    * pressed the only ways out were to create a field you had decided against,
    * or to abandon the task you were in the middle of writing.
    */
+  /*
+   * BOUNDING THIS SEQUENCE NEEDED A GUARD THE OTHERS DID NOT, and it is the
+   * clearest case for why bounding is not mechanical.
+   *
+   * The check below passes when the name row is NOT visible. Caught presses on
+   * a row that never opened leave it not visible for that reason — so the same
+   * patch that removes the row would have this check report that Cancel closes
+   * it. A confident zero, manufactured by the fix.
+   *
+   * So the row being open is measured BEFORE Cancel and carried into the
+   * condition. Still one check, and it now tells the two failures apart in
+   * words: nothing to close, versus Cancel refusing to close it.
+   */
   const ABANDONED = `Never made ${TAG}`
-  await page.getByTestId('quick-create-new-field').click()
-  await page.getByTestId('quick-create-new-field-name').fill(ABANDONED)
-  await page.getByTestId('quick-create-new-field-cancel').click()
+  await page.getByTestId('quick-create-new-field').click({ timeout: 8000 }).catch(() => {})
+  const rowOpened = await waitUntil(
+    () => page.getByTestId('quick-create-new-field-name').isVisible().catch(() => false),
+    { timeoutMs: 10_000 },
+  )
+  await page
+    .getByTestId('quick-create-new-field-name')
+    .fill(ABANDONED, { timeout: 8000 })
+    .catch(() => {})
+  await page.getByTestId('quick-create-new-field-cancel').click({ timeout: 8000 }).catch(() => {})
   chk(
-    await waitUntil(
-      async () => !(await page.getByTestId('quick-create-new-field-name').isVisible().catch(() => false)),
-      { timeoutMs: 10_000 },
-    ),
+    rowOpened &&
+      (await waitUntil(
+        async () => !(await page.getByTestId('quick-create-new-field-name').isVisible().catch(() => false)),
+        { timeoutMs: 10_000 },
+      )),
     'Cancel closes the field row',
-    'Cancel left the row open — the frame pairs it with Create for a reason',
+    rowOpened
+      ? 'Cancel left the row open — the frame pairs it with Create for a reason'
+      : 'the field row never opened, so there was nothing for Cancel to close',
   )
   const abandonedRows = await sql`
     select 1 from custom_field_definitions where name = ${ABANDONED}`
@@ -765,10 +816,18 @@ try {
   await page.getByTestId('quick-create-list').selectOption({ label: `List ${TAG}` })
 
   const SCOPED = `Only here ${TAG}`
-  await page.getByTestId('quick-create-new-field-type-search').fill('text')
-  await page.getByTestId('quick-create-new-field-name').fill(SCOPED)
+  // Bounded as a whole, for the reason given at the first of these sequences.
+  // The `scope` line was already caught and the three around it were not,
+  // which buys nothing: the thirty seconds just falls on whichever neighbour
+  // is still bare. The check below reads the DATABASE, so none of this decides
+  // it — with the row gone, no definition is written and it fails on that.
+  await page
+    .getByTestId('quick-create-new-field-type-search')
+    .fill('text', { timeout: 8000 })
+    .catch(() => {})
+  await page.getByTestId('quick-create-new-field-name').fill(SCOPED, { timeout: 8000 }).catch(() => {})
   await page.getByTestId('quick-create-new-field-scope').selectOption('list', { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('quick-create-new-field-save').click()
+  await page.getByTestId('quick-create-new-field-save').click({ timeout: 8000 }).catch(() => {})
 
   let scopedRow = null
   chk(
@@ -825,9 +884,17 @@ try {
    * config nothing counts differently would be the same bug with extra steps.
    */
   console.log('\n▶ §V2-01b — the config panel, and a config that changes the number')
-  await page.getByTestId('quick-create-new-field').click()
-  await page.getByTestId('quick-create-new-field-name').fill(`Subtasks only ${TAG}`)
-  await page.getByTestId('quick-create-new-field-type').selectOption('progress_auto')
+  // Bounded as a whole, for the reason given at the first of these sequences.
+  // `panelShown` below is what reports a row that never opened.
+  await page.getByTestId('quick-create-new-field').click({ timeout: 8000 }).catch(() => {})
+  await page
+    .getByTestId('quick-create-new-field-name')
+    .fill(`Subtasks only ${TAG}`, { timeout: 8000 })
+    .catch(() => {})
+  await page
+    .getByTestId('quick-create-new-field-type')
+    .selectOption('progress_auto', { timeout: 8000 })
+    .catch(() => {})
 
   const panelShown = await waitUntil(
     () => page.getByTestId('quick-create-progress-config').isVisible().catch(() => false),

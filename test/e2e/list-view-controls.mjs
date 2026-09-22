@@ -119,8 +119,12 @@ const childVisible = () =>
 const chooseSubtaskMode = async (mode) => {
   // `<summary>` is the clickable half of a <details>; clicking the details
   // itself lands on whichever child is under the cursor.
-  await page.getByTestId('list-subtasks').locator('summary').click()
-  await page.getByTestId(`list-subtasks-${mode}`).click()
+  // Both bounded: a check in this suite asserts the Subtasks menu exists, so a
+  // patch can take it away, and bounding only the first press would move the
+  // thirty seconds onto the second. Every caller checks what the mode DID, so
+  // a press that never landed fails there rather than ending the section here.
+  await page.getByTestId('list-subtasks').locator('summary').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId(`list-subtasks-${mode}`).click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1200)
 }
 
@@ -251,7 +255,10 @@ try {
   await page.waitForTimeout(900)
 
   console.log('\n▶ the Subtasks menu — three options, and only three')
-  await page.getByTestId('list-subtasks').locator('summary').click()
+  // Bounded: the menu this opens is asserted to exist elsewhere in the suite.
+  // With it gone the read below comes back empty and the check reports "0
+  // options", which is the finding — thirty seconds of nothing is not.
+  await page.getByTestId('list-subtasks').locator('summary').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(400)
   const optionTexts = await page.locator('[data-testid^="list-subtasks-"]').evaluateAll(
     (els) => els.map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim()),
@@ -346,7 +353,9 @@ try {
     'the child stayed a top-level row after the mode changed back')
 
   console.log('\n▶ Columns — the built-in ones, and only the ones this view draws')
-  await page.getByTestId('list-columns').locator('summary').click()
+  // Bounded for the same reason as the Subtasks menu above: with the control
+  // gone the read below is empty and the check names the number it found.
+  await page.getByTestId('list-columns').locator('summary').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(400)
   const listCols = await page.locator('[data-testid^="list-column-"]').evaluateAll(
     (els) => els.map((e) => e.getAttribute('data-testid')).sort(),
