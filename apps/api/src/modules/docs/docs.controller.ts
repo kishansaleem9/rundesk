@@ -161,6 +161,14 @@ export class DocsController {
    * it, so the extension is checked and the refusal says which formats work.
    */
   @Post('workspaces/:workspaceId/docs/import')
+  // WorkspaceMemberGuard, exactly as the `create` endpoint above carries it.
+  // Without it any authenticated user could import a doc into ANY workspace by
+  // id: the class guards prove WHO you are and that Docs are enabled, neither
+  // of which says you belong to the workspace named in the path. This was
+  // missing when the endpoint was first written and was found by reading the
+  // sibling route rather than by any test — a write that lands in the wrong
+  // workspace succeeds, so nothing fails to notice.
+  @UseGuards(WorkspaceMemberGuard)
   importDoc(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: CurrentUserPayload,
