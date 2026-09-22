@@ -232,7 +232,7 @@ jobs:
       # pinned in both directions, because a test of the floor's existence left
       # lowering it from five words to four completely green.
       - name: The claim matcher holds its contract
-        run: node scripts/check-claim-match.mjs
+        run: node scripts/check-claim-match.mjs --mutate
 
       # And the module that decides WHICH SUITE a patch is about. There were
       # four copies of that decision and they disagreed: one truncated
@@ -240,7 +240,7 @@ jobs:
       # attributed in one report and "(no suite named)" in another — and a patch
       # that cannot be attributed cannot be scheduled to run.
       - name: The patch-to-suite attribution holds its contract
-        run: node scripts/check-suite-of-patch.mjs
+        run: node scripts/check-suite-of-patch.mjs --mutate
 
       # And the module that decides WHICH TREE a recorded number is about. The
       # rule it replaced compared the suite file's commit date against the log's

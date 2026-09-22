@@ -24,7 +24,21 @@
  * person`, which is not a sentence and would be reported as a claim no suite
  * contains.
  */
-import { norm, findsClaim, quotedIn, MIN_WORDS } from './lib/claim-match.mjs'
+import { fileURLToPath } from 'node:url'
+import { dirname, join } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { proveMutationsBite } from './lib/mutate.mjs'
+
+/*
+ * DYNAMIC, so `--mutate` can point these cases at a deliberately-broken copy.
+ * A contract test that cannot be aimed at a broken subject proves only that its
+ * own cases run — and this subject decides whether a break patch's claim is
+ * verified at all, so every attribution number in the audit is downstream of
+ * it being right.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SUBJECT = process.env.CLAIM_MATCH_LIB ?? './lib/claim-match.mjs'
+const { norm, findsClaim, quotedIn, MIN_WORDS } = await import(SUBJECT)
 
 let failed = 0
 let ran = 0
@@ -150,6 +164,38 @@ is(
  * `0 failed` for checks it never reached.
  */
 let short = false
+/*
+ * AND THAT EACH CASE BITES. The floor below catches "every assertion deleted";
+ * it cannot catch "the matcher is broken and the cases pass anyway". Each
+ * mutation here is a way this module has ALREADY been wrong, or a relaxation
+ * its own comments argue against.
+ */
+if (process.argv.includes('--mutate')) {
+  failed += proveMutationsBite({
+    subject: join(HERE, 'lib/claim-match.mjs'),
+    caseFile: fileURLToPath(import.meta.url),
+    envVar: 'CLAIM_MATCH_LIB',
+    label: 'the claim matcher',
+    alive: (mutant) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(mutant)})`], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      return { ok: r.status === 0, why: (r.stderr ?? '').trim() }
+    },
+    mutations: [
+      ['the five-word floor drops to four', 'export const MIN_WORDS = 5', 'export const MIN_WORDS = 4'],
+      ['the floor drops away entirely', 'len >= MIN_WORDS', 'len >= 1'],
+      ['only a whole-claim match counts, so interpolated sentences read as rotted', 'if (hay.includes(q)) return true', 'if (hay.includes(q)) return true\n  return false\n  // eslint-disable-next-line no-unreachable'],
+      ['smart quotes stop being normalised', "/[‘’ʼ'\"“”]/g", '/__never_matches__/g'],
+      ['escaped quotes stop being unescaped', '/\\\\(["\'`\\\\])/g', '/__never_matches__()/g'],
+      ['runs of whitespace stop collapsing', '/\\s+/g', '/__never_matches__/g'],
+      ['single-quoted claims stop being read', 'return [...block.matchAll(SINGLE)].map((m) => norm(m[2]))', 'return []'],
+      ['a possessive apostrophe opens a quote again', "/(^|[\\s([<\\u2014-])'((?:[^'\\\\]|\\\\.){8,}?)'(?=$|[\\s,.;:!?)\\]>\\u2014-])/g", "/()'((?:[^'\\\\]|\\\\.){8,}?)'()/g"],
+    ],
+  })
+}
+
 const MIN_ASSERTIONS = 20
 if (ran < MIN_ASSERTIONS) {
   console.error(

@@ -26,7 +26,20 @@
 import { mkdtempSync, writeFileSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+import { spawnSync } from 'node:child_process'
+import { proveMutationsBite } from './lib/mutate.mjs'
+
+/*
+ * DYNAMIC, so `--mutate` can aim these cases at a broken copy. This subject
+ * answers "whose patch is this?", and two answers to that question is the
+ * duplicated-list defect the audit keeps finding — every per-suite number
+ * rests on it.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SUBJECT = process.env.SUITE_OF_PATCH_LIB ?? './lib/suite-of-patch.mjs'
+const { makeSuiteOf, declaresShortRun } = await import(SUBJECT)
 
 const dir = mkdtempSync(join(tmpdir(), 'suite-of-patch-'))
 let passed = 0
@@ -104,6 +117,27 @@ try {
     'and with no candidates step three is off, which is how claims uses it',
   )
 
+  /*
+   * A `Reddens:` BLOCK RUNS OVER MORE THAN ONE LINE, and nothing here covered
+   * that until `--mutate` said so: deleting the loop that gathers the
+   * continuation lines left every case green. Patches in the tree use the
+   * shape — a second claim indented under the first — and
+   * `task-cover-14-upload-commits-without-uploading` was written with it the
+   * same day this gap was found.
+   *
+   * The sentence that decides is on the SECOND line, so a reader that stops at
+   * the first attributes nothing.
+   */
+  is(
+    suiteOf(
+      'tfc-1-whatever',
+      '# Reddens: some-suite: "a sentence no suite contains at all"\n' +
+        '#          list-customize: "the open export dialog carries the plan caption"\n',
+    ),
+    'list-customize',
+    'a claim on a CONTINUATION line of the block still decides',
+  )
+
   console.log('\n5. a `unit:` claim is not attributed by a fragment of its sentence')
   // `aar-17-views-hardcoded` names a `*.test.ts` sentence that exists in no
   // suite, and step three attributed it to an e2e suite anyway, because
@@ -156,6 +190,36 @@ if (failed) {
  * `0 failed` for checks it never reached.
  */
 let short = false
+/*
+ * AND THAT EACH CASE BITES. The three attribution steps are ordered on purpose
+ * — the header, then the filename, then the sentence — and each mutation below
+ * either removes a step or lets it answer where it should decline.
+ */
+if (process.argv.includes('--mutate')) {
+  failed += proveMutationsBite({
+    subject: join(HERE, 'lib/suite-of-patch.mjs'),
+    caseFile: fileURLToPath(import.meta.url),
+    envVar: 'SUITE_OF_PATCH_LIB',
+    label: 'the patch-to-suite attributor',
+    alive: (mutant) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(mutant)})`], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      return { ok: r.status === 0, why: (r.stderr ?? '').trim() }
+    },
+    mutations: [
+      ['step 1 stops reading the header', 'named(text) || byFilename(patchName)', 'byFilename(patchName)'],
+      ['step 2 stops reading the filename', 'byFilename(patchName) || bySentence(text)', 'bySentence(text)'],
+      ['step 3 answers even when two suites match', 'if (hits.length === 1) return hits[0]', 'if (hits.length >= 1) return hits[0]'],
+      ['a `unit:` claim is attributed to an e2e suite again', "if (/^unit\\b/i.test(block)) return null", 'if (false) return null'],
+      ['the header name stops being walked back to a suite that exists', 'if (has(n)) return n', 'return n'],
+      ['a Reddens block stops carrying its continuation lines', 'for (let j = i + 1; j < lines.length && /^#\\s\\s+\\S/.test(lines[j]); j += 1) out.push(lines[j])', 'void lines'],
+      ['`Expect: SHORT` matches with nothing after it', '/^#[ \\t]*Expect:[ \\t]*SHORT\\b/im', '/^#[ \\t]*Expect:/im'],
+    ],
+  })
+}
+
 const MIN_ASSERTIONS = 18
 if (ran < MIN_ASSERTIONS) {
   console.error(

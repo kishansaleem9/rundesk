@@ -42,8 +42,8 @@ step "and every ender rule bites"        node scripts/check-suite-enders.mjs --m
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
-step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
-step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs
+step "the claim matcher holds its contract" node scripts/check-claim-match.mjs --mutate
+step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs --mutate
 step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs --mutate
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo

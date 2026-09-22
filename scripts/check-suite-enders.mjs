@@ -33,18 +33,9 @@ import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-/*
- * COUNTING THE CASES A MUTATION NAMED, AND COUNTING THEM PROPERLY.
- *
- * This matched the substring `FAIL` anywhere in a line, which also matches the
- * word FAILURE inside a PASSING case's own sentence — "a root that is not there
- * is a FAILURE, not a silent skip" was counted as a failing case every time it
- * passed. The number the mutation pass prints is the only evidence that a
- * mutation was attributed to anything, so it has to count the marker `chk`
- * prints rather than a word that appears in prose.
- */
-const NAMED_FAIL = /\x1b\[31mFAIL\x1b\[0m/
-const namedFailures = (stdout) => (stdout ?? '').split('\n').filter((l) => NAMED_FAIL.test(l)).length
+// The shared counter, and `lib/mutate.mjs` records why it is not `FAIL`
+// and not `includes('FAIL')` — both were tried here and both were wrong.
+import { namedFailures } from './lib/mutate.mjs'
 
 /*
  * THE FILE UNDER TEST IS NEVER WRITTEN. `ENDERS_CHECKER` points this at a COPY.

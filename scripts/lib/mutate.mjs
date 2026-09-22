@@ -47,14 +47,25 @@ import { join, dirname, basename, extname } from 'node:path'
 import { spawnSync } from 'node:child_process'
 
 /*
- * `\bFAIL\b` AND NOT `includes('FAIL')`, which is what three of these counted
- * with. The substring also matches the word FAILURE inside a PASSING case's own
- * sentence — "a root that is not there is a FAILURE, not a silent skip" was
- * counted as a failing case every time it passed. The word boundary refuses
- * that (FAILURE has a word character after the L) and still matches both
- * spellings in the tree: a bare `  FAIL …` and an ANSI-wrapped one.
+ * `FAIL` NOT FOLLOWED BY A LETTER, and the two rejected spellings are both
+ * mistakes this has already made.
+ *
+ * `includes('FAIL')` — what three case files counted with — also matches the
+ * word FAILURE inside a PASSING case's own sentence: "a root that is not there
+ * is a FAILURE, not a silent skip" was counted as a failing case every time it
+ * passed.
+ *
+ * `\bFAIL\b` — the obvious repair, and wrong for half the tree. A case file
+ * that colours its marker prints `\x1b[31mFAIL\x1b[0m`, and the escape ends in
+ * `m`, which IS a word character, so there is no boundary before the F and the
+ * match fails. `check-suite-of-patch` reported "0 of 7 bite" against mutants
+ * that had every one of them reddened a case; its output was simply coloured
+ * and `check-log-tree`'s was not.
+ *
+ * A negative lookahead needs no left-hand boundary at all: it matches `  FAIL`
+ * and `\x1b[31mFAIL` alike, and refuses FAILURE, FAILED and FAILS.
  */
-export const NAMED_FAIL = /\bFAIL\b/
+export const NAMED_FAIL = /FAIL(?![A-Za-z])/
 export const namedFailures = (stdout) =>
   (stdout ?? '').split('\n').filter((l) => NAMED_FAIL.test(l)).length
 
