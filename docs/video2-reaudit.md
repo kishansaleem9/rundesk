@@ -4937,25 +4937,79 @@ and Attachments tabs EXISTED. Where they stand now:
 | tab | state |
 |---|---|
 | Gallery | checked, including the Custom swatch reading back byte for byte |
-| Upload | half measured, and the limit is written down (below) |
+| Upload | **fully measured** — presign, PUT, and the bytes back out (below) |
 | Link | six checks; it worked and was simply unverified |
 | Search | asserted ABSENT, with the re-checked reason in the suite |
 | Attachments | five checks — and the tab could never list a file until today |
 | Remove | checked on all three fields a cover can be set in |
 
-**Upload is the one that cannot be finished here.** `R2Service` logs "R2 is not
-fully configured. File and clip uploads are disabled" and `presignPutObject`
-throws `Storage is not configured`, so presign → PUT → commit cannot run without
-credentials this repository does not hold. That is recorded as unmeasurable
-rather than skipped, the same way the eight language-model field types are.
+**Upload was recorded here as the one that could not be finished, and that
+reason was wrong.** What stood in this section said presign → PUT → commit
+"cannot run without credentials this repository does not hold", and the suite
+asserted the REFUSAL on that basis.
 
-The measurable half is the one the component's own comment says was missing:
-*"the version of this tab that shipped before had no handler at all, so a failed
-upload and a successful one looked the same: nothing happened either way."* So
-three checks — the tab offers a way to choose a file, choosing one when storage
-is unconfigured SAYS so in words, and the cover is left exactly as it was. 32 of
-32 green, and `task-cover-11-upload-fails-silently` reddens the middle one and
-only it: 31 of 32, with the cover check still passing, which is why both exist.
+`R2Service` reads `R2_ENDPOINT` and sets `forcePathStyle: true`. It speaks plain
+S3. What was missing was never credentials — it was somewhere to PUT to.
+Pointing those four variables at a local endpoint runs the whole path with **no
+product change at all**, which took one probe to establish:
+
+```
+configured = true · presigned host = 127.0.0.1 · signature present
+PUT 200 · HEAD 28/image/png · getObject bytes identical
+signed getObjectUrl 200, bytes identical · LIST finds the key
+after delete = NoSuchKey · unsigned PUT refused
+```
+
+So `scripts/e2e-lanes/s3-stub.mjs` is that endpoint, every lane starts one
+(`lane-env.sh`, sourced by all four launchers so the environment has ONE
+definition), and `scripts/check-s3-stub.mjs` drives the real `R2Service` against
+it every preflight — 14 cases, 8 of 8 mutations of the stub redden one. A double
+that quietly stops being faithful would turn every suite built on it green while
+measuring nothing, which is the defect class this audit exists inside.
+
+The section now asserts the bytes rather than words about the bytes: the presign
+is answered, the file is PUT to the URL that came back, the cover becomes a
+STORED key, and **the cover's own signed URL serves back the very bytes that
+were chosen**. 37 of 37 green. That last check is the one a facade cannot pass,
+and `task-cover-14-upload-commits-without-uploading` is the facade — presign,
+skip the PUT, commit the key anyway — which leaves every cheaper check looking
+correct.
+
+Measured at `4ba70853`, lane 2:
+
+| run | result | what it says |
+|---|---|---|
+| baseline | 37 passed, 0 failed | the whole path runs |
+| `task-cover-14` | 33 passed, 4 failed | presign and the stored key still PASS — that is the facade — and the PUT and the round trip do not |
+| `task-cover-11` | 36 passed, 1 failed | exactly the sentence it claims, with the cover check still passing |
+| `task-cover-13` | 31 passed, 6 failed | no file chooser, so nothing downstream of it can happen |
+
+Two things in that table are worth more than the counts. **Every run reported
+all 37 checks** — none ended short — which is what the section-ender work of
+the last two days was for. And `task-cover-14` was PREDICTED to redden three
+and reddened four: removing the PUT removes the only thing that can fail, so
+the arranged failure is never asked for and the second upload commits its key
+too. The patch header now records the measurement rather than the guess.
+
+The refusal is still measured, **arranged rather than starved**: configuring
+storage would have retired `task-cover-11-upload-fails-silently` along with the
+behaviour it proves, so the store is asked to refuse one PUT and the product
+still has to say so in words and leave the cover alone. That is the component's
+own comment about what shipped broken — *"no handler at all, so a failed upload
+and a successful one looked the same"* — kept honest against working storage.
+
+And the store is a COUNTED precondition, not a silent one: a lane without one
+comes up with R2 unconfigured and every check takes the refusal path while
+printing sentences about uploading. So its presence is its own check.
+
+**The general lesson, which is why this is written at length.** "Unmeasurable"
+was a verdict recorded once and then cited, and the citation was never re-tested
+against the code it was about. Four of the bugs this cost were in the harness,
+not the product: a missing CORS preflight that made the stub manufacture the
+exact facade the suite was written to catch; an arranged failure that leaked
+into the next run; a toggle pressed unconditionally; and a condition written on
+an element with `className="hidden"`, which is never visible and so never fired.
+None of them would have been found by continuing to assert the refusal.
 
 The cover picker is where the testid question paid for itself twice: nine of its
 eighteen testids were named by no suite this morning, and the two holes that
