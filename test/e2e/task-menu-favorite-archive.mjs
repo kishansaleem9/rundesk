@@ -179,7 +179,32 @@ try {
    * how they drift: the menu says "Remove from favorites" while the star sits
    * hollow. Both read the same hook, so both must have moved.
    */
+  /*
+   * WAIT FOR THE UI TO CATCH UP WITH THE WRITE, THEN READ.
+   *
+   * The check above proves the favourite is IN THE DATABASE — it polls
+   * `favouritedInDb` for fifteen seconds. These two then read the label and the
+   * star IMMEDIATELY, with nothing between the write landing and the render
+   * that reflects it, so both depend on React Query's invalidation winning a
+   * race against a single `openMenu()`.
+   *
+   * It usually does, which is worse than if it never did: this baseline was
+   * green at 11 of 11 all morning and came back `9 passed, 2 failed` at
+   * `2067fd8b`, with nothing in that commit — or any commit today — touching
+   * favourites. A red baseline REFUSES the whole set, so four patches went
+   * unmeasured behind a flake.
+   *
+   * Same shape as `ths-4-wraps-round` and `space-wizard-views` earlier today: a
+   * value read before the thing that produces it has arrived. The polling is
+   * bounded and the read stays AFTER it, so a product that genuinely never
+   * updates the label still fails the check with what it actually read — which
+   * is what `tmfa-*` needs from this check.
+   */
   await openMenu()
+  await waitUntil(
+    async () => (await readText(menuItem('task-menu-favorite'))).toLowerCase().includes('remove'),
+    { timeoutMs: 10_000 },
+  )
   const menuLabel = (await readText(menuItem('task-menu-favorite'))).toLowerCase()
   chk(
     menuLabel.includes('remove'),
@@ -187,10 +212,13 @@ try {
     `the menu still reads "${menuLabel}" on a task that IS a favourite`,
   )
   await page.keyboard.press('Escape')
-  const starPressed = await page
-    .locator('button[aria-pressed="true"]')
-    .filter({ has: page.locator('svg.lucide-star') })
-    .count()
+  const starsPressed = () =>
+    page
+      .locator('button[aria-pressed="true"]')
+      .filter({ has: page.locator('svg.lucide-star') })
+      .count()
+  await waitUntil(async () => (await starsPressed()) > 0, { timeoutMs: 10_000 })
+  const starPressed = await starsPressed()
   chk(
     starPressed > 0,
     'and the star beside it agrees — one piece of state, two controls',

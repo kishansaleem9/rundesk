@@ -5676,3 +5676,41 @@ with no closed status is a product regression — this patch is what causes it.
 The population checker was built this morning to guard the sweep's final
 sentence. Its first real firing found two suites, one blind spot in rule one and
 one false-positive class in rule two.
+
+### Convergence: the decision, and the one class of fix that survives it
+
+Measured, because the obvious speedup does not work: **4 CPUs, load average 7.5
+at three lanes.** The machine is already oversubscribed — each lane waits on
+CPU — so adding lanes makes the sweep slower. Memory is not the constraint
+(10 GB free of 15); parallelism is closed as a lever.
+
+The lever that IS open is the one I had been working against. **Every fix
+committed to a suite or a product file re-drifts that set into the next round.**
+Round 2's floor grew 29 → 32 sets in twenty minutes, entirely from this
+morning's own fixes. Checker and ledger commits cost nothing, because a patch
+depends only on its suite and the product files it edits.
+
+So from here: **suite and product changes are frozen except where a defect
+BLOCKS CONVERGENCE.** That is one category — a REFUSED baseline. A refusal
+records no patch lines at all, so its patches stay unmeasured however often the
+set runs, and `chain-plan.sh`'s own header names it as one of the two ways the
+chain can never stop. Everything else found from here is written down with its
+evidence and left for a stable tree.
+
+**And the first thing the freeze had to let through arrived immediately.**
+`task-menu-favorite-archive` refused at `2067fd8b` — `9 passed, 2 failed`,
+against a baseline that had been 11 of 11 all morning, with nothing in that
+commit or any commit today touching favourites.
+
+The suite proves the favourite reached the DATABASE — it polls `favouritedInDb`
+for fifteen seconds — and then reads the menu label and the star IMMEDIATELY,
+with nothing between the write landing and the render that reflects it. Both
+depend on React Query's invalidation winning a race against one `openMenu()`.
+It usually wins, which is worse than never winning.
+
+**That is the third instance of one shape today**, after `ths-4-wraps-round`
+and `space-wizard-views`: a value read before the thing that produces it has
+arrived. Bounded polling now stands in front of both reads, and the reads stay
+AFTER it — so a product that genuinely never updates the label still fails the
+check with what it actually read, which is what the `tmfa-*` patches need from
+it. Four patches were going unmeasured behind that flake.
