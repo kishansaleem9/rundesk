@@ -403,10 +403,17 @@ try {
    */
   await emailItem.click({ force: true }).catch(() => {})
   await page.keyboard.press('Escape').catch(() => {})
+  /*
+   * A chk message is built whether the check passes or fails, so read the mode
+   * once up here, bounded and caught — `trigger` is a locator held in a variable,
+   * the shape rule six could not see until it learnt to track locator variables.
+   * A trigger that is gone reads null, which fails the check rather than hanging.
+   */
+  const composerMode = await trigger.getAttribute('data-mode', { timeout: 8000 }).catch(() => null)
   chk(
-    (await trigger.getAttribute('data-mode')) === 'comment',
+    composerMode === 'comment',
     'and pressing Email leaves the composer in Comment mode rather than a mode with no send behind it',
-    `the composer is now in "${await trigger.getAttribute('data-mode')}" mode`,
+    `the composer is now in ${JSON.stringify(composerMode)} mode`,
   )
 } catch (err) {
   failed += 1
