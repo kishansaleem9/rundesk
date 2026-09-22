@@ -365,10 +365,16 @@ try {
   await page.waitForTimeout(1200)
   await openDetails(page.getByTestId('list-customize'))
   const exportSection = page.getByTestId('list-export-section')
+  // Bounded and caught, once: a chk message is built whether the check passes
+  // or fails, and this panel is a locator held in a variable — the shape rule
+  // six could not see until it learnt to track locator variables.
+  const boardExportView = await exportSection
+    .getAttribute('data-export-view', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    await exportSection.getAttribute('data-export-view') === 'board',
+    boardExportView === 'board',
     'standing on Board, the panel is about the board download',
-    `the panel said it would export ${JSON.stringify(await exportSection.getAttribute('data-export-view'))}`,
+    `the panel said it would export ${JSON.stringify(boardExportView)}`,
   )
   chk(
     await exportSection.getAttribute('data-export-locked') === 'true',

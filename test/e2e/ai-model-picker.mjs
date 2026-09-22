@@ -231,10 +231,17 @@ try {
 
   await openAiPage(page)
   const trigger = page.getByTestId('ai-model-tier')
+  // Read once, bounded and caught: a `chk` message is evaluated whether the
+  // check passes or fails, so an unbounded read here would wait out the default
+  // timeout and end the section. The locator is held in a variable — the shape
+  // rule six could not see until it learnt to track locator variables.
+  const openingTier = await trigger
+    .getAttribute('data-tier', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    (await trigger.getAttribute('data-tier')) === 'fast',
+    openingTier === 'fast',
     'the composer opens on the stored preference, not on a hardcoded default',
-    `the trigger read data-tier="${await trigger.getAttribute('data-tier')}" after the API stored ` +
+    `the trigger read data-tier=${JSON.stringify(openingTier)} after the API stored ` +
       '"fast" — "deep" here means it is ignoring the server and using DEFAULT_TIER',
   )
   chk(
@@ -346,10 +353,16 @@ try {
   const tierBefore = await trigger.getAttribute('data-tier')
   await page.getByTestId('ai-model-option-google').click({ force: true })
   await page.waitForTimeout(400)
+  // Bounded and caught for the same reason: the message runs on the passing
+  // path too, and this is a locator held in a variable — the shape rule six
+  // could not see until it learnt to track locator variables.
+  const tierAfterUnavailable = await trigger
+    .getAttribute('data-tier', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    (await trigger.getAttribute('data-tier')) === tierBefore,
+    tierAfterUnavailable === tierBefore,
     'and clicking one does not change the model in use',
-    `the composer moved from "${tierBefore}" to "${await trigger.getAttribute('data-tier')}" ` +
+    `the composer moved from "${tierBefore}" to ${JSON.stringify(tierAfterUnavailable)} ` +
       'after a provider with no client was clicked',
   )
 
@@ -359,10 +372,16 @@ try {
   // already in use would leave this check unable to fail.
   await page.getByTestId('ai-model-option-deep').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(600)
+  // Bounded and caught, once: the message is built whether or not the check
+  // passes, and this trigger is a locator held in a variable — the shape rule
+  // six could not see until it learnt to track locator variables.
+  const tierAfterChoice = await trigger
+    .getAttribute('data-tier', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    (await trigger.getAttribute('data-tier')) === 'deep',
+    tierAfterChoice === 'deep',
     'choosing a tier changes this conversation',
-    `the composer read "${await trigger.getAttribute('data-tier')}" after Deep was chosen`,
+    `the composer read ${JSON.stringify(tierAfterChoice)} after Deep was chosen`,
   )
   chk(
     prefWrites.length === writesBeforeChoice,

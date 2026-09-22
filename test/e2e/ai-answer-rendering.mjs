@@ -804,10 +804,15 @@ try {
   )
   await page.getByTestId('ai-word-suggestion-folder').click({ timeout: 8000 }).catch(() => {})
   const filled = await waitUntil(async () => (await box.inputValue()) === 'create a folder ', { timeoutMs: 8_000 })
+  // A chk message is evaluated whether the check passes or fails, so this last
+  // read is bounded and caught like the ones above. It goes through a locator
+  // held in a variable — the shape rule six could not see until it learnt to
+  // track locator variables — so a vanished composer reads as null, not as 30s.
+  const composerRead = await box.inputValue({ timeout: 8000 }).catch(() => null)
   chk(
-    filled,
+    filled && composerRead === 'create a folder ',
     'and pressing it REPLACES the stem rather than appending after it',
-    `the composer read ${JSON.stringify(await box.inputValue())}, not "create a folder " — ` +
+    `the composer read ${JSON.stringify(composerRead)}, not "create a folder " — ` +
       '"create a fol folder" is the version of this that looks right in a screenshot',
   )
 } catch (e) {

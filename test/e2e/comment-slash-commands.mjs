@@ -182,13 +182,20 @@ try {
   // Bounded and caught: the check above it is allowed to fail, and an unbounded
   // press on a control that is not there ends the section instead (ledger §10).
   await page.getByTestId('comment-slash-quote').click({ timeout: 10_000 }).catch(() => {})
+  // A chk MESSAGE is evaluated whether the check passes or fails, so the read
+  // behind it is bounded and caught instead of waiting out Playwright's thirty
+  // seconds — and `box` is a locator held in a VARIABLE, the shape rule six could
+  // not see until it learnt to track them. The poll keeps what it last read, so
+  // the message needs no second read.
+  let insertedValue = null
+  const quoteInserted = await waitUntil(async () => {
+    insertedValue = await box.inputValue({ timeout: 8000 }).catch(() => null)
+    return insertedValue !== null && insertedValue.includes('> ') && !insertedValue.includes('/quo')
+  }, { timeoutMs: 10_000 })
   chk(
-    await waitUntil(async () => {
-      const v = await box.inputValue()
-      return v.includes('> ') && !v.includes('/quo')
-    }, { timeoutMs: 10_000 }),
+    quoteInserted,
     'choosing it inserts the block AND removes the /query',
-    `the box holds "${await box.inputValue()}" — leaving "/quo" above the quote is the ` +
+    `the box holds ${JSON.stringify(insertedValue)} — leaving "/quo" above the quote is the ` +
       'bug this replaced in the description editor',
   )
 
