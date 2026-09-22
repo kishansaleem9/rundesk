@@ -155,10 +155,24 @@ try {
     'typing "/" opens the slash menu',
     'no menu — the composer has no slash commands, and the "+" item would be a label',
   )
+  /*
+   * NARROWING MEANS SOMETHING LEFT, and this check did not ask that.
+   *
+   * It asserted the Quote item is visible after typing `/quo` — which is also
+   * true of an empty query, because `matchBlocks` returns every block when the
+   * query is blank. So it passed against a menu that had stopped filtering at
+   * all, which is the only way this check can fail in the first place. The
+   * absence of a block that does NOT match is what makes it a narrowing check.
+   *
+   * `table` is the one to name: ten blocks are offered, and it shares no
+   * letters with "quo" in either its id or its label.
+   */
   chk(
-    await page.getByTestId('comment-slash-quote').isVisible().catch(() => false),
-    'and what follows the slash narrows it to Quote',
-    `"/quo" did not narrow to the quote block`,
+    (await page.getByTestId('comment-slash-quote').isVisible().catch(() => false)) &&
+      !(await page.getByTestId('comment-slash-table').isVisible().catch(() => false)),
+    'and what follows the slash narrows it to Quote — the blocks that do not match are gone',
+    `"/quo" left Quote ${(await page.getByTestId('comment-slash-quote').isVisible().catch(() => false)) ? 'visible' : 'hidden'} ` +
+      `and Table ${(await page.getByTestId('comment-slash-table').isVisible().catch(() => false)) ? 'visible too — nothing was filtered' : 'hidden'}`,
   )
 
   await page.getByTestId('comment-slash-quote').click()

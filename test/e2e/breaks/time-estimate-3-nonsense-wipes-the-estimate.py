@@ -16,11 +16,18 @@
 # look redundant: it reads as a second way of saying the same thing, and the
 # early `return` is the only part that matters.
 #
-# REDDENS THREE, AND THEY ARE THE THREE THAT ASK ABOUT NONSENSE: the estimate
-# is gone after a word, the box does not put back what is stored, and
-# committing "12x" changes something. The suggestion check between them stays
-# green, because nothing here touches whether a row is offered — only what
-# happens when the box loses focus.
+# REDDENS TWO, NOT THE THREE PREDICTED, and the third is worth understanding.
+# The estimate is gone after a word and the box does not put back what is
+# stored — both fail. "Committing 12x changes nothing" PASSES, because by then
+# the estimate is already null: the word wiped it, `12x` wipes it again, and
+# null equals null. A patch that destroys a value cannot be caught a second
+# time by a check comparing before and after, once there is nothing left to
+# destroy.
+#
+# That is an ordering property of the suite rather than a weakness in either
+# check: the word comes first because a word is the ordinary case. Worth the
+# paragraph because "reddened fewer than predicted" is the signal that found a
+# vacuous check twice in this session, and this time it is not one.
 #
 # Reddens: time-estimate: "typing a word leaves the estimate alone"
 import io
