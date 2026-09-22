@@ -21,6 +21,13 @@
 # would pass no matter what." This patch is invisible to any run that forgot
 # that.
 #
+# IT REDDENS FOUR, NOT THE ONE PREDICTED, AND ALL FOUR ARE HONEST. The 403
+# itself; the teams list being empty; the per-team row reading ""; and My Teams
+# being empty after the member is added to a team — because `myTeams` filters
+# the same `groups` array that is now empty. One endpoint, four assertions that
+# all read through it. I counted the endpoint and not its readers, which is the
+# same miscount as `lus-1`.
+#
 # Reddens: teams-destination: "a plain member may list the teams"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/workspace-groups/workspace-groups.controller.ts'
