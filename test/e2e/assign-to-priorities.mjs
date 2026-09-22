@@ -210,7 +210,10 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `15:55` — taking it reaches the server, and says where it went')
 
-  await page.getByTestId('priority-prompt-add').click()
+  // Bounded and caught: `a2p-5-assigning-writes-an-assignee-and-stops` leaves
+  // the prompt without its Add control, and this press waited out the default
+  // thirty seconds and ended the run at 3 of 10.
+  await page.getByTestId('priority-prompt-add').click({ timeout: 8000 }).catch(() => {})
 
   /*
    * THE TOAST IS READ FIRST, and its text captured immediately. A toast lives

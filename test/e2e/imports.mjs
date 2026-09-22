@@ -517,7 +517,13 @@ try {
   )
 
   console.log('\n▶ the preset used is on the report, not just in the database')
-  const presetBadge = await page.getByTestId('import-sheet-preset').getAttribute('data-preset')
+  // `imports-3-deadpreset` leaves the preset unresolved, so this badge is not
+  // drawn and the read threw at 18 of 20. `null` fails the check below, which
+  // is the honest answer for a badge that is not there.
+  const presetBadge = await page
+    .getByTestId('import-sheet-preset')
+    .getAttribute('data-preset', { timeout: 8000 })
+    .catch(() => null)
   chk(
     presetBadge === 'jira',
     'the report names the preset the import ran under',

@@ -301,10 +301,23 @@ try {
    * scale"; a fill at 100% of a track the same width as the fill is a bar that
    * can only ever mean one thing.
    */
-  const track = await page.getByTestId('ai-model-bar-intelligence-fast').evaluate((el) => {
-    const parent = el.parentElement
-    return parent ? parent.getBoundingClientRect().width : 0
-  })
+  /*
+   * `evaluate` IS A NINTH VERB IN THE CLASS, and it waits for its element like
+   * the rest. `amc-5-bound-moved` pushes the Fast tier behind the disclosure so
+   * this bar is never drawn — the two checks directly above report exactly that,
+   * 0px and 0px — and this threw at 18 of 24.
+   *
+   * 0 on absence, which is what the two checks above already report for a bar
+   * that is not there, and it fails the `track > fastIq + 8` below rather than
+   * passing it.
+   */
+  const track = await page
+    .getByTestId('ai-model-bar-intelligence-fast')
+    .evaluate((el) => {
+      const parent = el.parentElement
+      return parent ? parent.getBoundingClientRect().width : 0
+    }, undefined, { timeout: 8000 })
+    .catch(() => 0)
   chk(
     track > fastIq + 8,
     'over a visible track, so a part-filled meter reads as part-filled',

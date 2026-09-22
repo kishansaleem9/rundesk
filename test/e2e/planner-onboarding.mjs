@@ -186,7 +186,12 @@ try {
   }
   const panel = () => page.locator('[data-testid="planner-onboarding"]')
   const cardTitle = () => page.locator('[data-testid="planner-onboarding-card-title"]')
-  const readCard = async () => (await cardTitle().textContent())?.trim() ?? ''
+  // `po-1-panel-never-shows` removes the panel, so this title is never drawn
+  // and the read threw at 5 of 12 — with the gate above it already caught for
+  // that same patch. The empty string is what a card with no title reads as,
+  // which is what every caller here already compares against.
+  const readCard = async () =>
+    (await cardTitle().textContent({ timeout: 8000 }).catch(() => ''))?.trim() ?? ''
 
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ the screen frames `12:40`–`12:50` draw')

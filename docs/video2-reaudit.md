@@ -5777,3 +5777,47 @@ lists it) versus a current log this cannot read (a person settles it). The
 second joins `unproven` under a **ceiling of 3** that can only fall — gated, so
 they cannot accumulate in silence, but not demanded of a chain that cannot
 deliver them.
+
+### Nine short runs, fixed in one batch, and why the freeze bent for them
+
+The freeze said suite changes only where a defect BLOCKS convergence. Nine did,
+and they had accumulated precisely because of it: each one is a run that stopped
+early, so `check-break-reddened.mjs` counts it as a log it cannot read and
+`check-plan-population.mjs`'s needs-a-person ceiling — set at 3 — stood at 14.
+**A ceiling raised to meet a number is how the number stops meaning anything**,
+so the alternative was never an option.
+
+| patch | ran | declared | verb that ended it |
+|---|---|---|---|
+| `a2p-5-assigning-writes-an-assignee-and-stops` | 3 | 10 | `click` |
+| `po-1-panel-never-shows` | 5 | 12 | `textContent` |
+| `fd-8-no-private-control` | 7 | 21 | `check` |
+| `save-comment-1-save-writes-nothing` | 7 | 13 | `click` |
+| `csn-1-the-chat-page-owns-the-call-again` | 9 | 10 | `click` |
+| `sidebar-dms-1-no-section` | 10 | 14 | `getAttribute` |
+| `cma-16-no-search-box` | 16 | 24 | `click` |
+| `amc-5-bound-moved` | 18 | 24 | `evaluate` |
+| `imports-3-deadpreset` | 18 | 20 | `getAttribute` |
+
+Fixed in ONE commit on purpose: nine separate commits would drift nine sets into
+nine different rounds, and one commit drifts them into the same one.
+
+**Two more verbs, and both blind spots are worth naming.**
+
+`locator.evaluate` is a ninth verb in the class — it waits for its element like
+the rest. `amc-5` pushes the Fast tier behind the disclosure, the two checks
+directly above report `0px` and `0px` for bars that are not drawn, and then the
+track measurement threw.
+
+And `sidebar-dms` is the one that shows where two rules each stop. The read is
+`section.getAttribute('data-count')` — written twice, once in the condition and
+once in the message, which is exactly **rule six's** shape. Rule six missed it
+because the read is on a LOCATOR VARIABLE rather than a `getByTestId(…)` written
+inline, and rule six matches the literal. **Rule four** pairs a guarded
+identifier with a bare one, and here neither use was guarded, so it had nothing
+to pair. Two rules, one blind spot each, and the site sat between them.
+
+Not gated. A rule matching reads on any variable would have to know which
+variables are locators, and the only honest way to know that is to resolve them
+— which is a parser, not a text rule. The measurement found it, which is what
+the sweep is for.

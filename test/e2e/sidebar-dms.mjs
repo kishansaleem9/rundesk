@@ -307,10 +307,22 @@ try {
     `the tree drew ${await dmRows.count()} rows for ${dmIds.length} DMs — a section that renders ` +
       'everything it is handed passes a lower bound while quietly including the channels',
   )
+  /*
+   * READ ONCE, BOUNDED AND CAUGHT. `sidebar-dms-1-no-section` removes the
+   * section entirely — which is what the checks above report — so this read
+   * threw at 10 of 14 with four checks about the two sections not swallowing
+   * each other left unreported.
+   *
+   * Rule six did not see it: the read is on a LOCATOR VARIABLE, `section`, not
+   * on a `getByTestId(...)` written inline, and rule six matches the literal.
+   * Rule four pairs a guarded identifier with a bare one, and neither use here
+   * was guarded, so it had nothing to pair. Two rules, one blind spot each.
+   */
+  const drawnCount = await section.getAttribute('data-count', { timeout: 8000 }).catch(() => null)
   chk(
-    Number(await section.getAttribute('data-count')) === dmIds.length,
+    drawnCount !== null && Number(drawnCount) === dmIds.length,
     "and the section's own count agrees with what it drew",
-    `data-count said ${await section.getAttribute('data-count')} for ${dmIds.length} DMs`,
+    `data-count said ${JSON.stringify(drawnCount)} for ${dmIds.length} DMs`,
   )
 
   /*

@@ -240,7 +240,10 @@ try {
    * before it, you could only leave from the full surface, because navigating
    * away had already left for you.
    */
-  await page.getByTestId('call-dock-leave').click()
+  // `csn-1-the-chat-page-owns-the-call-again` leaves the call on navigation, so
+  // there is no dock to hang up from — the check above says exactly that — and
+  // this press threw at 9 of 10.
+  await page.getByTestId('call-dock-leave').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(3500)
   const after = await A(`/workspaces/${workspaceId}/calls/live?channelId=${channelId}`)
   const stillIn = (after.data?.participants ?? []).filter((p) => !p.leftAt && p.userId === myId)

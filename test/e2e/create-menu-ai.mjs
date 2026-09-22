@@ -356,7 +356,9 @@ try {
       }),
   )
 
-  await page.getByTestId('create-ai-open').click()
+  // `cma-16-no-search-box` renames the testid this section needs, so the panel
+  // never opens and this press ended the run at 15 of 24.
+  await page.getByTestId('create-ai-open').click({ timeout: 8000 }).catch(() => {})
   await appears('[data-testid="create-ai-confirm"]')
   chk(
     (await readText(page.getByTestId('create-ai-step-0'))).includes('Set that up') &&
@@ -365,7 +367,9 @@ try {
     `it drew ${JSON.stringify(await readText(page.getByTestId('create-ai-step-0')))} for a one-action plan`,
   )
 
-  await page.getByTestId('create-ai-confirm').click()
+  // And the press under it, for the same patch: bounding one step of a
+  // sequence moves the exception one line down.
+  await page.getByTestId('create-ai-confirm').click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => execCalls.length === 1, { timeoutMs: 25_000 }),
     'Create posts once to /ai/command/execute — the door that makes no model call',

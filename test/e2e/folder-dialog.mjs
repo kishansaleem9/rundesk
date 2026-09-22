@@ -205,7 +205,9 @@ try {
   console.log('\n▶ turning it on patches the folder that was just made, and says private')
   await page.getByTestId('quick-create-folder-name').fill(SHUT_NAME)
   await page.getByTestId('quick-create-folder-space').selectOption(SPACE)
-  await page.getByTestId('quick-create-folder-private').check()
+  // `fd-8-no-private-control` removes this switch — which is the check above —
+  // and ticking something that is not there threw at 7 of 21.
+  await page.getByTestId('quick-create-folder-private').check({ timeout: 8000 }).catch(() => {})
   await page.getByTestId('quick-create-folder-submit').click()
   chk(
     await waitUntil(() => folderPatches.length === 1, { timeoutMs: 20_000 }),

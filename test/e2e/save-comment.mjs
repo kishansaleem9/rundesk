@@ -303,7 +303,9 @@ try {
 
   await page.goto(`${stack.base}/app/${workspaceId}/inbox?view=later`, { waitUntil: 'domcontentloaded' })
   await settleCookies()
-  await page.getByTestId(`saved-comment-${commentId}`).click({ timeout: 25_000 })
+  // Caught as well as bounded: `save-comment-1-save-writes-nothing` means the
+  // save never lands, so there is no saved row to press — 7 of 13.
+  await page.getByTestId(`saved-comment-${commentId}`).click({ timeout: 25_000 }).catch(() => {})
   chk(
     await waitUntil(() => page.url().includes(`comment=${commentId}`), { timeoutMs: 15_000 }),
     'the link carries the comment, not only the task',
