@@ -4535,3 +4535,106 @@ un-removable in the wizard. Both sat unbuilt behind reasons that had stopped
 being true — *the stale reason*, which is the defect class that suppresses
 exactly the investigation that would find it. Re-checking rows marked done is
 not a formality; it closed two rows for free and reopened one that was wrong.
+
+## 10. Which tree is this number about?
+
+### The clock was the wrong instrument, twice
+
+`check-break-freshness.mjs` decided whether a recorded number was current by
+comparing the suite file's last commit against the log's MTIME. The mtime is the
+moment the run ENDED, and that reading is wrong in two directions that both cost
+me the measurement I most wanted.
+
+A suite fix committed WHILE its own set is running dates after the run started
+and before the log was last appended to, so the row says fresh. `folder-dialog`
+was fixed at 06:29:10 under a log stamped 06:29:50 — and `fd-7-toggle-latches`
+had been measured at 06:27, against the check the fix moved. `space-wizard` is
+the same story with `sw-4-dialog-stays-open`. Both were GREENS, and both fixes
+existed *for those two patches*.
+
+And the rule only ever asked about the suite. A green fixed in the PRODUCT
+touches no suite file at all, so nothing in that comparison could see it:
+`folder-create-12-toast-bottom-right` sat UNPROVEN for a day beneath a row
+calling its log current.
+
+Every log opens with the commit `wt-break.sh` synced to. That is a statement
+about the tree rather than about when somebody typed, and a log is current when
+nothing it depended on — the suite that did the measuring, and the product files
+each patch in it edits — differs between that sha and HEAD.
+`scripts/lib/log-tree.mjs` holds it, `check-log-tree.mjs` writes down the cases,
+and two of those cases found bugs in the module beneath them: `== restoring` was
+being recorded as a patch measured at some commit, and the case for "the newest
+log wins" passed with the comparison it exists to prove DELETED, because it is
+only consulted when the directory hands back the older file first.
+
+### What the honest number was: 641 → 175
+
+Under the corrected rule, 76 of 117 sets on this machine are STALE and 17 more
+record no commit at all — and `check-break-reddened.mjs` had been counting every
+one of them. Reddened falls from 641 to 175, and greens fall from 9 to **zero**:
+all nine were measurements of trees from before their own fixes.
+
+The floor moved to 171 rather than staying at 600. Nothing was measured away and
+the number is not a concession: 600 under this rule is a figure no evidence on
+this machine supports, and a floor that cannot be met is a floor that gets
+edited every time it speaks. It rises as the chain drains.
+
+### A plan that re-asks instead of a plan that remembers
+
+Every sweep I have run worked from a snapshot, and by the end of three hours the
+snapshot was wrong in both directions: `aar-24` was written after `plan3.txt` was
+generated and so was in no plan, while `fd-7` and `sw-4` sat in a plan that
+believed their suites were current. `chain-plan.sh` asks the question again
+between rounds — no log, or a log about a tree that has moved — and stops when a
+round comes back empty. Two non-termination risks are guarded rather than
+assumed away: a suite whose baseline REFUSES records no patch lines however
+often it runs, and a suite I keep editing drifts again each round, so a round
+that asks for exactly what the last round asked for ends the chain.
+
+### And a patch may say its own log is not evidence
+
+One case is out of reach of any rule about files: `folder-create-12` was
+measured while `wt-break.sh` built `packages/**` patches from the repo rather
+than the worktree, so the toaster it edits was never the one under test. The
+RUNNER changed, not the tree. Its header already claimed it was "in the stale
+plan" — a sentence nothing checked, and false. `# Re-run: <why>` makes that
+claim mechanical: the generator carries the patch until it has been measured at
+a commit later than the line was written, so the declaration is spent by being
+measured rather than by being deleted.
+
+### Two refusals that had already been fixed
+
+Within five minutes of the provenance rule landing I read `create-menu-ai`'s
+refused baseline as a live product defect — a type strip offering ten kinds
+where nine were expected — and went looking for the filter bug. There is no
+filter bug. The suite expected nine because `form` was added to the product
+after it was written, and it had been corrected hours before I read that log.
+`ai-assign`'s refusal is the same: a fixture leak fixed in the suite, a refusal
+on disk from before the fix.
+
+So `break-report.sh` marks every row with the tree it is about — `OLDER TREE`,
+or `TREE UNKNOWN` for the logs that predate the sync line — and both gate. The
+freshness checker had to stop collapsing two facts into one field to do it:
+REFUSED was winning over STALE, which lost the only thing worth knowing about a
+refusal, namely whether it is still true.
+
+### The read that ends the section, five times in two suites
+
+`list-customize-10-no-caption` removes the export caption; the check that looks
+for it reddens, and then `note.getAttribute('data-plan')` on a locator matching
+nothing waits thirty seconds and THROWS. The throw ends the section: 33 of 37
+checks ran, and among the four that did not was the anti-drift check that is the
+entire reason the caption resolves its own tier.
+
+`ai-answer-rendering` had four of these in one suite.
+`aar-7-list-refs-never-sent` ran 16 of 51 — thirty-five checks lost to one
+`getAttribute`. All four were in the ledger as patches that reddened the check
+they claim. They did, and they silenced the rest of the section on the way,
+which is the worse half and the half no number showed.
+
+**No checker for this one, deliberately.** The shape is "an unguarded read after
+a check that is allowed to fail", and a static rule over that flags hundreds of
+benign call sites. It does not need one: every instance shortens the run, and
+`EXPECTED_CHECKS` being exact turns every short run into a SHORT row that gates.
+The measurement already catches the class by construction — which is why all
+five of these were found this morning rather than argued about.
