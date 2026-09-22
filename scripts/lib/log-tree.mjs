@@ -133,11 +133,53 @@ export function patchDeps(text, suite) {
 // hand, so it lives here with the test beside it.
 export function makeMeasurementCheck({ root }) {
   const drifted = makeDriftCheck({ root })
-  return (rec, deps) => {
+  return (rec, deps, patch = null) => {
     if (!rec) return ['<no run log>']
     if (!rec.sha) return ['<no commit recorded>']
-    return drifted(rec.sha, deps)
+    const moved = drifted(rec.sha, deps)
+    if (moved.length || !patch) return moved
+    return patchCodeMoved({ root, sha: rec.sha, name: patch.name, text: patch.text })
   }
+}
+
+// THE PATCH'S OWN CODE IS A DEPENDENCY, AND ITS COMMENTS ARE NOT.
+//
+// `patchDeps` deliberately leaves the patch file out: headers are re-worded
+// constantly, `check-break-reddened.mjs` re-reads every claim against the log's
+// own text anyway, and treating a comment edit as a re-measurement would have
+// invalidated twenty-six runs for nothing.
+//
+// Then I rewrote what `po-3-one-provider` DOES — it had been setting the
+// `hidden` attribute, which a Tailwind class overrides, so it hid nothing and
+// ran green twice — and nothing put it back in the work list. The rule that
+// protects against comment churn also hid a patch that had become a different
+// patch. So the comparison is against the code with the `#` lines stripped:
+// a reworded header changes nothing, a rewritten body is a re-run.
+//
+// A PATCH THAT WAS NOT YET COMMITTED WHEN IT RAN cannot be compared at all —
+// `wt-break.sh` applies the working copy, so a patch written and run in the same
+// minute has no blob at that sha. UNKNOWN is not CURRENT: that is a reason, and
+// twenty-odd patches are in that state until their next run records them.
+const stripComments = (text) =>
+  text
+    .split('\n')
+    .filter((l) => !/^\s*#/.test(l))
+    .join('\n')
+    .trim()
+
+function patchCodeMoved({ root, sha, name, text }) {
+  const path = `test/e2e/breaks/${name}.py`
+  let was
+  try {
+    was = execFileSync('git', ['show', `${sha}:${path}`], {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+  } catch {
+    return [`${path} <not committed when it ran>`]
+  }
+  return stripComments(was) === stripComments(text) ? [] : [`${path} <body>`]
 }
 
 // `(sha, paths) => the paths that changed between sha and HEAD`, memoised

@@ -1,5 +1,8 @@
 # Unticking Due date changes nothing on the rows.
-# Reddens: list-view-controls: "and ticking it puts both back"
+# RE-AIMED. Ticking it back is unaffected — the gate is always true, so the
+# column is always there and re-ticking looks like it worked. What fails is the
+# unticking.
+# Reddens: list-view-controls: "unticking Due date takes it off every row"
 import io
 p='/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s=io.open(p,encoding='utf-8').read()

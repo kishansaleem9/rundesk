@@ -247,7 +247,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * in the same run, which is what `measuredAt` reads.
    */
   const rec = measured.get(name)
-  const moved = notCurrent(rec, patchDeps(text, suite))
+  const moved = notCurrent(rec, patchDeps(text, suite), { name, text })
   if (moved.length) {
     drifted.push(
       `${name} — measured at ${rec?.sha ?? 'an unrecorded commit'}, since when ` +

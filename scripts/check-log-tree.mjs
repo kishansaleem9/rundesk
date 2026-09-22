@@ -191,5 +191,48 @@ ok(
 ok(current({ sha: first }, ['apps/web/src/a.tsx']).length === 1, 'and a real record still answers by the diff')
 ok(current({ sha: first }, ['test/e2e/s.mjs']).length === 0, 'a measurement nothing has moved under is current')
 
+console.log('▶ the patch\'s own body, which its comments are not')
+
+// THE RULE THAT PROTECTS AGAINST COMMENT CHURN ALSO HID A REWRITTEN PATCH.
+// `po-3-one-provider` had been setting the `hidden` attribute, which a Tailwind
+// class overrides, so it hid nothing and ran green twice. Rewriting what it DOES
+// left its old measurement in place, because `patchDeps` leaves patch files out
+// on purpose. Stripped of `#` lines, a reworded header is nothing and a new body
+// is a re-run.
+mkdirSync(join(repo, 'test/e2e/breaks'), { recursive: true })
+const PATCH_PATH = join(repo, 'test/e2e/breaks/p-1-thing.py')
+writeFileSync(PATCH_PATH, '# the first explanation\nimport io\ns = "one"\n')
+git('add', '-A')
+git('commit', '-qm', 'the patch')
+const atPatch = git('rev-parse', 'HEAD').trim()
+const patchOf = (text) => current({ sha: atPatch }, [], { name: 'p-1-thing', text })
+
+ok(patchOf('# the first explanation\nimport io\ns = "one"\n').length === 0, 'the same patch is current')
+ok(
+  patchOf('# a WHOLLY different explanation\n#\n# over three lines\nimport io\ns = "one"\n').length === 0,
+  'and a reworded header is still the same patch',
+)
+const rewritten = patchOf('# the first explanation\nimport io\ns = "two"\n')
+ok(rewritten.length === 1, 'a changed body is not')
+// `?? ''` on every read of a reason, because an assertion that CRASHES on an
+// empty answer is not an assertion. Deleting the "not committed" reason made
+// this case die on `[0].includes` instead of reporting — the same defect these
+// checks exist to catch in the suites, in the file that checks them.
+ok((rewritten[0] ?? '').includes('<body>'), 'and it says which file and why')
+ok(
+  (current({ sha: atPatch }, [], { name: 'p-2-never-committed', text: 'import io\n' })[0] ?? '').includes(
+    '<not committed when it ran>',
+  ),
+  'a patch with no blob at that commit is a reason, not a pass — it ran before it was committed',
+)
+// The deps still win: a suite that moved is a re-run whatever the patch says.
+ok(
+  current({ sha: first }, ['apps/web/src/a.tsx'], {
+    name: 'p-1-thing',
+    text: '# the first explanation\nimport io\ns = "one"\n',
+  }).length === 1,
+  'and a moved dependency still answers first',
+)
+
 console.log(failed === 0 ? `\n${'ok'} log-tree: every case holds` : `\n${failed} FAILED`)
 process.exit(failed === 0 ? 0 : 1)
