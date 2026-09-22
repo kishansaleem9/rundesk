@@ -4672,3 +4672,105 @@ Two of those answers are unit tests, which is why the checker looks in
 `**/*.test.ts` as well: a rule that only read `test/e2e` would have called
 `18:20` missing and sent me to build a second copy of something that is already
 asserted, in the right place, for the right reason.
+
+### Four greens, four different reasons, none of them timing
+
+The provenance gate turned nine greens into UNKNOWN, and the sweep has now
+re-measured four of them against the current tree. Every one was green for a
+reason of its own, and not one was the race I went looking for first.
+
+**`po-3-one-provider` hid nothing.** It sets the `hidden` ATTRIBUTE on the
+Outlook button. `[hidden]` gets `display: none` from the user-agent stylesheet
+and `buttonVariants` puts `inline-flex` on the element through a CLASS, which
+wins — so the button stayed pressable, `checkVisibility()` correctly said so,
+and the check correctly passed: both providers really were still being offered.
+A patch that photographs as hiding something and hides nothing, inside the tool
+built to find facades. An inline `style` cannot be overridden by a class.
+
+**`tai-6-fill-rounds-to-first` was the starting state.** Its fallback writes
+`types[0]`, every workspace seeds Task · Milestone · Form Response · Meeting
+Note in that order, and a freshly created task ALREADY CARRIES `Task`. The
+fallback wrote the value that was already there, so before and after were
+identical. The suite stands the task on Milestone first now, and check 19
+asserts that it took — a precondition nobody checks is how this hid twice.
+
+**`pcb-4-full-width-over-the-rail` had a premise read off class names.** The
+check had two real defects, both fixed. Then it ran green again and the measured
+numbers said why: "left edge (560px) is clear of the rail, which ends at 531px".
+The patch removed `max-w-xl` on the reasoning that the container is `absolute
+inset-x-0 … px-4` so the bar would start at 16px. `absolute` resolves against
+the nearest POSITIONED ANCESTOR — the calendar region, to the right of the rail.
+I wrote that premise into the patch header and into the suite's comment without
+measuring it, in a patch whose entire job is to be measured. `fixed` is what
+makes `inset-x-0` mean the viewport.
+
+**And `folder-create-12`** needed neither: its log predates the runner fix, and
+the patch-body rule now says so without the declaration having to.
+
+### Frame `03:05` draws six tabs and two of them were never exercised
+
+Asking which product testids no suite names — 342 of 1063 — put nine in the
+cover picker, and the frame is explicit: **Gallery | Upload | Link | Search |
+Attachments | Remove**.
+
+**The Attachments tab could never list a file.** The picker filtered the task's
+attachments on `contentType`, and `GET /tasks/:id/attachments` does not return
+that field: `tasks.service.ts` maps its own `row.contentType` to `mimeType` on
+the way out, and every other reader in the web app takes `mimeType`. This one
+compared `undefined` to `image/` for every row, so the empty state drew on
+every task however many images were on it. Frame `03:10` says that tab offers
+the files already on the task. The tab had been asserted to EXIST for a day, and
+the assertion that it exists is what made it look covered.
+
+**The Link tab had the same shape** and turned out to work: six checks, measured
+29 of 29 green, and 27 of 29 with the patch that removes the http guard — so it
+was unverified rather than broken. **Remove** is checked on all three fields a
+cover can be set in, because a Remove that clears only the one being drawn
+leaves two for the next reader.
+
+Five patches on Link, two on Attachments and Remove, each with its prediction
+written first. One of them did not compile at first — it reverted the filter and
+not the type — which proves nothing and reports as a confirmation.
+
+### The record has to say which tree, even when nothing moved
+
+`wt-break.sh` wrote its `== syncing … to <sha>` line INSIDE the `if` that
+decides whether a checkout is needed. Two sets running back to back with no
+commit between them means the second one needs no sync — and writes no
+provenance at all. `integration-error-card` came back 9 of 9 reddened and
+unplaceable.
+
+That is worse than a gap in the record, because it could not have healed:
+`--drifted` puts an unplaceable log back in the work list, the re-run has the
+same chance of finding the worktree already synced, and the chain would have
+stopped on "no progress" against sets that were running perfectly. The line is
+written on every set now. Swapped in by REPLACING the file rather than editing
+it, because three lanes were executing it and bash reads a script as it goes.
+
+### Two ways I measured the wrong thing myself
+
+**A bundle older than the source.** `apps/web/dist` is not in git, so nothing
+rebuilds it when a suite is run by hand. `ai-answer-rendering` came back 48 of
+51 from the checkout and all three failures were in the AI panel, which is where
+I had been working — and the dist was 749 minutes older than `apps/web/src`,
+with the panel's fix inside that window. Rebuilt, 51 of 51. `startLocalStack`
+refuses a stale bundle now; a warning above fifty PASS lines is a warning nobody
+reads. No number from the sweep was ever affected, because `wt-break.sh` builds
+before every set — only the runs I did by hand, two of which had already gone
+into a commit message as evidence and were re-measured to stand on their own.
+
+**Eleven API processes.** `paywall-sites-8-export-unlocked` came back SHORT on
+"sorry, too many clients already", which is not a suite defect or a product
+defect: eight stale API processes from earlier lanes were holding 95 of
+Postgres's 100 connections, and the fourth API I started for a hand-run pushed
+it over. Killed the eight; 26 connections in use afterwards.
+
+### A number in a claim can be a hostage
+
+`tfc-3-short-type-list` claims "the type picker offers all 19 field types" and
+the run printed 22 — the suite interpolates the count, and three types had been
+added since the patch was written. It verified anyway, because the matcher
+compares against the literal part of a template, which is the part worth
+quoting. Of the 29 claims that quote a number, the rest are stable literals —
+HTTP statuses, `0,1,2`, `(500 - 125) * 2 is 750` — part of their sentence rather
+than hostage to it. Two were hostages and both quote the literal now.
