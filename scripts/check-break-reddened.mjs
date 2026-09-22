@@ -50,7 +50,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
+import { norm, quotedIn } from './lib/claim-match.mjs'
 import { reddensText, makeSuiteOf } from './lib/suite-of-patch.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
@@ -89,8 +89,20 @@ for (const n of suiteNames) {
  * set. Each of those was counted as a measurement. 501 is what is actually
  * measured; the difference moved to the unusable-log pile, where it can be
  * worked off by running the sets.
+ *
+ * **501 → 514, and the 501 was matching too loosely.** Claims were compared to
+ * the log's lines with `findsClaim`, whose five-word fragment fallback let a
+ * claim match a NEIGHBOURING check's passing sentence. Whole-claim matching is
+ * the right rule for "did this check pass" and moved thirteen patches into the
+ * column the logs plainly put them in.
+ *
+ * THE FLOOR SITS BELOW THE CHURN. `wt-break.sh` truncates `brk-<patch>.log` at
+ * the start of each patch run, so while a sweep is in flight the live count
+ * dips by however many logs are mid-rewrite — 513 one minute and 514 the next,
+ * with nothing wrong. 500 is under that and still catches the failure this
+ * floor exists for: the escape-strip regression took the count to 51.
  */
-const BASELINE = { reddened: 501, green: 2, unproven: 20 }
+const BASELINE = { reddened: 500, green: 2, unproven: 14 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
@@ -191,8 +203,27 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
     green.push(`${name} — the run reported 0 failed`)
     continue
   }
-  const inFails = claims.filter((c) => findsClaim(lines(raw, 'FAIL'), c))
-  const notInPasses = claims.filter((c) => !findsClaim(lines(raw, 'PASS'), c))
+  /*
+   * WHOLE CLAIM, NOT A FRAGMENT, AND THE DIFFERENCE IS THIRTEEN PATCHES.
+   *
+   * `findsClaim` falls back to any five consecutive words of the claim, which is
+   * right for the question `check-break-claims.mjs` asks — does this SUITE
+   * contain the sentence — because a claim often quotes the literal part of a
+   * template literal. It is wrong for the question here, which is whether this
+   * particular CHECK passed: a five-word overlap with a NEIGHBOURING check's
+   * sentence reads as "the claimed check passed" and the patch comes out
+   * unproven.
+   *
+   * `mp-7-flat-bars` was the one that showed it. Its claim is "the Fast tier's
+   * Speed bar is visibly longer than the Max tier's", the run says
+   * `FAIL speed measured fast=38px max=38px`, and a fragment of the claim
+   * matched a nearby passing sentence. Whole-claim matching moved it, and
+   * `lwb-1-noorder`, `acc-13-refs-claims-created` and
+   * `folder-create-6-rename-door-open`, into the reddened column where the logs
+   * plainly put them.
+   */
+  const inFails = claims.filter((c) => lines(raw, 'FAIL').includes(c))
+  const notInPasses = claims.filter((c) => !lines(raw, 'PASS').includes(c))
   if (inFails.length || notInPasses.length) {
     reddened += 1
     continue
