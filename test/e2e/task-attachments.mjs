@@ -227,6 +227,37 @@ try {
     `the cluster is at ${JSON.stringify(actionsBox)} against a card at ${JSON.stringify(cardBox)}`,
   )
 
+  /*
+   * THE SAME OBJECT, NOT THE SAME STRING — and the difference only appeared
+   * once the lanes gained an object store.
+   *
+   * These two checks compared a rendered `href` against the url the API had
+   * just returned, by `===`. That was a fair proxy while storage was
+   * unconfigured and the url was a static value. With a store configured,
+   * `r2.getObjectUrl` PRESIGNS on every call, so two reads two seconds apart
+   * differ in `X-Amz-Date` and `X-Amz-Signature` and the equality can never
+   * hold. The baseline went 11 passed 2 failed, and `wt-break.sh` correctly
+   * REFUSED to run the set: against a red baseline no patch can be told apart
+   * from what is already broken.
+   *
+   * The intent was never the query string. It was "this anchor points at THIS
+   * attachment's file, not a placeholder and not a sibling's". Origin plus
+   * pathname carries the bucket and the object key, which is exactly that —
+   * and it still fails on `#`, on an absent href, and on another attachment's
+   * key, which are the three things the check is for.
+   */
+  const sameObject = (a, b) => {
+    if (!a || !b) return false
+    try {
+      const [x, y] = [new URL(a), new URL(b)]
+      return x.origin === y.origin && x.pathname === y.pathname
+    } catch {
+      // Not a url on one side or the other: fall back to exact equality rather
+      // than letting a parse failure read as a match.
+      return a === b
+    }
+  }
+
   const firstRow = seededRows.find((r) => (r.fileName ?? '').includes('file-0-'))
   const download = page.getByTestId('attachment-download').first()
   // A chk MESSAGE is an argument, so it is evaluated on a pass as well as a fail:
@@ -236,7 +267,7 @@ try {
   const dlHref = await download.getAttribute('href', { timeout: 8000 }).catch(() => null)
   const dlDownload = await download.getAttribute('download', { timeout: 8000 }).catch(() => null)
   chk(
-    dlDownload !== null && !!dlHref && dlHref !== '#' && dlHref === firstRow?.url,
+    dlDownload !== null && !!dlHref && dlHref !== '#' && sameObject(dlHref, firstRow?.url),
     'Download is a real anchor with a `download` attribute, pointing at THIS attachment\'s url',
     `the download anchor points at ${JSON.stringify(dlHref)} with download=${JSON.stringify(dlDownload)}; ` +
       `the attachment's own url is "${firstRow?.url}"`,
@@ -253,7 +284,7 @@ try {
   // absences is a check that passes on the defect. The sibling above carries
   // the same guard as `!!dlHref`.
   chk(
-    expandTarget === '_blank' && !!expandHref && expandHref === firstRow?.url,
+    expandTarget === '_blank' && !!expandHref && sameObject(expandHref, firstRow?.url),
     'and Expand opens the same file in a new tab',
     `the expand anchor is href=${JSON.stringify(expandHref)} target=${JSON.stringify(expandTarget)}`,
   )
