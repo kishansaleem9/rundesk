@@ -44,7 +44,7 @@ step "and the model seam is really a seam" node scripts/check-model-stub.mjs --m
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs
-step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs
+step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs --mutate
 step "verify-ui isolation harness"      bash -c 'bash test/deploy/verify-ui-isolation.test.sh > /tmp/preflight-iso.log 2>&1'
 echo
 [ "$fail" = "0" ] && echo "PREFLIGHT CLEAN" || echo "PREFLIGHT FAILED — see /tmp/preflight-*.log"

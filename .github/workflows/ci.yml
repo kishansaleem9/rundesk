@@ -248,8 +248,14 @@ jobs:
       # passed that test while every patch in the run had already been measured
       # against the unfixed file. Two greens went unmeasured for a day behind a
       # row that called their logs current.
-      - name: The break-log provenance reader holds its contract
-        run: node scripts/check-log-tree.mjs
+      # `--mutate` earned itself on the first run. One case claimed to prove the
+      # "newest log wins" comparison and was written backwards from its own
+      # comment: it named the OLDER file to sort first, so a module that simply
+      # overwrote every time still ended on the newer and answered correctly.
+      # Replacing the comparison with `if (true)` left all 36 cases green. The
+      # names are reversed now, and 8 of 8 mutations redden a case.
+      - name: The break-log provenance reader holds its contract, and each case bites
+        run: node scripts/check-log-tree.mjs --mutate
 
       # And a press on a control the check above it is allowed to find absent.
       # `imports-3-deadpreset` leaves Start disabled and its run reported 7 of

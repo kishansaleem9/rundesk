@@ -17,8 +17,23 @@
 import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
-import { execFileSync } from 'node:child_process'
-import { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck, declaresRerun } from './lib/log-tree.mjs'
+import { execFileSync, spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
+import { dirname } from 'node:path'
+import { proveMutationsBite } from './lib/mutate.mjs'
+
+/*
+ * THE SUBJECT IS IMPORTED DYNAMICALLY, so `--mutate` can point these same cases
+ * at a deliberately-broken copy. A static import cannot be redirected, and a
+ * contract test that cannot be pointed at a broken subject can only prove that
+ * its cases run — never that they would notice.
+ *
+ * The mutant is written BESIDE `lib/log-tree.mjs`, so `./` resolves the same
+ * way for it; `lib/mutate.mjs` records what putting it anywhere else cost.
+ */
+const HERE = dirname(fileURLToPath(import.meta.url))
+const SUBJECT = process.env.LOG_TREE_LIB ?? './lib/log-tree.mjs'
+const { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck, declaresRerun } = await import(SUBJECT)
 
 let failed = 0
 let ran = 0
@@ -72,24 +87,31 @@ ok(at.get('antique-1-nothing')?.sha === null, 'a log with no syncing line report
 // latest run; taking the first would re-prove a number the re-run already
 // corrected, and taking whichever readdir happened to yield last is not a rule.
 //
-// THE NAMES DO THE WORK HERE. `break-dup-old` sorts BEFORE `break-dup-new`
-// would have, and that is deliberate: the older file has to be read first, or
+// THE NAMES DO THE WORK HERE, AND THEY WERE THE WRONG WAY ROUND.
+//
+// The comment that stood here said the OLDER file has to be read first "or
 // deleting the mtime comparison altogether still produces the right answer and
-// this case proves nothing. It was written the other way round first, and it
-// passed against a module with the comparison removed.
+// this case proves nothing" — and then named the files so the older WAS read
+// first, which is the arrangement it was warning against. Reading older then
+// newer, a module that simply overwrote every time would end on the newer and
+// answer correctly. `--mutate` proved it: replacing the comparison with
+// `if (true)` left all 36 cases green.
+//
+// So the NEWER file sorts first. Now a missing comparison lets the older one
+// overwrite it, and the answer is wrong — which is what this case is for.
 log(
-  'break-dup-a-older.txt',
-  ['== syncing /tmp/claude-0/wt3 to 1111111', '== twice-1-measured', '31 passed, 1 failed', ''].join('\n'),
-  1_700_000_000,
-)
-log(
-  'break-dup-b-newer.txt',
+  'break-dup-a-newer.txt',
   ['== syncing /tmp/claude-0/wt3 to 2222222', '== twice-1-measured', '32 passed, 0 failed', ''].join('\n'),
   1_700_009_999,
 )
+log(
+  'break-dup-b-older.txt',
+  ['== syncing /tmp/claude-0/wt3 to 1111111', '== twice-1-measured', '31 passed, 1 failed', ''].join('\n'),
+  1_700_000_000,
+)
 at = measuredAt(dir)
 ok(at.get('twice-1-measured')?.sha === '2222222', 'the newest log that names a patch is the one that dates it')
-ok(at.get('twice-1-measured')?.log === 'break-dup-b-newer.txt', 'and it says which log that was')
+ok(at.get('twice-1-measured')?.log === 'break-dup-a-newer.txt', 'and it says which log that was')
 
 // CONTROL LINES ARE NOT PATCHES. `== BASELINE`, `== restoring` and
 // `== REFUSING` all start with the same three characters, and a refusal
@@ -250,6 +272,51 @@ ok(
  * `0 failed` for checks it never reached.
  */
 let short = false
+/*
+ * AND THAT EACH CASE BITES. The floor below catches "every case deleted"; it
+ * cannot catch "the subject is broken and the cases pass anyway", which is the
+ * failure this file exists to prevent. Every mutation here is a way
+ * `log-tree.mjs`'s own comments say it could go wrong — mostly by answering
+ * CURRENT about a log it could not place, which is the direction that turns a
+ * stale number into a measurement.
+ */
+if (process.argv.includes('--mutate')) {
+  const subject = join(HERE, 'lib/log-tree.mjs')
+  failed += proveMutationsBite({
+    subject,
+    caseFile: fileURLToPath(import.meta.url),
+    envVar: 'LOG_TREE_LIB',
+    label: 'the provenance reader',
+    // It loads or it does not: a mutant that cannot be imported makes the case
+    // file throw on its own `await import`, which the named-case guard catches.
+    alive: (mutant) => {
+      const r = spawnSync(process.execPath, ['--input-type=module', '-e', `await import(${JSON.stringify(mutant)})`], {
+        encoding: 'utf8',
+        timeout: 30_000,
+      })
+      return { ok: r.status === 0, why: (r.stderr ?? '').trim() }
+    },
+    mutations: [
+      ['a log with no run at all reads as current', "if (!rec) return ['<no run log>']", 'if (!rec) return []'],
+      ['a log with no commit recorded reads as current', "if (!rec.sha) return ['<no commit recorded>']", 'if (!rec.sha) return []'],
+      ['the sha stops being read forward through the file', 'sha = s[1]\n        continue', 'continue'],
+      /*
+       * THE MTIME COMPARISON, NOT THE `.sort()` BESIDE IT. Deleting the sort
+       * reddens nothing and that is correct: the sort exists so the CASE is
+       * deterministic, not so the answer is right — with it gone, readdir order
+       * decides which file is read first and the mtime comparison still picks the
+       * newer. The lib's own comment says so. The comparison is the load-bearing
+       * part, and it is the part that was once deleted while its case passed.
+       */
+      ['the newest log stops winning', 'if (!prev || prev.mtime < mtime) at.set', 'if (true) at.set'],
+      ['a patch stops depending on its own suite', 'if (suite) deps.add(`test/e2e/${suite}.mjs`)', 'void suite'],
+      ['a patch stops depending on the product files it edits', '/\\/home\\/user\\/rundesk\\/((?:apps|packages)\\/[A-Za-z0-9_./-]+)/g', '/__never_matches__()/g'],
+      ['an unreadable commit reads as no drift', "out = ['<unknown commit>']", 'out = []'],
+      ['a Re-run: line with nothing after it counts', '/^#[ \\t]*Re-run:[ \\t]*\\S/im', '/^#[ \\t]*Re-run:/im'],
+    ],
+  })
+}
+
 const MIN_ASSERTIONS = 30
 if (ran < MIN_ASSERTIONS) {
   console.error(
