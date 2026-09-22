@@ -282,7 +282,15 @@ try {
   await chooseSubtaskMode('expanded')
   chk(await childVisible(), 'Expand all brings it into view without touching a chevron',
     'Expand all left the subtask hidden')
-  chk(await page.getByTestId('list-subtasks').getAttribute('data-mode') === 'expanded',
+  /*
+   * The read is the FIRST thing in the condition, so no `&&` stands in front of
+   * it to short-circuit: a missing chip would sit out the default 30s and throw,
+   * taking every check below it with it. Bound it, catch it, and compare for
+   * 'expanded' — absence lands as null, which is not 'expanded', so it FAILS.
+   */
+  const chipMode = await page.getByTestId('list-subtasks')
+    .getAttribute('data-mode', { timeout: 8000 }).catch(() => null)
+  chk(chipMode === 'expanded',
     'and the chip says what it is set to', 'the chip did not record the mode')
   await chooseSubtaskMode('collapsed')
   chk(!(await childVisible()), 'Collapse all puts it away again', 'Collapse all left the subtask on screen')

@@ -358,8 +358,17 @@ try {
     `a person’s row draws a real avatar (${Math.round(faceBox?.width ?? 0)}×${Math.round(faceBox?.height ?? 0)}px)`,
     `the "Me" row's face measured ${JSON.stringify(faceBox)} — a zero-sized avatar is a name in a list`,
   )
+  // `getAttribute()` is the FIRST thing in the condition below, so there is no
+  // `&&` in front of it to short-circuit: a missing Anyone row waits out the
+  // full default timeout and throws away every check after this one. Read it
+  // here instead, bounded and caught, and compare the value rather than test it
+  // — `null` (absent, or no such attribute) is not `'false'`, so absence reddens.
+  const anyoneFace = await page
+    .getByTestId('list-assignee-option-anyone')
+    .getAttribute('data-face', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('list-assignee-option-anyone').getAttribute('data-face') === 'false',
+    anyoneFace === 'false',
     'and "Anyone" is not given a face, because it is not a person',
     'the Anyone row draws somebody’s avatar',
   )

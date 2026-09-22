@@ -307,8 +307,16 @@ try {
     `the tab reported aria-current=${JSON.stringify(teamTabCurrent)} with ${drewTeam} team view(s) and ` +
       `${drewLocked} locked placeholder(s) on screen — the tab switched and the modal is decoration over it`,
   )
+  // Read once, bounded and caught. It sat first in the condition with no `&&`
+  // ahead of it to short-circuit, so a gate that never opened spent the default
+  // thirty seconds waiting and then threw, taking every check below with it.
+  // Compared against the literal, so a caught `null` is not 'plan' and fails.
+  const gateKind = await page
+    .getByTestId('feature-gate')
+    .getAttribute('data-gate-kind', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('feature-gate').getAttribute('data-gate-kind') === 'plan',
+    gateKind === 'plan',
     'it is the PLAN talking, not a switched-off flag',
     'the dialog reported itself as a flag gate — "buy Business" is the wrong instruction for a toggle',
   )
@@ -416,8 +424,17 @@ try {
     'standing on List, the panel is about the list download',
     `the panel said it would export ${JSON.stringify(exportView)}`,
   )
+  // Read once, bounded and caught, like the one above it. First in the
+  // condition with nothing to short-circuit it, so a missing section waited out
+  // the default thirty seconds and threw. Compared against the literal 'false':
+  // a caught `null` is not 'false', so an absent panel fails rather than reads
+  // as unlocked.
+  const listExportLocked = await page
+    .getByTestId('list-export-section')
+    .getAttribute('data-export-locked', { timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('list-export-section').getAttribute('data-export-locked') === 'false',
+    listExportLocked === 'false',
     'which is free, on the same plan that cannot have the board one',
     'the list export is marked locked — the paywall has spread to the download that must stay free',
   )

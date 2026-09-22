@@ -261,8 +261,19 @@ try {
     `the panel drew ${JSON.stringify(labels)} — two rows with one name is what a missing label map looks like`,
   )
 
+  /*
+   * HOISTED because this read was the FIRST thing in the condition, with no
+   * `&&` ahead of it to short-circuit: drop the row and `isDisabled` waits out
+   * the full default timeout, throws, and every check below goes unreported.
+   * Bounded and caught, so absence resolves to null — and null must FAIL, not
+   * be compared, hence `=== true` rather than the bare truthy read.
+   */
+  const listDisabled = await page
+    .getByTestId('space-wizard-view-list')
+    .isDisabled({ timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('space-wizard-view-list').isDisabled(),
+    listDisabled === true,
     'List is Required and cannot be switched off `[07:12]`',
     'the List view could be turned off — every list falls back to it, so the space would render nothing',
   )

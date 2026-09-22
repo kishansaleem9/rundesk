@@ -747,8 +747,17 @@ try {
    * list to mean. That is a deliberate disable, so it is pinned here rather
    * than left as something a later change could quietly drop.
    */
+  // Read once, bounded and caught: this read opens the condition, so there is
+  // no `&&` ahead of it to short-circuit, and a patch that takes the scope
+  // control away would hang the whole section on one locator. Absence has to
+  // FAIL the check rather than be compared, so the test is `=== true` — a null
+  // from the catch is not a disabled control.
+  const scopeDisabled = await page
+    .getByTestId('quick-create-new-field-scope')
+    .isDisabled({ timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.getByTestId('quick-create-new-field-scope').isDisabled(),
+    scopeDisabled === true,
     'and it will not offer "only this list" before a list is chosen',
     'the scope could be set to a list that had not been picked, which stores a ' +
       'scope pointing nowhere',
