@@ -259,3 +259,263 @@ export function tiptapToMarkdown(content: unknown): string {
   // Collapse 3+ blank lines and trim trailing whitespace.
   return md.replace(/\n{3,}/g, '\n\n').trimEnd() + '\n'
 }
+
+/*
+ * ─── THE INVERSE ──────────────────────────────────────────────────────────
+ *
+ * §V2-S13 frame `12:05` — the Imports submenu's second row, **Document files**.
+ *
+ * WHAT A DOCUMENT IMPORT SHOULD DO WAS NOT IN ANY FRAME. The submenu draws the
+ * row and nothing opens it, so the honest way to decide was to look at what
+ * this product already does: `tiptapToMarkdown` above turns a Doc into
+ * GitHub-flavoured Markdown, and `GET /docs/:id/export` already serves it as
+ * `text/markdown`. Import is that function run backwards, which is a
+ * specification the repository wrote for itself.
+ *
+ * AND IT HANDS US THE CHECK A FACADE CANNOT PASS. Export a doc, import the file
+ * back, and the doc must be the same — the same shape as the cover upload's
+ * byte-for-byte assertion, and worth far more than asserting that an import
+ * "succeeded". An importer that produced one paragraph holding the whole file
+ * would satisfy every other check anyone would think to write.
+ *
+ * WHY MARKDOWN AND TEXT AND NOTHING ELSE, which is a scope decision rather than
+ * a shortcut. `ai/attachment-text.ts` already decided this question for the
+ * knowledge indexer and said so in its own header: `text/*`, JSON and XML are
+ * extracted, while PDF, Word, Excel and PowerPoint are "intentionally NOT
+ * parsed" because they "would require a heavy parser dependency … out of
+ * scope". Offering a Word import here would contradict a recorded decision AND
+ * be the facade at document scale — which the import page's own header already
+ * refuses for the ten named tools it draws as column presets.
+ *
+ * Pure and dependency-free, exactly as the export half is, so both directions
+ * are testable together and neither can reach the network or the database.
+ */
+
+/** Inline: `code`, **bold**, *italic*, ~~strike~~, [text](href), ![alt](src). */
+function parseInline(src: string): Node[] {
+  const out: Node[] = []
+  let text = ''
+  const flush = (marks?: Mark[]) => {
+    if (!text) return
+    out.push(marks?.length ? { type: 'text', text, marks } : { type: 'text', text })
+    text = ''
+  }
+  /*
+   * CODE IS MATCHED FIRST AND ITS BODY IS NOT RE-SCANNED, because backticks
+   * mean "literal" — `**not bold**` inside code is four asterisks and two
+   * words. The exporter applies `code` innermost for the same reason, so the
+   * two halves agree about precedence rather than each having an opinion.
+   */
+  const TOKEN =
+    /(`[^`]+`)|(!\[[^\]]*\]\([^)]*\))|(\[[^\]]+\]\([^)]*\))|(\*\*[^*]+\*\*)|(~~[^~]+~~)|(\*[^*]+\*)/
+  let rest = src
+  while (rest) {
+    const m = rest.match(TOKEN)
+    if (!m || m.index === undefined) {
+      text += rest
+      break
+    }
+    text += rest.slice(0, m.index)
+    const tok = m[0]
+    flush()
+    if (tok.startsWith('`')) {
+      out.push({ type: 'text', text: tok.slice(1, -1), marks: [{ type: 'code' }] })
+    } else if (tok.startsWith('![')) {
+      const alt = tok.slice(2, tok.indexOf(']'))
+      const src2 = tok.slice(tok.indexOf('](') + 2, -1)
+      out.push({ type: 'image', attrs: { src: src2, alt } })
+    } else if (tok.startsWith('[')) {
+      const label = tok.slice(1, tok.indexOf(']'))
+      const href = tok.slice(tok.indexOf('](') + 2, -1)
+      out.push(...parseInline(label).map((n) => addMark(n, { type: 'link', attrs: { href } })))
+    } else if (tok.startsWith('**')) {
+      out.push(...parseInline(tok.slice(2, -2)).map((n) => addMark(n, { type: 'bold' })))
+    } else if (tok.startsWith('~~')) {
+      out.push(...parseInline(tok.slice(2, -2)).map((n) => addMark(n, { type: 'strike' })))
+    } else {
+      out.push(...parseInline(tok.slice(1, -1)).map((n) => addMark(n, { type: 'italic' })))
+    }
+    rest = rest.slice(m.index + tok.length)
+  }
+  flush()
+  return out
+}
+
+/** Add a mark to a text node, keeping any it already carries. */
+function addMark(node: Node, mark: Mark): Node {
+  if (node.type !== 'text') return node
+  return { ...node, marks: [...(node.marks ?? []), mark] }
+}
+
+const para = (line: string): Node => ({ type: 'paragraph', content: parseInline(line) })
+
+/**
+ * Parse Markdown into the Tiptap/ProseMirror JSON stored in `docs.content`.
+ *
+ * The inverse of `tiptapToMarkdown`, and deliberately covering exactly the
+ * blocks that one EMITS — headings, paragraphs, the three list kinds with
+ * nesting, blockquotes, fenced code, horizontal rules and GFM tables — so that
+ * a document exported from this product and imported back is the same document.
+ * Anything it does not recognise becomes a paragraph rather than being dropped:
+ * losing a line silently is worse than keeping it in the wrong shape, because
+ * the second is visible to whoever imported it.
+ */
+export function markdownToTiptap(md: string): { type: 'doc'; content: Node[] } {
+  const lines = String(md ?? '').replace(/\r\n?/g, '\n').split('\n')
+  const content: Node[] = []
+  let i = 0
+
+  const listItemAt = (line: string) => {
+    const m = line.match(/^(\s*)(?:([-*+])|(\d+)\.)\s+(.*)$/)
+    if (!m) return null
+    const indent = Math.floor(m[1].length / 2)
+    const rest = m[4]
+    const task = rest.match(/^\[([ xX])\]\s+(.*)$/)
+    return {
+      indent,
+      ordered: m[3] !== undefined,
+      checked: task ? task[1].toLowerCase() === 'x' : null,
+      text: task ? task[2] : rest,
+    }
+  }
+
+  /*
+   * A list is consumed as a RUN of item lines at or below the opening indent,
+   * and nesting recurses on the deeper ones. Written this way rather than with
+   * a running stack because the exporter indents nested lists by exactly two
+   * spaces per level — the two halves agree on the unit, so the reader does not
+   * have to guess what an indent means.
+   */
+  const takeList = (depth: number): Node | null => {
+    const first = listItemAt(lines[i])
+    if (!first || first.indent < depth) return null
+    const ordered = first.ordered
+    const isTask = first.checked !== null
+    const items: Node[] = []
+    while (i < lines.length) {
+      const here = listItemAt(lines[i])
+      if (!here || here.indent < depth) break
+      if (here.indent > depth) {
+        const nested = takeList(here.indent)
+        if (nested && items.length) (items[items.length - 1].content ??= []).push(nested)
+        continue
+      }
+      if (here.ordered !== ordered || (here.checked !== null) !== isTask) break
+      i += 1
+      const item: Node = {
+        type: isTask ? 'taskItem' : 'listItem',
+        content: [para(here.text)],
+      }
+      if (isTask) item.attrs = { checked: here.checked === true }
+      items.push(item)
+    }
+    if (!items.length) return null
+    return { type: isTask ? 'taskList' : ordered ? 'orderedList' : 'bulletList', content: items }
+  }
+
+  while (i < lines.length) {
+    const line = lines[i]
+
+    if (!line.trim()) {
+      i += 1
+      continue
+    }
+
+    // Fenced code. The closing fence is optional: a truncated file should
+    // import the code it has rather than refuse the whole document.
+    const fence = line.match(/^```(\w*)\s*$/)
+    if (fence) {
+      i += 1
+      const code: string[] = []
+      while (i < lines.length && !/^```\s*$/.test(lines[i])) code.push(lines[i++])
+      if (i < lines.length) {
+        i += 1
+      } else {
+        /*
+         * UNCLOSED, so the run ended at the end of the FILE — and a file ends
+         * with a newline, which `split('\n')` turns into a trailing empty
+         * element. Kept, it becomes a blank last line inside the code, so a
+         * truncated file imports code the author never wrote. A closed fence
+         * never reaches this: its loop stops at the fence.
+         */
+        while (code.length && !code[code.length - 1].trim()) code.pop()
+      }
+      const node: Node = { type: 'codeBlock', content: [{ type: 'text', text: code.join('\n') }] }
+      if (fence[1]) node.attrs = { language: fence[1] }
+      content.push(node)
+      continue
+    }
+
+    const heading = line.match(/^(#{1,6})\s+(.*)$/)
+    if (heading) {
+      content.push({
+        type: 'heading',
+        attrs: { level: heading[1].length },
+        content: parseInline(heading[2]),
+      })
+      i += 1
+      continue
+    }
+
+    if (/^(---|___|\*\*\*)\s*$/.test(line)) {
+      content.push({ type: 'horizontalRule' })
+      i += 1
+      continue
+    }
+
+    // GFM table: a header row, a delimiter row of dashes, then body rows.
+    if (/^\|.*\|\s*$/.test(line) && /^\|[\s:|-]+\|\s*$/.test(lines[i + 1] ?? '')) {
+      const cells = (row: string) =>
+        row.trim().replace(/^\|/, '').replace(/\|$/, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim())
+      const header = cells(line)
+      i += 2
+      const rows: Node[] = [
+        {
+          type: 'tableRow',
+          content: header.map((c) => ({ type: 'tableHeader', content: [para(c)] })),
+        },
+      ]
+      while (i < lines.length && /^\|.*\|\s*$/.test(lines[i])) {
+        rows.push({
+          type: 'tableRow',
+          content: cells(lines[i++]).map((c) => ({ type: 'tableCell', content: [para(c)] })),
+        })
+      }
+      content.push({ type: 'table', content: rows })
+      continue
+    }
+
+    if (/^>\s?/.test(line)) {
+      const quoted: string[] = []
+      while (i < lines.length && /^>\s?/.test(lines[i])) quoted.push(lines[i++].replace(/^>\s?/, ''))
+      const inner = markdownToTiptap(quoted.join('\n'))
+      content.push({ type: 'blockquote', content: inner.content })
+      continue
+    }
+
+    const list = takeList(listItemAt(line)?.indent ?? 0)
+    if (list) {
+      content.push(list)
+      continue
+    }
+
+    /*
+     * A PARAGRAPH IS ITS CONSECUTIVE LINES, joined by hard breaks. The exporter
+     * emits `hardBreak` for a soft line break inside a paragraph, so joining
+     * with a space here would lose it and the round trip would fail on any doc
+     * containing one.
+     */
+    const run: string[] = []
+    while (i < lines.length && lines[i].trim() && !/^(#{1,6}\s|>|```|\|)/.test(lines[i]) && !listItemAt(lines[i])) {
+      run.push(lines[i++])
+    }
+    const inline: Node[] = []
+    run.forEach((l, n) => {
+      if (n > 0) inline.push({ type: 'hardBreak' })
+      inline.push(...parseInline(l))
+    })
+    content.push({ type: 'paragraph', content: inline })
+  }
+
+  return { type: 'doc', content }
+}
