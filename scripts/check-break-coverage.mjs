@@ -72,7 +72,14 @@
  *
  * No static reading can catch that: the claim was true and the code was wrong.
  * Only the run distinguishes a patch aimed at a suite from a patch that
- * reaches it. So this number means "somebody has tried", and the ledger's
+ * reaches it.
+ *
+ * AND THE RUN NOW SAYS SO MECHANICALLY. `check-break-reddened.mjs` prints
+ * "<n> of 113 suite(s) have a patch measured against this tree to redden a
+ * check it names" — the strongest form of this claim, which §8 had been making
+ * by reading one suite at a time. This file stays as it is, because a static
+ * reading answering a static question is the right division: aim here, proof
+ * there. So this number means "somebody has tried", and the ledger's
  * section 8 — which records what actually reddened — is where "it works" is
  * written down.
  *

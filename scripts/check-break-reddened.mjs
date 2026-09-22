@@ -180,6 +180,27 @@ const lines = (raw, kind) =>
 const measured = measuredAt(LOGS)
 const notCurrent = makeMeasurementCheck({ root: ROOT })
 
+/*
+ * AND THE STRONGEST COVERAGE CLAIM IN THE AUDIT, which was being made by hand.
+ *
+ * `check-break-coverage.mjs` says in its own header that it counts AIM — has
+ * anybody ever written a patch pointed at this suite — and that "the ledger's
+ * §8 counts what reddened". §8 counted it by reading, one suite at a time,
+ * which is the version of every number here that has been wrong at least once.
+ *
+ * A suite is PROVEN when at least one of its patches has been measured, on THIS
+ * tree, to redden a check the patch names. That is the sentence the audit has
+ * applied to individual checks since step 6 and has never applied mechanically
+ * to the set of suites. It is an aggregation of the verdicts below, so it costs
+ * nothing.
+ *
+ * NO FLOOR ON IT YET, and the reason is stated rather than left out: most logs
+ * are currently held back on provenance while the chain re-measures them, so the
+ * number is honest and low. The floor goes in when a round comes back empty,
+ * against what is measured then.
+ */
+const provenSuites = new Set()
+
 const green = []
 const unproven = []
 const unknown = []
@@ -357,6 +378,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const notInPasses = claims.filter((c) => !lines(raw, 'PASS').includes(c))
   if (inFails.length || notInPasses.length) {
     reddened += 1
+    provenSuites.add(suite)
     continue
   }
   unproven.push(
@@ -364,6 +386,8 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   )
 }
 
+const withChecks = Object.entries(expectedIn).filter(([, n]) => n > 0).map(([n]) => n)
+const unproved = withChecks.filter((n) => !provenSuites.has(n))
 const accounted = reddened + drifted.length
 console.log(
   `[break-reddened] ${reddened} patch(es) reddened a check they claim · ${green.length} reddened ` +
@@ -371,6 +395,11 @@ console.log(
     `moved · ${unknown.length} have no usable log · ${noClaim.length} quote no sentence · ` +
     `${unitClaim.length} claim a unit test`,
 )
+console.log(
+  `[break-reddened] ${provenSuites.size} of ${withChecks.length} suite(s) have a patch measured ` +
+    `against this tree to redden a check it names${unproved.length ? `; ${unproved.length} do not yet` : ''}`,
+)
+
 const show = (label, rows, why) => {
   if (!rows.length) return
   console.log(`\n[break-reddened] ${rows.length} ${label}`)
