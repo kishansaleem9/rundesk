@@ -3,6 +3,8 @@
 # grid that spans five different weeks.
 #
 # REDDENS: planner-appearance-toggles.mjs — "Day view draws none of it" and "nor does Month"
+#
+# Reddens: planner-appearance-toggles: "and Day view draws none of it, as the frame"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

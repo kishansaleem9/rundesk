@@ -6,6 +6,8 @@
 #
 # Reddens list-empty-states: "one press clears both of them", "the rows are
 # back after the two-axis clear", and the whole Closed-toggle branch.
+#
+# Reddens: list-empty-states: "and one press clears both of them"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "    for (const n of activeNarrowings) n.clear()"

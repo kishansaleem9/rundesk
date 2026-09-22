@@ -1,6 +1,8 @@
 # "Stack fields" becomes a one-way switch: it turns on and never off. The
 # control still animates, because PanelSwitch draws from `checked`.
 # Reddens ONLY: "switching it back off returns the card to the height it was".
+#
+# Reddens: list-customize: "and switching it back off returns the card to the height it was"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

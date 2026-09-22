@@ -4,6 +4,8 @@
 # is testing the switch and not the calendar, which is the whole defect it exists for.
 #
 # REDDENS: planner-appearance-toggles.mjs — "turning it on puts THIS week's number in the header"
+#
+# Reddens: planner-appearance-toggles: "turning it on puts THIS week's number in the header"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

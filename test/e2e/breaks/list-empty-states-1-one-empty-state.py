@@ -8,6 +8,8 @@
 # Reddens list-empty-states: every check from "a search that matches nothing
 # produces the FILTERED empty state" onward, including the one with teeth
 # ("the filtered state says something DIFFERENT from the empty-list state").
+#
+# Reddens: list-empty-states: "a search that matches nothing produces the FILTERED empty state"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "  const emptiedByFilter = tasks.length > 0 && visibleTasks.length === 0"

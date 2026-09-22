@@ -4,6 +4,8 @@
 #
 # REDDENS: planner-appearance-toggles.mjs — "exactly the N days outside the schedule are dimmed" and
 #          "a Thursday outside the schedule is dimmed while the Monday inside it is not"
+#
+# Reddens: planner-appearance-toggles: "is dimmed, so the dimming below is the switch"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

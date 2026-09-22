@@ -6,6 +6,8 @@
 # between an explanation and a shrug.
 #
 # Reddens list-empty-states: "the search term itself is on screen".
+#
+# Reddens: list-empty-states: "the search term itself is on screen"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "{t('list.empty.filteredBy', { filters: activeNarrowings.map((n) => n.label).join(' · ') })}"

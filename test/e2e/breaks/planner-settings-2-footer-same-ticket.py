@@ -3,6 +3,8 @@
 # both — which nothing but a check on the request itself would notice.
 #
 # REDDENS: planner-settings.mjs — "and \"Feature requests\" files a DIFFERENT one — a wish is not an outage"
+#
+# Reddens: planner-settings: "files a DIFFERENT one — a wish is not an outage"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,7 @@
 # The `team` row falling back to a SIBLING's string — two rows both "List",
 # which is what the missing entry produced before `viewLabelKey` returned null.
+#
+# Reddens: space-wizard-views: "and no two rows say the same thing"
 import io
 p='/home/user/rundesk/apps/web/src/lib/space-views.ts'
 s=io.open(p,encoding='utf-8').read()

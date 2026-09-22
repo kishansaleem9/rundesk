@@ -6,6 +6,8 @@
 #
 # Reddens list-empty-states: "it reports the three rows the filter is hiding"
 # and "and says so in words, not only in an attribute".
+#
+# Reddens: list-empty-states: "it reports the three rows the filter is hiding"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 pairs = [

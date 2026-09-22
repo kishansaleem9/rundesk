@@ -6,6 +6,8 @@
 #
 # Reddens list-view-controls: "and is inert while the calendar is already
 # showing the current period".
+#
+# Reddens: list-view-controls: "and is inert while the calendar is already showing the current period"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "                  disabled={calendarOnToday}"

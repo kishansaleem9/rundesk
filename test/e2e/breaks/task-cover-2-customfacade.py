@@ -5,6 +5,8 @@
 # the task still gets a cover — it is simply always the same cover. Every
 # "the cover changed" assertion ever written passes on this; only reading the
 # colour back and comparing it to the one that was picked does not.
+#
+# Reddens: task-cover: "a Custom cell that commits a constant passes every check but this one"
 import io
 p = '/home/user/rundesk/apps/web/src/components/cover-image-picker.tsx'
 s = io.open(p, encoding='utf-8').read()

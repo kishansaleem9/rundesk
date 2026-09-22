@@ -2,6 +2,8 @@
 # auto-collapsed lane becomes a control that moves and changes nothing —
 # which is the dead control this audit keeps finding, in its smallest form.
 # Reddens ONLY: "the lane's own chevron still opens it".
+#
+# Reddens: list-customize: "and leaves the lane that has cards alone"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

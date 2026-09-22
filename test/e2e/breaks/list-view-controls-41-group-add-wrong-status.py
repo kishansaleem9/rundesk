@@ -8,6 +8,8 @@
 #
 # Reddens list-view-controls: "and it lands in that group (…), not in the
 # list's default status".
+#
+# Reddens: list-view-controls: "not in the list's default status"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "                  onAdd={(title, opts) => onAddTask(status, title, opts)}"

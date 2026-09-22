@@ -1,4 +1,6 @@
 # The menu item opens the creator and forgets which space it was opened from.
+#
+# Reddens: space-create-menu: "creator with this Space already chosen"
 import io
 p='/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 s=io.open(p,encoding='utf-8').read()

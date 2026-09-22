@@ -2,6 +2,8 @@
 # generic. A check that asserted the status alone could not tell this
 # refusal from a validation pipe's, and would pass here.
 # Reddens ONLY: "the refusal says what is missing".
+#
+# Reddens: list-assignee-filter: "asking without a person is refused, and the refusal says what is missing"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

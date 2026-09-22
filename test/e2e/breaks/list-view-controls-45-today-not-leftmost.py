@@ -6,6 +6,8 @@
 #
 # Reddens list-view-controls: "Today is on the toolbar, and leftmost as the
 # frame draws it".
+#
+# Reddens: list-view-controls: "Today is on the toolbar, and leftmost as the frame draws it"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

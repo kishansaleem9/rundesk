@@ -3,6 +3,8 @@
 # item: written, stored, honoured by nothing.
 #
 # REDDENS: planner-appearance-toggles.mjs — "turning it off removes every projection and leaves the real blocks alone"
+#
+# Reddens: planner-appearance-toggles: "turning it off removes every projection and leaves the real blocks alone"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

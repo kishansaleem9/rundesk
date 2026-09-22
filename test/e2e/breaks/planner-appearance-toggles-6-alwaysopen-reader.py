@@ -3,6 +3,8 @@
 # opened somewhere sensible' would still pass.
 #
 # REDDENS: planner-appearance-toggles.mjs — "with it on the planner opens on the start of the week, not on today"
+#
+# Reddens: planner-appearance-toggles: "with it on the planner opens on the start of the week"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

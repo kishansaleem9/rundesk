@@ -7,6 +7,8 @@
 #
 # Reddens list-view-controls: "and one press brings it back to the current
 # period".
+#
+# Reddens: list-view-controls: "and one press brings it back to the current period"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "                  onClick={() => setCalendarMonth(calendarView === 'week' ? new Date() : startOfMonth(new Date()))}"

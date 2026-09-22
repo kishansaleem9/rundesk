@@ -4,6 +4,8 @@
 #
 # REDDENS: planner-appearance-toggles.mjs — "the picker offers `list`, and choosing it repaints the grid"
 #          and "two blocks on one list match, and a block on another list does not"
+#
+# Reddens: planner-appearance-toggles: "and choosing it repaints the grid"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

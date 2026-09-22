@@ -17,6 +17,8 @@
 #      cell stayed on screen.
 #
 # So this replaces the element's own `style` prop rather than adding a second.
+#
+# Reddens: task-cover: "the Gallery offers Custom beside the fixed swatches"
 import io, sys
 p = '/home/user/rundesk/apps/web/src/components/cover-image-picker.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -9,6 +9,8 @@
 # the empty-list state", "it does not invite you to create a task that the
 # filter would immediately hide", "the search term itself is on screen",
 # "and says so in words".
+#
+# Reddens: list-empty-states: "the filtered state says something DIFFERENT from the empty-list state"
 import io, re
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

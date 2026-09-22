@@ -7,6 +7,8 @@
 # Reddens list-empty-states: "the empty-list state renders on a list with no
 # rows", "the filtered state is not the one on screen", "it offers to create
 # the first task", and both checks in the final section.
+#
+# Reddens: list-empty-states: "and says exactly what it said the first time"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "  const emptiedByFilter = tasks.length > 0 && visibleTasks.length === 0"

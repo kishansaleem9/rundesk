@@ -7,6 +7,8 @@
 #
 # Reddens list-view-controls: "each one carries exactly one add control" and
 # "including a group with nothing in it, which is the frame's `TO DO 0`".
+#
+# Reddens: list-view-controls: "an empty group offered no way to add to it — the case you most want it in"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = """                {/* §V2-S13 `10:52` — the frame's `+ Add Task`, inside the group. */}

@@ -2,6 +2,8 @@
 # settings page still has three switches and still looks complete.
 #
 # REDDENS: planner-upcoming-meeting.mjs — "the countdowns are gone, and both meetings are still listed"
+#
+# Reddens: planner-upcoming-meeting: "the countdowns are gone, and both meetings are still listed"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-meetings-page.tsx'
 s = io.open(p, encoding='utf-8').read()

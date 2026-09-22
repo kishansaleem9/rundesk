@@ -7,6 +7,8 @@
 # back, on a list full of completed work.
 #
 # Reddens list-empty-states: the three checks in the Closed-toggle section.
+#
+# Reddens: list-empty-states: "and names the Closed toggle as the reason"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "    if (!showClosed) {\n      out.push({ key: 'closed', label: t('list.empty.filterClosed'), clear: () => setShowClosed(true) })\n    }"
