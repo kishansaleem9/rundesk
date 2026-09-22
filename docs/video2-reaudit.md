@@ -4233,6 +4233,81 @@ an e2e suite by a five-word FRAGMENT of a sentence that exists only in a
 needed a following line to stop at, so a block that is the LAST thing in a file
 extracted nothing, silently.
 
+### What the sweep keeps finding, and it is one shape
+
+`break-report.sh` turns each finished set into a line, and the rows worth
+opening fall into three kinds. The counts below are what the first pass over
+112 sets produced; the loop is: read the row, fix the suite, the suite goes
+stale, the stale plan re-runs it.
+
+**A patch that ends the run instead of failing a check — fifteen of them, in
+eleven suites, all one shape.** An unbounded Playwright call on the element the
+patch removes. `list-customize`'s `flip()` helper was four on its own:
+`list-trio-1-no-trio` reported `3 passed, 4 failed` with `ran 6 checks, expected
+exactly 37` — thirty-one checks unreported under a headline about the harness.
+`space-wizard` was three, so all twenty-one of its clicks go through a bounded
+`press()` that answers a boolean; a caller that ignores it finds the setting
+unchanged, which is the honest failure. One of those call sites already had a
+`.catch`, which swallowed the error and still waited thirty seconds to get it.
+
+Two were not timeouts. `folder-dialog` read `.data.id` off the null that the
+check above it had just reported. And `planner-onboarding` produced the one
+outcome that says nothing at all — `NO SUMMARY: … it died before the totals` —
+because it is `try { … } finally { … }` with **no catch**, so an uncaught
+TimeoutError left the process before the totals line and before the
+`EXPECTED_CHECKS` guard. Three of the 113 were in that state, all three in a
+running plan; `check-suite-check-branches.mjs` now asserts a top-level `try` has
+a top-level `catch`, and its own first version flagged 108 of 113 because `\b`
+inside a non-raw Python heredoc became a literal BACKSPACE byte.
+
+**A patch whose evidence was the run ending, by design.** `aoc-4` was written to
+prove `attach-on-create`'s opening gate was still a gate, and its header said so
+in place of a claim. What it proved is that a thirteen-check suite could report
+nothing at all — and the check immediately after that gate asserts the very fact
+the gate did. One patch has earned the opposite verdict: `acc-7-no-id-returned`
+declares `# Expect: SHORT`, because the twenty-seven checks after the one it
+reddens ADDRESS the id it removed and have nothing to be about. Only SHORT may
+ever be declared, and the declaration is checked against the measured outcome.
+
+**A patch that reddens nothing, and every one was a different reason the check
+could not see it.**
+
+- `sw-4-dialog-stays-open` removed the one line whose job is to close the
+  wizard. `onCreated` runs immediately after it and the caller does two more
+  things that each remove the dialog: `onClose()` and a navigation that unmounts
+  it. Three mechanisms; the explicit close is the least load-bearing, existing
+  to close a tick earlier so nobody sees the wizard flash over a page already
+  changing. The patch removes all three now, recorded as the minimum.
+- `aoc-5-input-not-cleared` could not have been caught by any wording. It
+  removes `e.target.value = ''`, and the check re-picks with `setInputFiles`,
+  which dispatches a change event whatever the input held. The defect is a
+  NATIVE picker's behaviour and Playwright goes around it. The input's own value
+  is observable, so the suite asserts it where it lives.
+- `pat-2-two-copies-of-the-numbers` wrote DEAD CODE: it drifted `GRID_SIZES` and
+  added a second constant nothing read. The check compares what the swatch
+  advertises against what the grid draws, and both come from the one
+  declaration, so moving it moved both and they went on agreeing. A patch for a
+  duplicated list has to make something READ the second copy.
+- `po-3-one-provider` hides a button with a `hidden` attribute, and the check
+  counted DOM elements with `evaluateAll`. A button nobody can press is not one
+  of the two providers the frame offers; the suite asks for `checkVisibility()`
+  now, and keeps the whole list because absent and hidden are different
+  mistakes.
+- `ca-3-hiding-is-not-honoured` and `ca-5-its-own-connection-state` are in §8b:
+  a checkbox whose grid was read by no check, and `false === false` standing in
+  for agreement.
+- `imports-9-priorityscale` and `sl-3-call-card-not-broadcast` are the
+  redundancy cases — a fact guaranteed twice over, where the minimum disproving
+  edit spans two places and the header says so.
+
+**And two suites refused their own baseline.** `ai-answer-rendering` had never
+once run to its declared length. `create-menu-ai` held a hand-written list of
+creatable types under a comment promising it would "say so out loud" when a
+tenth arrived; a tenth arrived, the line went red instead, and because that
+suite's set had never run the refusal sat on disk unread with sixteen patches
+behind it. Both that suite and `space-create-menu` read the list out of
+`create-types.ts` now, with a floor asserted on the parse.
+
 ### Four product defects the sweep turned up
 
 **The AI panel dropped the answer you just watched arrive.** The thread-history
