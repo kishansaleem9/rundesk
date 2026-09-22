@@ -63,14 +63,33 @@ const reddensBlock = (lines) => {
   const i = lines.findIndex((l) => /^#\s*Reddens:/i.test(l))
   if (i === -1) return null
   const out = [lines[i].replace(/^#\s*Reddens:\s*/i, '')]
-  for (let j = i + 1; j < lines.length; j++) {
+  let j = i + 1
+  for (; j < lines.length; j++) {
     if (!/^#/.test(lines[j])) break
     // A continuation is indented under the Reddens line; a new paragraph is not.
     if (!/^#\s{2,}\S/.test(lines[j])) break
     out.push(lines[j].replace(/^#\s*/, ''))
   }
-  return out.join(' ')
+  return { block: out.join(' '), refused: j < lines.length && /^#\s\S/.test(lines[j]) }
 }
+
+/*
+ * AND A CLAIM CUT OFF MID-SENTENCE IS A CLAIM NOBODY CHECKED.
+ *
+ * The rule above — two or more spaces of indent — is what keeps a following
+ * PARAGRAPH out of the block. Eleven patches wrote their continuation with ONE
+ * space, so the parser stopped at the first line and the rest of the claim was
+ * invisible: `teams-person-cards-2-confident-zero`'s block ended
+ * `"the first person's row holds the first person's` — an unterminated quote —
+ * and the two further sentences on the next line were never read, never
+ * verified, and counted as "no quoted sentence".
+ *
+ * Six of the eleven became VERIFIED the moment the indentation was fixed, with
+ * no change to what they claim. So `refused` is reported: a `#` line with
+ * exactly one space directly after the block is a continuation somebody meant
+ * the parser to read, and there is no legitimate reason to write one — a new
+ * paragraph starts at column zero.
+ */
 
 /*
  * TWO FORMATS, BOTH LEGITIMATE, and the first version of this script only knew
@@ -100,6 +119,7 @@ const suitesContaining = (q) =>
   suiteFiles.map((f) => f.slice(0, -4)).filter((s) => findsClaim(hayFor(s), q))
 
 const files = readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()
+const cutOff = []
 const twoBlocks = []
 const noClaim = []
 const noSuite = []
@@ -112,11 +132,13 @@ for (const f of files) {
   const name = f.slice(0, -3)
   const lines = readFileSync(join(BREAKS, f), 'utf8').split('\n')
   if (lines.filter((l) => /^#\s*Reddens:/i.test(l)).length > 1) twoBlocks.push(name)
-  const block = reddensBlock(lines)
-  if (!block) {
+  const parsed = reddensBlock(lines)
+  if (!parsed) {
     noClaim.push(name)
     continue
   }
+  if (parsed.refused) cutOff.push(name)
+  const block = parsed.block
   // `unit:` claims point at a *.test.ts, which this does not try to parse.
   if (/^unit\b/i.test(block.trim())) {
     unverifiable++
@@ -165,6 +187,10 @@ for (const [name, suite, missing] of notFound) {
   console.log(`CLAIM NOT IN SUITE  ${name}`)
   console.log(`                    names ${suite}.mjs, which does not contain:`)
   for (const m of missing) console.log(`                      "${m}"`)
+}
+for (const name of cutOff) {
+  console.log(`CLAIM CUT OFF      ${name}`)
+  console.log('                    a one-space comment line follows the block — indent it to two')
 }
 for (const name of twoBlocks) {
   console.log(`TWO REDDENS BLOCKS ${name}`)
@@ -216,12 +242,13 @@ if (noClaim.length) {
  * nothing both land there, and a ratchet over them would push the next author
  * into quoting something rather than saying there is nothing to quote.
  */
-const BASELINE = { notFound: 0, noSuite: 0, noClaim: 0, twoBlocks: 0 }
+const BASELINE = { notFound: 0, noSuite: 0, noClaim: 0, twoBlocks: 0, cutOff: 0 }
 const actual = {
   notFound: notFound.length,
   noSuite: noSuite.length,
   noClaim: noClaim.length,
   twoBlocks: twoBlocks.length,
+  cutOff: cutOff.length,
 }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {

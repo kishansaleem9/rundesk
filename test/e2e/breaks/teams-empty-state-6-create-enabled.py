@@ -1,7 +1,7 @@
 # Create Team is enabled for everybody, including the members the API refuses —
 # a button whose only outcome is a 403.
 # Reddens: teams-empty-state "the page offers them a disabled button with a
-# reason, not a 403".
+#   reason, not a 403".
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx'
 s=io.open(p,encoding='utf-8').read()

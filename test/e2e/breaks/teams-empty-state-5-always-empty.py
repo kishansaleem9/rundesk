@@ -2,7 +2,7 @@
 # suite that only ever looks at the empty condition cannot see, because a page
 # that is always empty and a page that is correctly empty are the same pixels.
 # Reddens: teams-empty-state "the empty state gives way now that there is
-# something to show".
+#   something to show".
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx'
 s=io.open(p,encoding='utf-8').read()

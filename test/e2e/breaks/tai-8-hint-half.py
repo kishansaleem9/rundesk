@@ -1,7 +1,9 @@
 # HALF A HINT AGAIN. The composer hint goes back to the slash half only, on
 # the strength of a reason -- there is no space-for-AI hook -- that stopped
 # being true the day /ai/writing/improve shipped.
-# Reddens: task-ai-bar -- 'the hint reads ... both halves'
+# Reddens: task-ai-bar -- "both halves, because both halves now do something"
+#   — the sentence interpolates the hint it read, so an ellipsis stands
+#   for the part that is not in the file; the claim quotes the part that is
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = """  'taskDetail.composerHint': "Press 'space' for AI, '/' for commands","""

@@ -1,8 +1,8 @@
 # Finished work counts as current work: the status filter comes off, so a
 # person's card lists what they have already shipped and their number grows.
 # Reddens: teams-person-cards "the counts are each person's own (2 and 3)",
-# "work that is finished is not what somebody is working on", and the card
-# counts on screen.
+#   "work that is finished is not what somebody is working on", and the card
+#   counts on screen.
 import io
 p='/home/user/rundesk/apps/api/src/modules/workspace-groups/workspace-groups.service.ts'
 s=io.open(p,encoding='utf-8').read()

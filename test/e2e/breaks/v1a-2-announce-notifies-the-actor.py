@@ -7,8 +7,8 @@
 #
 # Reddens: notification-gaps:
 #   "reacting to my own comment added N notification(s) for me"
-# and proves video1-acceptance's seed is testing a real cross-user path rather
-# than any write at all.
+#   and proves video1-acceptance's seed is testing a real cross-user path rather
+#   than any write at all.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = """    // Don't notify someone they assigned themselves

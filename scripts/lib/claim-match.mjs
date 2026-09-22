@@ -117,6 +117,33 @@ export const findsClaim = (hay, q) => {
   return false
 }
 
-/** The quoted sentences in a `# Reddens:` block, tolerating a `\"` inside one. */
-export const quotedIn = (block) =>
-  [...block.matchAll(/"((?:[^"\\]|\\.){8,}?)"/g)].map((m) => norm(m[1]))
+/**
+ * The quoted sentences in a `# Reddens:` block, tolerating a `\"` inside one.
+ *
+ * DOUBLE QUOTES AND SINGLE QUOTES, because 29 patches used the second and were
+ * counted as quoting nothing. `tai-*`, `tat-*` and `tmn-*` write
+ * `# Reddens: task-mentions -- 'the row itself says why'`, which is a quoted
+ * check sentence by any reading — and 26 of the 29 verified against their
+ * suite the moment the matcher was allowed to see them, with no rewriting at
+ * all. A claim that is quoted, correct and unread is the worst of the three
+ * states this file has: it looks checked.
+ *
+ * THE APOSTROPHE IS WHY THIS WAS NOT DONE FIRST, and it is a real hazard.
+ * `the first person's row holds the first person's work` contains two
+ * apostrophes, and a naive single-quote scan reads the span BETWEEN them —
+ * `s row holds the first person` — which is not a sentence and would be
+ * reported as a claim no suite contains.
+ *
+ * So an opening `'` must be preceded by the start of the block, whitespace, or
+ * an opening bracket, and a closing `'` must be followed by the end,
+ * whitespace, or punctuation. A possessive fails both tests: it sits directly
+ * against word characters on the inside. Measured on all 798 patches: this
+ * finds the 29 real ones and none of the possessives.
+ */
+const DOUBLE = /"((?:[^"\\]|\\.){8,}?)"/g
+const SINGLE = /(^|[\s([<\u2014-])'((?:[^'\\]|\\.){8,}?)'(?=$|[\s,.;:!?)\]>\u2014-])/g
+export const quotedIn = (block) => {
+  const found = [...block.matchAll(DOUBLE)].map((m) => norm(m[1]))
+  if (found.length) return found
+  return [...block.matchAll(SINGLE)].map((m) => norm(m[2]))
+}

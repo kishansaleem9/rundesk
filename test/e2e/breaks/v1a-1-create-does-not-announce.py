@@ -4,7 +4,7 @@
 #
 # Reddens: video1-acceptance:
 #   "the peer assigning a task puts something in this account's inbox"
-# and, downstream of an empty inbox:
+#   and, downstream of an empty inbox:
 #   "§G10-12 Clear all is there even with nothing unread"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
