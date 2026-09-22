@@ -479,8 +479,19 @@ try {
       `gantt=${await page.locator('[data-testid="space-wizard-view-gantt"]').getAttribute('aria-checked').catch(() => null)}`,
   )
 
+  /*
+   * The read sits FIRST in the condition, so no `&&` in front of it can
+   * short-circuit: drop the List switch and `isDisabled()` waits out the
+   * default 30s and throws, taking every check below with it. Bound it, catch
+   * it, and compare to `true` — a missing switch answers null, and null is not
+   * `true`, so absence fails the check instead of quietly passing it.
+   */
+  const listLocked = await page
+    .locator('[data-testid="space-wizard-view-list"]')
+    .isDisabled({ timeout: 8000 })
+    .catch(() => null)
   chk(
-    await page.locator('[data-testid="space-wizard-view-list"]').isDisabled(),
+    listLocked === true,
     'List is Required and cannot be switched off `[frame 07:12]`',
     'the List view could be turned off — every list falls back to it, so the space would render nothing',
   )
