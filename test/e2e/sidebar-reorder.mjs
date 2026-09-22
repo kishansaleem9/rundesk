@@ -475,8 +475,15 @@ try {
   })
   chk(seedMove.status < 300, 'a project can be put in a folder to give it a strip', `move answered ${seedMove.status}`)
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId(`space-toggle-${space.id}`).click({ timeout: 25_000 }, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId(`tree-gap-project-${folderIds[0]}-0`).waitFor({ timeout: 20_000 })
+  // ONE options object. The rule-five pass appended `{ timeout: 8000 }` to a
+  // call that already carried `{ timeout: 25_000 }`, and Playwright's `click`
+  // takes a single argument — so the second was silently ignored. Harmless at
+  // runtime and wrong on the page, which is the kind of thing a mechanical
+  // transform produces when it appends instead of merging.
+  await page.getByTestId(`space-toggle-${space.id}`).click({ timeout: 25_000 }).catch(() => {})
+  // And the gate under it, which that same pass left throwing: the press above
+  // is allowed to fail, so this cannot be the line that ends the section.
+  await page.getByTestId(`tree-gap-project-${folderIds[0]}-0`).waitFor({ timeout: 20_000 }).catch(() => {})
 
   const beforeCross = { moves: moves.length, reorders: reorders.length }
   const armedCross = await html5DragTo(page, `tree-project-${P[2].id}`, `tree-gap-project-${folderIds[0]}-0`)

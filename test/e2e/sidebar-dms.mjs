@@ -242,7 +242,12 @@ try {
   // A timeout without a catch is still a throw. `sidebar-dms-1-no-section`
   // removes the section this control lives in, and the run ended at 4 of 14.
   await newMessage.click({ timeout: 20_000 }).catch(() => {})
-  await page.getByTestId('sidebar-new-message-search').waitFor({ timeout: 20_000 })
+  // AND THE GATE UNDER IT. The press above was bounded and caught for
+  // `sidebar-dms-1-no-section` by name, in the comment above it — and this
+  // `waitFor` was left throwing, so that patch and `-3-no-new-message` both
+  // ended at 4 of 14 on the line below the one that was fixed for them. A
+  // bounded timeout is still a throw (ledger §10).
+  await page.getByTestId('sidebar-new-message-search').waitFor({ timeout: 20_000 }).catch(() => {})
   /*
    * "+ New message" TAKES A PERSON. This is the whole reason DMs are a second
    * section rather than rows under Channels: `+ Add Channel` opens a name box,
