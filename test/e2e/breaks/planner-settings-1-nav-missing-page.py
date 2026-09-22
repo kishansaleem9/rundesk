@@ -1,8 +1,6 @@
 # Put the settings nav back to four pages by dropping Upcoming meeting — the state the
 # stale comment described and the state the old suite asserted as correct.
 #
-# REDDENS: planner-settings.mjs — "the nav offers exactly the five pages that do something" and the order check
-#
 # Reddens: planner-settings: "the nav offers exactly the five pages that do something"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'

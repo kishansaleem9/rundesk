@@ -29,10 +29,19 @@
 #
 # Neither of those is a fact about this patch; both are facts about a check that
 # named a property it never read, in a container whose clock made the property
-# untestable. The dialog opens, closes, stores and points at the message either
-# way.
+# untestable.
 #
-# Reddens: chat-message-actions: "the time field is pre-filled and local"
+# AND WITH THE CHECK ABLE TO FAIL, IT REDDENS THREE. The header said the dialog
+# opens, closes and stores either way, and on an Asia/Karachi clock that is
+# wrong: "an hour from now" computed in UTC is four hours in the PAST locally,
+# so the dialog will not close and no reminder is stored. The two extra
+# failures are the defect being worse than the patch predicted, not a miscount
+# in the suite — a pre-fill somebody would have to notice and correct by hand
+# before the control would work at all.
+#
+# Reddens: chat-message-actions: "the time field is pre-filled and local" and
+#   "the dialog closes once the reminder is set" and
+#   "the reminder is stored against the message"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
 a = """  const inAnHour = new Date(from.getTime() + 60 * 60 * 1000)

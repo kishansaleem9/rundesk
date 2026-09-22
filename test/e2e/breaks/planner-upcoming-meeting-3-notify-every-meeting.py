@@ -2,8 +2,6 @@
 # switch works, notifications appear, and a check that only asked 'did it notify' would
 # pass on a product that pages you three hours early.
 #
-# REDDENS: planner-upcoming-meeting.mjs — "exactly one desktop notification is raised — not one per meeting"
-#
 # Reddens: planner-upcoming-meeting: "exactly one desktop notification is raised — not one per meeting in the list"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-meetings-page.tsx'

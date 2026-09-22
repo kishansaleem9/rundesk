@@ -2,9 +2,9 @@
 # the view from the condition, so it is drawn over a single Day column and over a Month
 # grid that spans five different weeks.
 #
-# REDDENS: planner-appearance-toggles.mjs — "Day view draws none of it" and "nor does Month"
-#
 # Reddens: planner-appearance-toggles: "and Day view draws none of it, as the frame"
+#   and "nor does Month, which spans five of them" — the second was named only by a
+#   legacy uppercase REDDENS line that no checker ever read.
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

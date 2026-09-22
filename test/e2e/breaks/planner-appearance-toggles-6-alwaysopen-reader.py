@@ -2,8 +2,6 @@
 # returns early for people who have it off, so a check that only asserted 'the planner
 # opened somewhere sensible' would still pass.
 #
-# REDDENS: planner-appearance-toggles.mjs — "with it on the planner opens on the start of the week, not on today"
-#
 # Reddens: planner-appearance-toggles: "with it on the planner opens on the start of the week"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'

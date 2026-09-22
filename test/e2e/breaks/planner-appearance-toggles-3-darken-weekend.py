@@ -2,10 +2,9 @@
 # for a Monday-to-Friday team the two sets coincide exactly, so it demos perfectly and
 # is wrong for every team whose week is not Monday to Friday, and for every holiday.
 #
-# REDDENS: planner-appearance-toggles.mjs — "exactly the N days outside the schedule are dimmed" and
-#          "a Thursday outside the schedule is dimmed while the Monday inside it is not"
-#
 # Reddens: planner-appearance-toggles: "is dimmed, so the dimming below is the switch"
+#   and "outside the schedule are dimmed" — the second was named only by a legacy
+#   uppercase REDDENS line that no checker ever read.
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

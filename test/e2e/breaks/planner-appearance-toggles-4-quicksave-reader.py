@@ -1,8 +1,6 @@
 # Always save quickly, whatever the setting says. The switch still stores `false`; the
 # confirmation step it buys is simply never reached.
 #
-# REDDENS: planner-appearance-toggles.mjs — "with it off, Enter asks instead — and nothing has been posted yet"
-#
 # Reddens: planner-appearance-toggles: "with it off, Enter asks instead — and nothing has been posted yet"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'

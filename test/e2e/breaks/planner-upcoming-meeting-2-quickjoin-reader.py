@@ -1,7 +1,5 @@
 # Same again for quick join: the switch stores `false` and the Join pill is drawn anyway.
 #
-# REDDENS: planner-upcoming-meeting.mjs — "the Join pills are gone too, and the rows survived that as well"
-#
 # Reddens: planner-upcoming-meeting: "the Join pills are gone too, and the rows survived that as well"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-meetings-page.tsx'

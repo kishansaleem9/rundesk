@@ -2,9 +2,6 @@
 # duplicated-list defect restored to exactly how it was found: a value the server
 # accepts, the picker offers, and the grid renders identically to 'Nothing'.
 #
-# REDDENS: planner-appearance-toggles.mjs — "the picker offers `list`, and choosing it repaints the grid"
-#          and "two blocks on one list match, and a block on another list does not"
-#
 # Reddens: planner-appearance-toggles: "and choosing it repaints the grid"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'

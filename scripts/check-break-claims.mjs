@@ -38,7 +38,27 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
 const SUITES = join(ROOT, 'test/e2e')
 
-/** The `Reddens:` block: the line itself plus any `#` lines that continue it. */
+/**
+ * The `Reddens:` block: the line itself plus any `#` lines that continue it.
+ *
+ * ONLY THE FIRST ONE IS READ, WHICH IS WHY A SECOND IS REPORTED. Correcting a
+ * patch header from a run is the commonest edit in this directory, and adding
+ * the newly-observed sentences as a fresh `# Reddens:` paragraph is the natural
+ * way to do it — `cma-2-reminder-prefill-is-utc` gained a second block that
+ * way. `findIndex` takes the first, so everything in the second is invisible
+ * here: the claim verifies, the patch is attributed, and the extra sentences
+ * are neither checked nor counted. Silently ignoring half a header is the
+ * shape of defect this file exists to catch.
+ *
+ * THIRTEEN PATCHES HAD ONE WHEN THIS WAS ADDED, and they were not new mistakes
+ * — they were the format changing. Each carried a legacy `# REDDENS:
+ * <suite>.mjs — "…"` line above the canonical one, from before the machine-
+ * readable spelling was settled, and in two of them the legacy line named a
+ * sentence the canonical block does not: `nor does Month, which spans five of
+ * them` and `outside the schedule are dimmed`. Both were real checks in real
+ * suites, claimed by nothing and verified by nothing for as long as the second
+ * line existed. The legacy lines are gone and those two sentences are claimed.
+ */
 const reddensBlock = (lines) => {
   const i = lines.findIndex((l) => /^#\s*Reddens:/i.test(l))
   if (i === -1) return null
@@ -80,6 +100,7 @@ const suitesContaining = (q) =>
   suiteFiles.map((f) => f.slice(0, -4)).filter((s) => findsClaim(hayFor(s), q))
 
 const files = readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()
+const twoBlocks = []
 const noClaim = []
 const noSuite = []
 const notFound = []
@@ -89,7 +110,9 @@ let ok = 0
 
 for (const f of files) {
   const name = f.slice(0, -3)
-  const block = reddensBlock(readFileSync(join(BREAKS, f), 'utf8').split('\n'))
+  const lines = readFileSync(join(BREAKS, f), 'utf8').split('\n')
+  if (lines.filter((l) => /^#\s*Reddens:/i.test(l)).length > 1) twoBlocks.push(name)
+  const block = reddensBlock(lines)
   if (!block) {
     noClaim.push(name)
     continue
@@ -143,6 +166,10 @@ for (const [name, suite, missing] of notFound) {
   console.log(`                    names ${suite}.mjs, which does not contain:`)
   for (const m of missing) console.log(`                      "${m}"`)
 }
+for (const name of twoBlocks) {
+  console.log(`TWO REDDENS BLOCKS ${name}`)
+  console.log('                    only the first is read — merge them into one block')
+}
 for (const [name, , missing] of noSuite) {
   console.log(`CLAIM IN NO SUITE   ${name}`)
   console.log(`                    names no suite, and no suite anywhere contains:`)
@@ -189,8 +216,13 @@ if (noClaim.length) {
  * nothing both land there, and a ratchet over them would push the next author
  * into quoting something rather than saying there is nothing to quote.
  */
-const BASELINE = { notFound: 0, noSuite: 0, noClaim: 0 }
-const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
+const BASELINE = { notFound: 0, noSuite: 0, noClaim: 0, twoBlocks: 0 }
+const actual = {
+  notFound: notFound.length,
+  noSuite: noSuite.length,
+  noClaim: noClaim.length,
+  twoBlocks: twoBlocks.length,
+}
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {
   console.error('\n[break-claims] THIS IS WORSE THAN THE BASELINE:')

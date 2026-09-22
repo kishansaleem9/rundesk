@@ -1,8 +1,6 @@
 # The 'Show time left' switch keeps saving and the countdown keeps being drawn. The
 # settings page still has three switches and still looks complete.
 #
-# REDDENS: planner-upcoming-meeting.mjs — "the countdowns are gone, and both meetings are still listed"
-#
 # Reddens: planner-upcoming-meeting: "the countdowns are gone, and both meetings are still listed"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-meetings-page.tsx'
