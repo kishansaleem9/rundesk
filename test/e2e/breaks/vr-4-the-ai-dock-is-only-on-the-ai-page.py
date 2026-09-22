@@ -13,14 +13,32 @@
 # keyed on `open` reads as the same kind of tidying, and it produces a control
 # that looks correct in every state you can reach with it open.
 #
-# REDDENS THREE, IN A CHAIN THE SUITE WRITES DOWN ITSELF: with no toggle to
-# click it reports "the AI dock can be opened" as failed and then "so the trace
-# was never checked" and "and neither was the answer" as failures too, rather
-# than passing them vacuously or throwing. That is the right shape for a
-# missing entry point — one failure that is the cause and two that say plainly
-# they could not be evaluated.
+# PREDICTED THREE. IT REDDENED FOUR AND TRUNCATED THE RUN, AND NOW IT REDDENS
+# NINE — and that arc is the whole reason this patch was worth running.
 #
-# Reddens: video-regression: "the AI dock can be opened"
+# The prediction read the G13-10 chain's no-toggle branch, which reported three
+# checks, and missed A6.4 above it: `the AI dock is on screen outside the AI
+# page` looks for the same handle from the workspace home, so removing it fails
+# there too. Four.
+#
+# The run said `84 passed, 4 failed` under `✗ 88 of 92 checks ran`. The chain's
+# three branches reported three, four and seven checks, so the branch this
+# patch takes made the run FOUR SHORT — and the suite's exact-count guard then
+# declared the RUN broken rather than the product, with the four FAIL lines
+# naming the missing dock sitting underneath that headline. A person reading it
+# reaches for the harness. One of the eight sentences, "the AI dock can be
+# opened", existed ONLY on the branch where there was no dock to open, so the
+# path that clicked it never asserted it was there.
+#
+# The chain reports eight on every path now, one of them new, and 92 → 93. This
+# patch reddens all eight plus A6.4 — nine — and the run reaches its own totals:
+# `84 passed, 9 failed`, 93 of 93. That is the right shape for a missing entry
+# point: one failure that is the cause and the rest saying plainly they could
+# not be evaluated, none of them silently absent.
+#
+# Reddens: video-regression: "the AI dock can be opened" and
+#   "the AI dock is on screen outside the AI page", plus the six that report
+#   they could not be evaluated
 import io
 p = '/home/user/rundesk/apps/web/src/components/app-topbar.tsx'
 a = """  // A workspace that switched AI off should not be offered the handle.

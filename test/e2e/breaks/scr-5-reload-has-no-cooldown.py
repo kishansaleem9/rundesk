@@ -13,17 +13,27 @@
 # watches it — no error, no explanation, no way to read what went wrong. The
 # cooldown is what converts "this is not working" into an honest error boundary.
 #
-# Two checks, and the pair is the point: the boundary must appear AND the reload
-# count must stay bounded. A build that showed the boundary after thirty
-# reloads would pass the first and fail the second, and a build that reloaded
-# twice and then sat blank would pass the second and fail the first.
+# PREDICTED TWO AND IT IS ONE, and the one that stayed green is worth the note.
+# The pair is meant to be complementary — the boundary must appear AND the
+# reload count must stay bounded — and the run reports
+# `PASS no reload loop (2 document loads)` beside the boundary check failing.
+#
+# Two is under the check's ceiling of three, so the loop check cannot see a
+# missing cooldown inside the window the suite waits: the suite clicks, waits
+# four seconds, clicks again, waits five, and an unbounded reload gets through
+# two documents in that time rather than thirty. **The bound is real and the
+# check is loose**, which is a fact about the check rather than about the code —
+# and the honest place for it is here, where the next person reading this patch
+# can see that one of its two checks is not load-bearing. Tightening the ceiling
+# would need the suite to wait longer, which costs every run; naming it costs
+# nothing.
 #
 # The `force` path is untouched, so the Try again button still works — which is
 # what keeps this from being the obvious deletion. Only the automatic recovery
 # loses its bound.
 #
 # Reddens: stale-chunk-recovery: "the error boundary is shown once reloading has not helped"
-#   and "no reload loop"
+#   ("no reload loop" stays green — see the paragraph above)
 import io
 p = '/home/user/rundesk/apps/web/src/lib/chunk-reload.ts'
 a = """export function reloadForStaleChunks(force = false): boolean {

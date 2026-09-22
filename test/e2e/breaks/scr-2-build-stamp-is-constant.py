@@ -12,13 +12,24 @@
 # two otherwise identical builds, and pinning it is exactly what somebody
 # chasing deterministic output would do.
 #
-# Two checks, and the shape of the pair is the interesting part. "the build
-# stamps a version.json" still PASSES — correctly; it is right there. Only the
-# check that compares two releases can see this, which is why the suite builds
-# twice. A single-build check of a versioning mechanism cannot tell a version
-# from a constant.
+# PREDICTED ONE AND IT IS THREE, and the two extra are the point of the facade
+# rather than a miscount. "the build stamps a version.json" still PASSES —
+# correctly; it is right there — and only the check that compares two RELEASES
+# can see the constant, which is why the suite builds twice. A single-build
+# check of a versioning mechanism cannot tell a version from a constant.
 #
-# Reddens: stale-chunk-recovery: "and two releases stamp different ids"
+# The other two are downstream, in the section about a tab that is merely old.
+# With both releases stamping `rundesk` the tab compares its own id against the
+# server's, finds them equal, and behaves exactly as a current tab should: the
+# reload lands on "the new one" that is byte-identical to the old one, and it
+# never stops saying anything because it never started. The chain is
+# `a stale tab is told there is a newer build` → it reloads → the notice
+# clears, and a constant id severs it at the first link while every individual
+# mechanism keeps working.
+#
+# Reddens: stale-chunk-recovery: "and two releases stamp different ids" and
+#   "and reloading lands on the new one" and
+#   "and stops saying so once it is current"
 import io
 p = '/home/user/rundesk/apps/web/vite.config.ts'
 a = """          fileName: 'version.json',
