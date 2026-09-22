@@ -22,6 +22,7 @@
  *   node test/e2e/task-cover.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
+import { writeFileSync } from 'node:fs'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
@@ -38,7 +39,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 29
+const EXPECTED_CHECKS = 32
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -433,6 +434,65 @@ try {
     `the task still holds coverColor=${JSON.stringify(bare?.coverColor ?? null)}, ` +
       `coverStorageKey=${JSON.stringify(bare?.coverStorageKey ?? null)}, ` +
       `coverImageUrl=${JSON.stringify(bare?.coverImageUrl ?? null)}`,
+  )
+
+  /*
+   * ── The Upload tab, frame `03:05`'s second tab ───────────────────────────
+   *
+   * WHAT CAN BE MEASURED HERE IS THE REFUSAL, and that is the half worth
+   * having. `R2Service` logs "R2 is not fully configured. File and clip uploads
+   * are disabled." in this environment and `presignPutObject` throws
+   * `Storage is not configured`, so the happy path — presign, PUT, commit the
+   * storage key — cannot run without credentials this repository does not hold.
+   * Recorded as unmeasurable rather than skipped, the same way the
+   * language-model decisions are.
+   *
+   * The refusal is exactly what `cover-image-picker.tsx`'s own comment says was
+   * missing: "the version of this tab that shipped before had no handler at all,
+   * so a failed upload and a successful one looked the same: nothing happened
+   * either way." So: choosing a file must say something, in words, and must
+   * leave the cover alone.
+   */
+  console.log('\n▶ the Upload tab says when an upload cannot work, and changes nothing')
+  await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-tab-upload').click({ timeout: 10_000 }).catch(() => {})
+  const chooser = page.getByTestId('cover-upload-input')
+  chk(
+    (await page.getByTestId('cover-upload-button').count()) === 1 && (await chooser.count()) === 1,
+    'the Upload tab offers a way to choose a file',
+    'the Upload tab drew no way to choose anything — a tab named after an action that cannot start',
+  )
+
+  // A real file, because `setInputFiles` dispatches a change event whatever the
+  // input held and the handler reads `files[0]`.
+  const TINY_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARgwMDAwMAA8IAWYAAAAASUVORK5CYII=',
+    'base64',
+  )
+  const pngPath = `/tmp/claude-0/cover-upload-${stamp}.png`
+  writeFileSync(pngPath, TINY_PNG)
+  const beforeUpload = (await T()).data
+  await chooser.setInputFiles(pngPath, { timeout: 8000 }).catch(() => {})
+  const said = await waitUntil(
+    async () => (await page.getByTestId('cover-upload-error').count()) === 1,
+    { timeoutMs: 12_000 },
+  )
+  const errText = said
+    ? (await page.getByTestId('cover-upload-error').innerText({ timeout: 6000 }).catch(() => '')).trim()
+    : ''
+  chk(
+    said && errText.length > 0,
+    'choosing a file when storage is unconfigured SAYS so, rather than doing nothing visible',
+    `the tab reported ${said ? JSON.stringify(errText) : 'nothing at all'} — a failed upload and a ` +
+      'successful one looking the same is the state this tab shipped in',
+  )
+  const afterUpload = (await T()).data
+  chk(
+    (afterUpload?.coverStorageKey ?? null) === (beforeUpload?.coverStorageKey ?? null) &&
+      (afterUpload?.coverImageUrl ?? null) === (beforeUpload?.coverImageUrl ?? null),
+    'and the cover is left exactly as it was',
+    `the cover moved to coverStorageKey=${JSON.stringify(afterUpload?.coverStorageKey ?? null)}, ` +
+      `coverImageUrl=${JSON.stringify(afterUpload?.coverImageUrl ?? null)} on an upload that failed`,
   )
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })
