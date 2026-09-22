@@ -239,11 +239,11 @@ try {
     `it read ${JSON.stringify(await groupText())} — the frame's chip names the value, not the axis`)
   chk(await page.locator('[data-testid="list-group-chip"] svg').count() > 0,
     'and it carries a glyph, as all three chips do', 'the Group chip has no icon')
-  await page.getByTestId('list-group-by').selectOption('assignee')
+  await page.getByTestId('list-group-by').selectOption('assignee', { timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(900)
   chk(await groupText() === 'Group: Assignee', 'changing the grouping changes what the chip says',
     `after switching to assignee the chip read ${JSON.stringify(await groupText())}`)
-  await page.getByTestId('list-group-by').selectOption('status')
+  await page.getByTestId('list-group-by').selectOption('status', { timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(900)
 
   console.log('\n▶ the Subtasks menu — three options, and only three')

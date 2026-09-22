@@ -80,7 +80,29 @@
  * `video-regression` reading a chip through a catch in the MESSAGE while the
  * CONDITION read it bare.
  *
- * AND A FIFTH SHAPE THAT IS NOT A GATE, on purpose.
+ * RULE FIVE — ASSERTED IN THIS SECTION, THEN USED BARE IN IT.
+ *
+ * Rule one pairs a press with a check in the ten lines above it, and ten lines
+ * is why it kept missing these: the check and the press are in the same
+ * SECTION, thirty lines apart. `aoc-1-filelist-read-late` stages files with no
+ * Attachments section — the check says exactly that — and the press on the X
+ * inside a row of that section is twenty lines below it. 6 of 14 checks.
+ *
+ * The section is the suite's own boundary and it is exactly the scope a throw
+ * destroys: everything between one `console.log('\n▶ …')` and the next. So
+ * within a section, any testid a check asserts the existence of is a testid
+ * every later interaction in that section has to survive the absence of.
+ *
+ * Twenty instances, and one false-positive class worth naming: a read inside a
+ * `waitUntil` predicate is already safe, because `waitUntil` catches its
+ * predicate's throws — `comment-plus-menu` has three of those and they are
+ * correct as written. Excluded.
+ *
+ * This is where nine of the last ten measured section-enders came from, which
+ * is the argument for gating it rather than waiting for the other eighty sets
+ * to find them one at a time.
+ *
+ * AND A SIXTH SHAPE THAT IS NOT A GATE, on purpose.
  *
  * The real lesson of `list-view-controls-42-empty-group-no-add` is that its
  * press had been bounded FOR IT, by name, in a comment — and the run still
@@ -174,6 +196,41 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   }
 }
 
+// RULE FIVE. Asserted in this section, then used bare in it.
+const ANY = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|isChecked|boundingBox|textContent)\(/
+let sections = 0
+for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
+  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  let asserted = new Set()
+  for (let i = 0; i < lines.length; i++) {
+    if (/console\.log\(['"`]\\n/.test(lines[i])) {
+      asserted = new Set()
+      continue
+    }
+    if (/^\s*chk\(/.test(lines[i])) {
+      const cond = lines.slice(i, i + 4).join(' ')
+      if (/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) {
+        for (const m of cond.matchAll(
+          /getByTestId\(['`]([^'`]+)['`]\)|\bvisible\(['`]([^'`]+)['`]\)/g,
+        ))
+          asserted.add(m[1] ?? m[2])
+      }
+      continue
+    }
+    if (!ANY.test(lines[i]) || /catch/.test(lines.slice(i, i + 2).join(' '))) continue
+    // A `waitUntil` predicate catches its own throws.
+    if (/waitUntil\(/.test(lines.slice(Math.max(0, i - 3), i + 1).join(' '))) continue
+    for (const id of asserted) {
+      if (!id) continue
+      const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+      if (!new RegExp(`getByTestId\\(['\`]${q}['\`]\\)`).test(lines[i])) continue
+      sections += 1
+      rows.push({ file, line: i + 1, id, text: lines[i].trim(), section: true })
+      break
+    }
+  }
+}
+
 // RULE FOUR. The same locator variable: through a guard, then bare.
 const ANYVERB = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|boundingBox)\(/
 let sames = 0
@@ -201,15 +258,16 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
 for (const r of rows) {
   console.log(
     `  ${r.file}:${r.line}  ${r.id}${r.gate ? '  (gate)' : ''}${r.box ? '  (box)' : ''}` +
-      `${r.same ? '  (same locator, guarded above)' : ''}`,
+      `${r.same ? '  (same locator, guarded above)' : ''}${r.section ? '  (asserted in this section)' : ''}`,
   )
   console.log(`      ${r.text.slice(0, 120)}`)
 }
 console.log(
-  `[section-enders] ${rows.length - gates - boxes - sames} press(es) on a control the check above ` +
-    `them may find absent, ${gates} gate(s) in front of a check about the same element, ${boxes} ` +
-    `box read(s) that throw when nothing matches, and ${sames} use(s) of a locator that is guarded ` +
-    `one line up, across ${new Set(rows.map((r) => r.file)).size} suite(s)`,
+  `[section-enders] ${rows.length - gates - boxes - sames - sections} press(es) on a control the ` +
+    `check above them may find absent, ${gates} gate(s) in front of a check about the same element, ` +
+    `${boxes} box read(s) that throw when nothing matches, ${sames} use(s) of a locator guarded one ` +
+    `line up, and ${sections} use(s) of something this section asserts exists, across ` +
+    `${new Set(rows.map((r) => r.file)).size} suite(s)`,
 )
 if (rows.length) {
   console.error(

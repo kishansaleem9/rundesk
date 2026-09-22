@@ -475,7 +475,7 @@ try {
   })
   chk(seedMove.status < 300, 'a project can be put in a folder to give it a strip', `move answered ${seedMove.status}`)
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
-  await page.getByTestId(`space-toggle-${space.id}`).click({ timeout: 25_000 })
+  await page.getByTestId(`space-toggle-${space.id}`).click({ timeout: 25_000 }, { timeout: 8000 }).catch(() => {})
   await page.getByTestId(`tree-gap-project-${folderIds[0]}-0`).waitFor({ timeout: 20_000 })
 
   const beforeCross = { moves: moves.length, reorders: reorders.length }

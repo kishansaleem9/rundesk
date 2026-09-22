@@ -437,7 +437,7 @@ try {
   )
   chk(converter, 'Convert to opens a parent picker', 'Convert to opened nothing')
 
-  await page.getByTestId('task-convert-search').fill(`History check ${stamp}`)
+  await page.getByTestId('task-convert-search').fill(`History check ${stamp}`, { timeout: 8000 }).catch(() => {})
   const offersItself = await page.getByTestId('task-convert-candidate').count()
   chk(
     offersItself === 0,
@@ -446,7 +446,7 @@ try {
   )
 
   // A real conversion, driven from the picker, and read back from the API.
-  await page.getByTestId('task-convert-search').fill(`Other history ${stamp}`)
+  await page.getByTestId('task-convert-search').fill(`Other history ${stamp}`, { timeout: 8000 }).catch(() => {})
   const hasTarget = await waitUntil(
     async () => (await page.getByTestId('task-convert-candidate').count()) > 0,
     { timeoutMs: 10_000 },

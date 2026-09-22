@@ -129,7 +129,7 @@ try {
   await page.getByTestId('palette-source-gmail').click()
   chk(await appears(page.getByTestId('palette-source-disconnected')),
     'choosing an unconnected source explains itself', 'an unconnected source went silent')
-  await page.getByTestId('palette-source-all').click()
+  await page.getByTestId('palette-source-all').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(800)
   chk(
     await page.getByTestId('palette-type-all').isVisible().catch(() => false),

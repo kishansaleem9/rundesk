@@ -627,7 +627,7 @@ try {
    */
   await page.locator('[cmdk-input]').first().fill(nonsense)
   await page.waitForTimeout(7000)
-  await page.getByTestId('palette-ai-continue').click()
+  await page.getByTestId('palette-ai-continue').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1500)
   chk(
     !(await page.locator('[cmdk-input]').first().isVisible().catch(() => false)),

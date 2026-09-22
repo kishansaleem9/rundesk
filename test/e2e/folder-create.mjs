@@ -392,7 +392,7 @@ try {
    * exists rather than after a sleep.
    */
   const FRESH = `Fresh ${TAG}`
-  await page.getByTestId('sidebar-folder-name').fill(FRESH)
+  await page.getByTestId('sidebar-folder-name').fill(FRESH, { timeout: 8000 }).catch(() => {})
   await page.getByTestId('sidebar-folder-submit').click()
   chk(
     await waitUntil(

@@ -243,7 +243,7 @@ try {
    * panel as decoration. Relationships is task↔task, References is task↔doc,
    * and the doc linked earlier in this suite is the evidence for the second.
    */
-  await page.getByTestId('related-tab-references').click()
+  await page.getByTestId('related-tab-references').click({ timeout: 8000 }).catch(() => {})
   const docShown = await waitUntil(async () => {
     const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
     return body.includes(`Link doc ${stamp}`)
@@ -254,7 +254,7 @@ try {
     `the References tab did not name the linked doc — it read ` +
       `${JSON.stringify((await page.getByTestId('related-items-panel').innerText().catch(() => '')).slice(0, 120))}`,
   )
-  await page.getByTestId('related-tab-relationships').click()
+  await page.getByTestId('related-tab-relationships').click({ timeout: 8000 }).catch(() => {})
   const backToTasks = await waitUntil(async () => {
     const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
     return !body.includes(`Link doc ${stamp}`)

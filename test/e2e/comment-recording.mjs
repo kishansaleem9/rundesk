@@ -405,7 +405,7 @@ try {
   // rather than about filling an empty box.
   await page.locator('textarea').first().fill('quick thought:')
 
-  await page.getByTestId('comment-record-voice').click()
+  await page.getByTestId('comment-record-voice').click({ timeout: 8000 }).catch(() => {})
   const recording = await waitUntil(
     () => page.getByTestId('comment-recording-active').isVisible().catch(() => false),
     { timeoutMs: 10_000 },

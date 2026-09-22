@@ -751,7 +751,7 @@ try {
   const SCOPED = `Only here ${TAG}`
   await page.getByTestId('quick-create-new-field-type-search').fill('text')
   await page.getByTestId('quick-create-new-field-name').fill(SCOPED)
-  await page.getByTestId('quick-create-new-field-scope').selectOption('list')
+  await page.getByTestId('quick-create-new-field-scope').selectOption('list', { timeout: 8000 }).catch(() => {})
   await page.getByTestId('quick-create-new-field-save').click()
 
   let scopedRow = null

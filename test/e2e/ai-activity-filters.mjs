@@ -431,7 +431,7 @@ try {
   )
   chk(empty, 'three filters that can match nothing produce the empty state',
     'the list did not report that its filters matched nothing')
-  await page.getByTestId('ai-activity-clear-filters').click()
+  await page.getByTestId('ai-activity-clear-filters').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(1500)
   chk(
     (await page.getByTestId('ai-activity-status').inputValue()) === '' &&

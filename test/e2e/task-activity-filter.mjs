@@ -281,7 +281,7 @@ try {
    * The needle carries this run's timestamp, so this key has never been fetched.
    */
   requests.length = 0
-  await page.getByTestId('activity-search').fill(NEEDLE)
+  await page.getByTestId('activity-search').fill(NEEDLE, { timeout: 8000 }).catch(() => {})
   const count = page.getByTestId('activity-match-count')
   /* Settled, not merely in flight: a request on its way also draws 0 rows, and
    * "no matches" and "not answered yet" must not be the same measurement. */

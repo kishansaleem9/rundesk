@@ -161,7 +161,7 @@ try {
   })
 
   chk(await appears(page.getByTestId('task-cover')), 'the task has a cover band', 'no cover band on the task')
-  await page.getByTestId('cover-change').click()
+  await page.getByTestId('cover-change').click({ timeout: 8000 }).catch(() => {})
   chk(await appears(page.getByTestId('cover-tab-link')), 'the picker opens with a Link tab',
     'no Link tab — the picker cannot take an image address')
   chk(
@@ -237,7 +237,7 @@ try {
     'the Gallery offers Custom beside the fixed swatches',
     'no Custom cell in the Gallery — the palette is eight colours and nothing else',
   )
-  await page.getByTestId('cover-gallery-custom').click()
+  await page.getByTestId('cover-gallery-custom').click({ timeout: 8000 }).catch(() => {})
   chk(
     await appears(page.getByTestId('cover-custom-input'), 6000),
     'and opening it reveals a colour chooser',
@@ -245,7 +245,7 @@ try {
   )
 
   const chosen = '#1f9d55'
-  await page.getByTestId('cover-custom-input').fill(chosen)
+  await page.getByTestId('cover-custom-input').fill(chosen, { timeout: 8000 }).catch(() => {})
   await page.getByTestId('cover-custom-apply').click()
   const landed = await waitUntil(async () => ((await T()).data?.coverColor ?? '') === chosen, {
     timeoutMs: 8000,

@@ -504,10 +504,10 @@ try {
   )
   chk(
     await page.getByTestId('list-assignee-selected').count() === 0 &&
-      (await page.getByTestId('list-assignee-filter').inputValue()) === '',
+      (await page.getByTestId('list-assignee-filter').inputValue({ timeout: 6000 }).catch(() => null)) === '',
     'and both surfaces know it — no face on the chip, nothing in the select',
     `the chip drew ${await page.getByTestId('list-assignee-selected').count()} face(s) and the select reads ` +
-      `${JSON.stringify(await page.getByTestId('list-assignee-filter').inputValue())}`,
+      `${JSON.stringify(await page.getByTestId('list-assignee-filter').inputValue({ timeout: 6000 }).catch(() => null))}`,
   )
   /*
    * AND THE OTHER DIRECTION. The native select is what a screen reader
@@ -515,7 +515,7 @@ try {
    * the picker did not read, the two controls would be two filters wearing one
    * label.
    */
-  await page.getByTestId('list-assignee-filter').selectOption(ME)
+  await page.getByTestId('list-assignee-filter').selectOption(ME, { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => picker().getAttribute('data-value').then((v) => v === ME), { timeoutMs: 8_000 }),
     'and choosing in the select moves the picker too',
