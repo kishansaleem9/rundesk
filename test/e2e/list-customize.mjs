@@ -693,8 +693,24 @@ try {
     'the board export dialog offered a Download and no word about why it cannot work — ' +
       'the padlock is on the summary, which is not on screen once the section is open',
   )
-  const noteText = await readText(note)
-  const notePlan = await note.getAttribute('data-plan')
+  /*
+   * READ THE CAPTION ONLY IF THERE IS ONE, because the check above is allowed
+   * to fail and the two below have to survive it.
+   *
+   * `list-customize-10-no-caption` removes the block entirely — the state this
+   * row was in before the caption was built — and the first check reddened
+   * exactly as it should. Then `note.getAttribute('data-plan')` on a locator
+   * matching nothing waited its 30 seconds and THREW, which ended the section:
+   * 33 of 37 checks ran, and the four that did not include the anti-drift check
+   * that is the whole reason the caption resolves its own tier. A patch
+   * credited with reddening one check while silencing three.
+   *
+   * Absent reads as `null` and empty here, and both checks below then report
+   * their own sentences about a caption that is not there.
+   */
+  const present = (await note.count()) > 0
+  const noteText = present ? await readText(note) : ''
+  const notePlan = present ? await note.getAttribute('data-plan') : null
   chk(
     notePlan === 'business' && noteText.trim().length > 0,
     `it names Business, the cheapest tier that includes the board export (read ${JSON.stringify(noteText.trim())})`,
