@@ -243,12 +243,35 @@ try {
    * at the same height. A full-width bar would photograph the same and swallow
    * clicks on both.
    */
-  const railRight = (await page.locator('[data-testid="planner-priorities"]').boundingBox().catch(() => null))?.x ?? 0
+  /*
+   * TWO THINGS WERE WRONG HERE, AND `pcb-4-full-width-over-the-rail` RAN GREEN
+   * ON BOTH.
+   *
+   * It read the rail's `.x` under the name `railRight` — the rail's LEFT edge —
+   * so a bar overlapping the rail's right half compared as clear of it. And
+   * `?? 0` turned a rail that was not on screen into a rail at x=0, after which
+   * `barBox.x > 0` is true of every bar that exists. The patch removes
+   * `max-w-xl` from a container that is `absolute inset-x-0 … px-4`, so the bar
+   * really does start at 16px and cover the rail; the check said it did not.
+   *
+   * The rail's box must exist, and the comparison is against its RIGHT edge,
+   * which is what the paragraph above this has always said.
+   */
+  const railBox = await page
+    .locator('[data-testid="planner-priorities"]')
+    .boundingBox()
+    .catch(() => null)
   chk(
-    barBox !== null && barBox.x > railRight,
-    `its left edge (${Math.round(barBox?.x ?? 0)}px) is clear of the rail`,
-    `the bar started at ${Math.round(barBox?.x ?? 0)}px, over the rail — a floating bar that ` +
-      'covers the backlog takes clicks away from the rows underneath it',
+    barBox !== null && railBox !== null && barBox.x >= railBox.x + railBox.width,
+    `its left edge (${Math.round(barBox?.x ?? 0)}px) is clear of the rail, which ends at ` +
+      `${Math.round((railBox?.x ?? 0) + (railBox?.width ?? 0))}px`,
+    railBox
+      ? `the bar started at ${Math.round(barBox?.x ?? 0)}px, over a rail that ends at ` +
+        `${Math.round(railBox.x + railBox.width)}px — a floating bar that covers the backlog takes ` +
+        'clicks away from the rows underneath it'
+      : 'the priorities rail was not on screen at all, so "clear of the rail" could not be ' +
+        'measured — the `?? 0` this replaces read a missing rail as a rail at x=0 and passed ' +
+        'every bar that existed',
   )
 
   /* In the lower part of the calendar, which is what "bottom bar" means. */
@@ -336,7 +359,11 @@ try {
    */
   const typeInto = async (text) => {
     const box = page.locator('[cmdk-input]').first()
-    await box.fill(text)
+    // Bounded: `pcb-1-no-bar` removes the bar so no palette ever opens, and
+    // `pcb-7-a-second-search-surface` gives the page a second input — both left
+    // this `fill` waiting out the default timeout, and both runs ended one check
+    // short of the suite's ten.
+    await box.fill(text, { timeout: 8000 }).catch(() => {})
     return box
   }
 
