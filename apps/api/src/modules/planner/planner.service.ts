@@ -47,6 +47,31 @@ export type WorkspaceCalendarId = (typeof WORKSPACE_CALENDAR_IDS)[number]
  */
 export const MAX_TEAM_SCHEDULE_PEOPLE = 8
 
+/**
+ * The people a team schedule will actually draw, in the order asked.
+ *
+ * De-duplicated BEFORE the cap, and the caller's order is kept. Without the
+ * de-dupe, "Sara, Sara" draws two identical columns — the one failure mode a
+ * side-by-side grid cannot survive, because two columns of the same person look
+ * exactly like two people who happen to be busy at the same times.
+ *
+ * EXTRACTED SO IT CAN BE TESTED AT ALL. This was three statements inside
+ * `teamSchedules`, and the only suite covering that feature —
+ * `team-schedules.mjs` — intercepts `**\/api\/**` at the browser context, so no
+ * server code runs in it whatever. `ts-9-dedupe-dropped` removes the de-dupe
+ * and ran GREEN for that reason: it changes a line nothing in the repository
+ * executes. A fact this important cannot rest on a suite that cannot reach it.
+ */
+export function teamScheduleColumns(userIds: string[]): string[] {
+  const unique = [...new Set(userIds.filter(Boolean))]
+  if (unique.length > MAX_TEAM_SCHEDULE_PEOPLE) {
+    throw new BadRequestException(
+      `A team schedule can show at most ${MAX_TEAM_SCHEDULE_PEOPLE} people at once`,
+    )
+  }
+  return unique
+}
+
 /** The values `users.week_start` already accepts, unchanged. */
 const WEEK_STARTS = ['sunday', 'monday', 'saturday']
 
@@ -187,20 +212,8 @@ export class PlannerService {
     userIds: string[],
     opts: { from?: string; to?: string } = {},
   ) {
-    /*
-     * De-duplicated BEFORE the cap, and the order the caller asked for is
-     * kept. Without the de-dupe, "Sara, Sara" draws two identical columns —
-     * which is the one failure mode a side-by-side grid cannot survive,
-     * because two columns of the same person look exactly like two people who
-     * happen to be busy at the same times.
-     */
-    const unique = [...new Set(userIds.filter(Boolean))]
+    const unique = teamScheduleColumns(userIds)
     if (unique.length === 0) return { people: [] }
-    if (unique.length > MAX_TEAM_SCHEDULE_PEOPLE) {
-      throw new BadRequestException(
-        `A team schedule can show at most ${MAX_TEAM_SCHEDULE_PEOPLE} people at once`,
-      )
-    }
 
     const columns = await Promise.all(
       unique.map(async (userId) => {

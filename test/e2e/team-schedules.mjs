@@ -447,17 +447,27 @@ try {
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ taking somebody out, and the feature this did not replace')
 
-  await page.locator(`[data-testid="planner-team-remove-${SARA.userId}"]`).click()
+  /*
+   * THE MIDDLE ONE, NOT THE FIRST. This removed Sara — the first person picked
+   * — and `ts-7-remove-drops-the-wrong-one` replaces the remove with
+   * `teamUserIds.slice(1)`, which drops the first. The two are the same answer
+   * whenever the first is the one being removed, so the patch ran GREEN against
+   * the sentence that says the others are left where they were; its own header
+   * had predicted exactly that ("looks correct whenever the first is the one
+   * being removed"). Taking Omar out of the middle tells them apart: dropping
+   * the first leaves [Omar, Noor] where removing Omar leaves [Sara, Noor].
+   */
+  await page.locator(`[data-testid="planner-team-remove-${OMAR.userId}"]`).click({ timeout: 8000 }).catch(() => {})
   const removed = await waitUntil(async () => {
     const left = await columns().evaluateAll((els) => els.map((el) => el.getAttribute('data-user-id')))
-    return JSON.stringify(left) === JSON.stringify([OMAR.userId, NOOR.userId])
+    return JSON.stringify(left) === JSON.stringify([SARA.userId, NOOR.userId])
   }, { timeoutMs: 15_000 })
   chk(
     removed,
     'removing one person takes their column away and leaves the others where they were',
     `the remaining columns were ` +
       `${JSON.stringify(await columns().evaluateAll((els) => els.map((el) => el.getAttribute('data-user-id'))))} — ` +
-      'removing the first person must not renumber the rest onto the wrong calendars',
+      'removing somebody from the MIDDLE must not renumber the rest onto the wrong calendars',
   )
 
   /*
