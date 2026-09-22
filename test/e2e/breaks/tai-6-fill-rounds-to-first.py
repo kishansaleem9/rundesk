@@ -2,6 +2,19 @@
 # limited, unresolvable -- quietly applies the FIRST task type instead, so a
 # guess and a decision look identical on the task. This is the reasoning that
 # kept Assign with AI out of the product.
+# IT RAN GREEN ON A RACE OF ITS OWN MAKING. The fallback it adds is
+# `void api(...)` inside `onError` — unawaited — so the write lands a moment
+# after the refusal reaches the screen, and the check read the task's type ONCE,
+# immediately, and saw the old value. The patch modelled the defect correctly
+# and the check could not see it for three hundred milliseconds' worth of
+# reason.
+#
+# `task-ai-bar` polls for three seconds now and breaks the moment the type
+# changes, so an unawaited write has somewhere to land and a type that never
+# changes still leaves the loop with the value the check wants.
+#
+# PREDICTED ONE.
+#
 # Reddens: task-ai-bar -- 'a refused classification changes the task type to NOTHING'
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

@@ -293,7 +293,21 @@ try {
       : 'pressing it requested nothing',
   )
 
-  const typeAfter = (await A(`/tasks/${task.id}`)).data?.taskTypeId ?? null
+  /*
+   * POLLED, BECAUSE THE FALLBACK THIS RULES OUT WOULD BE FIRE-AND-FORGET.
+   * `tai-6-fill-rounds-to-first` adds `void api(...)` inside `onError`, so the
+   * write lands a moment AFTER the refusal is shown — and a single read here saw
+   * the old value and returned green against the sentence that names exactly
+   * that mistake. Three seconds is long enough for an unawaited PATCH to land,
+   * and a type that never changes leaves the loop with `typeBefore`, which is
+   * what the check wants.
+   */
+  let typeAfter = typeBefore
+  for (let i = 0; i < 12; i += 1) {
+    typeAfter = (await A(`/tasks/${task.id}`)).data?.taskTypeId ?? null
+    if (typeAfter !== typeBefore) break
+    await new Promise((r) => setTimeout(r, 250))
+  }
   chk(
     typeAfter === typeBefore,
     'and a refused classification changes the task type to NOTHING — it does not fall back to the first type',
