@@ -134,6 +134,21 @@ all the warning that is needed once the shape is familiar.
   Three of the four were found by a break patch running GREEN and one by a
   patch reddening fewer checks than predicted. None was visible by reading the
   suite: every one of them looks like a perfectly ordinary assertion.
+
+  **AND AN ABSENCE IS A CLAIM ONLY IF THE FIXTURE CREATES THE THING.** The
+  corollary, and the fifth instance, which arrived one commit after the rule
+  above was written. `a39-dm-tabs` asserts that a CLOSED task is not under
+  "open tasks" and that a meeting only one person attended is not under
+  "meetings with them" — two textbook negative assertions — and `ensureShared`
+  created neither row. Both were greps for strings no build would ever render,
+  true on every build for ever. `a39-3`, which deletes the `statusCategory`
+  filter outright, ran green against them.
+
+  So the rule has two halves and the second is the one that bites: **name the
+  excluded thing, then check the fixture makes it.** A negative assertion over
+  an absent fixture is the strongest-looking check in a suite and the emptiest
+  — stronger-looking than the vacuous positives above it, because it reads as
+  the careful one.
 - **Reading an element outside the thing under test to prove the thing under
   test opened.** A panel's presence proved by an element that renders whether or
   not the panel opened.

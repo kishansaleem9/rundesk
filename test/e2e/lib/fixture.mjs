@@ -211,7 +211,14 @@ export async function ensureNotification(api, apiBase, workspaceId, myUserId, li
  *
  * Idempotent by title, so repeated runs do not pile up rows.
  */
-export async function ensureShared(api, workspaceId, listId, myUserId, peerUserId, { taskTitle, meetingTitle }) {
+export async function ensureShared(
+  api,
+  workspaceId,
+  listId,
+  myUserId,
+  peerUserId,
+  { taskTitle, meetingTitle, closedTaskTitle, soloMeetingTitle },
+) {
   const existing = (await api(`/tasks/list/${listId}`)).data ?? []
   const tasks = Array.isArray(existing) ? existing : (existing.tasks ?? [])
   let task = tasks.find((t) => t.title === taskTitle)
@@ -221,6 +228,34 @@ export async function ensureShared(api, workspaceId, listId, myUserId, peerUserI
     // a task only one of you is on is not shared.
     for (const userId of [myUserId, peerUserId]) {
       if (userId) await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } })
+    }
+  }
+
+  /*
+   * THE ROWS THE NEGATIVE CHECKS NEED, and their absence made two checks
+   * vacuous for as long as they existed.
+   *
+   * `a39-dm-tabs` asserts that a CLOSED task is not under "open tasks" and
+   * that a meeting only one person attended is not under "meetings with
+   * them" — and nothing created either row, so both assertions were about
+   * strings no build would ever render. `a39-3-finished-work-is-shared-work`
+   * deletes the `statusCategory` filter outright and ran GREEN.
+   *
+   * An absence is a claim only when the thing could have been present. So the
+   * closed task is assigned to BOTH and then closed, and the solo meeting has
+   * exactly one attendee — each one qualifying for its tab in every respect
+   * except the one under test.
+   */
+  if (closedTaskTitle && !tasks.some((t) => t.title === closedTaskTitle)) {
+    const closed = (await api('/tasks', {
+      method: 'POST',
+      body: { listId, title: closedTaskTitle },
+    })).data
+    if (closed?.id) {
+      for (const userId of [myUserId, peerUserId]) {
+        if (userId) await api(`/tasks/${closed.id}/assignees`, { method: 'POST', body: { userId } })
+      }
+      await api(`/tasks/${closed.id}`, { method: 'PATCH', body: { status: 'done' } })
     }
   }
 
@@ -239,6 +274,20 @@ export async function ensureShared(api, workspaceId, listId, myUserId, peerUserI
         attendeeIds: [myUserId, peerUserId].filter(Boolean),
       },
     })).data
+  }
+
+  /* The solo one: same workspace, same shape, one attendee. */
+  if (soloMeetingTitle && !list.some((m) => m.title === soloMeetingTitle)) {
+    await api(`/workspaces/${workspaceId}/meetings`, {
+      method: 'POST',
+      body: {
+        title: soloMeetingTitle,
+        startsAt: new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString(),
+        endsAt: new Date(Date.now() + 49 * 60 * 60 * 1000).toISOString(),
+        provider: 'manual',
+        attendeeIds: [myUserId].filter(Boolean),
+      },
+    })
   }
   return { task, meeting }
 }

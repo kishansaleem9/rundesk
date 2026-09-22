@@ -15,6 +15,10 @@
 # `.filter((id) => theirSet.has(id))` on the end of a `[...new Set(...)]` chain
 # reads as a de-duplication step, which is what the line before it is.
 #
+# THE SAME FIXTURE GAP AS a39-3. "A39 Solo planning" was never seeded either,
+# so this patch had nothing to leak. The fixture now creates a meeting in the
+# same workspace, of the same shape, with exactly one attendee.
+#
 # ONE CHECK, AND IT IS AN ABSENCE AGAIN: "the meeting only one attended is
 # absent". The shared meeting is still listed, so the check above it passes —
 # that pair is what makes this catchable, because a tab that shows the right

@@ -32,6 +32,13 @@ const REPO = path.resolve(import.meta.dirname, '../..')
 let DM_NAME = process.env.E2E_DM_NAME ?? 'Colleague'
 const SHARED_TASK = 'A39 open task for the pair'
 const SHARED_MEETING = 'A39 Sprint sync with colleague'
+/*
+ * The two rows the negative checks need. Named here rather than inline,
+ * because a check grepping for a literal the fixture does not create is an
+ * assertion about nothing — which is what these two were.
+ */
+const CLOSED_TASK = 'A39 finished task'
+const SOLO_MEETING = 'A39 Solo planning'
 let stack = null
 let B = (process.env.BASE ?? '').replace(/\/$/, '')
 if (!B) {
@@ -54,6 +61,17 @@ let WS = process.env.E2E_WS
     await ensureShared(api, WS, fixture.listId, auth.user?.id ?? auth.id, dm.peer.userId, {
       taskTitle: SHARED_TASK,
       meetingTitle: SHARED_MEETING,
+      /*
+       * THE TWO ROWS THE NEGATIVE CHECKS BELOW NEED. Neither was seeded, so
+       * "a closed task is not listed under 'open tasks'" and "the meeting only
+       * one attended is absent" were assertions about strings no build would
+       * ever render — and `a39-3-finished-work-is-shared-work`, which deletes
+       * the closed-task filter entirely, ran GREEN against them.
+       *
+       * The names are the ones those checks already grep for.
+       */
+      closedTaskTitle: CLOSED_TASK,
+      soloMeetingTitle: SOLO_MEETING,
     })
   }
   console.log(`\x1b[2m  workspace ${WS}${dm ? `, DM with ${DM_NAME}` : ''}\x1b[0m`)
@@ -110,7 +128,7 @@ try {
   chk(/Meetings with/i.test(body), 'Calendar names whose meetings these are', `no heading: ${body.slice(0, 120)}`)
   chk(body.includes(SHARED_MEETING), 'the meeting both attended is listed',
     'the shared meeting is not on screen')
-  chk(!/A39 Solo planning/.test(body), 'the meeting only one attended is absent',
+  chk(!body.includes(SOLO_MEETING), 'the meeting only one attended is absent',
     'a solo meeting leaked into the shared calendar')
   chk(await p.locator('textarea:visible').count() === 0, 'the composer is out of the way on Calendar',
     'the message composer is still showing under Calendar')
@@ -123,7 +141,7 @@ try {
   body = await p.locator('main, body').first().innerText()
   chk(/Open tasks with/i.test(body), 'Tasks names whose tasks these are', `no heading: ${body.slice(0, 120)}`)
   chk(body.includes(SHARED_TASK), 'the shared open task is listed', 'the shared task is missing')
-  chk(!/A39 finished task/.test(body), 'a closed task is not listed under "open tasks"',
+  chk(!body.includes(CLOSED_TASK), 'a closed task is not listed under "open tasks"',
     'a closed task showed under Open tasks')
 
   console.log('\n▶ back to Chat, and the reset on switching')

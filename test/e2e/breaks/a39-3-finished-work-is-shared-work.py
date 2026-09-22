@@ -16,6 +16,13 @@
 # looks like a variation on the last, which is the shape `undo-delete-4` and
 # `list-statuses-seeded-4` were both about.
 #
+# IT RAN GREEN, AND THE FIXTURE WAS THE REASON. `ensureShared` created the
+# shared task and the shared meeting and nothing else — so "A39 finished task"
+# was a string no build would ever render, and the check asserting its absence
+# was true on every build including this one. The fixture now creates a task
+# assigned to BOTH people and then closes it: qualifying for the tab in every
+# respect except the one under test.
+#
 # ONE CHECK. The shared task is still listed, the solo meeting is still absent,
 # the heading is still right, the stream is still hidden. Only "a closed task is
 # not listed under 'open tasks'" fails — and it is asserted as an ABSENCE,
