@@ -3,7 +3,13 @@
 # which is the dead control this audit keeps finding, in its smallest form.
 # Reddens ONLY: "the lane's own chevron still opens it".
 #
-# Reddens: list-customize: "and leaves the lane that has cards alone"
+# IT NAMED A CHECK THAT PASSES.
+# It named "and leaves the lane that has cards alone", which passes: a lane with
+# cards in it is untouched either way. What falls is the check beside it — the
+# lane’s own chevron, outvoted by the switch on every press, which is what an
+# OR between the two settings does to a person trying to open one lane.
+#
+# Reddens: list-customize: "and the lane\u2019s own chevron still opens it, rather than being outvoted by the switch"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

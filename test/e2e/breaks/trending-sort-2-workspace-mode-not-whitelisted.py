@@ -18,7 +18,13 @@
 # four-way `||` chain of string literals, and losing one of them is a
 # merge-conflict resolution, not a decision.
 #
-# Reddens: trending-sort: "a colleague's opens move the workspace list"
+# IT NAMED A CHECK THAT PASSES.
+# Its claim did not appear in the suite verbatim — the fragment fallback matched
+# it. What falls is the check that holds the two modes apart: with the workspace
+# mode not whitelisted it falls back to MINE, so "for you" and "the workspace"
+# answer the same list and the second surface silently becomes the first.
+#
+# Reddens: trending-sort: "and leave mine alone \u2014 \"for you\" is my opens, not everybody\u2019s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.controller.ts'
 a = "    if (sort === 'updated' || sort === 'created' || sort === 'trending' || sort === 'trending_me') {"

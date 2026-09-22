@@ -1,4 +1,10 @@
-# Reddens: login-workspace-binding: "the older membership comes first"
+# IT NAMED A CHECK THAT PASSES.
+# It named "the older membership comes first", which passes: the list really is
+# ordered by membership age. What falls is the check after it — a RENAME
+# reordering the list, which is the defect, because an UPDATE is not a
+# membership event and must not move anything.
+#
+# Reddens: login-workspace-binding: "renaming the older workspace does not move it behind the newer one"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/workspaces/workspaces.service.ts'
 s = io.open(p, encoding='utf-8').read()
