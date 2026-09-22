@@ -58,7 +58,11 @@ let passed = 0
 let failed = 0
 const chk = (cond, good, bad) => {
   if (cond) { passed += 1; console.log(`  \x1b[32mPASS\x1b[0m ${good}`) }
-  else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${bad ?? good}`) }
+  // The SENTENCE, then the reason. This printed `${bad ?? good}`, so a failing
+  // check named only its reason and never itself — and for a check inside a
+  // loop the reason is all a reader (or `check-break-reddened.mjs`) has to go
+  // on. Seventy suites shared the line.
+  else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
 
 /* `apiClient` never throws — it resolves `{status, data, error}`. Judged on
