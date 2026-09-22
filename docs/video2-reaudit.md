@@ -4308,6 +4308,83 @@ suite's set had never run the refusal sat on disk unread with sixteen patches
 behind it. Both that suite and `space-create-menu` read the list out of
 `create-types.ts` now, with a floor asserted on the parse.
 
+### Every green, and why the check could not see it
+
+Sixteen patches reddened nothing once the sweep started measuring, and no two
+had the same cause. The list is the most useful thing in this section, because
+each entry is a different way a check can be blind to the patch aimed at it.
+
+| patch | why it passed |
+| --- | --- |
+| `b2-cluster` | `display: contents` keeps the element, the testid and the DOM nesting; only the wrapper's own BOX goes, and nothing measured it |
+| `pcb-4-full-width-over-the-rail` | the check read the rail's `.x` as `railRight`, and `?? 0` made a missing rail a rail at x=0 — two ways to pass |
+| `sw-4-dialog-stays-open` | the wizard closes three ways; the explicit close is the least load-bearing |
+| `aoc-5-input-not-cleared` | `setInputFiles` dispatches a change event whatever the input held — Playwright goes around the native behaviour |
+| `pat-2-two-copies-of-the-numbers` | the patch wrote DEAD CODE: a second constant nothing read |
+| `po-3-one-provider` | `hidden` leaves the element in the DOM and `evaluateAll` counted it |
+| `ts-3-columns-from-roster` | the stub answered exactly the ids asked for, so payload and selection were the same list |
+| `ts-7-remove-drops-the-wrong-one` | the check removed the FIRST person, which `slice(1)` gets right |
+| `ts-9-dedupe-dropped` | the suite stubs `**/api/**` at the context — no server code runs in it at all |
+| `tai-6-fill-rounds-to-first` | the fallback is an unawaited `void api(...)`; the check read the type once, immediately |
+| `fd-7-toggle-latches` | the check was asked after a dialog that had left the toggle OFF |
+| `imports-9-priorityscale` | `mapPriority` answers "highest" twice over on its own |
+| `ca-3-hiding-is-not-honoured` | the checks read the badge and the stored row; the grid was read by nothing |
+| `ca-5-its-own-connection-state` | `false === false` — this deployment has no Zoom credentials |
+| `us-3-share-levels-lose-their-meaning` | `/only|explan|can |may /i` over the WHOLE dialog text |
+| `sl-3-call-card-not-broadcast` | two independent delivery paths, neither removable alone |
+
+Five of the sixteen were fixed in the PRODUCT or its fixtures rather than the
+check: the duplicated priority list, the duplicated grid sizes, the three ways
+the wizard closes, the stub that could not disagree with the selection, and the
+line no suite executes — which became `teamScheduleColumns` and a unit test.
+
+### One suite's litter was another suite's red baseline
+
+`ai-assign` refused its whole set on one failing check: "with a runner-up, whose
+reason is a different sentence about a different person". The two sentences
+really were identical, because `explainCandidate` names a person by
+`displayName || email` and the workspace held **sixteen members called "Cal
+Peer"**.
+
+`calendar-accounts` invites a colleague per run with a timestamped email and a
+CONSTANT display name, and never took them back. Sixteen in one lane database,
+three in another. Nothing connected the two suites: one left the litter, the
+other refused, and the only shared thing was a display name. It is
+`Cal Peer ${TAG}` now and the cleanup deletes the member and the user.
+
+**And the check was asserting something the product cannot guarantee.** People
+are allowed to share a display name, so identical sentences are a fixture fact.
+What a shared LABEL breaks is that the runner-up's reason is ABOUT the
+runner-up and carries THEIR numbers — the pair the check above it already
+asserts for the pick. Strictly stronger, and it still reddens
+`assign-6-one-reason-for-everybody`.
+
+This is `syncup-live` from the other direction: there, one suite DELETED another
+suite's fixture; here it left one behind.
+
+### Two checkers deliberately not built
+
+Both would have held a floor over a class with no members, which is noise in a
+report whose value is that every line in it is worth reading.
+
+**A ratchet on ambiguous claims.** `paywall-sites-2-server-board` cost real time
+because its claim was a PREFIX of a neighbouring check's sentence, so it matched
+a passing check. Measured across all 113 suites afterwards, every other
+apparent duplicate is a template sentence inside a loop, printing a different
+value per iteration, or the two branches of a balanced `if/else` where only one
+runs. Neither is ambiguous in a log. One real instance, fixed; the reasoning
+lives in `check-break-claims.mjs`'s header so nobody builds it twice.
+
+**A ratchet on unbounded interactions.** 682 bare `.click()` calls across 96
+suites, and most are on controls no patch touches. What was done instead is
+narrower and evidence-driven: bound the three shapes that a patch actually
+proved dangerous — `click`, `hover` and `boundingBox`, mechanically, because a
+missed one cannot change a verdict — and leave `getAttribute`, `innerText` and
+`textContent` to be fixed one site at a time. Catching those is NOT neutral: on
+a NEGATIVE assertion an empty string makes an absent element CONFIRM the
+absence, which is how `ai-action-categories`' "none of them prints a number a
+person could mistake for a count" would have passed on a missing tile.
+
 ### Four product defects the sweep turned up
 
 **The AI panel dropped the answer you just watched arrive.** The thread-history
