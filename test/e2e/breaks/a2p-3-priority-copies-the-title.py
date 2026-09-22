@@ -17,6 +17,18 @@
 # The toast still fires, the link still lands on the Planner, the counter still
 # reads 1. Everything a screenshot could show is right.
 #
+# IT REDDENED TWO AND STOPPED THE RUN AT 6 OF 10 ON ITS FIRST GO, AND THAT WAS
+# THE SUITE'S FAULT. The server poll for "is it there by id" waits fifteen
+# seconds before giving up; a toast lives about four. The suite's own comment
+# warned about exactly this and had only half-applied it — the toast's TEXT was
+# read before the poll and the toast's CLICK was left after it. So the click
+# landed on a toast that had expired, and three checks that have nothing to do
+# with this patch died with it.
+#
+# The click now happens first. The server poll does not need the page, and the
+# rail read below needs the navigation the click performs, so the reorder costs
+# nothing and this patch reddens the one check it is about.
+#
 # Reddens: assign-to-priorities: "the task is on your priorities, by id — not a copy of its title"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

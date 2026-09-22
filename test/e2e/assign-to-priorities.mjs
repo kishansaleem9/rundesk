@@ -227,6 +227,31 @@ try {
     `the toast read: ${toastText} — "added" with no way to look is a claim taken on trust`,
   )
 
+  /*
+   * THE TOAST IS PRESSED BEFORE THE SERVER IS POLLED, and the order is the
+   * check's own comment finally applied all the way.
+   *
+   * It already said "a toast lives about four seconds; asserting it after a
+   * fifteen-second poll of the server means a failure anywhere earlier reports
+   * as 'no toast' too" — and it moved the toast's TEXT above the poll and left
+   * the toast's CLICK below it. So any patch that makes the poll time out also
+   * kills the three checks after it: `a2p-3-priority-copies-the-title` was
+   * predicted to redden one check and reddened two, stopping the run at 6 of
+   * 10, because the fifteen seconds spent not finding the priority outlived
+   * the toast it then tried to press.
+   *
+   * Pressing it first costs nothing — the server poll does not need the page,
+   * and the rail read below needs the navigation this click performs.
+   */
+  console.log('\n▶ frame `16:05` — the link lands on the rail, with the task in it')
+
+  await toast.getByRole('button').first().click()
+  chk(
+    await waitUntil(() => /\/calendar$/.test(page.url()), { timeoutMs: 15_000 }),
+    'the link goes to the Planner',
+    `it ended up at ${page.url()}`,
+  )
+
   let stored = []
   chk(
     await waitUntil(async () => {
@@ -235,16 +260,6 @@ try {
     }, { timeoutMs: 15_000 }),
     'the task is on your priorities, by id — not a copy of its title',
     `the priorities list held: ${stored.map((p) => `${p.title}(${p.taskId ?? 'no task'})`).join(' | ') || '(empty)'}`,
-  )
-
-  // -------------------------------------------------------------------------
-  console.log('\n▶ frame `16:05` — the link lands on the rail, with the task in it')
-
-  await toast.getByRole('button').first().click()
-  chk(
-    await waitUntil(() => /\/calendar$/.test(page.url()), { timeoutMs: 15_000 }),
-    'the link goes to the Planner',
-    `it ended up at ${page.url()}`,
   )
   const railText = await readText(page.getByTestId('planner-priorities'))
   chk(

@@ -12,10 +12,13 @@
 # the one that decides whether the grid of switches is a feature or a picture
 # of one, and it can only do that by checking each read site separately.
 #
-# REDDENS TWO, AND THEY ARE A PAIR. "Priority is gone from the group-by" fails
-# because it is not, and "exactly one option went" fails because none did. The
-# filter panel and the Email button still honour their switches, so six checks
-# stay green and the failure names the control rather than the feature.
+# REDDENS THREE, WHICH IS ONE MORE THAN PREDICTED. "Priority is gone from the
+# group-by" fails because it is not; "exactly one option went" fails because
+# none did; and the partial-map space checks the group-by too, so its "the key
+# the map names is honoured" fails as well. All three are about this one
+# control. The Email button and the filter panel still honour their switches,
+# so the failure names the control rather than the feature — which is what the
+# prediction was for, even though the count was low by one.
 #
 # Reddens: space-features: "Priority is gone from the group-by"
 import io
