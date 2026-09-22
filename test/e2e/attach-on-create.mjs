@@ -59,7 +59,11 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 13
+// 14 since 22 September: the picker clearing its own input is the one line
+// `aoc-5-input-not-cleared` breaks, and the row-based check below it cannot see
+// that at all — `setInputFiles` dispatches a change event whatever the input
+// held, which is the browser behaviour the defect is about.
+const EXPECTED_CHECKS = 14
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -225,6 +229,32 @@ try {
     staged[0] === FILE_A && staged[1] === FILE_B,
     'and each row names ITS OWN file, in the order they were picked',
     `the rows read ${JSON.stringify(staged)} — a list that renders files[0] twice passes any count check`,
+  )
+  /*
+   * THE INPUT CLEARS ITSELF, AND THIS IS THE ONLY WAY TO SEE IT FROM HERE.
+   *
+   * `aoc-5-input-not-cleared` removes `e.target.value = ''` from the change
+   * handler, and the check further down — "re-picking a file that was removed
+   * brings its row back" — CANNOT see it: that check re-picks with
+   * `setInputFiles`, which sets the files programmatically and dispatches a
+   * change event whatever the input held before. The defect is a NATIVE file
+   * picker's behaviour, where choosing the same file again fires nothing, and
+   * Playwright goes around it. So the patch ran green against the sentence that
+   * describes exactly what it breaks.
+   *
+   * The input's own value IS observable, and it is the single line the guarantee
+   * rests on. Asserting it is the same move `scr-3-nginx-caches-the-shell` makes
+   * against a vhost: check the thing the browser cannot show you, where it
+   * lives.
+   */
+  chk(
+    (await page
+      .locator('[data-testid="quick-create-attach"]')
+      .evaluate((el) => el.value === '')
+      .catch(() => false)),
+    'and the picker clears its own input, so choosing a removed file again fires a fresh change',
+    'the input still holds the file it was given — a native picker fires no change event for the ' +
+      'same file twice, so removing a row and choosing that file again would do nothing at all',
   )
   chk(
     (await page.getByTestId('quick-create-attachments').count()) === 1 &&
