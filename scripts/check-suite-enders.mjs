@@ -34,6 +34,19 @@ import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 /*
+ * COUNTING THE CASES A MUTATION NAMED, AND COUNTING THEM PROPERLY.
+ *
+ * This matched the substring `FAIL` anywhere in a line, which also matches the
+ * word FAILURE inside a PASSING case's own sentence — "a root that is not there
+ * is a FAILURE, not a silent skip" was counted as a failing case every time it
+ * passed. The number the mutation pass prints is the only evidence that a
+ * mutation was attributed to anything, so it has to count the marker `chk`
+ * prints rather than a word that appears in prose.
+ */
+const NAMED_FAIL = /\x1b\[31mFAIL\x1b\[0m/
+const namedFailures = (stdout) => (stdout ?? '').split('\n').filter((l) => NAMED_FAIL.test(l)).length
+
+/*
  * THE FILE UNDER TEST IS NEVER WRITTEN. `ENDERS_CHECKER` points this at a COPY.
  *
  * The mutation pass used to write a deliberately-broken version of the real
@@ -784,9 +797,16 @@ if (process.argv.includes('--mutate')) {
         encoding: 'utf8',
         env: { ...process.env, ENDERS_CHECKER: mutant },
       })
-      const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
+      const named = namedFailures(r.stdout)
       if (r.status === 0) {
         console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
+        blind += 1
+      } else if (named === 0) {
+        // Non-zero with nothing named is not a redden: this file stopped
+        // before it could report, so the exit code is about the harness
+        // rather than about the rule. Crediting it would be the same mistake
+        // as crediting a mutant that never ran.
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — it exited non-zero but named no case`)
         blind += 1
       } else {
         console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)

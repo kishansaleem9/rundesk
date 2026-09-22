@@ -32,6 +32,20 @@ import { tmpdir } from 'node:os'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 
+/*
+ * COUNTING THE CASES A MUTATION NAMED, AND COUNTING THEM PROPERLY.
+ *
+ * This matched the substring `FAIL` anywhere in a line, which also matches the
+ * word FAILURE inside a PASSING case's own sentence — "a root that is not there
+ * is a FAILURE, not a silent skip" was counted as a failing case every time it
+ * passed. The number the mutation pass prints is the only evidence that a
+ * mutation was attributed to anything, so it has to count the marker `chk`
+ * prints rather than a word that appears in prose.
+ */
+const NAMED_FAIL = /\x1b\[31mFAIL\x1b\[0m/
+const namedFailures = (stdout) => (stdout ?? '').split('\n').filter((l) => NAMED_FAIL.test(l)).length
+
+
 const HERE = dirname(fileURLToPath(import.meta.url))
 /*
  * THE FILE UNDER TEST IS NEVER WRITTEN. `GUARD_UNDER_TEST` points this at a COPY.
@@ -341,18 +355,44 @@ if (process.argv.includes('--mutate')) {
       blind += 1
       continue
     }
-    const mutant = join(mkdtempSync(join(tmpdir(), 'mutant-')), 'check-no-break-patches.mjs')
-    writeFileSync(mutant, ORIGINAL.split(from).join(to))
-    const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-      encoding: 'utf8',
-      env: { ...process.env, GUARD_UNDER_TEST: mutant },
-    })
-    const named = (r.stdout ?? '').split('\n').filter((l) => l.includes('FAIL')).length
-    if (r.status === 0) {
-      console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
-      blind += 1
-    } else {
-      console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
+    /*
+     * BESIDE THE ORIGINAL, NEVER IN A TEMP DIRECTORY, and this file is the
+     * third place that rule had to be learnt.
+     *
+     * The mutant used to be written under `tmpdir()`. One case here runs the
+     * guard from a foreign working directory with `BREAK_SCAN_ROOT` unset, on
+     * purpose — it is the case that catches a return to relative roots. A
+     * mutant living in `/tmp` resolves its three roots relative to ITSELF,
+     * finds none of them, and fails that case no matter what the mutation was.
+     *
+     * Measured, not reasoned: a NO-OP mutation — one word changed inside a
+     * comment — was run through this loop and "reddened" a case. Every one of
+     * the seven had been passing for that reason as much as for its own, and
+     * the pass reported 7 of 7 bite. A harness whose cases fail because of
+     * where it put the file is measuring its own plumbing.
+     */
+    const mutant = join(HERE, `.guard-mutant-${label.replace(/\W+/g, '-')}.mjs`)
+    try {
+      writeFileSync(mutant, ORIGINAL.split(from).join(to))
+      const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
+        encoding: 'utf8',
+        env: { ...process.env, GUARD_UNDER_TEST: mutant },
+      })
+      const named = namedFailures(r.stdout)
+      if (r.status === 0) {
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — every case still passes`)
+        blind += 1
+      } else if (named === 0) {
+        // Non-zero with nothing named is not a redden: it means this file
+        // stopped before it could report, so the exit code is about the
+        // harness rather than about the guard.
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — it exited non-zero but named no case`)
+        blind += 1
+      } else {
+        console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)
+      }
+    } finally {
+      rmSync(mutant, { force: true })
     }
   }
   console.log(
