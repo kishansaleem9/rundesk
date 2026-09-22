@@ -30,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 8
 
 const API = `http://127.0.0.1:${Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))}/api/v1`
 const ME = {
@@ -196,6 +196,7 @@ try {
     `watch returned ${watch.status}: ${JSON.stringify(watch.error)}`)
 
   const theirBefore = ((await B('/notifications')).data ?? []).length
+  const myBefore = ((await A('/notifications')).data ?? []).length
   await A(`/tasks/${watchedId}/assignees`, { method: 'POST', body: { userId: myId } })
   const theirRows = await expectRow(
     () => B('/notifications'),
@@ -215,6 +216,34 @@ try {
     aboutIt.some((n) => typeof n.body === 'string' && /assigned to/i.test(n.body)),
     'and the notification says who, not just that something changed',
     `bodies: ${JSON.stringify(aboutIt.map((n) => n.body))}`,
+  )
+  /*
+   * AND THE ACTOR IS NOT TOLD WHAT THE ACTOR JUST DID.
+   *
+   * The line above assigns the task to MYSELF, so every ingredient of this was
+   * already here — the rule is stated in this file's own header ("a
+   * notification telling you what you just did is noise you cannot react to")
+   * and checked for COMMENTS two sections up, and never for assignment.
+   *
+   * `v1a-2-announce-notifies-the-actor` is what found the hole. It deletes the
+   * `assigneeId !== actorId` guard in `tasks.service.ts` and claims this suite,
+   * and it came back 7 passed, 0 FAILED — green, on a patch that does exactly
+   * what the header forbids, because nothing here looked at MY inbox. It also
+   * quotes the comment-reaction sentence, which is a template literal
+   * (`added ${n} notification(s)`) that no log line can match, so the claim
+   * could not even be located in a run.
+   *
+   * Read by entity rather than by count: the suite's own earlier sections add
+   * rows to this inbox, so "no new notifications at all" would be false for
+   * reasons that have nothing to do with assignment.
+   */
+  const mineAfter = (await A('/notifications')).data ?? []
+  const aboutMyOwn = mineAfter.filter((n) => n.target?.entityId === watchedId)
+  chk(
+    aboutMyOwn.length === 0,
+    'and assigning it to myself tells ME nothing — the actor is not news to the actor',
+    `my inbox went ${myBefore} → ${mineAfter.length} and ${aboutMyOwn.length} row(s) name the task ` +
+      `I assigned to myself: ${JSON.stringify(aboutMyOwn.map((n) => n.body))}`,
   )
 } catch (e) {
   failed += 1

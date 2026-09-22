@@ -96,13 +96,40 @@ for (const line of run('scripts/check-break-reddened.mjs', [], { NAMES: '1' }).s
  *     `check-unit-claims.mjs` measures all four every preflight.
  *   · `noClaim` needs a claim written before a run could mean anything.
  *
- * `unproven` is the awkward one and it belongs with the first group: the run
- * reported failures and could not say whether the claimed check was among them,
- * so nothing is known about THIS patch and a re-run against a tree where the
- * suite names its failures is exactly the fix.
+ * `unproven` WAS PUT IN THE FIRST GROUP AND THAT WAS WRONG. The reasoning ran:
+ * the run reported failures and could not say whether the claimed check was
+ * among them, so nothing is known about this patch and a re-run settles it. It
+ * does not. The log is a complete run of THIS tree, so the re-run produces the
+ * identical ambiguity — what settles it is the suite naming its failures, or
+ * the claim being re-aimed. Both are work for a person. See the block below.
  */
-const NEEDS_RUN = ['drifted', 'unknown', 'unproven']
+const NEEDS_RUN = ['drifted', 'unknown']
 const needsRun = new Set(NEEDS_RUN.flatMap((b) => [...(buckets[b] ?? [])]))
+
+/*
+ * AND THE BUCKETS A RUN CANNOT SETTLE, WHICH THIS USED TO DEMAND THE PLAN LIST.
+ *
+ * `unreadable` is a log that IS about this tree and cannot be read — a short
+ * run, or one whose length does not match the suite. `unproven` is a run that
+ * reported failures where the claimed sentence is also among the passes. Both
+ * are complete, current measurements: re-running reproduces them exactly, so
+ * the plan is RIGHT not to list them and this was wrong to fail on it.
+ *
+ * `csn-1-the-chat-page-owns-the-call-again`, `save-comment-1-save-writes-
+ * nothing` and `us-1-grouped-column-still-shown` are what showed it — three
+ * patches this demanded be scheduled for work no run can finish. The same
+ * conflation the plan itself had for `unit:` claims, one level up, and I had
+ * already papered over one instance of it by fixing `planner-priorities-2`'s
+ * suite, which moved it into `drifted` and made the symptom go away.
+ *
+ * They are still open work, so they are still GATED — by a ratchet that can
+ * only fall, which is how the rest of this audit holds a number it intends to
+ * drive to zero rather than one it can meet by looking away.
+ */
+const PERSON_NOT_RUN = ['unreadable', 'unproven']
+const needsPerson = [...new Set(PERSON_NOT_RUN.flatMap((b) => [...(buckets[b] ?? [])]))].sort()
+// Measured 22 September: two short runs and one unproven. A CEILING.
+const MAX_NEEDS_PERSON = 3
 
 const bucketed = new Set(Object.values(buckets).flatMap((s) => [...s]))
 let bad = 0
@@ -182,6 +209,23 @@ if (bothWays.length) {
   console.error(
     '\n  Both buckets mean "needs a run", so the set comparison above cannot see this — and one of\n' +
       '  the two statements is false. A patch with no measurement has no tree to have drifted from.',
+  )
+  bad += 1
+}
+
+if (needsPerson.length > MAX_NEEDS_PERSON) {
+  console.error(
+    `\n[plan-population] ${needsPerson.length} patch(es) need a PERSON rather than a run, above ` +
+      `the ceiling of ${MAX_NEEDS_PERSON}:`,
+  )
+  for (const p of needsPerson) {
+    const where = Object.entries(buckets).find(([, s]) => s.has(p))?.[0] ?? '(unbucketed)'
+    console.error(`  ${p} — \`${where}\``)
+  }
+  console.error(
+    '\n  A short run and an unproven claim are COMPLETE measurements of this tree, so no round\n' +
+      '  will clear them. Fix the suite that ends the run early, or re-aim the claim — and lower\n' +
+      '  the ceiling as they go. Raising it is how a number stops meaning anything.',
   )
   bad += 1
 }

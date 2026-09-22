@@ -458,7 +458,22 @@ if (process.env.NAMES) {
   const buckets = {
     reddened: reddenedNames,
     drifted: drifted.map((d) => d.split(' — ')[0]),
-    unknown: unknown.map((d) => d.split(' — ')[0]),
+    /*
+     * `unknown` SPLITS IN TWO, AND THE DIFFERENCE DECIDES WHOSE JOB IT IS.
+     *
+     *   · NO RECORD AT ALL — nothing has ever measured this patch. A RUN
+     *     settles it, and `never-run-plan.mjs` lists it.
+     *   · A CURRENT LOG THIS CANNOT READ — a short run, or one whose length
+     *     does not match the suite. The measurement exists and is about THIS
+     *     tree, so re-running reproduces it exactly. A PERSON settles it, by
+     *     fixing whatever ends the run early.
+     *
+     * `check-plan-population.mjs` compared the plan against both and failed on
+     * the second, demanding the plan schedule work a run cannot finish. That is
+     * the same conflation the plan itself had for `unit:` claims, one level up.
+     */
+    unknown: unknown.filter((d) => / — no run log here$/.test(d)).map((d) => d.split(' — ')[0]),
+    unreadable: unknown.filter((d) => !/ — no run log here$/.test(d)).map((d) => d.split(' — ')[0]),
     green: green.map((d) => d.split(' — ')[0]),
     unproven: unproven.map((d) => d.split(' — ')[0]),
     noClaim,

@@ -5714,3 +5714,66 @@ arrived. Bounded polling now stands in front of both reads, and the reads stay
 AFTER it — so a product that genuinely never updates the label still fails the
 check with what it actually read, which is what the `tmfa-*` patches need from
 it. Four patches were going unmeasured behind that flake.
+
+### A green whose claim could never match, over a rule nothing checked
+
+`v1a-2-announce-notifies-the-actor` came back **7 passed, 0 failed** in its own
+suite, on a current log. It deletes the `assigneeId !== actorId` guard in
+`tasks.service.ts` — so assigning yourself a task notifies you about your own
+action — and `notification-gaps`, the suite it names, had nothing to say.
+
+Two faults, stacked.
+
+**The claim could not be located in any run.** It quoted *"reacting to my own
+comment added N notification(s) for me"*, and the suite writes that as a
+TEMPLATE LITERAL — `added ${selfAfter - selfBefore} notification(s)`. No run can
+print that sentence, so no log can be searched for it. `check-break-claims.mjs`
+passed it, correctly: the words ARE in the suite. Being present in the source
+and being findable in a run are different questions, and only the first was
+being asked.
+
+**And the check it named was about the wrong thing.** That sentence is about
+COMMENT reactions; this patch changes ASSIGNMENT. Even a matchable claim would
+have named a check the patch cannot move.
+
+**Underneath both: the rule was stated and never checked.** This file's header
+says *"a notification telling you what you just did is noise you cannot react
+to"*. The suite checks it for comments — with a comment on its own header
+recording that break-testing found THAT hole too — and the assignment section
+assigns the task to MYSELF at line 199 while looking only at the TEAMMATE's
+inbox. Every ingredient was already on the page.
+
+The check exists now: my own inbox, read by ENTITY rather than by count —
+earlier sections of this suite add rows to it, so "nothing new arrived" would be
+false for reasons that have nothing to do with assignment. `EXPECTED_CHECKS`
+7 → 8, and the patch's claim names it.
+
+Verified against the product before committing, because a red baseline refuses
+the whole set: `notifyWatchersOfAssigneeChange` excludes **both the assignee and
+the actor**, and here they are the same person, so the unpatched tree sends
+nothing and the check passes. Under the patch the guard becomes `if (true)` and
+a `task_assigned` row naming the task arrives in my own inbox.
+
+### And the population checker was demanding work no run can do
+
+Three patches — `csn-1-the-chat-page-owns-the-call-again`,
+`save-comment-1-save-writes-nothing` and `us-1-grouped-column-still-shown` —
+failed `check-plan-population.mjs` as "the checker says these need a run and the
+PLAN does not list them". The plan was right and the checker was wrong.
+
+Two are SHORT runs and one is UNPROVEN, and all three are **complete, current
+measurements of this tree**. Re-running reproduces them exactly. What settles a
+short run is fixing whatever ends it early; what settles an unproven claim is
+the suite naming its failures, or the claim being re-aimed. Both are work for a
+person, and neither is the plan's job.
+
+It is the same conflation the plan itself had for `unit:` claims, one level up —
+and I had already papered over one instance without noticing, by fixing
+`planner-priorities-2`'s suite, which moved it into `drifted` and made the
+symptom disappear.
+
+`unknown` now splits by REASON: no record at all (a run settles it, the plan
+lists it) versus a current log this cannot read (a person settles it). The
+second joins `unproven` under a **ceiling of 3** that can only fall — gated, so
+they cannot accumulate in silence, but not demanded of a chain that cannot
+deliver them.
