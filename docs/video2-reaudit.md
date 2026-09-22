@@ -3610,11 +3610,11 @@ why, so the raise cannot be used as cover later.
 | `addressability-live` | 4 | 2·1·3·2 | three unbalanced branches; a facade check reading the whole document |
 | `panel-collapse` | 4 | 6·1·1·2 | six unbalanced branches; four unbounded clicks; a section leaking a persisted preference |
 | `syncup-live` | 5 | 1·1·1·1·1 | the only suite keeping a floor; ten unbalanced branches; a third delivery fact nobody asserted; a record read from another suite's row, and deleted |
-| `settings-depth` | 4 | 1·1·1·1 | the workspace-package resolution bug |
+| `settings-depth` | 4 | 2·1·1·1 | the workspace-package resolution bug |
 | `chat-message-actions` | 4 | 6·3·1·1 | a check that named "local" and read only the format, in a UTC container; an unbounded click |
-| `task-depth` | 4 | — | four unbalanced branches; an unguarded dereference |
-| `video1-fast-items` | 4 | — | — |
-| `ui-sweep` | 4 | — | a literal `check(true, …)` |
+| `task-depth` | 4 | 6·2·1·3 | four unbalanced branches; an unguarded dereference |
+| `video1-fast-items` | 4 | not measured until 22 September | fifteen unbalanced branches — and four patches with no surviving run log at all, which is what the freshness check was written to find |
+| `ui-sweep` | 4 | 1·1·1·2 | a literal `check(true, …)`; a level-hint check scanning the whole dialog |
 
 ### The four patches that ran GREEN
 
@@ -4017,19 +4017,31 @@ Every set that has run since the denominator was corrected, with its baseline:
 | `stale-chunk-recovery` | 27 · 0 | 1 · 3 · 1 · 1 · 1 |
 | `addressability-live` | 28 · 0 | 2 · 1 · 3 · 2 |
 | `panel-collapse` | 56 · 0 | 6 · 1 · 1 · 2 |
-| `syncup-live` | 54 · 0 · 5 skipped | 1 · 1 · — · 1 |
+| `syncup-live` | 54 · 0 · 5 skipped | 1 · 1 · 1 · 1 · 1 |
 | `settings-depth` | 61 · 0 | 2 · 1 · 1 · 1 |
 | `chat-message-actions` | 73 · 0 | 6 · 3 · 1 · 1 |
 | `task-depth` | 91 · 0 | 6 · 2 · 1 · 3 |
 | `video1-fast-items` | 92 · 0 | — |
 | `video-regression` | 93 · 0 | 3 · 2 · 1 · 9 |
-| `ui-sweep` | 107 · 0 | 1 · 1 · — · 2 |
+| `ui-sweep` | 107 · 0 | 1 · 1 · 1 · 2 |
 | `person-panel` | 59 · 0 | 2 · 2 · 1 · 1 |
-| `command-palette` | 43 · 0 | 2 · 7 · 2 · 1 |
+| `command-palette` | 43 · 0 | 1 · 7 · 2 · 1 |
 
 Where a cell reads `—` the patch ran green and is dealt with above. Where a
 baseline is not `N · 0` the set was refused, which is the harness declining to
-measure anything against a suite that was already red.
+measure anything against a suite that was already red. **A row with `—` for
+the whole set means it was never measured, which is a different thing and now
+says so** — `video1-fast-items` sat like that, four patches with no surviving
+run log, which is exactly the state `check-break-freshness.mjs` was written to
+find and the state `check-break-coverage.mjs` counts as covered.
+
+And one row here was wrong in the other direction. The reddened column above
+read `1·1·1·1` for `settings-depth`, taken from the run where
+`sd-1-contrast-marks-but-does-not-paint` was still reporting a bogus green
+through the worktree resolution bug; its re-run after that fix reddens **two**.
+The number in the table was a sentence about a harness defect that had already
+been fixed, added to three that were fine — which is the shape of the
+`sidebar-dms` 10 of 10 that started this whole section.
 
 ---
 

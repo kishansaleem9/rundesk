@@ -30,6 +30,12 @@
 # because the words are all there; that is what makes this the one check in the
 # section that can see the difference.
 #
+# MEASURED AGAINST THE REWRITE: `106 passed, 1 failed` — the one it predicted,
+# and the first time this patch has been evidence of anything. The rewrite also
+# failed its own baseline first, because the level is called "View only" and the
+# check looked for `View` followed by a dash; `wt-break.sh` refused the whole
+# set on the red baseline rather than reporting four misread results.
+#
 # Reddens: ui-sweep: "each level carries a one-line meaning"
 import io
 p = '/home/user/rundesk/apps/web/src/components/share-panel.tsx'
