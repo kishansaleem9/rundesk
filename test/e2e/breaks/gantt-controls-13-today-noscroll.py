@@ -4,7 +4,13 @@
 # promised to show you is off to the right where it always was. This is the
 # patch the coordinator asked for: state without scroll.
 #
-# Reddens: gantt-controls: "and it reached today by growing the range"
+# THE CLAIM WAS AIMED AT THE WRONG CHECK.
+# It named "and it reached today by growing the range", which passes: the range
+# really does grow. What falls is the SECOND press, after the chart has been
+# scrolled away — which is the whole point of a Today button and the half a
+# range-growing check cannot see.
+#
+# Reddens: gantt-controls: "and a second press scrolls back to today after the chart was scrolled away"
 import io, os
 p = os.environ.get('GANTT_SRC', '/home/user/rundesk/apps/web/src/pages/workspace-timeline-page.tsx')
 s = io.open(p, encoding='utf-8').read()

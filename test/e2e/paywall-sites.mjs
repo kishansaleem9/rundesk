@@ -175,7 +175,12 @@ try {
   chk(boardOk.status === 200, 'the entitled workspace downloads the board',
     `the board export returned ${boardOk.status} for a plan that includes it`)
   const boardLocked = await raw(`/tasks/list/${LOCKED.listId}/export?view=board`)
-  chk(boardLocked.status === 403, 'the blocked workspace is refused',
+  // NOT "the blocked workspace is refused" — that is the TEAM export's sentence
+  // sixteen lines up, and this one was a prefix of it. Two checks whose
+  // sentences overlap cannot be told apart in a log, and a patch cannot name
+  // one of them: `paywall-sites-2-server-board` reddens this and its claim
+  // matched the passing one.
+  chk(boardLocked.status === 403, 'the blocked workspace is refused the board too',
     `the board export returned ${boardLocked.status} for a Free plan`)
 
   /*

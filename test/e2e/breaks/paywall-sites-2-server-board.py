@@ -1,5 +1,12 @@
 # The server stops refusing the board-shaped export.
-# Reddens: "the blocked workspace is refused" (board download).
+# THE CLAIM WAS AIMED AT THE WRONG CHECK.
+# Its claim, "the blocked workspace is refused", was a PREFIX of the TEAM
+# export’s sentence sixteen lines above the board one — so it matched a passing
+# check and this patch read as unproven. Two checks whose sentences overlap
+# cannot be told apart in a log and neither can be named by a patch; the board
+# one says "refused the board too" now.
+#
+# Reddens: paywall-sites: "the blocked workspace is refused the board too"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.controller.ts'
 s = io.open(p, encoding='utf-8').read()

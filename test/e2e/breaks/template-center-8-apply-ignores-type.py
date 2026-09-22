@@ -1,19 +1,14 @@
 # `targetType` reduced to a badge: the card prints it, the facet counts it, the
 # filter narrows on it, and apply makes a folder regardless. The mirror of a
 # facade — a column with no reader at the end of it.
-# Reddens: template-center: "and a List template refuses to apply with nowhere to put the list"
+# THE CLAIM WAS AIMED AT THE WRONG CHECK.
+# It named "and a List template refuses to apply with no target", which passes —
+# the refusal is still there. What falls is the case above it: a SPACE template
+# is told it needs a target space, so the type is being ignored in the
+# direction that breaks the thing that should work rather than the thing that
+# should refuse.
 #
-# WRITTEN THE LONG WAY ON PURPOSE. The obvious form,
-#
-#     const targetType: TemplateTargetType = 'folder'
-#
-# does not compile: TypeScript narrows a const initialised with a literal to
-# that literal even when the annotation is the union, so the five `=== 'list'`
-# and `=== 'space'` comparisons below it all become TS2367 "no overlap" and the
-# patch reports BUILD FAILED instead of reddening anything. That is the same
-# narrowing trap `{false && …}` sets, and it has now cost two break patches.
-# Indexing an array typed as the union produces the union, so the value is
-# still always 'folder' and every comparison downstream still typechecks.
+# Reddens: template-center: "applying a Space template makes a space, with no target space asked for"
 import io
 p='/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 s=io.open(p,encoding='utf-8').read()
