@@ -247,7 +247,21 @@ try {
 
   const chosen = '#1f9d55'
   await page.getByTestId('cover-custom-input').fill(chosen, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('cover-custom-apply').click()
+  /*
+   * BOUNDED AND CAUGHT — RULE ONE'S SHAPE, DISPLACED BY ONE ELEMENT. The check
+   * above is allowed to find the colour chooser absent, and when it is absent
+   * this Apply button cannot exist either: `task-cover-1-nocustom` hides the
+   * Custom cell, nothing opened, and this press waited out the default thirty
+   * seconds and ended the run at 18 of 32 — under a row crediting the patch
+   * with exactly the one check it claims. The two steps in front of it were
+   * already bounded for the same patch; this one was missed because the rule
+   * pairs a press with the testid of the check directly above it, and these
+   * are `cover-custom-input` and `cover-custom-apply` — one dialog, two names.
+   *
+   * Catching it changes no verdict: the check below reads the colour back off
+   * the task, so a press that never landed fails it.
+   */
+  await page.getByTestId('cover-custom-apply').click({ timeout: 8000 }).catch(() => {})
   const landed = await waitUntil(async () => ((await T()).data?.coverColor ?? '') === chosen, {
     timeoutMs: 8000,
   })

@@ -4961,3 +4961,71 @@ The cover picker is where the testid question paid for itself twice: nine of its
 eighteen testids were named by no suite this morning, and the two holes that
 hunt pointed at were a tab that could never list a file and a tab nobody had
 pressed.
+
+### A seventh verb, and a press one name away from rule one
+
+Two more section enders, both found by the sweep rather than by a rule, and
+they are worth writing down together because they failed the SAME rule in two
+different ways.
+
+`space-create-menu.mjs:485` read `isDisabled()` on the quick-create submit
+button with nothing bounding it. `form-1-not-offered` and
+`space-create-menu-3-defaulttab` both take the Form tab away, so there is no
+submit button to read: the call waited out Playwright's default thirty seconds,
+threw, and both patches reported **12 of 29** while being credited with the one
+check each claims. `isDisabled` is a seventh verb in the class — on a locator
+that matches nothing it throws rather than answering `false` — and the guard
+seventeen lines further down already knew that, having been written for
+`form-5-space-lists-endpoint`.
+
+The fix keeps the count SEPARATELY and asserts it: `submitCount === 1 &&
+disabledWhenEmpty`. "Absent" and "enabled" both fail this check and they are
+not the same defect — a button that is not there is not a button that refuses
+in silence, it is no button at all — so the message now prints both and the
+check is strictly stronger than the one it replaces.
+
+`task-cover.mjs:250` is rule one's shape displaced by exactly one element:
+
+```
+chk(await appears(page.getByTestId('cover-custom-input'), 6000), 'and opening it reveals a colour chooser', …)
+…
+await page.getByTestId('cover-custom-apply').click()      ← the press
+```
+
+The check above is ALLOWED to find the chooser absent — that is what
+`task-cover-1-nocustom` makes happen, by hiding the Custom cell — and when it
+is absent the Apply button cannot exist either. The two steps in front of this
+press were already bounded for that same patch. This one was missed because
+rule one pairs a press with the testid of the check directly above it, and
+these are `cover-custom-input` and `cover-custom-apply`: one dialog, two names.
+18 of 32 reported.
+
+**And no rule was added for either.** That is the finding, not a concession.
+The scan for a bare single-line press with neither a timeout nor a catch
+returns **275 sites**, and the overwhelming majority are presses on controls a
+working product always draws, where a throw is the correct "this page is
+broken" signal for the baseline. Rule one's 19-of-19 hit rate was for the
+PAIRED shape, never for bare presses generally; a rule on the shape alone
+would report two hundred and fifty working call sites as defects, which is by
+the header's own words "a checker nobody would keep." The narrow scan for a
+state or value read on a testid locator returns 37. Measurement decides which
+of those matter, and the 636-patch sweep IS the measurement — one site fixed
+per SHORT it names, with the patch that named it in the comment.
+
+### The `ai-assign` refusal was a suite the tree had already fixed
+
+The refusal on disk reads `22 passed, 1 failed` at `2bf30a74`, on the runner-up
+check, and the payload it printed satisfies every clause of the assertion it
+names — replayed against the live code, all five conditions return `true`. So
+the check that failed was not the check in the tree: the suite was rewritten
+at `6c029e5` ("One suite's litter was another suite's red baseline") for
+exactly this, replacing a comparison of the two reason STRINGS with one that
+requires the runner-up's reason to name the runner-up and carry their own
+count. Two members of the shared workspace had both accumulated the display
+name "Cal Peer", and `explainCandidate` names a person by `displayName ||
+email`, so the two sentences were identical and the old check failed on a
+fixture fact rather than a product one.
+
+Nothing needed fixing; the refusal needed re-measuring. It is in the plan the
+round regenerated, so the seven `assign-*` patches stay UNKNOWN — not absent,
+not green — until it runs.

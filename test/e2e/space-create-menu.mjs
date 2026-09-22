@@ -482,13 +482,31 @@ try {
   await page.getByTestId('quick-create-form-space').selectOption(SPACE, { timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(900)
   const noListNote = await page.getByTestId('quick-create-form-no-lists').count()
-  const disabledWhenEmpty = await page.getByTestId('quick-create-form-submit').isDisabled()
+  const submitCount = await page.getByTestId('quick-create-form-submit').count()
+  /*
+   * BOUNDED AND CAUGHT, AND THE COUNT KEPT SEPARATELY. `form-1-not-offered` and
+   * `space-create-menu-3-defaulttab` both take the Form tab away, so there is no
+   * submit button for this to read: it waited out the default timeout, threw,
+   * and both patches ended at 12 of 29 with every check below unreported.
+   * `isDisabled` is a seventh verb in the class the section-ender rule gates —
+   * on a locator that matches nothing it throws rather than answering false,
+   * and the guard two blocks down already knew that for `form-5`.
+   *
+   * The count is asserted rather than folded into the boolean because "absent"
+   * and "enabled" are different defects and this check's claim needs both: a
+   * button that is not there is not a button that refuses in silence, it is no
+   * button at all.
+   */
+  const disabledWhenEmpty = await page
+    .getByTestId('quick-create-form-submit')
+    .isDisabled({ timeout: 8000 })
+    .catch(() => false)
   chk(
-    before.length === 0 && noListNote === 1 && disabledWhenEmpty,
+    before.length === 0 && noListNote === 1 && submitCount === 1 && disabledWhenEmpty,
     'a Space with no Lists says so instead of leaving a disabled button unexplained',
-    `the space held ${before.length} list(s), the note was drawn ${noListNote} time(s) and the button ` +
-      `was ${disabledWhenEmpty ? '' : 'NOT '}disabled — a form filed nowhere makes nothing, so refusing ` +
-      'is right and refusing in silence is not',
+    `the space held ${before.length} list(s), the note was drawn ${noListNote} time(s), the submit ` +
+      `button was drawn ${submitCount} time(s) and read ${disabledWhenEmpty ? '' : 'NOT '}disabled — a ` +
+      'form filed nowhere makes nothing, so refusing is right and refusing in silence is not',
   )
   await dismissAll()
 
