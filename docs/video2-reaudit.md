@@ -4638,3 +4638,37 @@ benign call sites. It does not need one: every instance shortens the run, and
 `EXPECTED_CHECKS` being exact turns every short run into a SHORT row that gates.
 The measurement already catches the class by construction — which is why all
 five of these were found this morning rather than argued about.
+
+### The thirteen frames answered under another timestamp
+
+`check-frame-traceability.mjs` asks the one question the ledger's own
+reconciliations cannot: does a line of the SPECIFICATION — a timestamped
+observation in `video2-frame-observations.md` — appear anywhere in the evidence?
+115 observations; 73 are named in a suite, 3 in a unit test, 26 in this document
+or the gap audit, and 14 were named nowhere at all.
+
+One of the fourteen was a hole (`03:15`, above). The other thirteen are answered
+under an adjacent timestamp, which from the checker's position looks identical
+to an unanswered frame — so they are written down here, each one checked rather
+than assumed:
+
+| frame | what it draws | answered by |
+|---|---|---|
+| `02:25` | checklist items typed, and the header counting **"Checklists 2 open"** | `checklists.mjs` |
+| `03:45` | the activity feed, each entry with a relative time | `activity-rail.mjs` |
+| `04:40` | the **"Attach as audio file"** tooltip over the composer | `comment-recording.mjs` |
+| `05:50` | a **thread on a comment** — "Thread by …", the clip, the reply composer | `replies-inline-thread.mjs` |
+| `09:40` | Gantt: `Week ▾ · Auto fit · ⤢ Export`, the red TODAY line, `W32` | `gantt-controls.mjs` |
+| `11:20` | the inline **"Search for tasks in your view"** box in the list toolbar | `list-empty-states.mjs` (and three more, via `list-task-search`) |
+| `12:15` | browsable template categories with counts — **"See 135 more"** | `template-center.mjs` |
+| `13:25` | the calendar picker **grouped by account**, with Manage accounts | `calendar-accounts.mjs` |
+| `14:15` | Upcoming meeting: Show time left · Show in desktop · Quick join `2 mins` | `planner-upcoming-meeting.mjs`, with its recorded decision on the two desktop-only switches |
+| `17:40` | inline **word suggestions** above the AI composer | `ai-answer-rendering.mjs`, as `17:42`–`17:50` |
+| `18:20` | the answer that cannot act: **"No changes made."** plus follow-ups | `ai-command.test.ts` — a sentence the planner composes, so a unit test is the right place for it |
+| `18:40` | the integration **error card** and its Help-centre link | `integration-error-card.mjs` |
+| `20:15` | Recent Chats **auto-named after what they did** | `chat-thread-title.test.ts` |
+
+Two of those answers are unit tests, which is why the checker looks in
+`**/*.test.ts` as well: a rule that only read `test/e2e` would have called
+`18:20` missing and sent me to build a second copy of something that is already
+asserted, in the right place, for the right reason.

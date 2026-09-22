@@ -26,6 +26,7 @@ step "web unit tests"                   bash -c 'cd apps/web && ../../packages/d
 step "migration guardrail"              node scripts/check-migration-order.mjs
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs
+step "every frame is answered somewhere" node scripts/check-frame-traceability.mjs
 step "every break patch finds its line" python3 scripts/check-break-patches.py
 step "break runs measured this tree"    node scripts/check-break-freshness.mjs
 step "break patches name a real check"  node scripts/check-break-claims.mjs
