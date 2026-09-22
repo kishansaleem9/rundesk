@@ -280,14 +280,48 @@ try {
   chk(moved.status < 400, 'the list accepts its own last status over the API',
     `PATCH to "${binned.key}" answered ${moved.status} ${moved.error ?? ''}`)
   await openTask()
-  const atEnd = await waitUntil(
-    async () => (await page.getByTestId('task-status-next').getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)) === '',
+  /*
+   * WAIT FOR THE STATUSES TO ARRIVE, THEN ASK. This waited for
+   * `data-next-status === ''` alone — and `''` is what the attribute reads
+   * BEFORE `statusesQuery` resolves, because `orderedStatuses` is empty and
+   * `findIndex` answers -1. So the wait was satisfied by the loading state and
+   * the check passed before the product had computed anything.
+   *
+   * `ths-4-wraps-round` is the patch that proves it: it makes the ▶ wrap from
+   * the last status back to the first, which is precisely what this check's
+   * own sentence forbids, and the run came back 15 of 15 GREEN. `ths-2`
+   * reddened this same check, which is why it looked covered.
+   *
+   * `data-status-count` was added to the button for this: it carries
+   * `orderedStatuses.length`, so "resolved to nothing" and "nothing has
+   * arrived" are tellable apart. The count is required to be the pipeline's
+   * own length, not merely non-zero, because a partial list would also have
+   * a last rung and would make this pass for the wrong reason.
+   */
+  const nextBtn = page.getByTestId('task-status-next')
+  const loadedAtEnd = await waitUntil(
+    async () =>
+      (await nextBtn.getAttribute('data-status-count', { timeout: 2000 }).catch(() => null)) ===
+      String(pipeline.length),
     { timeoutMs: 20_000 },
   )
+  const atEnd =
+    loadedAtEnd &&
+    (await nextBtn.getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)) === ''
+  // The message names WHICH of the two it was, because "the statuses never
+  // loaded" and "the ▶ offered a status" are different defects and the old
+  // version of this check could not tell them apart at all.
+  const endCount = await nextBtn.getAttribute('data-status-count', { timeout: 2000 }).catch(() => null)
+  const endNext = await nextBtn.getAttribute('data-next-status', { timeout: 2000 }).catch(() => null)
   chk(
-    atEnd && (await page.getByTestId('task-status-next').isDisabled().catch(() => false)),
+    atEnd && (await nextBtn.isDisabled().catch(() => false)),
     'on the last status the ▶ resolves to nothing and is disabled — it does not wrap round to the start',
-    'the ▶ still offers a status on the last rung; wrapping would send a finished task back to the top',
+    loadedAtEnd
+      ? `the ▶ offered ${JSON.stringify(endNext)} on the last rung of ${endCount} — wrapping would ` +
+        'send a finished task back to the top'
+      : `the button reported data-status-count=${JSON.stringify(endCount)} against a pipeline of ` +
+        `${pipeline.length}, so the statuses never arrived and an empty data-next-status here would ` +
+        'have meant nothing either way',
   )
 
   console.log('\n▶ and the ✓ on a list with no closed status at all')
@@ -305,14 +339,41 @@ try {
   )
   await settleCookies()
   await waitUntil(() => page.getByTestId('task-tab-overview').isVisible().catch(() => false), { timeoutMs: 25_000 })
-  const noClosed = await waitUntil(
-    async () => (await page.getByTestId('task-status-complete').getAttribute('data-complete-status')) === '',
+  /*
+   * THE SAME LATENT FALSE PASS, in the same suite, one section down. This
+   * waited for `data-complete-status === ''` and `''` is also what it reads
+   * before the statuses arrive — so a product that resolved the ✓ correctly and
+   * one that had simply not loaded were the same answer.
+   *
+   * `ths-1-complete-writes-done` does redden it, by making the key `done`
+   * rather than empty, which is why it looked covered. It was covered by one
+   * patch's shape rather than by the check being decidable.
+   *
+   * The open-only list holds exactly one status: `Thinking` was added and every
+   * default reassigned to it and deleted. So the count is read from the list
+   * rather than assumed, and the assertion is that the statuses ARRIVED and the
+   * ✓ still resolved to nothing.
+   */
+  const openPipeline = (await A(`/lists/${openOnly.id}/statuses`)).data ?? []
+  const completeBtn = page.getByTestId('task-status-complete')
+  const loadedNoClosed = await waitUntil(
+    async () =>
+      (await page
+        .getByTestId('task-status-next')
+        .getAttribute('data-status-count', { timeout: 2000 })
+        .catch(() => null)) === String(openPipeline.length),
     { timeoutMs: 20_000 },
   )
+  const closedKey = await completeBtn.getAttribute('data-complete-status', { timeout: 2000 }).catch(() => null)
+  const noClosed = loadedNoClosed && closedKey === ''
   chk(
-    noClosed && (await page.getByTestId('task-status-complete').isDisabled().catch(() => false)),
+    noClosed && (await completeBtn.isDisabled().catch(() => false)),
     'a list with no closed status disables the ✓ rather than inventing `done`',
-    'the ✓ resolved to a key on a list that has no closed status — it is writing a constant',
+    loadedNoClosed
+      ? `the ✓ resolved to ${JSON.stringify(closedKey)} on a list of ${openPipeline.length} status(es), ` +
+        'none of them closed — it is writing a constant'
+      : 'the statuses never arrived on the open-only list, so an empty data-complete-status here ' +
+        'would have meant nothing either way',
   )
 } catch (err) {
   failed += 1

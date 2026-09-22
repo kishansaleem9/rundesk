@@ -2953,11 +2953,26 @@ function OverviewPanel({
               so what the control will write is measurable without pressing it —
               and a suite can put the question to a list whose statuses were
               renamed, where a hard-coded `todo`/`done` has nothing to match.
+
+              AND `data-status-count`, WHICH SAYS WHETHER THERE IS AN ANSWER YET.
+              Both keys above are `''` in two entirely different situations: the
+              control has resolved to nothing — a task on the last rung, a list
+              with no closed status — and the statuses have not loaded. A suite
+              waiting for `''` is satisfied by the loading state, so
+              `ths-4-wraps-round` made the advance button wrap from the last
+              status back to the first and the check written for exactly that
+              passed: 15 of 15, green, because it read the empty attribute
+              before `statusesQuery` resolved.
+
+              This carries `orderedStatuses.length`, so "there is no next" and
+              "nothing has arrived" are tellable apart. It is the same kind of
+              attribute as the two above it and it is here for the same reason.
             */}
             <button
               type="button"
               data-testid="task-status-next"
               data-next-status={nextStatus?.key ?? ''}
+              data-status-count={orderedStatuses.length}
               disabled={patchTask.isPending || !nextStatus}
               onClick={() => nextStatus && patchTask.mutate({ status: nextStatus.key })}
               title={

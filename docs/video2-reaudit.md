@@ -5270,3 +5270,44 @@ reason they are not reported.
 
 **Preflight is 24 steps, 23 green.** The single red step is `break runs measured
 this tree`, which is the sweep's own work list.
+
+### `ths-4-wraps-round`: a wait satisfied by the loading state
+
+15 of 15, green, on a patch that makes the ▶ wrap from the last status back to
+the first — which is word for word what the check it names forbids: *"on the
+last status the ▶ resolves to nothing and is disabled — it does not wrap round
+to the start."*
+
+The check walks the task to the pipeline's last status and waits for
+`data-next-status === ''`. And `''` is what that attribute reads **before
+`statusesQuery` resolves**, because `orderedStatuses` is empty, `findIndex`
+answers `-1`, and `nextStatus?.key ?? ''` is the empty string. So the wait
+succeeded on the loading state and the check passed before the product had
+computed anything at all. The same `''` meant two unrelated things:
+
+- the control resolved to nothing — the answer the check is about
+- nothing has arrived yet — no answer at all
+
+`ths-2-next-writes-fixed-key` DOES redden this check, which is exactly why it
+looked covered: it was covered by one patch's shape rather than by the check
+being decidable.
+
+**And the same defect sits one section down.** The ✓ check on a list with no
+closed status waits for `data-complete-status === ''`, which is likewise the
+loading value. `ths-1-complete-writes-done` reddens it by making the key `done`
+instead of empty — again, covered by a patch's shape rather than by the check.
+
+The fix is one attribute beside the two that already exist for this reason:
+`data-status-count`, carrying `orderedStatuses.length`. Both checks now wait for
+the count to equal the pipeline's OWN length — not merely non-zero, because a
+partial list also has a last rung and would pass for the wrong reason — and
+only then read the key. `EXPECTED_CHECKS` is unchanged at 15: no check was
+added, two were made decidable.
+
+Both failure messages now name which of the two it was, since "the statuses
+never arrived" and "the ▶ offered a status" are different defects and the old
+version could not tell them apart in either direction.
+
+**Still to measure.** All three lanes were busy when this was written, so
+whether `ths-4` now reddens comes from the chain's next pass over the suite.
+It is recorded here as a fix awaiting its own measurement, not as one.
