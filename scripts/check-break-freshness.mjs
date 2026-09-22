@@ -44,23 +44,50 @@ if (logs.length === 0) {
   process.exit(0)
 }
 
-const rows = []
-for (const log of logs) {
-  const suite = log.replace(/^break-/, '').replace(/\.txt$/, '')
-  // Batch/partial logs (`-batch1`, `-full`) name a slice of a suite, not a file.
-  const file = join(ROOT, 'test/e2e', `${suite}.mjs`)
-  let suiteMtime = null
+const lastChanged = (name) => {
   try {
-    const iso = execFileSync('git', ['log', '-1', '--format=%cI', '--', `test/e2e/${suite}.mjs`], {
+    const iso = execFileSync('git', ['log', '-1', '--format=%cI', '--', `test/e2e/${name}.mjs`], {
       cwd: ROOT,
       encoding: 'utf8',
     }).trim()
-    if (iso) suiteMtime = new Date(iso)
+    return iso ? new Date(iso) : null
   } catch {
-    /* not a tracked suite file */
+    return null /* not a tracked suite file */
   }
+}
+
+const rows = []
+for (const log of logs) {
+  const suite = log.replace(/^break-/, '').replace(/\.txt$/, '')
+  /*
+   * A SLICE LOG IS EVIDENCE ABOUT ITS PARENT SUITE, NOT ABOUT NOTHING.
+   *
+   * Five logs here name a slice rather than a file — `-batch1`, `-batch2`,
+   * `-full`, `-patch15-rerun`, `-fixed` — because a 23-patch suite gets run
+   * four at a time and each batch was given its own log so the truncation
+   * would not eat the last one. They were reported `??  not tracked` and then
+   * skipped, which is the worst of the three possible answers: the canonical
+   * `break-custom-field-types.txt` holds ONE patch line, the other fourteen
+   * live in the batch logs, and the row that said "1 patches" was the only one
+   * compared against the suite at all.
+   *
+   * So the name is walked back a segment at a time until a tracked suite file
+   * turns up, and the log is measured against THAT — which is the file the run
+   * was really about. The row still prints the log's own name and says whose
+   * slice it is, because attributing by name-stripping is a guess, and a guess
+   * a reader cannot see is the stale reason this audit keeps finding.
+   */
+  let named = suite
+  let suiteMtime = lastChanged(named)
+  while (!suiteMtime) {
+    const cut = named.lastIndexOf('-')
+    if (cut <= 0) break
+    named = named.slice(0, cut)
+    suiteMtime = lastChanged(named)
+  }
+  const sliceOf = suiteMtime && named !== suite ? named : null
   if (!suiteMtime) {
-    rows.push({ suite, verdict: 'NO SUITE FILE', detail: `test/e2e/${suite}.mjs is not tracked` })
+    rows.push({ suite, verdict: 'NO SUITE FILE', detail: `no tracked suite file for ${suite} or any prefix of it` })
     continue
   }
   const runMtime = statSync(join(BREAKS, log)).mtime
@@ -95,7 +122,7 @@ for (const log of logs) {
   // The working tree can hold an edit the commit date does not know about.
   let dirty = false
   try {
-    dirty = execFileSync('git', ['status', '--porcelain', '--', `test/e2e/${suite}.mjs`], {
+    dirty = execFileSync('git', ['status', '--porcelain', '--', `test/e2e/${named}.mjs`], {
       cwd: ROOT,
       encoding: 'utf8',
     }).trim().length > 0
@@ -112,13 +139,15 @@ for (const log of logs) {
     missing,
     noChange,
     done,
-    detail: dirty
-      ? 'suite has UNCOMMITTED edits — the run cannot be about this file'
-      : stale
-        ? `suite changed ${suiteMtime.toISOString().slice(5, 16)} AFTER the run ${runMtime
-            .toISOString()
-            .slice(5, 16)}`
-        : `run ${runMtime.toISOString().slice(5, 16)} ≥ suite ${suiteMtime.toISOString().slice(5, 16)}`,
+    detail:
+      (sliceOf ? `slice of ${sliceOf}: ` : '') +
+      (dirty
+        ? 'suite has UNCOMMITTED edits — the run cannot be about this file'
+        : stale
+          ? `suite changed ${suiteMtime.toISOString().slice(5, 16)} AFTER the run ${runMtime
+              .toISOString()
+              .slice(5, 16)}`
+          : `run ${runMtime.toISOString().slice(5, 16)} ≥ suite ${suiteMtime.toISOString().slice(5, 16)}`),
   })
 }
 
@@ -219,7 +248,17 @@ if (neverRan.size) {
 }
 
 if (stale.length || refusedSets.length || broken.length || absent.length || inert.length) process.exit(1)
+// A row with no suite file was never COMPARED to anything, so it cannot be
+// folded into "all N postdate their suite" — that sentence is the whole output
+// most readers see, and counting an unmeasured log inside it is how a total
+// stops being about what it names.
+const unmatched = rows.filter((r) => r.verdict === 'NO SUITE FILE')
 console.log(
-  `\n[break-freshness] all ${rows.length} break set(s) postdate their suite, none refused, ` +
-    'every patch file was found, built, and changed something',
+  `\n[break-freshness] all ${rows.length - unmatched.length} break set(s) postdate their suite, none refused, ` +
+    'every patch file was found, built, and changed something' +
+    (unmatched.length
+      ? `\n                  ${unmatched.length} log(s) name no suite file and were NOT compared: ${unmatched
+          .map((r) => r.suite)
+          .join(', ')}`
+      : ''),
 )

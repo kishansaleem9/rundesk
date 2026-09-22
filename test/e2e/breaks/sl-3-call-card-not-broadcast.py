@@ -27,11 +27,24 @@
 # load-bearing on its own, and it is exactly the shape that made the first
 # version of this patch read as a real defect.
 #
-# THREE CHECKS, AND THE THIRD IS THE ONE THIS SEQUENCE ADDED. "the call posts a
-# card into the channel" reads the server and still passes: the row is there.
+# PREDICTED TWO AND IT IS ONE, and the one that stayed green is the reason the
+# suite is built the way it is. Of the three checks on this claim, TWO tolerate
+# a reload by design:
 #
-# Reddens: syncup-live: "and the other person sees it in the channel" and
-#   "and it arrives without a reload"
+#   - "the call posts a card into the channel" reads the SERVER, and the row is
+#     there — this patch keeps the insert.
+#   - "and the other person sees it in the channel" RELOADS before giving up, on
+#     purpose, so that never-announced and never-written are told apart instead
+#     of arriving as one silent timeout. With the row in the database the reload
+#     finds it, and the check passes.
+#
+# So only "and it arrives without a reload" can fall, which is exactly the check
+# added after the first version of this patch ran green twice. The prediction of
+# two was reading the sentences rather than the code under them: the middle
+# check's own comment says it reloads, and a check that reloads cannot see a
+# missing push.
+#
+# Reddens: syncup-live: "and it arrives without a reload"
 import io
 
 p = '/home/user/rundesk/apps/api/src/modules/calls/calls.service.ts'

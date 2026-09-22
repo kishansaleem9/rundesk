@@ -3600,7 +3600,7 @@ local helper, and the grep saw 67 where the suite runs 93.
 the ratchet's own comment now says which direction of move is legitimate and
 why, so the raise cannot be used as cover later.
 
-### Eleven sets, forty-six patches, and what they found
+### Eleven sets, forty-seven patches, and what they found
 
 | suite | patches | reddened | found |
 | --- | --- | --- | --- |
@@ -3609,9 +3609,9 @@ why, so the raise cannot be used as cover later.
 | `stale-chunk-recovery` | 5 | 1·3·1·1·1 | a reload-loop check too loose to see a missing cooldown |
 | `addressability-live` | 4 | 2·1·3·2 | three unbalanced branches; a facade check reading the whole document |
 | `panel-collapse` | 4 | 6·1·1·2 | six unbalanced branches; four unbounded clicks; a section leaking a persisted preference |
-| `syncup-live` | 4 | 1·1·1·1 | the only suite keeping a floor; ten unbalanced branches; a third delivery fact nobody asserted |
+| `syncup-live` | 5 | 1·1·1·1·1 | the only suite keeping a floor; ten unbalanced branches; a third delivery fact nobody asserted; a record read from another suite's row, and deleted |
 | `settings-depth` | 4 | 1·1·1·1 | the workspace-package resolution bug |
-| `chat-message-actions` | 4 | 5·3·1·1 | a check that named "local" and read only the format, in a UTC container; an unbounded click |
+| `chat-message-actions` | 4 | 6·3·1·1 | a check that named "local" and read only the format, in a UTC container; an unbounded click |
 | `task-depth` | 4 | — | four unbalanced branches; an unguarded dereference |
 | `video1-fast-items` | 4 | — | — |
 | `ui-sweep` | 4 | — | a literal `check(true, …)` |
@@ -3701,6 +3701,52 @@ gate — the storage chain, because no bucket is configured here. The speaker
 picker and the AI Notes entitlement both ran as real checks. The floor of 48 was
 53 minus five checks that were not the five it described: the stale reason, in
 a comment whose whole job was to justify an exception.
+
+### And the same suite was reading another suite's record — and deleting it
+
+The exact count turned the floor into a number that can fail, and the first
+thing it caught was not a product regression. `syncup-live` ran `53 passed, 1
+failed, 5 skipped`, and the one failure was `naming everyone who was there (1)`
+on a call two people had just spent a section in.
+
+The record was fine. The database held it with both attendees. What the suite
+read was a different meeting.
+
+It found the record by asking for the meetings list and taking the first row
+whose start was at or after this call's, under a comment stating it was *"pinned
+to THIS call rather than the newest meeting"*. That is the **stale reason**
+again, and this time in a comment describing its own line: the list is ordered
+`startsAt DESC`, so a meeting SCHEDULED IN THE FUTURE outranks a call that
+ended a second ago. `a39-dm-tabs` seeds one dated tomorrow in the same lane
+database. The row the suite read was `A39 Sprint sync with colleague`, with its
+one attendee, while the call's own record sat below it. **Every green run before
+this was luck about what else the database happened to hold.**
+
+The second half is worse than a false failure. §7 tidies up with
+`DELETE /workspaces/:ws/meetings/${record.id}` — so on every run where the pin
+missed, `syncup-live` deleted another suite's fixture on its way out, and the
+suite that finds itself short of a meeting next week has no way to trace it
+here.
+
+It asks `POST /calls/:id/end` for the id now. `end` is idempotent by
+contract — *"Ended AND the record is there: nothing left to do"* returns it — so
+asking after the UI has already ended the call changes nothing, and `pending:
+true` is the named state where the id is still coming, which is why it polls.
+The check that reads the product is still the one above it, and it has already
+run and already failed by the time this asks for an id.
+
+**And the attendee check had no patch that could have found this.** `sl-5`
+narrows the attendee list to participants whose `leftAt` is null — which at
+record time is nobody, because the record is written by the last person out
+from inside `leave`, after their own `leftAt` is stamped. A call two people
+spent twenty minutes in leaves a record naming one of them, every mechanism
+around it working. It reddens exactly one check. It could not have been written
+against the old pin: a check that fails for the wrong reason cannot be broken on
+purpose.
+
+The sweep for the same shape found no other instance — every other suite that
+touches `/meetings` either POSTs its own fixture or matches on the id it was
+given.
 
 ### Six harness defects, four of them silent
 
@@ -3865,6 +3911,20 @@ Three things turned up on the way that were not the shape being fixed:
   a set that ran before per-run archiving existed and was overwritten —
   `break-ai-answer-rendering.txt` holds one patch line out of twenty-three that
   ran.
+- **And five logs it was skipping entirely.** A 23-patch suite gets run four at
+  a time, and each batch was given its own log — `-batch1`, `-batch2`, `-full`,
+  `-patch15-rerun`, `-fixed` — precisely so the truncation would not eat them.
+  The checker looked for `test/e2e/<log name>.mjs`, found nothing, printed
+  `??  not tracked` and moved on. So `custom-field-types`'s row read **1
+  patches** — the canonical log holds one line — while the other 46 patch
+  results sat in logs that were never compared to anything. The name is walked
+  back a segment at a time now until a tracked suite turns up, the row says
+  whose slice it is, and a slice measured against a suite that has since
+  changed goes STALE like any other. Break-tested: a slice log dated before its
+  parent's last commit fails, where before it was silent. The closing summary
+  no longer counts an unmatched log inside "all N postdate their suite" either
+  — an unmeasured log inside a total is how a number stops being about what it
+  names.
 - **`check-break-claims.mjs` reports a SECOND `# Reddens:` block**, because
   `findIndex` reads only the first. Thirteen patches had one, and in two of
   them the legacy line named a sentence the canonical block does not: `nor does
@@ -3959,7 +4019,7 @@ Every set that has run since the denominator was corrected, with its baseline:
 | `panel-collapse` | 56 · 0 | 6 · 1 · 1 · 2 |
 | `syncup-live` | 54 · 0 · 5 skipped | 1 · 1 · — · 1 |
 | `settings-depth` | 61 · 0 | 2 · 1 · 1 · 1 |
-| `chat-message-actions` | 73 · 0 | 5 · 3 · 1 · 1 |
+| `chat-message-actions` | 73 · 0 | 6 · 3 · 1 · 1 |
 | `task-depth` | 91 · 0 | 6 · 2 · 1 · 3 |
 | `video1-fast-items` | 92 · 0 | — |
 | `video-regression` | 93 · 0 | 3 · 2 · 1 · 9 |
