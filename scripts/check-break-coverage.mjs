@@ -32,6 +32,15 @@
  * said 27, which is the stale-reason defect in the file that exists to stop a
  * number describing something it no longer describes.
  *
+ * IT IS ZERO NOW, and that changes what this ratchet is for. It no longer
+ * measures a backlog; it holds a floor. Every one of the 101 suites has at
+ * least one patch aimed at it, so a NEW suite arriving without one is the only
+ * thing that can move this number — which is exactly the moment the check is
+ * worth failing on.
+ *
+ * AND ZERO HERE STILL DOES NOT MEAN "IT WORKS". Read the paragraph below about
+ * `save-comment`: this counts aim, and the ledger's §8 counts what reddened.
+ *
  * A suite with no patch is not a suite that failed. It is a suite about which
  * nothing is known: every one of its checks may be a facade, and being green
  * says nothing either way. That is the same sentence this audit has applied to
@@ -174,7 +183,7 @@ if (unattributedNames.length) {
 }
 
 // THE RATCHET. Lower it when a suite is covered; never raise it to pass.
-const BASELINE_UNCOVERED = 1
+const BASELINE_UNCOVERED = 0
 if (uncovered.length > BASELINE_UNCOVERED) {
   console.error(
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
