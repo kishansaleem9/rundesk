@@ -78,7 +78,14 @@ let section = ''
 const ok = (m) => { results.push(['PASS', section, m]); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(['FAIL', section, m]); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const skip = (m) => { results.push(['SKIP', section, m]); console.log(`  \x1b[2mSKIP\x1b[0m ${m}`) }
-const check = (c, g, b) => (c ? ok(g) : bad(b))
+// THE SENTENCE, THEN THE REASON. This printed only `b`, so a failing check
+// named its reason and never itself — and `check-break-reddened.mjs` infers a
+// reddening by looking for the claimed sentence among the FAIL lines. With
+// only the reason there it could not tell whether the claimed check was the
+// one that failed, and `us-1-grouped-column-still-shown` sat UNPROVEN: its
+// claim is a fragment several iterations of a loop print, and the iteration
+// that failed printed its reason instead of its name.
+const check = (c, g, b) => (c ? ok(g) : bad(`${g}${b && b !== g ? ` \u2014 ${b}` : ''}`))
 
 /*
  * A CHAIN THAT REPORTS THE SAME NUMBER OF CHECKS WHICHEVER WAY IT GOES.

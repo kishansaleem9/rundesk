@@ -252,7 +252,11 @@ try {
    */
   console.log('\n▶ frame `16:05` — the link lands on the rail, with the task in it')
 
-  await toast.getByRole('button').first().click()
+  // The cascade's next step. Bounding `priority-prompt-add` above moved the
+  // thirty seconds here: `a2p-5-assigning-writes-an-assignee-and-stops` means
+  // no priority is written, so the toast that would offer to undo never
+  // appears. 3 of 10 became 5 of 10; this is the rest of it.
+  await toast.getByRole('button').first().click({ timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(() => /\/calendar$/.test(page.url()), { timeoutMs: 15_000 }),
     'the link goes to the Planner',

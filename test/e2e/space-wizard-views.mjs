@@ -95,7 +95,14 @@ if (!B) {
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
-const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+// THE SENTENCE, THEN THE REASON. This printed `${badMsg ?? good}`, so a failing
+// check named only its reason and never itself — and `check-break-reddened.mjs`
+// infers a reddening by looking for the claimed sentence among the FAIL lines.
+// With only the reason there, it could not tell whether the claimed check was
+// the one that failed, and reported UNPROVEN. That is the fix this file's own
+// ledger names for the shape, rather than a looser rule in the checker.
+const chk = (c, good, badMsg) =>
+  c ? ok(good) : bad(`${good}${badMsg && badMsg !== good ? ` \u2014 ${badMsg}` : ''}`)
 
 const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
 const api = apiClient(`${B}/api/v1`, auth.accessToken)

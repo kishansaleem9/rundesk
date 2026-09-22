@@ -5876,3 +5876,58 @@ Left deliberately: the request-only check is not strengthened to assert the
 response. The listener records requests, not replies, and rewiring it is a
 change to the suite's fixture rather than to a check — recorded here as the
 better fix when the tree is quiet.
+
+## §11 — The chain drained
+
+```
+16:13:15 round 4: nothing left — every log on disk measured the current tree
+[never-run-plan] 0 patch(es) across 0 unmeasured suite(s)
+[never-run-plan] 0 patch(es) across 0 DRIFTED suite(s)
+```
+
+The sentence this whole sweep was aimed at, and the numbers under it:
+
+| | |
+|---|---|
+| reddened a check they claim | **797** of 808 |
+| reddened nothing | **0** |
+| measured against a tree that has moved | **0** |
+| suites with a patch proven on this tree | **113 of 113** |
+| unproven | 4 |
+| no usable log | 3 |
+| unit claims, measured elsewhere | 4 |
+
+Three of these needed the last mile.
+
+### The cascade, finished
+
+`a2p-5`, `po-1` and `task-cover-1` were still short — and each had MOVED rather
+than survived. `a2p-5` went 3 of 10 → 5, `po-1` 5 of 12 → 10, `task-cover-1` 18
+of 32 → 19, each stopping on the next unguarded call after the one fixed. That
+is the sequence shape the ledger declined to gate, converging by cascade exactly
+as it said it would: `toast.getByRole('button').first().click()`,
+`panel().boundingBox()`, and a second `cover-change` press.
+
+### And four UNPROVEN that were one line in four suites
+
+`assign-1-first-member`, `space-create-menu-1-onelabel`,
+`space-wizard-views-1-teamlabel` and `us-1-grouped-column-still-shown` all read
+*"1 check failed and all 1 claimed sentence(s) are among the passes"* — the run
+failed something, and the checker could not tell whether it was the claimed one.
+
+The cause is one line each:
+
+```js
+const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+```
+
+**A failing check named its reason and never itself.** `check-break-reddened.mjs`
+infers a reddening by finding the claimed sentence among the FAIL lines, and
+with only the reason there it cannot. `us-1` is the case the checker's own
+header predicted: its claim is a fragment several iterations of a loop print,
+and the iteration that failed printed its reason rather than its name.
+
+This is the fix that header named — *"making the 70 suites print `FAIL
+<sentence> — <reason>` would move most of these into REDDENED, which is the fix
+rather than a looser rule here"* — applied to the four that still had the old
+form. No suite's check count moved.

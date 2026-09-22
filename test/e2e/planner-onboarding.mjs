@@ -411,7 +411,10 @@ try {
     if (el) el.scrollTop = 0
   })
   await page.waitForTimeout(150)
-  const box = await panel().boundingBox()
+  // `po-1-panel-never-shows` removes the panel, so there is no box to measure.
+  // Rule three's shape, reached only once `readCard` above stopped throwing
+  // first: 5 of 12 became 10 of 12, and this is the last two.
+  const box = await panel().boundingBox().catch(() => null)
   // `.catch` because `po-9-onboarding-replaces-the-grid` removes the grid, which
   // is what this check is about: the null is already the failing case below, and
   // without the catch it was thirty seconds and an exception instead.

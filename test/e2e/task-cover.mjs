@@ -232,7 +232,9 @@ try {
    * required to hold exactly that colour.
    */
   console.log('\n▶ the Gallery has a Custom swatch, and it commits the colour you chose')
-  await page.getByTestId('cover-change').click()
+  // Bounded for `task-cover-1-nocustom`, whose hidden Custom cell leaves this
+  // reopen with nothing to press once the section above has failed.
+  await page.getByTestId('cover-change').click({ timeout: 8000 }).catch(() => {})
   chk(
     await appears(page.getByTestId('cover-gallery-custom')),
     'the Gallery offers Custom beside the fixed swatches',
@@ -294,7 +296,9 @@ try {
    * closes exactly like one that works.
    */
   console.log('\n▶ the Link tab takes an address, refuses one that is not, and commits the rest')
-  await page.getByTestId('cover-change').click()
+  // Bounded for `task-cover-1-nocustom`, whose hidden Custom cell leaves this
+  // reopen with nothing to press once the section above has failed.
+  await page.getByTestId('cover-change').click({ timeout: 8000 }).catch(() => {})
   chk(
     await appears(page.getByTestId('cover-tab-link'), 6000),
     'the picker still opens on something that can reach the Link tab',
