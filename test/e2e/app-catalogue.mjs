@@ -409,17 +409,35 @@ try {
    * cache and report a write that never happened.
    */
   console.log('\n▶ a tile that cannot be connected still does something')
-  await tile('box').getByTestId('integration-action').click()
+  /*
+   * BOUNDED, BECAUSE A MISSING BOX TILE IS WHAT TWO OF THIS SUITE'S PATCHES
+   * MAKE. `app-catalogue-10-frame-app-missing` drops the app from the registry
+   * and `app-catalogue-11-ghost-tile` draws it without an action, so this
+   * unqualified click spent Playwright's default thirty seconds and threw:
+   * `13 passed, 4 failed` with `ran 16 checks, expected 25`, nine checks
+   * unreported. Both were recorded as reddening four checks, three of which
+   * they never reached.
+   */
+  const boxPressed = await tile('box')
+    .getByTestId('integration-action')
+    .click({ timeout: 8000 })
+    .then(() => true)
+    .catch(() => false)
   let boxRequested = false
-  await waitUntil(async () => {
-    const rows = await api(`/workspaces/${ws.id}/integrations/connections/access-requests`)
-    boxRequested = rows.status === 200 && (rows.data ?? []).some((r) => r.provider === 'box')
-    return boxRequested
-  }, { timeoutMs: 10_000 })
+  if (boxPressed) {
+    await waitUntil(async () => {
+      const rows = await api(`/workspaces/${ws.id}/integrations/connections/access-requests`)
+      boxRequested = rows.status === 200 && (rows.data ?? []).some((r) => r.provider === 'box')
+      return boxRequested
+    }, { timeoutMs: 10_000 })
+  }
   chk(
     boxRequested,
     'pressing it records the ask against this workspace',
-    'the Box tile’s button left no access request on the server — it is a dead control',
+    boxPressed
+      ? 'the Box tile’s button left no access request on the server — it is a dead control'
+      : 'there was no Box tile with an action to press, so whether pressing it records an ask ' +
+        'could not be read at all — reported as failed because UNKNOWN is not the same as fine',
   )
 
   // ── 5 · the rail's AI group ──────────────────────────────────────────────
@@ -437,23 +455,40 @@ try {
   )
 
   const SUGGESTION = `Airtable ${TAG}`
-  await page.getByTestId('integrations-suggest-app').click()
-  await page.waitForSelector('[data-testid="integrations-suggest-dialog"]', { timeout: 10_000 })
-  await page.getByTestId('integrations-suggest-name').fill(SUGGESTION)
-  await page.getByTestId('integrations-suggest-note').fill(`Wanted by ${TAG}`)
-  await page.getByTestId('integrations-suggest-submit').click()
+  /*
+   * ONE OPENER, BOUNDED, FOR BOTH TIMES THE DIALOG IS NEEDED.
+   * `app-catalogue-14-suggest-is-a-facet` files the control among the facets, so
+   * `integrations-suggest-app` matches nothing and the unqualified click threw
+   * at 18 of 25.
+   */
+  const openSuggest = () =>
+    page
+      .getByTestId('integrations-suggest-app')
+      .click({ timeout: 8000 })
+      .then(() => page.waitForSelector('[data-testid="integrations-suggest-dialog"]', { timeout: 10_000 }))
+      .then(() => true)
+      .catch(() => false)
+
+  const suggestOpened = await openSuggest()
   let suggestionStored = null
-  await waitUntil(async () => {
-    const rows = await api(`/workspaces/${ws.id}/integrations/connections/access-requests`)
-    suggestionStored = rows.status === 200
-      ? (rows.data ?? []).find((r) => r.provider === SUGGESTION)
-      : null
-    return !!suggestionStored
-  }, { timeoutMs: 10_000 })
+  if (suggestOpened) {
+    await page.getByTestId('integrations-suggest-name').fill(SUGGESTION)
+    await page.getByTestId('integrations-suggest-note').fill(`Wanted by ${TAG}`)
+    await page.getByTestId('integrations-suggest-submit').click()
+    await waitUntil(async () => {
+      const rows = await api(`/workspaces/${ws.id}/integrations/connections/access-requests`)
+      suggestionStored = rows.status === 200
+        ? (rows.data ?? []).find((r) => r.provider === SUGGESTION)
+        : null
+      return !!suggestionStored
+    }, { timeoutMs: 10_000 })
+  }
   chk(
     !!suggestionStored && suggestionStored.note === `Wanted by ${TAG}`,
     'a suggestion reaches the server under the name that was typed, note and all',
-    `the server holds ${JSON.stringify(suggestionStored)} for ${JSON.stringify(SUGGESTION)}`,
+    suggestOpened
+      ? `the server holds ${JSON.stringify(suggestionStored)} for ${JSON.stringify(SUGGESTION)}`
+      : 'the Suggest an app dialog never opened, so nothing could be typed into it',
   )
 
   /*
@@ -467,16 +502,20 @@ try {
    * REOPENED, because a successful suggestion closes the dialog — which is the
    * right behaviour and would have made the next two lines type into nothing.
    */
-  await page.getByTestId('integrations-suggest-app').click()
-  await page.waitForSelector('[data-testid="integrations-suggest-dialog"]', { timeout: 10_000 })
-  await page.getByTestId('integrations-suggest-name').fill('X'.repeat(81))
-  await page.getByTestId('integrations-suggest-submit').click()
-  const refusal = await readText(page.getByTestId('integrations-suggest-error'), { timeoutMs: 10_000 })
+  const reopened = await openSuggest()
+  let refusal = ''
+  if (reopened) {
+    await page.getByTestId('integrations-suggest-name').fill('X'.repeat(81))
+    await page.getByTestId('integrations-suggest-submit').click()
+    refusal = await readText(page.getByTestId('integrations-suggest-error'), { timeoutMs: 10_000 })
+  }
   chk(
     /80 characters at most/i.test(refusal),
     'and an over-long name is refused in the service’s own words',
-    `the dialog said ${JSON.stringify(refusal)} — a name with no bound reaches a text column ` +
-      'and every admin’s notification title',
+    reopened
+      ? `the dialog said ${JSON.stringify(refusal)} — a name with no bound reaches a text column ` +
+        'and every admin’s notification title'
+      : 'the Suggest an app dialog would not open a second time, so the refusal could not be read',
   )
   await page.getByTestId('integrations-suggest-cancel').click().catch(() => {})
 
@@ -490,7 +529,9 @@ try {
     'the banner carries the frame’s own two lines',
     `the banner read ${JSON.stringify(mcpTitle)} / ${JSON.stringify(mcpSubtitle)}`,
   )
-  await page.getByTestId('integrations-mcp-banner').click()
+  // Bounded for the same reason as the tiles above: a banner that is not there
+  // is a failing check, not a broken harness.
+  await page.getByTestId('integrations-mcp-banner').click({ timeout: 8000 }).catch(() => {})
   await page.waitForSelector('[data-testid="integrations-mcp-dialog"]', { timeout: 10_000 }).catch(() => {})
   const limitation = await readText(page.getByTestId('integrations-mcp-limitation'))
   chk(
@@ -499,7 +540,7 @@ try {
     `the panel said ${JSON.stringify(limitation)} — a URL field over an assistant that ` +
       'can call nothing would store rows as evidence for a feature that does not exist',
   )
-  await page.getByTestId('integrations-mcp-request').click()
+  await page.getByTestId('integrations-mcp-request').click({ timeout: 8000 }).catch(() => {})
   let mcpRequested = false
   await waitUntil(async () => {
     const rows = await api(`/workspaces/${ws.id}/integrations/connections/access-requests`)

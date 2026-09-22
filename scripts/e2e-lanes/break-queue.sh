@@ -91,6 +91,14 @@ while IFS= read -r line; do
     /^== / { flush(); inpatch = 1; hdr = $0; isshort = 0; isgreen = 0; nosummary = 0; next }
     inpatch && /^  NO SUMMARY:/ { nosummary = 1; next }
     inpatch && /^  SHORT RUN:/  { isshort = 1; next }
+    # AND THE OTHER WORDING FOR THE SAME FACT. Suites report a short run two
+    # ways: the `\u2717 N of M checks ran` line `wt-break.sh` tags as SHORT RUN,
+    # and `FAIL ran N checks, expected M`, which several suites print as an
+    # ordinary failure. `app-catalogue-10-frame-app-missing` stopped at 16 of 25
+    # and was classified RED here — a patch that reddened four checks, three of
+    # which it never reached. One partition, two spellings, and only one of them
+    # was being read.
+    inpatch && /FAIL ran [0-9]+ checks, expected/ { isshort = 1; next }
     inpatch && /, 0 failed/     { isgreen = 1; next }
     END {
       flush()
