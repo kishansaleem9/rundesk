@@ -29,6 +29,27 @@
  *
  * It is a RATCHET rather than a verdict; the reasoning is at the bottom.
  */
+/*
+ * AND A CLAIM HAS TO NAME ONE CHECK, WHICH IS NOT RATCHETED HERE — because the
+ * class turned out to be empty, and that is worth writing down so nobody builds
+ * the checker twice.
+ *
+ * `paywall-sites-2-server-board` claimed "the blocked workspace is refused",
+ * which is a PREFIX of the TEAM export's sentence sixteen lines above the board
+ * one. So the claim matched a PASSING check, `check-break-reddened.mjs` could
+ * not tell whether the patch had reddened what it named, and the answer took
+ * half an hour of reading. Two checks whose sentences overlap cannot be told
+ * apart in a log and neither can be named by a patch.
+ *
+ * Measured across all 113 suites afterwards: every OTHER apparent duplicate is
+ * one of two legitimate shapes — a template sentence inside a loop, which
+ * prints a different value per iteration, or the two branches of a balanced
+ * `if/else`, where only one runs and `test/e2e/lib/chain.mjs` exists to keep
+ * them reporting the same count. Neither is ambiguous in a log. The
+ * board-export prefix was the only real instance and it is fixed, so a ratchet
+ * here would hold a floor at zero over a class with no members — noise, in a
+ * file whose value is that every number in it is worth reading.
+ */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
