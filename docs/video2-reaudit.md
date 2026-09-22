@@ -3431,6 +3431,85 @@ The two directories held 614 byte-identical files, which is the only reason
 nothing already recorded describes the wrong patch. That is luck, not a
 property: it held only because no patch had yet been edited in place.
 
+### 47 → 17, and the checks that could not fail
+
+Sixteen suites closed. The table is the boring half; the column that matters is
+the last one, because **ten of the sixteen gave back a defect in the suite
+itself.**
+
+| suite | patches | reddened | what it gave back |
+| --- | --- | --- | --- |
+| `malformed-ids` | 4 | 4 | — |
+| `trending-sort` | 4 | 4 | a check that could not fail for its own reason |
+| `undo-delete` | 4 | 4 | three restores asserted by status code (8 → 11) |
+| `task-provenance` | 3 | 3 | a fourth patch that had to not be written |
+| `search-sources` | 4 | 4 | — |
+| `bookmarks` | 5 | 5 | a cascade the prediction was too narrow for |
+| `list-statuses-seeded` | 4 | 4 | an absence with a second cause (9 → 10) |
+| `list-save-view` | 4 | 4 | — |
+| `replies-inline-thread` | 4 | 4 | — |
+| `request-access` | 4 | 4 | cleanup that only ran on the happy path |
+| `planner-priorities` | 4 | 4 | a claim no browser check can make (9 → 10) |
+| `space-features` | 5 | 5 | a merge two fixtures could not distinguish (10 → 12) |
+| `assign-to-priorities` | 5 | 5 | a toast clicked after it had expired |
+| `time-estimate` | 5 | 5 | nonsense that was only ever a word (11 → 13) |
+| `comment-slash-commands` | 4 | — | narrowing asserted by naming what should be there |
+| `assignee-picker` | 5 | — | — |
+
+**The shape repeats, and the mechanism never does.** Four of the ten are the
+same sentence about a different thing: a check that names only what SHOULD be
+present cannot see a mechanism that has stopped working, because the thing it
+names is present either way.
+
+- `comment-slash-commands` asserted *"what follows the slash narrows it to
+  Quote"* by checking Quote is visible. `matchBlocks` returns every block for a
+  blank query, so Quote is visible in an unfiltered menu too. **The absence of
+  what does not match is the claim.**
+- `space-features` had one space with no feature map and one with a complete
+  map. `{ ...ALL, ...stored }` and `stored` are the same answer for both, so
+  the merge that stops a newly shipped switch retroactively switching itself
+  off could have been deleted with the suite green.
+- `time-estimate`'s only bad input was the word `soon`, which has no digits —
+  so the parser refuses it whether or not it requires the whole box to be a
+  duration, and all three nonsense checks passed under a parser that had
+  stopped guarding anything.
+- `list-statuses-seeded` asserted a closed task is ABSENT from the teams work
+  preview, and created it with no assignee, while that endpoint joins
+  `task_assignees`. It passed on the exact bug it was written for.
+
+**AND ONE PROPERTY TURNED OUT NOT TO BE OBSERVABLE AT ALL.**
+`planner-priorities` claims the rail and the person panel share one React
+Query key. The first check called the endpoint directly — nowhere near a cache.
+The second really opened the panel through the app after writing in the rail,
+and the patch that gives the panel its own key **still ran green**: the panel
+MOUNTS when it opens, which is after the write, and a `useQuery` whose key
+holds no data fetches on mount. With React Query's default `staleTime: 0` even
+a populated key refetches on remount. There is no moment at which that screen
+can hold a stale panel.
+
+So the key is pinned by `apps/web/src/lib/use-priorities.test.ts` instead, and
+the browser check is restated to what it does prove. **Before writing a check
+about stale state, name the moment the reader holds the stale value.** If that
+moment does not exist, the check is a sentence about a mechanism rather than a
+test of one.
+
+**PREDICTING THE REDDENED SET BEFORE THE RUN IS WHAT FOUND MOST OF THESE**, and
+it works in both directions. `trending-sort-1` was predicted to redden three
+checks and reddened two — the colleague opened whatever relevance had already
+ranked first, so the check held under a build with no trending sort at all.
+`bookmarks-2` was predicted to redden one and reddened three, and the two extra
+were an honest cascade: the peer's delete really removes the row, so the checks
+that read it back cannot pass. A prediction that is too high finds a weak
+check; one that is too low finds reasoning nobody did. Both get written down;
+only one of them is comfortable.
+
+**TWO PATCHES WERE NOT WRITTEN, AND SAYING SO IS PART OF THE RESULT.** A fourth
+`task-provenance` patch would have cleared the `origin` marker on rename — and
+that suite renames the seeded type, so the column would have come back `null`
+for good. `git checkout -- .` reverts the source and not the lane's Postgres.
+The test to apply first: *does the patch write something the suite did not
+create?*
+
 ---
 
 ## 9. The misclassified rows, resolved

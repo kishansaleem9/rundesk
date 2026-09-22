@@ -650,6 +650,18 @@ Two general rules:
 
   The tell was there to be read: the two runs disagreed. **Two measurements of
   one thing that differ is not a reason to pick the more interesting one.**
+
+  **AND IT HAPPENED AGAIN INSIDE THE HOUR, WITH THE RULE ALREADY WRITTEN.**
+  `check-break-patches.py`, run while a background typecheck loop was applying
+  and reverting patches to `task-detail-sheet.tsx`, reported four patches whose
+  anchor was gone and one whose FILE was gone. The file exists. The loop had it
+  checked out at that instant.
+
+  Writing the rule down is not applying it — the same sentence this document
+  already carries about the `checklists` fixture, now about itself. So the rule
+  gains a mechanism instead of a reminder: **a verification command runs with
+  `run_in_background: false`, or after an explicit wait on every job that
+  touches the tree.** "I will remember to check" has now failed twice.
 - **THE RUNNER READ FROM SOMEWHERE ELSE THAN YOU WROTE TO.** Break patches
   lived in `/tmp/claude-0/breaks` before they were committed.
   `check-break-patches.py` moved to the tracked copy and wrote down why — "the
