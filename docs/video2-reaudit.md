@@ -6185,7 +6185,79 @@ tick but not render is a stored value no reader honours". Building an Activity
 view from an invented design would be the same mistake wearing a tick.
 
 So: **Create Folder description → Threads**, both fully evidenced, batched per
-file.
+file. **View types and Document import are no longer held** — the
+first was researched against ClickUp itself, the second decided; both are
+recorded below with what they rest on.
+
+### Activity and Workload, researched rather than invented
+
+The frames show only a toggle list, so ClickUp's own behaviour was read instead.
+`help.clickup.com` is blocked by this machine's egress proxy, so this is from
+ClickUp's indexed documentation and its product pages.
+
+**Activity view** — an aggregated log of everything that happened in that
+location. Entries are grouped by time, newest first; each carries the **avatar
+and name** of who made the change, a description of the change, and a timestamp.
+A **Customize → Activities** menu chooses which kinds show, and there is a
+search box plus two filters that are not the same thing: a TASK filter (show
+activity from tasks matching criteria) and an ACTIVITY filter (show only certain
+kinds). It covers task created/deleted, tasks moved between Lists, Folders and
+Spaces, name/description/priority edits, status changes, and Lists created,
+renamed, archived or deleted.
+
+**Workload view** — a table of tasks over time: each ROW is one value of the
+group-by (assignee by default), each COLUMN a time period, with the scale
+selectable across Days, Weeks, Months, 7 days and 14 days. What fills the cells
+is chosen from a **Workload** button upper-left, defaulting to **Time
+Estimates**, with **Tasks**, **Sprint Points** and Number/Dropdown custom fields
+as the alternatives — and under Tasks, a task scheduled across five days counts
+as five. Capacity is a per-person limit set in natural language, applied across
+the Workspace, and settable only when grouping by assignee; green, amber and red
+mean under, nearing and over. Tasks with no estimate are **not counted as zero**
+— they get their own **"No estimate"** section, shown only when measuring by
+Time Estimates.
+
+**AND RUNDESK ALREADY HOLDS BOTH DEFINITIONS, which is the finding that makes
+these buildable rather than inventable:**
+
+| ClickUp needs | Rundesk has |
+|---|---|
+| an activity log to aggregate | `task_activity`, already read by the task Activity panel and `task-activity-filter.mjs` |
+| time estimates | `tasks.timeEstimate`, in seconds, closed by `time-estimate.mjs` |
+| a rule for who is overloaded | **`findOverloadedAssignees()`** — `open >= 6 && open >= 1.5 × the team average` — with `collectWorkloadLoads()` behind it |
+
+That last row matters more than the other two. The colour bands do not have to
+be invented, and they must not be: the AI assign gate already refuses to suggest
+an overloaded person using exactly that rule. A Workload view that drew its own
+threshold would let the view and the assistant disagree about who is
+overloaded — two answers to one question, which is the duplicated list this
+audit keeps finding. So the view reads the product's own definition, and the
+"No estimate" section is kept for the same reason the round-trip check was kept
+on the cover upload: a task with no estimate contributing zero load is a
+confident zero.
+
+### Document import: the inverse of an export this product already has
+
+Decided here rather than asked, and it rests on something already in the tree.
+`apps/api/src/modules/docs/tiptap-markdown.ts` converts a Doc's ProseMirror JSON
+to GitHub-flavoured Markdown — pure, dependency-free — and
+`GET …/docs/:id/export` already serves `text/markdown`. **Document import is
+that function run backwards.**
+
+Which settles the check that makes it honest: **export a doc, import the file
+back, and the doc must be the same.** A round trip is the assertion a facade
+cannot pass — the same shape as the cover upload's byte-for-byte check, and
+better than any assertion that an import merely "succeeded".
+
+Scope is `.md`, `.markdown` and `.txt`, and that is not a shortcut. This
+repository has ALREADY decided against parsing binary documents:
+`attachment-text.ts` extracts `text/*`, JSON and XML and says in its own header
+that PDF, Word, Excel and PowerPoint are "intentionally NOT parsed" because
+doing so "would require a heavy parser dependency … out of scope". Offering a
+Word import would be the facade at document scale — which is precisely what this
+import page's own header refuses for the ten named tools. So the formats
+Rundesk can genuinely read are imported, and the rest are listed with their
+reason and no control, exactly as the four tools with no preset already are.
 
 ### The folder description, surveyed so the build is mechanical
 
