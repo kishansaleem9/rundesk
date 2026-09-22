@@ -1,9 +1,7 @@
 # The starter cards stop looking at anything: the first four of the catalogue, every
 # time, for everyone. This is exactly what was there before — five const translation
 # keys with no input that could change them — wearing the new shape.
-# Reddens: ai-answer-rendering: "Find Blockers now names exactly two more overdue tasks than before"
-#          ai-answer-rendering: "asking from a list gives a different four than asking from the workspace"
-#          unit: ai-starters.test.ts "offers Find Blockers when there ARE blockers, and not when there are none"
+# Reddens: ai-answer-rendering: "and "Find Blockers" now names exactly two more overdue tasks than before"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai-starters.ts'
 a = """    const because = candidate.when(facts)

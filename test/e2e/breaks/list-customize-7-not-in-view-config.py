@@ -1,6 +1,6 @@
 # The switches leave the saved view's config, so they reset on every reload
 # and the Save-view chip never notices them.
-# Reddens: "changing one marks the view unsaved", "saving the view writes it".
+# Reddens: list-customize: "saving the view writes the switches with it"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

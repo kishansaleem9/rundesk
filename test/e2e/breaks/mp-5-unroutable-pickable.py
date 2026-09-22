@@ -1,5 +1,5 @@
 # The providers with no client offered as if they worked.
-# Reddens: ai-model-picker: "with exactly the two pickable tiers" / "reveals exactly the two unreachable providers"
+# Reddens: ai-model-picker: "pressing it reveals exactly the two unreachable providers"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 a = '                          data-available="false"'

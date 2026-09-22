@@ -2,7 +2,7 @@
 # The switch still flips, still saves into the view, and the card still
 # reports data-stacked="true" — only the class that DRAWS the stack is
 # reverted. Every "the toggle is on" assertion passes on this build.
-# Reddens: "every field is on a line of its own", "the card grows with them".
+# Reddens: list-customize: "and every field starts below the last ("
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -2,7 +2,6 @@
 # The picker looks right, the preference stores fine, and choosing "Max" changes
 # nothing about which model answers. Two names for one thing.
 # Reddens: ai-model-picker: "to a DIFFERENT model each, not two labels for one"
-#          unit: model-tiers.test.ts "offers a real choice, not aliases of one model"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/model-tiers.ts'
 a = """    id: 'max',

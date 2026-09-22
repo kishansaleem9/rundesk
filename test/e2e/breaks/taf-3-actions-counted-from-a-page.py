@@ -1,8 +1,7 @@
 # The per-action counts are tallied from the newest hundred rows rather than
 # from the whole log — so the numbers beside each option are wrong on any busy
 # task, and an action whose only occurrence is old is not offered at all.
-# Reddens: task-activity-filter — "the actions endpoint counts 120 `status_changed` entries",
-#          "it offers `commented`, whose only occurrence is the year-old entry"
+# Reddens: task-activity-filter: "a count taken from the loaded page would read 100 or fewer"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/activity/activity.service.ts'
 a = """    const rows = await this.db

@@ -93,6 +93,16 @@ for a feature that does not exist.
 two of which have drifted. The third picker offers ten of nineteen field types
 and nobody noticed, because each picker is individually plausible.
 
+> **AND IT HAPPENS TO CHECKERS, WHERE IT IS WORSE.** `check-break-claims.mjs`
+> and `check-break-coverage.mjs` each carried their own copy of the same
+> `norm`/`findsClaim` matcher, asking two different questions of it. One copy
+> had grown a dash fold and a backtick unescape; the other had not. A product
+> defect of this shape shows a wrong list on screen; this shape publishes two
+> numbers that disagree about the same claim, each one authoritative-looking on
+> its own, with nothing on screen to look at. Pull the shared thing into one
+> module and verify by DIFF — byte-identical output before and after — so the
+> extraction is separated from the behaviour change it enables.
+
 **The confident zero.** An aggregate that reports 0 because it queried the
 wrong key, not because the answer is zero. Indistinguishable from a true zero
 in the UI, which is the whole problem.
@@ -762,6 +772,18 @@ as the same defects one level up.
   the exit code. Every assertion added to these scripts gets the same treatment:
   break it, see it fail, restore it, see it pass. Twice today that found an
   assertion that had never once run.
+- **A PATCH THAT BREAKS THE GATE HAS NO CHECK SENTENCE TO NAME, AND QUOTING THE
+  THROWN LINE IS NOT ONE.** `aoc-4-attach-input-unnamed` removes the testid the
+  suite's opening `waitForSelector` waits for, so the run throws before its
+  first `chk()` and the `EXPECTED_CHECKS` guard fails it on 0 of 13. Its header
+  quoted the two lines the run prints — `"threw: page.waitForSelector"` and
+  `"ran 0 checks, expected 13"` — which are runtime output, not checks, and a
+  claim checker can only read them as checks the suite does not have. Say in
+  prose that there is nothing to quote. **Keep the `<suite>:` prefix while doing
+  it**: `check-break-coverage.mjs` reads the same line to attribute the patch,
+  and rewording the header so the suite was followed by a comma instead of a
+  colon cost the patch its attribution (743 → 742) with every check still
+  green — one line of prose, two checkers, and only one of them noticed.
 - **AN ANCHOR BEGINNING WITH SPACES CANNOT PIN INDENTATION.** A more-deeply
   indented copy of the same line contains it, so `s.count(a)` sees two and the
   patch refuses. Both cases found were correct code — a loading skeleton

@@ -1,7 +1,7 @@
 # `targetType` reduced to a badge: the card prints it, the facet counts it, the
 # filter narrows on it, and apply makes a folder regardless. The mirror of a
 # facade — a column with no reader at the end of it.
-# Reddens: template-center: "applying a LIST template makes a list"
+# Reddens: template-center: "and a List template refuses to apply with nowhere to put the list"
 #
 # WRITTEN THE LONG WAY ON PURPOSE. The obvious form,
 #

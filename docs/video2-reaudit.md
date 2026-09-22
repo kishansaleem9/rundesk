@@ -3145,14 +3145,61 @@ A patch's `# Reddens:` line is the only thing tying it to the thing it proves,
 and **a patch whose claim has rotted still applies perfectly** — so no run, no
 anchor check and no `PATCH FAILED` line will ever mention it.
 `teams-empty-state-1-one-card` named *"the frame's two explainer cards"*, a
-check that had not existed for a day, and it was found by reading it. There are
-573 patches.
+check that had not existed for a day, and it was found by reading it. There were
+573 patches when this was written and there are 744 now.
 
 `scripts/check-break-claims.mjs` resolves each patch's suite the way a reader
 does — what the header says, else the longest filename prefix that is a suite,
 else whichever suite contains the sentence — and verifies the quoted sentence is
-really there. **345 verified · 85 unverifiable · 22 claim a check their suite
-does not have · 121 make no claim at all.**
+really there. On arrival: **345 verified · 85 unverifiable · 22 claim a check
+their suite does not have · 121 make no claim at all.**
+
+**Every one of those 143 is closed.** The run now reads **652 verified · 5
+verified in another suite · 87 unverifiable · 0 · 0 · 0**, and the ratchet's
+three baselines are all at zero. The arc, because the intermediate numbers are
+the finding:
+
+| | claimless | claim not in its suite |
+| --- | --- | --- |
+| as found | 121 | 22 |
+| after the parser learned the `# Reddens: "…"` form | 111 | 16 |
+| after 83 patches were given their suite's own sentence | 28 | 16 |
+| after the last 28 were written | 0 | 16 |
+| after 15 paraphrases were replaced with the literal | 0 | 1 |
+| after the backtick fold and `aoc-4` | **0** | **0** |
+
+Two of the last three are worth naming, because neither was a patch aimed at the
+wrong thing:
+
+- **`po-2-headline-reworded`** quoted *"with frame `12:40`'s own headline"* and
+  the suite writes it `` with frame \`12:40\`'s own headline `` — the check
+  sentence is itself a template literal, so its backticks are escaped. 23 check
+  sentences across 15 suites name a frame that way. The claim differed from the
+  check by two backslashes, so the fold belongs in `norm` with the three already
+  there. Break-tested by retyping the time as `12:41`: still CLAIM NOT IN SUITE,
+  which is the difference between a normalisation and a matcher loosened until
+  today's failure goes away.
+- **`aoc-4-attach-input-unnamed`** removes the `data-testid` the suite's opening
+  gate waits for, so the run throws *before its first check* and the
+  `EXPECTED_CHECKS` guard fails it on 0 of 13. Its header quoted the two lines
+  the run prints. Those are not checks, and a claim checker can only read them
+  as checks the suite does not have — so it says in prose that there is no
+  sentence to quote, which lands it in `unverifiable` where it belongs. It still
+  names its suite after the colon, because `check-break-coverage.mjs` reads that
+  line too and dropping the colon silently cost the patch its attribution
+  (743 → 742) with every check still green.
+
+**And the matcher was in two files, which had drifted.** `check-break-claims.mjs`
+asks whether a quoted sentence is in the suite the patch names;
+`check-break-coverage.mjs` asks which suite a patch belongs to — different
+questions over the same `norm`/`findsClaim`, each with its own copy. By the time
+they were pulled out into `scripts/lib/claim-match.mjs`, coverage's copy had
+neither the en/em-dash fold nor the backtick unescape. Nothing published a wrong
+number today; the defect is that it could, and that each file's number looks
+authoritative on its own — a patch attributed to a suite by one checker and
+reported as quoting a sentence that suite does not have by the other, both true
+of the matcher that produced them. The extraction is verified by diff: byte-identical
+output from both checkers before and after.
 
 It took four passes to stop lying, and the intermediate numbers are the reason
 the first was not written down. **136** "names no suite that exists" became
@@ -3173,12 +3220,22 @@ own sentence do not appear by accident in a different check. What is left over
 is reported, and some of it is a patch paraphrasing where it should have quoted
 — a real defect in the patch, and not one the matcher should be bent to hide.
 
-It is registered as a **ratchet**: today's numbers are in the file and the build
+It is registered as a **ratchet**: the numbers are in the file and the build
 fails when one grows. Failing on arrival makes red the normal state, and a check
 everybody steps over is worse than none; exiting 0 with the findings printed is
 a check that cannot fail. Break-tested both ways — a claimless probe patch, and
 a real claim reworded to a plausible synonym of its own check, each take it to
-exit 1.
+exit 1. **Re-break-tested at zero, three ways**, because a ratchet resting on a
+floor is a different check from one resting on a backlog: a patch with no
+`# Reddens:` line, a patch quoting a sentence no suite anywhere contains, and a
+patch naming a real suite and a check it does not have — `noClaim: 0 → 1`,
+`noSuite: 0 → 1`, `notFound: 0 → 1`, exit 1 each time, exit 0 with all three
+removed.
+
+`unverifiable` is deliberately **not** ratcheted. A `unit:` claim and a patch
+that legitimately has no sentence to quote both land there, and a ratchet over
+them would push the next author into quoting something rather than saying there
+is nothing to quote — which is exactly the defect `aoc-4` had.
 
 ### The two checkers, and the one that broke what it was measuring
 
@@ -3187,10 +3244,10 @@ by two scripts, and none of them had been found by eight hours of reading the
 same table. Both scripts exist because the eye-version produced the numbers
 above.
 
-- **`scripts/check-break-patches.py`** dry-applies all 573 patches and reports
-  the anchors that would miss. Every patch already asserts `s.count(a) == 1`
-  before writing, so the assertion IS the test — it just had to be run without
-  the write. 567 apply; 6 do not.
+- **`scripts/check-break-patches.py`** dry-applies every patch and reports the
+  anchors that would miss. Every patch already asserts `s.count(a) == 1` before
+  writing, so the assertion IS the test — it just had to be run without the
+  write. 567 of 573 applied when this was written; **744 of 744 apply now.**
 - **`scripts/check-break-freshness.mjs`** asks, per suite, whether the recorded
   run postdates the suite's last change, and flags a log that refused or holds a
   patch that never built.

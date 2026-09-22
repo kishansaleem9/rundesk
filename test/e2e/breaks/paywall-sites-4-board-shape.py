@@ -1,7 +1,5 @@
 # The paid download becomes the free one with a different name on the button.
-# Reddens: "the board export leads with the column each card is sitting in",
-#          "every row names a real board column",
-#          and in list-export.mjs "an entitled plan gets a different sheet".
+# Reddens: paywall-sites: "and every row names a real board column"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,5 @@
 # A toggle that is dead on the second press.
-# Reddens: ai-activity-filters: "and pressing it again takes `userId` back out"
+# Reddens: ai-activity-filters: "and `userId` is gone from the next thing the page asks for"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-value-panel.tsx'
 a = '              onClick={() => setMineOnly((v) => !v)}'

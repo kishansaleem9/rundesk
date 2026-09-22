@@ -71,6 +71,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const SUITES = join(ROOT, 'test/e2e')
@@ -113,28 +114,17 @@ const prefixSuite = (name) => {
  * third step is the one `check-break-claims.mjs` already uses: ask which suite
  * actually contains the sentence the patch quotes. A patch that names its check
  * can always be attributed, whatever punctuation it used.
+ *
+ * THE MATCHER THAT ANSWERS THAT QUESTION IS SHARED — `scripts/lib/claim-match.mjs`
+ * — because it was copied here and the copies drifted. This one had neither the
+ * dash fold nor the backtick unescape the other had grown, so the two files
+ * could disagree about whether the same claim is in the same suite while each
+ * printed a number that looked authoritative on its own.
  */
-const norm = (s) =>
-  s
-    .replace(/\\(["'\\])/g, '$1')
-    .replace(/[\u2018\u2019\u02bc'"\u201c\u201d]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim()
 const hayOf = new Map()
 const hayFor = (s) => {
   if (!hayOf.has(s)) hayOf.set(s, norm(readFileSync(join(SUITES, `${s}.mjs`), 'utf8')))
   return hayOf.get(s)
-}
-const MIN_WORDS = 5
-const findsClaim = (hay, q) => {
-  if (hay.includes(q)) return true
-  const w = q.split(' ')
-  for (let len = w.length - 1; len >= MIN_WORDS; len--) {
-    for (let i = 0; i + len <= w.length; i++) {
-      if (hay.includes(w.slice(i, i + len).join(' '))) return true
-    }
-  }
-  return false
 }
 
 const patches = {}
@@ -149,7 +139,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py'))) {
     // The sentence decides. Only when exactly one suite holds it, because two
     // would be a guess and a guess in a coverage number is how this went wrong.
     const block = text.match(/^#\s*Reddens:[\s\S]*?(?=^[^#]|^#\s*$)/m)?.[0] ?? ''
-    for (const q of [...block.matchAll(/"((?:[^"\\]|\\.){8,}?)"/g)].map((m) => norm(m[1]))) {
+    for (const q of quotedIn(block)) {
       const hits = suiteNames.filter((n) => checksIn[n] > 0 && findsClaim(hayFor(n), q))
       if (hits.length === 1) {
         suite = hits[0]
@@ -174,11 +164,19 @@ console.log(
 console.log(`[break-coverage] ${uncovered.length} suites have NO break patch at all:`)
 for (const n of uncovered) console.log(`    ${String(checksIn[n]).padStart(3)} checks  ${n}`)
 if (unattributedNames.length) {
-  // NAMED, NOT COUNTED. Every one of these has no `# Reddens:` line at all, so
-  // nothing but reading it says which suite it belongs to — and a bare count
-  // of them is how the first version of this file hid four covered suites.
-  console.log(`\n[break-coverage] ${unattributedNames.length} patches name no check, so they`)
-  console.log('               belong to no suite here and count towards none:')
+  /*
+   * NAMED, NOT COUNTED, because a bare count of them is how the first version
+   * of this file hid four covered suites: 64 unattributed patches were
+   * published as "53 suites have never had a single break patch".
+   *
+   * What lands here now is not rot. `amp-2-opus-unpriced` reddens a Vitest
+   * file — `# Reddens: unit: model-tiers.test.ts "…"` — and a browser suite's
+   * coverage number is the wrong place to count it; there is no `test/e2e`
+   * suite it belongs to. That is why these are printed by name: the list is
+   * meant to be read and each line judged, not summed.
+   */
+  console.log(`\n[break-coverage] ${unattributedNames.length} patches name no e2e suite, so they`)
+  console.log('               belong to none here and count towards none:')
   for (const n of unattributedNames) console.log(`    ${n}`)
 }
 

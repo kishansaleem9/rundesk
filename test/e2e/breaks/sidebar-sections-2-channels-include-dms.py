@@ -1,7 +1,6 @@
 # Drop the !isDm filter, so the Channels section swallows Direct Messages —
 # which frame `06:25` draws as its OWN section with its own "+ New message".
-# Reddens: sidebar-sections: "the section draws exactly the N public channels" /
-#          "and none of the N direct messages"
+# Reddens: sidebar-sections: "a direct message was drawn in the Channels section"
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 s = io.open(p, encoding='utf-8').read()

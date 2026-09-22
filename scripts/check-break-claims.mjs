@@ -9,7 +9,7 @@
  * not existed for a day — the frame shows three cards in a carousel, and the
  * check asserting two was one of the five that passed against a broken build —
  * so the patch would, if "repaired", have been re-aimed at the wrong count. It
- * was found by reading it. There are 573 patches.
+ * was found by reading it. There are 744 patches.
  *
  * This checks three things that a `PATCH FAILED` line never will, because a
  * patch whose claim has rotted still applies perfectly:
@@ -18,99 +18,25 @@
  *   2. the suite it names exists;
  *   3. the check sentence it quotes is really in that suite.
  *
- * Quoted text is compared after normalising quotes, dashes and whitespace away
- * (see `norm`), and a sentence assembled from a template literal is matched on
- * its longest literal fragment (see `findsClaim`), because the interpolated
- * part is not in the file at all. A claim that cannot be checked either way
- * is counted as UNVERIFIABLE rather than as a failure — a check that says "I could not tell"
- * is worth more than one that guesses.
+ * The matching itself is in `scripts/lib/claim-match.mjs`, shared with
+ * `check-break-coverage.mjs` — quoted text compared after normalising quotes,
+ * dashes and whitespace away, and a sentence assembled from a template literal
+ * matched on its longest literal fragment, because the interpolated part is not
+ * in the file at all. It is one module because it was two and they had drifted;
+ * the reasoning is over there. A claim that cannot be checked either way is
+ * counted as UNVERIFIABLE rather than as a failure — a check that says "I could
+ * not tell" is worth more than one that guesses.
  *
  * It is a RATCHET rather than a verdict; the reasoning is at the bottom.
  */
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
 const SUITES = join(ROOT, 'test/e2e')
-
-/*
- * NORMALISE UNTIL ONLY THE WORDS ARE LEFT. Three separate spellings of the same
- * sentence were reported as three missing checks:
- *
- *   - the patch escapes its inner quotes (`\"My runs\"`) because it is inside a
- *     Python string; the suite does not;
- *   - the patch writes `'create a '` and the suite writes `"create a "`, so
- *     every quote character is DROPPED rather than folded to a sentinel: the
- *     suite often quotes a label INSIDE the sentence (`and "Find Blockers" now
- *     names …`) where the patch's claim does not, and a sentinel there breaks
- *     the match just as surely as the original character did;
- *   - the suite uses `’` where the patch uses `'`.
- *
- * None of those is a difference in what the check SAYS, and a checker that
- * reports them is just noise with a failure's exit code.
- */
-const norm = (s) =>
-  s
-    .replace(/\\(["'\\])/g, '$1')
-    .replace(/[\u2018\u2019\u02bc'"\u201c\u201d]/g, '')
-    .replace(/[\u2013\u2014]/g, '-')
-    .replace(/\s+/g, ' ')
-    .trim()
-
-/*
- * A CHECK SENTENCE IS OFTEN A TEMPLATE LITERAL, so its literal text is not in
- * the file at all: `the grid is four columns wide at ${VIEWPORT.width}px`
- * cannot be found by searching for "…at 1440px". Matching on a literal fragment
- * instead is the difference between a checker that finds rotted claims and one
- * that reports every interpolated sentence as rotted.
- *
- * The fragment cannot be the claim's PREFIX, which is what this tried first:
- * the interpolation is often at the START — `<name> really exists in this run's
- * own space`, `every one of the ${n} tiles offered` — leaving a prefix far too
- * short to match on. So the longest contiguous fragment ANYWHERE in the
- * sentence is looked for, longest first.
- *
- * MEASURED IN WORDS, NOT CHARACTERS, and this is where the tuning stops. A
- * 30-character floor still failed `the type picker offers all ${n} field types`
- * and `the modal's picker offers all ${n} types`, whose literal runs are 27 and
- * 30 characters — so the floor was wrong, not the claims, and the obvious move
- * is to lower it. That way lies a matcher that matches anything, which is a
- * check that cannot fail.
- *
- * Five consecutive words is the rule instead, because it is a statement about
- * how specific the evidence is rather than a number picked to make today's
- * failures go away: five words of a check's own sentence do not appear by
- * accident in a different check.
- *
- * AND IT STILL MATCHES THE WRONG CHECK WHERE TWO DIFFER BY ONE WORD.
- * `mp-7-flat-bars` claimed "the Fast tier's Speed bar is visibly longer than
- * the DEEP tier's" and the suite compares Fast against MAX. The shared
- * fragment — "Speed bar is visibly longer than the" — is six words, so the
- * claim verified and the patch was aimed at a comparison that does not exist.
- * It ran green, correctly, and only running it told anyone.
- *
- * A FRAGMENT LONG ENOUGH NOT TO APPEAR BY ACCIDENT IS NOT THE SAME AS A
- * FRAGMENT THAT PINS THE MEANING. This is a real limit of matching on text and
- * not one to tune away: requiring the whole sentence would reject every
- * template literal, which is where this started. Where a suite holds two
- * checks of the same shape over different subjects, the claim can only be
- * confirmed by the run. What is left over after this is reported, and
- * some of it is a patch paraphrasing where it should have quoted — which is a
- * real defect in the patch, and not one the matcher should be bent to hide.
- */
-const MIN_WORDS = 5
-const findsClaim = (hay, q) => {
-  if (hay.includes(q)) return true
-  const w = q.split(' ')
-  for (let len = w.length - 1; len >= MIN_WORDS; len--) {
-    for (let i = 0; i + len <= w.length; i++) {
-      if (hay.includes(w.slice(i, i + len).join(' '))) return true
-    }
-  }
-  return false
-}
 
 /** The `Reddens:` block: the line itself plus any `#` lines that continue it. */
 const reddensBlock = (lines) => {
@@ -173,8 +99,7 @@ for (const f of files) {
     unverifiable++
     continue
   }
-  // Quoted sentences, tolerating a `\"` inside one.
-  const quoted = [...block.matchAll(/"((?:[^"\\]|\\.){8,}?)"/g)].map((m) => norm(m[1]))
+  const quoted = quotedIn(block)
   if (quoted.length === 0) {
     unverifiable++
     continue
@@ -237,25 +162,34 @@ if (noClaim.length) {
 }
 
 /*
- * A RATCHET, NOT A VERDICT.
+ * A RATCHET, NOT A VERDICT — AND IT IS NOW AT ZERO, SO IT HOLDS A FLOOR
+ * RATHER THAN MEASURING A BACKLOG. KEEP THIS PARAGRAPH IN STEP WITH THE
+ * CONSTANT.
  *
- * 36 patches quote a sentence their suite does not have and 121 quote nothing
- * at all. Some of that is real rot — `teams-empty-state-1` named a check that
- * had been deleted — and some is a patch paraphrasing where it should have
- * quoted (`"laid out as two rows of four"` against the suite's `and lays the
- * eight tiles out as two rows of four`). Both are worth fixing and neither is
- * fixable in one sitting.
+ * It started at 36 patches quoting a sentence their suite does not have and
+ * 121 quoting nothing at all. Some of that was real rot — `teams-empty-state-1`
+ * named a check that had been deleted — and most of the rest was a patch
+ * paraphrasing where it should have quoted (`"laid out as two rows of four"`
+ * against the suite's `and lays the eight tiles out as two rows of four`). All
+ * 157 are closed: every paraphrase was replaced with the suite's own sentence,
+ * and the handful that could not be — `aoc-4-attach-input-unnamed` breaks the
+ * gate that runs BEFORE the first check, so there is no check sentence in
+ * existence to name — say so in prose instead of quoting runtime output, which
+ * a checker can only read as a check that does not exist.
  *
  * The two obvious ways to register a check in that state are both bad in ways
  * this audit has names for. Failing on arrival makes a red build the normal
  * state, and a check everybody steps over is worse than none. Exiting 0 with
  * the findings printed is a check that cannot fail.
  *
- * So it fails when a number GROWS. It cannot rot further — a refactor that
- * orphans another claim, or a new patch that makes none, fails the build that
- * brings it — and the baseline is a number in the file that only goes down.
+ * So it fails when a number GROWS. From zero that means it fails on the first
+ * refactor that orphans a claim and on the first patch that makes none, which
+ * is the whole of what it is for now: `unverifiable` is deliberately NOT
+ * ratcheted, because a `unit:` claim and a patch that legitimately quotes
+ * nothing both land there, and a ratchet over them would push the next author
+ * into quoting something rather than saying there is nothing to quote.
  */
-const BASELINE = { notFound: 16, noSuite: 1, noClaim: 0 }
+const BASELINE = { notFound: 0, noSuite: 0, noClaim: 0 }
 const actual = { notFound: notFound.length, noSuite: noSuite.length, noClaim: noClaim.length }
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
 if (grew.length) {

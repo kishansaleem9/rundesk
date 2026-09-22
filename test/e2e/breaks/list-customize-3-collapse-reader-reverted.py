@@ -1,6 +1,5 @@
 # And for "Collapse empty columns": the preference is live, the lanes ignore it.
-# Reddens: "switching it on folds the empty lane", "the lane really is
-#          shorter", "the chevron still opens it".
+# Reddens: list-customize: "switching it on folds the empty lane"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()
