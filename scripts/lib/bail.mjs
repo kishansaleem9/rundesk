@@ -24,6 +24,15 @@
  * early rather than one that was cut off, and the exit code is correct
  * throughout. There is nothing in the output to notice.
  *
+ * THE 113 SUITES ARE NOT AFFECTED, and this is recorded so the question is not
+ * re-opened from the grep alone. Every one of them ends in `process.exit()`,
+ * which looks like the same bug and is not, for two independent reasons:
+ * `wt-break.sh` runs a suite with `> file 2>&1`, and a FILE write in Node is
+ * synchronous — there is nothing queued to lose — and the largest suite output
+ * on disk is 11.6KB against a 64KB buffer, with none of the 945 recorded runs
+ * over 60KB. Measured, not assumed; if a suite ever grew past that AND its
+ * output were piped, both halves would have to change before it mattered.
+ *
  * So: set the code, wait for both streams to drain, then leave. The timer is a
  * backstop for a reader that has gone away entirely — `unref`'d so it cannot
  * hold the process open on its own — because a checker that HANGS instead of
