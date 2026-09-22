@@ -397,9 +397,28 @@ export function statusCategoryOf(status: TaskStatus): StatusCategory {
   return DEFAULT_STATUSES.find((s) => s.key === status)?.category ?? 'open'
 }
 
-/** Extra words the general ClickUp mapper does not know (Jira, Wrike, Monday). */
-const URGENT_WORDS = ['urgent', 'highest', 'critical', 'blocker', 'immediate']
-const LOW_WORDS = ['lowest', 'minor', 'trivial', 'deferred']
+/*
+ * Extra words the general ClickUp mapper does not know (Jira, Wrike, Monday) —
+ * and ONLY those, which is the correction.
+ *
+ * These lists held `highest`, `urgent`, `critical` and `lowest` as well, every
+ * one of which `mapPriority` already answers: its own table maps them exactly
+ * and its containment rules try `highest` and `lowest` BEFORE `high` and `low`
+ * so a longer word cannot be eaten by the shorter one inside it. Four entries
+ * that decided nothing — the duplicated list, in the function whose doc comment
+ * says it delegates the common vocabulary precisely so the two cannot drift.
+ *
+ * It cost a break patch. `imports-9-priorityscale` emptied `URGENT_WORDS` to
+ * make Jira's "Highest" import as high, and ran GREEN: `mapPriority` caught it
+ * twice over, so the check could not see the change.
+ *
+ * What stays is what `mapPriority` genuinely cannot express. Its table is an
+ * EXACT match, so `blocker`, `immediate`, `minor`, `trivial` and `deferred`
+ * still need a containment pass here — "Blocker - P1" hits no exact key, and
+ * none of `mapPriority`'s containment rules mention it.
+ */
+const URGENT_WORDS = ['blocker', 'immediate']
+const LOW_WORDS = ['minor', 'trivial', 'deferred']
 
 /**
  * Normalise a priority cell. Delegates the common vocabulary to
@@ -424,8 +443,12 @@ export function normalizePriority(raw: string | undefined, scale: PriorityScale)
   }
 
   if (URGENT_WORDS.some((w) => v.includes(w))) return 'urgent'
-  // "lowest"/"minor" must beat mapPriority's substring rules, which would read
-  // "highest" as high and never see "lowest" at all.
+  // These two run before `mapPriority` because they are words it has no rule
+  // for at all, not because they have to beat its rules. The comment here used
+  // to say `"lowest"/"minor" must beat mapPriority's substring rules, which
+  // would read "highest" as high and never see "lowest" at all` — a stale
+  // reason: `mapPriority` orders `highest` and `lowest` ahead of `high` and
+  // `low` for exactly that reason, and says so in its own comment.
   if (LOW_WORDS.some((w) => v.includes(w))) return 'low'
   return mapPriority(v)
 }
