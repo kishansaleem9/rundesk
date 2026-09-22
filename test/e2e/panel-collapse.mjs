@@ -522,6 +522,32 @@ try {
     }
   }
 
+  /*
+   * PUT IT BACK. A CHECK THAT CHANGES GLOBAL STATE AND LEAVES IT CHANGED
+   * CASCADES INTO EVERY SECTION AFTER IT.
+   *
+   * `pc-3-chord-fires-while-typing` makes the chord fire inside a text field,
+   * so the sidebar ends this section COLLAPSED — and everything below reads a
+   * sidebar that is not there. It predicted one check and reddened eight, five
+   * of which were about favourites and the space tree, plus five that never ran
+   * at all. Seven of those eight are the state this section left behind rather
+   * than anything the patch broke.
+   *
+   * The collapse is a persisted preference, so the reset goes through the same
+   * store the UI does and is then waited on rather than assumed.
+   */
+  await page.evaluate(() => {
+    try {
+      const raw = JSON.parse(localStorage.getItem('rundesk.sidebar') ?? '{}')
+      raw.state = { ...(raw.state ?? {}), collapsed: false }
+      localStorage.setItem('rundesk.sidebar', JSON.stringify(raw))
+    } catch {
+      /* storage blocked — the reload below still re-reads the server copy */
+    }
+  })
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForTimeout(3000)
+
   // ---------------------------------------------------------------------
   console.log('\n▶ G12-8 — a notification can be put back to unread')
   // ---------------------------------------------------------------------
@@ -545,22 +571,13 @@ try {
    * unreached ones as failures naming why.
    */
   check(!!seeded, 'a notification exists to mark unread', 'could not seed one')
-  const unreadChain = [
-    ['and it can be marked read first', null],
-    ['a read row offers Mark unread', null],
-    ['and pressing it really un-reads it', null],
-  ]
-  let chainAt = 0
-  const chainCheck = (cond, why) => {
-    const [good] = unreadChain[chainAt++]
-    check(cond, good, why ?? '')
-  }
-  const chainRest = (why) => {
-    while (chainAt < unreadChain.length) {
-      const [good] = unreadChain[chainAt++]
-      check(false, good, why)
-    }
-  }
+  const unread = chain(
+    'and it can be marked read first',
+    'a read row offers Mark unread',
+    'and pressing it really un-reads it',
+  )
+  const chainCheck = (cond, why) => unread.step(cond, why ?? '')
+  const chainRest = (why) => unread.rest(why)
   if (!seeded) {
     chainRest('skipped: no notification could be seeded')
   } else {

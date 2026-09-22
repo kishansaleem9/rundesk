@@ -12,14 +12,27 @@
 # one navigation away. 56px of avatars is the difference between collapsing a
 # panel and closing it.
 #
-# Three checks, and they divide the claim: the rail exists, it is 56px and not
-# zero, and it still carries the channels. A build that left an empty 56px
-# column would fail only the third; this fails all three, because the element is
-# not rendered at all.
+# PREDICTED THREE AND IT REDDENED FIVE, AND TOOK THE RUN DOWN WITH IT. The
+# three predicted were the rail existing, its width and its contents. The two
+# extra are honest: `reclaiming 216px of chrome, which is the whole complaint`
+# subtracts one box from the other and gets `272 -> undefined`, and the fresh
+# second browser finds no rail either, because the element is not rendered for
+# anybody.
+#
+# Then `getByTestId('chat-panel-expand').click()` spent thirty seconds retrying
+# a button that lives INSIDE the rail this patch hid, threw, and the run ended
+# on `3 passed, 5 failed` with `✗ only 8 of 56 checks ran`. Forty-eight checks
+# did not run, and the harness's own record of that — a patch line with five
+# FAIL lines under it — is what a patch reddening five checks looks like. The
+# suite's four collapse/expand clicks are bounded at eight seconds now and the
+# checks that needed them fail with the reason, so this reports its five and
+# the run reaches its own totals.
 #
 # Reddens: panel-collapse: "collapsing leaves a rail" and
 #   "at 56px, not zero — channels stay one click away" and
-#   "and the rail still carries the channels"
+#   "and the rail still carries the channels" and
+#   "reclaiming 216px of chrome, which is the whole complaint" and
+#   "the preference is the person’s, not the machine’s"
 import io
 p = '/home/user/rundesk/apps/web/src/components/chat/chat-sidebar.tsx'
 a = '        className="hidden md:flex w-[56px] shrink-0 flex-col items-center border-r border-border/80 bg-[#fbfbfc] py-2 dark:bg-[#16181d]"\n'
