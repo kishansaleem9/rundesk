@@ -227,6 +227,34 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
     unknown.push(`${name} — no run log here`)
     continue
   }
+  const text = readFileSync(join(BREAKS, f), 'utf8')
+  const suite = suiteOf(name, text)
+  /*
+   * WHICH TREE FIRST, AND EVERY OTHER QUESTION AFTER IT.
+   *
+   * This guard sat five checks lower, and the order was the same mistake the
+   * freshness checker made: a log that CRASHED against an older suite was
+   * reported as one this file cannot read. `planner-command-bar-1` and
+   * `po-1-panel-never-shows` are exactly that — both died on an uncaught
+   * TimeoutError before their totals, and both suites were given the catch that
+   * fixes it hours later, with the comment in `planner-command-bar.mjs` naming
+   * `po-1` as the reason. Their logs are pre-fix history filed under "the
+   * reader is broken".
+   *
+   * If a measurement is not about this tree, nothing else about it is worth
+   * asking. `brk-<patch>.log` carries no commit of its own — it is the suite's
+   * raw output — so the sha comes from the per-suite log that named this patch
+   * in the same run, which is what `measuredAt` reads.
+   */
+  const rec = measured.get(name)
+  const moved = notCurrent(rec, patchDeps(text, suite))
+  if (moved.length) {
+    drifted.push(
+      `${name} — measured at ${rec?.sha ?? 'an unrecorded commit'}, since when ` +
+        `${moved.length} file(s) the run depended on changed (${moved[0]})`,
+    )
+    continue
+  }
   // The colours come off first. `\bFAIL\b` does not match `\x1b[31mFAIL`,
   // because `m` is a word character — the bug that kept `wt-break.sh` from
   // recording a single failure sentence for 102 of the 113 suites.
@@ -255,35 +283,9 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * is the same answer: it is not a statement about the file as it is now.
    */
   const ran = Number(totals[1]) + Number(totals[2]) + Number(totals[3] ?? 0)
-  const suite = suiteOf(name, readFileSync(join(BREAKS, f), 'utf8'))
   const want = suite ? expectedIn[suite] : 0
   if (!suite || !want) {
     unknown.push(`${name} — no suite with a declared check count to compare the log against`)
-    continue
-  }
-  /*
-   * AND IT HAS TO BE A RUN OF THE TREE AS IT IS NOW.
-   *
-   * Every guard above asks whether the log is a complete run of the right
-   * suite. None of them asks whether that suite, or the product under it, is
-   * still the one on disk — so a green from before its own fix reads exactly
-   * like a green from after it. That is the shape of all nine greens this file
-   * currently reports: `fd-7-toggle-latches` was measured at 06:27 against a
-   * check the suite moved at 06:29, and the fix was FOR that patch.
-   *
-   * `brk-<patch>.log` carries no commit of its own — it is the suite's raw
-   * output — so the sha comes from the per-suite log that named this patch in
-   * the same run, which is what `measuredAt` reads. A log about a tree that has
-   * since moved is UNKNOWN: not a green, not a reddening, and counted out loud
-   * so that "9 greens" cannot mean "9 unmeasured patches" again.
-   */
-  const rec = measured.get(name)
-  const moved = notCurrent(rec, patchDeps(readFileSync(join(BREAKS, f), 'utf8'), suite))
-  if (moved.length) {
-    drifted.push(
-      `${name} — measured at ${rec?.sha ?? 'an unrecorded commit'}, since when ` +
-        `${moved.length} file(s) the run depended on changed (${moved[0]})`,
-    )
     continue
   }
   /*
@@ -298,7 +300,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * Only the length guard is waived. The pass-count assertion below still has
    * to hold, because that is the one that catches a log this file cannot parse.
    */
-  if (ran !== want && !declaresShortRun(readFileSync(join(BREAKS, f), 'utf8'))) {
+  if (ran !== want && !declaresShortRun(text)) {
     unknown.push(
       `${name} — the log ran ${ran} checks and ${suite} declares ${want}: a short run, a run of ` +
         'another suite, or a run that predates a check this suite has since grown',
