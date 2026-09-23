@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
+import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { eq, and, or, asc, desc, ilike, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
@@ -90,6 +90,7 @@ import { assertCanCreateInSpace } from '../../common/permissions/container-acces
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { pickUpdatable } from './task-update-fields'
+import { CustomFieldsService } from '../custom-fields/custom-fields.service'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -204,6 +205,10 @@ export class TasksService {
     private r2: R2Service,
     private calendarSync: CalendarSyncService,
     private security: SecurityService,
+    // The export's custom-field columns read through the same method as the
+    // task's own field panel. Optional so a service built by hand in a unit
+    // test, which never exports, needs no eleventh argument.
+    @Optional() private customFields?: CustomFieldsService,
   ) {}
 
   /**
@@ -2778,16 +2783,29 @@ export class TasksService {
         ? COLUMNS.filter((c) => c.key === 'title')
         : mode === 'all'
           ? COLUMNS
-          : // "Visible columns" is the view's own set when the caller names one,
-            // and the list's default shape when it does not.
+          : // "Visible columns" is the view's own set, IN THE VIEW'S ORDER, when
+            // the caller names one, and the list's default shape when it does not.
             opts.fields?.length
-            ? COLUMNS.filter((c) => opts.fields!.includes(c.key))
+            ? opts.fields.map((k) => COLUMNS.find((c) => c.key === k)).filter((c): c is (typeof COLUMNS)[number] => Boolean(c))
             : COLUMNS.filter((c) => ['title', 'status', 'assignees', 'priority', 'dueDate'].includes(c.key))
+
+    /*
+     * CUSTOM FIELDS — `cf:<definition id>` in `fields`, or every one of the
+     * list's in "All columns". Neither was ever exported: the view's own
+     * columns never reached this method (the web sent no `fields`), and
+     * `COLUMNS` has no custom field in it.
+     */
+    const custom = await this.exportCustomColumns(
+      listId,
+      rows as Array<Record<string, any>>,
+      mode === 'all' ? null : mode === 'visible' ? (opts.fields ?? []).filter((k) => k.startsWith('cf:')).map((k) => k.slice(3)) : [],
+      date,
+    )
 
     // A `fields` list naming nothing we know would export an empty row per
     // task, which reads as "the list is empty" rather than "you asked for
     // columns that do not exist".
-    const columns = chosen.length > 0 ? chosen : COLUMNS.filter((c) => c.key === 'title')
+    const columns = chosen.length + custom.length > 0 ? [...chosen, ...custom] : COLUMNS.filter((c) => c.key === 'title')
 
     const name = list?.name ?? 'list'
     const format: ExportFormat = opts.format === 'xlsx' ? 'xlsx' : 'csv'
@@ -2842,6 +2860,92 @@ export class TasksService {
           : 'text/csv; charset=utf-8',
       body: format === 'xlsx' ? toXlsx(name, headers, cells) : toCsv(headers, cells),
     }
+  }
+
+  /**
+   * The export's custom-field columns: each asked-for definition (all of the
+   * list's when `ids` is null), in the order asked, read per task through
+   * `CustomFieldsService.getValuesForTask` — the method the task's own field
+   * panel uses — so a formula or an automatic progress exports the number the
+   * screen shows, not a second computation of it.
+   */
+  private async exportCustomColumns(
+    listId: string,
+    rows: Array<Record<string, any>>,
+    ids: string[] | null,
+    date: (v: unknown) => string | null,
+  ): Promise<Array<{ key: string; header: string; read: (t: Record<string, any>) => unknown }>> {
+    if (!this.customFields || rows.length === 0 || (ids && ids.length === 0)) return []
+    const ctx = await this.resolveWorkspaceForList(listId)
+    if (!ctx) return []
+    type Read = Awaited<ReturnType<CustomFieldsService['getValuesForTask']>>
+    const perTask = new Map<string, Read>()
+    for (let i = 0; i < rows.length; i += 10) {
+      const chunk = rows.slice(i, i + 10)
+      const reads = await Promise.all(chunk.map((t) => this.customFields!.getValuesForTask(ctx.workspaceId, t.id as string)))
+      chunk.forEach((t, j) => perTask.set(t.id as string, reads[j]))
+    }
+    const defsById = new Map<string, Read[number]['definition']>()
+    for (const read of perTask.values()) for (const { definition } of read) defsById.set(definition.id, definition)
+    const defs = ids
+      ? ids.map((id) => defsById.get(id)).filter((d): d is Read[number]['definition'] => Boolean(d))
+      : [...defsById.values()].sort((a, b) => a.position - b.position)
+    if (defs.length === 0) return []
+
+    // Names for the ids that people, tasks and files fields hold — one query each.
+    const idsOf = (type: string) =>
+      [...new Set([...perTask.values()].flatMap((read) =>
+        read.filter((r) => r.definition.type === type && defs.some((d) => d.id === r.definition.id)).flatMap((r) => (Array.isArray(r.value) ? (r.value as string[]) : [])),
+      ))]
+    const peopleIds = idsOf('people')
+    const taskIds = idsOf('tasks')
+    const fileIds = idsOf('files')
+    const people = peopleIds.length
+      ? await this.db.select({ id: users.id, name: users.displayName, email: users.email }).from(users).where(inArray(users.id, peopleIds))
+      : []
+    const titles = taskIds.length ? await this.db.select({ id: tasks.id, title: tasks.title }).from(tasks).where(inArray(tasks.id, taskIds)) : []
+    const files = fileIds.length
+      ? await this.db.select({ id: taskAttachments.id, name: taskAttachments.fileName }).from(taskAttachments).where(inArray(taskAttachments.id, fileIds))
+      : []
+    const personName = new Map(people.map((p) => [p.id, p.name || p.email]))
+    const taskTitle = new Map(titles.map((t) => [t.id, t.title]))
+    const fileName = new Map(files.map((f) => [f.id, f.name]))
+
+    const show = (def: Read[number]['definition'], value: unknown): unknown => {
+      if (value === null || value === undefined) return ''
+      const options = (def.options as Array<{ label: string; value: string }> | null) ?? []
+      const label = (v: string) => options.find((o) => o.value === v)?.label ?? v
+      const list = Array.isArray(value) ? (value as string[]) : []
+      switch (def.type) {
+        case 'date':
+          return date(value)
+        case 'checkbox':
+          return value === true ? 'Yes' : 'No'
+        case 'dropdown':
+          return label(String(value))
+        case 'labels':
+          return list.map(label).join(', ')
+        case 'people':
+          return list.map((id) => personName.get(id) ?? id).join(', ')
+        case 'tasks':
+          return list.map((id) => taskTitle.get(id) ?? id).join(', ')
+        case 'files':
+          return list.map((id) => fileName.get(id) ?? id).join(', ')
+        case 'voting':
+          return list.length
+        case 'signature':
+          return value ? 'Signed' : ''
+        default:
+          // text, long text, url, email, phone, location, t-shirt size — and the
+          // numbers: number, money, rating, progress (either kind), formula.
+          return value
+      }
+    }
+    return defs.map((def) => ({
+      key: `cf:${def.id}`,
+      header: def.name,
+      read: (t: Record<string, any>) => show(def, perTask.get(t.id as string)?.find((r) => r.definition.id === def.id)?.value),
+    }))
   }
 
   /**

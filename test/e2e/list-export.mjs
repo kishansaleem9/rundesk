@@ -25,7 +25,11 @@
  *
  *   node test/e2e/list-export.mjs --api 3011
  */
-import { signInApi } from './lib/signin.mjs'
+import path from 'node:path'
+import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { resolveChromium, launchOptions } from './lib/playwright.mjs'
+import { startLocalStack } from './lib/local-stack.mjs'
+import { waitUntil } from './lib/wait.mjs'
 import { xlsxRows, unzip } from './lib/unzip.mjs'
 import { openDb } from './lib/db.mjs'
 
@@ -35,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure too. */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 30
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -47,6 +51,8 @@ const ME = {
 let passed = 0
 let failed = 0
 let sql = null
+let stack = null
+let browser = null
 const TAG = `lxp-${Date.now()}`
 const chk = (cond, good, bad) => {
   if (cond) { passed += 1; console.log(`  \x1b[32mPASS\x1b[0m ${good}`) }
@@ -312,11 +318,99 @@ try {
     `view=board returned ${paidBoard.status} with header ${JSON.stringify(paidBoard.text.split('\r\n')[0])}`,
   )
 
+  /*
+   * ══ VISIBLE COLUMNS ARE THE VIEW'S ══
+   *
+   * `product-siblings/export-visible-columns-ignores-view`: the panel never
+   * sent `fields`, so "Visible columns" was always the same five, whatever
+   * the view hid; the web's column keys were not the server's; and no custom
+   * field was ever a column. ClickUp's Visible columns exports what the view
+   * shows, custom fields included.
+   */
+  console.log('\n▶ Visible columns are the view’s — its fields, its order, its custom fields')
+  const shown = await R(`/tasks/list/${list.id}/export?columns=visible&fields=title,dueDate,assignees`)
+  chk(
+    shown.text.split('\r\n')[0] === '"Name","Due date","Assignees"',
+    'Visible columns exports the fields the view names, in its order — and nothing it hid',
+    `header was ${JSON.stringify(shown.text.split('\r\n')[0])}`,
+  )
+  const listRow = (await A(`/lists/${list.id}`)).data
+  const stage = await A(`/workspaces/${workspaceId}/projects/${listRow?.projectId}/custom-fields`, {
+    method: 'POST',
+    body: { name: `Stage ${stamp}`, type: 'dropdown', options: [{ label: 'Ready to ship', value: 'ready' }, { label: 'Parked', value: 'parked' }] },
+  })
+  if (stage.status >= 300 || !stage.data?.id) throw new Error(`could not make the custom field: ${stage.status}`)
+  const datedTask = ((await A(`/tasks/list/${list.id}`)).data ?? []).find((t) => t.title === DATED)
+  const setStage = await A(`/workspaces/${workspaceId}/tasks/${datedTask?.id}/custom-fields/${stage.data.id}`, { method: 'PUT', body: { value: 'ready' } })
+  if (setStage.status >= 300) throw new Error(`could not set the custom field: ${setStage.status}`)
+  const withField = await R(`/tasks/list/${list.id}/export?columns=visible&fields=title,cf:${stage.data.id}`)
+  const fieldLines = withField.text.split('\r\n')
+  chk(
+    fieldLines[0] === `"Name","Stage ${stamp}"` && fieldLines.some((l) => l === `"${DATED}","Ready to ship"`),
+    'a custom field the view shows is a column of its own, a dropdown written as its label',
+    `header ${JSON.stringify(fieldLines[0])}; the dated task's row ${JSON.stringify(fieldLines.find((l) => l.includes(DATED)))}`,
+  )
+  const everything = await R(`/tasks/list/${list.id}/export?columns=all`)
+  chk(
+    everything.text.split('\r\n')[0].includes(`"Stage ${stamp}"`),
+    'and All columns carries every custom field of the list',
+    `header was ${JSON.stringify(everything.text.split('\r\n')[0])}`,
+  )
+
+  // ON SCREEN: what the panel actually asks for, read off the request.
+  const chromium = await resolveChromium()
+  stack = await startLocalStack({ dist: path.resolve(import.meta.dirname, '../..', argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
+  browser = await chromium.launch(launchOptions())
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })).newPage()
+  await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+  await page.fill('input[type=email]', ME.email)
+  await page.fill('input[type=password]', ME.password)
+  await page.click('button[type=submit]')
+  await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
+  await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
+  await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${listRow?.projectId}/${list.id}`, { waitUntil: 'domcontentloaded' })
+  /** Open Customize, choose Visible columns, press Download — and return the `fields` it asked for. */
+  const exportedFields = async () => {
+    const asked = page.waitForRequest((r) => r.url().includes(`/tasks/list/${list.id}/export?`), { timeout: 20_000 }).catch(() => null)
+    // Customize, then its Export view section — each a <details> of its own,
+    // opened only when shut (a click on an open one would close it).
+    for (const id of ['list-customize', 'list-export-section']) {
+      const details = page.getByTestId(id)
+      if (!(await details.evaluate((el) => el.open).catch(() => true))) {
+        await details.locator(':scope > summary').click({ timeout: 15_000 }).catch(() => {})
+      }
+    }
+    await page.getByTestId('list-export-visible').click({ timeout: 10_000 }).catch(() => {})
+    await page.getByTestId('list-export-download').click({ timeout: 10_000 }).catch(() => {})
+    const request = await asked
+    await page.keyboard.press('Escape').catch(() => {})
+    return request ? (new URL(request.url()).searchParams.get('fields') ?? '(none)') : '(no request)'
+  }
+  await page.getByTestId('list-columns').locator(':scope > summary').click({ timeout: 20_000 }).catch(() => {})
+  await page.getByTestId('list-column-priority').uncheck({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('list-columns').locator(':scope > summary').click({ timeout: 5000 }).catch(() => {})
+  const listFields = await exportedFields()
+  chk(
+    listFields === 'title,status,assignees,dueDate',
+    'in the list, with Priority hidden, the download asks for the list’s columns and not Priority',
+    `it asked for fields=${listFields}`,
+  )
+  await page.getByTestId('work-view-tab-type-table').click({ timeout: 15_000 }).catch(() => {})
+  await waitUntil(async () => (await page.getByTestId('list-customize').count()) > 0, { timeoutMs: 10_000 })
+  const tableFields = await exportedFields()
+  chk(
+    tableFields.split(',').includes(`cf:${stage.data.id}`) && tableFields.startsWith('title,'),
+    'and in the table it asks for the custom fields the table shows',
+    `it asked for fields=${tableFields}`,
+  )
+
   await A(`/lists/${list.id}`, { method: 'DELETE' }).catch(() => {})
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
+  await browser?.close().catch(() => {})
+  stack?.close()
   if (sql) {
     // Cascades to the space/project/list under it. A Free-plan workspace left
     // lying around is one another suite's `pickWorkspace` can wander into.

@@ -516,6 +516,15 @@ type SubtaskMode = 'collapsed' | 'expanded' | 'separate'
  * Name/title is deliberately absent: the reference will not let you hide it
  * either, and a row with no name is not a row.
  */
+/** The export's name for each built-in column (`GET /tasks/list/:id/export?fields=`). */
+const EXPORT_KEY_OF_COLUMN: Record<string, string> = {
+  'col:status': 'status',
+  'col:priority': 'priority',
+  'col:assignees': 'assignees',
+  'col:due': 'dueDate',
+  'col:created': 'createdAt',
+}
+
 const BUILTIN_COLUMNS: { key: string; labelKey: TranslationKey; views: ('list' | 'table')[] }[] = [
   { key: 'col:status', labelKey: 'list.columns.status', views: ['table'] },
   { key: 'col:priority', labelKey: 'list.columns.priority', views: ['list', 'table'] },
@@ -1967,6 +1976,20 @@ function ListDetail() {
   }, [tasks, statusFilter, columnFilters, taskSearch, filterRules, projectFields, customFieldByTask, sort, statusOrder, showClosed, assignedViaIds])
 
   /*
+   * WHAT "VISIBLE COLUMNS" MEANS HERE: the columns this view draws, in its
+   * order. The table draws its built-in columns and the project's custom
+   * fields; the list draws its built-ins, with status as its groups. Hidden
+   * ones are left out, because hiding a column is what "visible" is about.
+   */
+  const exportFields = useMemo(() => {
+    if (activeView !== 'table' && activeView !== 'list') return undefined
+    const view = activeView
+    const builtIn = BUILTIN_COLUMNS.filter((c) => c.views.includes(view) && !hiddenFields.has(c.key)).map((c) => EXPORT_KEY_OF_COLUMN[c.key])
+    const custom = view === 'table' ? projectFields.filter((f) => !hiddenFields.has(f.id)).map((f) => `cf:${f.id}`) : []
+    return ['title', ...(view === 'list' ? ['status'] : []), ...builtIn, ...custom]
+  }, [activeView, hiddenFields, projectFields])
+
+  /*
    * §V2-07 frame `11:00` — the strings the List view's two annotation switches
    * put on a row, resolved once here rather than per row.
    *
@@ -3110,6 +3133,7 @@ function ListDetail() {
               listId={listId}
               includeClosed={showClosed}
               includeArchived={showArchived}
+              exportFields={exportFields}
               /*
                * §V2-13 `[10:42]` — the download follows the view you are ON.
                * Standing on Board asks for the board shape (and is the paid
@@ -7175,6 +7199,7 @@ function CustomizeViewPanel({
   includeClosed,
   includeArchived,
   exportView,
+  exportFields,
   requireBoardExport,
   boardExportLocked,
   boardExportPlan,
@@ -7203,6 +7228,13 @@ function CustomizeViewPanel({
   onShowClosed,
 }: {
   listId: string
+  /**
+   * The columns the view is showing, as the export names them (`title`,
+   * `priority`, `dueDate`, `cf:<field id>` …), in the view's order. "Visible
+   * columns" sends these; without them the server can only guess the five it
+   * used to export for every view, whatever the view hid or added.
+   */
+  exportFields?: string[]
   /**
    * §V2-13 `[10:38]`–`[10:49]` — which shape the Download button asks for.
    * `'board'` is the paid artifact; `'list'` is the free one.
@@ -7324,6 +7356,7 @@ function CustomizeViewPanel({
         includeArchived: String(includeArchived),
         view: exportView,
       })
+      if (columns === 'visible' && exportFields?.length) query.set('fields', exportFields.join(','))
       // `downloadFile` already carries the Authorization header, refreshes an
       // expired token and revokes the object URL — an <a href> can do none of
       // those, and a second copy of it here would be a second thing to fix.

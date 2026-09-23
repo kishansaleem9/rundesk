@@ -21,11 +21,13 @@ import { CalendarSyncModule } from '../calendar-sync/calendar-sync.module'
 import { SecurityModule } from '../security/security.module'
 import { EmailToTaskModule } from '../email-to-task/email-to-task.module'
 import { PlansModule } from '../plans/plans.module'
+import { CustomFieldsModule } from '../custom-fields/custom-fields.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 
 @Module({
   imports: [
     RealtimeModule,
+    CustomFieldsModule,
     AutomationsModule,
     WebhooksModule,
     SlackModule,
