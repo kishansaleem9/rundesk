@@ -43,3 +43,5 @@ apps/web/.build-assets
 # commits one; it is machine-specific and meaningless to anybody else.
 vite.config.ts.timestamp-*.mjs
 *.timestamp-*.mjs
+# stale-chunk-recovery builds its two releases in a throwaway copy of apps/web
+apps/.web-release-*/

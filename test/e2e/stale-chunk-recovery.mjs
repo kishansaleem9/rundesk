@@ -94,24 +94,40 @@ const CHANGED_BY_RELEASE_B = [
 /** Build apps/web into `dest`. `marker` perturbs the sources above so the
  *  release's chunk hashes move, exactly as a real code change would. A comment
  *  wouldn't do it — minification strips those and the hash would be unchanged;
- *  it has to be a statement that survives into the output. */
+ *  it has to be a statement that survives into the output.
+ *
+ *  BUILT FROM A COPY, NEVER FROM `apps/web`. This used to append its marker to
+ *  the two source files in the shared tree, run `vite build` into the shared
+ *  `apps/web/dist`, and write the sources back. The content came back; the
+ *  damage did not go with it. Every other lane's bundle then looked older than
+ *  its source — one sweep on 23 September had 26 suites refused on two lanes
+ *  after this one ran — a build running at the same moment would have baked
+ *  the marker in, and in CI the shared `dist` that every later step serves was
+ *  left as release B. The copy sits beside `apps/web`, at the same depth, so
+ *  the config's relative paths and the symlinked `node_modules` resolve exactly
+ *  as they do for the real package; nothing under `apps/web` is written. */
 function buildRelease(dest, marker) {
-  const originals = new Map()
-  if (marker) {
-    for (const rel of CHANGED_BY_RELEASE_B) {
-      const file = path.join(WEB, rel)
-      const source = fs.readFileSync(file, 'utf8')
-      originals.set(file, source)
-      fs.writeFileSync(file, `${source}\nconsole.debug('rundesk release ${marker}')\n`)
-    }
-  }
+  const copy = path.join(REPO, 'apps', `.web-release-${process.pid}-${marker ?? 'a'}`)
+  const skip = [path.join(WEB, 'node_modules'), path.join(WEB, 'dist')]
+  fs.rmSync(copy, { recursive: true, force: true })
   try {
-    execFileSync('pnpm', ['exec', 'vite', 'build'], { cwd: WEB, stdio: 'pipe' })
+    fs.cpSync(WEB, copy, {
+      recursive: true,
+      filter: (src) => !skip.some((s) => src === s || src.startsWith(s + path.sep)),
+    })
+    fs.symlinkSync(path.join(WEB, 'node_modules'), path.join(copy, 'node_modules'))
+    if (marker) {
+      for (const rel of CHANGED_BY_RELEASE_B) {
+        const file = path.join(copy, rel)
+        fs.writeFileSync(file, `${fs.readFileSync(file, 'utf8')}\nconsole.debug('rundesk release ${marker}')\n`)
+      }
+    }
+    execFileSync(path.join(WEB, 'node_modules', '.bin', 'vite'), ['build'], { cwd: copy, stdio: 'pipe' })
+    fs.rmSync(dest, { recursive: true, force: true })
+    fs.cpSync(path.join(copy, 'dist'), dest, { recursive: true })
   } finally {
-    for (const [file, source] of originals) fs.writeFileSync(file, source)
+    fs.rmSync(copy, { recursive: true, force: true })
   }
-  fs.rmSync(dest, { recursive: true, force: true })
-  fs.cpSync(path.join(WEB, 'dist'), dest, { recursive: true })
 }
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rundesk-stale-'))
