@@ -28,7 +28,11 @@ export class TaskDependenciesController {
   }
 
   @Delete(':depId')
-  remove(@Param('depId') depId: string, @CurrentUser() user: CurrentUserPayload) {
-    return this.tasks.removeDependency(depId, user.id)
+  remove(
+    @Param('taskId') taskId: string,
+    @Param('depId') depId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.tasks.removeDependency(taskId, depId, user.id)
   }
 }

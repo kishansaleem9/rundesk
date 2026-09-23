@@ -169,6 +169,16 @@ const DESCRIPTION_REVISION_WINDOW_MS = 2 * 60 * 1000
  * the UI renders the key and everything that matters reads the category.
  */
 const CLOSED_STATUS_KEYS = new Set(['done', 'complete', 'completed', 'closed', 'cancelled'])
+
+/**
+ * Why a person cannot be put on a task — see `assertPersonCanSeeTask`. One
+ * sentence per role, so the assignee picker and the follower picker each say
+ * what happened in the words of what was tried.
+ */
+const PERSON_CANNOT_SEE = {
+  assignee: "That person can't see this task, so it can't be assigned to them",
+  follower: "That person can't see this task, so they can't follow it",
+} as const
 function inferCategoryFromKey(key: string): StatusCategory {
   return CLOSED_STATUS_KEYS.has(key.toLowerCase()) ? 'closed' : 'open'
 }
@@ -679,6 +689,9 @@ export class TasksService {
         spaceVisibility: spaces.visibility,
         projectId: projects.id,
         projectVisibility: projects.visibility,
+        listVisibility: lists.visibility,
+        listCreatedById: lists.createdById,
+        taskVisibility: tasks.visibility,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -687,7 +700,54 @@ export class TasksService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (!ctx) throw new NotFoundException('Task not found')
+    const access = await this.assertContainerReadAccess(ctx, actorId)
+    /*
+     * PER-ITEM PRIVACY, as `ResourceMemberGuard` enforces it on the routes that
+     * carry it: a private list is its creator's and the managers'; a private
+     * task is its creator's, its assignees' and the managers'. This check did
+     * not look, so every service path asking "can this person see the task" —
+     * a parent, a dependency, a follower, a saved comment — said yes for a
+     * private one the task's own GET refuses.
+     */
+    if (ctx.listVisibility === 'private' || ctx.taskVisibility === 'private') {
+      const isManager = isManagerRole(access.workspaceRole)
+      if (!canSeePrivateItem({ visibility: ctx.listVisibility, createdById: ctx.listCreatedById }, { userId: actorId, isManager })) {
+        throw new ForbiddenException('This list is private')
+      }
+      if (ctx.taskVisibility === 'private') {
+        const [assigned] = await this.db
+          .select({ userId: taskAssignees.userId })
+          .from(taskAssignees)
+          .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
+          .limit(1)
+        if (
+          !canSeePrivateItem(
+            { visibility: ctx.taskVisibility, createdById: ctx.createdById },
+            { userId: actorId, isManager, isAssignee: Boolean(assigned) },
+          )
+        ) {
+          throw new ForbiddenException('This task is private')
+        }
+      }
+    }
+    return access
+  }
 
+  /**
+   * Whether `actorId` may read what sits in this container — the workspace, a
+   * private space, a private project. Split out of `assertTaskReadAccess` so
+   * the same rule answers for a task that does not exist YET: `createTask`
+   * checks its assignees against the list before it writes anything.
+   */
+  private async assertContainerReadAccess<
+    C extends {
+      workspaceId: string
+      spaceId: string
+      spaceVisibility: string | null
+      projectId: string | null
+      projectVisibility: string | null
+    },
+  >(ctx: C, actorId: string): Promise<C & { workspaceRole: string }> {
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
@@ -696,7 +756,8 @@ export class TasksService {
     if (!membership) throw new NotFoundException('Workspace not found')
 
     // Managers/admins/super_admins bypass private-container membership.
-    if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
+    const withRole = { ...ctx, workspaceRole: membership.role as string }
+    if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return withRole
 
     // A private space requires the actor to be a member of it.
     if (ctx.spaceVisibility === 'private') {
@@ -726,7 +787,7 @@ export class TasksService {
       }
     }
 
-    return ctx
+    return withRole
   }
 
   /**
@@ -750,16 +811,86 @@ export class TasksService {
    * private space or project they cannot see.
    */
   private async assertParentInWorkspace(parentTaskId: string, workspaceId: string, actorId: string) {
-    const [parent] = await this.db
+    await this.assertTaskReference(parentTaskId, workspaceId, actorId, 'Parent task not found')
+  }
+
+  /**
+   * ANY task a caller points at from another task obeys the parent's rule: the
+   * same workspace, and one the caller can read. A dependency is the parent
+   * defect in its sibling — `getTask` hands back each dependency's `related`
+   * task row whole, so a dependency on a task in another workspace was a way
+   * to read it, and that task's own dependency list then showed work from a
+   * tenant it has never heard of.
+   */
+  private async assertTaskReference(otherTaskId: string, workspaceId: string, actorId: string, notFound: string) {
+    const [other] = await this.db
       .select({ workspaceId: spaces.workspaceId })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(tasks.id, parentTaskId))
+      .where(eq(tasks.id, otherTaskId))
       .limit(1)
-    if (!parent || parent.workspaceId !== workspaceId) throw new NotFoundException('Parent task not found')
-    await this.assertTaskReadAccess(parentTaskId, actorId)
+    if (!other || other.workspaceId !== workspaceId) throw new NotFoundException(notFound)
+    await this.assertTaskReadAccess(otherTaskId, actorId)
+  }
+
+  /**
+   * The people a caller ATTACHES to a task — an assignee, a follower — must be
+   * able to see it. Each is told about the task from then on, so one outside
+   * the workspace was told another tenant's work, and one outside a private
+   * space or project was told the titles that container exists to keep from
+   * them. And being assigned something you cannot open is simply broken.
+   *
+   * `POST /tasks/:id/watchers` had no access check at all, in the route or
+   * here: an account that shared no workspace with the task could follow it by
+   * id — and the answer was the whole task, title and description, from a
+   * route whose GET twin refuses the same account with 403.
+   *
+   * 400 with the reason, not 404: the caller can see the task, and what they
+   * need to know is why this person cannot be put on it.
+   */
+  private async assertPersonCanSeeTask(taskId: string, userId: string, as: 'assignee' | 'follower') {
+    try {
+      await this.assertTaskReadAccess(taskId, userId)
+    } catch {
+      throw new BadRequestException(PERSON_CANNOT_SEE[as])
+    }
+  }
+
+  /** The same rule for a task that does not exist yet: judged by the list it will be created in. */
+  private async assertPeopleCanSeeList(listId: string, userIds: string[], as: 'assignee' | 'follower') {
+    if (userIds.length === 0) return
+    const [ctx] = await this.db
+      .select({
+        workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+        listVisibility: lists.visibility,
+        listCreatedById: lists.createdById,
+      })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!ctx) throw new NotFoundException('List not found')
+    for (const userId of userIds) {
+      // A private list is its creator's and the managers' — the list half of
+      // the item rule in `assertTaskReadAccess`. The task's own privacy does
+      // not apply: somebody it is born assigned to is one of its assignees.
+      const visible = await this.assertContainerReadAccess(ctx, userId).then(
+        (access) =>
+          canSeePrivateItem(
+            { visibility: ctx.listVisibility, createdById: ctx.listCreatedById },
+            { userId, isManager: isManagerRole(access.workspaceRole) },
+          ),
+        () => false,
+      )
+      if (!visible) throw new BadRequestException(PERSON_CANNOT_SEE[as])
+    }
   }
 
   /**
@@ -1762,6 +1893,22 @@ export class TasksService {
       if (!home) throw new NotFoundException('List not found')
       await this.assertParentInWorkspace(data.parentTaskId, home.workspaceId, data.createdById)
     }
+    // The people and labels a task is BORN with obey the rules their own routes
+    // enforce: an assignee must be able to see the task (assertPersonCanSeeTask)
+    // and a label must be this workspace's own (addLabel). Checked before
+    // anything is written, so a refused create leaves no half-made task behind.
+    const bornAssignees = [...new Set(data.assigneeIds ?? [])].filter(Boolean)
+    await this.assertPeopleCanSeeList(data.listId, bornAssignees, 'assignee')
+    const bornLabels = [...new Set(data.labelIds ?? [])].filter(Boolean)
+    if (bornLabels.length > 0) {
+      const home = await this.resolveWorkspaceForList(data.listId)
+      if (!home) throw new NotFoundException('List not found')
+      const own = await this.db
+        .select({ id: labels.id })
+        .from(labels)
+        .where(and(inArray(labels.id, bornLabels), eq(labels.workspaceId, home.workspaceId)))
+      if (own.length !== bornLabels.length) throw new NotFoundException('Label not found')
+    }
     const resolved = await this.resolveStatusForList(data.listId, data.status)
     // A workspace that has nominated a default type gets it applied here, so
     // every task created through any surface — quick-add, board, import — is
@@ -1806,16 +1953,15 @@ export class TasksService {
     // later are — see `announceAssignment`. Writing the rows and stopping there
     // is what this used to do, and it meant the create modal could put your
     // name on a task without telling you.
-    const bornAssignees = [...new Set(data.assigneeIds ?? [])].filter(Boolean)
     if (bornAssignees.length) {
       await this.db.insert(taskAssignees).values(
         bornAssignees.map((userId) => ({ taskId: task.id, userId })),
       )
     }
-    if (data.labelIds?.length) {
+    if (bornLabels.length) {
       await this.db
         .insert(taskLabelAssignments)
-        .values(data.labelIds.map((labelId) => ({ taskId: task.id, labelId })))
+        .values(bornLabels.map((labelId) => ({ taskId: task.id, labelId })))
         .onConflictDoNothing()
     }
     // Creator is auto-subscribed as a watcher so they hear about replies/activity
@@ -2735,12 +2881,35 @@ export class TasksService {
     })
     if (!row) return null
 
+    /*
+     * WHAT THIS TASK MAY SHOW FROM ELSEWHERE: only rows in its own workspace.
+     * Its parent, subtasks, dependencies and labels are all other rows, and
+     * until the write paths checked, any of them could be another tenant's —
+     * so a task was a window into a workspace its reader never joined. The
+     * writes refuse that now; this is their read-side twin, for rows that took
+     * a foreign reference before they did, as the cover's signing check is.
+     */
+    const home = await this.resolveWorkspaceForList(row.listId)
+    if (!home) return null
+    const homeWorkspaceId = home.workspaceId
+    if (row.subtasks.length > 0) {
+      const own = await this.db
+        .select({ id: tasks.id })
+        .from(tasks)
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(tasks.parentTaskId, taskId), eq(spaces.workspaceId, homeWorkspaceId)))
+      const ownIds = new Set(own.map((r) => r.id))
+      row.subtasks = row.subtasks.filter((st) => ownIds.has(st.id))
+    }
+
     const [labelRows, watcherRows, checklistRows, dependencyRows, attachmentRows] = await Promise.all([
       this.db
         .select({ label: labels })
         .from(taskLabelAssignments)
         .innerJoin(labels, eq(labels.id, taskLabelAssignments.labelId))
-        .where(eq(taskLabelAssignments.taskId, taskId)),
+        .where(and(eq(taskLabelAssignments.taskId, taskId), eq(labels.workspaceId, homeWorkspaceId))),
       this.db
         .select({ watcher: taskWatchers, user: PUBLIC_USER_COLUMNS })
         .from(taskWatchers)
@@ -2758,7 +2927,10 @@ export class TasksService {
         })
         .from(taskDependencies)
         .innerJoin(tasks, eq(tasks.id, taskDependencies.relatedTaskId))
-        .where(eq(taskDependencies.taskId, taskId)),
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(eq(taskDependencies.taskId, taskId), eq(spaces.workspaceId, homeWorkspaceId))),
       this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
     ])
 
@@ -2767,7 +2939,10 @@ export class TasksService {
       ? await this.db
           .select({ id: tasks.id, title: tasks.title })
           .from(tasks)
-          .where(eq(tasks.id, row.parentTaskId))
+          .innerJoin(lists, eq(lists.id, tasks.listId))
+          .innerJoin(projects, eq(projects.id, lists.projectId))
+          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+          .where(and(eq(tasks.id, row.parentTaskId), eq(spaces.workspaceId, homeWorkspaceId)))
           .limit(1)
       : []
 
@@ -3375,7 +3550,7 @@ export class TasksService {
             )
             .limit(1)
           if (existing) {
-            await this.removeDependency(existing.id, actorId)
+            await this.removeDependency(taskId, existing.id, actorId)
           }
         }
         if (moveListId) {
@@ -3762,6 +3937,7 @@ export class TasksService {
   // --- Assignees -----------------------------------------------------------
   async addAssignee(taskId: string, userId: string, actorId: string) {
     await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertPersonCanSeeTask(taskId, userId, 'assignee')
     await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
     if (await this.notifications.autoFollowEnabled(userId)) {
       await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
@@ -3950,7 +4126,12 @@ export class TasksService {
 
   // --- Labels --------------------------------------------------------------
   async addLabel(taskId: string, labelId: string, actorId: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    const access = await this.assertTaskWriteAccess(taskId, actorId)
+    // A label is the workspace's own, and `getTask` hands back its name and
+    // colour with the task — so another workspace's label id put that tenant's
+    // label on this task, and on the screen of everybody who opens it.
+    const [label] = await this.db.select({ workspaceId: labels.workspaceId }).from(labels).where(eq(labels.id, labelId)).limit(1)
+    if (!label || label.workspaceId !== access.workspaceId) throw new NotFoundException('Label not found')
     await this.db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
     await this.logActivity({ taskId, actorId, action: 'label_added', meta: { labelId } })
     return this.getTask(taskId)
@@ -3967,6 +4148,8 @@ export class TasksService {
 
   // --- Watchers ------------------------------------------------------------
   async addWatcher(taskId: string, userId: string, actorId?: string) {
+    await this.assertMayChangeFollowers(taskId, userId, actorId)
+    await this.assertPersonCanSeeTask(taskId, userId, 'follower')
     await this.db.insert(taskWatchers).values({ taskId, userId }).onConflictDoNothing()
     this.realtime.emitToTask(taskId, { type: 'watchers.updated', taskId })
     // §2.2 — "FOLLOWER CHANGE — yaani ke agar mere hi task pe koi follower add
@@ -3974,6 +4157,18 @@ export class TasksService {
     // roster changed.
     await this.notifyFollowerChanged(taskId, userId, actorId).catch(() => undefined)
     return this.getTask(taskId)
+  }
+
+  /**
+   * Who may change a task's followers. Following it yourself, or stopping, is
+   * open to anyone who can SEE the task — it changes nothing but your own
+   * inbox. Putting somebody else on it, or taking them off, is an edit to the
+   * task and needs write access. Both routes answered anyone before this.
+   */
+  private async assertMayChangeFollowers(taskId: string, userId: string, actorId?: string) {
+    if (!actorId) return
+    await this.assertTaskReadAccess(taskId, actorId)
+    if (userId !== actorId) await this.assertTaskWriteAccess(taskId, actorId)
   }
 
   /** §2.2 — tell a task's assignees that its follower list moved. */
@@ -4006,6 +4201,7 @@ export class TasksService {
   }
 
   async removeWatcher(taskId: string, userId: string, actorId?: string) {
+    await this.assertMayChangeFollowers(taskId, userId, actorId)
     await this.db.delete(taskWatchers).where(and(eq(taskWatchers.taskId, taskId), eq(taskWatchers.userId, userId)))
     this.realtime.emitToTask(taskId, { type: 'watchers.updated', taskId })
     // The type is task_follower_changed, not task_follower_added: a follower
@@ -5116,6 +5312,19 @@ export class TasksService {
       frontier = nextFrontier
     }
 
+    // Nodes from the root's own workspace only — the read-side twin of
+    // addDependency's check, for edges written before it existed. A node from
+    // elsewhere is dropped with every edge that touches it, so the graph never
+    // names another tenant's task, and its metrics count only what it shows.
+    const [root] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!root) throw new NotFoundException('Task not found')
     const nodeIds = [...visited]
     const rows = await this.db
       .select({
@@ -5127,9 +5336,15 @@ export class TasksService {
         isArchived: tasks.isArchived,
       })
       .from(tasks)
-      .where(inArray(tasks.id, nodeIds))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(inArray(tasks.id, nodeIds), eq(spaces.workspaceId, root.workspaceId)))
 
     const byId = new Map(rows.map((r) => [r.id, r]))
+    for (const [key, edge] of edges) {
+      if (!byId.has(edge.taskId) || !byId.has(edge.relatedTaskId)) edges.delete(key)
+    }
     const isOpen = (id: string) => {
       const node = byId.get(id)
       if (!node) return false
@@ -5181,6 +5396,11 @@ export class TasksService {
 
   async addDependency(taskId: string, relatedTaskId: string, type: DependencyType, actorId: string) {
     if (taskId === relatedTaskId) throw new BadRequestException('A task cannot depend on itself')
+    // An edit to this task, so write access — the route's guard only proves
+    // membership — and the other end obeys the parent's rule. See
+    // assertTaskReference.
+    const access = await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertTaskReference(relatedTaskId, access.workspaceId, actorId, 'Related task not found')
     if (type === 'blocks' || type === 'blocked_by') {
       const blocker = type === 'blocks' ? taskId : relatedTaskId
       const blocked = type === 'blocks' ? relatedTaskId : taskId
@@ -5202,8 +5422,23 @@ export class TasksService {
     return created
   }
 
-  async removeDependency(depId: string, actorId: string) {
-    const [existing] = await this.db.select().from(taskDependencies).where(eq(taskDependencies.id, depId))
+  /**
+   * Removed through the task the route names, and only a dependency that
+   * touches it. This took the dependency's id alone: the route's guard proved
+   * membership of `:taskId`'s workspace and nothing tied `:depId` to that task,
+   * so any member of any workspace could delete any dependency by id.
+   */
+  async removeDependency(taskId: string, depId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const [existing] = await this.db
+      .select()
+      .from(taskDependencies)
+      .where(
+        and(
+          eq(taskDependencies.id, depId),
+          or(eq(taskDependencies.taskId, taskId), eq(taskDependencies.relatedTaskId, taskId)),
+        ),
+      )
     if (!existing) throw new NotFoundException('Dependency not found')
     await this.db.delete(taskDependencies).where(eq(taskDependencies.id, depId))
     await this.logActivity({

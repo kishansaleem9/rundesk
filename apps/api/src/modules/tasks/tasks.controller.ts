@@ -618,7 +618,13 @@ export class TasksController {
   }
 
   // --- Watchers -----------------------------------------------------------
+  // THE GUARD THE TASK'S OWN GET CARRIES. Both routes had none, and neither did
+  // the service: an account sharing no workspace with the task could follow it
+  // by id and was answered with the whole task. The service now decides who
+  // may follow and who may be made to (TasksService.assertMayChangeFollowers,
+  // assertPersonCanSeeTask); this keeps the route from reaching it otherwise.
   @Post(':taskId/watchers')
+  @UseGuards(ResourceMemberGuard)
   async addWatcher(
     @Param('taskId') taskId: string,
     @Body() body: { userId: string },
@@ -631,6 +637,7 @@ export class TasksController {
   }
 
   @Delete(':taskId/watchers/:userId')
+  @UseGuards(ResourceMemberGuard)
   async removeWatcher(
     @Param('taskId') taskId: string,
     @Param('userId') userId: string,

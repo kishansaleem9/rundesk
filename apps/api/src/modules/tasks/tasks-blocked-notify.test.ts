@@ -129,6 +129,11 @@ describe('TasksService.addDependency → blocked notification wiring', () => {
     const notifications = { create: mock.fn(async (_data: any) => ({})) }
     const svc = makeService(db, notifications)
     ;(svc as any).hasBlockingPath = async () => false
+    // Access is not what this describe is about — the two checks that now
+    // come first have their own tests below — so they answer yes here and the
+    // queued results still line up with the insert and the activity row.
+    ;(svc as any).assertTaskWriteAccess = async () => ({ workspaceId: 'w1' })
+    ;(svc as any).assertTaskReference = async () => undefined
     const spy = mock.fn(async (_blocked: string, _blocker: string, _actor: string) => {})
     ;(svc as any).notifyTaskBlocked = spy
     await svc.addDependency('X', 'Y', type, 'actor')
@@ -155,5 +160,32 @@ describe('TasksService.addDependency → blocked notification wiring', () => {
   it('no-op insert (dependency already existed) does not fire', async () => {
     const spy = await run('blocks', undefined)
     assert.equal(spy.mock.callCount(), 0)
+  })
+})
+
+describe('TasksService.addDependency — the other end is checked before anything is written', () => {
+  it('checks the related task against THIS task\'s workspace, as the actor', async () => {
+    const db = makeDb([[{ id: 'dep1' }], [{ id: 'act1' }]])
+    const svc = makeService(db, { create: mock.fn(async () => ({})) })
+    ;(svc as any).hasBlockingPath = async () => false
+    ;(svc as any).notifyTaskBlocked = async () => {}
+    ;(svc as any).assertTaskWriteAccess = async () => ({ workspaceId: 'w1' })
+    const ref = mock.fn(async (..._args: unknown[]) => undefined)
+    ;(svc as any).assertTaskReference = ref
+    await svc.addDependency('X', 'Y', 'related_to', 'actor')
+    assert.equal(ref.mock.callCount(), 1)
+    assert.deepEqual(ref.mock.calls[0].arguments, ['Y', 'w1', 'actor', 'Related task not found'])
+  })
+
+  it('and a refused reference writes nothing', async () => {
+    const db = makeDb([[{ id: 'dep1' }], [{ id: 'act1' }]])
+    const svc = makeService(db, { create: mock.fn(async () => ({})) })
+    ;(svc as any).hasBlockingPath = async () => false
+    ;(svc as any).assertTaskWriteAccess = async () => ({ workspaceId: 'w1' })
+    ;(svc as any).assertTaskReference = async () => {
+      throw new Error('Related task not found')
+    }
+    await assert.rejects(svc.addDependency('X', 'Y', 'blocks', 'actor'), /Related task not found/)
+    assert.equal(db.insert.mock.callCount(), 0, 'no dependency row, no activity row')
   })
 })
