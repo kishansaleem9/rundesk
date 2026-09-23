@@ -134,13 +134,17 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Add a sprint picker that sends sprintId to both the JSON and the PDF endpoints.
 
-### `product-siblings/cover-dangles-after-attachment-delete` — open, small
+### `product-siblings/cover-dangles-after-attachment-delete` — **closed**, break run pending
 
 **Deleting the attachment used as a task's cover deletes the object, but the cover keeps signing its key**
 
 *Evidence:* cover-image-picker.tsx:361 sets the cover to an existing attachment's key (`commit({kind:'stored', storageKey: a.storageKey})`). tasks.service.ts:2902-2911 (removeAttachment) deletes the row and calls r2.deleteObject(storageKey) without touching tasks.cover_storage_key. getTask (:2752-2754) and the list path (:2417) keep signing it. Failure: pick an attachment as the cover, then remove that attachment. The banner and the board card now load a live-looking signed URL to a deleted object, which renders as a broken image.
 
 *To close:* In removeAttachment, clear cover_storage_key where it equals the removed key (or keep the object while referenced).
+
+*ClickUp:* a Board card's cover is the first image attached to the task, or an attachment pinned as the cover ("Pin a Cover Image"; web search, 23 September). The cover IS an attachment, so it goes when the attachment does.
+
+*Closed:* `removeAttachment` clears `cover_storage_key` where it names the removed object, and emits `task.updated` to the list and the task, the events the board refetches its tasks on. Only a stored key: a link cover is its own column, and deleting a link attachment removes no image. A cover uploaded through the picker's Upload tab has no attachment row and is untouched. `task-cover`, 41/41 on lane 1, three new checks: deleting another attachment leaves the cover where it was, still drawn; deleting the one it was picked from takes the cover off the task and off the board's list row; and on screen, removing it in the sheet over the Board takes the image off the card behind, with no reload. Against the unfixed build the first passed and the other two failed: the task still held the key, and it and the board row both carried a signed URL that served nothing; the card still drew it. (The on-screen check first opened `?view=board`, which names a SAVED view, so the Board never drew and the check failed for the wrong reason. It now switches views with the tab.) Regression on lane 1: list-card-cover 26/26, task-attachments 17/17, task-boundaries 45/45. `task-cover-17..19`, each compiled: the cover survives, any attachment takes it, the board is not told.
 
 ### `product-siblings/cover-storage-key-unvalidated` — **closed**
 

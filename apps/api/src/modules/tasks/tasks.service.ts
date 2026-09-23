@@ -3331,6 +3331,32 @@ export class TasksService {
     await this.db
       .delete(taskAttachments)
       .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
+    /*
+     * A COVER PICKED FROM THIS ATTACHMENT GOES WITH IT. The cover picker's
+     * Attachments tab makes an image attachment the cover by its key, and this
+     * method deletes the object below. It used to leave the key on the task, so
+     * the banner and the board card went on signing a key with nothing behind
+     * it: a broken image behind a live-looking URL. In ClickUp a card's cover is
+     * the first image attached or one pinned from the attachments, so it IS the
+     * attachment, and deleting the attachment takes the cover with it.
+     *
+     * Only a stored key. A LINK cover is its own column, pointing at an image
+     * that deleting the attachment does not remove.
+     */
+    if (attachment.storageKey && !isLinkAttachmentKey(attachment.storageKey)) {
+      const uncovered = await this.db
+        .update(tasks)
+        .set({ coverStorageKey: null, updatedAt: new Date() })
+        .where(and(eq(tasks.id, taskId), eq(tasks.coverStorageKey, attachment.storageKey)))
+        .returning({ listId: tasks.listId })
+      // The board draws the list, and refetches it on the list's events; a
+      // card left holding the old URL is the same broken image, one step later.
+      if (uncovered[0]) {
+        const { listId } = uncovered[0]
+        this.realtime.emitToList(listId, { type: 'task.updated', listId, taskId, patch: { coverStorageKey: null } })
+        this.realtime.emitToTask(taskId, { type: 'task.updated', listId, taskId, patch: { coverStorageKey: null } })
+      }
+    }
     // A link has no object behind it, and a file still arriving has no key:
     // neither is anything to delete from the bucket.
     if (this.r2.configured && attachment.storageKey && !isLinkAttachmentKey(attachment.storageKey)) {

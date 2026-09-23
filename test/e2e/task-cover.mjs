@@ -41,7 +41,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 38
+const EXPECTED_CHECKS = 41
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -707,6 +707,117 @@ try {
     'and the cover is left exactly as it was',
     `the cover moved to coverStorageKey=${JSON.stringify(afterRefused?.coverStorageKey ?? null)}, ` +
       `coverImageUrl=${JSON.stringify(afterRefused?.coverImageUrl ?? null)} on an upload that failed`,
+  )
+
+  /*
+   * ── A cover picked from an attachment goes with the attachment ─────────
+   *
+   * `product-siblings/cover-dangles-after-attachment-delete`. The Attachments
+   * tab makes an image attachment the cover by its key, and removing that
+   * attachment deleted the object and left the key on the task, so the banner
+   * and the board card went on signing a key with nothing behind it: a broken
+   * image behind a live-looking URL. In ClickUp a card's cover is the first
+   * image attached or one pinned from the attachments, so it IS that
+   * attachment, and deleting the attachment takes the cover with it.
+   *
+   * Paired: deleting a DIFFERENT attachment leaves the cover where it was, and
+   * still drawn. Read through the task and through the list the board draws.
+   */
+  console.log('\n▶ deleting the attachment a cover was picked from takes the cover with it')
+  const uploadImage = async (name) => {
+    const pre = await A(`/tasks/${task.id}/attachments/presign`, {
+      method: 'POST',
+      body: { fileName: name, contentType: 'image/png', sizeBytes: TINY_PNG.length },
+    })
+    const key = pre.data?.storageKey ?? null
+    const put = pre.data?.uploadUrl
+      ? await fetch(pre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'image/png' }, body: TINY_PNG })
+          .then((r) => r.status, () => 0)
+      : 0
+    const rec = key
+      ? await A(`/tasks/${task.id}/attachments`, {
+          method: 'POST',
+          body: { fileName: name, storageKey: key, contentType: 'image/png', sizeBytes: TINY_PNG.length },
+        })
+      : { status: 0 }
+    return { key, id: rec.data?.id ?? null, said: `presign ${pre.status}, PUT ${put}, record ${rec.status}` }
+  }
+  const bytesOf = (url) =>
+    typeof url === 'string' && /^https?:\/\//.test(url)
+      ? fetch(url).then(async (r) => (r.ok ? Buffer.from(await r.arrayBuffer()) : null), () => null)
+      : Promise.resolve(null)
+  const onBoard = async () => ((await A(`/tasks/list/${listId}`)).data ?? []).find((r) => r.id === task.id) ?? null
+
+  const pinnedImage = await uploadImage(`pinned-${stamp}.png`)
+  const otherImage = await uploadImage(`other-${stamp}.png`)
+  const pinned = pinnedImage.key
+    ? await setCover({ coverStorageKey: pinnedImage.key, coverImageUrl: null, coverColor: null })
+    : { status: 0 }
+  const otherGone = otherImage.id
+    ? await A(`/tasks/${task.id}/attachments/${otherImage.id}`, { method: 'DELETE' })
+    : { status: 0 }
+  const keptRow = (await T()).data
+  const keptBytes = await bytesOf(keptRow?.coverUrl)
+  chk(
+    pinned.status < 300 && otherGone.status < 300 && keptRow?.coverStorageKey === pinnedImage.key &&
+      keptBytes !== null && keptBytes.equals(TINY_PNG),
+    'deleting another attachment leaves the cover where it was, still drawn',
+    `the pinned image: ${pinnedImage.said}; the other: ${otherImage.said}; setting the cover answered ${pinned.status}, ` +
+      `deleting the other ${otherGone.status}; the task now holds coverStorageKey=${JSON.stringify(keptRow?.coverStorageKey ?? null)} ` +
+      `and its coverUrl ${keptBytes === null ? 'serves nothing' : 'serves other bytes'}`,
+  )
+
+  const pinnedGone = pinnedImage.id
+    ? await A(`/tasks/${task.id}/attachments/${pinnedImage.id}`, { method: 'DELETE' })
+    : { status: 0 }
+  const coverless = (await T()).data
+  const card = await onBoard()
+  chk(
+    pinnedGone.status < 300 && coverless?.coverStorageKey == null && coverless?.coverUrl == null &&
+      card !== null && card.coverUrl == null,
+    'deleting the attachment the cover was picked from takes the cover off — the banner and the board card draw none',
+    `deleting it answered ${pinnedGone.status}; the task still holds coverStorageKey=${JSON.stringify(coverless?.coverStorageKey ?? null)}, ` +
+      `coverUrl=${JSON.stringify(coverless?.coverUrl ?? null).slice(0, 90)} (serving ${(await bytesOf(coverless?.coverUrl)) === null ? 'nothing' : 'bytes'}); ` +
+      `the board card's coverUrl=${JSON.stringify(card?.coverUrl ?? null).slice(0, 90)}`,
+  )
+
+  /*
+   * AND ON SCREEN, where the other half of it was. The sheet removes an
+   * attachment and refetches the TASK, so its banner follows the server. The
+   * board card behind the sheet draws the LIST, which nothing refetched, so it
+   * went on drawing the URL it already had until something reloaded the page.
+   * Removed here the way a person removes it, through the sheet, over the
+   * Board view.
+   */
+  console.log('\n▶ and the board card behind the sheet stops drawing it, with no reload')
+  const shown = await uploadImage(`shown-${stamp}.png`)
+  const shownPinned = shown.key
+    ? await setCover({ coverStorageKey: shown.key, coverImageUrl: null, coverColor: null })
+    : { status: 0 }
+  // `?view=` names a SAVED view, not a view type, so the Board is chosen the
+  // way a person chooses it, and the sheet is opened from the card itself.
+  await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
+  await page.getByTestId('work-view-tab-type-board').click({ timeout: 15_000 }).catch(() => {})
+  const boardCard = page.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`)
+  const cardImage = boardCard.locator('[data-testid="board-card-cover"][data-cover-kind="image"] img')
+  const drawnBefore = await waitUntil(async () => (await cardImage.count()) > 0, { timeoutMs: 25_000 })
+  await boardCard.click({ timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('task-tab-attachments').click({ timeout: 15_000 }).catch(() => {})
+  await page.locator(`[data-testid="attachment-more"][data-attachment-id="${shown.id}"]`).click({ timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('attachment-remove').click({ timeout: 10_000 }).catch(() => {})
+  const removedInSheet = await waitUntil(
+    async () => !((await A(`/tasks/${task.id}/attachments`)).data ?? []).some((a) => a.id === shown.id),
+    { timeoutMs: 15_000 },
+  )
+  const cardCleared = removedInSheet && (await waitUntil(async () => (await cardImage.count()) === 0, { timeoutMs: 10_000 }))
+  chk(
+    shownPinned.status < 300 && drawnBefore && removedInSheet && cardCleared,
+    'removing that attachment in the sheet takes the cover off the board card behind it, with no reload',
+    !drawnBefore
+      ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}), so there was nothing to take off`
+      : !removedInSheet
+        ? 'the sheet never removed the attachment'
+        : 'the card still draws an image, and its URL is to an object that was deleted',
   )
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })
