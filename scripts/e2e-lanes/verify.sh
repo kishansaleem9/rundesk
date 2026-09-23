@@ -105,12 +105,27 @@ fi
 # Same conservatism as above, and the same asymmetry behind it: an mtime moved
 # by `git checkout` costs one rebuild, a stale API costs an afternoon.
 #
-# THE REFERENCE IS THE BUILD'S NEWEST FILE, NOT `main.js`. Written against
-# `main.js` first, and it refused a build made twenty minutes earlier: `tsc`
-# rewrites `main.js` only when `main.ts` changes, so the one file named after
-# the build is the one least likely to have moved. The newest output anywhere
-# in `dist` is what "when did this last build" actually means.
-API_BUILT=$(find apps/api/dist -name '*.js' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+# THE REFERENCE IS A STAMP, AND THE TWO REFERENCES TRIED BEFORE IT BOTH FAILED
+# IN A WAY WORTH KEEPING WRITTEN DOWN.
+#
+#   · `main.js`, the obvious one, refused a build made twenty minutes earlier:
+#     `tsc` rewrites it only when `main.ts` changes, so the file named after
+#     the build is the one least likely to have moved.
+#   · the NEWEST output anywhere in `dist`, which is what "when did this last
+#     build" seems to mean — and has a deadlock in it. A `git checkout` or a
+#     reverted break patch moves a source mtime without changing a byte, an
+#     incremental `tsc` then writes nothing, the newest output stays put, and
+#     the refusal repeats however many times you follow its own advice. That
+#     happened within the hour, and a gate you cannot satisfy gets switched off.
+#
+# `build-api.sh` touches `dist/.built-at` after both builds succeed, which
+# answers the question this check is really asking — has a build been RUN since
+# the source was last touched — rather than the proxy, did it write anything.
+# The fallback keeps the check working on a tree that has never used the
+# wrapper; it is the version with the deadlock, so the message names the
+# wrapper either way.
+API_BUILT=apps/api/dist/.built-at
+[ -f "$API_BUILT" ] || API_BUILT=$(find apps/api/dist -name '*.js' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
 if [ -n "$API_BUILT" ]; then
   API_NEWER=$(find apps/api/src packages/db/src -name '*.ts' 2>/dev/null \
               | xargs -r -I{} sh -c '[ {} -nt "'"$API_BUILT"'" ] && echo {}' 2>/dev/null | head -3)
@@ -118,8 +133,7 @@ if [ -n "$API_BUILT" ]; then
     echo "== $SUITE (lane $LANE) REFUSING — the API build is older than the source it is built from"
     echo "   newer, among others:"
     echo "$API_NEWER" | sed 's/^/     /'
-    echo "   rebuild and restart:  pnpm --filter @rundesk/db build && pnpm --filter @rundesk/api build \\"
-    echo "                         && bash scripts/e2e-lanes/fleet-restart.sh \"$LANE\""
+    echo "   rebuild and restart:  bash scripts/e2e-lanes/build-api.sh \"$LANE\"" ""
     exit 7
   fi
 fi

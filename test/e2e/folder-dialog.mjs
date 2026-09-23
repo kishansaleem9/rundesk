@@ -645,11 +645,24 @@ try {
   const shown = reopened
     ? await page.getByTestId('container-edit-description').inputValue().catch(() => null)
     : null
+  /*
+   * AGAINST WHAT THE SERVER HOLDS, NOT AGAINST WHAT WAS TYPED, and the
+   * difference is which defect this check is allowed to name.
+   *
+   * Written against `DESC_TEXT` first, it reddened under
+   * `folder-desc-25-never-sent` — a patch that stops the CREATE carrying the
+   * description — and the sentence it printed blamed the reader for a write
+   * that never happened. The check above already owns that failure. This one
+   * owns exactly one question: does the dialog draw what the row contains? A
+   * null column and an empty box are the same answer, so they compare equal.
+   */
+  const storedNow = await byId(fid)
   chk(
-    shown === DESC_TEXT,
+    shown === (storedNow?.description ?? ''),
     'reopening the folder shows the description back — the column has a reader, not just a writer',
     reopened
-      ? `the edit dialog held ${JSON.stringify(shown)} against a stored ${JSON.stringify(DESC_TEXT)}`
+      ? `the edit dialog held ${JSON.stringify(shown)} where the row holds ` +
+        `${JSON.stringify(storedNow?.description ?? null)}`
       : 'the folder\'s edit dialog never opened, so there is no evidence of a reader at all — ' +
         'which for this row is the same as not having one',
   )
