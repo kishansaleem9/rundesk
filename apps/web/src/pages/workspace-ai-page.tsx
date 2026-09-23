@@ -1121,9 +1121,18 @@ function MeetingRecordPanel({
           body: { ...body, recordingUrl: recordingUrl.trim() || null, attendeeIds },
         })
       }
+      /*
+       * THE RECORDING ONLY WHEN IT WAS CHANGED. The field is loaded with the
+       * link the GET hands out — for a call's own recording, a URL signed for
+       * fifteen minutes — and sending it back on every Update wrote that URL
+       * over the durable key, so the recording died a quarter of an hour
+       * later. The server now keeps the key on that round trip too; this stops
+       * sending what nobody touched.
+       */
+      const recordingChanged = (recordingUrl.trim() || null) !== (current?.recordingUrl ?? null)
       const updated = await api<MeetingRecord>(`/workspaces/${workspaceId}/meetings/${meetingId}`, {
         method: 'PATCH',
-        body: { ...body, recordingUrl: recordingUrl.trim() || null },
+        body: recordingChanged ? { ...body, recordingUrl: recordingUrl.trim() || null } : body,
       })
       // Attendees are their own rows, so an edit is a diff rather than a
       // rewrite — removing someone must not also drop what they said.

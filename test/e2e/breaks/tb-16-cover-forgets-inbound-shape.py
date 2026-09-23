@@ -3,7 +3,9 @@
 # Reddens: task-boundaries: "and so is its own inbound-email attachment, which the Attachments tab also offers"
 import io
 p = "/home/user/rundesk/apps/api/src/modules/tasks/task-object-keys.ts"
-a = "  if (key.startsWith(inbound)) return isSafeSegment(key.slice(inbound.length))"
+# Re-anchored on 23 September: the segment rule moved into
+# common/storage/object-key-shape.ts, which chat and calls now share.
+a = "  if (key.startsWith(inbound)) return isKeyDirectlyUnder(key, inbound)"
 b = "  if (key.startsWith(inbound)) return false"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

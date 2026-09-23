@@ -30,6 +30,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
+import { isKeyDirectlyUnder } from '../../common/storage/object-key-shape'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
 import { TasksService } from '../tasks/tasks.service'
@@ -181,6 +182,13 @@ export class ChatService {
     this.assertCanPost(await this.assertChannelAccess(channelId, userId))
     this.assertAttachmentSize(data.sizeBytes)
     if (!data.storageKey) throw new BadRequestException('storageKey is required')
+    // Exactly the key the presign above mints for THIS channel. This took any
+    // key and signed it straight back — a working URL to any object in the
+    // bucket for anybody who can post here. See object-key-shape.ts for why
+    // the check is the shape and not a prefix.
+    if (!isKeyDirectlyUnder(data.storageKey, `chat/${channelId}/attachments/`)) {
+      throw new BadRequestException('storageKey must be an upload presigned for this channel')
+    }
     const [row] = await this.db
       .insert(chatMessageAttachments)
       .values({
@@ -198,8 +206,20 @@ export class ChatService {
       contentType: row.contentType,
       sizeBytes: row.sizeBytes,
       storageKey: row.storageKey,
-      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
+      url: await this.chatAttachmentUrl(row),
     }
+  }
+
+  /**
+   * The URL a chat attachment is fetched from — one rule for the four places a
+   * row becomes a link, which were four copies of one ternary. Signed only when
+   * the key is exactly its own channel's upload; a key that got into the table
+   * before `recordAttachment` checked, or by any path added later, becomes no
+   * link at all rather than a signed URL to somebody else's object.
+   */
+  private async chatAttachmentUrl(a: { channelId: string; storageKey: string }): Promise<string | null> {
+    if (!isKeyDirectlyUnder(a.storageKey, `chat/${a.channelId}/attachments/`)) return null
+    return this.r2.configured ? this.r2.getObjectUrl(a.storageKey) : a.storageKey
   }
 
   /** Ensure a system "Rundesk AI" user exists to author @Rundesk replies. */
@@ -1195,9 +1215,19 @@ export class ChatService {
     return Promise.all(
       rows.map(async ({ storageKey, ...emoji }) => ({
         ...emoji,
-        imageUrl: storageKey && this.r2.configured ? await this.r2.getObjectUrl(storageKey) : emoji.imageUrl,
+        imageUrl: storageKey ? await this.emojiImageUrl(workspaceId, storageKey) : emoji.imageUrl,
       })),
     )
+  }
+
+  /**
+   * An uploaded emoji's image, signed fresh — but only a key of this
+   * workspace's emoji shape. One recorded before `addCustomEmoji` checked the
+   * shape draws nothing rather than someone else's object.
+   */
+  private async emojiImageUrl(workspaceId: string, key: string): Promise<string | null> {
+    if (!isKeyDirectlyUnder(key, `chat/${workspaceId}/emoji/`)) return null
+    return this.r2.configured ? this.r2.getObjectUrl(key) : key
   }
 
   /**
@@ -1239,7 +1269,9 @@ export class ChatService {
     // trusted on read.
     const key = storageKey?.trim()
     if (key) {
-      if (!key.startsWith(`chat/${workspaceId}/emoji/`)) throw new BadRequestException('Invalid storageKey')
+      // The shape, not the prefix: `chat/<ws>/emoji/../../…` passed the
+      // `startsWith` this was, and a public-CDN URL collapses the dots.
+      if (!isKeyDirectlyUnder(key, `chat/${workspaceId}/emoji/`)) throw new BadRequestException('Invalid storageKey')
     } else if (!/^https?:\/\/\S+$/.test(imageUrl ?? '')) {
       throw new BadRequestException('imageUrl must be an http(s) URL')
     }
@@ -1251,7 +1283,7 @@ export class ChatService {
     if (!row) throw new BadRequestException(`:${code}: already exists in this workspace`)
     return {
       ...row,
-      imageUrl: key && this.r2.configured ? await this.r2.getObjectUrl(key) : row.imageUrl,
+      imageUrl: key ? await this.emojiImageUrl(workspaceId, key) : row.imageUrl,
     }
   }
 
@@ -1387,7 +1419,7 @@ export class ChatService {
       .select()
       .from(chatMessageAttachments)
       .where(inArray(chatMessageAttachments.messageId, messageIds))
-    const attachmentsByMessage = new Map<string, Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string }>>()
+    const attachmentsByMessage = new Map<string, Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string | null }>>()
     for (const a of attachmentRows) {
       if (!a.messageId) continue
       const list = attachmentsByMessage.get(a.messageId) ?? []
@@ -1397,7 +1429,7 @@ export class ChatService {
         contentType: a.contentType,
         sizeBytes: a.sizeBytes,
         storageKey: a.storageKey,
-        url: this.r2.configured ? await this.r2.getObjectUrl(a.storageKey) : a.storageKey,
+        url: await this.chatAttachmentUrl(a),
       })
       attachmentsByMessage.set(a.messageId, list)
     }
@@ -1831,7 +1863,7 @@ export class ChatService {
     // Link any pre-uploaded attachments to this message. Only rows belonging to
     // this channel and still unlinked (message_id null) are claimed, so an id
     // can't be smuggled across channels or re-attached to a second message.
-    let attachments: Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string }> = []
+    let attachments: Array<{ id: string; fileName: string; contentType: string; sizeBytes: number; storageKey: string; url: string | null }> = []
     if (attachmentIds.length > 0) {
       const linked = await this.db
         .update(chatMessageAttachments)
@@ -1851,7 +1883,7 @@ export class ChatService {
           contentType: a.contentType,
           sizeBytes: a.sizeBytes,
           storageKey: a.storageKey,
-          url: this.r2.configured ? await this.r2.getObjectUrl(a.storageKey) : a.storageKey,
+          url: await this.chatAttachmentUrl(a),
         })),
       )
     }
@@ -2800,7 +2832,7 @@ export class ChatService {
         uploadedById: r.uploadedById,
         uploaderName: r.uploaderName ?? null,
         createdAt: r.createdAt,
-        url: this.r2.configured ? await this.r2.getObjectUrl(r.storageKey) : r.storageKey,
+        url: await this.chatAttachmentUrl(r),
       })),
     )
   }

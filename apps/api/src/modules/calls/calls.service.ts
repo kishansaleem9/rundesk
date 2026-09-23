@@ -27,6 +27,7 @@ import { AiService } from '../ai/ai.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
 import { FLAGS } from '@rundesk/feature-flags'
 import { R2Service } from '../../common/storage/r2.service'
+import { isCallRecordingKeyFor } from './call-recording-keys'
 
 /**
  * §2.8 gap 10 — one utterance, capped.
@@ -788,7 +789,8 @@ export class CallsService {
    */
   async attachRecording(callId: string, userId: string, storageKey: string) {
     const call = await this.assertCanReach(callId, userId)
-    if (!storageKey?.startsWith(`calls/${call.workspaceId}/${callId}/`)) {
+    // The shape, not the prefix — see call-recording-keys.ts.
+    if (!isCallRecordingKeyFor(storageKey, call.workspaceId, callId)) {
       // A key from another call would attach somebody else's recording to this
       // meeting, which is the one mistake here that cannot be undone.
       throw new BadRequestException('That storage key does not belong to this call')

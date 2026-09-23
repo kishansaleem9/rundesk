@@ -9,6 +9,7 @@ import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { AiService } from '../ai/ai.service'
 import { R2Service } from '../../common/storage/r2.service'
 import { TasksService } from '../tasks/tasks.service'
+import { isCallRecordingKeyFor, isWorkspaceCallRecordingKey } from '../calls/call-recording-keys'
 
 const MAX_TITLE = 300
 
@@ -68,11 +69,42 @@ export class MeetingsService {
    * the meeting notes have been read once. The key is what is durable; the URL
    * is made fresh on the way out, exactly as chat attachments already do.
    */
-  private async playableRecording(stored: string | null): Promise<string | null> {
+  private async playableRecording(stored: string | null, workspaceId: string): Promise<string | null> {
     if (!stored) return null
-    if (stored.includes('://')) return stored
+    // A pasted link: http(s) only. This passed anything containing `://`, so
+    // `javascript://…` came back as a recording link to be drawn as an href.
+    if (/^https?:\/\//i.test(stored)) return stored
+    // A key: only a recording of one of THIS workspace's calls. This signed
+    // whatever the column named, so a member who stored another tenant's key
+    // was handed a working URL to it.
+    if (!isWorkspaceCallRecordingKey(stored, workspaceId)) return null
     if (!this.r2.configured) return stored
     return this.r2.getObjectUrl(stored).catch(() => null)
+  }
+
+  /**
+   * What a CLIENT may put in `recordingUrl`: nothing, a pasted http(s) link,
+   * or what is already there, unchanged. Keys are written by the server alone
+   * (calls.service attachRecording) — a client that could name one could name
+   * another tenant's.
+   *
+   * THE ROUND TRIP IS NOT A CHANGE. The AI page's meeting card loads the
+   * signed URL the GET hands out and sends it back on every Update, which wrote
+   * a fifteen-minute URL over the durable key: the recording died a quarter of
+   * an hour later. A URL of our own bucket naming the key already stored keeps
+   * the key; one naming any other object of ours is refused.
+   */
+  private acceptRecordingInput(input: string | null | undefined, stored: string | null): string | null {
+    const value = typeof input === 'string' ? input.trim() : null
+    if (!value) return null
+    if (value === stored) return stored
+    const own = this.r2.keyFromOwnUrl(value)
+    if (own !== null) {
+      if (own === stored) return stored
+      throw new BadRequestException("That link points into this workspace's own storage; a recording there belongs to the call that made it")
+    }
+    if (!/^https?:\/\/\S+$/i.test(value)) throw new BadRequestException('A recording link must start with http:// or https://')
+    return value
   }
 
   /**
@@ -94,14 +126,21 @@ export class MeetingsService {
     const byMeeting = new Map<string, string[]>()
     if (!meetingIds.length) return byMeeting
     const rows = await this.db
-      .select({ meetingId: calls.meetingId, storageKey: callRecordings.storageKey })
+      .select({
+        meetingId: calls.meetingId,
+        storageKey: callRecordings.storageKey,
+        callId: calls.id,
+        workspaceId: calls.workspaceId,
+      })
       .from(callRecordings)
       .innerJoin(calls, eq(calls.id, callRecordings.callId))
       .where(inArray(calls.meetingId, meetingIds))
       .orderBy(asc(calls.meetingId), asc(callRecordings.position))
     for (const r of rows) {
       if (!r.meetingId) continue
-      const playable = await this.playableRecording(r.storageKey)
+      // Only this call's own recording — the key is signed, so it must be one.
+      if (!isCallRecordingKeyFor(r.storageKey, r.workspaceId, r.callId)) continue
+      const playable = await this.playableRecording(r.storageKey, r.workspaceId)
       if (!playable) continue
       const list = byMeeting.get(r.meetingId) ?? []
       list.push(playable)
@@ -119,12 +158,12 @@ export class MeetingsService {
    * changes meaning. `recordings` is the whole of what was captured, in order,
    * and is empty for a meeting that was never a call.
    */
-  private async withRecordings<T extends { id: string; recordingUrl: string | null }>(rows: T[]) {
+  private async withRecordings<T extends { id: string; workspaceId: string; recordingUrl: string | null }>(rows: T[]) {
     const bySegment = await this.recordingsFor(rows.map((r) => r.id))
     return Promise.all(
       rows.map(async (r) => ({
         ...r,
-        recordingUrl: await this.playableRecording(r.recordingUrl),
+        recordingUrl: await this.playableRecording(r.recordingUrl, r.workspaceId),
         recordings: bySegment.get(r.id) ?? [],
       })),
     )
@@ -318,7 +357,7 @@ export class MeetingsService {
         endsAt: body.endsAt ? new Date(body.endsAt) : null,
         provider: body.provider ?? 'manual',
         joinUrl: body.joinUrl ?? null,
-        recordingUrl: body.recordingUrl ?? null,
+        recordingUrl: this.acceptRecordingInput(body.recordingUrl, null),
         notes: body.notes ?? null,
         taskId: body.taskId ?? null,
         createdById: userId,
@@ -377,6 +416,16 @@ export class MeetingsService {
     await this.assertMember(workspaceId, userId)
     await this.load(workspaceId, meetingId)
     const set: Record<string, unknown> = { updatedAt: new Date() }
+    if (body.recordingUrl !== undefined) {
+      // Compared with what is STORED, not with what load() hands back — that
+      // is the signed URL, which is the thing this must not write.
+      const [stored] = await this.db
+        .select({ recordingUrl: meetings.recordingUrl })
+        .from(meetings)
+        .where(and(eq(meetings.workspaceId, workspaceId), eq(meetings.id, meetingId)))
+        .limit(1)
+      set.recordingUrl = this.acceptRecordingInput(body.recordingUrl, stored?.recordingUrl ?? null)
+    }
     // Absent means "leave the tags alone"; an empty array means "remove them
     // all", which is a real answer. Conflating the two is how a clear becomes
     // impossible — the defect this repo already fixed on nav favourites.
@@ -386,7 +435,7 @@ export class MeetingsService {
       if (!t) throw new BadRequestException('title cannot be empty')
       set.title = t.slice(0, MAX_TITLE)
     }
-    for (const k of ['notes', 'transcript', 'recordingUrl'] as const) {
+    for (const k of ['notes', 'transcript'] as const) {
       if (body[k] !== undefined) set[k] = body[k]
     }
     if (body.startsAt !== undefined) set.startsAt = body.startsAt ? new Date(body.startsAt) : null

@@ -15,6 +15,7 @@ export class R2Service {
   private readonly logger = new Logger(R2Service.name)
   private readonly bucketName: string | null
   private readonly publicUrl: string | null
+  private readonly endpoint: string | null
   private readonly client: S3Client | null
 
   constructor(private readonly config: ConfigService) {
@@ -25,6 +26,7 @@ export class R2Service {
     const endpoint = this.config.get<string>('R2_ENDPOINT') ?? (accountId ? `https://${accountId}.r2.cloudflarestorage.com` : undefined)
     this.publicUrl = this.config.get<string>('R2_PUBLIC_URL') ?? null
     this.bucketName = bucketName ?? null
+    this.endpoint = endpoint ?? null
 
     if (!endpoint || !accessKeyId || !secretAccessKey || !bucketName) {
       this.client = null
@@ -119,6 +121,44 @@ export class R2Service {
     }
     const cmd = new GetObjectCommand({ Bucket: this.bucketName!, Key: key })
     return getSignedUrl(this.client!, cmd, { expiresIn: expiresInSeconds })
+  }
+
+  /**
+   * The key behind a URL this service hands out, or null when the URL is not
+   * one of ours — for a caller that must not store a URL of our own bucket in
+   * place of the key it was made from.
+   *
+   * WHY IT EXISTS. `getObjectUrl` signs for fifteen minutes. A screen that
+   * loads a signed URL into a form and sends the form back writes that URL
+   * into a column meant for the durable key, and the link dies a quarter of an
+   * hour later — the AI page's meeting card did exactly that on every Update.
+   * Both shapes are recognised: `${R2_PUBLIC_URL}/<key>` and the path-style
+   * presigned `${endpoint}/<bucket>/<key>?X-Amz-…`.
+   */
+  keyFromOwnUrl(url: string): string | null {
+    if (!this.configured) return null
+    let parsed: URL
+    try {
+      parsed = new URL(url)
+    } catch {
+      return null
+    }
+    const underPath = (base: string) => {
+      const b = new URL(base.endsWith('/') ? base : `${base}/`)
+      if (parsed.origin !== b.origin || !parsed.pathname.startsWith(b.pathname)) return null
+      const rest = parsed.pathname.slice(b.pathname.length)
+      try {
+        return decodeURIComponent(rest) || null
+      } catch {
+        return null
+      }
+    }
+    if (this.publicUrl) {
+      const key = underPath(this.publicUrl)
+      if (key !== null) return key
+    }
+    if (this.endpoint && this.bucketName) return underPath(`${this.endpoint.replace(/\/$/, '')}/${this.bucketName}`)
+    return null
   }
 
   async deleteObject(key: string): Promise<void> {

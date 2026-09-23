@@ -30,18 +30,14 @@
  * Pure, so the rule is unit-tested without a database or a bucket.
  */
 
-const SEGMENT = /^[A-Za-z0-9._-]+$/
-
-const isSafeSegment = (segment: string) => SEGMENT.test(segment) && segment !== '.' && segment !== '..'
+import { isKeyDirectlyUnder, isSafeSegment } from '../../common/storage/object-key-shape'
 
 /**
  * Exactly the key `createAttachmentUploadUrl` mints for this task in this
  * workspace. What `addAttachment` may register: an upload, and nothing else.
  */
 export function isTaskUploadKey(key: unknown, workspaceId: string, taskId: string): boolean {
-  if (typeof key !== 'string') return false
-  const prefix = `workspaces/${workspaceId}/tasks/${taskId}/attachments/`
-  return key.startsWith(prefix) && isSafeSegment(key.slice(prefix.length))
+  return isKeyDirectlyUnder(key, `workspaces/${workspaceId}/tasks/${taskId}/attachments/`)
 }
 
 /**
@@ -88,7 +84,7 @@ export function attachmentKind(key: unknown): 'link' | 'file' {
 export function isTaskOwnObjectKey(key: unknown, taskId: string, workspaceId?: string): boolean {
   if (typeof key !== 'string') return false
   const inbound = `inbound-email/${taskId}/`
-  if (key.startsWith(inbound)) return isSafeSegment(key.slice(inbound.length))
+  if (key.startsWith(inbound)) return isKeyDirectlyUnder(key, inbound)
   const m = /^workspaces\/([^/]+)\/tasks\/([^/]+)\/attachments\/([^/]+)$/.exec(key)
   if (!m) return false
   const [, ws, task, name] = m
