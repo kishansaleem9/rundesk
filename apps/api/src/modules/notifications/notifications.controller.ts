@@ -2,11 +2,44 @@ import { BadRequestException, Body, Controller, Get, Headers, Post, Param, Query
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { NotificationsService, INBOX_VIEWS, type InboxView } from './notifications.service'
+import {
+  NotificationsService,
+  INBOX_PAGE_MAX,
+  INBOX_VIEWS,
+  NOTIFICATION_TYPES,
+  type InboxScope,
+  type InboxView,
+} from './notifications.service'
 import type { CurrentUserPayload } from '../tasks/types'
 
 /** Longest a notification may be parked in Later — a year of snoozes is a bug, not a wish. */
 const MAX_SNOOZE_MS = 365 * 24 * 3600_000
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * `?workspaceId=` and `?types=`, read the same way by every route that takes
+ * them.
+ *
+ * Refused when malformed rather than ignored. Ignoring a bad `workspaceId`
+ * answers with every workspace — the very thing the parameter exists to stop
+ * — and an unknown type would reach Postgres as an enum it cannot parse.
+ * `types` is comma-separated; present but empty means "none of them".
+ */
+function parseScope(workspaceId: string | undefined, types: string | undefined): InboxScope {
+  const scope: InboxScope = {}
+  if (workspaceId !== undefined) {
+    if (!UUID.test(workspaceId)) throw new BadRequestException('workspaceId must be a workspace id')
+    scope.workspaceId = workspaceId
+  }
+  if (types !== undefined) {
+    const named = types.split(',').map((t) => t.trim()).filter(Boolean)
+    const unknown = named.filter((t) => !NOTIFICATION_TYPES.includes(t))
+    if (unknown.length) throw new BadRequestException(`Unknown notification type: ${unknown.join(', ')}`)
+    scope.types = named
+  }
+  return scope
+}
 
 @ApiTags('notifications')
 @ApiBearerAuth()
@@ -15,21 +48,52 @@ const MAX_SNOOZE_MS = 365 * 24 * 3600_000
 export class NotificationsController {
   constructor(private notifications: NotificationsService) {}
 
+  /**
+   * One page of the caller's notifications, newest first.
+   *
+   * `before` is the id of the last row of the previous page, `limit` is at
+   * most {@link INBOX_PAGE_MAX}. A caller asking for one more row than it
+   * shows learns whether there is another page without a second request.
+   */
   @Get()
   list(
     @CurrentUser() user: CurrentUserPayload,
     @Query('unreadOnly') unreadOnly?: string,
+    @Query('readOnly') readOnly?: string,
     @Query('view') view?: string,
+    @Query('workspaceId') workspaceId?: string,
+    @Query('types') types?: string,
+    @Query('before') before?: string,
+    @Query('limit') limit?: string,
   ) {
+    if (before !== undefined && !UUID.test(before)) {
+      throw new BadRequestException('before must be the id of a notification')
+    }
+    let pageSize: number | undefined
+    if (limit !== undefined) {
+      pageSize = Number(limit)
+      if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > INBOX_PAGE_MAX) {
+        throw new BadRequestException(`limit must be a whole number from 1 to ${INBOX_PAGE_MAX}`)
+      }
+    }
     return this.notifications.list(user.id, {
       unreadOnly: unreadOnly === 'true',
-      view: (INBOX_VIEWS as string[]).includes(view ?? '') ? (view as InboxView) : undefined,
+      readOnly: readOnly === 'true',
+      view: parseView(view),
+      ...parseScope(workspaceId, types),
+      before,
+      limit: pageSize,
     })
   }
 
   @Get('unread-count')
-  unreadCount(@CurrentUser() user: CurrentUserPayload) {
-    return this.notifications.unreadCount(user.id)
+  unreadCount(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('workspaceId') workspaceId?: string,
+    @Query('types') types?: string,
+    @Query('view') view?: string,
+  ) {
+    return this.notifications.unreadCount(user.id, parseScope(workspaceId, types), parseView(view))
   }
 
   @Get('unread-by-workspace')
@@ -38,8 +102,12 @@ export class NotificationsController {
   }
 
   @Get('counts')
-  triageCounts(@CurrentUser() user: CurrentUserPayload) {
-    return this.notifications.triageCounts(user.id)
+  triageCounts(
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('workspaceId') workspaceId?: string,
+    @Query('types') types?: string,
+  ) {
+    return this.notifications.triageCounts(user.id, parseScope(workspaceId, types))
   }
 
   @Get('digest/preview')
@@ -150,8 +218,12 @@ export class NotificationsController {
   }
 
   @Post('mark-all-read')
-  markAllRead(@CurrentUser() user: CurrentUserPayload) {
-    return this.notifications.markAllRead(user.id)
+  markAllRead(
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body?: { workspaceId?: string },
+  ) {
+    const { workspaceId } = parseScope(bodyString(body?.workspaceId, 'workspaceId'), undefined)
+    return this.notifications.markAllRead(user.id, { workspaceId })
   }
 
   /**
@@ -162,12 +234,13 @@ export class NotificationsController {
   @Post('clear-all')
   clearAll(
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body?: { types?: string[] },
+    @Body() body?: { types?: string[]; workspaceId?: string },
   ) {
     const types = Array.isArray(body?.types)
       ? body.types.filter((t): t is string => typeof t === 'string')
       : undefined
-    return this.notifications.clearAll(user.id, { types })
+    const { workspaceId } = parseScope(bodyString(body?.workspaceId, 'workspaceId'), undefined)
+    return this.notifications.clearAll(user.id, { types, workspaceId })
   }
 
   @Post(':notificationId/clear')
@@ -212,6 +285,26 @@ export class NotificationsController {
   ) {
     return this.notifications.sendTest(user.id, body?.workspaceId ?? null)
   }
+}
+
+/**
+ * `?view=`, when it is given, has to be one of the buckets. An unknown one was
+ * served as the Inbox, so a caller that misspelt `cleared` was shown the
+ * Inbox and told nothing.
+ */
+function parseView(view: string | undefined): InboxView | undefined {
+  if (view === undefined) return undefined
+  if (!(INBOX_VIEWS as string[]).includes(view)) {
+    throw new BadRequestException(`view must be one of: ${INBOX_VIEWS.join(', ')}`)
+  }
+  return view as InboxView
+}
+
+/** A body field that must be a string when it is there at all. */
+function bodyString(value: unknown, name: string): string | undefined {
+  if (value === undefined || value === null) return undefined
+  if (typeof value !== 'string') throw new BadRequestException(`${name} must be a string`)
+  return value
 }
 
 /**

@@ -2,6 +2,7 @@ import { createFileRoute, Link, Outlet, useMatches, useNavigate } from '@tanstac
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Card, EmptyState as EmptyStateCard, Button, Badge, toast } from '@rundesk/ui'
 import { ListSkeleton } from '../components/loading-skeletons'
+import { LoadOlder } from '../components/load-older'
 import { FLAGS } from '@rundesk/feature-flags'
 import {
   Bell,
@@ -19,8 +20,9 @@ import {
   AlarmClock,
 } from 'lucide-react'
 import { api } from '../lib/api'
-import { isReplyNotification } from '../lib/reply-types'
-import { useMemo, useState } from 'react'
+import { ASSIGNED_COMMENT_TYPES, REPLY_TYPES } from '../lib/reply-types'
+import { notificationsUrl, typesKey, useNotificationPages, useUnreadCount } from '../lib/notifications-query'
+import { useState } from 'react'
 import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
@@ -138,15 +140,31 @@ function WorkspaceHome() {
   const setSection = (next: HomeSection) =>
     navigate({ to: '/app/$workspaceId', params: { workspaceId }, search: { section: next }, replace: true })
 
-  const notificationsQuery = useQuery({
-    queryKey: ['notifications', workspaceId],
-    queryFn: async () => {
-      try {
-        return await api<Notification[]>(`/notifications`)
-      } catch {
-        return [] as Notification[]
-      }
-    },
+  /*
+   * Home's three notification panels, each asked for by type and scoped to this
+   * workspace, with their counts from the server.
+   *
+   * They were one bare `/notifications` read — the newest fifty, from every
+   * workspace — filtered and counted here, so a reply older than fifty other
+   * notifications was neither listed nor counted, and another workspace's rows
+   * were. A failed read was caught and shown as an empty inbox.
+   */
+  const panelTypes =
+    section === 'replies' ? REPLY_TYPES : section === 'assigned-comments' ? ASSIGNED_COMMENT_TYPES : undefined
+  const notificationsQuery = useNotificationPages<Notification>(
+    [workspaceId, 'home', typesKey(panelTypes)],
+    { workspaceId, types: panelTypes },
+    { enabled: section === 'inbox' || section === 'replies' || section === 'assigned-comments' },
+  )
+  const inboxUnread = useUnreadCount({ workspaceId })
+  const repliesUnread = useUnreadCount({ workspaceId, types: REPLY_TYPES })
+  const assignedUnread = useUnreadCount({ workspaceId, types: ASSIGNED_COMMENT_TYPES })
+  // The newest briefing, asked for as itself: it was found among the newest
+  // fifty notifications, so one busy morning was enough to hide it.
+  const briefingQuery = useQuery({
+    queryKey: ['notifications', workspaceId, 'home-briefing'],
+    queryFn: () =>
+      api<Notification[]>(notificationsUrl('/notifications', { workspaceId, types: ['ai_briefing'], limit: 1 })),
   })
   const myTasksQuery = useQuery({
     queryKey: ['home-my-tasks', workspaceId, user?.id],
@@ -220,13 +238,7 @@ function WorkspaceHome() {
   })
 
   const { namesById } = useMentionNames(workspaceId)
-  const notifications = notificationsQuery.data ?? []
-  const unread = notifications.filter((n) => !n.readAt)
-  // §G12-1 — the shared list, so this badge and the Replies page cannot drift
-  // apart again. The old inline list named a type nothing emits and omitted two
-  // that everything does.
-  const replies = notifications.filter((n) => isReplyNotification(n.type))
-  const assignedComments = notifications.filter((n) => ['task_mentioned', 'mention'].includes(n.type))
+  const notifications = notificationsQuery.rows
   const myTasks = myTasksQuery.data ?? []
   const assignedToMe = myTasks.filter((task) => !['done', 'cancelled'].includes(task.status))
   const todayAndOverdue = myTasks.filter((task) => {
@@ -254,20 +266,10 @@ function WorkspaceHome() {
   // §A6.5 — the scheduled briefing arrives as a notification; Home is where the
   // user starts their day, so the most recent one is shown here rather than
   // being left to be discovered on the Insights page.
-  const latestBriefing = notifications.find((n) => n.type === 'ai_briefing') ?? null
+  const latestBriefing = briefingQuery.data?.[0] ?? null
 
-  const selectedItems = useMemo(() => {
-    switch (section) {
-      case 'inbox':
-        return notifications
-      case 'replies':
-        return replies
-      case 'assigned-comments':
-        return assignedComments
-      default:
-        return []
-    }
-  }, [section, notifications, replies, assignedComments])
+  // The panel's rows are already the section's: the server filtered them.
+  const selectedItems = notifications
 
   const resolveDestination = async (notif: Notification) => {
     const raw = notif.target?.url?.trim()
@@ -348,9 +350,9 @@ function WorkspaceHome() {
         <Card variant="glass" className="p-3 h-fit">
           <h1 className="text-3xl font-display font-semibold mb-3">{t('appWorkspace.home')}</h1>
           <div className="space-y-1">
-            <HomeItem icon={Bell} label={t('appWorkspace.inbox')} active={section === 'inbox'} onClick={() => setSection('inbox')} count={unread.length} />
-            <HomeItem icon={MessageCircleReply} label={t('appWorkspace.replies')} active={section === 'replies'} onClick={() => setSection('replies')} count={replies.filter((n) => !n.readAt).length} />
-            <HomeItem icon={UserRoundCheck} label={t('appWorkspace.assignedComments')} active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedComments.filter((n) => !n.readAt).length} />
+            <HomeItem icon={Bell} label={t('appWorkspace.inbox')} active={section === 'inbox'} onClick={() => setSection('inbox')} count={inboxUnread.data?.count} testId="home-nav-inbox" />
+            <HomeItem icon={MessageCircleReply} label={t('appWorkspace.replies')} active={section === 'replies'} onClick={() => setSection('replies')} count={repliesUnread.data?.count} testId="home-nav-replies" />
+            <HomeItem icon={UserRoundCheck} label={t('appWorkspace.assignedComments')} active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedUnread.data?.count} testId="home-nav-assigned-comments" />
             <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">{t('appWorkspace.myTasks')}</div>
             <HomeItem icon={CircleCheck} label={t('appWorkspace.assignedToMe')} active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
             <HomeItem icon={CalendarClock} label={t('appWorkspace.todayOverdue')} active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
@@ -384,6 +386,10 @@ function WorkspaceHome() {
                   back. Shapes until we know. */}
               {notificationsQuery.isPending ? (
                 <ListSkeleton rows={3} rowClassName="h-16" />
+              ) : notificationsQuery.isError && selectedItems.length === 0 ? (
+                <p className="text-sm text-destructive" data-testid="home-notifications-failed">
+                  {t('inbox.loadFailed')}
+                </p>
               ) : selectedItems.length === 0 ? (
                 <EmptyStateCard
                   icon={<Bell className="h-6 w-6" />}
@@ -395,6 +401,7 @@ function WorkspaceHome() {
                   <Card
                     key={n.id}
                     variant="glass"
+                    data-testid={`home-notification-${n.id}`}
                     className="p-3 cursor-pointer hover:border-accent/30"
                     onClick={async () => {
                       if (!n.readAt) await markRead.mutateAsync(n.id)
@@ -433,6 +440,9 @@ function WorkspaceHome() {
                   </Card>
                 ))
               )}
+              {/* Fifty at a time, like the Inbox, and the rest one click away
+                  rather than silently left out of the panel. */}
+              {notificationsQuery.hasNextPage && <LoadOlder query={notificationsQuery} testId="home-load-more" />}
             </div>
           )}
 

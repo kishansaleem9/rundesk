@@ -56,6 +56,7 @@ import { applyBrandColor } from '../lib/branding'
 import { canInstall, onInstallabilityChange, promptInstall, watchForInstallPrompt } from '../lib/pwa-install'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
+import { notificationsUrl, useUnreadCount } from '../lib/notifications-query'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { QuickCreateModal } from './quick-create-modal'
 import { getRealtimeSocket } from '../lib/realtime'
@@ -907,14 +908,12 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
     }
   }, [open])
 
-  const countQuery = useQuery({
-    queryKey: ['notifications-unread-count'],
-    queryFn: () => api<{ count: number }>('/notifications/unread-count'),
-    refetchInterval: 30000,
-  })
+  // This workspace's, as its Inbox is — the badge and the list both counted
+  // and listed every workspace's rows — and every workspace's outside one.
+  const countQuery = useUnreadCount({ workspaceId }, { refetchInterval: 30000 })
   const listQuery = useQuery({
-    queryKey: ['notifications', 'recent'],
-    queryFn: () => api<Notification[]>('/notifications'),
+    queryKey: ['notifications', 'recent', workspaceId ?? '*'],
+    queryFn: () => api<Notification[]>(notificationsUrl('/notifications', { workspaceId, limit: 20 })),
     enabled: open,
   })
 
@@ -926,7 +925,7 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
     },
   })
   const markAllRead = useMutation({
-    mutationFn: () => api('/notifications/mark-all-read', { method: 'POST' }),
+    mutationFn: () => api('/notifications/mark-all-read', { method: 'POST', body: { workspaceId } }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['notifications-unread-count'] })
       qc.invalidateQueries({ queryKey: ['notifications', 'recent'] })
@@ -946,7 +945,10 @@ function NotificationsBell({ workspaceId }: { workspaceId?: string }) {
         >
           <Bell className="h-4 w-4" />
           {unread > 0 && (
-            <span className="absolute top-1 right-1 h-4 min-w-4 px-1 rounded-full bg-brand-gradient text-white text-[10px] font-semibold flex items-center justify-center shadow-glow">
+            <span
+              data-testid="bell-unread"
+              className="absolute top-1 right-1 h-4 min-w-4 px-1 rounded-full bg-brand-gradient text-white text-[10px] font-semibold flex items-center justify-center shadow-glow"
+            >
               {unread > 99 ? '99+' : unread}
             </span>
           )}

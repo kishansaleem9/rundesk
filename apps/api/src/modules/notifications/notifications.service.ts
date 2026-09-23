@@ -1,6 +1,6 @@
 import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common'
 import { eq, and, isNull, isNotNull, or, desc, sql, inArray, gte, gt, lte } from 'drizzle-orm'
-import { notifications, users, webPushSubscriptions } from '@rundesk/db'
+import { notifications, notificationTypeEnum, users, webPushSubscriptions } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -135,6 +135,29 @@ export type PushDelivery =
 export type InboxView = 'inbox' | 'later' | 'cleared' | 'all'
 
 export const INBOX_VIEWS: InboxView[] = ['inbox', 'later', 'cleared', 'all']
+
+/** Every notification type there is — what a `types` filter may name. */
+export const NOTIFICATION_TYPES: readonly string[] = notificationTypeEnum.enumValues
+
+/**
+ * The most rows one `GET /notifications` returns. The route used to take no
+ * page size and the service read 50, full stop — so the Inbox showed the
+ * newest fifty and then said "You're all caught up" about the rest.
+ */
+export const INBOX_PAGE_MAX = 100
+
+/**
+ * Which of a person's notifications a read or a bulk verb is about.
+ *
+ * `workspaceId` narrows to that workspace's rows AND the rows that belong to
+ * no workspace at all: the Inbox is per workspace, as ClickUp's is, and an
+ * account-level notification has no other workspace to be shown in. Absent,
+ * it means every workspace — the view outside any workspace.
+ *
+ * `types` narrows to those types; an empty list means none of them, never
+ * "no filter", for the reason `clearAll` gives.
+ */
+export type InboxScope = { workspaceId?: string; types?: string[] }
 
 /** Snooze presets the inbox offers, in hours from now. */
 export const SNOOZE_PRESET_HOURS = [1, 4, 24, 24 * 7] as const
@@ -705,21 +728,74 @@ export class NotificationsService {
     }
   }
 
-  async list(userId: string, opts: { unreadOnly?: boolean; limit?: number; view?: InboxView } = {}) {
+  /** The rows `scope` is about — see {@link InboxScope}. */
+  private scopeCondition(scope: InboxScope) {
+    return and(
+      scope.workspaceId
+        ? or(eq(notifications.workspaceId, scope.workspaceId), isNull(notifications.workspaceId))
+        : undefined,
+      scope.types?.length ? inArray(notifications.type, scope.types as never) : undefined,
+    )
+  }
+
+  /**
+   * Rows that come after `anchorId` in the Inbox's order: newest first, ties
+   * broken by id, so a page boundary can neither repeat a row nor drop one.
+   *
+   * Compared in the database, against the anchor's own stored timestamp, and
+   * not against a timestamp the client sends back: `created_at` holds
+   * microseconds and JSON carries milliseconds, so two notifications written
+   * in the same millisecond would straddle a page boundary and the older one
+   * would never be shown.
+   */
+  private olderThan(anchorId: string) {
+    return sql`(${notifications.createdAt}, ${notifications.id}) < (select a.created_at, a.id from ${notifications} a where a.id = ${anchorId})`
+  }
+
+  /**
+   * A cursor has to be one of the caller's own notifications. Anyone else's id
+   * would still page — and paging would tell them when that notification was
+   * written.
+   */
+  private async assertOwnAnchor(userId: string, anchorId: string) {
+    const [row] = await this.db
+      .select({ id: notifications.id })
+      .from(notifications)
+      .where(and(eq(notifications.id, anchorId), eq(notifications.userId, userId)))
+      .limit(1)
+    if (!row) throw new BadRequestException('before must be the id of one of your own notifications')
+  }
+
+  async list(
+    userId: string,
+    opts: {
+      unreadOnly?: boolean
+      readOnly?: boolean
+      limit?: number
+      view?: InboxView
+      before?: string
+    } & InboxScope = {},
+  ) {
+    if (opts.types && opts.types.length === 0) return []
+    if (opts.unreadOnly && opts.readOnly) return []
+    if (opts.before) await this.assertOwnAnchor(userId, opts.before)
     const where = and(
       eq(notifications.userId, userId),
       opts.unreadOnly ? isNull(notifications.readAt) : undefined,
+      opts.readOnly ? isNotNull(notifications.readAt) : undefined,
       // Default to the Inbox bucket: the bell and the workspace home both call
       // this bare, and a cleared notification must not resurface there.
       this.viewCondition(opts.view ?? 'inbox', new Date()),
+      this.scopeCondition(opts),
+      opts.before ? this.olderThan(opts.before) : undefined,
     )
     const rows = await this.db
       .select()
       .from(notifications)
       .leftJoin(users, eq(users.id, notifications.actorId))
       .where(where)
-      .orderBy(desc(notifications.createdAt))
-      .limit(opts.limit ?? 50)
+      .orderBy(desc(notifications.createdAt), desc(notifications.id))
+      .limit(Math.min(opts.limit ?? 50, INBOX_PAGE_MAX))
 
     const mapped = rows.map((row: any) => ({
       ...(row.notifications ?? row),
@@ -795,7 +871,12 @@ export class NotificationsService {
     return { ok: true }
   }
 
-  async markAllRead(userId: string) {
+  /**
+   * `workspaceId` keeps "Mark all read" in one workspace's Inbox from reading
+   * another's: that Inbox only shows its own rows, so the others were being
+   * marked read without ever having been on screen.
+   */
+  async markAllRead(userId: string, scope: Pick<InboxScope, 'workspaceId'> = {}) {
     const now = new Date()
     // Scoped to the Inbox bucket so a snoozed row comes back unread when its
     // Later window lapses — that is the whole point of saving it for later.
@@ -807,6 +888,7 @@ export class NotificationsService {
           eq(notifications.userId, userId),
           isNull(notifications.readAt),
           this.viewCondition('inbox', now),
+          this.scopeCondition(scope),
         ),
       )
     return { ok: true }
@@ -825,7 +907,7 @@ export class NotificationsService {
    * to Primary would also bin everything the filter was hiding, which is a
    * surprise you cannot see happening.
    */
-  async clearAll(userId: string, opts: { types?: string[] } = {}) {
+  async clearAll(userId: string, opts: InboxScope = {}) {
     const now = new Date()
     // An explicit empty list means "none of these", not "no filter". Omitting
     // `types` is how a caller asks to clear the whole bucket; treating `[]` the
@@ -839,14 +921,19 @@ export class NotificationsService {
         and(
           eq(notifications.userId, userId),
           this.viewCondition('inbox', now),
-          opts.types?.length ? inArray(notifications.type, opts.types as never) : undefined,
+          this.scopeCondition(opts),
         ),
       )
       .returning({ id: notifications.id })
     return { ok: true, cleared: rows.length }
   }
 
-  async unreadCount(userId: string) {
+  /**
+   * `view` is the bucket counted — the Inbox unless a page lists another. The
+   * Replies page lists every bucket, and its badge has to count what it lists.
+   */
+  async unreadCount(userId: string, scope: InboxScope = {}, view: InboxView = 'inbox') {
+    if (scope.types && scope.types.length === 0) return { count: 0 }
     const [row] = await this.db
       .select({ count: sql<number>`count(*)::int` })
       .from(notifications)
@@ -854,7 +941,8 @@ export class NotificationsService {
         and(
           eq(notifications.userId, userId),
           isNull(notifications.readAt),
-          this.viewCondition('inbox', new Date()),
+          this.viewCondition(view, new Date()),
+          this.scopeCondition(scope),
         ),
       )
     return { count: row?.count ?? 0 }
@@ -901,7 +989,8 @@ export class NotificationsService {
    * counts; `now()` rather than a bound timestamp so all four agree on the same
    * instant without a parameter round-trip.
    */
-  async triageCounts(userId: string) {
+  async triageCounts(userId: string, scope: InboxScope = {}) {
+    if (scope.types && scope.types.length === 0) return { inbox: 0, later: 0, cleared: 0, unread: 0 }
     const [row] = await this.db
       .select({
         inbox: sql<number>`count(*) filter (where ${notifications.dismissedAt} is null and (${notifications.snoozedUntil} is null or ${notifications.snoozedUntil} <= now()))::int`,
@@ -910,7 +999,7 @@ export class NotificationsService {
         unread: sql<number>`count(*) filter (where ${notifications.readAt} is null and ${notifications.dismissedAt} is null and (${notifications.snoozedUntil} is null or ${notifications.snoozedUntil} <= now()))::int`,
       })
       .from(notifications)
-      .where(eq(notifications.userId, userId))
+      .where(and(eq(notifications.userId, userId), this.scopeCondition(scope)))
     return {
       inbox: row?.inbox ?? 0,
       later: row?.later ?? 0,

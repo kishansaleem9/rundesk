@@ -401,11 +401,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND FIFTEEN — every suite in the repo, which
-    # `check-suites-registered.mjs` now enforces rather than this comment
-    # asserting it. At the measured 1.1 minutes each that is about 126
-    # minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115.
+    # The job now runs ONE HUNDRED AND SIXTEEN — every suite in the repo but the
+    # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
+    # rather than this comment asserting it. At the measured 1.1 minutes each
+    # that is about 128 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1609,6 +1609,19 @@ jobs:
       - name: The Mine timesheet is the viewer's own week
         if: '!cancelled()'
         run: node test/e2e/timesheet-mine.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The Inbox is one workspace's, pages to its end, and counts what the
+      # server holds. It read the newest fifty from every workspace and counted,
+      # filtered and declared "all caught up" from those — so Replies, Home and
+      # both badges did too. Two page boundaries are staged in Postgres
+      # (DATABASE_URL, the job's own): rows a few microseconds apart, and rows
+      # at one instant.
+      - name: The Inbox is the workspace's, every page of it
+        if: '!cancelled()'
+        run: node test/e2e/inbox-scope.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

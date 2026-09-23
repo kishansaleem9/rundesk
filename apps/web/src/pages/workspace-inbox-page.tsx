@@ -35,6 +35,8 @@ import {
 } from 'lucide-react'
 import { formatDistanceToNowStrict, isToday, isYesterday } from 'date-fns'
 import { api } from '../lib/api'
+import { notificationsUrl, typesKey, useNotificationPages } from '../lib/notifications-query'
+import { LoadOlder } from '../components/load-older'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
@@ -326,13 +328,18 @@ export const PRIMARY_SELECTABLE_TYPES: Array<{ type: string; labelKey: Translati
   { type: 'subtask_created', labelKey: 'inbox.type.subtaskCreated' },
 ]
 
-export function matchesInboxFilter(
-  type: string,
-  filter: InboxFilter,
-  primaryTypes?: Set<string>,
-): boolean {
-  if (filter === 'all') return true
-  return (primaryTypes ?? HUMAN_TYPES).has(type)
+/**
+ * §A2.6b — the types a chip shows, as the server is asked for them;
+ * `undefined` is All, which narrows nothing.
+ *
+ * The list, the chip's count and Clear all take their set from here, so what
+ * is listed, what is counted and what is cleared cannot be three sets. The
+ * list used to be filtered in the browser from the newest fifty rows of every
+ * type, so a Primary whose rows were older than fifty others showed nothing —
+ * and counted nothing — while they sat on the next page.
+ */
+export function inboxChipTypes(filter: InboxFilter, primaryTypes: Set<string>): Set<string> | undefined {
+  return filter === 'all' ? undefined : primaryTypes
 }
 
 /**
@@ -351,8 +358,8 @@ export function clearAllPayload(
   primaryTypes: Set<string>,
 ): { types?: string[] } {
   // All means all: no narrowing, so an omitted `types` rather than a list.
-  if (filter === 'all') return {}
-  return { types: [...primaryTypes] }
+  const types = inboxChipTypes(filter, primaryTypes)
+  return types === undefined ? {} : { types: [...types] }
 }
 
 const FILTER_LABEL_KEY: Record<InboxFilter, TranslationKey> = {
@@ -558,35 +565,39 @@ export function InboxPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/inbox' })
   const { view = 'inbox', filter = 'all' } = useSearch({ from: '/app/$workspaceId/inbox' })
 
-  const notifsQuery = useQuery({
-    queryKey: ['notifications', workspaceId, view],
-    queryFn: async () => {
-      try {
-        return await api<Notification[]>(`/notifications?view=${view}`)
-      } catch {
-        return [] as Notification[]
-      }
-    },
-  })
-  const countsQuery = useQuery({
-    queryKey: ['notification-counts'],
-    queryFn: async () => {
-      try {
-        return await api<TriageCounts>('/notifications/counts')
-      } catch {
-        return { inbox: 0, later: 0, cleared: 0, unread: 0 } as TriageCounts
-      }
-    },
-  })
-
-  // §2.2 — what this member chose to see in Primary. Falls back to the default
-  // set while it loads, so the counts do not jump as the request lands.
+  // §2.2 — what this member chose to see in Primary. The default set stands in
+  // only if the preferences cannot be read; while they load, nothing that
+  // depends on Primary is asked for, so its list and count do not arrive twice.
   const prefsQuery = useQuery({
     queryKey: ['notification-preferences'],
     queryFn: () =>
       api<{ primaryTypes?: string[]; inboxView?: Partial<InboxViewPrefs> }>('/notifications/preferences'),
   })
   const primaryTypes = new Set(prefsQuery.data?.primaryTypes ?? [...HUMAN_TYPES])
+  const chipTypes = inboxChipTypes(filter, primaryTypes)
+
+  /*
+   * This workspace's notifications, a page at a time, filtered by the server.
+   *
+   * It read `/notifications?view=` bare — the newest fifty, from every
+   * workspace — and a failed request was caught and turned into `[]`, which
+   * this page then presented as an empty Inbox. A failure is shown as one now.
+   */
+  const notifsQuery = useNotificationPages<Notification>(
+    [workspaceId, view, typesKey(chipTypes)],
+    { workspaceId, view, types: chipTypes },
+    { enabled: filter === 'all' || !prefsQuery.isPending },
+  )
+  const countsQuery = useQuery({
+    queryKey: ['notification-counts', workspaceId],
+    queryFn: () => api<TriageCounts>(notificationsUrl('/notifications/counts', { workspaceId })),
+  })
+  const primaryCountsQuery = useQuery({
+    queryKey: ['notification-counts', workspaceId, typesKey(primaryTypes)],
+    enabled: !prefsQuery.isPending,
+    queryFn: () =>
+      api<TriageCounts>(notificationsUrl('/notifications/counts', { workspaceId, types: primaryTypes })),
+  })
   /*
    * Defaulted to the behaviour that shipped before it was a choice — day
    * buckets, newest first, comfortable — so an account that never opens the
@@ -642,17 +653,23 @@ export function InboxPage() {
   const savedComments = view === 'later' ? (savedCommentsQuery.data ?? []) : []
 
   const { namesById } = useMentionNames(workspaceId)
-  const counts = countsQuery.data ?? { inbox: 0, later: 0, cleared: 0, unread: 0 }
-  const all = notifsQuery.data ?? []
-  const notifs = all.filter((n) => matchesInboxFilter(n.type, filter, primaryTypes))
-  const unread = notifs.filter((n) => !n.readAt)
-  // Counts per chip, so the split tells you where the traffic is before you
-  // click into it. Derived from the list already loaded — no extra request.
-  const primaryCount = all.filter((n) => matchesInboxFilter(n.type, 'primary', primaryTypes)).length
-  const filterCounts: Record<InboxFilter, number> = {
-    all: all.length,
-    primary: primaryCount,
+  const counts = countsQuery.data
+  const notifs = notifsQuery.rows
+  /*
+   * Counts per chip, so the split tells you where the traffic is before you
+   * click into it — the server's, for the bucket on screen. They were counted
+   * from the rows already loaded, and a page holds fifty: a chip reading 50
+   * meant "at least 50", and a Primary whose rows were all older read 0.
+   * Blank until known, never a zero that has not been counted.
+   */
+  const inView = (c?: TriageCounts) => c?.[view]
+  const filterCounts: Record<InboxFilter, number | undefined> = {
+    all: inView(counts),
+    primary: inView(primaryCountsQuery.data),
   }
+  // Caught up is the server's answer too. The rows on screen being read says
+  // nothing about the next page.
+  const unreadUnderChip = (filter === 'primary' ? primaryCountsQuery.data : counts)?.unread
 
   // Every triage verb moves rows between buckets, so the tab counts and the
   // bell badge have to be refetched alongside the list itself.
@@ -678,8 +695,10 @@ export function InboxPage() {
     mutationFn: (id: string) => api(`/notifications/${id}/unread`, { method: 'POST' }),
     onSuccess: refreshAll,
   })
+  // This workspace's, like the list it sits above: another workspace's rows
+  // were being marked read without ever having been on screen here.
   const markAllRead = useMutation({
-    mutationFn: () => api('/notifications/mark-all-read', { method: 'POST' }),
+    mutationFn: () => api('/notifications/mark-all-read', { method: 'POST', body: { workspaceId } }),
     onSuccess: refreshAll,
   })
   const clear = useMutation({
@@ -694,8 +713,8 @@ export function InboxPage() {
       api('/notifications/clear-all', {
         method: 'POST',
         // Only what the chip is showing — the member's own Primary set, not the
-        // default one it started from.
-        body: clearAllPayload(filter, primaryTypes),
+        // default one it started from — and only in this workspace.
+        body: { ...clearAllPayload(filter, primaryTypes), workspaceId },
       }),
     onSuccess: refreshAll,
   })
@@ -767,10 +786,10 @@ export function InboxPage() {
             <h1 className="font-display text-2xl font-semibold leading-tight">{t('inbox.title')}</h1>
           </div>
           <div className="ml-auto flex items-center gap-2">
-            {counts.unread > 0 && (
+            {(counts?.unread ?? 0) > 0 && (
               <>
-                <Badge variant="gradient" className="text-[10px]">
-                  {t('inbox.new', { count: counts.unread })}
+                <Badge variant="gradient" className="text-[10px]" data-testid="inbox-unread-badge">
+                  {t('inbox.new', { count: counts?.unread ?? 0 })}
                 </Badge>
                 <button
                   type="button"
@@ -838,7 +857,9 @@ export function InboxPage() {
                 )}
               >
                 {t(VIEW_LABEL_KEY[v])}
-                <span className="tabular-nums text-[10px] text-muted-foreground">{counts[v]}</span>
+                <span className="tabular-nums text-[10px] text-muted-foreground" data-testid={`inbox-view-count-${v}`}>
+                  {counts?.[v]}
+                </span>
               </button>
             ))}
           </div>
@@ -860,7 +881,9 @@ export function InboxPage() {
                 )}
               >
                 {t(FILTER_LABEL_KEY[f])}
-                <span className="tabular-nums text-[10px] text-muted-foreground">{filterCounts[f]}</span>
+                <span className="tabular-nums text-[10px] text-muted-foreground" data-testid={`inbox-chip-count-${f}`}>
+                  {filterCounts[f]}
+                </span>
               </button>
             ))}
             {/* §2.2 — "Primary pe yeh setting ka option hai; is par main click
@@ -988,6 +1011,17 @@ export function InboxPage() {
             // state here would assert there is nothing in your inbox before we
             // know that. Skeleton rows say "still looking" instead.
             <ListSkeleton rows={7} rowClassName="h-14" />
+          ) : notifsQuery.isError && notifs.length === 0 ? (
+            <div className="text-center space-y-2" data-testid="inbox-load-failed">
+              <p className="text-sm text-destructive">{t('inbox.loadFailed')}</p>
+              <button
+                type="button"
+                onClick={() => void notifsQuery.refetch()}
+                className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              >
+                {t('common.retry')}
+              </button>
+            </div>
           ) : notifs.length === 0 && savedMessages.length === 0 && savedComments.length === 0 ? (
             <EmptyState
               icon={<Bell className="h-6 w-6" />}
@@ -1054,8 +1088,13 @@ export function InboxPage() {
               </section>
             ))
           )}
-          {unread.length === 0 && notifs.length > 0 && view === 'inbox' && (
-            <p className="text-center text-xs text-muted-foreground">{t('inbox.allCaughtUp')}</p>
+          {notifsQuery.hasNextPage && (
+            <LoadOlder query={notifsQuery} testId="inbox-load-more" />
+          )}
+          {unreadUnderChip === 0 && notifs.length > 0 && view === 'inbox' && (
+            <p className="text-center text-xs text-muted-foreground" data-testid="inbox-caught-up">
+              {t('inbox.allCaughtUp')}
+            </p>
           )}
         </div>
       </div>

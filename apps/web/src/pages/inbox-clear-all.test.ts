@@ -19,7 +19,8 @@
  *
  * Run:  pnpm --filter @rundesk/web test
  */
-import { clearAllPayload, matchesInboxFilter, PRIMARY_SELECTABLE_TYPES } from './workspace-inbox-page'
+import { clearAllPayload, inboxChipTypes, PRIMARY_SELECTABLE_TYPES } from './workspace-inbox-page'
+import { notificationsUrl } from '../lib/notifications-query'
 
 const failures: string[] = []
 
@@ -47,10 +48,16 @@ expectSame(
 // The invariant behind it, stated directly: everything the payload names is on
 // screen, and everything on screen is named. Checked across every kind the
 // customiser can offer, so adding a type cannot quietly break one direction.
+//
+// "On screen" is what the list ASKS THE SERVER FOR, read back out of the URL
+// the page sends — the list is filtered there now, not in the browser, so the
+// request is the only honest statement of what the rows can be.
 const chosen = new Set(['task_overdue', 'message_reaction', 'access_requested'])
 const payload = new Set(clearAllPayload('primary', chosen).types ?? [])
+const listUrl = notificationsUrl('/notifications', { types: inboxChipTypes('primary', chosen) })
+const listed = new Set((new URLSearchParams(listUrl.split('?')[1] ?? '').get('types') ?? '').split(',').filter(Boolean))
 for (const { type } of PRIMARY_SELECTABLE_TYPES) {
-  const onScreen = matchesInboxFilter(type, 'primary', chosen)
+  const onScreen = listed.has(type)
   expect(
     payload.has(type) === onScreen,
     onScreen
@@ -68,6 +75,12 @@ for (const type of ['message_reaction', 'shared_with_me']) {
   )
 }
 
+// And All asks the server for every type: no `types` in the list's request.
+expect(
+  !notificationsUrl('/notifications', { types: inboxChipTypes('all', chosen) }).includes('types='),
+  'All must not narrow the list it requests',
+)
+
 // "Show me nothing in Primary" is a choice the customiser allows. The button is
 // hidden when nothing is on screen, so this should be unreachable — but if it
 // is ever reached it must clear nothing, and an empty list is how you say that.
@@ -78,4 +91,4 @@ if (failures.length) {
   for (const f of failures) console.error(`  - ${f}`)
   throw new Error(`${failures.length} assertion(s) failed`)
 }
-console.log(`clearAllPayload: all ${PRIMARY_SELECTABLE_TYPES.length + 5} cases passed`)
+console.log(`clearAllPayload: all ${PRIMARY_SELECTABLE_TYPES.length + 6} cases passed`)

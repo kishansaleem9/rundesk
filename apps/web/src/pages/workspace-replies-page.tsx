@@ -6,7 +6,9 @@ import { ListSkeleton } from '../components/loading-skeletons'
 import { MessageCircleReply, CheckCircle2, FileText, MessageSquare } from 'lucide-react'
 import { formatDistanceToNowStrict } from 'date-fns'
 import { api } from '../lib/api'
-import { isReplyNotification } from '../lib/reply-types'
+import { REPLY_TYPES } from '../lib/reply-types'
+import { useNotificationPages, useUnreadCount } from '../lib/notifications-query'
+import { LoadOlder } from '../components/load-older'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { MentionText } from '../components/mention-text'
 import { useMentionNames } from '../hooks/use-mention-names'
@@ -70,22 +72,28 @@ export function RepliesPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/replies' })
   const { filter = 'unread' } = useSearch({ from: '/app/$workspaceId/replies' })
 
-  const notifsQuery = useQuery({
-    queryKey: ['notifications', workspaceId, 'replies'],
-    queryFn: async () => {
-      try {
-        return await api<Notification[]>('/notifications?view=all')
-      } catch {
-        return [] as Notification[]
-      }
-    },
+  /*
+   * This workspace's replies, filtered by the server, a page at a time.
+   *
+   * It read `/notifications?view=all` — the newest fifty notifications of
+   * every type, from every workspace — and kept the replies among them. Fifty
+   * newer assignments were enough to empty this page while every reply sat
+   * one page further down, and the badge counted only the replies that
+   * survived. A failed read was caught and shown as "no replies".
+   */
+  const notifsQuery = useNotificationPages<Notification>(['replies', workspaceId, filter], {
+    workspaceId,
+    view: 'all',
+    types: REPLY_TYPES,
+    unreadOnly: filter === 'unread',
+    readOnly: filter === 'read',
   })
+  // The badge counts what the page lists: replies in every bucket, unread.
+  const unreadQuery = useUnreadCount({ workspaceId, types: REPLY_TYPES, view: 'all' })
 
   const { namesById } = useMentionNames(workspaceId)
-  const replies = (notifsQuery.data ?? []).filter((n) => isReplyNotification(n.type))
-  const unreadCount = replies.filter((n) => !n.readAt).length
-  const visible =
-    filter === 'all' ? replies : replies.filter((n) => (filter === 'read' ? Boolean(n.readAt) : !n.readAt))
+  const unreadCount = unreadQuery.data?.count ?? 0
+  const visible = notifsQuery.rows
 
   const refreshCounts = async () => {
     await qc.invalidateQueries({ queryKey: ['notifications'] })
@@ -129,7 +137,7 @@ export function RepliesPage() {
             <h1 className="font-display text-2xl font-semibold leading-tight">{t('replies.title')}</h1>
           </div>
           {unreadCount > 0 && (
-            <Badge variant="gradient" className="ml-auto text-[10px]">
+            <Badge variant="gradient" className="ml-auto text-[10px]" data-testid="replies-unread-badge">
               {t('inbox.new', { count: unreadCount })}
             </Badge>
           )}
@@ -162,6 +170,10 @@ export function RepliesPage() {
             // `visible` is [] until the request lands — showing the empty state
             // here would claim you have no replies before we know.
             <ListSkeleton rows={6} rowClassName="h-14" />
+          ) : notifsQuery.isError && visible.length === 0 ? (
+            <p className="text-sm text-destructive" data-testid="replies-load-failed">
+              {t('inbox.loadFailed')}
+            </p>
           ) : visible.length === 0 ? (
             <EmptyState
               icon={<MessageCircleReply className="h-6 w-6" />}
@@ -279,6 +291,7 @@ export function RepliesPage() {
               )
             })
           )}
+          {notifsQuery.hasNextPage && <LoadOlder query={notifsQuery} testId="replies-load-more" />}
         </div>
       </div>
     </div>

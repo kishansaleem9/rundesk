@@ -79,6 +79,7 @@ import {
   TooltipTrigger,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { useUnreadCount } from '../lib/notifications-query'
 import { offerUndo, undoLastDelete } from '../lib/undoable-delete'
 import { ContainerEditDialog, type ContainerEditValues } from './container-edit-dialog'
 import { CreateWorkspaceFlow, type WorkspaceDraft } from './create-workspace-flow'
@@ -1163,14 +1164,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     queryFn: () => api<any>(`/dashboards/dock/${workspaceId}`),
     enabled: !!workspaceId,
   })
-  // Inbox unread badge (Plan §6.12). Reuse the topbar bell's exact query key so
-  // React Query shares a single fetch/cache instead of duplicating it.
-  const unreadCountQuery = useQuery({
-    queryKey: ['notifications-unread-count'],
-    queryFn: () => api<{ count: number }>('/notifications/unread-count'),
-    refetchInterval: 30000,
-    enabled: !!workspaceId,
-  })
+  // Inbox unread badge (Plan §6.12) — this workspace's, as its Inbox is. The
+  // same hook as the topbar bell, so the two share one fetch and one cache.
+  const unreadCountQuery = useUnreadCount({ workspaceId }, { refetchInterval: 30000, enabled: !!workspaceId })
   const unreadCount = unreadCountQuery.data?.count ?? 0
   const { t } = useTranslation()
   // Localize the fixed set of app-defined nav/recent labels for display, while the
@@ -1818,6 +1814,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <span className="truncate flex-1">{navLabel(item.label)}</span>
                           {item.path.endsWith('/inbox') && unreadCount > 0 && (
                             <span
+                              data-testid="sidebar-inbox-unread"
                               className="ml-auto shrink-0 min-w-[18px] h-[18px] px-1 rounded-full bg-brand-gradient text-white text-[10px] font-semibold flex items-center justify-center tabular-nums"
                               title={t('nav.unreadNotifications', { count: unreadCount })}
                               aria-label={t('nav.unreadNotifications', { count: unreadCount })}

@@ -27,9 +27,9 @@ a = """          {notifsQuery.isPending ? (
             // state here would assert there is nothing in your inbox before we
             // know that. Skeleton rows say "still looking" instead.
             <ListSkeleton rows={7} rowClassName="h-14" />
-          ) : notifs.length === 0 && savedMessages.length === 0 && savedComments.length === 0 ? (
+          ) : notifsQuery.isError && notifs.length === 0 ? (
 """
-b = """          {notifs.length === 0 && savedMessages.length === 0 && savedComments.length === 0 ? (
+b = """          {notifsQuery.isError && notifs.length === 0 ? (
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

@@ -18,3 +18,15 @@ export const REPLY_TYPES: ReadonlySet<string> = new Set([
 ])
 
 export const isReplyNotification = (type: string): boolean => REPLY_TYPES.has(type)
+
+/**
+ * Home › Assigned Comments — comments and chat messages somebody assigned to
+ * you, which is what the section is called and what ClickUp puts there.
+ *
+ * It filtered `['task_mentioned', 'mention']`: mentions, under a label that
+ * says "assigned", and `mention` is not a type anything emits. The two types
+ * that ARE emitted when a comment or a message is assigned to you
+ * (tasks.service `comment_assigned`, chat.service `message_assigned`) were
+ * never shown there.
+ */
+export const ASSIGNED_COMMENT_TYPES: ReadonlySet<string> = new Set(['comment_assigned', 'message_assigned'])
