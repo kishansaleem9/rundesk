@@ -138,6 +138,30 @@ if [ -n "$API_BUILT" ]; then
   fi
 fi
 
+# ── AND THE LANE HAS TO BE SERVING THIS TREE'S BUILD AT ALL. ─────────────────
+#
+# The stamp above proves THIS tree's build is fresh. It says nothing about the
+# process on the lane's port. `wt-break.sh` starts each break lane's API from
+# its own worktree (`/tmp/claude-0/wt<k>/apps/api`) and leaves it running when
+# it finishes — at whatever commit, and after whatever patch, that run last
+# built. A sweep on lanes 2–4 straight after a break plan measured those, and
+# printed the result under this tree's name. Found on 23 September by asking
+# the port which directory it was serving from, before the first full sweep
+# of the day rather than after it.
+#
+# `fuser` names the pid listening on the port; its working directory says
+# which tree it runs. Anything but this repository's `apps/api` is refused.
+LANE_PID=$(fuser -n tcp "$PORT" 2>/dev/null | tr -s ' ' '\n' | grep -E '^[0-9]+$' | head -1)
+if [ -n "$LANE_PID" ]; then
+  LANE_CWD=$(readlink "/proc/$LANE_PID/cwd" 2>/dev/null)
+  if [ "$LANE_CWD" != "/home/user/rundesk/apps/api" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — port $PORT is served from $LANE_CWD, not this tree"
+    echo "   a break worktree's API is left running when wt-break.sh finishes; put the lane back on this build:"
+    echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
+    exit 8
+  fi
+fi
+
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 export E2E_EMAIL=admin@rundesk.internal
