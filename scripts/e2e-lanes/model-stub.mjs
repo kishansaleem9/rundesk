@@ -127,9 +127,40 @@ const server = createServer(async (req, res) => {
   seen.push({ model: body.model, system: body.system, messages: body.messages })
 
   if (staged?.status && staged.status >= 400) {
+    /*
+     * READ BEFORE CLEARING, and the order is the whole bug.
+     *
+     * This was `staged = null` and then `json(res, staged?.status ?? 400, err)`
+     * — the staging is gone by the time the status is read, so EVERY arranged
+     * failure came back 400 whatever the caller asked for. A suite staging a
+     * 503 to exercise "the provider is down" would have been handed a 400 and
+     * its check would have failed about the product.
+     *
+     * `check-model-stub.mjs` could not see it: the case stages a 500 and
+     * asserts the error's CLASS NAME, which is the same whichever status
+     * arrives. It asserted that an error reached the product, under a sentence
+     * about the error the caller arranged. It asserts the status now.
+     */
+    const status = staged.status
     const err = { type: 'error', error: { type: staged.type ?? 'api_error', message: staged.message ?? 'the stub was asked to fail' } }
-    staged = null
-    return json(res, staged?.status ?? 400, err)
+    /*
+     * AND IT CAN FAIL MORE THAN ONCE, because the SDK RETRIES.
+     *
+     * Found the moment the status above became truthful. A staged 500 was
+     * consumed by the first attempt, the Anthropic client retried, the retry
+     * found nothing staged and answered normally — so the call SUCCEEDED and
+     * the arranged failure reached nobody. The old 400 hid this: 400 is not
+     * retried, so one staging made one failure and the case passed for the
+     * wrong reason twice over.
+     *
+     * `count` is how many calls a staging survives, default one. A suite
+     * arranging a refusal through the PRODUCT — which builds its client with
+     * the SDK's default retries — stages `count` high enough to outlast them,
+     * and a probe that wants exactly one failure sets `maxRetries: 0` instead.
+     */
+    const left = Number(staged.count ?? 1) - 1
+    staged = left > 0 ? { ...staged, count: left } : null
+    return json(res, status, err)
   }
 
   const system = typeof body.system === 'string' ? body.system : JSON.stringify(body.system ?? '')

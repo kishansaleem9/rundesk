@@ -91,10 +91,22 @@ async function main() {
     out.afterStaged = after.content[0]?.type === 'text' ? after.content[0].text : null
     // An arranged API error must reach the product as an ERROR, not as text.
     await fetch(BASE + '/__control/next', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ status: 500, message: 'arranged' }) })
-    out.arranged = await client.messages
+    /*
+     * maxRetries 0, so ONE staging is ONE failure. With the SDK's default
+     * retries a staged 500 is consumed by the first attempt and the retry
+     * answers normally — the call succeeds and the arranged failure reaches
+     * nobody. That is real client behaviour and the stub now carries a count
+     * for callers who go through the product; this probe is about the stub, so
+     * it takes the retries out of the question instead.
+     */
+    const strict = new Anthropic({ apiKey: 'stub-key', baseURL: BASE, maxRetries: 0 })
+    out.arranged = await strict.messages
       .create({ model: 'claude-stub-1', max_tokens: 16, system: 'x', messages: [{ role: 'user', content: 'y' }] })
       .then(() => 'answered-anyway')
-      .catch((e: Error) => e.constructor.name)
+      // THE STATUS, not only the class name: that is the same whichever code
+      // arrives, so the old assertion held for a stub that answered every
+      // arranged failure as 400 — which is what it did.
+      .catch((e: Error & { status?: number }) => \`\${e.constructor.name}:\${e.status ?? '?'}\`)
     await fetch(BASE + '/__control/reset', { method: 'POST' })
     out.afterReset = (await (await fetch(BASE + '/__control/seen')).json()).calls.length
   } catch (err) {
@@ -202,8 +214,8 @@ if (out.none !== undefined) {
     'the staged reply latched and answered twice',
   )
   chk(
-    out.arranged === 'APIError' || /Error$/.test(String(out.arranged ?? '')),
-    'an arranged API error reaches the product as an ERROR, not as an answer that happens to say "error"',
+    /Error:500$/.test(String(out.arranged ?? '')),
+    'an arranged API error reaches the product as an ERROR carrying THE STATUS THAT WAS ARRANGED',
     `the arranged failure came back as ${JSON.stringify(out.arranged)}`,
   )
   chk(out.afterReset === 0, 'and reset clears the record, so a section can establish its own starting state', `after reset the stub still held ${out.afterReset} call(s)`)
@@ -222,6 +234,11 @@ if (process.argv.includes('--mutate')) {
     ['it answers the fallback whatever the prompt said', "SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'", "'A stubbed reply.'"],
     ['a staged body LATCHES into the next call', "const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'\n  staged = null", "const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'"],
     ['an arranged error comes back as a 200 that says "error"', 'if (staged?.status && staged.status >= 400) {', 'if (false) {'],
+    // The ORDER of the two lines, which is how the stub answered every arranged
+    // failure as 400: clear the staging first and the status is gone before it
+    // is read. The case asserted the error's class name and could not see it.
+    ['a staged status is read after it has been cleared', 'const status = staged.status\n    const err =', 'const err ='],
+    ['the arranged status is replaced by a constant', 'return json(res, status, err)', 'return json(res, 400, err)'],
     ['usage is zeroes, so a metering check passes on nothing', 'usage: { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }', 'usage: { input_tokens: 0, output_tokens: 0 }'],
     ['reset keeps the record of the run before', 'seen.length = 0', 'void seen'],
   ]
