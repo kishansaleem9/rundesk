@@ -503,7 +503,19 @@ try {
       'the mirror defect this row exists to avoid',
   )
 
-  const ownStatuses = await effective(owning.list.data.id)
+  /*
+   * OPTIONAL-CHAINED, LIKE ITS TWIN FOUR LINES UP, and the pair is the lesson.
+   *
+   * `effective()` above already answers `{status: 0, keys: []}` for a null id,
+   * with a comment saying so — the guard was put INSIDE the helper and the
+   * caller was left dereferencing. `folder-statuses-19-new-reader-breaks-the-writer`
+   * makes both list creates answer 500, so `owning.list` is null,
+   * `owning.list.data` throws, and the run ended at 21 of 29 — taking the
+   * eight description checks with it and leaving a log nothing could read.
+   *
+   * A guard inside a function does not protect the expression that calls it.
+   */
+  const ownStatuses = await effective(owning.list?.data?.id)
   chk(
     ownStatuses.status === 200 && ownStatuses.keys.length > 0,
     'and a list in the other kind of folder has a usable set of its own',
