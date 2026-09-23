@@ -4,7 +4,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
-**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
 
 ## Product defects — 46
 
@@ -604,9 +604,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Write $$ into each lock dir, and on contention check `kill -0` on the recorded PID. If the holder is gone, log 'stale lock from PID N, taking it' and take it. In chain-plan.sh:35 and run-plan.sh:62, log once when waiting starts and give up with a distinct exit after a bound.
 
-### `harness/sweep-drain-run-stale-tmp-copies` — open, small
+### `harness/sweep-drain-run-stale-tmp-copies` — **closed**
 
 **sweep.sh and drain.sh still run uncommitted /tmp copies of verify.sh and wt-break.sh**
+
+*Closed:* `sweep.sh` runs the repo's `verify.sh`, from a shared queue with one worker per lane, records each suite's status and exits non-zero when any did not pass; `batch.sh` is a wrapper over it; `drain.sh` is deleted (run-plan.sh supersedes it) and the resume doc's two mentions say so. Proven on lane 1: a sweep of `doc-boundaries` and a suite that does not exist reported "1 of 2 passed", named the failure, and exited 1.
 
 *Evidence:* sweep.sh:14 runs `bash /tmp/claude-0/verify.sh`. batch.sh:6-8 records exactly this defect as fixed ('a committed script whose only action was to invoke something no checkout has'). The /tmp copy exists (4005 bytes, 21 Sep 17:49), and diff against scripts/e2e-lanes/verify.sh shows it lacks the API-staleness refusal (exit 7, repo :88-139). drain.sh:15 and :34 run /tmp/claude-0/wt-break.sh (293 diff lines against the repo copy) over /tmp/claude-0/breaks, which holds 614 patches against 833 in test/e2e/breaks. drain.sh:17-26 also hardcodes an 8-suite QUEUE. Neither script is called by any other script. fleet-up.sh:19 still cites sweep.sh's lane-list shape, and docs/video2-resume.md:185-187 and :284-288 present drain.sh as current tooling.
 
@@ -628,9 +630,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Pass the path as an argument rather than splicing it into the script: `xargs -r -I{} sh -c '[ "$1" -nt "$2" ] && echo "$1"' _ {} "$DIST/index.html"`, or better `find … -newer "$DIST/index.html" -print | head -3`. Do the same for :130-131. Add a fixture (a `$`-named file) to whatever checks verify.sh, or move the scan into node as local-stack.mjs's refuseStaleBundle does.
 
-### `harness/verify-sh-exit-masked` — open, small
+### `harness/verify-sh-exit-masked` — **closed**
 
 **verify.sh exits 0 when the suite fails or crashes, because its last command is `grep | sed | tail`**
+
+*Closed:* `verify.sh` ends with `exit "$code"`. Proven through the sweep above: the missing suite's run exited 1, which `verify.sh` used to report as 0.
 
 *Evidence:* scripts/e2e-lanes/verify.sh:146-149 captures `code=$?`, echoes 'exit=$code', and ends with `grep -E 'passed,|FAIL' "$OUT" | sed ... | tail -8`. There is no `exit $code` and no pipefail (the script uses only `set -u` at :44). Only the staleness refusals return non-zero: exit 6 at :84 and exit 7 at :137. batch.sh:17 and :31, and sweep.sh:14, never read verify's status either. batch.sh's own exit is sed's.
 

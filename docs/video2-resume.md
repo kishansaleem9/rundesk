@@ -182,9 +182,11 @@ passed.
 list was written — both complete, every patch reddening. They are done, not
 outstanding.
 
-`scripts/e2e-lanes/drain.sh` walks that queue, one suite per worktree, waiting
-for a lane rather than assuming one. The patch scripts themselves live in the
-scratch directory and do NOT survive the container — see §5.
+`scripts/e2e-lanes/run-plan.sh` walks a queue like that one, handing each set
+to a lane only when the lane is free; `never-run-plan.mjs` writes the queue.
+(`drain.sh`, which did this from uncommitted `/tmp` copies of `wt-break.sh`
+and of the patches, was deleted on 23 September.) The patches live in
+`test/e2e/breaks/` and are committed.
 
 Two of those sets exist because an earlier run found the patch at fault rather
 than the check: `tab-title-countdown-2-norestore` was inert until a third
@@ -282,10 +284,10 @@ Two things that are not obvious and will waste an hour each:
 - **`apps/web/dist` is shared and read-only during a run.** Break tests
   rebuild, so they need their own tree. Git worktrees with `node_modules`
   symlinked in work, and `scripts/e2e-lanes/wt-break.sh` does exactly that —
-  it is in the repo now, along with `drain.sh`, which walks a queue of
+  it is in the repo now, along with `run-plan.sh`, which walks a queue of
   patch sets across the worktrees. Both carry the reasons for their locking
   and rebuild rules in comments, because all three of this session's
-  false-green incidents were in those two files.
+  false-green incidents were in the scripts they replaced.
 
 The frames come from the walkthrough video, which is also not in the repo. The
 transcript timecodes in the ledger and in `video2-frame-observations.md` are

@@ -147,3 +147,7 @@ timeout 900 node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&
 code=$?
 echo "== $SUITE (lane $LANE, dist $DIST) exit=$code"
 grep -E 'passed,|FAIL' "$OUT" | sed 's/\x1b\[[0-9;]*m//g' | tail -8
+# THE SUITE'S STATUS, NOT THE SUMMARY'S. This ended on the grep|sed|tail above,
+# so it exited 0 for a suite that failed or crashed, and every runner that read
+# its status — sweep.sh and batch.sh among them — counted a red run as green.
+exit "$code"

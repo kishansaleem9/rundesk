@@ -16,7 +16,7 @@
 # `DROP DATABASE`s every lane from 1 to N. Adding two lanes to a running fleet
 # by calling `fleet-up.sh 10` would therefore wipe the eight lanes other agents
 # were working in, which is a mistake you get to make once. A list is the same
-# shape `sweep.sh` already takes for its lanes.
+# shape `sweep.sh` takes for its lanes.
 set -u
 R=/home/user/rundesk
 export PGPASSWORD=rundesk
