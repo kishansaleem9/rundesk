@@ -102,6 +102,7 @@ restart() {
   # a suite's second run differ from its first for a reason nothing in the
   # suite mentions.
   lane_store_up "$LANE"
+  lane_model_up "$LANE"
   (
     cd "$WT/apps/api"
     export PORT="$PORT" PORTMARK="$LANE"
@@ -112,6 +113,7 @@ restart() {
     # this the lane comes up with R2 unconfigured and every upload check
     # measures the refusal path instead of the real one.
     lane_store_env "$LANE"
+    lane_model_env "$LANE"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$LANE.log" 2>&1 &

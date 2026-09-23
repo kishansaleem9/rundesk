@@ -66,6 +66,7 @@ for k in "${LANES[@]}"; do
   pg_restore -h 127.0.0.1 -U rundesk -d "$DB" --no-owner --role=rundesk \
     /tmp/claude-0/pristine.dump > "/tmp/claude-0/restore-v$k.log" 2>&1
   lane_store_up "$k"
+  lane_model_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -76,6 +77,7 @@ for k in "${LANES[@]}"; do
     # The four variables that turn "Storage is not configured" into a working
     # presign. No product change; `R2Service` has read these all along.
     lane_store_env "$k"
+    lane_model_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &

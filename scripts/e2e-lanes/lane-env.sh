@@ -73,3 +73,68 @@ lane_store_up () {
   tail -3 "$log" 2>/dev/null >&2
   return 1
 }
+
+# ── THE LANE'S MODEL, AND WHY IT IS OFF BY DEFAULT ───────────────────────────
+#
+#   lane_model_up  <k>   start lane k's model stub, wait for it to say ready
+#   lane_model_env <k>   export the two variables that point the API at it
+#
+# THE SEAM IS THE SAME ONE STORAGE USED, and `model-stub.mjs` says so in its own
+# header: `ai.service.ts` builds `new Anthropic({ apiKey })` and passes no
+# `baseURL`, so the SDK fills it from `ANTHROPIC_BASE_URL`. No product change,
+# exactly as `R2_ENDPOINT` needed none. What was missing was never a key; it was
+# something to answer.
+#
+# GATED ON `RUNDESK_LANE_MODEL=1`, DELIBERATELY, AND THIS IS THE WHOLE POINT.
+# Six suites — ai-answer-rendering, ai-assign, ai-create-containers,
+# clip-created-card, create-menu-ai, task-ai-bar — currently assert the REFUSAL:
+# 503, and the words "not configured". Every one of them flips the day a lane
+# can answer, which is precisely the defect class this audit found twice in one
+# night: a green that depended on the environment being broken. The difference
+# is that this one is known in advance, so it is opt-in until each of those six
+# has had its refusal re-aimed from STARVED to ARRANGED — the shape `task-cover`
+# already uses for storage, and which `model-stub.mjs` supports through
+# `POST /__control/next` with a `count` that outlasts the SDK's retries.
+#
+# Turning this on before that work is done would take six green suites red at
+# once, which is how a gate gets switched off rather than satisfied.
+#
+# Lane k gets port 92<k>, beside storage on 91<k>.
+lane_model_port () { echo $((9200 + $1)); }
+
+lane_model_env () {
+  local k="$1"
+  [ "${RUNDESK_LANE_MODEL:-0}" = "1" ] || return 0
+  export ANTHROPIC_BASE_URL="http://127.0.0.1:$(lane_model_port "$k")"
+  # Any non-empty value: `ai.service.ts` only asks whether a key is SET before
+  # building the client, and the stub authenticates nobody.
+  export ANTHROPIC_API_KEY=stub-model-key
+}
+
+lane_model_up () {
+  local k="$1"
+  [ "${RUNDESK_LANE_MODEL:-0}" = "1" ] || return 0
+  local port log
+  port="$(lane_model_port "$k")"
+  log="/tmp/claude-0/model-v$k.log"
+
+  # Already listening for this lane — leave it, and leave its staging alone, for
+  # the reason the store helper gives: a restart mid-run changes a suite's
+  # second run from its first with nothing in the suite to explain it.
+  if grep -q '"ready":true' "$log" 2>/dev/null &&
+     curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/__control/seen"; then
+    return 0
+  fi
+
+  pkill -f "model-stub.mjs --port $port " 2>/dev/null
+  : > "$log"
+  RUNDESK_MODEL_STUB=1 nohup node "$LANE_ENV_DIR/model-stub.mjs" --port "$port" >> "$log" 2>&1 &
+
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the model stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
