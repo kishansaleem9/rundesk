@@ -99,6 +99,33 @@ describe('ClipsService', () => {
     )
   })
 
+  /*
+   * The key that walked out: it starts with this workspace's clip prefix, so a
+   * `startsWith` check let it through, and its `..` segments land on another
+   * workspace's object once a browser, or the store, collapses them.
+   */
+  const WALK = 'workspaces/ws-1/clips/../../../workspaces/ws-2/tasks/t-1/attachments/1-secret.pdf'
+
+  it('refuses to delete a key that walks out of the workspace’s clips, and deletes nothing', async () => {
+    const r2 = createR2Mock()
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock())
+    await assert.rejects(
+      () => svc.remove('ws-1', WALK),
+      (error: unknown) => error instanceof BadRequestException,
+    )
+    assert.equal(r2.deleteObject.mock.calls.length, 0)
+  })
+
+  it('refuses to share a key that walks out of the workspace’s clips, and signs nothing', async () => {
+    const r2 = createR2Mock()
+    const svc = new ClipsService(r2, createEmailMock(), createDbMock())
+    await assert.rejects(
+      () => svc.share('ws-1', 'actor-1', 'owner@rundesk.dev', { storageKey: WALK, mode: 'public' }),
+      (error: unknown) => error instanceof BadRequestException,
+    )
+    assert.equal(r2.getObjectUrl.mock.calls.length, 0)
+  })
+
   it('shares public clip without triggering email', async () => {
     const email = createEmailMock()
     const svc = new ClipsService(createR2Mock(), email, createDbMock())

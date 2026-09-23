@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { R2Service } from '../../common/storage/r2.service'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
+import { clipPrefix, isWorkspaceClipKey } from './clip-keys'
 
 @Injectable()
 export class ClipsService {
@@ -16,10 +17,6 @@ export class ClipsService {
 
   private sanitizeFileName(input: string): string {
     return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'clip.webm'
-  }
-
-  private clipPrefix(workspaceId: string): string {
-    return `workspaces/${workspaceId}/clips/`
   }
 
   async createUploadUrl(
@@ -34,7 +31,7 @@ export class ClipsService {
   ) {
     if (!this.r2.configured) throw new BadRequestException('R2 is not configured')
     const fileName = this.sanitizeFileName(body.fileName)
-    const key = `${this.clipPrefix(workspaceId)}${Date.now()}-${fileName}`
+    const key = `${clipPrefix(workspaceId)}${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(
       key,
       body.contentType || 'video/webm',
@@ -49,7 +46,7 @@ export class ClipsService {
 
   async list(workspaceId: string) {
     if (!this.r2.configured) return []
-    const prefix = this.clipPrefix(workspaceId)
+    const prefix = clipPrefix(workspaceId)
     const listed = await this.r2.listObjects(prefix, 200)
     const objects = (listed.Contents ?? []).filter((o) => !!o.Key)
     const results = await Promise.all(objects.map(async (obj) => {
@@ -80,9 +77,9 @@ export class ClipsService {
   }
 
   async remove(workspaceId: string, storageKey: string) {
-    // A missing/non-string storageKey threw on `.startsWith()` → 500. Validate
-    // the type so a malformed body yields a 400.
-    if (typeof storageKey !== 'string' || !storageKey.startsWith(this.clipPrefix(workspaceId))) {
+    // By shape, not prefix: a prefix check let `..` delete another
+    // workspace's object (clip-keys.ts). A non-string is refused with the rest.
+    if (!isWorkspaceClipKey(storageKey, workspaceId)) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
     await this.r2.deleteObject(storageKey)
@@ -101,7 +98,9 @@ export class ClipsService {
       expiresInMinutes?: number
     },
   ) {
-    if (typeof body.storageKey !== 'string' || !body.storageKey.startsWith(this.clipPrefix(workspaceId))) {
+    // By shape, not prefix — see clip-keys.ts for the key that signed another
+    // workspace's file.
+    if (!isWorkspaceClipKey(body.storageKey, workspaceId)) {
       throw new BadRequestException('Invalid clip key for workspace')
     }
     const expiresInSeconds = Math.max(60, Math.min(7 * 24 * 60 * 60, (body.expiresInMinutes ?? 60) * 60))

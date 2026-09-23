@@ -104,12 +104,18 @@ describe('WorkspacesService.createLogoUploadUrl (§13.5)', () => {
     )
   })
 
-  it('returns upload + public URLs for a valid image', async () => {
+  /*
+   * The public URL is the address that does not expire: the images route,
+   * which redirects to a fresh signature on every request. It used to be
+   * `getObjectUrl`, a presigned GET fifteen minutes long, which the settings
+   * page saved as the logo (`avatar-logo-persist-expiring-signed-url`).
+   */
+  it('returns an upload URL, and a public URL that does not expire', async () => {
     const svc = new WorkspacesService({} as any, {} as any, {} as any, okR2, {} as any)
     const res = await svc.createLogoUploadUrl('ws-7', { contentType: 'image/png', sizeBytes: 1024 })
     assert.equal(res.uploadUrl, 'https://r2.example/upload')
-    assert.equal(res.publicUrl, 'https://cdn.example/logo.png')
     assert.match(res.storageKey, /^workspace-logos\/ws-7-[0-9a-f]+\.png$/)
+    assert.equal(res.publicUrl, `/api/v1/public/images/${res.storageKey}`)
   })
 })
 

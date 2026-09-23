@@ -1,8 +1,8 @@
 /**
  * THE KEYS A CLIENT HANDS BACK — chat attachments, custom emoji, call
- * recordings and a meeting's recording pointer. Each is an object key the
- * server signs into a working URL, so each is a way to read any object in the
- * bucket unless the key is proven to be the caller's own.
+ * recordings, a meeting's recording pointer and clips. Each is an object key
+ * the server signs into a working URL (or deletes), so each is a way to read
+ * any object in the bucket unless the key is proven to be the caller's own.
  *
  * NOT A FRAME ROW. Three open-work items and what was found beside them:
  *
@@ -14,7 +14,10 @@
  *   · a meeting's `recordingUrl` with no scheme was signed whatever it named,
  *     anything containing `://` — `javascript://` included — came back as a
  *     link, and the AI page's meeting card wrote the fifteen-minute signed URL
- *     back over the durable key on every Update.
+ *     back over the durable key on every Update;
+ *   · a clip's share and delete checked a prefix too: sharing the walk handed
+ *     back a link that served another workspace's file, and deleting it
+ *     removed that file from the store (§5, measured on a lane).
  *
  * The rule now is one module, `object-key-shape.ts`: a key is ours when it is
  * our prefix plus ONE segment in the sanitisers' alphabet. Every refusal here
@@ -35,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 19
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -334,6 +337,91 @@ try {
     attached.status < 300 && REC_KEY !== null && (await recordingRows(REC_KEY)) === 1,
     'while the key the call’s own presign minted is attached',
     `upload-url answered ${said(upload)}; attaching answered ${said(attached)}`,
+  )
+
+  // ══ 5. CLIPS ═════════════════════════════════════════════════════════════
+  console.log('\n▶ a clip is one of this workspace’s clips, by shape — to share it and to delete it')
+
+  /*
+   * A REAL OBJECT OF B'S THIS TIME, because the delete is the harm and a key
+   * with nothing behind it cannot show it: a task attachment, uploaded the way
+   * B's own members upload one, read back through B's own attachment list.
+   */
+  const inB = async (route, body, what) => {
+    const res = await A(route, { method: 'POST', body })
+    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what} in B: ${said(res)}`)
+    return res.data.id
+  }
+  const bSpace = await inB('/spaces', { workspaceId: WB, name: `${TAG} space` }, 'a space')
+  const bProject = await inB('/projects', { spaceId: bSpace, name: `${TAG} project` }, 'a project')
+  const bList = await inB('/lists', { projectId: bProject, name: `${TAG} list` }, 'a list')
+  const bTask = await inB('/tasks', { listId: bList, title: `${TAG} holds B’s file` }, 'a task')
+  const SECRET = Buffer.from(`${TAG} — workspace B's file`)
+  const bPresign = await A(`/tasks/${bTask}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: 'secret.pdf', contentType: 'application/pdf', sizeBytes: SECRET.length },
+  })
+  const bPut = bPresign.data?.uploadUrl ? await put(bPresign.data.uploadUrl, SECRET, 'application/pdf') : 0
+  const bRecord = bPresign.data?.storageKey
+    ? await A(`/tasks/${bTask}/attachments`, {
+        method: 'POST',
+        body: { fileName: 'secret.pdf', storageKey: bPresign.data.storageKey, contentType: 'application/pdf', sizeBytes: SECRET.length },
+      })
+    : { status: 0 }
+  if (bPut !== 200 || bRecord.status >= 300) throw new Error(`could not plant B's file: PUT ${bPut}, record ${said(bRecord)}`)
+  const B_OBJECT = bPresign.data.storageKey
+  /** B's file, read the way B reads it; null once it is gone. */
+  const bFileNow = async () => {
+    const rows = (await A(`/tasks/${bTask}/attachments`)).data ?? []
+    return bytesAt(rows.find((r) => r.storageKey === B_OBJECT)?.url)
+  }
+  const CLIP_WALK = `workspaces/${WA}/clips/../../../${B_OBJECT}`
+
+  const walkShare = await A(`/workspaces/${WA}/clips/share`, { method: 'POST', body: { storageKey: CLIP_WALK, mode: 'public' } })
+  const walkServed = await bytesAt(walkShare.data?.shareUrl)
+  chk(
+    walkShare.status === 400 && !walkShare.data?.shareUrl,
+    'a clip key that starts with the workspace’s clips and walks out of them is not shared — no link comes back for it',
+    `it answered ${said(walkShare)}${walkServed ? `, and the link served ${walkServed.equals(SECRET) ? 'workspace B’s file' : `${walkServed.length} byte(s)`}` : ''}`,
+  )
+
+  const CLIP = Buffer.from(`${TAG} — A's own clip`)
+  const clipPresign = await A(`/workspaces/${WA}/clips/presign`, {
+    method: 'POST',
+    body: { fileName: `${stamp}-own.webm`, contentType: 'video/webm', title: `${TAG} own clip` },
+  })
+  const clipPut = clipPresign.data?.uploadUrl ? await put(clipPresign.data.uploadUrl, CLIP, 'video/webm') : 0
+  const OWN_CLIP = clipPresign.data?.storageKey ?? null
+  const ownShare = OWN_CLIP
+    ? await A(`/workspaces/${WA}/clips/share`, { method: 'POST', body: { storageKey: OWN_CLIP, mode: 'public' } })
+    : { status: 0 }
+  const ownShared = await bytesAt(ownShare.data?.shareUrl)
+  chk(
+    ownShare.status < 300 && ownShared !== null && ownShared.equals(CLIP),
+    'while the workspace’s own clip is shared, and its link serves the clip',
+    `presign ${said(clipPresign)}, PUT ${clipPut}, share ${said(ownShare)}; the link served ` +
+      `${ownShared === null ? 'nothing' : `${ownShared.length} other byte(s)`}`,
+  )
+
+  const walkRemove = await A(`/workspaces/${WA}/clips`, { method: 'DELETE', body: { storageKey: CLIP_WALK } })
+  const bAfter = await bFileNow()
+  chk(
+    walkRemove.status === 400 && bAfter !== null && bAfter.equals(SECRET),
+    'and deleting that key is refused, with workspace B’s file still there afterwards',
+    `it answered ${said(walkRemove)}; B's file ${bAfter === null ? 'is GONE — the walk deleted it' : 'is still there'}`,
+  )
+
+  const libraryHas = async (key) => ((await A(`/workspaces/${WA}/clips`)).data ?? []).some((c) => c.storageKey === key)
+  const listedBefore = OWN_CLIP ? await libraryHas(OWN_CLIP) : false
+  const ownRemove = OWN_CLIP
+    ? await A(`/workspaces/${WA}/clips`, { method: 'DELETE', body: { storageKey: OWN_CLIP } })
+    : { status: 0 }
+  const listedAfter = OWN_CLIP ? await libraryHas(OWN_CLIP) : true
+  chk(
+    listedBefore && ownRemove.status < 300 && !listedAfter,
+    'while the workspace’s own clip is deleted, and leaves the library',
+    `the library ${listedBefore ? 'listed' : 'did not list'} it; delete answered ${said(ownRemove)}; ` +
+      `afterwards it is ${listedAfter ? 'still listed' : 'gone'}`,
   )
 } catch (e) {
   failed += 1

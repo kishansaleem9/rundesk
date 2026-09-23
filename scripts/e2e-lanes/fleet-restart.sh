@@ -78,9 +78,19 @@ pg_isready >/dev/null || { echo "POSTGRES DOWN"; exit 1; }
 # Refusing is right. A lane that comes up and 500s on its first write costs
 # more than one that never came up, because the failure arrives wearing the
 # suite's name.
-LATEST_SQL=$(ls "$R/packages/db/src/migrations"/*.sql | sort | tail -1)
-NEWEST_COL=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z_]+"' "$LATEST_SQL" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
-NEWEST_TBL=$(grep -oiE 'ALTER TABLE "[a-z_]+"' "$LATEST_SQL" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
+#
+# THE NEWEST MIGRATION THAT ADDS A COLUMN, not simply the newest file. A
+# data-only migration (0161 rewrites saved image URLs) names no column to look
+# for, and reading only the newest file switched this check off for every
+# restart for as long as such a file stayed newest — it printed "schema NOT
+# verified" and started the API anyway. Walking back to the newest file with a
+# column keeps the witness.
+LATEST_SQL=""; NEWEST_COL=""; NEWEST_TBL=""
+for f in $(ls "$R/packages/db/src/migrations"/*.sql | sort -r); do
+  col=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z_]+"' "$f" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
+  tbl=$(grep -oiE 'ALTER TABLE "[a-z_]+"' "$f" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
+  if [ -n "$col" ] && [ -n "$tbl" ]; then LATEST_SQL="$f"; NEWEST_COL="$col"; NEWEST_TBL="$tbl"; break; fi
+done
 
 # The lanes this run REFUSED to restart. The count at the end has to leave them
 # out: a refused lane still has its old API listening, which answers health, so
@@ -112,7 +122,7 @@ for k in "${LANES[@]}"; do
       continue
     fi
   else
-    echo "lane $k: could not read a column check out of $(basename "$LATEST_SQL") — schema NOT verified"
+    echo "lane $k: no migration names a column to check — schema NOT verified"
   fi
   # Kill by PORT, never by `pkill -f` on an environment variable: PORTMARK is
   # not in any command line, so that pattern matches nothing (and a looser one
