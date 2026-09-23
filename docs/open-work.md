@@ -4,7 +4,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
-**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted; then `product-siblings/chat-attachment-key-unvalidated`, `product-siblings/meeting-recording-key-unvalidated`, `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` and `product-siblings/teams-work-preview-ignores-privacy`. The docs item `product-siblings/docs-patch-mass-assign-public-share` is closed below as well. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
 
 ## Product defects — 46
 
@@ -88,9 +88,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Add a workspace picker (or a platform-wide audit endpoint).
 
-### `product-siblings/chat-attachment-key-unvalidated` — open, small
+### `product-siblings/chat-attachment-key-unvalidated` — **closed**
 
 **POST /chat/channels/:id/attachments records any storageKey and returns a signed URL for it**
+
+*Closed (10a1317):* `recordAttachment` requires exactly this channel's presigned shape (`common/storage/object-key-shape.ts`, one safe segment after `chat/<channel>/attachments/`), and one helper, `chatAttachmentUrl`, replaces the four copies of the signing ternary and signs only that shape. Custom emoji had a `startsWith` check `..` walks out of; they use the same rule, at write and at read. `object-key-boundaries` §1–§2, 7 checks; okb-1..7.
 
 *Evidence:* chat.service.ts:176-203 (recordAttachment) checks only `!data.storageKey` (:183), with no prefix check. It signs at :201, and again on every read at :1400, :1854 and :2803. chat.controller.ts:311-318 takes an inline body type, so ValidationPipe checks nothing. The EMPTY-key shape from tonight is NOT reachable here: the column is NOT NULL (packages/db/src/schema/chat.ts:136) and :183 rejects ''. The unvalidated-key shape is reachable: a channel member (or an ex-member of another workspace who kept a key) posts `{storageKey:'workspaces/<other>/tasks/<id>/attachments/<file>'}` and gets a working signed URL. Minor: with R2 unconfigured the raw key comes back as `url`, which is the same branch tasks kept.
 
@@ -162,9 +164,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* orderBy(projects.position, projects.createdAt) in both branches, with a check through a non-sidebar surface.
 
-### `product-siblings/docs-patch-mass-assign-public-share` — open, small
+### `product-siblings/docs-patch-mass-assign-public-share` — **closed**
 
 **PATCH /docs/:id spreads the body into the row: a doc can be moved to another workspace, or made public despite blockPublicSharing**
+
+*Closed (66f518a):* proven on lane 1 first — as a member of two workspaces, PATCH moved a doc into the other workspace, rewrote its creator, and minted a public link that answered 200 despite `blockPublicSharing`; create/import/from-template took any space, whose name the doc list then showed; `parentDocId` took any doc, including the doc's own child. `doc-update-fields.ts` is the one list of writable fields (the route refuses the rest by name, pointing at the share route when it is a link); `assertDocSpace` and `assertDocParent` (same workspace, reachable, never a descendant) guard every path; the list, the trash and the AI filter join only the doc's own workspace's space. `doc-boundaries` 17/17; db-1..17; unit tests for both field lists.
 
 *Evidence:* docs.controller.ts:190-206 takes an inline body type and passes it whole. docs.service.ts:~451 `set = {...patch, updatedAt}` (only expectedUpdatedAt is deleted) → db.update(docs).set(set). The docs table (packages/db/src/schema/docs.ts:10-30) has workspaceId, publicShareId, publicShareEnabledAt, createdById and archivedById, all writable this way. enablePublicShare (docs.service.ts:561-577) enforces workspaces.blockPublicSharing, but PATCH {publicShareId:'anything'} skips that check. getByPublicShare (:611-627) then serves the doc anonymously by that slug. PATCH {workspaceId:<other>} re-homes the doc across tenants (FK only).
 
@@ -236,9 +240,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* In all three writers, refuse a spaceId whose space is not in the path's workspace, and a parentDocId whose doc is not in it. Add an e2e check that uses a second workspace, and a break patch that removes the check.
 
-### `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` — open, small
+### `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` — **closed**
 
 **The AI page meeting card writes the 15-minute signed recording URL back over the durable key on every Update**
+
+*Closed (10a1317):* `R2Service.keyFromOwnUrl` recognises the URLs our own bucket hands out (public-CDN and path-style presigned); a URL naming the key already stored keeps the key, one naming any other object of ours is refused. The AI card sends the recording only when it was changed. `object-key-boundaries` "the signed URL a meeting hands out, sent back with an edit, leaves the durable key in place"; okb-11, okb-12; unit tests for both URL modes.
 
 *Evidence:* workspace-ai-page.tsx:1092-1095 reads GET /workspaces/:ws/meetings, which signs recordingUrl (meetings.service.ts:214 via withRecordings/playableRecording). :1106 loads that signed URL into the Recording input, and :1124-1127 PATCHes `recordingUrl: recordingUrl.trim() || null` even when the field was never touched. meetings.service.ts:389-391 stores it. :65-69 says 'a signed URL written into this column is a dead link before the meeting notes have been read once'. Failure: a SyncUp-recorded meeting (key written at calls.service.ts:848), opened in the AI meeting card with a notes edit and Update, now has meetings.recording_url set to a presigned GET. 15 minutes later its Recording link is dead permanently when R2_PUBLIC_URL is unset (optional per .env.example:66-67).
 
@@ -252,9 +258,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Use the same local-offset conversion as ReminderForm (or date-fns format(date, "yyyy-MM-dd'T'HH:mm")).
 
-### `product-siblings/meeting-recording-key-unvalidated` — open, small
+### `product-siblings/meeting-recording-key-unvalidated` — **closed**
 
 **A meeting's recordingUrl with no scheme is treated as a storage key and signed, whatever it names**
+
+*Closed (10a1317):* a client may store nothing, an http(s) link, or the stored value unchanged (`acceptRecordingInput`); keys are the server's to write. Reads sign only a recording of one of the workspace's own calls (`isWorkspaceCallRecordingKey`) and pass through http(s) only — the old `includes('://')` handed `javascript://…` back as a link. `calls.service` `attachRecording` checked a prefix; it checks the exact shape. `object-key-boundaries` §3–§4, 8 checks; okb-8..16.
 
 *Evidence:* meetings.service.ts:71-76 (playableRecording): empty returns null (guarded), '://' passes through, and anything else goes to r2.getObjectUrl. create stores body.recordingUrl unchecked at :321, and update at :389-391. The body types are at meetings.controller.ts:42 and :88. So a member can store 'workspaces/<other-ws>/…' and GET /meetings returns a signed URL for it. calls.service.ts:791 is the correct model: it checks the key against `calls/${workspaceId}/${callId}/`.
 
@@ -342,9 +350,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Invalidate ['task', taskId] with exact: true for the detail, plus the specific sub-keys per event type. Drop the narrower invalidations that follow a prefix invalidation.
 
-### `product-siblings/teams-work-preview-ignores-privacy` — open, small
+### `product-siblings/teams-work-preview-ignores-privacy` — **closed**
 
 **GET /workspaces/:ws/teams/work-preview returns every member's open task titles with no visibility filter**
+
+*Closed (c7f69d1):* the preview takes the viewer and applies the container rule (new `containerVisibilityFilter`, `checkContainerAccess` as a WHERE fragment, written beside it), the list rule and the task rule; the card's count is of what it shows. `read-visibility` 8/8: of a teammate's five open tasks — public, private space, private project, private list, private task — a plain member sees exactly the public one, while the manager and the teammate see all five. rv-1..10.
 
 *Evidence:* workspace-groups.controller.ts:119-131 uses WorkspaceMemberGuard only and passes no actor. workspace-groups.service.ts:358-380 selects tasks by assignee across the workspace without taskVisibilityFilter or a private space/project check. workspace-groups is absent from the 14 services that call taskVisibilityFilter (rg -l). Failure: a member with no access to a private space sees the titles and due dates of tasks in it on the Teams page.
 
@@ -416,11 +426,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 ### `found-23-sep/container-read-rule-twice` — open, small
 
-**The container read rule exists twice: `assertContainerReadAccess` in tasks.service inline, and `checkContainerAccess` used by the guard**
+**The container read rule exists in THREE forms: `assertContainerReadAccess` in tasks.service inline, `checkContainerAccess` used by the guard (and its WHERE-fragment twin `containerVisibilityFilter`, written beside it on purpose), and an SQL predicate in ai.service that omits the space-admin case**
 
 *Evidence:* both implement manager bypass, private-space membership, private-project membership or space admin; they agree today (compared on 23 September). Two copies of an access rule is the duplicated-list defect: the day one learns a case, the guard and the service disagree.
 
-*To close:* make `assertContainerReadAccess` call `checkContainerAccess` and keep its two distinct error messages by asking which half failed.
+*To close:* make `assertContainerReadAccess` call `checkContainerAccess` (keeping its two distinct messages by asking which half failed), and replace ai.service's predicate with `containerVisibilityFilter` — which also gives space admins the private-project access the guard gives them.
 
 ### `found-23-sep/labels-editable-by-any-member` — open, small (policy to confirm)
 
