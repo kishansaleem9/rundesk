@@ -864,6 +864,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* re-measured — 884 files in apps, 293 in packages, 134 in test — and the floor is 1,000; `dist-*` is pruned with `dist`, because a bundle is not the tree and one built from a patched tree would be a hit no source file holds; the case reads the guard's floor from its source. `check-no-break-patches` reads 1,311 from the repository and from `/tmp`; `check-patch-guard --mutate` 14/14 cases, 7/7 mutations.
 
+### `found-23-sep/views-role-list-named-no-real-roles` — **closed**, break run pending (found folding the admin-role copies into one)
+
+**A protected view could be changed by a manager and not by a workspace admin: its role list named `owner` and `admin`, which no workspace member is**
+
+*Evidence:* `views.service.ts` kept `MANAGER_ROLES = new Set(['owner', 'admin', 'manager'])` — "Mirrors `item-visibility.ts`", which says `workspace_admin`, `manager`, `super_admin` — and compared it with `workspace_members.role`. Measured on lane 1: renaming a member's protected view answered 403 for a workspace admin (not a super admin) and 200 for a manager. The comment's own rule is "protected: its creator and the workspace's managers". A member's PRIVATE view answered 404 to both, which is right: `loadVisible` hides it before any role is asked.
+
+*Closed:* `isManagerRole`, the one list. `view-visibility` 23/23 with two new checks in a workspace of its own — an admin and a manager may both change a member's protected view; neither may touch the member's private view — the first of which failed on the old API (403 against the manager's 200). `view-visibility-5` (the old list) and `-6` (the lookup that hides a private view). Regression: list-save-view, read-visibility, view-visibility 3/3.
+
 ### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
 
 **A check that reads `textContent` cannot tell a shown message from a hidden one**

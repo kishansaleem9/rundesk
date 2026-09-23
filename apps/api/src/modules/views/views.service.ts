@@ -3,13 +3,12 @@ import { and, asc, desc, eq, ne, or, sql } from 'drizzle-orm'
 import { taskViews, taskViewPrefs, lists, projects, spaces, workspaceMembers } from '@rundesk/db'
 import type { Db, ViewVisibility } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isManagerRole } from '../../common/permissions/item-visibility'
 
 type ViewType = 'list' | 'board' | 'calendar' | 'gantt' | 'table'
 
 const VISIBILITIES: readonly ViewVisibility[] = ['everyone', 'private', 'protected']
 
-/** Roles that may act on a view they do not own. Mirrors `item-visibility.ts`. */
-const MANAGER_ROLES = new Set(['owner', 'admin', 'manager'])
 
 /** A view `config` is a keyed object — reject a string/array/primitive so a
  *  reader that reaches into `config.columns` etc. never meets a wrong type. */
@@ -50,7 +49,10 @@ export class ViewsService {
       )
       .where(eq(taskViews.id, viewId))
       .limit(1)
-    return !!row && MANAGER_ROLES.has(row.role)
+    // `isManagerRole`, not a list of its own: the copy that was here read
+    // `owner`, `admin` and `manager` — two roles no workspace member has —
+    // so a manager could change a protected view and a workspace admin could not.
+    return !!row && isManagerRole(row.role)
   }
 
   /**

@@ -25,7 +25,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 23
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -242,6 +242,57 @@ try {
     shares.status === 200 && Array.isArray(shares.data?.items),
     'a view can be opened in the share panel like anything else',
     `GET /shares/view/:id returned ${shares.status} ${JSON.stringify(shares.error)}`,
+  )
+
+  // ══ WHO MANAGES A WORKSPACE ═══════════════════════════════════════════
+  // "protected: its creator and the workspace's managers". The role list
+  // behind that read `owner`, `admin` and `manager` — two roles no workspace
+  // member has — so a manager could change a protected view and a workspace
+  // admin could not. Measured on lane 1: 403 for the admin, 200 for the
+  // manager. Its own workspace, so three people join nothing shared.
+  console.log('\n▶ a protected view answers to the people who manage the workspace — admins as well as managers')
+  const roleWs = (await A('/workspaces', { method: 'POST', body: { name: `Views roles ${stamp}` } })).data?.id
+  if (!roleWs) throw new Error('could not make the roles workspace')
+  cleanup.push(() => A(`/workspaces/${roleWs}`, { method: 'DELETE' }))
+  const person = async (label, role) => {
+    const email = `views-${label}-${stamp}@rundesk.invalid`
+    const res = await fetch(`${API}/auth/signup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ fullName: `Views ${label}`, email, password: 'Member@12345!', organizationName: `Views ${label} ${stamp}`, organizationSlug: `views-${label}-${stamp}` }),
+    })
+    const token = (await res.json().catch(() => null))?.data?.accessToken
+    const added = await A(`/workspaces/${roleWs}/members`, { method: 'POST', body: { email, role } })
+    if (!token || added.status >= 300) throw new Error(`could not add the ${label}: ${res.status}, ${added.status}`)
+    return apiAs(token)
+  }
+  const owner = await person('owner', 'member')
+  const wsAdmin = await person('admin', 'workspace_admin')
+  const wsManager = await person('manager', 'manager')
+  const roleSpace = (await A('/spaces', { method: 'POST', body: { workspaceId: roleWs, name: `Views roles ${stamp}`, defaultPermission: 'edit' } })).data?.id
+  const roleProject = (await A('/projects', { method: 'POST', body: { spaceId: roleSpace, name: 'Roles' } })).data?.id
+  const roleList = (await A('/lists', { method: 'POST', body: { projectId: roleProject, name: 'Roles' } })).data?.id
+  if (!roleList) throw new Error('could not make the roles list')
+  const ownView = async (name, visibility) =>
+    (await owner(`/lists/${roleList}/views`, { method: 'POST', body: { name, type: 'list', config: {}, visibility } })).data
+  const guardedByMember = await ownView(`Guarded by a member ${stamp}`, 'protected')
+  const privateOfMember = await ownView(`Private to a member ${stamp}`, 'private')
+  if (!guardedByMember?.id || !privateOfMember?.id) throw new Error('the member could not make their views')
+  const byAdmin = await wsAdmin(`/views/${guardedByMember.id}`, { method: 'PATCH', body: { name: `Renamed by the admin ${stamp}` } })
+  const byManager = await wsManager(`/views/${guardedByMember.id}`, { method: 'PATCH', body: { name: `Renamed by the manager ${stamp}` } })
+  const guardedNow = ((await owner(`/lists/${roleList}/views`)).data ?? []).find((v) => v.id === guardedByMember.id)
+  chk(
+    byAdmin.status === 200 && byManager.status === 200 && guardedNow?.name === `Renamed by the manager ${stamp}`,
+    'a workspace admin may change a member’s protected view, as a manager may',
+    `admin answered ${byAdmin.status}, manager ${byManager.status}; the view is now called ${JSON.stringify(guardedNow?.name)}`,
+  )
+  const adminPrivate = await wsAdmin(`/views/${privateOfMember.id}`, { method: 'PATCH', body: { name: 'taken' } })
+  const managerPrivate = await wsManager(`/views/${privateOfMember.id}`, { method: 'PATCH', body: { name: 'taken' } })
+  const privateNow = ((await owner(`/lists/${roleList}/views`)).data ?? []).find((v) => v.id === privateOfMember.id)
+  chk(
+    adminPrivate.status === 404 && managerPrivate.status === 404 && privateNow?.name === `Private to a member ${stamp}`,
+    'while neither may touch a member’s private view — it is not theirs to find',
+    `admin ${adminPrivate.status}, manager ${managerPrivate.status}; it is now called ${JSON.stringify(privateNow?.name)}`,
   )
 } catch (e) {
   failed += 1
