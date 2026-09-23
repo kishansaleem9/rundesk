@@ -432,7 +432,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   // §2/§13.4 — the folder/project/list currently being renamed from the tree.
   // One shared dialog serves the whole tree; `null` means it is closed.
   const [treeEdit, setTreeEdit] = useState<
-    | { kind: 'folder'; spaceId: string; id: string; name: string }
+    | { kind: 'folder'; spaceId: string; id: string; name: string; description: string }
     | { kind: 'project'; id: string; name: string }
     | { kind: 'list'; id: string; name: string }
     | null
@@ -807,9 +807,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     setSavingEdit(true)
     try {
       if (treeEdit.kind === 'folder') {
+        /*
+         * §V2-S09 `08:25` — `description` goes with the name, and `?? ''` is
+         * what makes CLEARING one possible: `ContainerEditValues.description`
+         * is absent when the field is not enabled, and an empty string when it
+         * is enabled and emptied. Sending `undefined` would leave the old text
+         * in place, which is a field that can be written and never erased.
+         */
         await api(`/spaces/${treeEdit.spaceId}/folders/${treeEdit.id}`, {
           method: 'PATCH',
-          body: { name: values.name },
+          body: { name: values.name, description: values.description ?? '' },
         })
       } else if (treeEdit.kind === 'list') {
         await api(`/lists/${treeEdit.id}`, { method: 'PUT', body: { name: values.name } })
@@ -1064,7 +1071,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             api<Array<{ id: string; name: string; folderId?: string | null; position?: number; createdAt?: string }>>(
               `/projects/space/${space.id}`,
             ),
-            api<Array<{ id: string; name: string; visibility?: string | null }>>(`/spaces/${space.id}/folders`).catch(() => []),
+            api<Array<{ id: string; name: string; description?: string | null; visibility?: string | null }>>(
+              `/spaces/${space.id}/folders`,
+            ).catch(() => []),
             api<Array<{ id: string; name: string; projectId: string; visibility?: string | null }>>(
               `/lists/space/${space.id}`,
             ).catch(() => []),
@@ -2633,6 +2642,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                             <DropdownMenu>
                               <DropdownMenuTrigger asChild>
                                 <button
+                                  data-testid={`tree-folder-actions-${folder.id}`}
                                   className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
                                   aria-label={t('nav.actionsFor', { name: folder.name })}
                                 >
@@ -2640,11 +2650,27 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-44">
+                                {/*
+                                  §V2-S09 `08:25` — the shared dialog now edits a
+                                  folder's DESCRIPTION as well as its name, so the
+                                  row that opens it no longer says "Rename". A
+                                  menu row naming one of the two things behind it
+                                  is the stale reason this audit keeps finding.
+                                */}
                                 <DropdownMenuItem
-                                  onClick={() => setTreeEdit({ kind: 'folder', spaceId: space.id, id: folder.id, name: folder.name })}
+                                  data-testid="tree-folder-edit"
+                                  onClick={() =>
+                                    setTreeEdit({
+                                      kind: 'folder',
+                                      spaceId: space.id,
+                                      id: folder.id,
+                                      name: folder.name,
+                                      description: folder.description ?? '',
+                                    })
+                                  }
                                 >
                                   <Pencil className="h-3.5 w-3.5" />
-                                  {t('container.rename')}
+                                  {t('folder.edit')}
                                 </DropdownMenuItem>
                                 <DropdownMenuItem
                                   onClick={() =>
@@ -3093,8 +3119,19 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
         onOpenChange={(next) => {
           if (!next) setTreeEdit(null)
         }}
-        title={treeEdit?.kind === 'folder' ? t('folder.renameTitle') : t('container.rename')}
-        initial={{ name: treeEdit?.name ?? '' }}
+        title={treeEdit?.kind === 'folder' ? t('folder.editTitle') : t('container.rename')}
+        /*
+         * §V2-S09 `08:25` — THE READER FOR THE COLUMN. `fields.description`
+         * is the flag projects already pass; turning it on for folders is what
+         * makes the create dialog's field a round trip rather than a write
+         * nothing reads back. Lists and projects reach this dialog by the same
+         * `treeEdit` state and are deliberately left as they were.
+         */
+        fields={treeEdit?.kind === 'folder' ? { description: true } : undefined}
+        initial={{
+          name: treeEdit?.name ?? '',
+          description: treeEdit?.kind === 'folder' ? treeEdit.description : undefined,
+        }}
         submitting={savingEdit}
         onSubmit={submitTreeEdit}
       />

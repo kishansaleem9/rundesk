@@ -22,7 +22,10 @@ export type ContainerEditValues = {
 
 // Which optional fields a given container type exposes in the edit dialog.
 // Every container has a name; spaces additionally carry a color + icon, and
-// projects carry a description (Plan §2 / §13.4).
+// projects and FOLDERS carry a description (Plan §2 / §13.4, and §V2-S09
+// frame `08:25` for folders — this flag is the reader that makes the Create
+// Folder dialog's description a round trip rather than a stored value nothing
+// honours).
 export type ContainerEditFields = {
   description?: boolean
   color?: boolean
@@ -116,6 +119,7 @@ export function ContainerEditDialog({
             <Label htmlFor="container-edit-name">{t('container.nameLabel')}</Label>
             <Input
               id="container-edit-name"
+              data-testid="container-edit-name"
               autoFocus
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -134,6 +138,7 @@ export function ContainerEditDialog({
               <Label htmlFor="container-edit-description">{t('container.descriptionLabel')}</Label>
               <Textarea
                 id="container-edit-description"
+                data-testid="container-edit-description"
                 value={description}
                 onChange={(e) => setDescription(e.target.value)}
                 placeholder={t('container.descriptionPlaceholder')}
@@ -223,7 +228,7 @@ export function ContainerEditDialog({
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             {t('common.cancel')}
           </Button>
-          <Button onClick={submit} disabled={!name.trim() || submitting}>
+          <Button data-testid="container-edit-save" onClick={submit} disabled={!name.trim() || submitting}>
             {submitting ? t('common.saving') : t('common.save')}
           </Button>
         </DialogFooter>

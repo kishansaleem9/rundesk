@@ -1861,6 +1861,17 @@ function FolderForm({
    * their own.
    */
   const [statusScope, setStatusScope] = useState<'space' | 'list'>('space')
+  /*
+   * §V2-S09 frame `08:25` — **Description**, the dialog's second field,
+   * "Tell us a bit about your Folder (optional)".
+   *
+   * IT GOES OUT ON THE CREATE CALL, not on a follow-up PATCH the way `private`
+   * does above. That shape exists only because the create route refuses
+   * `visibility`; `description` is a column the route accepts, so sending it
+   * with the name keeps the folder from existing for a moment without the
+   * words the person typed.
+   */
+  const [description, setDescription] = useState('')
 
   const spaces = useQuery({
     queryKey: ['spaces', workspaceId],
@@ -1873,7 +1884,7 @@ function FolderForm({
     mutationFn: async () => {
       const folder = await api<{ id: string }>(`/spaces/${spaceId}/folders`, {
         method: 'POST',
-        body: { name, statusScope },
+        body: { name, description, statusScope },
       })
       if (isPrivate && folder?.id) {
         try {
@@ -1917,6 +1928,24 @@ function FolderForm({
       }}
     >
       <Input autoFocus data-testid="quick-create-folder-name" placeholder={t('quickCreate.folderNamePlaceholder')} value={name} onChange={(e) => setName(e.target.value)} />
+      {/*
+        Frame `08:25` — Description, BETWEEN Name and "Select a Location",
+        which is where the frame puts it and why this line is here rather than
+        below the Select. A textarea and not an Input: the frame's box is two
+        rows deep, and "tell us a bit about" is an invitation to write a
+        sentence rather than a label.
+
+        It is not required, so it is not in the submit guard below — the frame
+        writes "(optional)" into the placeholder itself.
+      */}
+      <textarea
+        data-testid="quick-create-folder-description"
+        placeholder={t('quickCreate.folderDescriptionPlaceholder')}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+        rows={2}
+        className="w-full resize-y rounded-md border border-border bg-card px-2.5 py-1.5 text-[13px] text-foreground placeholder:text-muted-foreground"
+      />
       <Select data-testid="quick-create-folder-space" labelKey="quickCreate.selectSpace" value={spaceId} onChange={setSpaceId} options={spaces.map((s) => ({ value: s.id, label: s.name }))} />
       {/* Frame `08:32`'s toggle, with the frame's own sentence under it. */}
       <label className="flex items-start justify-between gap-3 rounded-md border border-border/70 px-2.5 py-2">

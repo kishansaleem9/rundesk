@@ -17,6 +17,22 @@ export const folders = pgTable(
     id:          uuid('id').primaryKey().defaultRandom(),
     spaceId:     uuid('space_id').notNull().references(() => spaces.id, { onDelete: 'cascade' }),
     name:        text('name').notNull(),
+    /**
+     * §V2-S09 frame `08:25` — the Create Folder dialog's second field, placed
+     * between Name and "Select a Location", placeholder *"Tell us a bit about
+     * your Folder (optional)"*.
+     *
+     * ITS READER, NAMED: `container-edit-dialog.tsx`, the shared edit dialog
+     * for spaces, folders, projects and lists, whose `fields.description` flag
+     * is turned on for folders. Reopen the folder and the description is in
+     * the box, editable, and `FoldersService.update` writes it back — a
+     * description that could be set once and never changed is half a field.
+     *
+     * Nullable, like `spaces.description` and `projects.description`: the
+     * frame marks it optional and no reader here distinguishes absent from
+     * empty.
+     */
+    description: text('description'),
     color:       text('color').default('#354fb0'),
     position:    integer('position').notNull().default(0),
     /**

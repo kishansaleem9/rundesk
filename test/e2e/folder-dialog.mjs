@@ -13,20 +13,29 @@
  *     ──────────────────────────────────────────────────────────────────
  *     Use Templates                                                [ ✦ ]
  *
- * Rundesk's Folder tab was a name and a space picker. This suite covers the two
- * of the missing pieces that are BUILDABLE and asserts them against the server:
- * the private toggle, and the Use-Templates footer.
+ * Rundesk's Folder tab was a name and a space picker. This suite covers the
+ * missing pieces that are BUILDABLE and asserts each against the server: the
+ * private toggle, the Use-Templates footer, Settings › Statuses, and — since
+ * migration 0160 — **Description**.
  *
- * DELIBERATELY NOT HERE, both recorded rather than faked:
+ * THE DESCRIPTION'S ENTRY HERE USED TO BE A REFUSAL, and it is worth leaving
+ * the shape of it visible. It read: "`folders` has no description column,
+ * `FoldersService` whitelists `{name, color}` on create … so a description
+ * typed here would have nowhere to go. Adding the column without a writer and
+ * a reader is the mirror of the facade." Every clause was true when it was
+ * written and the conclusion was right. What made it stale is that the READER
+ * turned out to exist already: `container-edit-dialog.tsx` is the shared edit
+ * dialog for spaces, folders, projects and lists, it has a description field
+ * behind a `fields.description` flag, and projects were passing it. So the
+ * column, the writer and the reader are one change rather than three, and the
+ * refusal outlived its reason — which is the sixth defect class this audit
+ * names, found in its own ledger.
  *
- *   · **Settings › Statuses**. A separate row, owned elsewhere in this pass.
- *
- *   · **Description**. `folders` has no description column, `FoldersService`
- *     whitelists `{name, color}` on create and `{name, color, position,
- *     visibility}` on update, so a description typed here would have nowhere to
- *     go. Adding the column without a writer and a reader is the mirror of the
- *     facade — a row in Postgres standing as evidence for a feature that does
- *     not exist — so it is reported as a gap instead.
+ * WHAT THE DESCRIPTION SECTION MEASURES, and why a field and a column are not
+ * enough: it is typed in the create dialog, read out of Postgres, read BACK in
+ * the edit dialog, CHANGED there, and CLEARED there. A description that can be
+ * written once and never altered is half a field, and one that can be written
+ * and never emptied is a control that works in one direction only.
  *
  * HOW THE PRIVATE TOGGLE IS HELD TOGETHER. `POST /spaces/:id/folders` does not
  * accept `visibility`; `PATCH …/:folderId` does, and every folder read path
@@ -59,7 +68,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 29
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -500,6 +509,184 @@ try {
     'and a list in the other kind of folder has a usable set of its own',
     `it returned ${JSON.stringify(ownStatuses.keys)} — the override must not leave a list with ` +
       'no statuses at all, which would refuse every status a task tried to take',
+  )
+  // ══ FRAME `08:25` — DESCRIPTION, THE DIALOG'S SECOND ROW ══════════════════
+  console.log('\n▶ frame `08:25` — the Description field, and where the frame puts it')
+
+  await openFolderTab()
+
+  const descBox = page.getByTestId('quick-create-folder-description')
+  chk(
+    (await descBox.count()) === 1,
+    'the Create Folder dialog has a Description field',
+    'there is no description field — the frame draws one as the dialog\'s second row, under Name',
+  )
+  // Bounded and caught: the check above is allowed to find the field absent,
+  // and an unbounded read of an absent element is thirty seconds and a throw
+  // that would take the seven checks below it with it.
+  const descPlaceholder = await descBox.getAttribute('placeholder', { timeout: 8000 }).catch(() => null)
+  chk(
+    descPlaceholder === 'Tell us a bit about your Folder (optional)',
+    'carrying the frame\'s own placeholder, "(optional)" included',
+    `the placeholder read ${JSON.stringify(descPlaceholder)} where the frame reads ` +
+      '"Tell us a bit about your Folder (optional)" — and the "(optional)" in it is the reason ' +
+      'the field is not in the submit guard',
+  )
+
+  /*
+   * POSITION, BECAUSE THE FRAME STACKS THEM AND A FIELD IN THE WRONG PLACE IS A
+   * DIFFERENT DIALOG. Read off the rendered geometry rather than off the source
+   * order: a `flex-col-reverse` or an `order-` class would leave the markup in
+   * the right sequence and draw it in the wrong one.
+   */
+  const rowTops = await page.evaluate(() => {
+    const top = (id) => {
+      const el = document.querySelector(`[data-testid="${id}"]`)
+      return el ? Math.round(el.getBoundingClientRect().top) : null
+    }
+    return {
+      name: top('quick-create-folder-name'),
+      description: top('quick-create-folder-description'),
+      location: top('quick-create-folder-space'),
+    }
+  })
+  chk(
+    rowTops.name !== null &&
+      rowTops.description !== null &&
+      rowTops.location !== null &&
+      rowTops.name < rowTops.description &&
+      rowTops.description < rowTops.location,
+    'and it is drawn between Name and Select a Location, as the frame stacks them',
+    `the three rows were drawn at ${JSON.stringify(rowTops)} — the frame's order is ` +
+      'Name, Description, Select a Location',
+  )
+
+  console.log('\n▶ and what is typed in it reaches the server')
+
+  const DESC_NAME = `Described ${TAG}`
+  const DESC_TEXT = `Everything the ${TAG} team owns`
+  await page.getByTestId('quick-create-folder-name').fill(DESC_NAME)
+  await descBox.fill(DESC_TEXT, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-space').selectOption(SPACE)
+  const beforeDescribed = folderPosts.length
+  await page.getByTestId('quick-create-folder-submit').click()
+  const madeDescribed = await waitUntil(() => folderPosts.length > beforeDescribed, { timeoutMs: 20_000 })
+
+  const foldersNow = async () => {
+    const r = await api(`/spaces/${SPACE}/folders`)
+    return r.status < 300 ? (r.data ?? []) : []
+  }
+  const byName = async (name) => (await foldersNow()).find((f) => f.name === name) ?? null
+  // NO ID IS AN ANSWER, NOT A CRASH — the shape `folder-statuses-19` taught
+  // this suite one section up. Every reader below goes through here.
+  const byId = async (id) => (id ? (await foldersNow()).find((f) => f.id === id) ?? null : null)
+
+  const described = madeDescribed ? await byName(DESC_NAME) : null
+  chk(
+    described?.description === DESC_TEXT,
+    'the words typed in the dialog are on the folder the server made',
+    `the row came back with ${JSON.stringify(described?.description ?? null)} for a typed ` +
+      `${JSON.stringify(DESC_TEXT)} — a box wired to nothing is indistinguishable from this one ` +
+      'until somebody reads the row',
+  )
+
+  /*
+   * THE FOLDER MADE WITHOUT ONE, which is the other half of "(optional)". An
+   * empty string stored where nothing was written is a value that reads as an
+   * answer: the edit dialog would draw a filled box containing no words.
+   */
+  const undescribed = await byName(OPEN_NAME)
+  chk(
+    !!undescribed && (undescribed.description === null || undescribed.description === undefined),
+    'and a folder made without one stores nothing, rather than an empty string standing in for an answer',
+    undescribed
+      ? `it stored ${JSON.stringify(undescribed.description)} for a description nobody typed`
+      : `the public folder "${OPEN_NAME}" is not in this space, so this proved nothing either way`,
+  )
+
+  console.log('\n▶ and the folder reads it back, changes it, and can be emptied again')
+
+  const fid = described?.id ?? null
+  /*
+   * THE READER, REACHED THE WAY A PERSON REACHES IT: the sidebar tree, the
+   * folder's ⋯ menu, Edit. Every step is bounded and caught and the helper
+   * answers `false` rather than throwing, because the three checks below are
+   * about what the dialog holds — a throw here would replace all three with a
+   * stack trace about the step before them.
+   */
+  const openFolderEdit = async () => {
+    if (!fid) return false
+    await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
+    /*
+     * THE SPACE HAS TO BE OPENED FIRST, and the probe that found this is worth
+     * a line: the tree draws six `tree-space-` rows and NOTHING under them
+     * until one is clicked, so `tree-folder-<id>` was absent for twenty-five
+     * seconds and three checks read "the edit dialog never opened" when the
+     * dialog was fine and the folder was simply not on screen yet.
+     */
+    await page.getByTestId(`tree-space-${SPACE}`).click({ timeout: 15_000 }).catch(() => {})
+    const drawn = await page
+      .getByTestId(`tree-folder-${fid}`)
+      .waitFor({ timeout: 25_000 })
+      .then(() => true)
+      .catch(() => false)
+    if (!drawn) return false
+    await page.getByTestId(`tree-folder-${fid}`).hover({ timeout: 8000 }).catch(() => {})
+    await page.getByTestId(`tree-folder-actions-${fid}`).click({ timeout: 10_000 }).catch(() => {})
+    await page.getByTestId('tree-folder-edit').click({ timeout: 10_000 }).catch(() => {})
+    return page
+      .getByTestId('container-edit-description')
+      .waitFor({ timeout: 10_000 })
+      .then(() => true)
+      .catch(() => false)
+  }
+
+  const reopened = await openFolderEdit()
+  const shown = reopened
+    ? await page.getByTestId('container-edit-description').inputValue().catch(() => null)
+    : null
+  chk(
+    shown === DESC_TEXT,
+    'reopening the folder shows the description back — the column has a reader, not just a writer',
+    reopened
+      ? `the edit dialog held ${JSON.stringify(shown)} against a stored ${JSON.stringify(DESC_TEXT)}`
+      : 'the folder\'s edit dialog never opened, so there is no evidence of a reader at all — ' +
+        'which for this row is the same as not having one',
+  )
+
+  const CHANGED = `${DESC_TEXT} — revised`
+  if (reopened) {
+    await page.getByTestId('container-edit-description').fill(CHANGED, { timeout: 8000 }).catch(() => {})
+    await page.getByTestId('container-edit-save').click({ timeout: 10_000 }).catch(() => {})
+  }
+  const edited = await waitUntil(async () => (await byId(fid))?.description === CHANGED, { timeoutMs: 15_000 })
+  chk(
+    edited,
+    'and editing it there writes the new words back',
+    `the server still holds ${JSON.stringify((await byId(fid))?.description ?? null)} — a ` +
+      'description that can be set once and never changed is half a field',
+  )
+
+  const reopenedToClear = await openFolderEdit()
+  if (reopenedToClear) {
+    await page.getByTestId('container-edit-description').fill('', { timeout: 8000 }).catch(() => {})
+    await page.getByTestId('container-edit-save').click({ timeout: 10_000 }).catch(() => {})
+  }
+  const cleared = await waitUntil(
+    async () => {
+      const d = (await byId(fid))?.description
+      return d === null || d === ''
+    },
+    { timeoutMs: 15_000 },
+  )
+  chk(
+    reopenedToClear && cleared,
+    'and emptying the box really deletes it — the field works in both directions',
+    reopenedToClear
+      ? `the server still holds ${JSON.stringify((await byId(fid))?.description ?? null)} after the ` +
+        'box was emptied and saved — a truthiness test on the patch accepts every edit except ' +
+        'the one that erases, and reports no error for it'
+      : 'the edit dialog would not open a second time, so clearing could not be tried',
   )
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)

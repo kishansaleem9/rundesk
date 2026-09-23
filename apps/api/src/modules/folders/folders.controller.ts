@@ -26,7 +26,7 @@ export class FoldersController {
     // §V2-S09 `08:32` — Settings → Statuses. Typed here as well as validated in
     // the service, so a caller reading the route knows the two values without
     // opening it.
-    @Body() body: { name: string; color?: string; statusScope?: 'space' | 'list' },
+    @Body() body: { name: string; description?: string; color?: string; statusScope?: 'space' | 'list' },
   ) {
     return this.folders.create(spaceId, body, user.id)
   }
@@ -36,7 +36,16 @@ export class FoldersController {
   update(
     @Param('spaceId') spaceId: string,
     @Param('folderId') folderId: string,
-    @Body() body: { name?: string; color?: string; position?: number; visibility?: 'public' | 'private' },
+    @Body() body: {
+      name?: string
+      // §V2-S09 `08:25`. `string | null` and not `string`: emptying the box in
+      // the edit dialog is how a description is deleted, and the service reads
+      // `!== undefined` so that edit arrives rather than being filtered out.
+      description?: string | null
+      color?: string
+      position?: number
+      visibility?: 'public' | 'private'
+    },
   ) {
     return this.folders.update(spaceId, folderId, body)
   }

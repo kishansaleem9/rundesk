@@ -89,7 +89,7 @@ export class FoldersService {
    */
   async create(
     spaceId: string,
-    data: { name: string; color?: string; statusScope?: 'space' | 'list' },
+    data: { name: string; description?: string; color?: string; statusScope?: 'space' | 'list' },
     actorId?: string,
   ) {
     const name = (data.name ?? '').trim()
@@ -108,6 +108,13 @@ export class FoldersService {
       .values({
         spaceId,
         name,
+        /*
+         * §V2-S09 frame `08:25`. Trimmed, and an all-whitespace description is
+         * stored as NULL rather than as "   " — every reader treats absent and
+         * empty alike, so keeping a third spelling would only give the edit
+         * dialog a box that looks filled and says nothing.
+         */
+        description: data.description?.trim() || null,
         color: data.color || '#354fb0',
         statusScope: data.statusScope ?? 'space',
         createdById: actorId ?? null,
@@ -119,7 +126,13 @@ export class FoldersService {
   async update(
     spaceId: string,
     folderId: string,
-    patch: { name?: string; color?: string; position?: number; visibility?: 'public' | 'private' },
+    patch: {
+      name?: string
+      description?: string | null
+      color?: string
+      position?: number
+      visibility?: 'public' | 'private'
+    },
   ) {
     if (patch.visibility !== undefined && patch.visibility !== 'public' && patch.visibility !== 'private') {
       throw new BadRequestException('visibility must be public or private')
@@ -130,6 +143,15 @@ export class FoldersService {
     if (patch.name !== undefined) await this.assertFolderNameFree(spaceId, patch.name, folderId)
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name.trim()
+    /*
+     * CLEARING HAS TO BE REACHABLE, which is why the test is `!== undefined`
+     * and not a truthiness check. `fields.description` in the edit dialog sends
+     * whatever is in the box, and emptying the box is how a person deletes a
+     * description; a truthy test would accept every edit except that one and
+     * leave the old text in place with no error — a control that works in one
+     * direction only.
+     */
+    if (patch.description !== undefined) set.description = patch.description?.trim() || null
     if (patch.color !== undefined) set.color = patch.color
     if (patch.position !== undefined) set.position = patch.position
     if (patch.visibility !== undefined) set.visibility = patch.visibility
