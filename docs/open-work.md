@@ -784,6 +784,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* the grant is put back straight after the check, and a failure to put it back stops the run by name. Re-run pending.
 
+### `found-23-sep/break-guard-floor-counted-build-output` — **closed** (found by preflight)
+
+**`check-no-break-patches` refused a clean tree: its file floor had been measured on a tree that still held a bundle**
+
+*Evidence:* preflight's first step failed with "the scan read 1311 file(s), below the floor of 2000", and its case file's "run from outside the repository" case with it. The floor came from "Measured 22 September: 2,526 files" — but the walk pruned `dist` by exact name, so that count took in about 1,200 files of the tracked `apps/web/dist-brk` bundle, which 491e1dc deleted. The version before today's `bail` change reads the same 1,311, so the edit did not cause it. And the case file kept its own copy of the number (2000), so re-measuring one would have left the other failing.
+
+*Closed:* re-measured — 884 files in apps, 293 in packages, 134 in test — and the floor is 1,000; `dist-*` is pruned with `dist`, because a bundle is not the tree and one built from a patched tree would be a hit no source file holds; the case reads the guard's floor from its source. `check-no-break-patches` reads 1,311 from the repository and from `/tmp`; `check-patch-guard --mutate` 14/14 cases, 7/7 mutations.
+
 ### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
 
 **A check that reads `textContent` cannot tell a shown message from a hidden one**

@@ -252,8 +252,11 @@ console.log('\n▶ and it does not care where it was run from — which is the d
   const r = spawnSync(process.execPath, [GUARD], { encoding: 'utf8', cwd: tmpdir(), env })
   const out = (r.stdout ?? '') + (r.stderr ?? '')
   const count = Number(out.match(/clean — ([\d]+) file\(s\) read/)?.[1] ?? 0)
+  // The guard's own floor, read from its source: a second copy of the number
+  // here stayed at 2000 when the guard's had to be re-measured.
+  const floor = Number(readFileSync(GUARD, 'utf8').match(/MIN_SCANNED = [^\n]*: (\d+)\n/)?.[1] ?? NaN)
   chk(
-    r.status === 0 && count >= 2000,
+    r.status === 0 && Number.isFinite(floor) && count >= floor,
     `run from outside the repository it still reads the whole tree (${count} files)`,
     `from ${tmpdir()} it exited ${r.status} having read ${count} file(s): ` +
       `${out.trim().slice(0, 200)}`,

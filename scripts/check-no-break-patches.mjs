@@ -64,13 +64,18 @@ const REPO =
   path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const ROOTS = ['apps', 'packages', 'test'].map((r) => path.join(REPO, r))
 const EXT = /\.(ts|tsx|mjs|js|jsx|css|sql)$/
-// Measured 22 September: 2,526 files under the three roots, from the repository
-// root and from `/tmp` alike. A floor rather than an equality, because the tree
-// grows — and the number it guards against is 0, or the handful a half-resolved
-// root would leave.
+// Measured 23 September: 1,311 files under the three roots (884 in apps, 293 in
+// packages, 134 in test). The 2,526 measured the day before, and the floor of
+// 2,000 set from it, counted about 1,200 files of BUILD OUTPUT — the tracked
+// `apps/web/dist-brk` bundle, deleted in 491e1dc — because the walk pruned
+// `dist` by exact name only. So the floor measured an artifact, and failed the
+// day the artifact went. `dist-*` is pruned now too: a bundle is not the tree,
+// and one built from a patched tree would be a hit that no source file holds.
+// A floor rather than an equality, because the tree grows — and the number it
+// guards against is 0, or the handful a half-resolved root would leave.
 // The floor does not apply to a planted tree, which is four files by design.
 // `BREAK_SCAN_ROOT` is set by the case file and by nothing else.
-const MIN_SCANNED = process.env.BREAK_SCAN_ROOT ? 1 : 2000
+const MIN_SCANNED = process.env.BREAK_SCAN_ROOT ? 1 : 1000
 
 /**
  * Each pattern is something a break patch writes and ordinary code does not.
@@ -115,7 +120,7 @@ const walk = (dir) => {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
     const full = path.join(dir, entry.name)
     if (entry.isDirectory()) {
-      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('.')) continue
+      if (entry.name === 'node_modules' || entry.name === 'dist' || entry.name.startsWith('dist-') || entry.name.startsWith('.')) continue
       walk(full)
     } else if (EXT.test(entry.name) && path.resolve(full) !== SELF) {
       scanned += 1
