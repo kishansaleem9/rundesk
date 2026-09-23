@@ -14,7 +14,7 @@
  * rather than copied. The clips page imports it now.
  *
  * WHEN, and this is a real decision rather than a detail: LAZILY, on the first
- * action that needs a link. Uploading the moment the card appears would spend
+ * of the three actions that is pressed. Uploading the moment the card appears would spend
  * somebody's bandwidth on a clip they are about to discard, and cleaning that
  * up means a second call (`DELETE /clips`) that can itself fail and leave an
  * orphan in storage. The frames do show a spinner — at `05:35`, on the clip
@@ -23,8 +23,10 @@
  *
  * `Attach clip` is untouched and still stages the file for the comment, so the
  * ordinary path uploads once, as an attachment, when the comment is posted. A
- * clip only reaches the clips library if somebody asks for a LINK to it, which
- * is the one case where a second, addressable copy is the point.
+ * clip only reaches the clips library if somebody asks for a link to it, or
+ * for a task made from it (ClickUp saves every clip to its Clips Hub; this
+ * saves the ones somebody did something with). The task then gets its own
+ * copy from the library, made by the API: see `attachClipToTask`.
  */
 import { api } from './api'
 
@@ -102,6 +104,19 @@ export async function publishClip(args: {
     throw new Error(`clip upload failed (${put.status} ${put.statusText})`)
   }
   return presign.storageKey
+}
+
+/**
+ * §V2-S05 frame `05:25`: Create a task attaches the clip. The task gets its
+ * own copy of the uploaded clip, made by the API inside the bucket, so nothing
+ * is uploaded twice. It is signed whenever the task is read, where a link
+ * pasted into the description stopped working after a day.
+ */
+export async function attachClipToTask(taskId: string, storageKey: string, fileName: string): Promise<void> {
+  await api(`/tasks/${taskId}/attachments/from-clip`, {
+    method: 'POST',
+    body: { storageKey, fileName },
+  })
 }
 
 /**

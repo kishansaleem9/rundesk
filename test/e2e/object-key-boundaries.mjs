@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 21
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -340,7 +340,7 @@ try {
   )
 
   // ══ 5. CLIPS ═════════════════════════════════════════════════════════════
-  console.log('\n▶ a clip is one of this workspace’s clips, by shape — to share it and to delete it')
+  console.log('\n▶ a clip is one of this workspace’s clips, by shape — to share it, attach it to a task, and delete it')
 
   /*
    * A REAL OBJECT OF B'S THIS TIME, because the delete is the harm and a key
@@ -401,6 +401,44 @@ try {
     'while the workspace’s own clip is shared, and its link serves the clip',
     `presign ${said(clipPresign)}, PUT ${clipPut}, share ${said(ownShare)}; the link served ` +
       `${ownShared === null ? 'nothing' : `${ownShared.length} other byte(s)`}`,
+  )
+
+  /*
+   * A TASK ATTACHES A CLIP BY COPYING IT (Create a task on the clip card), so
+   * the attach route is one more place a client hands back a clip key. It
+   * copies whatever it is given into the task, where the task's own list signs
+   * it: the walk here would put B's file on A's task.
+   */
+  const inA = async (route, body, what) => {
+    const res = await A(route, { method: 'POST', body })
+    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what} in A: ${said(res)}`)
+    return res.data.id
+  }
+  const aSpace = await inA('/spaces', { workspaceId: WA, name: `${TAG} space` }, 'a space')
+  const aProject = await inA('/projects', { spaceId: aSpace, name: `${TAG} project` }, 'a project')
+  const aList = await inA('/lists', { projectId: aProject, name: `${TAG} list` }, 'a list')
+  const aTask = await inA('/tasks', { listId: aList, title: `${TAG} made from a clip` }, 'a task')
+  const aTaskFiles = async () => sql`select storage_key from task_attachments where task_id = ${aTask}`
+
+  const walkClipAttach = await A(`/tasks/${aTask}/attachments/from-clip`, { method: 'POST', body: { storageKey: CLIP_WALK } })
+  const afterWalk = await aTaskFiles()
+  chk(
+    walkClipAttach.status === 400 && afterWalk.length === 0,
+    'a task cannot attach a key that walks out of its workspace’s clips — refused, and nothing is attached',
+    `it answered ${said(walkClipAttach)}; the task holds ${afterWalk.length} file(s)`,
+  )
+
+  const ownClipAttach = OWN_CLIP
+    ? await A(`/tasks/${aTask}/attachments/from-clip`, { method: 'POST', body: { storageKey: OWN_CLIP, fileName: 'own clip.webm' } })
+    : { status: 0 }
+  const attachedBytes = await bytesAt(ownClipAttach.data?.url)
+  const afterOwn = await aTaskFiles()
+  chk(
+    ownClipAttach.status < 300 && attachedBytes !== null && attachedBytes.equals(CLIP) && afterOwn.length === 1 &&
+      afterOwn[0].storage_key.startsWith(`workspaces/${WA}/tasks/${aTask}/attachments/`),
+    'while one of the workspace’s own clips is attached as the task’s own copy, which serves the clip',
+    `attach answered ${said(ownClipAttach)}; the task holds ${JSON.stringify(afterOwn.map((r) => r.storage_key)).slice(0, 160)}; ` +
+      `its URL served ${attachedBytes === null ? 'nothing' : `${attachedBytes.length} byte(s)`}`,
   )
 
   const walkRemove = await A(`/workspaces/${WA}/clips`, { method: 'DELETE', body: { storageKey: CLIP_WALK } })

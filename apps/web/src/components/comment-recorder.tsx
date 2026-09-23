@@ -35,7 +35,7 @@ import { Mic, Square, Video, Trash2, Loader2 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { ClipSetupPanel } from './clip-setup-panel'
 import { openClipStream, readClipSetup, type ClipSetup } from '../lib/clip-capture'
-import { publishClip, clipShareUrl } from '../lib/clip-publish'
+import { publishClip, clipShareUrl, attachClipToTask } from '../lib/clip-publish'
 import { api, ApiError } from '../lib/api'
 import { useSpeechRecognition } from '../lib/use-speech-recognition'
 import {
@@ -311,36 +311,60 @@ export function CommentRecorder({
    * §V2-S05 frames `05:25`–`05:30` — "Clip created!" offers Create a task ·
    * New tab · Copy link, and the last confirms "Link copied".
    *
-   * ALL THREE NEED A URL, and a just-recorded clip has none: it is a Blob
-   * behind an object URL, private to this document. Copying that would produce
-   * a link that works in this tab and nowhere else, which is the neatest facade
-   * available here. So the clip is uploaded — LAZILY, on the first action that
-   * needs it, and once. See `lib/clip-publish.ts` for why not sooner.
+   * ALL THREE NEED THE CLIP SOMEWHERE REAL, and a just-recorded clip is not:
+   * it is a Blob behind an object URL, private to this document. Copying that
+   * would produce a link that works in this tab and nowhere else, which is the
+   * neatest facade available here. So the clip is uploaded, LAZILY, on the
+   * first action that needs it, and once. See `lib/clip-publish.ts` for why
+   * not sooner.
+   *
+   * `busy` covers the WHOLE action, not just the upload: Create a task is an
+   * upload, a new task and an attach, and a second press halfway through would
+   * make a second task.
    */
-  const ensureLink = async (): Promise<string | null> => {
-    if (!finished || !workspaceId) return null
+  const busy = async <T,>(action: () => Promise<T>): Promise<T> => {
     setPublishing(true)
     try {
-      const key = clipKey ?? (await publishClip({
-        workspaceId,
-        file: finished.file,
-        title: finished.file.name,
-        durationSeconds: finished.seconds,
-      }))
-      if (!clipKey) setClipKey(key)
-      return await clipShareUrl(workspaceId, key)
-    } catch {
-      // An upload or a signature that failed must say so: the alternative is a
-      // Copy link that reports success and puts nothing on the clipboard.
-      toast.error(t('clipCreated.uploadFailed'))
-      return null
+      return await action()
     } finally {
       setPublishing(false)
     }
   }
 
+  /** The clip's key in the library, uploading it the first time anything needs it. */
+  const ensureClip = async (): Promise<string | null> => {
+    if (!finished || !workspaceId) return null
+    if (clipKey) return clipKey
+    try {
+      const key = await publishClip({
+        workspaceId,
+        file: finished.file,
+        title: finished.file.name,
+        durationSeconds: finished.seconds,
+      })
+      setClipKey(key)
+      return key
+    } catch {
+      // An upload that failed must say so: the alternative is a Copy link that
+      // reports success and puts nothing on the clipboard.
+      toast.error(t('clipCreated.uploadFailed'))
+      return null
+    }
+  }
+
+  const ensureLink = async (): Promise<string | null> => {
+    const key = await ensureClip()
+    if (!key || !workspaceId) return null
+    try {
+      return await clipShareUrl(workspaceId, key)
+    } catch {
+      toast.error(t('clipCreated.uploadFailed'))
+      return null
+    }
+  }
+
   const copyClipLink = async () => {
-    const url = await ensureLink()
+    const url = await busy(ensureLink)
     if (!url) return
     try {
       await navigator.clipboard?.writeText(url)
@@ -352,34 +376,51 @@ export function CommentRecorder({
   }
 
   const openClipInNewTab = async () => {
-    const url = await ensureLink()
+    const url = await busy(ensureLink)
     if (url) window.open(url, '_blank', 'noopener')
   }
 
-  const createTaskFromClip = async () => {
-    if (!listId) return
-    const url = await ensureLink()
-    if (!url) return
-    try {
-      /*
-       * In THIS list, because that is the list the person is already working
-       * in and the frame offers no picker. The clip's link goes in the
-       * description rather than the title: a title carrying a signed URL is
-       * unreadable in every list view it appears in.
-       */
-      await api('/tasks', {
-        method: 'POST',
-        body: JSON.stringify({
-          title: finished?.file.name ?? t('clipCreated.title'),
-          listId,
-          description: url,
-        }),
-      })
-      toast.success(t('clipCreated.taskCreated'))
-    } catch (err) {
-      toast.error(err instanceof ApiError ? err.message : t('clipCreated.taskFailed'))
-    }
-  }
+  /*
+   * Frame `05:25`: Create a task. ClickUp's help describes it as "Create a new
+   * task and attach the Clip", and says every clip is saved in the Clips Hub.
+   *
+   * IT USED TO PASTE A LINK INTO THE DESCRIPTION, signed for 24 hours, with no
+   * key kept, so the next day the task pointed at nothing. Now the clip goes to
+   * the library as before (the Hub), and the task gets the clip itself: an
+   * attachment the API copies from the library inside the bucket, signed each
+   * time the task is read, like every other file on it.
+   *
+   * In THIS list, because that is the list the person is already working in
+   * and the frame offers no picker.
+   */
+  const createTaskFromClip = () =>
+    busy(async () => {
+      if (!listId || !finished) return
+      const key = await ensureClip()
+      if (!key) return
+      let taskId: string
+      try {
+        const task = await api<{ id: string }>('/tasks', {
+          method: 'POST',
+          body: JSON.stringify({ title: finished.file.name || t('clipCreated.title'), listId }),
+        })
+        taskId = task.id
+      } catch (err) {
+        toast.error(err instanceof ApiError ? err.message : t('clipCreated.taskFailed'))
+        return
+      }
+      try {
+        await attachClipToTask(taskId, key, finished.file.name)
+        toast.success(t('clipCreated.taskCreated'))
+      } catch {
+        /*
+         * The task exists and the clip is not on it. "Task created from the
+         * clip" would be the facade, so it says what is missing, and the clip
+         * is still on this card to attach by hand.
+         */
+        toast.error(t('clipCreated.taskClipNotAttached'))
+      }
+    })
 
   if (finished) {
     return (

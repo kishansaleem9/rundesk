@@ -29,7 +29,7 @@
 import io
 p = '/home/user/rundesk/apps/web/src/components/comment-recorder.tsx'
 a = """  const copyClipLink = async () => {
-    const url = await ensureLink()
+    const url = await busy(ensureLink)
     if (!url) return
 """
 b = """  const copyClipLink = async () => {

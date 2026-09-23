@@ -7,6 +7,7 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  MaxLength,
 } from 'class-validator'
 
 // Note: only the create handler is converted to a DTO. The update handler keeps
@@ -106,4 +107,20 @@ export class AddAttachmentDto {
   @IsOptional()
   @IsInt()
   sizeBytes?: number
+}
+
+/**
+ * §V2-S05 frame `05:25` — the clip that "Create a task" attaches. The key is
+ * checked against this workspace's clips by shape in the service; the size and
+ * type are read from the stored object, never taken from the caller.
+ */
+export class AttachClipDto {
+  @IsString()
+  @IsNotEmpty()
+  storageKey!: string
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(255)
+  fileName?: string
 }

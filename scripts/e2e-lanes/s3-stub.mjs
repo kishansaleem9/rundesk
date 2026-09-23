@@ -20,9 +20,9 @@
  * WHY NOT MinIO. There is no container runtime on this machine — `docker info`
  * fails — and pulling an image over the proxy to test four HTTP verbs would
  * trade a reason I can check for one I cannot. The surface the upload path
- * actually touches is PUT, GET, HEAD, DELETE and one list, so it is written
- * out here and checked in, which also means the lane harness has no external
- * dependency to be unavailable on the day it is needed.
+ * actually touches is PUT, GET, HEAD, DELETE, one list and a server-side copy,
+ * so it is written out here and checked in, which also means the lane harness
+ * has no external dependency to be unavailable on the day it is needed.
  *
  * THE SIGNATURE IS NOT VERIFIED, AND THAT IS THE POINT OF THE SEAM.
  * `getSignedUrl` signs locally — no network, no round trip — so what a real
@@ -214,7 +214,9 @@ const server = createServer(async (req, res) => {
   // Control routes returned above and preflights carry no intent, so what is
   // recorded is exactly what the product asked the bucket to do.
   requestSeq += 1
-  requests.push({ n: requestSeq, method: req.method, bucket, key })
+  // Kept by reference: a copy notes its source on this entry once it is known.
+  const logged = { n: requestSeq, method: req.method, bucket, key }
+  requests.push(logged)
   if (requests.length > REQUEST_LOG_CAP) requests.shift()
 
   if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
@@ -249,16 +251,54 @@ const server = createServer(async (req, res) => {
      * that serves an unsigned PUT would let a product that stopped signing
      * pass. The signature's CORRECTNESS is deliberately not checked — see the
      * header.
+     *
+     * AND A REQUEST THE API SENDS ITSELF IS SIGNED TOO, in its `Authorization`
+     * header rather than its query string. Reading only the query refused
+     * every PUT the SDK sends directly (`putObject`, and a copy), so under
+     * `--strict` — which is how CI runs this — the product's own server-side
+     * uploads were refused as unsigned.
      */
-    if (STRICT && !url.searchParams.has('X-Amz-Signature')) {
-      return s3Error(res, 403, 'AccessDenied', 'the PUT carried no X-Amz-Signature')
+    const signed =
+      url.searchParams.has('X-Amz-Signature') || /\bSignature=[0-9a-f]+/.test(String(req.headers.authorization ?? ''))
+    if (STRICT && !signed) {
+      return s3Error(res, 403, 'AccessDenied', 'the PUT carried no signature')
     }
     if (failNextPut) {
       // Consumed FIRST, and before the body is read, so a refusal cannot leave
-      // the flag armed for the next lane's upload if this handler throws.
+      // the flag armed for the next lane's upload if this handler throws. A
+      // copy is a PUT too, and consumes it the same way.
       failNextPut = false
       await readBody(req)
       return s3Error(res, 500, 'InternalError', 'the stub was asked to refuse this PUT')
+    }
+    /*
+     * CopyObject: a PUT with `x-amz-copy-source: <bucket>/<key>` (URL-encoded,
+     * sometimes with a leading slash) and no body. Served because the product
+     * copies a clip into a task's own prefix; without this the copy would be
+     * stored as an EMPTY object, a 200 for bytes that never moved.
+     */
+    const copySource = req.headers['x-amz-copy-source']
+    if (copySource) {
+      await readBody(req)
+      const [srcBucket, ...rest] = decodeURIComponent(String(copySource)).replace(/^\//, '').split('/')
+      const srcKey = rest.join('/')
+      logged.copyOf = srcKey
+      if (srcBucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${srcBucket}`)
+      const src = objects.get(srcKey)
+      if (!src) return s3Error(res, 404, 'NoSuchKey', `no object at ${srcKey}`)
+      const replace = String(req.headers['x-amz-metadata-directive'] ?? '').toUpperCase() === 'REPLACE'
+      const copied = {
+        body: Buffer.from(src.body),
+        contentType: replace ? req.headers['content-type'] ?? 'application/octet-stream' : src.contentType,
+        at: new Date(),
+      }
+      objects.set(key, copied)
+      const xml =
+        `<?xml version="1.0" encoding="UTF-8"?><CopyObjectResult>` +
+        `<LastModified>${copied.at.toISOString()}</LastModified><ETag>"${key.length}-${copied.body.length}"</ETag>` +
+        `</CopyObjectResult>`
+      res.writeHead(200, { 'content-type': 'application/xml', 'content-length': Buffer.byteLength(xml) })
+      return res.end(xml)
     }
     const body = await readBody(req)
     objects.set(key, {

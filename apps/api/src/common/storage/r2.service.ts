@@ -1,6 +1,7 @@
 import { Injectable, InternalServerErrorException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import {
+  CopyObjectCommand,
   DeleteObjectCommand,
   GetObjectCommand,
   HeadObjectCommand,
@@ -164,6 +165,35 @@ export class R2Service {
   async deleteObject(key: string): Promise<void> {
     this.requireConfigured()
     await this.client!.send(new DeleteObjectCommand({ Bucket: this.bucketName!, Key: key }))
+  }
+
+  /**
+   * A copy made INSIDE the bucket; the bytes never pass through the API. For
+   * an object that has to become somebody else's own: a clip attached to a
+   * task gets a copy under the task's prefix, so deleting either one leaves
+   * the other where it was.
+   *
+   * `REPLACE`, not the default `COPY`, for the metadata: the copy describes
+   * its new owner (who put it there, which task it is on), as an upload to
+   * that prefix would, and not the object it was copied from.
+   */
+  async copyObject(
+    sourceKey: string,
+    destinationKey: string,
+    opts: { contentType: string; metadata?: Record<string, string> },
+  ): Promise<void> {
+    this.requireConfigured()
+    await this.client!.send(
+      new CopyObjectCommand({
+        Bucket: this.bucketName!,
+        Key: destinationKey,
+        // `bucket/key`, URL-encoded, which is the header's defined form.
+        CopySource: encodeURI(`${this.bucketName}/${sourceKey}`),
+        MetadataDirective: 'REPLACE',
+        ContentType: opts.contentType,
+        Metadata: opts.metadata ?? {},
+      }),
+    )
   }
 
   async headObject(key: string) {

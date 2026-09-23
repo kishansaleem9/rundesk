@@ -34,6 +34,18 @@
  * both and failed on share, which was perfectly real. The two disagree about
  * whether unconfigured storage is the caller's fault — noted, not fixed here.)
  *
+ * AND ONE SECTION TURNS THE STUBS OFF. Create a task used to paste the share
+ * link into the task's description (a URL signed for 24 hours), and this suite
+ * asserted exactly that: it looked for the stub's URL in the description, so
+ * the defect was the check. ClickUp's Create a task makes "a new task and
+ * attach[es] the Clip". What that needs proved is a file on the task, in the
+ * store, served when the task is read. So in that section presign and share
+ * pass through to the API, the clip goes to the lane's real store, and the
+ * suite reads back the row, the store's own request log and the bytes.
+ *
+ * Service workers are blocked: every check here that stubs a route depends on
+ * the route seeing the request (`found-23-sep/routes-bypassed-by-the-service-worker`).
+ *
  *   node test/e2e/clip-created-card.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -42,6 +54,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { storeBase, storeRequests } from './lib/store.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -49,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 26
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -224,27 +237,34 @@ try {
   const [task] = await sql`
     insert into tasks (list_id, title) values (${list.id}, ${`Card subject ${TAG}`}) returning id`
 
-  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
+  const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
   await ctx.addInitScript(FAKES)
 
-  /* The storage backend, and only that, stood in for. */
+  /*
+   * The storage backend, and only that, stood in for — except while
+   * `realStore` is set, when presign and share go to the API as they are (the
+   * Create a task section). Counted either way.
+   */
   const calls = { presign: 0, share: 0, put: 0, presignBodies: [] }
+  let realStore = false
   await ctx.route('**/clips/presign', async (route) => {
     calls.presign += 1
     calls.presignBodies.push(route.request().postDataJSON())
+    if (realStore) return route.fallback().catch(() => {})
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({ data: { uploadUrl: UPLOAD_URL, storageKey: `workspaces/${workspaceId}/clips/${TAG}.webm` }, error: null }),
-    })
+    }).catch(() => {})
   })
   await ctx.route('**/clips/share', async (route) => {
     calls.share += 1
+    if (realStore) return route.fallback().catch(() => {})
     await route.fulfill({
       status: 201,
       contentType: 'application/json',
       body: JSON.stringify({ data: { shareUrl: SHARE_URL }, error: null }),
-    })
+    }).catch(() => {})
   })
   /*
    * `failPut` exists because a break-test found this suite blind: making
@@ -383,7 +403,7 @@ try {
   )
 
   // -------------------------------------------------------------------------
-  console.log('\n▶ New tab, and Create a task')
+  console.log('\n▶ New tab')
 
   await page.getByTestId('clip-created-newtab').click()
   chk(
@@ -394,23 +414,7 @@ try {
     'New tab opens the shared url',
     `it opened ${JSON.stringify((await page.evaluate(() => window.__clip)).opened)}`,
   )
-
-  await page.getByTestId('clip-created-task').click()
-  /*
-   * READ BACK FROM THE DATABASE. A toast saying "Task created" is the easiest
-   * thing in the world to show without creating one.
-   */
-  const made = await waitUntil(async () => {
-    const rows = await sql`
-      select title, description from tasks
-      where list_id = ${list.id} and description like ${'%' + 'storage.test' + '%'}`
-    return rows.length === 1
-  }, { timeoutMs: 20_000 })
-  chk(
-    made,
-    'Create a task really makes one, in this list, carrying the clip link',
-    'no task in this list holds the clip link — the button reported success and made nothing',
-  )
+  // Create a task is the section below, against the real store.
 
   // -------------------------------------------------------------------------
   console.log('\n▶ a SECOND clip is not the first clip')
@@ -478,6 +482,126 @@ try {
     'a link was copied for a clip that never finished uploading — the worst of both',
   )
   failPut = false
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ frame `05:25` — Create a task attaches the clip (the real store)')
+
+  /*
+   * READ BACK FROM THE DATABASE AND THE STORE. A toast saying "Task created" is
+   * the easiest thing in the world to show without creating one, and a link in
+   * a description is the easiest thing to mistake for the clip.
+   */
+  realStore = true
+  const STORE = storeBase(API_PORT, argOf('--store', undefined))
+  const OWN_CLIPS = `workspaces/${workspaceId}/clips/`
+  const uploadedClips = []
+  const tasksInList = async () => (await sql`select id from tasks where list_id = ${list.id}`).map((r) => r.id)
+  const newTaskSince = async (before) => (await tasksInList()).filter((id) => !before.has(id))
+
+  await openComposer()
+  await recordAClip()
+  const tasksBefore = new Set(await tasksInList())
+  const seq0 = (await storeRequests(STORE))?.seq ?? null
+  await page.getByTestId('clip-created-task').click()
+  let made = null
+  await waitUntil(async () => {
+    const fresh = await newTaskSince(tasksBefore)
+    if (fresh.length !== 1) return false
+    ;[made] = await sql`select id, title, description from tasks where id = ${fresh[0]}`
+    return (await sql`select id from task_attachments where task_id = ${fresh[0]}`).length > 0
+  }, { timeoutMs: 20_000 })
+
+  chk(
+    made != null && !/https?:\/\//i.test(made.description ?? ''),
+    'Create a task makes a task in this list, with no link that can expire in its description',
+    made ? `its description is ${JSON.stringify(made.description).slice(0, 140)}` : 'no task appeared in this list',
+  )
+
+  const ownPrefix = `workspaces/${workspaceId}/tasks/${made?.id}/attachments/`
+  const attached = made
+    ? await sql`select content_type, size_bytes, storage_key from task_attachments where task_id = ${made.id}`
+    : []
+  chk(
+    attached.length === 1 && attached[0].storage_key.startsWith(ownPrefix) &&
+      String(attached[0].content_type).startsWith('video/') && Number(attached[0].size_bytes) === 16384,
+    'and the clip is attached to it: one file, under the task’s own prefix, with the recording’s type and size',
+    `the task holds ${attached.length} attachment(s): ${JSON.stringify(attached).slice(0, 220)}`,
+  )
+
+  const after = seq0 === null ? null : (await storeRequests(STORE))?.requests.filter((r) => r.n > seq0) ?? null
+  const clipPuts = (after ?? []).filter((r) => r.method === 'PUT' && r.key.startsWith(OWN_CLIPS) && !r.copyOf)
+  const copies = (after ?? []).filter((r) => r.method === 'PUT' && r.copyOf)
+  const reUploads = (after ?? []).filter((r) => r.method === 'PUT' && r.key.startsWith(ownPrefix) && !r.copyOf)
+  uploadedClips.push(...clipPuts.map((r) => r.key))
+  chk(
+    clipPuts.length === 1 && copies.length === 1 && copies[0].copyOf === clipPuts[0].key &&
+      copies[0].key === attached[0]?.storage_key && reUploads.length === 0,
+    'copied inside the store from the clip the card uploaded — the recording is sent once',
+    after === null
+      ? `the store's request log could not be read at ${STORE}`
+      : `after the press the store saw ${JSON.stringify(after.map((r) => [r.method, r.key.split('/').slice(-2).join('/'), r.copyOf ? 'copy' : '']).slice(0, 8))}`,
+  )
+
+  const listedOnTask = made ? (await A(`/tasks/${made.id}/attachments`)).data ?? [] : []
+  const served = typeof listedOnTask[0]?.url === 'string'
+    ? await fetch(listedOnTask[0].url).then(async (r) => (r.ok ? Buffer.from(await r.arrayBuffer()) : null), () => null)
+    : null
+  chk(
+    served !== null && served.length === 16384,
+    'and the task serves it: the attachment’s URL, signed when the task is read, returns the recording',
+    `the task lists ${listedOnTask.length} attachment(s); its URL returned ${served === null ? 'nothing' : `${served.length} byte(s)`}`,
+  )
+
+  const library = (await A(`/workspaces/${workspaceId}/clips`)).data ?? []
+  chk(
+    clipPuts.length === 1 && library.some((c) => c.storageKey === clipPuts[0].key),
+    'while the clip is kept in the workspace’s clips too, as ClickUp keeps every clip in its Clips Hub',
+    `the library holds ${library.length} clip(s)${clipPuts.length === 1 ? ', not this one' : ''}`,
+  )
+
+  /*
+   * AND AN ATTACH THAT FAILS SAYS SO. "Task created from the clip" over a task
+   * with no clip on it would be the facade.
+   *
+   * THE FAILURE IS A MISSING CLIP, NOT AN ARRANGED STORE ERROR. The first
+   * version armed the store's fail-next-put for the copy, and the attach
+   * succeeded anyway: the AWS SDK retries a 500, and the retry went through,
+   * as it would against a real bucket having a bad moment. A clip deleted
+   * from the library between the upload and the press is not retried (the
+   * API answers 404), and it is a thing that happens: the library is shared.
+   */
+  await openComposer()
+  await recordAClip()
+  const seq1 = (await storeRequests(STORE))?.seq ?? null
+  await page.getByTestId('clip-created-copy').click()
+  await waitUntil(async () => (await page.evaluate(() => window.__clip)).copied.length > 0, { timeoutMs: 20_000 })
+  const firstUpload = seq1 === null ? [] : ((await storeRequests(STORE))?.requests ?? [])
+    .filter((r) => r.n > seq1 && r.method === 'PUT' && r.key.startsWith(OWN_CLIPS) && !r.copyOf)
+  const gone = firstUpload.length === 1
+    ? await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey: firstUpload[0].key } })
+    : { status: 0 }
+  const removedFirst = firstUpload.length === 1 && gone.status < 300
+  const tasksBeforeFailure = new Set(await tasksInList())
+  await page.getByTestId('clip-created-task').click()
+  const saidSo = await waitUntil(
+    async () => (await page.locator('[data-sonner-toast]', { hasText: /could not be attached/i }).count()) > 0,
+    { timeoutMs: 20_000 },
+  )
+  const failedTask = (await newTaskSince(tasksBeforeFailure))[0] ?? null
+  const failedRows = failedTask ? await sql`select id from task_attachments where task_id = ${failedTask}` : []
+  const toasts = await page.locator('[data-sonner-toast]').allInnerTexts().catch(() => [])
+  chk(
+    removedFirst && saidSo && failedRows.length === 0,
+    'and when the attach fails, the card says the clip is not on the task — not "Task created"',
+    `the clip was ${removedFirst ? 'removed from the library first' : `not removed first (${firstUpload.length} upload(s) seen, delete answered ${gone.status})`}; ` +
+      `the toasts read ${JSON.stringify(toasts).slice(0, 200)}; the task holds ${failedRows.length} attachment(s)`,
+  )
+  // The clips this section put in the library go again, so the library a later
+  // run reads is not this run's leftovers.
+  for (const storageKey of uploadedClips) {
+    await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey } }).catch(() => {})
+  }
+  realStore = false
 
   // -------------------------------------------------------------------------
   console.log('\n▶ frames `05:35`–`05:40` — the clip in the comment')

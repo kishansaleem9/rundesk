@@ -20,7 +20,7 @@ import { TasksService } from './tasks.service'
 import { PlansService } from '../plans/plans.service'
 import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
-import { CreateTaskDto, AddAttachmentDto } from './dto/task.dto'
+import { CreateTaskDto, AddAttachmentDto, AttachClipDto } from './dto/task.dto'
 import { unknownUpdateFields } from './task-update-fields'
 import type { CurrentUserPayload } from './types'
 
@@ -674,6 +674,20 @@ export class TasksController {
     @Body() body: AddAttachmentDto,
   ) {
     return this.tasks.addAttachment(taskId, user.id, body)
+  }
+
+  /**
+   * §V2-S05 frame `05:25`: Create a task on the "Clip created!" card attaches
+   * the clip, as a copy of one of this workspace's clips that the task owns.
+   * See `TasksService.attachClip`.
+   */
+  @Post(':taskId/attachments/from-clip')
+  async attachClip(
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: AttachClipDto,
+  ) {
+    return this.tasks.attachClip(taskId, user.id, body)
   }
 
   @Post(':taskId/attachments/presign')

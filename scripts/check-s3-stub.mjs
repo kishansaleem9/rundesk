@@ -107,13 +107,25 @@ async function main() {
     // And it does NOT latch: the very next PUT succeeds again.
     out.afterArrangedFail = (await fetch(refusedUrl, { method: 'PUT', body: BYTES })).status
     out.unsignedPut = (await fetch('http://127.0.0.1:${PORT}/' + '${BUCKET}' + '/' + KEY, { method: 'PUT', body: BYTES })).status
+    // A copy made inside the bucket — how a clip becomes a task's own
+    // attachment. Asked for a type the source does not have, so REPLACE shows.
+    out.copied = await r2.copyObject(KEY, 'tasks/probe/copy.bin', { contentType: 'application/x-rundesk-copy' })
+      .then(() => 'copied').catch((e: Error) => e.name)
+    out.copyRoundTrip = await r2.getObject('tasks/probe/copy.bin').then((b) => b.equals(BYTES)).catch(() => false)
+    out.copyHeadType = await r2.headObject('tasks/probe/copy.bin').then((h) => h.ContentType).catch((e: Error) => e.name)
+    out.copyMissing = await r2.copyObject('tasks/probe/never.png', 'tasks/probe/copy-of-nothing.png', { contentType: 'image/png' })
+      .then(() => 'copied').catch((e: Error) => e.name)
+    out.copyOfNothingStored = await r2.headObject('tasks/probe/copy-of-nothing.png').then(() => true).catch(() => false)
+    // A PUT the API signs in its HEADER, not its query — how it uploads by itself.
+    out.directPut = await r2.putObject('tasks/probe/direct.png', BYTES, 'image/png').then(() => 'stored').catch((e: Error) => e.name)
+    out.directRoundTrip = await r2.getObject('tasks/probe/direct.png').then((b) => b.equals(BYTES)).catch(() => false)
     await r2.deleteObject(KEY)
     out.afterDelete = await r2.getObject(KEY).then(() => 'still-there').catch((e: Error) => e.name)
     // The request log: what a suite reads to prove the product did, or did
     // NOT, ask the bucket for something.
     const log = await (await fetch('http://127.0.0.1:${PORT}/__control/requests')).json()
     out.logSeq = log.seq
-    out.logged = (log.requests as Array<{ n: number; method: string; key: string; bucket: string }>).map((r) => [r.n, r.method, r.key, r.bucket])
+    out.logged = (log.requests as Array<{ n: number; method: string; key: string; bucket: string; copyOf?: string }>).map((r) => [r.n, r.method, r.key, r.bucket, r.copyOf ?? null])
     out.missingHead = await r2.headObject('tasks/probe/never.png').then(() => 'answered').catch((e: Error) => e.name)
   } catch (err) {
     out.threw = err instanceof Error ? \`\${err.name}: \${err.message}\` : String(err)
@@ -196,6 +208,26 @@ if (out.none !== undefined) {
   chk(out.arrangedFailStatus === 500, 'an arranged failure refuses the next PUT — so "a failed upload says so" stays measurable', `the arranged failure answered ${out.arrangedFailStatus}`)
   chk(out.afterArrangedFail === 200, 'and it does NOT latch — the PUT after it succeeds, so the failure cannot leak into the next suite', `the PUT after the arranged failure answered ${out.afterArrangedFail}`)
   chk(out.unsignedPut === 403, 'an UNSIGNED PUT is refused — a product that stopped signing would be caught, not quietly served', `an unsigned PUT answered ${out.unsignedPut}`)
+  chk(
+    out.directPut === 'stored' && out.directRoundTrip === true,
+    'while a PUT the API signs in its header is served — the product’s own uploads are signed too',
+    `the API's own PUT answered ${out.directPut}; round trip ${out.directRoundTrip}`,
+  )
+  chk(
+    out.copied === 'copied' && out.copyRoundTrip === true,
+    'a copy made inside the bucket holds the source’s bytes — how a clip becomes a task’s own attachment',
+    `the copy answered ${out.copied}; its bytes ${out.copyRoundTrip ? 'match' : 'do not match'}`,
+  )
+  chk(
+    out.copyHeadType === 'application/x-rundesk-copy',
+    'and carries the type the copy asked for, since it replaces the metadata',
+    `HEAD on the copy said ${out.copyHeadType}`,
+  )
+  chk(
+    out.copyMissing === 'NoSuchKey' && out.copyOfNothingStored === false,
+    'a copy of a key that was never written fails with the code the SDK names, and stores nothing',
+    `copying nothing answered ${out.copyMissing}; ${out.copyOfNothingStored ? 'an object now exists at the target' : 'nothing was stored'}`,
+  )
   chk(out.afterDelete === 'NoSuchKey', 'a deleted object is gone, and says so with the code the SDK names', `after delete it answered ${out.afterDelete}`)
   chk(out.missingHead !== 'answered', 'and HEAD on a key that was never written does not answer as though it were', 'HEAD answered for an object that does not exist')
   const logged = Array.isArray(out.logged) ? out.logged : []
@@ -204,6 +236,12 @@ if (out.none !== undefined) {
     has('PUT', KEY_NAME) && has('DELETE', KEY_NAME),
     'the request log names the PUT and the DELETE the product sent, by key — so a suite can see what reached the bucket',
     `the log held ${JSON.stringify(logged).slice(0, 200)}`,
+  )
+  chk(
+    logged.some(([, m, k, , c]) => m === 'PUT' && k === 'tasks/probe/copy.bin' && c === KEY_NAME) &&
+      logged.some(([, m, k, , c]) => m === 'PUT' && k === KEY_NAME && c === null),
+    'and says what a copy was copied from — so a suite can tell a copy from a second upload',
+    `the copy's entry is ${JSON.stringify(logged.find(([, , k]) => k === 'tasks/probe/copy.bin') ?? null)}`,
   )
   chk(
     logged.length > 0 && logged.every(([n], i) => i === 0 || n > logged[i - 1][0]) && out.logSeq === logged[logged.length - 1][0],
@@ -240,7 +278,13 @@ if (process.argv.includes('--mutate')) {
   let blind = 0
   const MUTATIONS = [
     ['the stub answers 200 to every PUT without storing anything', 'objects.set(key, {', 'void 0 && objects.set(key, {'],
-    ['it serves an unsigned PUT', "if (STRICT && !url.searchParams.has('X-Amz-Signature')) {", 'if (false) {'],
+    ['it serves an unsigned PUT', 'if (STRICT && !signed) {', 'if (false) {'],
+    ['it refuses a PUT signed in its header, as it did', "/\\bSignature=[0-9a-f]+/.test(String(req.headers.authorization ?? ''))", 'false'],
+    ['a copy stores nothing', 'objects.set(key, copied)', 'void copied'],
+    ['a copy stores other bytes than its source’s', 'body: Buffer.from(src.body),', "body: Buffer.from('X'),"],
+    ['a copy keeps the source’s type when told to replace it', "contentType: replace ? req.headers['content-type'] ?? 'application/octet-stream' : src.contentType,", 'contentType: src.contentType,'],
+    ['a copy of nothing succeeds, storing an empty object', "const src = objects.get(srcKey)\n      if (!src) return s3Error(res, 404, 'NoSuchKey', `no object at ${srcKey}`)", "const src = objects.get(srcKey) ?? { body: Buffer.alloc(0), contentType: 'application/octet-stream' }"],
+    ['the log does not say what a copy was copied from', 'logged.copyOf = srcKey', 'void srcKey'],
     ['a deleted object is still there', 'objects.delete(key)', 'void key'],
     ['the arranged failure never fires', 'if (failNextPut) {', 'if (false) {'],
     ['the arranged failure LATCHES, leaking into the next upload', 'failNextPut = false\n      await readBody(req)', 'await readBody(req)'],
@@ -260,8 +304,8 @@ if (process.argv.includes('--mutate')) {
     ['HEAD answers for an object that was never written', "res.writeHead(404)\n      return res.end()", "res.writeHead(200, { 'content-length': 0 })\n      return res.end()"],
     ['the list is empty whatever is in the bucket', 'const hits = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).slice(0, max)', 'const hits = []'],
     ['a stored object comes back with a byte changed', 'return res.end(found.body)', "return res.end(Buffer.concat([Buffer.from('X'), found.body.subarray(1)]))"],
-    ['the request log records nothing', 'requests.push({ n: requestSeq, method: req.method, bucket, key })', 'void 0'],
-    ['the request log forgets which key', 'requests.push({ n: requestSeq, method: req.method, bucket, key })', "requests.push({ n: requestSeq, method: req.method, bucket, key: '' })"],
+    ['the request log records nothing', 'requests.push(logged)', 'void logged'],
+    ['the request log forgets which key', 'const logged = { n: requestSeq, method: req.method, bucket, key }', "const logged = { n: requestSeq, method: req.method, bucket, key: '' }"],
     ['the log reports no position to read from', 'JSON.stringify({ seq: requestSeq, requests })', 'JSON.stringify({ seq: 0, requests })'],
     ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['control routes are logged as bucket traffic', "  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {", "  requests.push({ n: ++requestSeq, method: req.method, bucket, key })\n  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {"],

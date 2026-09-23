@@ -16,6 +16,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Build to ClickUp, which shares the dependency on section 4's clips table (see s4-clip-link). Give each clip a stable, unguessable share token and an app route such as /clips/:token that re-signs the storage object on every view. Copy link, New tab and Create a task then use that route, never a signed URL, so task descriptions stop rotting. If an expiry is offered at all, make it an explicit choice and state it in the toast and dialog. Checks: the copied link still resolves after the signing window (sign with a short TTL in the test); the task description holds the stable route, not a storage URL; if the toast or dialog carries an expiry, it matches the server's.
 
+*Progress:* one of its three uses is gone. Create a task no longer writes a URL into the task: it attaches the clip (`clip-create-task-persists-24h-url`), and `clip-created-card` no longer asserts the description link. Copy link and New tab still hand out the 24-hour signed URL with nothing saying so, which is the rest of this item.
+
 ### `product-siblings/avatar-logo-persist-expiring-signed-url` — **closed**, break run pending
 
 **Avatar and workspace-logo uploads persist a 15-minute presigned URL as avatarUrl/logoUrl**
@@ -110,13 +112,19 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Require storageKey to start with `chat/${channelId}/attachments/`, the prefix createAttachmentUploadUrl mints at :164.
 
-### `product-siblings/clip-create-task-persists-24h-url` — open, small
+### `product-siblings/clip-create-task-persists-24h-url` — **closed**, break run pending
 
 **'Create a task' from a clip writes a 24-hour signed URL into the task description and keeps no key**
 
 *Evidence:* comment-recorder.tsx:320-338 ensureLink returns clipShareUrl(...), which clip-publish.ts:108-121 requests with a 24h expiry (clips.service.ts:107-108 signs it). createTaskFromClip at :358-373 POSTs `description: url`. The task keeps no attachment or key reference to the clip. docs/video2-resume.md:244-246 (item 7) covers Copy link's unstated expiry, not this persisted copy. Failure: the next day the task created from a clip has a dead link and no way back to the recording.
 
 *To close:* Attach the clip to the new task as a task attachment (or a clip reference) and render the link by signing on read.
+
+*ClickUp:* the help article on Clip recordings lists the card's actions as "Create a task: Create a new task and attach the Clip", "New tab" and "Copy link", and says every clip is saved in the Clips Hub (web search, 23 September; help.clickup.com itself is blocked here).
+
+*Closed:* Create a task puts the clip in the library (the Clips Hub, reusing the upload if Copy link already made it), creates the task, and has the API attach the clip: `POST /tasks/:id/attachments/from-clip` copies one of the workspace's clips (by shape, `clip-keys.ts`) inside the bucket to the task's own upload prefix, and records it as an attachment with the stored object's type and size (the 100 MB limit applies as for an upload). It is signed on every read, like any other file on the task, and the description carries no link. A copy rather than a reference, so the object has one owner: removing the attachment deletes the task's copy, deleting the clip leaves the task's. If the attach fails, the card says "The task was created, but the clip could not be attached to it", not "Task created". New in `R2Service`: `copyObject`. The lane store serves a copy (and, found doing it, `found-23-sep/lane-store-refused-the-apis-own-uploads`).
+
+*Measured, lane 1:* `clip-created-card` 26/26. It asserted the defect as the spec (a check that the description held the stub's link); that check is gone and six took its place, run against the real store: no link in the description; one attachment under the task's prefix with the recording's type and size; the store's own log shows the copy made from the clip the card uploaded and no second upload; the task's attachment URL serves the recording; the clip is in the library; and a failed attach (the clip deleted from the library between the upload and the press, which the API answers 404) is reported as such. Against the old build: the first five failed, the description holding `http://127.0.0.1:9101/…/clips/…webm?X-Amz-…`, and the library twin passed. (The first version of the failure check armed the store's fail-next-put for the copy; the AWS SDK retried the 500, and the attach went through. That is correct behaviour, so the check uses a failure that is not retried.) `object-key-boundaries` §5 gained the attach route's pair: a key that walks out of the clips is refused with nothing attached, and the workspace's own clip is attached as the task's copy and serves the clip (21/21). `check-s3-stub` 23/23 cases, 19/19 mutations. Break patches, each compiled: `ccc-1`/`ccc-2` re-anchored, `ccc-4` re-aimed (it claimed the removed check), `ccc-5..9` new, `okb-22`/`okb-23` new.
 
 ### `product-siblings/contribution-sprint-unselectable` — open, small
 
@@ -479,6 +487,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* `clips.service.ts` `share` (:104) and `remove` (:85) checked `storageKey.startsWith('workspaces/<ws>/clips/')`, the prefix check that was replaced by a shape check for task attachments, chat attachments, emoji and call recordings. Measured on lane 1 against the running API: a member of workspace A and B planted a task attachment in B. Then, in A, `POST /workspaces/A/clips/share {storageKey: 'workspaces/A/clips/../../../<B's key>'}` answered 201 with a URL whose path, with its dot segments collapsed as a browser collapses them, is B's object, and fetching it returned B's file. `DELETE /workspaces/A/clips` with the same key answered 200, and B's object was gone from the store. (On R2 a presigned URL would probably fail its signature once the path is normalised. A public-CDN deployment signs nothing, which is the case the other four were fixed for.)
 
 *Closed:* one pure rule, `modules/clips/clip-keys.ts`: a workspace's clip is its prefix plus exactly one safe segment (`isKeyDirectlyUnder`), used by share and remove, and by the task attach below. `object-key-boundaries` §5, 19/19 on lane 1: the walk is not shared and no link comes back; deleting it is refused and B's file is still there, each beside the workspace's own clip being shared (its link serves the clip) and deleted (it leaves the library). Against the old API the two refusals failed ("the link served workspace B's file", "B's file is GONE — the walk deleted it") and the two twins passed. Unit tests: `clip-keys.test.ts` (3) and two in `clips.service.test.ts` (nothing deleted, nothing signed). Break patches: `okb-17..21`, each compiled, run pending (lanes 2 to 4 are in plan-4). `clk-1` and `clk-2` are unit claims, each shown to fail its named test. Regression on lane 1, 4/4: object-key-boundaries, clip-created-card, settings-depth, video-regression.
+
+### `found-23-sep/clip-library-lists-the-oldest-200` — open, small (found reading `ClipsService.list` for the item above)
+
+**The clip library shows a workspace's 200 OLDEST clips, so from the 201st on, a new clip never appears in it**
+
+*Evidence:* `clips.service.ts` `list` asks `listObjects(prefix, 200)`. ListObjectsV2 returns keys in ascending order, and every clip key starts with `Date.now()`, so the 200 keys it returns are the oldest 200. They are then sorted newest-first for display, which makes the page look current. There is no paging or cursor, and nothing on the page says the list was cut off. Read, not yet measured: the lane store lists in the order objects were written, which is also oldest first, so it can be measured by uploading 201 clips.
+
+*To close:* page through the listing (continuation token) and show the newest, or, as `s4-clip-link` proposes, read a clips table. Check: after 201 uploads the newest is listed.
 
 ## Verification-harness defects — 27
 
@@ -846,6 +862,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* `serviceWorkers: 'block'` in each of the four, and every hold asserts that it held (a flag set in the handler, as `webhook-access` does), so a route that never fires fails its check instead of passing it. A rule in the suite checkers: a `.route(` in a file whose contexts do not block service workers.
 
+*Progress:* `clip-created-card` blocks the worker now (with `clip-create-task-persists-24h-url`), and its handlers catch their own errors. It holds nothing. Its routes stand in for presign and share, and its checks count them, so a route that never fired would fail them rather than pass. Three to go: `chat-history`, `create-menu-ai`, `ui-sweep`.
+
 ### `found-23-sep/secret-and-credential-reads` — partly-fixed, low now (from a read-only sweep of every credential column, each measured before it was fixed; only admin-side invitation tokens remain)
 
 **Read routes handed credentials to people who should not have them, and an invitation could grant another organisation's workspace**
@@ -947,6 +965,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* `fleet-restart.sh` reads a column to look for out of the NEWEST migration file and skips the check, with a warning, when it finds none. `0161_public_image_urls.sql` (fdac6bd) is data-only: it rewrites saved image URLs. So from that commit on, every restart printed "could not read a column check out of 0161_public_image_urls.sql — schema NOT verified" and started the API anyway. That is the case the check exists to refuse, a database behind the code.
 
 *Closed:* it walks back to the newest migration that adds a column (today 0160, `folders.description`) and checks that. The warning remains for a tree where no migration adds one. Lane 1 restarted with the check performed and no warning.
+
+### `found-23-sep/lane-store-refused-the-apis-own-uploads` — **closed** (found giving the store a copy for `clip-create-task-persists-24h-url`)
+
+**Under `--strict`, the lane store refused every PUT the API sends itself, as unsigned**
+
+*Evidence:* `s3-stub.mjs` counted a PUT as signed only if its QUERY carried `X-Amz-Signature`, which is a presigned upload's shape. The SDK signs a request it sends directly in the `Authorization` header, so `putObject` (inbound email attachments) and any copy were answered 403 "the PUT carried no X-Amz-Signature" wherever the stub runs strict, which is how CI runs it. `check-s3-stub.mjs` never sent one, so nothing noticed. A mutation restoring the old rule reddens 5 cases of the new contract.
+
+*Closed:* a signature in either place counts, and an unsigned PUT is still refused. The stub also serves CopyObject (the source's bytes, the requested type under `REPLACE`, `NoSuchKey` for a missing source, the source noted in the request log), which `check-s3-stub` drives through the real `R2Service`: 23/23 cases, 19/19 mutations.
 
 ## Test-suite defects (chains, catches, fingerprints, branches) — 21
 

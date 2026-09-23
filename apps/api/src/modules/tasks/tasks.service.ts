@@ -89,6 +89,7 @@ import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
+import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
 import { CustomFieldsService } from '../custom-fields/custom-fields.service'
 
@@ -3207,15 +3208,82 @@ export class TasksService {
     if (!task) throw new NotFoundException('Task not found')
     const storageKey = data.storageKey ?? data.url
     if (!storageKey) throw new BadRequestException('storageKey is required')
+    return this.recordAttachment(taskId, actorId, {
+      fileName: data.fileName,
+      contentType: data.contentType ?? 'application/octet-stream',
+      sizeBytes: data.sizeBytes ?? 0,
+      storageKey,
+    })
+  }
+
+  /**
+   * §V2-S05 frame `05:25`: **Create a task** on the "Clip created!" card.
+   * ClickUp's help says it creates "a new task and attach[es] the Clip".
+   *
+   * THE CARD USED TO PASTE A LINK INTO THE DESCRIPTION: a URL signed for 24
+   * hours, with no key kept. The next day the task pointed at nothing and had
+   * no way back to the recording.
+   *
+   * SO THE TASK GETS THE CLIP ITSELF, as an attachment it owns: a copy of one
+   * of this workspace's clips, made inside the bucket, under the task's own
+   * upload prefix. From there it is every other attachment. It is signed when
+   * the task is read, it goes wherever the task's access rules let it, and
+   * deleting it deletes the task's copy and never the library's. A reference
+   * to the library key would have given the object two owners: removing the
+   * attachment would have deleted the clip from the library, and deleting the
+   * clip would have left the task signing a key with nothing behind it.
+   *
+   * Nothing new is trusted. The key is one of this workspace's clips by shape
+   * (`clip-keys.ts`), the caller must be able to write to the task, and the
+   * size is the stored object's, so the attachment limit holds as it does for
+   * an upload.
+   */
+  async attachClip(taskId: string, actorId: string, data: { storageKey: string; fileName?: string }) {
+    const ctx = await this.assertTaskWriteAccess(taskId, actorId)
+    if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
+    if (!isWorkspaceClipKey(data.storageKey, ctx.workspaceId)) {
+      throw new BadRequestException('storageKey must be one of this workspace’s clips')
+    }
+    let head: Awaited<ReturnType<R2Service['headObject']>>
+    try {
+      head = await this.r2.headObject(data.storageKey)
+    } catch (err) {
+      const name = (err as { name?: string } | null)?.name
+      if (name === 'NotFound' || name === 'NoSuchKey') throw new NotFoundException('Clip not found')
+      throw err
+    }
+    const sizeBytes = Number(head.ContentLength ?? 0)
+    this.assertAttachmentSize(sizeBytes)
+    const contentType = head.ContentType || 'video/webm'
+    const fileName =
+      (data.fileName?.trim() || head.Metadata?.title || data.storageKey.split('/').pop() || 'clip.webm').slice(0, 255)
+    const storageKey = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${this.sanitizeFileName(fileName)}`
+    await this.r2.copyObject(data.storageKey, storageKey, {
+      contentType,
+      metadata: { uploadedby: actorId, taskid: taskId },
+    })
+    return this.recordAttachment(taskId, actorId, { fileName, contentType, sizeBytes, storageKey })
+  }
+
+  /**
+   * The row, its activity entry and its search entry, however the object got
+   * there. `addAttachment` records what a client uploaded or linked;
+   * `attachClip` records a copy it made itself.
+   */
+  private async recordAttachment(
+    taskId: string,
+    actorId: string,
+    data: { fileName: string; contentType: string; sizeBytes: number; storageKey: string },
+  ) {
     const [row] = await this.db
       .insert(taskAttachments)
       .values({
         taskId,
         uploadedById: actorId,
         fileName: data.fileName,
-        contentType: data.contentType ?? 'application/octet-stream',
-        sizeBytes: data.sizeBytes ?? 0,
-        storageKey,
+        contentType: data.contentType,
+        sizeBytes: data.sizeBytes,
+        storageKey: data.storageKey,
       })
       .returning()
     await this.logActivity({
