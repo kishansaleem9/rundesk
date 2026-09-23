@@ -814,7 +814,7 @@ checks, not about a run.**
 | | capability |
 |---|---|
 | P | Import — a real delimited-file parser with per-source column presets covers 7 of the 10 named tools. Basecamp needs its API; Confluence exports pages not task rows; Slack exports conversation JSON. Monday and Wrike default to .xlsx, which is not read |
-| P | Importers — frame `12:08`'s submenu has twelve rows: Spreadsheet files, Document files and ten named tools. **Spreadsheet import is built** — a real delimited-file importer with explicit column mapping — closed by `imports.mjs`, **20** checks — 19 until `imports-3-deadpreset` showed that a disabled Start was ending the run rather than reporting, and "the import reported a result" became a check of its own — **19/19 break-tested**. The ten named tools appear as column **PRESETS over that one importer**, which is a decision and is recorded as one: ten tiles opening a dialog that cannot import would be the facade defect at ten times scale, and `imports-1-ghosttile` exists to redden exactly that. The four rows with no preset are drawn as text with their reason and no control. **Document import is the part still open** |
+| B | Importers — frame `12:08`'s submenu has twelve rows: Spreadsheet files, Document files and ten named tools. **Spreadsheet import is built** — a real delimited-file importer with explicit column mapping — closed by `imports.mjs`, **20** checks — 19 until `imports-3-deadpreset` showed that a disabled Start was ending the run rather than reporting, and "the import reported a result" became a check of its own — **19/19 break-tested**. The ten named tools appear as column **PRESETS over that one importer**, which is a decision and is recorded as one: ten tiles opening a dialog that cannot import would be the facade defect at ten times scale, and `imports-1-ghosttile` exists to redden exactly that. The four rows with no preset are drawn as text with their reason and no control. **Document import is now built too** — `POST /workspaces/:id/docs/import`, `markdownToTiptap()` run against `tiptap-markdown.ts`'s existing exporter, closed by `doc-import.mjs`, **15 checks, 4/4 break-tested**. The check that makes it honest is the ROUND TRIP: export a doc, import the file back, and the doc must be the same — the shape a facade cannot pass. Scope is `.md`, `.markdown` and `.txt` by the decision `attachment-text.ts` already made for this repository (PDF, Word, Excel and PowerPoint "intentionally NOT parsed"), and a format it cannot read is refused in words naming the ones that work; `doc-import-3-any-format-accepted` reddens exactly that. So every row of frame `12:08`'s submenu is now either built or drawn with its reason and no control |
 | B | Template Center — faceted browse with type, complexity, use-cases and categories, counted in SQL over the corpus rather than over the loaded page |
 | B | Planner onboarding screen — closed by `planner-onboarding.mjs`, 12 checks (frames `12:40`/`12:45`/`12:48`). The card titles are the frame's own words and one of them was not: the product shipped "Keep your meeting notes" in four locales where `12:45` draws **"Automate your meeting notes"**, so the check was green against copy the specification does not contain. Corrected. The Connect check asserts the browser LANDS on the URL the server hands back, not merely that it asked — `window.location.href = authUrl` is the convention in all three OAuth surfaces, so "it requested" and "it went there" are different facts and only the second is the feature |
 | B | Connect Google / Outlook; two-way scope; drag task → block; prefix applied |
@@ -894,7 +894,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 146 built · 13 partial · 14 missing.**
+**173 rows: 147 built · 12 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -930,26 +930,28 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 114 | 9 | 9 | 132 |
+| §2, the sections table | 115 | 8 | 9 | 132 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **146** | **13** | **14** | **173** |
+| **consolidated** | **147** | **12** | **14** | **173** |
 
-TWO ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the only
-shape of movement this table should ever show for a build: *Threads* is now
-`comment-thread.mjs`, 13 of 13, 11 break patches, and *Create Folder* is
-`folder-dialog.mjs`, 29 of 29, 8 patches, its description no longer blocked. A
-build that raised the total would mean a row had been invented rather than
-answered.
+THREE ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
+only shape of movement this table should ever show for a build: *Threads* is
+now `comment-thread.mjs`, 13 of 13, 11 break patches; *Create Folder* is
+`folder-dialog.mjs`, 29 of 29, 8 patches, its description no longer blocked;
+and *Importers* is closed by `doc-import.mjs`, 15 of 15, 4 patches, which makes
+every row of frame `12:08`'s submenu either built or drawn with its reason and
+no control. A build that raised the total would mean a row had been invented
+rather than answered.
 
-§2's 114 built includes the four marked `B*` — built, but the row also records
+§2's 115 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
-114 above is 112 plus the Threads and Create Folder rows closing, not the
-strike being undone.
+115 above is 112 plus the Threads, Create Folder and Importers rows closing,
+not the strike being undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
 countdown anywhere in the walkthrough; the row existed only because of the
@@ -6155,7 +6157,7 @@ the create-modal placeholder (no frame behind it at all), and credits.
 | ~~Threads~~ **BUILT** | `05:50` — a panel headed *"Thread by \<name\>"* holding the comment, its reactions and a *"Reply to comment…"* composer of its own | `test/e2e/comment-thread.mjs`, 13 of 13, 11 break patches. Four insertions into `task-detail-sheet.tsx` and no modified lines, because that file carries about eighty patches |
 | View types | Activity and Workload | six of eleven; Map / Mind Map / Timeline are a recorded decision, not a gap |
 | ~~Create Folder description~~ **BUILT** | a description on the folder dialog | migration 0160, the column, create AND update, the frame's field in the frame's place, and `fields.description` on for folders — the reader that turned out to exist already. `folder-dialog.mjs` 29 of 29, 8 break patches, each reddening the check it names |
-| Document import | the second row of `12:08`'s submenu | the delimited-file importer is built and 19/19 break-tested; documents are the open half |
+| ~~Document import~~ **BUILT** | the second row of `12:08`'s submenu | `doc-import.mjs`, 15 of 15, 4 patches. The round trip — export a doc, import the file back, compare — is the check a facade cannot pass |
 
 ### The order is decided by drift, not by appetite
 
@@ -6396,13 +6398,28 @@ piping a suite's stdout, this becomes a live defect** and the 215 sites want
 condition attached is the stale reason waiting to happen, which is the mistake
 this pass found twice in its own ledger.
 
+### Document import closed while this was being written
+
+All four patches redden the check they name, against a 15 of 15 baseline:
+`doc-import-1-title-heading-kept` proves the leading h1 is CONSUMED into the
+title rather than stored twice (the export hides that by not prepending a
+second one, so the round trip alone is blind to it);
+`doc-import-2-never-indexed` proves the import takes an opening revision, so
+the first edit has something to diff against; `-3-any-format-accepted` proves
+a `.docx` is refused in words that name the formats that DO work; and
+`-4-any-workspace` proves the write refuses a workspace the caller does not
+belong to — a gap found by reading the sibling route, not by a check, and one
+that was green in 29 tests while writing into somebody else's workspace.
+
+§2's Importers row is now `B`: every row of frame `12:08`'s submenu is built or
+drawn with its reason and no control.
+
 ### What is still held, and it has not changed
 
-**View types (Activity, Workload)** and **Document import** remain where the
-section above left them. Rundesk holds both definitions already —
+**View types (Activity, Workload)** remain where the section above left them. Rundesk holds both definitions already —
 `task_activity` for one, `findOverloadedAssignees()` (`open >= 6 && open >= 1.5
 × team average`) for the other — but `07:10` only lists them in a wizard's
 toggle list and no frame opens either view, so what they should DRAW is a
 decision the walkthrough does not make. Document import is built and measured
-(`doc-import.mjs`, 15 of 15) against a decision recorded rather than a frame,
-and that entry says so.
+(`doc-import.mjs`, 15 of 15, 4 of 4 patches) against a decision recorded rather
+than a frame, and the entry above says so.
