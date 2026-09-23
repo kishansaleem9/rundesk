@@ -180,6 +180,17 @@ for path in patches:
         (dupe if 'appears 2' in msg or 'occurs 2' in msg else miss).append((name, msg))
     except FileNotFoundError as e:
         gone.append((name, f'{e.filename} no longer exists'))
+    except SystemExit as e:
+        # SIX PATCHES STOP WITH `sys.exit('anchor %d times' % n)` INSTEAD OF THE
+        # ASSERT, and `SystemExit` is not an `Exception`: the first of them to
+        # lose its anchor ended THIS RUN — no report, no patch named, just
+        # "anchor 0 times" and exit 1 (found 23 September, `lwb-1-noorder`).
+        # So an exit is the patch's verdict, read like the assert's.
+        msg = ' '.join(str(e.code).split()) if e.code not in (None, 0) else ''
+        if not msg:
+            ok += 1
+        else:
+            (dupe if 'anchor 2' in msg or 'appears 2' in msg else miss).append((name, msg))
     except Exception:  # a broken patch is a finding, not a crash
         err.append((name, traceback.format_exc(limit=1).strip().splitlines()[-1]))
     finally:

@@ -25,7 +25,7 @@
  *
  *   node scripts/check-unit-claims.mjs
  */
-import { readdirSync, readFileSync, writeFileSync, existsSync } from 'node:fs'
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -97,7 +97,12 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const backup = new Map()
   for (const rel of touched) {
     const abs = join(ROOT, rel)
-    if (existsSync(abs)) backup.set(abs, readFileSync(abs))
+    if (existsSync(abs)) {
+      // Milliseconds with their fraction: a Date rounds to the millisecond,
+      // and rounding UP made a restored file newer than it was.
+      const { atimeMs, mtimeMs } = statSync(abs)
+      backup.set(abs, { bytes: readFileSync(abs), atime: atimeMs / 1000, mtime: mtimeMs / 1000 })
+    }
   }
   if (!backup.size) {
     unknown.push(`${name} — names no file under apps/ or packages/, so nothing could be applied`)
@@ -125,7 +130,18 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   } catch (e) {
     unknown.push(`${name} — the patch would not apply: ${String(e.message).split('\n')[0]}`)
   } finally {
-    for (const [abs, bytes] of backup) writeFileSync(abs, bytes)
+    /*
+     * THE BYTES, AND THE TIME. Writing the same bytes back still moved each
+     * file's mtime, and `verify.sh` judges a lane's build stale by mtime — so
+     * after every preflight all four lanes were refused as "older than the
+     * source it is built from" over six files that had not changed (found
+     * 23 September: `person-panel.tsx`, `ai-cost.ts` and four more, all
+     * written in the same second this ran).
+     */
+    for (const [abs, was] of backup) {
+      writeFileSync(abs, was.bytes)
+      utimesSync(abs, was.atime, was.mtime)
+    }
   }
   if (!applied) continue
 

@@ -812,6 +812,22 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Still open:* (2) inbound-webhook tokens — the token to its creator and the workspace's admins and managers only, creating to non-guests who can create in the list, deleting to the creator or an admin, and a hook whose creator has left stops creating (needs the list panel changed: it builds each URL from the token); (4) portals — refuse creation while `blockPublicSharing` is on (as docs do) and keep guests out of portal management; whether existing portal links should die with the switch is a ClickUp question to research; federated search runs every member's query through the connecting admin's account; invitation tokens still come back to org admins in the list and create answers (low — the same admins can fetch the link).
 
+### `found-23-sep/break-patch-check-died-on-an-exit` — **closed** (found closing the credential item)
+
+**`check-break-patches.py` stopped at the first patch that called `sys.exit`, and reported nothing else**
+
+*Evidence:* six older patches end `sys.exit('anchor %d times' % n)` rather than the assert, and `SystemExit` is not an `Exception`, so it escaped `except Exception` and ended the checker: the whole output was "anchor 0 times" and exit 1 — no patch named, no count. `lwb-1-noorder` had lost its anchor to `findByMember`'s new `return rows.map(`.
+
+*Closed:* the checker reads an exit as the patch's verdict, the same way as the assert — named, counted, `ANCHOR GONE`; a probe patch that exits is now reported by name, where the previous checker printed only its message. `lwb-1-noorder` is re-anchored to the new shape with the same break (no ORDER BY), and says why. 1042/1042 apply.
+
+### `found-23-sep/unit-claims-moved-mtimes` — **closed** (found when lane 1 was refused as stale after a preflight)
+
+**Every preflight made every lane look stale: `check-unit-claims` wrote six unchanged files back and moved their mtimes**
+
+*Evidence:* `verify.sh` refused lane 1 — "dist-1 is older than the source it is built from … person-panel.tsx" — with `git status` clean for that file. Six files had mtimes in one 10-second window, 18:55:44–53: `person-panel.tsx`, `ai-cost.ts`, `ai-containers.ts`, `knowledge-indexer.service.ts`, `task-object-keys.ts`, `planner.service.ts` — exactly the files the six unit-claim patches edit. The checker applies each patch for real, runs the unit test, and writes the bytes back; `verify.sh` judges staleness by mtime.
+
+*Closed:* the bytes AND the times go back — `utimesSync` with the fractional milliseconds (`mtimeMs / 1000`; a `Date` rounded .570933974 UP to .571). Measured: the six mtimes drift at most one microsecond, older, across a run; 6/6 unit claims still redden.
+
 ### `found-23-sep/admin-grant-taken-and-not-put-back` — **closed**, measurement pending (found in plan-2)
 
 **`space-default-permission` removed the admin's space grant for one check and never restored it, so `sdp-7` ended the run one section on**
