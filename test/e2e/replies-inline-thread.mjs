@@ -147,7 +147,7 @@ try {
     'the row offers to open the thread in place',
     'no way to open a thread from the Replies list',
   )
-  await opener.click()
+  await opener.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(3000)
 
   const parentBlock = (await page.getByTestId('reply-thread-parent').innerText().catch(() => '')).trim()

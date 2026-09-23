@@ -234,7 +234,7 @@ try {
     await page.getByTestId('menu-my-profile').isVisible().catch(() => false),
     'the avatar menu offers a profile that is not account settings',
   )
-  await page.getByTestId('menu-my-profile').click()
+  await page.getByTestId('menu-my-profile').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(1800)
 
   const panel = page.getByTestId('person-panel')
@@ -286,9 +286,9 @@ try {
   }
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2500)
-  await page.getByTestId('user-menu').click()
+  await page.getByTestId('user-menu').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
-  await page.getByTestId('menu-my-profile').click()
+  await page.getByTestId('menu-my-profile').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2000)
 
   check(
@@ -305,7 +305,7 @@ try {
     await page.getByTestId('person-time-off-add').isVisible().catch(() => false),
     'and "Add time off" is offered right there',
   )
-  await page.getByTestId('person-time-off-add').click()
+  await page.getByTestId('person-time-off-add').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(500)
   check(
     await page.getByTestId('person-time-off-form').isVisible().catch(() => false),
@@ -704,9 +704,9 @@ try {
 
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
-  await page.getByTestId('user-menu').click()
+  await page.getByTestId('user-menu').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
-  await page.getByTestId('menu-my-profile').click()
+  await page.getByTestId('menu-my-profile').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2200)
   check((await page.locator('[data-testid^=person-bucket-]').count()) >= 4,
     'and the panel draws them as separate sections')
@@ -815,9 +815,9 @@ try {
   // …and through the UI, which is where it was asked for.
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
-  await page.getByTestId('user-menu').click()
+  await page.getByTestId('user-menu').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
-  await page.getByTestId('menu-my-profile').click()
+  await page.getByTestId('menu-my-profile').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2200)
 
   const standupBtn = page.getByTestId('person-standup')

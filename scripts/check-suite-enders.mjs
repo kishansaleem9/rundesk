@@ -180,6 +180,131 @@ console.log('\n▶ rule one — a press on a control the check above it may find
   )
 }
 
+console.log('\n▶ a suite that calls its helper `check` is read like one that calls it `chk`')
+
+// Thirteen suites — about 700 checks — call it `check`, and every line rule
+// matched `chk(` alone, so they were never read at all.
+chk(
+  run({
+    'check-spelled.mjs': [
+      `const check = (cond, good, bad) => {}`,
+      `check(await visible('thing'), 'there is a control to press', 'no control')`,
+      `await page.getByTestId('thing').click()`,
+      '',
+    ].join('\n'),
+  }).counts?.presses === 1,
+  'a bare press after a `check(` about the same control is a site',
+  'a suite spelling its helper `check` was not read',
+)
+
+console.log('\n▶ a locator held in a variable is the same element')
+
+chk(
+  run({
+    'var-press.mjs': [
+      `const opener = page.getByTestId('thing')`,
+      `chk(await opener.isVisible(), 'there is a control to press', 'no control')`,
+      `await opener.click()`,
+      '',
+    ].join('\n'),
+  }).counts?.presses === 1,
+  'a bare press through a variable, after a check on that variable, is a site',
+  'a press through a locator variable was not seen',
+)
+chk(
+  run({
+    'var-continued.mjs': [
+      `console.log('\\n▶ one section')`,
+      `chk(await visible('head'), 'there is a header', 'none')`,
+      `chk(`,
+      `  (await page.getByTestId('head').count()) === 1`,
+      `    && (await page.getByTestId('head').getAttribute('data-n')) === '2',`,
+      `  'it counts two', 'it does not',`,
+      `)`,
+      '',
+    ].join('\n'),
+  }).counts?.sections === 0,
+  "a read on a check's continuation line is the check's, not a bare use",
+  'a line inside a multi-line check was reported as a statement',
+)
+chk(
+  run({
+    'var-ternary.mjs': [
+      `console.log('\\n▶ one section')`,
+      `chk(await visible('note'), 'there is a note', 'none')`,
+      `const present = (await page.getByTestId('note').count()) === 1`,
+      `const plan = present ? await page.getByTestId('note').getAttribute('data-plan') : null`,
+      '',
+    ].join('\n'),
+  }).counts?.sections === 0,
+  'a read behind a ternary on its own presence is guarded',
+  'a ternary-guarded read was reported as bare',
+)
+{
+  const nine = (line) =>
+    run({ 'nine.mjs': [`const gear = page.getByRole('link', { name: 'Settings' })`, line, ''].join('\n') }).counts?.assigns
+  chk(nine(`const href = await gear.getAttribute('href')`) === 1, 'rule nine reads a variable locator as rule seven does', 'a throwing read through a variable was missed')
+  chk(nine(`const href = ok ? await gear.getAttribute('href') : null`) === 0, 'and a ternary on it guards it', 'a guarded read through a variable was reported')
+  chk(nine(`const done = await waitUntil(async () => (await gear.getAttribute('href')) === '/x', { timeoutMs: 1000 })`) === 0, 'and a waitUntil predicate catches it', 'a read in a waitUntil predicate was reported')
+}
+chk(
+  run({
+    'four-wait.mjs': [
+      `const car = page.getByTestId('car')`,
+      `const before = await car.getAttribute('data-i', { timeout: 5000 }).catch(() => null)`,
+      `const moved = await waitUntil(`,
+      `  async () => (await car.getAttribute('data-i')) === '1',`,
+      `  { timeoutMs: 8000 },`,
+      `)`,
+      '',
+    ].join('\n'),
+  }).counts?.sames === 0,
+  'rule four spares the same locator read inside a waitUntil predicate',
+  'a read waitUntil catches was reported as bare',
+)
+
+console.log('\n▶ rules five and eight spare DOM reads that cannot throw')
+
+const domRead = `const state = await page.evaluate(() => document.querySelector('[data-testid="side"]')?.getAttribute('data-x'))`
+chk(
+  run({
+    'dom-optional-section.mjs': [
+      `console.log('\\n▶ one section')`,
+      `chk(await visible('side'), 'there is a sidebar', 'none')`,
+      domRead,
+      '',
+    ].join('\n'),
+  }).counts?.sections === 0,
+  'an optionally-chained querySelector read of an element this SECTION asserts is not a site',
+  'a DOM read that answers undefined was reported as one that throws',
+)
+chk(
+  run({
+    'dom-optional-file.mjs': [
+      `console.log('\\n▶ one section')`,
+      `chk(await visible('side'), 'there is a sidebar', 'none')`,
+      `console.log('\\n▶ another section')`,
+      domRead,
+      '',
+    ].join('\n'),
+  }).counts?.files === 0,
+  'nor one of an element asserted elsewhere in the FILE',
+  'a DOM read that answers undefined was reported as one that throws',
+)
+chk(
+  run({
+    'dom-bare.mjs': [
+      `console.log('\\n▶ one section')`,
+      `chk(await visible('side'), 'there is a sidebar', 'none')`,
+      `console.log('\\n▶ another section')`,
+      `const state = await page.getByTestId('side').getAttribute('data-x')`,
+      '',
+    ].join('\n'),
+  }).counts?.files === 1,
+  'while the same read through a locator, which waits and throws, still is',
+  'the exemption swallowed a locator read too',
+)
+
 chk(
   run({
     'press-bounded.mjs': [
@@ -1059,6 +1184,18 @@ if (process.argv.includes('--mutate')) {
   const MUTATIONS = [
     ["rule one stops requiring a press at all", ".click\\\\(`).test(line)", "`).test(line)"],
     ['rule one stops honouring its window', 'Math.min(i + 1 + WINDOW, lines.length)', 'lines.length'],
+    // Locator variables stop being written out: a press through one is invisible again.
+    ['the line rules read locator variables as nothing', "import { messageReads, topLevelArgs, THROWS, locatorVars, withLocatorsResolved, checkSpanLines } from './lib/suite-reads.mjs'", "import { messageReads, topLevelArgs, THROWS, locatorVars, checkSpanLines } from './lib/suite-reads.mjs'\nconst withLocatorsResolved = (src) => src.split('\\n')"],
+    ["a check's continuation lines are statements again", "import { messageReads, topLevelArgs, THROWS, locatorVars, withLocatorsResolved, checkSpanLines } from './lib/suite-reads.mjs'", "import { messageReads, topLevelArgs, THROWS, locatorVars, withLocatorsResolved } from './lib/suite-reads.mjs'\nconst checkSpanLines = () => new Set()"],
+    ['rule nine stops reading a variable locator', " && !vars.some((v) => new RegExp(`(?<![\\\\w$.])${v}\\\\s*\\\\.`).test(stmt))) continue", ') continue'],
+    ['rule nine forgets a ternary through a variable', "    if (vars.length && new RegExp(`\\\\?\\\\s*[('\"\\`\\\\w]*\\\\s*(await\\\\s+)?(?:${vars.join('|')})\\\\b`).test(stmt)) continue\n", ''],
+    ['rule nine forgets that waitUntil catches', "    if (/waitUntil\\(/.test(stmt)) continue\n    if (/\\.evaluateAll", "    if (/\\.evaluateAll"],
+    ['rule five forgets a ternary guard', "      if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page\\d*\\s*\\./.test(lines[i])) continue\n      sections += 1", '      sections += 1'],
+    ['rule four forgets that waitUntil catches', "      if (insideWaitUntil(lines, j)) continue\n      for (const v of new Set(guarded)) {", "      for (const v of new Set(guarded)) {"],
+    // The spelling, back to what it was: `chk(` only, a thirteen-suite blind spot.
+    ['the rules read `chk(` alone again', "import { CHECK_LINE, checkCalls } from './lib/check-call.mjs'", "const CHECK_LINE = /^\\s*chk\\(/\nfunction* checkCalls(src) { for (let i = src.indexOf('chk('); i !== -1; i = src.indexOf('chk(', i + 1)) yield { start: i, paren: i + 3 } }"],
+    ['rule five forgets that an optional DOM read cannot throw', "      if (new RegExp(`querySelector(?:All)?\\\\(\\\\s*['\"\\`]\\\\[data-testid=\"${q}\"\\\\]['\"\\`]\\\\s*\\\\)\\\\?\\\\.`).test(lines[i])) continue\n      // Guarded by a ternary \u2014 `present ? await x.getAttribute(\u2026) : null` \u2014 as\n      // rule nine already allows: the read only runs when the element is there.\n      if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page\\d*\\s*\\./.test(lines[i])) continue\n      sections += 1", "      // Guarded by a ternary \u2014 `present ? await x.getAttribute(\u2026) : null` \u2014 as\n      // rule nine already allows: the read only runs when the element is there.\n      if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page\\d*\\s*\\./.test(lines[i])) continue\n      sections += 1"],
+    ['rule eight forgets that an optional DOM read cannot throw', "      if (new RegExp(`querySelector(?:All)?\\\\(\\\\s*['\"\\`]\\\\[data-testid=\"${q}\"\\\\]['\"\\`]\\\\s*\\\\)\\\\?\\\\.`).test(lines[i])) continue\n      // Guarded by a ternary \u2014 `present ? await x.getAttribute(\u2026) : null` \u2014 as\n      // rule nine already allows: the read only runs when the element is there.\n      if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page\\d*\\s*\\./.test(lines[i])) continue\n      // Rule five already holds this one, at the narrower scope. One site, one", "      // Guarded by a ternary \u2014 `present ? await x.getAttribute(\u2026) : null` \u2014 as\n      // rule nine already allows: the read only runs when the element is there.\n      if (/\\?\\s*[('\"`\\w]*\\s*(await\\s+)?[\\w.]*page\\d*\\s*\\./.test(lines[i])) continue\n      // Rule five already holds this one, at the narrower scope. One site, one"],
     ['rule one stops asking whether the check is about existence', "if (!/\\.count\\(\\)|isVisible|visible\\(|waitUntil/.test(cond)) continue", 'if (false) continue'],
     ['rule two forgets which testids are asserted', 'if (!checked.has(m[1])) continue', 'if (false) continue'],
     ['rule two forgets to skip a caught gate', "if (!m || /catch/.test(lines.slice(i, i + 3).join(' '))) continue", 'if (!m) continue'],

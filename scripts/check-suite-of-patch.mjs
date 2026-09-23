@@ -175,7 +175,7 @@ try {
 console.log(`\n${passed} passed, ${failed} failed`)
 if (failed) {
   console.error('[suite-of-patch] the attribution contract is broken')
-  bail(1)
+  await bail(1)
 }
 /*
  * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true

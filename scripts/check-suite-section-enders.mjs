@@ -165,8 +165,9 @@
  */
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { messageReads, topLevelArgs, THROWS, locatorVars } from './lib/suite-reads.mjs'
+import { messageReads, topLevelArgs, THROWS, locatorVars, withLocatorsResolved, checkSpanLines } from './lib/suite-reads.mjs'
 import { bail } from './lib/bail.mjs'
+import { CHECK_LINE, checkCalls } from './lib/check-call.mjs'
 
 /*
  * `SUITE_DIR` EXISTS SO THE FIVE LINE-BASED RULES CAN BE TESTED AT ALL.
@@ -270,9 +271,11 @@ const insideWaitUntil = (lines, i) => {
 
 const rows = []
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
-  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  // Locator variables written out as their testid — see `withLocatorsResolved`.
+  const lines = withLocatorsResolved(readFileSync(join(SUITES, file), 'utf8'))
+  const inCheck = checkSpanLines(lines)
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*chk\(/.test(lines[i])) continue
+    if (!CHECK_LINE.test(lines[i])) continue
     // The condition, which may run over the next few lines before the message.
     const cond = chkText(lines, i)
     // Only checks that ask whether something EXISTS. A check about a value can
@@ -284,6 +287,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     if (!ids.length) continue
     for (let j = i + 1; j < Math.min(i + 1 + WINDOW, lines.length); j++) {
       const line = lines[j]
+      if (inCheck.has(j)) continue
       if (/catch|timeout/.test(line)) continue
       for (const id of new Set(ids)) {
         const quoted = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
@@ -318,7 +322,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
   const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
   const checked = new Set()
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*chk\(/.test(lines[i])) continue
+    if (!CHECK_LINE.test(lines[i])) continue
     for (const m of lines
       .slice(i, i + 5)
       .join(' ')
@@ -365,14 +369,16 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
 const ANY = /\.(click|fill|type|selectOption|check|uncheck|setInputFiles|innerText|getAttribute|inputValue|isChecked|boundingBox|textContent)\(/
 let sections = 0
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
-  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  // Locator variables written out as their testid — see `withLocatorsResolved`.
+  const lines = withLocatorsResolved(readFileSync(join(SUITES, file), 'utf8'))
+  const inCheck = checkSpanLines(lines)
   let asserted = new Set()
   for (let i = 0; i < lines.length; i++) {
     if (/console\.log\(['"`]\\n/.test(lines[i])) {
       asserted = new Set()
       continue
     }
-    if (/^\s*chk\(/.test(lines[i])) {
+    if (CHECK_LINE.test(lines[i])) {
       const cond = chkText(lines, i)
       if (/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) {
         for (const m of cond.matchAll(
@@ -382,6 +388,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       }
       continue
     }
+    if (inCheck.has(i)) continue
     if (!ANY.test(lines[i]) || /catch|timeout/.test(stmt(lines, i))) continue
     // A `waitUntil` predicate catches its own throws.
     if (insideWaitUntil(lines, i)) continue
@@ -389,6 +396,14 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       if (!id) continue
       const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       if (!new RegExp(`(?:getByTestId\\(['\`]${q}['\`]\\)|\\[data-testid="${q}"\\])`).test(lines[i])) continue
+      // DOM code run inside the page and optionally chained —
+      // `document.querySelector('[data-testid="x"]')?.getAttribute(…)` — answers
+      // undefined when the element is gone. It cannot throw, whatever this file
+      // asserts; `panel-collapse` was reported twice for exactly this.
+      if (new RegExp(`querySelector(?:All)?\\(\\s*['"\`]\\[data-testid="${q}"\\]['"\`]\\s*\\)\\?\\.`).test(lines[i])) continue
+      // Guarded by a ternary — `present ? await x.getAttribute(…) : null` — as
+      // rule nine already allows: the read only runs when the element is there.
+      if (/\?\s*[('"`\w]*\s*(await\s+)?[\w.]*page\d*\s*\./.test(lines[i])) continue
       sections += 1
       rows.push({ file, line: i + 1, id, text: lines[i].trim(), section: true })
       break
@@ -427,10 +442,12 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
  */
 let files = 0
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
-  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  // Locator variables written out as their testid — see `withLocatorsResolved`.
+  const lines = withLocatorsResolved(readFileSync(join(SUITES, file), 'utf8'))
+  const inCheck = checkSpanLines(lines)
   const asserted = new Set()
   for (let i = 0; i < lines.length; i++) {
-    if (!/^\s*chk\(/.test(lines[i])) continue
+    if (!CHECK_LINE.test(lines[i])) continue
     const cond = chkText(lines, i)
     if (!/\.count\(\)|isVisible|\bvisible\(|waitUntil|appears\(/.test(cond)) continue
     for (const m of cond.matchAll(
@@ -439,13 +456,21 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       asserted.add(m[1] ?? m[2] ?? m[3])
   }
   for (let i = 0; i < lines.length; i++) {
-    if (/^\s*chk\(/.test(lines[i])) continue
+    if (CHECK_LINE.test(lines[i]) || inCheck.has(i)) continue
     if (!ANY.test(lines[i]) || /catch|timeout/.test(stmt(lines, i))) continue
     if (insideWaitUntil(lines, i)) continue
     for (const id of asserted) {
       if (!id) continue
       const q = id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
       if (!new RegExp(`(?:getByTestId\\(['\`]${q}['\`]\\)|\\[data-testid="${q}"\\])`).test(lines[i])) continue
+      // DOM code run inside the page and optionally chained —
+      // `document.querySelector('[data-testid="x"]')?.getAttribute(…)` — answers
+      // undefined when the element is gone. It cannot throw, whatever this file
+      // asserts; `panel-collapse` was reported twice for exactly this.
+      if (new RegExp(`querySelector(?:All)?\\(\\s*['"\`]\\[data-testid="${q}"\\]['"\`]\\s*\\)\\?\\.`).test(lines[i])) continue
+      // Guarded by a ternary — `present ? await x.getAttribute(…) : null` — as
+      // rule nine already allows: the read only runs when the element is there.
+      if (/\?\s*[('"`\w]*\s*(await\s+)?[\w.]*page\d*\s*\./.test(lines[i])) continue
       // Rule five already holds this one, at the narrower scope. One site, one
       // row: the distinct count below would fold them anyway, but the per-rule
       // numbers are meant to say which scope found it FIRST.
@@ -505,7 +530,11 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
  */
 let assigns = 0
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
-  const lines = readFileSync(join(SUITES, file), 'utf8').split('\n')
+  const text = readFileSync(join(SUITES, file), 'utf8')
+  const lines = text.split('\n')
+  // As rule seven does: a variable assigned from a locator factory is a
+  // locator, testid or not — `gear.first().getAttribute(…)` throws the same.
+  const vars = [...locatorVars(text)]
   for (let i = 0; i < lines.length; i++) {
     if (!/^\s*(const|let)\s+[A-Za-z_$][\w$]*\s*=\s*/.test(lines[i])) continue
     const stmt = stmt9(lines, i)
@@ -513,8 +542,12 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     if (/\.catch\(|timeout:/.test(stmt)) continue
     if (/locator\(\s*['"`]body['"`]\s*\)/.test(stmt)) continue
     if (/\?\s*[('"`\w]*\s*(await\s+)?[\w.]*page/.test(stmt)) continue
+    // The same ternary guard through a locator variable: `n ? await note.…` .
+    if (vars.length && new RegExp(`\\?\\s*[('"\`\\w]*\\s*(await\\s+)?(?:${vars.join('|')})\\b`).test(stmt)) continue
+    // A read inside a `waitUntil` predicate is caught by it, as rule seven says.
+    if (/waitUntil\(/.test(stmt)) continue
     if (/\.evaluateAll\(/.test(stmt)) continue
-    if (!/getByTestId\(|data-testid/.test(stmt)) continue
+    if (!/getByTestId\(|data-testid/.test(stmt) && !vars.some((v) => new RegExp(`(?<![\\w$.])${v}\\s*\\.`).test(stmt))) continue
     if (insideWaitUntil(lines, i)) continue
     assigns += 1
     rows.push({ file, line: i + 1, id: stmt.match(THROWS)[1], text: stmt.trim().replace(/\s+/g, ' '), assign: true })
@@ -653,6 +686,8 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
     if (!guarded.length) continue
     for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
       if (/catch|timeout/.test(lines[j])) continue
+      // A `waitUntil` predicate catches its own throws, as the other rules say.
+      if (insideWaitUntil(lines, j)) continue
       for (const v of new Set(guarded)) {
         if (!new RegExp(`\\b${v}\\s*\\.`).test(lines[j]) || !ANYVERB.test(lines[j])) continue
         sames += 1
@@ -687,9 +722,9 @@ const leadReads = []
 for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort()) {
   const src = readFileSync(join(SUITES, file), 'utf8')
   const vars = [...locatorVars(src)]
-  for (let i = src.indexOf('chk('); i !== -1; i = src.indexOf('chk(', i + 1)) {
+  for (const { start: i, paren } of checkCalls(src)) {
     let d = 0
-    let end = i + 3
+    let end = paren
     for (; end < src.length; end++) {
       if (src[end] === '(') d += 1
       else if (src[end] === ')') {
@@ -698,7 +733,7 @@ for (const file of readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).sort())
       }
     }
     if (d !== 0) continue
-    const cond = topLevelArgs(src.slice(i + 4, end))[0] ?? ''
+    const cond = topLevelArgs(src.slice(paren + 1, end))[0] ?? ''
     if (!THROWS.test(cond)) continue
     if (/\.catch\(|timeout:/.test(cond)) continue
     // A `waitUntil` predicate catches its own throws.
@@ -788,5 +823,5 @@ if (rows.length) {
       '`if (!el) return false` — so the check below reports in its own words. A throw would still\n' +
       'end the section, which is the thing being fixed.',
   )
-  bail(1)
+  await bail(1)
 }

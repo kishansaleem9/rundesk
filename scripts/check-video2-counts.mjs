@@ -469,7 +469,7 @@ if (problems.length) {
   console.error('[video2-counts] the ledger disagrees with itself:\n')
   for (const p of problems) console.error(`  · ${p}\n`)
   console.error(`Fix ${PATH} §4, or this number will be quoted as fact.`)
-  bail(1)
+  await bail(1)
 }
 /*
  * AND THE SUMMARY ONLY CLAIMS WHAT RAN.

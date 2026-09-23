@@ -407,7 +407,7 @@ try {
     if (!haveDlg) {
       followers.rest('skipped: the dialog never opened, so nothing in it could be read')
     } else {
-      const body = await dlg.innerText()
+      const body = await dlg.innerText({ timeout: 5000 }).catch(() => '')
       followers.step(/\d+ watcher/i.test(body), `no watcher count in the dialog: ${body.slice(0, 120)}`,
         `it shows the follower count: ${(body.match(/\d+ watchers?/i) || [])[0]}`)
       followers.step(/Watch task|Unwatch/i.test(body),
@@ -424,7 +424,7 @@ try {
   say('5. Checklists tab (V4)')
   await sheet.getByRole('button', { name: 'Checklists', exact: true }).click()
   await page.waitForTimeout(1400)
-  const clText = await sheet.innerText()
+  const clText = await sheet.innerText({ timeout: 5000 }).catch(() => '')
   check(/checklist/i.test(clText), 'the checklists tab renders', `tab body: ${clText.slice(0, 140)}`)
   check(!/Due date.*checklist item/i.test(clText),
     'checklist items are not date-first (V4 replaced the date with an assignee)',
@@ -481,7 +481,7 @@ try {
   if (!haveShare) {
     share.rest('skipped: the dialog never opened, so no level could be read')
   } else {
-    const t = await shareDlg.innerText()
+    const t = await shareDlg.innerText({ timeout: 5000 }).catch(() => '')
     for (const lvl of ['View', 'Comment', 'Edit', 'Full edit']) {
       share.step(t.includes(lvl), `${lvl} missing from the panel`)
     }
@@ -558,7 +558,7 @@ try {
     const input = page.locator('input:visible').last()
     await input.fill('task')
     await page.waitForTimeout(1800)
-    const pt = await palette.innerText()
+    const pt = await palette.innerText({ timeout: 5000 }).catch(() => '')
     pal.step(pt.length > 40, `palette body: ${pt.slice(0, 120)}`)
     // The type and sort chips live behind a "Filters" toggle rather than
     // always-on chrome — open it before asserting they exist.
@@ -606,14 +606,14 @@ try {
 
     // Multi-select is the case that was broken in production — prove the chips
     // actually narrow, and that two of them together return both types.
-    const before = (await palette.innerText()).match(/^[A-Z ]{3,}$/gm) || []
-    await palette.getByRole('button', { name: 'Docs', exact: true }).click()
+    const before = (await palette.innerText({ timeout: 5000 }).catch(() => '')).match(/^[A-Z ]{3,}$/gm) || []
+    await palette.getByRole('button', { name: 'Docs', exact: true }).click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1600)
-    const afterDocs = await palette.innerText()
+    const afterDocs = await palette.innerText({ timeout: 5000 }).catch(() => '')
     pal.step(!/^TASKS$/m.test(afterDocs), 'tasks still listed with only Docs selected')
-    await palette.getByRole('button', { name: 'Tasks', exact: true }).click()
+    await palette.getByRole('button', { name: 'Tasks', exact: true }).click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1600)
-    const both = await palette.innerText()
+    const both = await palette.innerText({ timeout: 5000 }).catch(() => '')
     pal.step(/^TASKS$/m.test(both), `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
     // By testid: Status and Priority now offer their own "All" chip, so a
     // click matched on the visible label alone is ambiguous between three

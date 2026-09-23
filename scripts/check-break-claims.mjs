@@ -294,7 +294,7 @@ if (bucketed !== files.length) {
       `${Math.abs(files.length - bucketed)} fell into no column at all, so every number above is ` +
       'about a subset nobody named.',
   )
-  bail(1)
+  await bail(1)
 }
 
 const grew = Object.keys(BASELINE).filter((k) => actual[k] > BASELINE[k])
@@ -302,7 +302,7 @@ if (grew.length) {
   console.error('\n[break-claims] THIS IS WORSE THAN THE BASELINE:')
   for (const k of grew) console.error(`  ${k}: ${BASELINE[k]} → ${actual[k]}`)
   console.error('  Fix the patch, or fix the check it names. Do not raise the baseline to pass.')
-  bail(1)
+  await bail(1)
 }
 const shrank = Object.keys(BASELINE).filter((k) => actual[k] < BASELINE[k])
 if (shrank.length) {

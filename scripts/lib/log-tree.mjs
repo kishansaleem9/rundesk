@@ -30,11 +30,12 @@
  * about the clock. A log is current when nothing the run depended on differs
  * between its sha and HEAD.
  *
- * WHAT A RUN DEPENDS ON: the suite that does the measuring, and the product
- * files the patch edits. Not the patch file itself — patches are authored,
- * re-worded and re-headed constantly, and `check-break-reddened.mjs` already
- * re-reads each claim against the log's own text, so a comment edit would
- * otherwise invalidate 26 more measurements than the code in it justifies.
+ * WHAT A RUN DEPENDS ON: the suite that does the measuring and the
+ * `test/e2e/lib` helpers it imports, the product files the patch edits, and
+ * the patch's own CODE — its body with the `#` lines stripped, so a re-worded
+ * header is not a re-measurement and a rewritten body is (`patchCodeMoved`,
+ * below). A pending `# Re-run:` is a reason too. `makeMeasurementCheck` asks
+ * all of it, and the planner, the reddened checker and freshness all call it.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, posix, resolve } from 'node:path'

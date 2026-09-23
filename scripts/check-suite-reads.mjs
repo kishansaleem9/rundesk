@@ -36,7 +36,8 @@ import { proveMutationsBite } from './lib/mutate.mjs'
  */
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUBJECT = process.env.SUITE_READS_LIB ?? './lib/suite-reads.mjs'
-const { messageReads, topLevelArgs, THROWS, locatorVars } = await import(SUBJECT)
+const { messageReads, topLevelArgs, THROWS, locatorVars, locatorTestIds, withLocatorsResolved, checkSpanLines } =
+  await import(SUBJECT)
 
 let pass = 0
 let fail = 0
@@ -271,6 +272,40 @@ chk(
  *
  * Measured 22 September: 17 cases. A floor, because the set grows.
  */
+console.log('\n▶ locator variables, written out for the line rules')
+
+{
+  const src = [
+    "const opener = page.getByTestId('thread-open')",
+    "const first = page.getByTestId('row').first()",
+    "const inner = page.locator('[data-testid=\"row\"] a')",
+    "const wide = page.getByTestId('row').locator('button')",
+    "// then opener.click() in a comment",
+    "await opener.click()",
+    "await first.fill('x')",
+  ].join('\n')
+  const ids = locatorTestIds(src)
+  chk(ids.get('opener') === 'thread-open' && ids.get('first') === 'row', 'a variable assigned from one testid is resolved, `.first()` included', `resolved ${JSON.stringify([...ids])}`)
+  chk(!ids.has('inner') && !ids.has('wide'), 'one assigned from a wider selector is not — it is not that element', `resolved ${JSON.stringify([...ids])}`)
+  const out = withLocatorsResolved(src)
+  chk(out[5] === "await page.getByTestId('thread-open').click()" && out[6] === "await page.getByTestId('row').fill('x')", 'a use is written out as its testid', JSON.stringify(out.slice(5)))
+  chk(out[0] === "const opener = page.getByTestId('thread-open')", 'the declaration itself is left alone', out[0])
+  chk(out[4] === '// then opener.click() in a comment', 'and a comment that mentions one is prose, not a read', out[4])
+}
+{
+  const lines = [
+    "chk(",
+    "  (await rows.count()) === 1",
+    "    && (await page.getByTestId('h').getAttribute('x')) === 'y',",
+    "  'a header', 'none',",
+    ")",
+    "await page.getByTestId('h').click()",
+  ]
+  const inside = checkSpanLines(lines)
+  chk(inside.has(1) && inside.has(2) && inside.has(4), "a multi-line check's continuation lines are the check's", JSON.stringify([...inside]))
+  chk(!inside.has(0) && !inside.has(5), 'and neither its first line nor the statement after it are', JSON.stringify([...inside]))
+}
+
 let short = false
 /*
  * AND THAT EACH CASE BITES. The floor below catches an empty case file; it
@@ -295,9 +330,12 @@ if (process.argv.includes('--mutate')) {
       ['the comma splitter stops counting square brackets', "else if ('([{'.includes(c)) depth += 1", "else if ('({'.includes(c)) depth += 1"],
       ['the comma splitter stops skipping strings', "if (c === \"'\" || c === '\"' || c === '`') quote = c", 'if (false) quote = c'],
       ['an escaped quote ends a string early', "if (c === quote && inner[i - 1] !== '\\\\') quote = null", 'if (c === quote) quote = null'],
-      ['the reader goes back to skipping the PASS sentence', 'topLevelArgs(src.slice(i + 4, end)).slice(1)', 'topLevelArgs(src.slice(i + 4, end)).slice(2)'],
-      ['the reader starts at the CONDITION, which rule seven owns', 'topLevelArgs(src.slice(i + 4, end)).slice(1)', 'topLevelArgs(src.slice(i + 4, end)).slice(0)'],
+      ['the reader goes back to skipping the PASS sentence', 'topLevelArgs(src.slice(paren + 1, end)).slice(1)', 'topLevelArgs(src.slice(paren + 1, end)).slice(2)'],
+      ['the reader starts at the CONDITION, which rule seven owns', 'topLevelArgs(src.slice(paren + 1, end)).slice(1)', 'topLevelArgs(src.slice(paren + 1, end)).slice(0)'],
       ['a locator variable stops counting as a read', '!readsAVar(arg)', 'true'],
+      ['a variable from a wider selector is resolved as if it were the element', ")(?:\\s*\\.\\s*(?:first|last)\\(\\)|\\s*\\.\\s*nth\\(\\d+\\))?\\s*$/gm", ")/gm"],
+      ['a comment is read as code again', "if (/^\\s*(?:\\*|\\/\\/)/.test(line)) return line", ''],
+      ["a check's continuation lines stop being the check's", 'for (let l = first + 1; l <= last; l++) inside.add(l)', ''],
       ['a testid spelling stops counting as a read', '/getByTestId\\(|data-testid/.test(arg)', 'false'],
       ['isDisabled stops being a throwing read', '/\\.(innerText|textContent|inputValue|isDisabled', '/\\.(innerText|textContent|inputValue'],
     ],

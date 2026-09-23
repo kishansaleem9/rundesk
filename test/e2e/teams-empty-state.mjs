@@ -212,13 +212,13 @@ try {
    * button exists.
    */
   const carousel = page.getByTestId('teams-empty-carousel')
-  const idxBefore = await carousel.getAttribute('data-index')
+  const idxBefore = await carousel.getAttribute('data-index', { timeout: 5000 }).catch(() => null)
   await page.getByTestId('teams-empty-pager-next').click({ timeout: 8000 }).catch(() => {})
   const advanced = await waitUntil(
     async () => (await carousel.getAttribute('data-index')) === '1',
     { timeoutMs: 8000 },
   )
-  const idxAfter = await carousel.getAttribute('data-index')
+  const idxAfter = await carousel.getAttribute('data-index', { timeout: 5000 }).catch(() => null)
   chk(
     idxBefore === '0' && advanced,
     'pressing → advances it, as it advances between `20:57` and `21:02`',

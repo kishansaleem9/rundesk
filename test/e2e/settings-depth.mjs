@@ -205,7 +205,7 @@ try {
     await page.getByTestId('menu-set-status').isVisible().catch(() => false),
     'the avatar menu offers "Set a status"',
   )
-  await page.getByTestId('menu-set-status').click()
+  await page.getByTestId('menu-set-status').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(600)
   check(
     await page.getByTestId('status-composer').isVisible().catch(() => false),
@@ -269,7 +269,7 @@ try {
   const mutedBefore = await page.evaluate(() =>
     getComputedStyle(document.documentElement).getPropertyValue('--muted-foreground').trim(),
   )
-  await toggle.click()
+  await toggle.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(1200)
   check(
     await page.evaluate(() => document.documentElement.classList.contains('high-contrast')),
@@ -461,7 +461,7 @@ try {
       `no card for: ${missing.join(', ')}`,
     )
   }
-  await page.getByTestId('book-call-open').click()
+  await page.getByTestId('book-call-open').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(700)
   await page.getByTestId('book-call-reason').fill('Walk me through onboarding')
   await page.getByTestId('book-call-add-slot').click()
@@ -702,7 +702,7 @@ try {
 
     const opener = page.getByTestId('notepad-open')
     check(await opener.isVisible().catch(() => false), 'a pinned Notepad reaches the top bar')
-    await opener.click()
+    await opener.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(900)
     check(
       await page.getByTestId('notepad-panel').isVisible().catch(() => false),
@@ -725,7 +725,7 @@ try {
     // And it is still there on the next visit — the whole point of a pad.
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(2500)
-    await page.getByTestId('notepad-open').click()
+    await page.getByTestId('notepad-open').click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1200)
     check(
       (await page.getByTestId('notepad-text').inputValue().catch(() => '')) === jotted,

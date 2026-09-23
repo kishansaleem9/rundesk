@@ -201,7 +201,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ and pressing it STORES something')
 
-  await saveBtn.click()
+  await saveBtn.click({ timeout: 10_000 }).catch(() => {})
 
   /*
    * THE TOAST FIRST, and not for tidiness: a toast auto-dismisses, so asserting
@@ -353,7 +353,7 @@ try {
     'a reply carries the same Save',
     'replies have no Save — the action row is duplicated and only one copy got it',
   )
-  await replyBtn.click()
+  await replyBtn.click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await savedRows(replyId))[0].c === 1, { timeoutMs: 20_000 }),
     'and saving a reply stores a row of its own',

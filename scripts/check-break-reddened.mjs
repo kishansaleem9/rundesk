@@ -200,7 +200,7 @@ const BASELINE = { accounted: 804, green: 0, unproven: 0 }
 
 if (!existsSync(LOGS)) {
   console.log('[break-reddened] no break logs on this machine — nothing to check')
-  bail(0)
+  await bail(0)
 }
 
 const lines = (raw, kind) =>

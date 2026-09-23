@@ -421,6 +421,20 @@ try {
     `the admin's PUT returned ${adminRename.status} ${messageOf(adminRename.error)} — ` +
       'a space setting that can lock an admin out of their own workspace is a foot-gun',
   )
+  /*
+   * AND PUT BACK. The grant was taken away for that one check; left gone, every
+   * later section that briefly raises this space (`withEditable`) leans on the
+   * admin's ROLE alone — so a build that narrows admins (`sdp-7`) failed there,
+   * one section on, and the run ended before the checks it was aimed at could
+   * say anything.
+   */
+  const reseated = await A(`/spaces/${viewSpace.id}/members`, {
+    method: 'POST',
+    body: { userId: adminId, role: 'admin' },
+  })
+  if (reseated.status >= 400) {
+    throw new Error(`could not give the admin back its space_members row (${reseated.status} ${messageOf(reseated.error)})`)
+  }
 
   console.log('\n▶ an explicit grant beats the default — "without an explicit grant"')
 

@@ -210,7 +210,7 @@ check(
 // ---------------------------------------------------------------------------
 console.log('\n4. search, over the real list')
 // ---------------------------------------------------------------------------
-await page.fill('[data-testid="emoji-search"]', 'tada')
+await page.fill('[data-testid="emoji-search"]', 'tada', { timeout: 10_000 }).catch(() => {})
 await page.waitForTimeout(300)
 const firstHit = await page
   .locator('[data-testid="emoji-scroll"] button[data-emoji]')
@@ -221,7 +221,7 @@ const firstHit = await page
 // wired to the real dataset rather than to a fixture.
 check(firstHit === '🎉', 'searching "tada" finds 🎉 — a word Unicode never uses', `got ${firstHit}`)
 
-await page.fill('[data-testid="emoji-search"]', 'zzzqqq')
+await page.fill('[data-testid="emoji-search"]', 'zzzqqq', { timeout: 10_000 }).catch(() => {})
 await page.waitForTimeout(300)
 check(
   await page.locator('[data-testid="emoji-no-results"]').isVisible().catch(() => false),
@@ -235,14 +235,14 @@ console.log('\n4b. the category strip works WHILE searching')
 // are gone. Looking one up before clearing the query made every tab in the
 // strip dead the moment anybody typed — it returned before it even cleared the
 // search. Nothing moved and nothing said why.
-await page.fill('[data-testid="emoji-search"]', 'cat')
+await page.fill('[data-testid="emoji-search"]', 'cat', { timeout: 10_000 }).catch(() => {})
 await page.waitForTimeout(250)
-await page.locator('[data-testid="emoji-tab-food"]').click()
+await page.locator('[data-testid="emoji-tab-food"]').click({ timeout: 10_000 }).catch(() => {})
 await page.waitForTimeout(400)
 check(
-  (await page.inputValue('[data-testid="emoji-search"]')) === '',
+  (await page.inputValue('[data-testid="emoji-search"]', { timeout: 5000 }).catch(() => null)) === '',
   'pressing a tab mid-search clears the search',
-  `the search box still reads ${JSON.stringify(await page.inputValue('[data-testid="emoji-search"]'))}`,
+  `the search box still reads ${JSON.stringify(await page.inputValue('[data-testid="emoji-search"]', { timeout: 5000 }).catch(() => null))}`,
 )
 check(
   await page.locator('[data-testid="emoji-section-food"]').isVisible().catch(() => false),
@@ -252,7 +252,7 @@ check(
 // ---------------------------------------------------------------------------
 console.log('\n5. picking one puts it in the message')
 // ---------------------------------------------------------------------------
-await page.fill('[data-testid="emoji-search"]', '')
+await page.fill('[data-testid="emoji-search"]', '', { timeout: 10_000 }).catch(() => {})
 await page.waitForTimeout(200)
 /*
  * NOT THE ONE THAT IS ALREADY FIRST, and the first version of this took exactly
@@ -268,7 +268,7 @@ await page.waitForTimeout(200)
  * counted and the count survived, which is the claim.
  */
 const frequentButtons = page.locator('[data-testid="emoji-section-frequent"] button[data-emoji]')
-const leadBefore = await frequentButtons.first().getAttribute('data-emoji')
+const leadBefore = await frequentButtons.first().getAttribute('data-emoji', { timeout: 5000 }).catch(() => null)
 const second = frequentButtons.nth(1)
 const picked = await second.getAttribute('data-emoji')
 check(

@@ -329,7 +329,7 @@ try {
   await waitUntil(async () => (await boardRows.count()) === 1, { timeoutMs: 15_000 })
   await boardRows.first().click({ timeout: 8000 }).catch(() => {})
   const inserted = await waitUntil(async () => !(await input.inputValue()).includes('@'), { timeoutMs: 10_000 })
-  const value = await input.inputValue()
+  const value = await input.inputValue({ timeout: 5000 }).catch(() => '')
   chk(
     inserted && value.trim() === `Whiteboard:Board ${TAG}`,
     `choosing it writes exactly "${value.trim()}" — the whole prefix is cut, not just its last character`,

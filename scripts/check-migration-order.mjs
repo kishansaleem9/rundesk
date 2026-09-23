@@ -7,9 +7,12 @@ import { bail } from './lib/bail.mjs'
 const MIGRATIONS_DIR = path.resolve(process.cwd(), 'packages/db/src/migrations')
 const SQL_NAME = /^(\d{4})_[a-z0-9_]+\.sql$/
 
-function fail(message) {
+// Awaited at every call: it stops the check THERE. Without the await a
+// refusal printed, the check ran on — dereferencing the value it had just
+// refused — and could still end on "Validated …".
+async function fail(message) {
   console.error(`[migration-check] ${message}`)
-  bail(1)
+  await bail(1)
 }
 
 function ok(message) {
@@ -18,24 +21,25 @@ function ok(message) {
 
 async function main() {
   const files = (await readdir(MIGRATIONS_DIR)).filter((f) => f.endsWith('.sql'))
-  if (files.length === 0) fail('No migration files found')
+  if (files.length === 0) await fail('No migration files found')
 
-  const numbered = files.map((file) => {
+  const numbered = []
+  for (const file of files) {
     const m = file.match(SQL_NAME)
-    if (!m) fail(`Invalid migration filename format: ${file}`)
-    return { file, seq: Number(m[1]) }
-  })
+    if (!m) await fail(`Invalid migration filename format: ${file}`)
+    numbered.push({ file, seq: Number(m[1]) })
+  }
 
   const bySeq = new Map()
   for (const row of numbered) {
-    if (bySeq.has(row.seq)) fail(`Duplicate migration sequence ${String(row.seq).padStart(4, '0')}`)
+    if (bySeq.has(row.seq)) await fail(`Duplicate migration sequence ${String(row.seq).padStart(4, '0')}`)
     bySeq.set(row.seq, row.file)
   }
 
   const seqs = [...bySeq.keys()].sort((a, b) => a - b)
   for (let i = 0; i < seqs.length; i++) {
     if (seqs[i] !== i) {
-      fail(`Missing sequence ${String(i).padStart(4, '0')} before ${String(seqs[i]).padStart(4, '0')}`)
+      await fail(`Missing sequence ${String(i).padStart(4, '0')} before ${String(seqs[i]).padStart(4, '0')}`)
     }
   }
 
@@ -48,28 +52,28 @@ async function main() {
   try {
     journal = JSON.parse(await readFile(journalPath, 'utf8'))
   } catch (err) {
-    fail(`Could not read ${journalPath}: ${err?.message ?? err}`)
+    await fail(`Could not read ${journalPath}: ${err?.message ?? err}`)
   }
 
   const tags = (journal.entries ?? []).map((e) => e.tag)
   const tagSet = new Set(tags)
-  if (tags.length !== tagSet.size) fail('Duplicate tag in _journal.json')
+  if (tags.length !== tagSet.size) await fail('Duplicate tag in _journal.json')
 
   for (const { file } of numbered) {
     const tag = file.replace(/\.sql$/, '')
     if (!tagSet.has(tag)) {
-      fail(`${file} has no entry in meta/_journal.json — drizzle would skip it silently`)
+      await fail(`${file} has no entry in meta/_journal.json — drizzle would skip it silently`)
     }
   }
   for (const tag of tags) {
     if (!bySeq.has(Number(tag.slice(0, 4)))) {
-      fail(`_journal.json lists ${tag}, but there is no such .sql file`)
+      await fail(`_journal.json lists ${tag}, but there is no such .sql file`)
     }
   }
 
   const idxs = (journal.entries ?? []).map((e) => e.idx)
   for (let i = 0; i < idxs.length; i++) {
-    if (idxs[i] !== i) fail(`_journal.json idx out of order at position ${i}: got ${idxs[i]}`)
+    if (idxs[i] !== i) await fail(`_journal.json idx out of order at position ${i}: got ${idxs[i]}`)
   }
 
   ok(
@@ -78,4 +82,4 @@ async function main() {
   )
 }
 
-main().catch((err) => fail(err?.message ?? String(err)))
+await main().catch((err) => fail(err?.message ?? String(err)))

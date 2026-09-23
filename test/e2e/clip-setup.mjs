@@ -208,7 +208,7 @@ try {
     'the composer offers Record a Video Clip',
     'there is no clip button on the composer',
   )
-  await clipButton.click()
+  await clipButton.click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(() => page.getByTestId('clip-setup-panel').isVisible().catch(() => false), {
       timeoutMs: 15_000,
@@ -313,7 +313,7 @@ try {
    * that the next recording starts where the last one left off.
    */
   await openComposer()
-  await page.getByTestId('comment-record-clip').click()
+  await page.getByTestId('comment-record-clip').click({ timeout: 10_000 }).catch(() => {})
   const remembered = await waitUntil(async () => {
     if (!(await page.getByTestId('clip-setup-panel').isVisible().catch(() => false))) return false
     return (await page.getByTestId('clip-setup-quality').inputValue()) === '720p'

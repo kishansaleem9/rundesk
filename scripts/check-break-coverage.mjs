@@ -216,7 +216,7 @@ if (below.length) {
       'than the floor, unless the corpus genuinely shrank — and then say here which suites went\n' +
       'and why, the way the ratchet below is moved.',
   )
-  bail(1)
+  await bail(1)
 }
 
 console.log(
@@ -288,7 +288,7 @@ if (uncovered.length > BASELINE_UNCOVERED) {
     `\n[break-coverage] WORSE: ${BASELINE_UNCOVERED} → ${uncovered.length} suites with no break patch.`,
   )
   console.error('  A new suite arrives with a patch, or this build fails. Do not raise the baseline.')
-  bail(1)
+  await bail(1)
 }
 if (uncovered.length < BASELINE_UNCOVERED) {
   console.log(`\n[break-coverage] better — lower the baseline in this file to ${uncovered.length}`)

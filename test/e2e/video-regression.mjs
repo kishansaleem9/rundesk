@@ -644,7 +644,7 @@ try {
   const ta = page.locator('textarea:visible').first()
   if (await ta.count()) {
     await ta.fill('we need to shipp this featur by friday pls')
-    const before = await ta.inputValue()
+    const before = await ta.inputValue({ timeout: 5000 }).catch(() => '')
     const composer = page.locator('div').filter({ has: page.locator('textarea') }).last()
     const askAi = composer.getByRole('button', { name: /Ask AI/i }).first()
     const composerAi = chain(

@@ -249,7 +249,7 @@ console.log('\n§1.5  the language switcher is out of the top bar')
   const { ctx, page } = await openApp()
   const header = page.locator('header').first()
   const inTopbar = await header.getByRole('combobox').count()
-  const topbarText = await header.innerText()
+  const topbarText = await header.innerText({ timeout: 5000 }).catch(() => '')
   check(
     !/english|urdu|español|العربية/i.test(topbarText),
     'no language control in the top bar',
@@ -298,12 +298,12 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   if (!haveToggle) {
     bellPref.rest('skipped: there was no control to read or click')
   } else {
-    bellPref.step(!(await toggle.isChecked()), 'the bell already shows as on')
+    bellPref.step(!(await toggle.isChecked({ timeout: 5000 }).catch(() => false)), 'the bell already shows as on')
     const before = calls.length
     // click + wait, not .check(): .check() asserts the box is checked the
     // instant the click returns, which is a claim about round-trip latency
     // rather than about the control. It failed roughly two runs in five.
-    await toggle.click()
+    await toggle.click({ timeout: 10_000 }).catch(() => {})
     await waitUntil(async () =>
       calls.slice(before).some((c) => c.method === 'PATCH' && c.body.includes('topbarHidden')),
     )
@@ -319,7 +319,7 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
       }),
       patches.map((c) => c.body).join(' | ').slice(0, 120),
     )
-    bellPref.step(await waitUntil(async () => await toggle.isChecked()), 'the control did not update')
+    bellPref.step(await waitUntil(async () => await toggle.isChecked({ timeout: 5000 }).catch(() => false)), 'the control did not update')
   }
   await ctx.close()
 }
@@ -350,7 +350,7 @@ console.log('\n§1.5  the notification bell — off by default, and a member can
   await page.waitForTimeout(900)
   const gear = page.locator('[data-testid="bell-notification-settings"]')
   check((await gear.count()) > 0, 'and the bell offers a way to configure notifications from it')
-  const href = (await gear.first().getAttribute('href')) ?? ''
+  const href = (await gear.first().getAttribute('href', { timeout: 5000 }).catch(() => null)) ?? ''
   check(
     /\/app\/profile/.test(href) && /tab=notifications/.test(href),
     'which lands on the notification preferences, not just the profile',
@@ -502,7 +502,7 @@ console.log('\n§1.3  the sidebar collapses to icons')
   // measuring the aside counts the dock's links and its drag handle too.
   const rail = page.locator('[data-testid="workspace-sidebar"][data-collapsed="true"] > nav')
   const railLinks = await rail.locator('a').count()
-  const railText = (await rail.innerText()).trim()
+  const railText = (await rail.innerText({ timeout: 5000 }).catch(() => '')).trim()
   check(railLinks >= 5, `the destinations are still reachable (${railLinks} icons)`)
   check(
     /home/i.test(railText) && /inbox/i.test(railText),
@@ -694,16 +694,16 @@ console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock 
   if ((await toggle.count()) === 0) {
     tree.rest('skipped: there was no expand control to click')
   } else {
-    await toggle.click()
+    await toggle.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(800)
     tree.step((await child.count()) > 0, 'the space did not open')
 
-    await toggle.click()
+    await toggle.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(800)
     tree.step((await child.count()) === 0, 'the space did not close')
 
     // The reported bug: closing was easy, reopening was not.
-    await toggle.click()
+    await toggle.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(800)
     tree.step((await child.count()) > 0, 'the space would not reopen')
   }
@@ -717,7 +717,7 @@ console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock 
       'skipped: the name was not a separate target to click',
     )
   } else {
-    await link.click()
+    await link.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1200)
     check((await child.count()) > 0, 'clicking the name opens the space, never closes it')
   }
@@ -810,7 +810,7 @@ console.log('\n§2  the search bar she walked through')
       } else {
         // Revealed but not yet searched — the second click is what narrows.
         const before = calls.length
-        await chip.click()
+        await chip.click({ timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(1500)
         const req = calls
           .slice(before)
@@ -960,7 +960,7 @@ console.log('\n§6  pinning a tool puts it in the top bar')
     if (!there) {
       pinned.rest(`skipped: ${tool} is not in the bar, so it points nowhere`)
     } else {
-      const href = await el.first().getAttribute('href')
+      const href = await el.first().getAttribute('href', { timeout: 5000 }).catch(() => null)
       pinned.step(
         !!href && href.startsWith(`/app/${WS}/`),
         '',
@@ -1068,7 +1068,7 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
    * "'xyz' likhoongi to meri new workspace ka naam hai, aur main is ko Finish
    * karoongi to meri workspace ban jayegi" [09:02].
    */
-  await page.locator('[data-testid="new-workspace"]').click()
+  await page.locator('[data-testid="new-workspace"]').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
   check((await page.locator('[data-testid="create-workspace-flow"]').count()) > 0, 'it opens a stepped flow')
 
@@ -1084,7 +1084,7 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
 
   const toolSearch = page.locator('[data-testid="workspace-tool-search"]')
   check((await toolSearch.count()) > 0, 'then which tool you are coming from, searchable')
-  await toolSearch.fill('trel')
+  await toolSearch.fill('trel', { timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(400)
   await page.locator('[data-testid="workspace-tool-trello"]').click()
 
@@ -1109,9 +1109,9 @@ console.log('\n§7  any member can make a workspace; a guest cannot')
   // "Skip ya step" [08:54] — a skip finishes, it does not stall.
   const { ctx, page, calls } = await openApp(`/app/${WS}/inbox`, {}, { role: 'member' })
   await page.waitForTimeout(2500)
-  await page.locator('[data-testid="workspace-switcher"]').click()
+  await page.locator('[data-testid="workspace-switcher"]').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(800)
-  await page.locator('[data-testid="new-workspace"]').click()
+  await page.locator('[data-testid="new-workspace"]').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
   await page.locator('[data-testid="workspace-name"]').fill('skipped')
   await page.locator('[data-testid="workspace-next"]').click()

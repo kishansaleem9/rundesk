@@ -127,7 +127,7 @@ if (routes < MIN_ROUTES) {
       `below the floor of ${MIN_ROUTES}.\nThe verdict below is a zero, so a scan that reads nothing passes — ` +
       'point this at the controllers rather than lowering the floor.',
   )
-  bail(1)
+  await bail(1)
 }
 
 const novel = bare.filter((b) => !VERIFIED.has(b.key))
@@ -151,7 +151,7 @@ if (novel.length) {
       '  saying where. A write that lands in the wrong workspace SUCCEEDS: there is no error to\n' +
       '  notice, so this list is the only thing standing between a new route and a silent one.',
   )
-  bail(1)
+  await bail(1)
 }
 
 // A route that was verified and has since GAINED a guard is good news, but the

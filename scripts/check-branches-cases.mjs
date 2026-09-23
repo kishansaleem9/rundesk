@@ -138,6 +138,18 @@ chk(
   'an if with no check in it was reported',
 )
 
+// Playwright's `.check()` ticks a checkbox; it is not the suite's helper. A
+// conditional tick asserts nothing, and read as a check it would be reported
+// as a run whose length depends on the branch.
+chk(
+  run(
+    { 'tick.mjs': ['if (terms) {', "  await page.getByTestId('agree').check()", '}', ''].join('\n') },
+    { env: AT_ZERO },
+  ).total === 0,
+  "a conditional `.check()` on a checkbox is not a conditional check",
+  'a checkbox tick inside an if was reported as a check',
+)
+
 chk(
   run(
     { 'single.mjs': ["if (ready) await page.goto(url)", ''].join('\n') },
@@ -285,6 +297,8 @@ if (process.argv.includes('--mutate')) {
     mutations: [
       ['the else test stops sparing a balanced branch', "if (/^\\s*else\\b/.test(src.slice(block.end, block.end + 40))) continue", 'if (false) continue'],
       ['an if with no check in it becomes a finding', 'if (!CHECK_CALL.test(block.body)) continue', 'if (false) continue'],
+      // The shared pattern without its dot exclusion: `.check(` is the helper.
+      ['a method called `.check(` counts as a check', "import { CHECK_CALL } from './lib/check-call.mjs'", 'const CHECK_CALL = /\\b(chk|check)\\s*\\(/'],
       /*
        * THE WHITESPACE SKIP, not the braceless guard beside it. Removing the
        * guard reddens nothing and that is not a gap: with it gone the brace

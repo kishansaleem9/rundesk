@@ -478,7 +478,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Give the plan a per-suite requirement: model, no-model, or either. Have run-plan.sh and sweep-until-clean.sh start a mixed fleet (for example RUNDESK_LANE_MODEL='3 4') and send each set to a matching lane. Then write model-lane checks and break patches for the AI surfaces that today are measured only by their refusal.
 
-### `harness/section-enders-blind-to-check-spelling` — open, medium
+### `harness/section-enders-blind-to-check-spelling` — **closed** (with its duplicate `suite-hygiene/section-enders-blind-to-check-suites`)
+
+*Closed:* one shared matcher, `scripts/lib/check-call.mjs` — `CHECK_LINE`, `CHECK_CALL` and `checkCalls(src)`, both spellings, and NOT `.check(` (Playwright ticking a checkbox) — used by the section-ender rules, `suite-reads`' message reader and `check-suite-check-branches`. Widened, the checker reported 24 sites across 7 suites; every real one is bounded (`{ timeout: 10_000 }` and a catch on the press, a caught read in a condition or message): person-panel ×5 (and the `user-menu` press beside three of them), settings-depth ×2, task-depth ×3, video1-fast-items ×2 (and its `workspace-switcher` press), emoji-picker ×7, and three in `chat-history`, written today. The two in panel-collapse were false positives — `document.querySelector('[data-testid=…]')?.getAttribute(…)` runs in the page and answers undefined — so rules five and eight now spare exactly that optional-chained DOM read, and still flag the same read through a locator. The tree reports 0. Cases: a `check(`-spelled suite is read (`check-suite-enders`), an optional DOM read is spared at section and file scope while a locator read is not, and a conditional `.check()` is not a conditional check (`check-branches-cases`); mutations restoring `chk(`-only, removing either exemption, and dropping the dot exclusion each redden (enders 32/32, branches 7/7, suite-reads 8/8 after re-anchoring its two).
 
 **check-suite-section-enders only recognises `chk(`, so 13 suites (about 700 checks) spelled `check(` are never scanned**
 
@@ -486,7 +488,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Use one shared CHECK_CALL regex (\b(chk|check)\s*\(), exported from a lib and used by section-enders, suite-reads.messageReads and check-suite-check-branches, and consider chain `.step(` too. Add a check( fixture to check-suite-enders.mjs. Then fix the roughly 19 real sites the widened rules report.
 
-### `harness/section-enders-blind-to-variable-locators` — open, medium
+### `harness/section-enders-blind-to-variable-locators` — **closed** (one gap kept open, named below)
+
+*Closed:* `withLocatorsResolved` (lib/suite-reads.mjs) writes every locator variable assigned straight from ONE testid (`.first()`/`.last()`/`.nth()` allowed, nothing wider) out as that testid before rules one, five and eight read the file, and rule nine reads any locator variable as rule seven does. Widened, the checker reported 68 sites in 23 suites. Eight were false positives in four shapes the rules now know — a comment mentioning a read, a read on a multi-line check's continuation line (rules six and seven own those; `checkSpanLines`), a read behind a ternary on its own presence, and a read inside a `waitUntil` predicate (rule four and rule nine had not been told) — and the other 60 are bounded in 20 suites: presses and fills with a timeout and a catch, reads with a timeout and a fallback the check below then fails on in its own words. The tree reports 0. `check-suite-reads.mjs` holds the resolver (32 cases, 11/11 mutations: wider selectors resolved, comments read, continuation lines forgotten); `check-suite-enders.mjs` holds the rules (39/39 mutations, each new exemption and the resolution itself). *Not done:* chain steps — `x.step(cond, msg)` is a check to rules one, five and eight, but `check-suite-check-branches` must NOT count it (the chain helper exists to balance conditional steps), so it needs the checkers to take different matchers; the two reads it hid in video1-fast-items are bounded by hand.
 
 **Rules 1, 5, 8 and 9 cannot see a press or read through a locator held in a variable, and 12 real sites sit in that gap**
 
@@ -604,7 +608,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* In never-run-plan.mjs --drifted, replace the drifted(...) test with makeMeasurementCheck({root})(rec, patchDeps(text, suite), { name, text }), keeping the Re-run branch. Give check-break-freshness.mjs the same per-patch body comparison, or have it consume makeMeasurementCheck. Add --mutate entries to scripts/check-log-tree.mjs:312-332 for patchCodeMoved; today none of its mutations touch the body rule or the `if (moved.length || !patch)` line. Add a check-plan-population fixture case in which only a patch body changed.
 
-### `harness/process-exit-remaining` — partly-fixed, small
+### `harness/process-exit-remaining` — **closed**
+
+*Closed:* `local-sweep.mjs` (four exits) and `smoke-phase1.mjs` (its `fail` helper, seven callers, and the catch-all) stop through `await bail(…)`; neither calls `process.exit` any more. `bail.mjs`'s numbers are re-measured: 123 suites, 1,094 recorded runs, the largest 11.6KB. Converting them found a defect in `bail` itself — below.
 
 **process.exit() is still used in local-sweep.mjs and smoke-phase1.mjs; bail.mjs's suite count is stale**
 
@@ -622,7 +628,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Have makeMeasurementCheck return a '<declares Re-run>' reason when declaresRerun(text) holds and the patch file differs from its blob at rec.sha, so both callers share it. Compare the working copy in both.
 
-### `suite-hygiene/section-enders-blind-to-check-suites` — open, small
+### `suite-hygiene/section-enders-blind-to-check-suites` — **closed** (the same item as `harness/section-enders-blind-to-check-spelling`; closed there)
 
 **The section-enders pairing rules only read chk(, so 13 check()-style suites are never scanned**
 
@@ -753,6 +759,38 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* `tb-30` (assignment refuses all) and `tb-37` (dependencies refuse all) broke `task-boundaries`' SETUP, which assigned T2 and made the B dependency through those routes — 1 of 45 checks ran. `sdp-7` (admins narrowed) broke `space-default-permission`'s placement section, whose admin made a project straight into the view-only space — 27 of 36 ran. `check-plan-population` listed all three as needing a person.
 
 *Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Both suites are re-run in the next plan.
+
+### `found-23-sep/role-editor-offers-unenforced-permissions` — open, large (found reading the custom-role item)
+
+**Seventeen of the 26 permissions the role editor offers are checked nowhere: granting one changes nothing**
+
+*Evidence:* `permission-catalog.ts` lists 26 permissions and `roles-tab.tsx:154` offers every one of them from `/roles/catalog`. The server checks a permission in two ways — `@RequirePermissions` through `PermissionsGuard`, and `CustomRolesService.hasPermission`, which nothing outside `custom-roles` calls — and 9 keys appear in either (space.create, project.create, template.manage, webhook.manage, integrations.manage, integrations.access_requests.manage, sso.manage, workspace.billing, report.view.basic; two of them also in services). The other 17 appear nowhere outside the catalog: workspace.manage, workspace.delete, workspace.audit.view, members.invite, members.remove, members.role.change, roles.manage, security.policy.manage, space.delete, project.delete, list.delete, task.delete.any, doc.publish, doc.delete.any, automation.manage, report.export, time.approval.manage. What actually gates those actions is a role: 90 uses of `WorkspaceAdminGuard`/`@Roles`, and inline lists such as `invitations.controller.ts:40` (`['workspace_admin', 'manager']` for members.invite), `time-entries.service.ts:163` (approvals), `tasks.service.ts:658,764,2141,5114`, and `spaces.service.ts:520` (`adminOnlyDelete: true`, "space.delete not in MANAGER_DELTA"). So a custom role granting a member `space.delete`, `members.invite` or `time.approval.manage` is saved, shown and ignored — the facade class, in the permission system itself. Under-granting only: no role can gain more than its base role this way.
+
+*To close:* make each permission the real gate for the actions it names — replace the role test at each site with `hasPermission(workspace, user, key)`, which by construction gives every base role exactly what it has today (the cascade) and honours custom grants; or take the key out of the editor until it is. Research ClickUp's custom-role permission list for the names and scope. A suite per group, each check paired: the base role unchanged, a member with the grant allowed, without it refused.
+
+### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
+
+**`bail()` returned whenever output was queued — i.e. whenever piped — and eleven checkers ran on past their own refusal**
+
+*Evidence:* with nothing queued it exits at once; with output still queued it scheduled the exit and RETURNED. Measured: a script that printed 200KB and called `bail(3)` mid-file printed the line after the call when piped (`| (sleep 1; cat)`) and not when redirected to a file. CI's output is piped. Every mid-file stop — eleven checkers, twenty calls — was exposed; `check-migration-order`'s `fail` then went on to dereference the filename it had just refused, and could end on "Validated …".
+
+*Closed:* `bail` returns a promise that never settles and every call site is `await bail(…)`, so execution stops there until the exit; the backstop timer is no longer unref'd (a parked caller must not end as an unsettled top-level await, exit 13). `check-migration-order`'s helper is async and awaited at each of its nine call sites. `scripts/check-bail.mjs --mutate` (preflight, verify job): piped with 200KB queued, redirected, and idle — exit 3, every byte delivered, the line after never runs — and 3 of 3 mutations caught (returns instead of parking, exits without draining, forgets the code).
+
+### `found-23-sep/admin-grant-taken-and-not-put-back` — **closed**, measurement pending (found in plan-2)
+
+**`space-default-permission` removed the admin's space grant for one check and never restored it, so `sdp-7` ended the run one section on**
+
+*Evidence:* to test "a workspace admin is not narrowed … with no explicit grant", the suite deletes the admin's seeded `space_members` row on the view-only space. It stayed deleted; the placement section's `withEditable` then leaned on the admin's ROLE alone, which is exactly what `sdp-7` takes away — "could not raise …: 403", 27 of 36 checks ran, even after that section's own project was moved inside `withEditable`.
+
+*Closed:* the grant is put back straight after the check, and a failure to put it back stops the run by name. Re-run pending.
+
+### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
+
+**A check that reads `textContent` cannot tell a shown message from a hidden one**
+
+*Evidence:* `hr-9` wraps Home's reminders empty state in `<div hidden>` — a blank panel to anybody looking — and `home-reminders` stayed green, because `textContent` includes hidden elements and still read "No reminders waiting". Fixed in that suite (`innerText`, which is what is rendered). The same read appears in 16 suites (`grep -l 'textContent(' test/e2e/*.mjs`, 23 September), and every one that asserts a sentence is SHOWN has the same blind spot to a patch that hides rather than removes.
+
+*To close:* a section-enders-style rule — a check whose condition asserts text through `textContent` — with the fix `innerText` or an explicit visibility check; measure the count first, then convert.
 
 ### `found-23-sep/stale-chunk-recovery-writes-the-shared-tree` — **closed**
 
@@ -1334,7 +1372,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 ## Stale documentation — 18
 
-### `harness/break-queue-references-stale` — open, small
+### `harness/break-queue-references-stale` — partly-fixed, small
+
+*Fixed:* `check-break-freshness.mjs` says `break-queue.sh` was deleted and names what reads these logs now; `break-report.sh` no longer calls the classifier "shared with the runner" — only it calls it, and `log-tree.mjs` holds the same four outcomes as `NOT_RUN`. *Still open:* the two references in `wt-break.sh`, which is running the break plan and is not edited mid-run.
 
 **Comments still name the deleted break-queue.sh, and break-report calls the awk classifier 'shared with the runner'**
 
@@ -1342,7 +1382,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Repoint the comments at break-report.sh / classify-break-log.awk.
 
-### `harness/fleet-up-cites-nonexistent-break-fleet` — open, small
+### `harness/fleet-up-cites-nonexistent-break-fleet` — **closed**
+
+*Closed:* the sentence points at `wt-break.sh` (per-lane worktrees) and `refresh-dists.sh` (the `/tmp/claude-0/dist-<lane>` bundles `verify.sh` prefers), and says `break-fleet.sh` never existed.
 
 **fleet-up.sh points readers at break-fleet.sh, which has never existed in this repository**
 
@@ -1390,7 +1432,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Rewrite §2, §3, §5 and §6 from the checkers' current output, and consider guarding the suite and registration counts the same way the headline is guarded.
 
-### `harness/log-tree-header-contradicts-body-rule` — open, small
+### `harness/log-tree-header-contradicts-body-rule` — **closed**
+
+*Closed:* the header states what a run depends on as the code now asks it — suite, its `test/e2e/lib` helpers, the product files, the patch's own code (comments stripped) and a pending `# Re-run:` — and that `makeMeasurementCheck` is the one question all three instruments ask; freshness's copy of the old premise went with `planner-ignores-patch-body`.
 
 **log-tree.mjs header and check-break-freshness still say the patch file is not a dependency**
 
@@ -1414,7 +1458,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Rename each reference to the real consumer (wt-break.sh plus classify-break-log.awk, or run-plan.sh), and fix the pointer in fleet-up.sh. Consider having check-suite or preflight fail on comments that name a script path that does not exist.
 
-### `harness/resume-doc-harness-stale` — open, small
+### `harness/resume-doc-harness-stale` — **closed**
+
+*Closed:* §2's drain paragraph had already been corrected (run-plan.sh, never-run-plan.mjs, drain.sh deleted) and §5 is accurate; §6 now gives 117 suites, about 129 minutes, `timeout-minutes: 180`, and points at the job comment and `check-suites-registered.mjs` instead of a count that drifts.
 
 **video2-resume.md describes retired harness state**
 
@@ -1470,7 +1516,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Rewrite each comment when its row is built, or now, so the reason no longer blocks investigation.
 
-### `harness/suite-reads-untested-claim-stale` — open, small
+### `harness/suite-reads-untested-claim-stale` — **closed**
+
+*Closed:* the sentence now says rules one to five are line-based and that `check-suite-enders.mjs` holds their cases and breaks each rule.
 
 **suite-reads.mjs still says rules one to five are untested**
 

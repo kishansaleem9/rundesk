@@ -813,7 +813,7 @@ try {
     check(false, 'and the dock stops carrying it', 'skipped')
     check(false, 'and turning it back on brings it back', 'skipped')
   } else {
-    const wasOn = await docsToggle.isChecked()
+    const wasOn = await docsToggle.isChecked({ timeout: 5000 }).catch(() => false)
     check(wasOn, 'Docs is in the dock to begin with', 'docs was not in the default set')
     await docsToggle.click()
     await page.waitForTimeout(1800)
@@ -904,7 +904,7 @@ try {
     check(false, 'so a different browser sees it too', 'skipped')
     check(false, 'and an emptied list is not silently refilled', 'skipped')
   } else {
-    await star.click({ force: true })
+    await star.click({ force: true, timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(2000)
 
     const saved = await A(`/dashboards/dock/${workspaceId}`)
@@ -1055,7 +1055,7 @@ try {
         check(before >= 3, `all the spaces are listed to begin with (${before})`)
 
         // Typing a LIST name: its space survives, the other two do not.
-        await box.fill(LIST_NEEDLE)
+        await box.fill(LIST_NEEDLE, { timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(900)
         const narrowed = await rows()
         check(
@@ -1069,7 +1069,7 @@ try {
           'the match is in the tree but still hidden inside a collapsed space',
         )
 
-        await box.fill(`nothing-matches-${tag}`)
+        await box.fill(`nothing-matches-${tag}`, { timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(700)
         /*
          * Read for words, not for the element.

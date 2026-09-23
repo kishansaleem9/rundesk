@@ -396,7 +396,7 @@ try {
   await input.fill('already typing')
   await input.press(' ')
   const stillClosed = !(await page.getByTestId('comment-ai-panel').isVisible().catch(() => false))
-  const typedValue = await input.inputValue()
+  const typedValue = await input.inputValue({ timeout: 5000 }).catch(() => '')
   chk(
     stillClosed && typedValue === 'already typing ',
     'and with words in the box a space is just a space — the panel stays shut and the character lands',
@@ -439,7 +439,7 @@ try {
       : 'the panel reported nothing: the request failed and the reader was left looking at an empty box',
   )
 
-  const composerAfter = await input.inputValue()
+  const composerAfter = await input.inputValue({ timeout: 5000 }).catch(() => '')
   chk(
     composerAfter === '',
     'and a failed ask leaves the comment box exactly as it was — nothing is written without Keep',

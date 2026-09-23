@@ -39,7 +39,7 @@ const ROOT = new URL('..', import.meta.url).pathname
 const OBS = join(ROOT, 'docs/video2-frame-observations.md')
 if (!existsSync(OBS)) {
   console.error('[frames] no docs/video2-frame-observations.md — nothing to trace')
-  bail(1)
+  await bail(1)
 }
 
 // An OBSERVATION is a top-level bullet that opens with a timestamp. Nested
@@ -169,5 +169,5 @@ if (nowhere.length) {
       'there — an unanswered frame and a frame answered under another timestamp look identical from\n' +
       'here, and the difference is the whole point.',
   )
-  bail(1)
+  await bail(1)
 }

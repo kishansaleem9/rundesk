@@ -362,7 +362,7 @@ try {
     'the current value is not shown on the row',
   )
 
-  await assignee.click()
+  await assignee.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(500)
   const search = page.getByTestId('palette-assignee-search')
   chk((await search.count()) > 0, 'opening it gives a search box', 'the picker has no search box')
@@ -373,7 +373,7 @@ try {
   )
 
   // Type-ahead: the whole reason for the change.
-  await search.fill('Hamda')
+  await search.fill('Hamda', { timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(400)
   chk(
     (await page.locator('[data-testid^="palette-assignee-option-"]').count()) === 2,
@@ -382,7 +382,7 @@ try {
   )
 
   // The case a name alone cannot settle.
-  await search.fill('raza@')
+  await search.fill('raza@', { timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(400)
   chk(
     (await page.getByTestId('palette-assignee-option-u3').count()) === 1 &&
@@ -433,7 +433,7 @@ try {
   )
 
   // Clearing has to be reachable, which is what "Anyone" is for.
-  await page.getByTestId('palette-assignee').click()
+  await page.getByTestId('palette-assignee').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(400)
   const beforeClear = searchCalls.length
   await page.getByTestId('palette-assignee-anyone').click()
@@ -490,7 +490,7 @@ try {
   await page.waitForTimeout(700)
 
   const toggle = page.getByTestId('palette-filters-toggle')
-  const countNow = async () => Number(await toggle.getAttribute('data-active-filters')) || 0
+  const countNow = async () => Number(await toggle.getAttribute('data-active-filters', { timeout: 5000 }).catch(() => null)) || 0
 
   /*
    * Driven with the created-after/created-before pair rather than the Space

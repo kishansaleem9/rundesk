@@ -25,6 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { bail } from './lib/bail.mjs'
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..')
 const WORKFLOW = path.join(ROOT, '.github/workflows/ci.yml')
@@ -111,7 +112,7 @@ if (!fs.existsSync(path.join(DIST, 'index.html'))) {
   // A missing bundle makes every suite fail with ENOENT, which reads as
   // twenty broken features instead of one forgotten build.
   console.error(`✗ ${DIST}/index.html does not exist — build the web app first:\n    pnpm --filter @rundesk/web exec vite build`)
-  process.exit(2)
+  await bail(2)
 }
 
 const before = fingerprint()
@@ -119,7 +120,7 @@ const all = suitesFromWorkflow()
 const suites = filters.length ? all.filter((s) => filters.some((f) => s.name.includes(f))) : all
 if (suites.length === 0) {
   console.error(`✗ nothing matched ${JSON.stringify(filters)} in ${all.length} suites`)
-  process.exit(2)
+  await bail(2)
 }
 
 console.log(`\n${before}`)
@@ -163,6 +164,8 @@ const after = fingerprint()
 console.log(`\nbefore: ${before}\nafter:  ${after}`)
 if (before !== after) {
   console.log('\n✗ the tree changed while the sweep ran — this result describes neither commit.')
-  process.exit(1)
+  await bail(1)
 }
-process.exit(failed.length === 0 ? 0 : 1)
+// Through `bail`, not `process.exit`: this ends a report of up to twelve lines
+// per failed suite, and exit() drops whatever a slow pipe has not read yet.
+await bail(failed.length === 0 ? 0 : 1)

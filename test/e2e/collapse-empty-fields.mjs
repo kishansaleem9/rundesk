@@ -186,7 +186,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ collapsing hides the empty ones and ONLY the empty ones')
 
-  await toggle.first().click()
+  await toggle.first().click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await emptyOnScreen()) === 0, { timeoutMs: 10_000 }),
     'the empty fields go',
@@ -273,7 +273,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ turning it back off brings everything back')
 
-  await page.getByTestId('collapse-empty-fields').first().click()
+  await page.getByTestId('collapse-empty-fields').first().click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(async () => (await rows()).some((r) => r.includes('blank optional')), {
       timeoutMs: 10_000,

@@ -145,7 +145,7 @@ if (missing.length) {
       'repository\nlayout has changed. Point it at the new one rather than letting it report a ' +
       'clean tree it\nnever opened.',
   )
-  bail(1)
+  await bail(1)
 }
 
 if (scanned < MIN_SCANNED) {
@@ -155,7 +155,7 @@ if (scanned < MIN_SCANNED) {
       'quietly narrowed:\n"no signatures found" in a scan this small is a statement about the ' +
       'scan, not about the tree.',
   )
-  bail(1)
+  await bail(1)
 }
 
 if (hits.length === 0) {
@@ -163,7 +163,7 @@ if (hits.length === 0) {
     `[break-patch-check] clean — ${scanned} file(s) read across apps, packages and test, ` +
       'no break-patch signatures in any of them',
   )
-  bail(0)
+  await bail(0)
 }
 
 console.error(`\n[break-patch-check] ${hits.length} break-patch signature(s) reached the tree:\n`)

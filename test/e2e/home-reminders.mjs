@@ -194,11 +194,14 @@ try {
   )
 
   await page.getByTestId('home-reminder').filter({ hasText: TASK_TITLE }).getByTestId('home-reminder-delete').click({ timeout: 8000 }).catch(() => {})
+  // `innerText`, not `textContent`: what is RENDERED. textContent includes
+  // hidden elements, so a panel whose empty state was present but hidden —
+  // blank to anybody looking — read as saying "No reminders" (hr-9 ran green).
   const empty = await waitUntil(
-    async () => (await page.getByTestId('home-reminder').count()) === 0 && (await panel.textContent().catch(() => '') ?? '').length > 0,
+    async () => (await page.getByTestId('home-reminder').count()) === 0 && ((await panel.innerText({ timeout: 3000 }).catch(() => '')) ?? '').length > 0,
     { timeoutMs: 10_000 },
   )
-  const panelText = (await panel.textContent().catch(() => '')) ?? ''
+  const panelText = (await panel.innerText({ timeout: 5000 }).catch(() => '')) ?? ''
   chk(
     empty && /no reminders/i.test(panelText),
     'and with none left, the panel says there are none rather than going blank',

@@ -147,7 +147,7 @@ try {
   const start = page.getByTestId('call-start-button')
   chk(await start.isVisible().catch(() => false), 'a channel offers to start a SyncUp',
     'no start button in the channel header')
-  await start.click()
+  await start.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2500)
   /*
    * Reported rather than left to time out. A refused camera makes the pre-join

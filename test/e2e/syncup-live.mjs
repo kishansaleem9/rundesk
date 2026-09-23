@@ -457,7 +457,7 @@ console.log('\n2. starting a SyncUp')
 const startBtn = A.page.locator('[data-testid="call-start-button"]')
 await startBtn.waitFor({ timeout: 15000 }).catch(() => {})
 check(await startBtn.isVisible().catch(() => false), 'the channel header offers Start SyncUp', 'no start control in the channel header')
-await startBtn.click()
+await startBtn.click({ timeout: 10_000 }).catch(() => {})
 
 // The pre-join screen takes the camera BEFORE anything is signalled — the one
 // place a browser can refuse and leave somebody in a call with no media.

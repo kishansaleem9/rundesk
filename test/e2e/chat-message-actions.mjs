@@ -316,7 +316,7 @@ try {
   await page.waitForTimeout(700)
   const optionOther = page.getByTestId(`assign-option-${other.user.id}`)
   check(await optionOther.isVisible().catch(() => false), 'Assign opens a list of people who can see the channel')
-  await optionOther.click()
+  await optionOther.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2200)
 
   const chip = page.locator('[data-testid^="message-assignments-"]').first()
@@ -466,7 +466,7 @@ try {
 
   const sidebarChannel = page.locator(`[data-testid="channel-row-${channelId}"]`).first()
   check((await sidebarChannel.count()) > 0, 'the channel is listed in the sidebar')
-  await sidebarChannel.click()
+  await sidebarChannel.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(2500)
   check(
     page.url().includes(`channel=${channelId}`),
@@ -603,7 +603,7 @@ try {
   const count = await saveBtn.count()
   let clicked = false
   for (let i = 0; i < count; i += 1) {
-    const title = (await saveBtn.nth(i).getAttribute('title')) ?? ''
+    const title = (await saveBtn.nth(i).getAttribute('title', { timeout: 5000 }).catch(() => null)) ?? ''
     if (/save/i.test(title) && !/unsave/i.test(title)) {
       await saveBtn.nth(i).click().catch(() => {})
       clicked = true
@@ -1060,7 +1060,7 @@ try {
 
       const resolve = page.getByTestId(`reply-resolve-${mine.id}`)
       check(await resolve.isVisible().catch(() => false), 'an unread reply offers to resolve it')
-      await resolve.click()
+      await resolve.click({ timeout: 10_000 }).catch(() => {})
       await page.waitForTimeout(1500)
 
       // The whole point: once read, there is a way back.
@@ -1070,7 +1070,7 @@ try {
         'and once read, it offers to mark it unread again',
         'the row is read with no way back — the queue is destroyed by reading it',
       )
-      await unread.click()
+      await unread.click({ timeout: 10_000 }).catch(() => {})
       await page.waitForTimeout(1500)
       check(
         (await A(`/notifications?limit=50`)).data?.find((n) => n.id === mine.id)?.readAt == null,

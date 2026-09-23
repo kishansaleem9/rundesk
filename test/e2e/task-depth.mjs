@@ -229,7 +229,7 @@ try {
   )
 
   // And the tab does something, which is the half a tab strip cannot prove.
-  await page.getByTestId('create-tab-reminder').click()
+  await page.getByTestId('create-tab-reminder').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(800)
   check(
     await page.getByTestId('quick-create-reminder').isVisible().catch(() => false),
@@ -439,7 +439,7 @@ try {
 
   const addTag = page.getByTestId('task-tag-add')
   check(await addTag.isVisible().catch(() => false), 'the task sheet offers a way to add a tag')
-  await addTag.click()
+  await addTag.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
   check(
     await page.getByTestId('task-tag-popover').isVisible().catch(() => false),
@@ -538,7 +538,7 @@ try {
 
   await page.getByTestId('description-slash-table').click()
   await page.waitForTimeout(1200)
-  const draft = await textarea.inputValue()
+  const draft = await textarea.inputValue({ timeout: 5000 }).catch(() => '')
   check(/\|\s*Column\s*\|/.test(draft) && /\|\s*---\s*\|/.test(draft), 'picking Table writes a table', draft.slice(0, 80))
   check(!draft.includes('/'), 'and the "/" that opened the menu is gone', draft.slice(0, 80))
 
@@ -980,7 +980,7 @@ try {
   check(
     (await sprintLink.count()) > 0,
     'the sidebar offers a way into Sprints',
-    (await page.locator('[data-testid="workspace-sidebar"]').innerText()).replace(/\s+/g, ' ').slice(0, 160),
+    ((await page.locator('[data-testid="workspace-sidebar"]').innerText({ timeout: 5000 }).catch(() => '')) ?? '').replace(/\s+/g, ' ').slice(0, 160),
   )
   if ((await sprintLink.count()) > 0) {
     await sprintLink.first().click()

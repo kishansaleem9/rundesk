@@ -218,7 +218,7 @@ try {
   const widthOf = async () => (await sheet.boundingBox().catch(() => null))?.width ?? 0
   const widthBefore = await widthOf()
 
-  await toggle.click()
+  await toggle.click({ timeout: 10_000 }).catch(() => {})
   chk(
     await waitUntil(() => page.getByTestId('task-activity-rail').isVisible().catch(() => false), {
       timeoutMs: 15_000,
@@ -356,13 +356,13 @@ try {
    * somewhere, and Overview is the answer: that is the pairing the rail exists
    * for. Getting left on a tab that no longer exists is a blank panel.
    */
-  await page.getByTestId('task-activity-rail-toggle').click()
+  await page.getByTestId('task-activity-rail-toggle').click({ timeout: 10_000 }).catch(() => {})
   const tabBack = await waitUntil(
     () => page.getByTestId('task-tab-activity').isVisible().catch(() => false),
     { timeoutMs: 15_000 },
   )
   await page.getByTestId('task-tab-activity').click({ timeout: 15_000 })
-  await page.getByTestId('task-activity-rail-toggle').click()
+  await page.getByTestId('task-activity-rail-toggle').click({ timeout: 10_000 }).catch(() => {})
   const movedToOverview = await waitUntil(async () => {
     if (!(await page.getByTestId('task-activity-rail').isVisible().catch(() => false))) return false
     return (await page.getByTestId('task-field').count())

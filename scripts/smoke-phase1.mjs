@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { bail } from './lib/bail.mjs'
 // End-to-end smoke test for Phase 1 surface area.
 // Hits real HTTP endpoints; bails at first failing assertion.
 
@@ -6,7 +7,9 @@ const BASE = process.env.API_URL ?? 'http://localhost:3001/api/v1'
 
 function log(step, ...rest) { console.log(`\x1b[36m[smoke]\x1b[0m ${step}`, ...rest) }
 function ok(step)            { console.log(`\x1b[32m[ ok  ]\x1b[0m ${step}`) }
-function fail(step, detail)  { console.error(`\x1b[31m[fail ]\x1b[0m ${step}`, detail); process.exit(1) }
+// Awaited at every call, so a failure stops the smoke there with its output
+// intact — `process.exit()` dropped what a slow pipe had not read yet.
+async function fail(step, detail) { console.error(`\x1b[31m[fail ]\x1b[0m ${step}`, detail); await bail(1) }
 
 async function j(res) {
   const text = await res.text()
@@ -25,7 +28,7 @@ async function call(method, path, { token, body } = {}) {
     ...(body !== undefined ? { body: JSON.stringify(body) } : {}),
   })
   const { body: b, status } = await j(res)
-  if (!res.ok) fail(`${method} ${path}`, `status=${status} body=${JSON.stringify(b)}`)
+  if (!res.ok) await fail(`${method} ${path}`, `status=${status} body=${JSON.stringify(b)}`)
   return b?.data ?? b
 }
 
@@ -36,7 +39,7 @@ async function main() {
   })
   const token = login.accessToken
   const workspaceId = login.workspaces?.[0]?.id
-  if (!token || !workspaceId) fail('login', JSON.stringify(login))
+  if (!token || !workspaceId) await fail('login', JSON.stringify(login))
   ok(`logged in, workspace=${workspaceId}`)
 
   log('get spaces')
@@ -56,12 +59,12 @@ async function main() {
 
   log('get tasks in list')
   const tasks = await call('GET', `/tasks/list/${listId}`, { token })
-  if (!Array.isArray(tasks) || tasks.length === 0) fail('tasks empty')
+  if (!Array.isArray(tasks) || tasks.length === 0) await fail('tasks empty')
   ok(`${tasks.length} tasks, first has ${tasks[0].labels?.length ?? 0} labels, ${tasks[0].assignees?.length ?? 0} assignees`)
 
   log('get workspace labels')
   const labels = await call('GET', `/workspaces/${workspaceId}/labels`, { token })
-  if (!labels.length) fail('no labels')
+  if (!labels.length) await fail('no labels')
   ok(`${labels.length} labels`)
 
   log('get saved views')
@@ -88,7 +91,7 @@ async function main() {
 
   log('add a label to parent')
   const withLabel = await call('POST', `/tasks/${parent.id}/labels/${labels[0].id}`, { token })
-  if (!withLabel.labels?.some(l => l.id === labels[0].id)) fail('label not attached')
+  if (!withLabel.labels?.some(l => l.id === labels[0].id)) await fail('label not attached')
   ok('label attached')
 
   log('update parent task status -> in_progress')
@@ -114,7 +117,7 @@ async function main() {
   const timer = await call('POST', `/tasks/${parent.id}/time-entries/start`, { token, body: { description: 'Smoke run' } })
   await new Promise((r) => setTimeout(r, 1200))
   const stopped = await call('POST', `/tasks/${parent.id}/time-entries/stop/${timer.id}`, { token })
-  if (!stopped.durationSec || stopped.durationSec < 1) fail('timer duration', JSON.stringify(stopped))
+  if (!stopped.durationSec || stopped.durationSec < 1) await fail('timer duration', JSON.stringify(stopped))
   ok(`timer ran ${stopped.durationSec}s`)
 
   log('add dependency subtask -> parent')
@@ -162,7 +165,7 @@ async function main() {
   console.log('\n\x1b[32m✅  Phase 1 smoke passed\x1b[0m')
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err)
-  process.exit(1)
+  await bail(1)
 })

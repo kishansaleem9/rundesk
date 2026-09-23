@@ -7,8 +7,10 @@
 # port. Lane k is database rundesk_v<k> on port 302<k>.
 #
 # The shared `apps/web/dist` stays shared and is only ever READ by a suite, so
-# lanes can share it safely. Break tests, which must rebuild, get their own
-# dist directory per lane — see break-fleet.sh.
+# lanes can share it safely. Break tests, which must rebuild, run in their own
+# worktree per lane — see wt-break.sh — and a lane's private bundle is built by
+# refresh-dists.sh into the /tmp/claude-0/dist-<lane> that verify.sh prefers.
+# (This used to point at break-fleet.sh, which never existed.)
 #   fleet-up.sh 4          lanes 1 2 3 4
 #   fleet-up.sh "9 10"     lanes 9 and 10, LEAVING 1..8 ALONE
 #

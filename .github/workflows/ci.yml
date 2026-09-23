@@ -367,6 +367,11 @@ jobs:
       - name: A dead holder's lane lock is taken, a live one kept
         run: bash scripts/check-locks.sh --mutate
 
+      # Every checker stops through bail(). It returned whenever output was
+      # still queued — i.e. whenever piped, as here — and the checker ran on.
+      - name: bail stops the checker and loses no output
+        run: node scripts/check-bail.mjs --mutate
+
       # The same recorded reason, one subsystem over. A row of AI surfaces is
       # blocked in the ledger on ANTHROPIC_API_KEY being "empty here and in
       # CI", and their suites assert the refusal. But `ai.service.ts` writes

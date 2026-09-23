@@ -8,8 +8,9 @@
 # in `app-catalogue` and four in `list-customize` were first recorded as
 # nineteen-for-nineteen and twenty-one-for-twenty-one.
 #
-# The classifier is `classify-break-log.awk`, shared with the runner, so the
-# reporter and the runner cannot disagree about what a patch did.
+# The classifier is `classify-break-log.awk`. Only this reporter calls it —
+# no runner does, whatever this line used to say; `scripts/lib/log-tree.mjs`
+# holds the same four outcomes (`NOT_RUN`) for the planner and the checkers.
 #
 #   bash scripts/e2e-lanes/break-report.sh              # every log on this machine
 #   bash scripts/e2e-lanes/break-report.sh ui-sweep     # named suites only

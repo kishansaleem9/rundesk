@@ -17,9 +17,10 @@
  *     success.
  *
  * `scripts/check-suite-reads.mjs` breaks each of those and requires the answer
- * to change. Rules one to five are still line-based and still untested, which
- * is a gap named in the ledger rather than papered over here.
+ * to change. Rules one to five are line-based; `scripts/check-suite-enders.mjs`
+ * holds their cases and breaks each rule on purpose.
  */
+import { checkCalls } from './check-call.mjs'
 
 // The verbs that THROW when the locator matches nothing, because they wait for
 // the element before answering. `count` is deliberately absent: it answers 0.
@@ -88,6 +89,41 @@ const LOCATOR_VAR =
 export const locatorVars = (src) => new Set([...src.matchAll(LOCATOR_VAR)].map((m) => m[1]))
 
 /*
+ * AND THE ONES THAT NAME A SINGLE TESTID, RESOLVED — so the line rules, which
+ * match a testid written on the line, see a press through a variable too.
+ *
+ * `const opener = page.getByTestId('thread-open')`, a check on
+ * `opener.isVisible()`, then a bare `await opener.click()`: rules one, five and
+ * eight matched `getByTestId('…')` on the press line and never saw it — twelve
+ * real sites sat in that gap. Only a variable assigned straight from ONE testid
+ * is resolved (optionally `.first()`, `.last()` or `.nth(n)`, and nothing
+ * chained after): anything wider is not "that element", and guessing would put
+ * a false site in a rule people have to trust.
+ */
+const TESTID_VAR =
+  /^\s*(?:const|let)\s+([A-Za-z_$][\w$]*)\s*=\s*(?:await\s+)?[\w.]*\bpage\d*\s*\.\s*(?:getByTestId\(\s*['"`]([^'"`]+)['"`]\s*\)|locator\(\s*['"`]\[data-testid="([^"]+)"\]['"`]\s*\))(?:\s*\.\s*(?:first|last)\(\)|\s*\.\s*nth\(\d+\))?\s*$/gm
+
+export const locatorTestIds = (src) => new Map([...src.matchAll(TESTID_VAR)].map((m) => [m[1], m[2] ?? m[3]]))
+
+/** `src`'s lines with every single-testid locator variable written out in place. */
+export const withLocatorsResolved = (src) => {
+  const ids = locatorTestIds(src)
+  const lines = src.split('\n')
+  if (!ids.size) return lines
+  // No declaration can be rewritten: TESTID_VAR ends at the locator, so a
+  // resolvable declaration's own line never holds `<name>.`.
+  return lines.map((line) => {
+    // A comment that mentions `note.getAttribute(…)` is prose, not a read.
+    if (/^\s*(?:\*|\/\/)/.test(line)) return line
+    let out = line
+    for (const [v, id] of ids) {
+      out = out.replace(new RegExp(`(?<![\\w$.])${v.replace(/\$/g, '\\$')}\\s*\\.`, 'g'), `page.getByTestId('${id}').`)
+    }
+    return out
+  })
+}
+
+/*
  * Every `chk` in `src` whose MESSAGE reads a locator with a verb that throws,
  * and whose message has no `.catch` of its own — whether the locator is written
  * inline as a testid or held in a variable assigned from a locator factory.
@@ -106,9 +142,9 @@ export const messageReads = (src) => {
           '(?:innerText|textContent|inputValue|isDisabled|isEnabled|isChecked|isEditable|getAttribute|boundingBox)\\(',
       ).test(arg),
     )
-  for (let i = src.indexOf('chk('); i !== -1; i = src.indexOf('chk(', i + 1)) {
+  for (const { start: i, paren } of checkCalls(src)) {
     let depth = 0
-    let end = i + 3
+    let end = paren
     for (; end < src.length; end++) {
       if (src[end] === '(') depth += 1
       else if (src[end] === ')') {
@@ -136,7 +172,7 @@ export const messageReads = (src) => {
      * rather than introducing a report to argue with — the same trade rule one
      * made when it broadened from `.click()` to `.click(`.
      */
-    for (const arg of topLevelArgs(src.slice(i + 4, end)).slice(1)) {
+    for (const arg of topLevelArgs(src.slice(paren + 1, end)).slice(1)) {
       if (!THROWS.test(arg)) continue
       // Written inline as a testid, OR held in a variable assigned from a
       // locator factory in this file. Same read, same throw.
@@ -151,4 +187,32 @@ export const messageReads = (src) => {
     }
   }
   return out
+}
+
+/*
+ * THE LINES THAT CONTINUE A CHECK'S ARGUMENTS — the second and later lines of
+ * a multi-line `chk(…)`. A read there is part of the check's condition or its
+ * message, which rules six and seven own; the statement rules (one, five,
+ * eight) read `&& (await header.getAttribute(…))` on its own line as a bare
+ * use of something asserted, when a `count()` two lines up short-circuits it.
+ */
+export const checkSpanLines = (lines) => {
+  const src = lines.join('\n')
+  const inside = new Set()
+  for (const { start, paren } of checkCalls(src)) {
+    let depth = 0
+    let end = paren
+    for (; end < src.length; end++) {
+      if (src[end] === '(') depth += 1
+      else if (src[end] === ')') {
+        depth -= 1
+        if (depth === 0) break
+      }
+    }
+    if (depth !== 0) continue
+    const first = src.slice(0, start).split('\n').length - 1
+    const last = src.slice(0, end).split('\n').length - 1
+    for (let l = first + 1; l <= last; l++) inside.add(l)
+  }
+  return inside
 }

@@ -61,7 +61,7 @@ const ARCHIVE = /-\d{8}-\d{6}\.txt$/
 const logs = readdirSync(BREAKS).filter((f) => /^break-.+\.txt$/.test(f) && !ARCHIVE.test(f))
 if (logs.length === 0) {
   console.log('[break-freshness] no break logs on this machine — nothing to check')
-  bail(0)
+  await bail(0)
 }
 
 const lastChanged = (name) => {
@@ -130,8 +130,9 @@ for (const log of logs) {
   // the source, so a patch written into `test/e2e/breaks` and never hand-copied
   // came back "== <name> MISSING". That line starts with `== `, is not a control
   // line and does not say FAILED, so it counted as a patch here and as a patch
-  // in `break-queue.sh` — two sets of four reported "patches 4 · STILL-GREEN 0 ·
-  // UNBUILT 0" having opened no file at all.
+  // in `break-queue.sh` (since deleted; `break-report.sh` reads these logs now,
+  // through `classify-break-log.awk`) — two sets of four reported "patches 4 ·
+  // STILL-GREEN 0 · UNBUILT 0" having opened no file at all.
   //
   // `PATCH CHANGED NOTHING` joins it: applied, left the tree identical, proved
   // nothing, and says neither MISSING nor FAILED.
@@ -237,7 +238,7 @@ rows.sort((a, b) => a.verdict.localeCompare(b.verdict) || a.suite.localeCompare(
 // the disagreement would be invisible.
 if (process.argv.includes('--porcelain')) {
   for (const r of rows) console.log(`${r.verdict}\t${r.suite}\t${r.tree ?? 'unknown'}`)
-  bail(0)
+  await bail(0)
 }
 
 const TAGS = {
@@ -450,7 +451,7 @@ if (
   absent.length ||
   inert.length
 )
-  bail(1)
+  await bail(1)
 // A row with no suite file was never COMPARED to anything, so it cannot be
 // folded into "all N postdate their suite" — that sentence is the whole output
 // most readers see, and counting an unmeasured log inside it is how a total
