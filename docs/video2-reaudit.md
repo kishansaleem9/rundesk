@@ -777,7 +777,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | P | View types — 6 of 11. Table already existed; the wizard now labels Team correctly (it rendered as "List"). Map / Mind Map / Timeline deliberately NOT offered — a view you can tick but not render is a stored value no reader honours. Activity and Workload remain buildable |
 | B | **Copy configuration from another space** ("from: `<Space>` · Hide · Apply") — frame `07:50`, the bar in `create-space-wizard.tsx`, closed by `space-wizard.mjs`, 5 checks. Stale, not missing |
 | B | "+" on a space opens the Create menu, from one shared list both it and the quick-create tabs import — **8 create kinds above the rule and the frame's Imports/Templates footer below it**, and `space-create-menu.mjs` now asserts the two groups separately, 23 checks. It did not: it scraped every `space-create-*` item into one array and compared it to the create kinds, so on the day the footer shipped — which is frame `08:00`'s own bottom group — **the baseline went red for a menu that had just become more correct**, and stayed red through a whole break-test round, which refused to run against it. Its header also called that array "the eight of frame `08:00`" when the frame's eight are a different set (no Task, Reminder or Project; a **Form** Rundesk has none of, which is the `M` row above). Two new checks came out of the fix: the footer pair is named, and **neither may grow a creator tab** — `workspace-sidebar.tsx` argues in a comment that making them `CreateKind`s would be "the dead control, twice", and a comment is not a guarantee |
-| P | Create Folder — **private toggle and Use-Templates footer closed** by `folder-dialog.mjs`, 13 checks (frame `08:32`). Still open: **description**, and it is blocked rather than pending — `folders` has no such column and `FoldersService` whitelists `{name, color}` on create, so a description typed here would have nowhere to go. Left absent on purpose: a field that stores into nothing is the mirror defect, and the frames are not worth a column that lies |
+| B | Create Folder — **private toggle, Use-Templates footer and now the DESCRIPTION** closed by `folder-dialog.mjs`, 29 checks (frames `08:25`/`08:32`). The description was blocked rather than pending and the block was right when written; what made it stale is that the READER already existed — `container-edit-dialog.tsx` has had a description field behind `fields.description` the whole time and projects were passing it, so the column, the writer and the reader turned out to be one change rather than three. Migration `0160`, `create` AND `update`, the frame's own placeholder *"Tell us a bit about your Folder (optional)"* between Name and Location, and the flag turned on for folders. `update` tests `!== undefined` rather than truthiness, because emptying the box is how a description is deleted and a truthy test accepts every edit except that one, silently; `folder-desc-29-one-way` is that patch and it reddens exactly the check that empties the box. **The sidebar's own inline "new folder here" dialog still posts `{ name }` alone** — recorded rather than built, because it answers no frame and a second surface would need its own checks to be worth anything |
 | B | Folder **"Use Space statuses"** inheritance — closed by `folder-dialog.mjs`, **21 checks, 8 of them new and all 8 break-tested** (frame `08:32`: Settings › Statuses over the value *"Use Space statuses"*, with a `›`). Built as **one column with a reader**, migration `0159`: `folders.status_scope ∈ 'space' \| 'list'` is the default handed to every list made in that folder, and `ListsService.createList` is the reader, so the setting shows up on the first list rather than being stored against a someday. Deliberately NOT a fourth status table — `resolveEffectiveStatuses` already honours `'space'` on the read path and the task write path, and folder-owned statuses nothing read would be the mirror defect this audit has found six times. The decisive check compares a list's **effective** statuses key-for-key with the space's own, not by count, so a list that seeded a same-sized default cannot pass. The confident zero is handled too: `applyPreset` seeds `space_statuses` inside a `try`, so a space can legitimately have none, and `createList` only scopes to `'space'` when the space actually has some — **this suite's own guard check caught that on its first run**, against a fixture that had created a space with no preset |
 | B | Skeletons on load; sidebar hierarchy; breadcrumb |
 | B | Error toasts bottom-left; **list names unique per project**; both create paths report failure |
@@ -894,7 +894,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 145 built · 14 partial · 14 missing.**
+**173 rows: 146 built · 13 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -930,23 +930,26 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 113 | 10 | 9 | 132 |
+| §2, the sections table | 114 | 9 | 9 | 132 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **145** | **14** | **14** | **173** |
+| **consolidated** | **146** | **13** | **14** | **173** |
 
-ONE ROW MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the only
+TWO ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the only
 shape of movement this table should ever show for a build: *Threads* is now
-`comment-thread.mjs`, 13 of 13, 11 break patches. A build that raised the total
-would mean a row had been invented rather than answered.
+`comment-thread.mjs`, 13 of 13, 11 break patches, and *Create Folder* is
+`folder-dialog.mjs`, 29 of 29, 8 patches, its description no longer blocked. A
+build that raised the total would mean a row had been invented rather than
+answered.
 
-§2's 113 built includes the four marked `B*` — built, but the row also records
+§2's 114 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
-113 above is 112 plus the Threads row closing, not the strike being undone.
+114 above is 112 plus the Threads and Create Folder rows closing, not the
+strike being undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
 countdown anywhere in the walkthrough; the row existed only because of the
