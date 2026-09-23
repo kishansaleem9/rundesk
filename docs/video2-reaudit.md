@@ -756,7 +756,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Clip in a comment is a card with its name; a clip still arriving says so |
 | — | …its download / expand / `00:16` are the NATIVE player's, already there; Copy link deliberately absent (15-min signed URL) |
 | P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
-| P | Threads — replies nest inline; no "Thread by `<name>`" panel with own composer |
+| B | Threads — `comment-thread-panel`, headed *"Thread by \<name\>"*, carrying the comment, its reactions and a *"Reply to comment…"* composer whose parent is the panel's own root. 13 checks, 13 of 13; the one that carries the row reads `parent_comment_id` out of Postgres |
 | B | Reactions, react/reply/assign hover actions, resolve/reopen |
 | B | **"Save" a comment** — per-person bookmark → Inbox › Later, comment-anchored link |
 
@@ -6142,9 +6142,9 @@ the create-modal placeholder (no frame behind it at all), and credits.
 
 | item | what the frame asks for | what exists |
 |---|---|---|
-| Threads | `05:50` — a panel headed *"Thread by \<name\>"* holding the comment, its reactions and a *"Reply to comment…"* composer of its own | replies nest inline; the API already stores `parentCommentId`, so this is a UI build |
+| ~~Threads~~ **BUILT** | `05:50` — a panel headed *"Thread by \<name\>"* holding the comment, its reactions and a *"Reply to comment…"* composer of its own | `test/e2e/comment-thread.mjs`, 13 of 13, 11 break patches. Four insertions into `task-detail-sheet.tsx` and no modified lines, because that file carries about eighty patches |
 | View types | Activity and Workload | six of eleven; Map / Mind Map / Timeline are a recorded decision, not a gap |
-| Create Folder description | a description on the folder dialog | blocked *on purpose* — `folders` has no column and `FoldersService` whitelists `{name, color}`, so the field would store into nothing. Building it means the column AND a reader, or it is the mirror defect |
+| ~~Create Folder description~~ **BUILT** | a description on the folder dialog | migration 0160, the column, create AND update, the frame's field in the frame's place, and `fields.description` on for folders — the reader that turned out to exist already. `folder-dialog.mjs` 29 of 29, 8 break patches, each reddening the check it names |
 | Document import | the second row of `12:08`'s submenu | the delimited-file importer is built and 19/19 break-tested; documents are the open half |
 
 ### The order is decided by drift, not by appetite
@@ -6295,3 +6295,104 @@ This is written down because the number that decides half of it — 80 — is no
 something anyone would guess, because the other half needed the frames rather
 than a summary of them, and because a container reclaim has already cost this
 engagement its unpushed work once.
+
+---
+
+## Both of them built, and what the building found
+
+`Create Folder description` and `Threads` are the two the section above chose,
+on the grounds that the frames specify them and the other two are a menu row
+with nothing behind it. Both are in, both measured, and three of the findings
+are about this harness rather than about the product.
+
+### Create Folder description — `folder-dialog.mjs`, 29 of 29, 8 patches
+
+Migration 0160, the column on `folders`, `create` and `update` both carrying
+it, the frame's field between Name and Location with the frame's own
+placeholder, and `fields.description` turned on for folders in
+`container-edit-dialog.tsx`.
+
+**The refusal in the suite's own header had gone stale.** It read: no column,
+`FoldersService` whitelisting `{name, color}`, so a description typed there
+would have nowhere to go — every clause true when it was written. What made it
+stale is that the READER already existed and nobody had looked: the shared edit
+dialog has had a description field behind a flag the whole time, and projects
+were passing it. So the column, the writer and the reader are one change rather
+than three. The sixth defect class, found in this ledger.
+
+`update` tests `patch.description !== undefined` rather than truthiness,
+because emptying the box is how a description is deleted and a truthy test
+accepts every edit except that one, silently. `folder-desc-29-one-way` is that
+patch and it reddens exactly the check that empties the box.
+
+### Threads — `comment-thread.mjs`, 13 of 13, 11 patches
+
+Nothing here is a new data path: replies have nested inline for a long time and
+`parentCommentId` has been stored for longer. What the frame has and the list
+does not is a PLACE that is about one comment. In the list, the composer at the
+bottom answers whichever comment you last pressed Reply on; in the panel the
+parent is the panel's own root and cannot be anything else.
+
+The control sits on EVERY root comment rather than on the replies count.
+Hanging it off the count is the obvious design and loses exactly one case — the
+first reply, on a comment nobody has answered, which is what the frame's
+composer is for. `ct-11-thread-only-when-replies` is that design, written down
+as a patch so the choice stays measured rather than remembered.
+
+Wired in with four INSERTIONS and no modified lines. `task-detail-sheet.tsx`
+carries about eighty break patches and a moved line is a patch that silently
+stops measuring what it names.
+
+### Three findings about the harness
+
+**A stale API build reads exactly like a product defect.** `folder-dialog`
+reported "the row came back with null for a typed …" — the suite's own words
+for a box wired to nothing — against a service that had been writing the column
+for twenty minutes. The lane was serving a `tsc` output from two days earlier.
+Nothing in the run said so and the failure named the product. `verify.sh` now
+refuses a stale API build as it already refused a stale web bundle, and the
+API's is worse in one way: every lane shares it, so one forgotten build is
+wrong everywhere at once.
+
+That check then had a deadlock in it, which took a second pass to see. Written
+against the newest output in `dist`, it could not be satisfied: a `git
+checkout` or a reverted break patch moves a source mtime without changing a
+byte, an incremental `tsc` then writes nothing, and the refusal repeats however
+many times you follow its own advice. `build-api.sh` now touches
+`dist/.built-at`, which answers the question the gate is really asking — has a
+build been RUN since the source was last touched — rather than the proxy, did
+that build write anything. A gate you cannot satisfy gets switched off, which
+is worse than no gate.
+
+**Rule ten**, in `check-suite-section-enders.mjs`, is the first rule that reads
+code running in the BROWSER. A Playwright locator auto-waits;
+`document.querySelector` does not, and returns null on no match, so a bare
+dereference races the render — under `sidebar-reorder-4-gap-uses-stale-parent`
+that printed `Cannot read properties of null (reading 'dispatchEvent')`, true
+and naming neither the element nor the drag. The first scan for it reported
+ELEVEN sites and SIX were already guarded, in five spellings a window-of-text
+rule cannot see, so the rule classifies the variable's first USE instead. Five
+were real and all five are fixed.
+
+**`process.exit()` in the suites is the wrong pattern and cannot bite today.**
+`console.log` to a pipe is asynchronous and `process.exit()` discards pending
+writes; 215 call sites across 114 suites still use it. It is recorded rather
+than changed, with the condition that would invalidate the reason: the largest
+suite output measured is 11.6 KB against a 64 KB pipe buffer, and every harness
+path — `verify.sh`, `wt-break.sh` — redirects to a FILE, which Node writes
+synchronously. **If a suite's output passes 64 KB, or a harness path starts
+piping a suite's stdout, this becomes a live defect** and the 215 sites want
+`scripts/lib/bail.mjs`. Written down because a reason with no invalidating
+condition attached is the stale reason waiting to happen, which is the mistake
+this pass found twice in its own ledger.
+
+### What is still held, and it has not changed
+
+**View types (Activity, Workload)** and **Document import** remain where the
+section above left them. Rundesk holds both definitions already —
+`task_activity` for one, `findOverloadedAssignees()` (`open >= 6 && open >= 1.5
+× team average`) for the other — but `07:10` only lists them in a wizard's
+toggle list and no frame opens either view, so what they should DRAW is a
+decision the walkthrough does not make. Document import is built and measured
+(`doc-import.mjs`, 15 of 15) against a decision recorded rather than a frame,
+and that entry says so.
