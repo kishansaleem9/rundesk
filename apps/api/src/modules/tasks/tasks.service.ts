@@ -2779,7 +2779,23 @@ export class TasksService {
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
       storageKey: row.storageKey,
-      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
+      /*
+       * NO KEY, NO URL — and the store is what made this visible.
+       *
+       * An attachment row exists from the moment the upload is recorded, and a
+       * file still arriving has an EMPTY `storage_key`. With R2 unconfigured
+       * this branch handed that empty string back and the browser read it as
+       * falsy, which is how the "still arriving" state was ever reached. With a
+       * store configured, `getObjectUrl('')` mints a perfectly good presigned
+       * URL for an object that does not exist — so the card stopped saying the
+       * clip was on its way and started offering a link to nothing.
+       *
+       * That is worse than the paperclip-to-nowhere it replaced: a dead link
+       * announces itself, a signed URL to a missing object looks live until it
+       * is pressed. `clip-created-card` caught it as a red baseline the day the
+       * lanes got an object store, against a product nobody had touched.
+       */
+      url: row.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey) : null,
     })))
   }
 
@@ -2842,7 +2858,23 @@ export class TasksService {
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
       storageKey: row.storageKey,
-      url: this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey,
+      /*
+       * NO KEY, NO URL — and the store is what made this visible.
+       *
+       * An attachment row exists from the moment the upload is recorded, and a
+       * file still arriving has an EMPTY `storage_key`. With R2 unconfigured
+       * this branch handed that empty string back and the browser read it as
+       * falsy, which is how the "still arriving" state was ever reached. With a
+       * store configured, `getObjectUrl('')` mints a perfectly good presigned
+       * URL for an object that does not exist — so the card stopped saying the
+       * clip was on its way and started offering a link to nothing.
+       *
+       * That is worse than the paperclip-to-nowhere it replaced: a dead link
+       * announces itself, a signed URL to a missing object looks live until it
+       * is pressed. `clip-created-card` caught it as a red baseline the day the
+       * lanes got an object store, against a product nobody had touched.
+       */
+      url: row.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey) : null,
     }
   }
 
@@ -4274,7 +4306,10 @@ export class TasksService {
         fileName: f.fileName,
         fileSize: f.sizeBytes,
         mimeType: f.contentType,
-        url: this.r2.configured ? await this.r2.getObjectUrl(f.storageKey) : f.storageKey,
+        // NO KEY, NO URL — the third site of the same rule; see the note on
+        // `listAttachments` above. This is the one the comment cards read, so
+        // it is the one a clip still arriving is drawn from.
+        url: f.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(f.storageKey as string) : f.storageKey) : null,
       })
       byComment.set(f.commentId as string, list)
     }

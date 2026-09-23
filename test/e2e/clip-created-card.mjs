@@ -175,13 +175,22 @@ try {
    * implements an address the product does not serve. Anything else proves the
    * route matched and the handler ran.
    *
-   * The two do not even agree on a status: presign answers 400 "R2 is not
-   * configured" and share answers 500 "Storage is not configured", for the same
-   * cause. Pinning either number was this check's own first mistake — it failed
-   * on share while the endpoint was perfectly real.
+   * The two do not even agree on a status: unconfigured, presign answers 400
+   * "R2 is not configured" and share answers 500 "Storage is not configured",
+   * for the same cause. Pinning either number was this check's own first
+   * mistake — it failed on share while the endpoint was perfectly real.
+   *
+   * AND THEN IT HAD TO STOP REQUIRING THE FAILURE. Reading the error message
+   * for the word "storage" is still pinning a number, one level up: it demands
+   * that the call FAIL, and it does not fail any more. `s3-stub.mjs` gave every
+   * lane a working store, both routes started answering 201, and the guard went
+   * red against a product nobody had touched — a green that depended on the
+   * environment being broken. A 2xx proves "the route matched and the handler
+   * ran" better than any error does, so it is accepted here; the enemy this
+   * guard was written against is still the 404, and that is still refused.
    */
   const servedByStorage = (res) =>
-    res.status !== 404 && /r2|storage/i.test(String(res.error?.message ?? ''))
+    res.status !== 404 && (res.status < 300 || /r2|storage/i.test(String(res.error?.message ?? '')))
 
   const presignReal = await A(`/workspaces/${workspaceId}/clips/presign`, {
     method: 'POST',
@@ -515,6 +524,14 @@ try {
    * produce the thing. So a SECOND attachment is seeded with an empty storage
    * key, which is what a file still arriving looks like, and the check is a
    * positive one about what the person sees instead.
+   *
+   * AND IT THEN CAUGHT A REAL ONE, which is the whole argument for a check
+   * shaped this way. With a store configured, `getObjectUrl('')` mints a
+   * perfectly good presigned URL for an object that does not exist, so the
+   * card stopped saying the clip was on its way and offered a link to nothing
+   * — worse than the paperclip it replaced, because a dead link announces
+   * itself and a signed URL to a missing object looks live until it is
+   * pressed. Fixed in `tasks.service.ts`: no key, no url.
    */
   const PENDING_NAME = `Still arriving ${TAG}.webm`
   await sql`
