@@ -6423,3 +6423,52 @@ toggle list and no frame opens either view, so what they should DRAW is a
 decision the walkthrough does not make. Document import is built and measured
 (`doc-import.mjs`, 15 of 15, 4 of 4 patches) against a decision recorded rather
 than a frame, and the entry above says so.
+
+---
+
+## What the Brain² rows are actually about, read while the sweep ran
+
+The six `M` rows in §2 that name Brain² — the hub, `/ai/brain`, the AI-scoped
+left nav, the Ask|Agents toggle, Super Agents, the credit meter, the rotating
+placeholder, the composer "+", generated artifacts and Credits entirely — are
+the largest block of video 2 still open, and frames `16:30` and `17:15` specify
+them better than anything else left. So they were read against the tree rather
+than against the summary of it, because the last two items this pass took on
+were both smaller than their rows implied.
+
+**The rows hold.** Nothing in them is stale. But the shape of the work is not
+what the count suggests, and the difference is worth writing down before
+anybody estimates it:
+
+**The hub's MAIN COLUMN is largely built.** `ai-panel.tsx` already carries the
+composer (`ai-composer-input`), the model selector with the frame's tiered
+picker (`ai-model-menu`, `ai-model-group-best`, `ai-model-show-more`,
+`ai-model-tier`, `ai-model-set-preferred`), the skill chips (`ai-skill-chip`),
+the word suggestions of `17:40` (`ai-word-suggestions`) and the trace of
+`19:00` (`ai-trace`). Frame `16:32`'s four starter cards exist by name and by
+subtitle — `ai-starters.ts` opens with *"Project Status (Summarize all current
+tasks) · Generate Brief (Draft new project outline) · Daily Plan (Organize your
+daily schedule) · Task Ideas (Brainstorm project task ideas)"* and serves them
+from `GET /ai/starters`, chosen from how much of your work is overdue rather
+than from a constant array.
+
+**What is missing is the SHELL.** `workspace-ai-page.tsx` is a horizontal TAB
+STRIP — chat · knowledge · commands · generate · notes · writing · analytics —
+where the frame draws a left nav in two groups (**AI**: Ask or Create ·
+Analytics · Skills (Beta) · Connections; **Super Agents**: Create Agent · All
+Agents · My Agents) over a **Recent Chats** list. There is no Ask|Agents toggle,
+no agents hub, and no credit meter.
+
+**And two of those are blocked for the reason already recorded, not for want of
+effort.** The credit meter reads *"500 Credits left"*, and `PlanUsage.usage` is
+`{ members, projects }` — a count of things that EXIST, not of times a feature
+was USED. Building the meter means inventing the allowance and the reset policy
+and then writing checks against my own invention, which is the trade §2 already
+refuses for the metered paywall state at `09:30`. The rotating placeholder is
+four exact strings on a timer and is cheap; `ai-panel.tsx` already argues, in a
+comment about the starter CARDS, that a set rotating on a timer is
+indistinguishable from a set that responds to anything — which is the note to
+read before building the placeholder rather than after.
+
+Recorded rather than acted on, because the sweep was running and a tree that
+moves under a sweep turns its final sentence into a false one.
