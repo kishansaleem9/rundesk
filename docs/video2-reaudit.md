@@ -832,7 +832,7 @@ checks, not about a run.**
 | B | Appearance: **Grid size** — frame `14:05`'s first control, three swatches (Default · Large · XL) over *"Choose how large events and time slots appear in the grid"*. Closed by `planner-appearance-toggles.mjs`, 3 of its 20 checks, **re-run green at HEAD**. THIS ROW WAS STALE, not missing: the control, the API's validation and the reader all exist. `const hourPx = GRID_SIZES[gridSize]` is the reader and every block's `top` and `height` is computed from it, and `GRID_SIZES` is imported FROM the settings dialog rather than re-declared, so the swatch and the grid cannot disagree about what "Large" means |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
-| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open (it is on Calendar settings › Sidebar, over the planner rail, not on the tree). `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
+| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open, and **blocked rather than pending** — the distinction matters because "still open" invites somebody to build it. It is on Calendar settings › Sidebar, over the planner rail, not on the tree; the five named sections of frame `14:10` are built there with show, hide and reorder, from one shared list the planner page imports rather than the hardcoded copy it used to keep. What no frame supplies is what a NEW section would contain: `14:10` draws the button and nothing opens it, so a name and a rule for what falls into it would both be mine. Same class as Super Agents at `16:30` — a control the frames draw over a decision they never make. `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
 | B | **Upcoming meeting page** — time left, quick-join, and desktop notification |
 | B | Time blocking + the five settings that were STORED AND READ BY NOTHING — showWeekNumbers, alwaysOpenAtStartOfWeek, darkenNonWorkingHours, savePersonalEventsQuickly, showRecurring — each now has a reader that changes the grid |
 | B | `showOverdue` — now read by the backlog |
@@ -6586,3 +6586,52 @@ read before building the placeholder rather than after.
 
 Recorded rather than acted on, because the sweep was running and a tree that
 moves under a sweep turns its final sentence into a false one.
+
+---
+
+## The seven remaining `P` rows, read against the tree
+
+Prompted by finding four rows stale in one night, every remaining partial row
+in §2 was checked against the code rather than against its own summary. The
+result is worth recording in both directions, because a row that survives
+checking is a result too.
+
+**One was stale and is now `B`.** *Composer hint — the "/" half, which is the
+half that works; no space-for-AI hook exists.* Both halves work.
+`task-detail-sheet.tsx` swallows a space pressed on an EMPTY composer, opens
+`comment-ai-panel` and focuses its prompt; a space after any text stays an
+ordinary space. `task-ai-bar.mjs` measures the hint's wording, the gesture, the
+swallow AND the negative case, and its failure sentence names the exact defect
+the row claimed: *"the hint promises a gesture the composer does not honour."*
+
+**Five hold, and two of them are documented in the code itself.**
+
+| row | claim | what the tree says |
+|---|---|---|
+| Cover Search tab | "one grep finds no image provider anywhere" | Holds — and `cover-image-picker.tsx` carries that very grep in its own header |
+| @ picker — Brain section, Agents | blocked | Holds; no agents table, module or route exists |
+| Create-menu — Super Agent | blocked | Holds, same absence |
+| View types — 6 of 11 | six offered | Exact: `SPACE_VIEW_KEYS` is `list · board · table · calendar · gantt · team` |
+| Import — Monday and Wrike default to .xlsx, "which is not read" | holds | The importer takes delimited text, and its own comment says "the UI says *save it as CSV* rather than accepting an .xlsx". Rundesk WRITES xlsx (`common/export/xlsx`); writing is not reading |
+
+**One had its reason sharpened without changing status.** The sidebar row's
+`+ Add a new section` was "still open", which invites somebody to build it. It
+is blocked: the five named sections of `14:10` are built with show, hide and
+reorder, and what no frame supplies is what a NEW section would CONTAIN. Same
+class as Super Agents — a control the frames draw over a decision they never
+make.
+
+### What this pass says about the ledger as an instrument
+
+Five claims in it were wrong today, and they were wrong in one direction every
+time: **it overstates what is missing.** The folder description's blocker (the
+reader already existed), the credit meter's reason (it named one table and
+stopped looking), Recent Chats (a null grep read as an absence), the composer
+hint, and two suites recorded as green that were only green because the
+environment was broken.
+
+Not one error ran the other way — nothing recorded as built turned out to be
+absent. That asymmetry is itself a finding. A ledger that overstates gaps costs
+time; a ledger that understates them costs trust, and this one has not done
+that. But reading a row against the tree has been worth more per hour tonight
+than building against it, and the next pass should start there.
