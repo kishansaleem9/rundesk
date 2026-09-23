@@ -522,12 +522,29 @@ try {
    *
    * The variable was also called `restingPlaceholder` while being read off a
    * DISABLED composer, so the name said one state and the value held another.
+   * It is `beforePlaceholder` now — what the composer said before the request
+   * went out — which is true whichever state that was.
    */
-  const disabledPlaceholder = await attrOf(composer, 'placeholder')
+  /*
+   * AND THEN ASKED AGAINST THE CONFIGURATION, for the same reason the three
+   * checks in `ai-create-containers` were. Pinning the unavailable sentence is
+   * pinning the ENVIRONMENT: no lane had a model, so every lane read it. With
+   * `RUNDESK_LANE_MODEL=1` the composer is not disabled at all and the
+   * placeholder is the resting invitation, so the exact string this check was
+   * just corrected to assert would fail — correctly, and about nothing.
+   *
+   * One check, true either way: the composer's placeholder says which state it
+   * is in, and that state is the one `/ai/status` reports.
+   */
+  const aiStatus = await api('/ai/status')
+  const modelConfigured = aiStatus.status === 200 && aiStatus.data?.available === true
+  const UNAVAILABLE = 'AI is not configured on this server'
+  const beforePlaceholder = await attrOf(composer, 'placeholder')
   chk(
-    disabledPlaceholder === 'AI is not configured on this server',
-    'a composer disabled because no model is configured says so, rather than inviting you to type',
-    `the placeholder on a disabled input read ${JSON.stringify(disabledPlaceholder)}`,
+    modelConfigured ? beforePlaceholder !== UNAVAILABLE : beforePlaceholder === UNAVAILABLE,
+    'the composer says which state it is in, and it is the state /ai/status reports',
+    `the placeholder read ${JSON.stringify(beforePlaceholder)} while /ai/status said ` +
+      `available=${JSON.stringify(aiStatus.data?.available)}`,
   )
 
   /*
@@ -570,9 +587,9 @@ try {
   )
   const busyPlaceholder = await attrOf(page.getByTestId('ai-composer-input'), 'placeholder')
   chk(
-    busyPlaceholder === 'Working on it…' && busyPlaceholder !== disabledPlaceholder,
+    busyPlaceholder === 'Working on it…' && busyPlaceholder !== beforePlaceholder,
     'and the composer says it is WORKING, which is a different sentence from either of the others',
-    `it read ${JSON.stringify(busyPlaceholder)} against a disabled ${JSON.stringify(disabledPlaceholder)}`,
+    `it read ${JSON.stringify(busyPlaceholder)} against a disabled ${JSON.stringify(beforePlaceholder)}`,
   )
 
   release()

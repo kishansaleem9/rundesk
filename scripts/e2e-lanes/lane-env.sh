@@ -102,15 +102,40 @@ lane_store_up () {
 # the same habit this audit spent a night finding in its own ledger.
 #
 # It is the defect class found twice in one night — a green that depended on
-# the environment being broken — except known in advance. So it is opt-in until
-# each of those four has had its refusal re-aimed from STARVED to ARRANGED: the
-# shape `task-cover` already uses for storage, which `model-stub.mjs` supports
-# through `POST /__control/next` with a `count` that outlasts the SDK's retries.
-# The two stale header sentences want fixing at the same time; neither is a
-# check, so neither blocks the flag.
+# the environment being broken — except known in advance.
 #
-# Turning this on before that work is done would take four green suites red at
-# once, which is how a gate gets switched off rather than satisfied.
+# TWO OF THE FOUR CONVERT BY RE-AIMING, AND TWO DO NOT. That distinction was
+# found by doing the work, and it is the reason this flag will never simply be
+# switched on:
+#
+#   · `ai-create-containers` and `ai-answer-rendering` assert the refusal
+#     INCIDENTALLY — they are about containers and about rendering, and the 503
+#     is scenery. Both are converted: each check now asserts that the endpoint
+#     AGREES with `/ai/status` rather than that it returns a particular code,
+#     which is a stronger claim and holds in either environment. Both were run
+#     both ways: 33 of 33 and 51 of 51, with a model and without.
+#
+#   · `create-menu-ai` and `task-ai-bar` are ABOUT the refusal. Their subject is
+#     that a product with no key says "AI features are not configured" in words,
+#     in the UI, in a toast. Arranging a provider failure through the stub does
+#     NOT reproduce that: `assertAvailable` throws before any call is made, so
+#     the arranged message would be the provider's and not the product's. With a
+#     model configured the product correctly never says "not configured", and
+#     these suites have nothing left to measure.
+#
+# AVAILABILITY IS PROCESS-LEVEL — one key per API — so a suite cannot choose.
+# Turning this on for every lane would not break those two so much as EMPTY
+# them. What they need is a lane without a model, which is what the per-lane
+# shape of this flag already allows: `RUNDESK_LANE_MODEL=1` is read per lane at
+# launch, so a fleet can run some lanes with a model and some without, and each
+# suite goes to the lane whose configuration is its subject. Wiring that choice
+# into the dispatcher is the next piece of this work and is NOT done.
+#
+# The two stale header sentences on `ai-assign` and `clip-created-card` were
+# fixed at the same time; neither is a check, so neither blocks anything.
+#
+# Turning this on for every lane before that work is done would empty two green
+# suites and redden nothing, which is worse than a gate that fails loudly.
 #
 # Lane k gets port 92<k>, beside storage on 91<k>.
 lane_model_port () { echo $((9200 + $1)); }
