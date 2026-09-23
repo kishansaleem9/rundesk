@@ -6,6 +6,8 @@ import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { pickDocUpdatable } from './doc-update-fields'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -124,7 +126,10 @@ export class DocsService {
       // Left: the creator may have been removed (createdById is set null), and
       // a workspace-level doc has no space.
       .leftJoin(users, eq(users.id, docs.createdById))
-      .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+      // The doc's OWN workspace's space only: a spaceId written before the
+      // write paths checked could name another tenant's space, and this join
+      // put that space's name in the list.
+      .leftJoin(spaces, and(eq(spaces.id, docs.spaceId), eq(spaces.workspaceId, docs.workspaceId)))
       .where(where)
       .orderBy(asc(docs.position), asc(docs.createdAt))
   }
@@ -192,6 +197,62 @@ export class DocsService {
   }
 
   /**
+   * A doc's SPACE is where it lives: in the doc's own workspace, and one the
+   * caller can reach. Every path that sets it — create, import, from a
+   * template, PATCH — took any id. A doc in workspace A filed under workspace
+   * B's space put B's space NAME in A's doc list (the list joins it), and a
+   * private space in A accepted docs from people it keeps out.
+   *
+   * NOT FOUND either way, so a caller probing ids cannot tell "another
+   * workspace's" or "private to you" from "does not exist".
+   */
+  private async assertDocSpace(spaceId: string, workspaceId: string, actorId: string) {
+    const [space] = await this.db
+      .select({ workspaceId: spaces.workspaceId, visibility: spaces.visibility })
+      .from(spaces)
+      .where(eq(spaces.id, spaceId))
+      .limit(1)
+    if (!space || space.workspaceId !== workspaceId) throw new NotFoundException('Space not found')
+    const [member] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    const reachable = await checkContainerAccess(
+      this.db,
+      { spaceId, spaceVisibility: space.visibility },
+      { userId: actorId, workspaceRole: member?.role },
+    )
+    if (!reachable) throw new NotFoundException('Space not found')
+  }
+
+  /**
+   * A doc's PARENT is another doc in the same workspace — and, when a doc is
+   * MOVED, never one of its own descendants. The workspace half is the space
+   * rule's twin: a parent in another workspace joined two tenants' doc trees.
+   * The descendant half is older and quieter: hanging a doc under its own
+   * child made a loop, and a tree walk over it never ends.
+   */
+  private async assertDocParent(parentDocId: string, workspaceId: string, movingDocId?: string) {
+    const [parent] = await this.db
+      .select({ workspaceId: docs.workspaceId })
+      .from(docs)
+      .where(eq(docs.id, parentDocId))
+      .limit(1)
+    if (!parent || parent.workspaceId !== workspaceId) throw new NotFoundException('Parent doc not found')
+    if (!movingDocId) return
+    // Walk up from the new parent. Reaching the doc being moved means the
+    // parent is inside it. Bounded, so a loop already in the data cannot hang
+    // the request that would have made another.
+    let cursor: string | null = parentDocId
+    for (let depth = 0; cursor && depth < 256; depth += 1) {
+      if (cursor === movingDocId) throw new BadRequestException('A doc cannot be moved inside itself')
+      const [up] = await this.db.select({ parentDocId: docs.parentDocId }).from(docs).where(eq(docs.id, cursor)).limit(1)
+      cursor = up?.parentDocId ?? null
+    }
+  }
+
+  /**
    * §V2-10 — the tasks linked to this doc.
    *
    * `[06:15]` "acha, is document ka yeh task hai" — she describes reading the
@@ -236,6 +297,8 @@ export class DocsService {
     icon?: string
     createdById: string
   }) {
+    if (data.spaceId) await this.assertDocSpace(data.spaceId, data.workspaceId, data.createdById)
+    if (data.parentDocId) await this.assertDocParent(data.parentDocId, data.workspaceId)
     const [row] = await this.db
       .insert(docs)
       .values({
@@ -296,6 +359,7 @@ export class DocsService {
     // The title rule lives in `tiptap-markdown.ts` beside both converters, so
     // the unit test exercises the rule this uses rather than a copy of it.
     const { title, content } = splitTitleFromMarkdown(raw, opts.fileName ?? '')
+    if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
 
     const [row] = await this.db
       .insert(docs)
@@ -392,6 +456,7 @@ export class DocsService {
   ) {
     const [template] = await this.db.select().from(docTemplates).where(eq(docTemplates.id, templateId)).limit(1)
     if (!template || template.workspaceId !== workspaceId) throw new NotFoundException('Template not found in this workspace')
+    if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
 
     const [row] = await this.db
       .insert(docs)
@@ -436,7 +501,13 @@ export class DocsService {
       expectedUpdatedAt?: string
     },
   ) {
-    await this.assertDocAccess(docId, userId)
+    const doc = await this.assertDocAccess(docId, userId)
+    // Only the columns this route may write — see doc-update-fields.ts. The
+    // route refuses anything else by name; this is the service's own copy of
+    // the rule for its other callers (revision restore).
+    const writable = pickDocUpdatable(patch)
+    if (writable.spaceId) await this.assertDocSpace(writable.spaceId, doc.workspaceId, userId)
+    if (writable.parentDocId) await this.assertDocParent(writable.parentDocId, doc.workspaceId, docId)
     if (patch.expectedUpdatedAt) {
       const [current] = await this.db
         .select({ updatedAt: docs.updatedAt })
@@ -449,9 +520,8 @@ export class DocsService {
         throw new ConflictException('Doc was updated by a teammate. Refresh and retry your save.')
       }
     }
-    const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
-    delete set.expectedUpdatedAt
-    if (patch.content) set.plaintext = extractPlaintext(patch.content)
+    const set: Record<string, unknown> = { ...writable, updatedAt: new Date() }
+    if (writable.content) set.plaintext = extractPlaintext(writable.content)
     const [row] = await this.db.update(docs).set(set).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
     if (patch.content) await this.snapshotRevision(row, userId)

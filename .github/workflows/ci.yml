@@ -401,11 +401,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND TEN — every suite in the repo, which
+    # The job now runs ONE HUNDRED AND ELEVEN — every suite in the repo, which
     # `check-suites-registered.mjs` now enforces rather than this comment
-    # asserting it. At the measured 1.1 minutes each that is about 121
+    # asserting it. At the measured 1.1 minutes each that is about 122
     # minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110.
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1553,6 +1553,19 @@ jobs:
       - name: Task references stay inside their workspace
         if: '!cancelled()'
         run: node test/e2e/task-boundaries.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The same boundary for docs. `PATCH /docs/:id` spread its body into the
+      # row — a member moved a doc into another workspace, rewrote its creator,
+      # and minted a public link past `blockPublicSharing` — and create, import
+      # and create-from-template took any space, whose NAME the doc list then
+      # showed. Parents across workspaces, and a doc nested inside its own
+      # child, are refused too.
+      - name: Doc references stay inside their workspace
+        if: '!cancelled()'
+        run: node test/e2e/doc-boundaries.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

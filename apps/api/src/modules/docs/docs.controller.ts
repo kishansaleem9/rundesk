@@ -7,6 +7,7 @@ import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { DocsService, DOC_SCOPES, type DocScope } from './docs.service'
+import { unknownDocUpdateFields } from './doc-update-fields'
 import type { CurrentUserPayload } from '../tasks/types'
 
 /**
@@ -203,6 +204,19 @@ export class DocsController {
       expectedUpdatedAt?: string
     },
   ) {
+    // Refused BY NAME rather than dropped: a client sending `publicShareId`
+    // is told where public links are made, instead of getting a 200 and no
+    // link. See doc-update-fields.ts for what this route used to let through.
+    const unknown = unknownDocUpdateFields(body)
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        `These fields cannot be changed here: ${unknown.join(', ')}.` +
+          (unknown.includes('publicShareId') || unknown.includes('publicShareEnabledAt')
+            ? ' A public link is made with POST /docs/:docId/share.'
+            : '') +
+          (unknown.includes('workspaceId') ? ' A doc cannot be moved to another workspace.' : ''),
+      )
+    }
     return this.docs.update(docId, user.id, body)
   }
 

@@ -165,7 +165,8 @@ export class TrashService {
           byId: users.id, byName: users.displayName, byAvatar: users.avatarUrl,
         })
         .from(docs)
-        .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+        // The doc's own workspace's space only — see DocsService.assertDocSpace.
+        .leftJoin(spaces, and(eq(spaces.id, docs.spaceId), eq(spaces.workspaceId, docs.workspaceId)))
         .leftJoin(users, eq(users.id, docs.archivedById))
         .where(and(eq(docs.workspaceId, workspaceId), eq(docs.isArchived, true)))
       for (const r of res) rows.push({ id: r.id, type: 'doc', name: r.name, location: r.spaceName ?? '', deletedAt: stamp(r.at), deletedBy: deleter(r) })

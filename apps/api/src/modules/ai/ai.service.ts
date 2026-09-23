@@ -2692,7 +2692,9 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
         ? this.db
             .select({ id: docs.id })
             .from(docs)
-            .leftJoin(spaces, eq(spaces.id, docs.spaceId))
+            // The doc's own workspace's space only: a doc filed under another
+            // tenant's space is judged by nothing of theirs, and so excluded.
+            .leftJoin(spaces, and(eq(spaces.id, docs.spaceId), eq(spaces.workspaceId, docs.workspaceId)))
             .where(
               and(
                 eq(docs.workspaceId, workspaceId),
