@@ -140,9 +140,36 @@ lane_store_up () {
 # Lane k gets port 92<k>, beside storage on 91<k>.
 lane_model_port () { echo $((9200 + $1)); }
 
+# WHICH LANES GET A MODEL, AND IT IS A LIST BECAUSE IT HAS TO BE.
+#
+#   RUNDESK_LANE_MODEL=all     every lane
+#   RUNDESK_LANE_MODEL="3 4"   those lanes, and no others
+#   RUNDESK_LANE_MODEL=1       LANE ONE — a bare number is a list of one
+#   unset                      no lane
+#
+# All-or-nothing was the first spelling and it cannot express what this work
+# needs. `create-menu-ai` and `task-ai-bar` are ABOUT the product refusing for
+# want of a key, so they need a lane WITHOUT one, while the suites that reach
+# past the refusal need a lane with. One fleet, both configurations, chosen per
+# lane — the same shape `fleet-up.sh` already takes for its lane list.
+#
+# A NOTE ON `=1`, because it changed meaning and silence would be a trap. It
+# used to mean "on, everywhere"; it now means "lane 1". Every use of it so far
+# was a single-lane verification on lane 1, so the effect is unchanged — but
+# that is a coincidence, not a compatibility guarantee, and a script that meant
+# "everywhere" must now say `all`.
+lane_has_model () {
+  local k="$1" want="${RUNDESK_LANE_MODEL:-}"
+  [ -n "$want" ] || return 1
+  [ "$want" = "all" ] && return 0
+  local n
+  for n in $want; do [ "$n" = "$k" ] && return 0; done
+  return 1
+}
+
 lane_model_env () {
   local k="$1"
-  [ "${RUNDESK_LANE_MODEL:-0}" = "1" ] || return 0
+  lane_has_model "$k" || return 0
   export ANTHROPIC_BASE_URL="http://127.0.0.1:$(lane_model_port "$k")"
   # Any non-empty value: `ai.service.ts` only asks whether a key is SET before
   # building the client, and the stub authenticates nobody.
@@ -151,7 +178,7 @@ lane_model_env () {
 
 lane_model_up () {
   local k="$1"
-  [ "${RUNDESK_LANE_MODEL:-0}" = "1" ] || return 0
+  lane_has_model "$k" || return 0
   local port log
   port="$(lane_model_port "$k")"
   log="/tmp/claude-0/model-v$k.log"
