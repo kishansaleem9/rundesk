@@ -21,6 +21,7 @@
  *   node test/e2e/hook-portal-access.mjs --api 3011
  */
 import path from 'node:path'
+import { randomBytes } from 'node:crypto'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
@@ -99,9 +100,19 @@ try {
   const hookRows = async () => (await sql`select id from inbound_webhooks where list_id = ${LIST}`).map((r) => r.id)
   const portalRows = async () => (await sql`select id from client_portals where project_id = ${PROJECT}`).map((r) => r.id)
 
-  const adminHook = await api(HOOKS, { method: 'POST', body: { name: `${TAG} admin's hook` } })
-  if (adminHook.status >= 300 || !adminHook.data?.token) throw new Error(`the admin could not make a hook: ${adminHook.status}`)
-  const A = adminHook.data
+  /*
+   * THE ADMIN'S HOOK IS WRITTEN BY SQL, not made through the route this suite
+   * measures. It was `POST …/inbound-webhooks`, so `hpa-2` (nobody may add a
+   * hook) broke the fixture too: the run died making the admin's hook, before
+   * the check the patch names, and a short run is a measurement no plan can
+   * settle (`found-23-sep/fixtures-built-through-the-route-under-test`). The
+   * token is minted as the service mints one.
+   */
+  const [adminUser] = await sql`select id from users where email = ${EMAIL}`
+  const [A] = await sql`
+    insert into inbound_webhooks (list_id, token, name, created_by_id)
+    values (${LIST}, ${randomBytes(24).toString('hex')}, ${`${TAG} admin's hook`}, ${adminUser.id})
+    returning id, token`
 
   // ══ 1. INBOUND WEBHOOKS ══════════════════════════════════════════════════
   console.log('\n▶ a hook’s address is its creator’s, and the workspace admins’')
@@ -150,9 +161,12 @@ try {
   console.log('\n▶ portals are not a guest’s, and not minted while public sharing is blocked')
 
   const PORTALS = `/projects/${PROJECT}/portal`
-  const firstPortal = await M(PORTALS, { method: 'POST', body: { name: `${TAG} before the switch` } })
-  if (firstPortal.status >= 300 || !firstPortal.data?.token) throw new Error(`the member could not make the first portal: ${firstPortal.status}`)
-  const P1 = firstPortal.data
+  // The member's first portal, by SQL for the same reason as the admin's hook:
+  // `hpa-12` refuses every portal, and the run died here making it.
+  const [P1] = await sql`
+    insert into client_portals (workspace_id, project_id, token, name, created_by_id)
+    values (${WS}, ${PROJECT}, ${randomBytes(18).toString('base64url')}, ${`${TAG} before the switch`}, ${member.id ?? null})
+    returning id, token`
   const portalsBefore = (await portalRows()).length
   const guestLists = await G(PORTALS)
   const guestPortal = await G(PORTALS, { method: 'POST', body: { name: `${TAG} guest's` } })
