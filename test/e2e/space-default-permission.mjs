@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
  * with `<`, a branch that silently skipped turns into a shorter run that still
  * reports "0 failed".
  */
-const EXPECTED_CHECKS = 34
+const EXPECTED_CHECKS = 36
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -589,6 +589,31 @@ try {
     projectIntoEdit.status < 300 && (await projectIn(mine)) === editSpace2.id,
     'while moving it into another space they may edit works',
     `it answered ${projectIntoEdit.status} ${JSON.stringify(projectIntoEdit.error ?? '')}`,
+  )
+
+  // A folder is the third thing a member can move. Plain members hold
+  // `space.create`, which the folder routes require, so this is the member's
+  // own folder and only the destination rule can refuse it.
+  const myFolder = await makeAs(M, `/spaces/${editSpace.id}/folders`, { name: named('member folder') }, "the member's folder")
+  const folderIn = async (spaceId, id) =>
+    ((await A(`/spaces/${spaceId}/folders`)).data ?? []).some((f) => f.id === id)
+  const folderIntoView = await M(`/spaces/${editSpace.id}/folders/${myFolder}/move`, {
+    method: 'POST',
+    body: { targetSpaceId: viewSpace.id },
+  })
+  chk(
+    folderIntoView.status === 403 && (await folderIn(editSpace.id, myFolder)) && !(await folderIn(viewSpace.id, myFolder)),
+    'nor their own folder into the view-only space',
+    `it answered ${folderIntoView.status} ${JSON.stringify(folderIntoView.error ?? '')}`,
+  )
+  const folderIntoEdit = await M(`/spaces/${editSpace.id}/folders/${myFolder}/move`, {
+    method: 'POST',
+    body: { targetSpaceId: editSpace2.id },
+  })
+  chk(
+    folderIntoEdit.status < 300 && (await folderIn(editSpace2.id, myFolder)),
+    'while moving the folder into another space they may edit works',
+    `it answered ${folderIntoEdit.status} ${JSON.stringify(folderIntoEdit.error ?? '')}`,
   )
 
   const INTO_VIEW = named('applied into view')
