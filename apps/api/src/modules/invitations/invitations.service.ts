@@ -1,7 +1,7 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
-import { eq, and } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
-import { organizations, invitations, organizationMembers, workspaceMembers, users } from '@rundesk/db'
+import { organizations, invitations, organizationMembers, workspaceMembers, users, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
@@ -9,6 +9,21 @@ import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
+
+/**
+ * WHAT AN INVITATION MAY GRANT.
+ *
+ * Workspace roles come from the account-role enum, so without a list here an
+ * invitation could name `super_admin` — an account role, never a workspace
+ * one. And an organisation is handed over, not invited into, so `owner` is not
+ * on the organisation list.
+ */
+export const INVITE_WORKSPACE_ROLES = ['workspace_admin', 'manager', 'member', 'guest'] as const
+export type InviteWorkspaceRole = (typeof INVITE_WORKSPACE_ROLES)[number]
+export const INVITE_ORG_ROLES = ['admin', 'billing', 'member'] as const
+type InviteOrgRole = (typeof INVITE_ORG_ROLES)[number]
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 
 @Injectable()
 export class InvitationsService {
@@ -57,14 +72,80 @@ export class InvitationsService {
       .where(and(eq(invitations.organizationId, organizationId), eq(invitations.status, 'pending')))
   }
 
+  /**
+   * THE WORKSPACE GRANTS AN INVITATION MAY CARRY — each workspace one of THIS
+   * organisation's, each role one an invitation can grant, none named twice.
+   *
+   * Nothing checked the workspaces. An organisation's owner is an organisation
+   * admin, so `POST /invitations/:org/bulk` — reachable by anybody who signs up
+   * — made an invitation naming another organisation's workspace, with any
+   * role, and claiming it inserted the membership. Refused here, before
+   * anything is written or sent.
+   */
+  private async checkedMemberships(organizationId: string, memberships: unknown): Promise<Array<{ workspaceId: string; role: InviteWorkspaceRole }>> {
+    if (memberships == null) return []
+    if (!Array.isArray(memberships)) throw new BadRequestException('workspaceMemberships must be a list')
+    const wanted = memberships.map((m: any) => ({ workspaceId: m?.workspaceId, role: m?.role ?? 'member' }))
+    for (const m of wanted) {
+      if (typeof m.workspaceId !== 'string' || !UUID.test(m.workspaceId)) {
+        throw new BadRequestException('Each workspace an invitation grants needs a workspaceId')
+      }
+      if (!(INVITE_WORKSPACE_ROLES as readonly string[]).includes(m.role)) {
+        throw new BadRequestException(`An invitation cannot grant the workspace role "${String(m.role)}"`)
+      }
+    }
+    const ids = [...new Set(wanted.map((m) => m.workspaceId as string))]
+    if (ids.length !== wanted.length) throw new BadRequestException('An invitation names the same workspace twice')
+    const found = ids.length
+      ? await this.db
+          .select({ id: workspaces.id })
+          .from(workspaces)
+          .where(and(inArray(workspaces.id, ids), eq(workspaces.organizationId, organizationId)))
+      : []
+    if (found.length !== ids.length) {
+      throw new BadRequestException('Every workspace an invitation grants must belong to its organization')
+    }
+    return wanted as Array<{ workspaceId: string; role: InviteWorkspaceRole }>
+  }
+
+  /**
+   * The same rule at CLAIM time, for invitations written before it existed: a
+   * grant outside the invitation's organisation, or of a role an invitation
+   * cannot grant, is dropped rather than inserted.
+   */
+  private async grantableAtClaim(
+    tx: Pick<Db, 'select'>,
+    organizationId: string,
+    memberships: unknown,
+  ): Promise<Array<{ workspaceId: string; role: InviteWorkspaceRole }>> {
+    const wanted = this.inviteWorkspaces(memberships).filter((m) =>
+      (INVITE_WORKSPACE_ROLES as readonly string[]).includes(m.role ?? 'member'),
+    )
+    if (wanted.length === 0) return []
+    const inOrg = await tx
+      .select({ id: workspaces.id })
+      .from(workspaces)
+      .where(and(inArray(workspaces.id, wanted.map((m) => m.workspaceId)), eq(workspaces.organizationId, organizationId)))
+    const ok = new Set(inOrg.map((w) => w.id))
+    return wanted
+      .filter((m) => ok.has(m.workspaceId))
+      .map((m) => ({ workspaceId: m.workspaceId, role: (m.role ?? 'member') as InviteWorkspaceRole }))
+  }
+
   async create(organizationId: string, invitedById: string, dto: { email: string, orgRole?: string, workspaceMemberships?: any[] }) {
     const org = await this.db.select().from(organizations).where(eq(organizations.id, organizationId)).limit(1)
     if (org.length === 0) throw new NotFoundException('Organization not found')
 
+    const orgRole = dto.orgRole ?? 'member'
+    if (!(INVITE_ORG_ROLES as readonly string[]).includes(orgRole)) {
+      throw new BadRequestException(`An invitation cannot make someone "${String(orgRole)}" of an organization`)
+    }
+    const memberships = await this.checkedMemberships(organizationId, dto.workspaceMemberships)
+
     // Plan §14.1: an invite that grants workspace membership counts against the
     // target workspace's plan member cap. Block before sending the invite when a
     // target is already at capacity. No-op for enterprise (unlimited) workspaces.
-    for (const ws of this.inviteWorkspaces(dto.workspaceMemberships)) {
+    for (const ws of memberships) {
       await this.plans.assertCanAddMembers(ws.workspaceId)
     }
 
@@ -76,8 +157,8 @@ export class InvitationsService {
       .values({
         organizationId,
         email: dto.email.toLowerCase(),
-        orgRole: (dto.orgRole || 'member') as any,
-        workspaceMemberships: dto.workspaceMemberships || [],
+        orgRole: orgRole as InviteOrgRole,
+        workspaceMemberships: memberships,
         invitedByUserId: invitedById,
         token,
         expiresAt,
@@ -254,6 +335,8 @@ export class InvitationsService {
     if (invite.status !== 'pending') throw new GoneException('Invitation already used')
     if (invite.expiresAt < new Date()) throw new GoneException('Invitation expired')
 
+    const grants = await this.grantableAtClaim(this.db, invite.organizationId, invite.workspaceMemberships)
+
     const result = await this.db.transaction(async (tx) => {
       let userId = currentUserId
 
@@ -295,28 +378,27 @@ export class InvitationsService {
         }
       }
 
-      // Create org membership
+      // Create org membership. An `owner` on an invitation written before the
+      // role list existed joins as a member: ownership is handed over, not claimed.
       await tx
         .insert(organizationMembers)
         .values({
           organizationId: invite.organizationId,
           userId: userId!,
-          role: invite.orgRole,
+          role: (INVITE_ORG_ROLES as readonly string[]).includes(invite.orgRole) ? invite.orgRole : 'member',
         })
         .onConflictDoNothing()
 
-      // Create workspace memberships
-      if (invite.workspaceMemberships && Array.isArray(invite.workspaceMemberships)) {
-        for (const ws of invite.workspaceMemberships) {
-          await tx
-            .insert(workspaceMembers)
-            .values({
-              workspaceId: ws.workspaceId,
-              userId: userId!,
-              role: ws.role,
-            })
-            .onConflictDoNothing()
-        }
+      // Create workspace memberships — only the ones this organisation may grant.
+      for (const ws of grants) {
+        await tx
+          .insert(workspaceMembers)
+          .values({
+            workspaceId: ws.workspaceId,
+            userId: userId!,
+            role: ws.role,
+          })
+          .onConflictDoNothing()
       }
 
       // Mark invite accepted
@@ -335,7 +417,7 @@ export class InvitationsService {
     // Fire member.joined per workspace the invite granted (best effort). The
     // joining user is the actor. Runs after the tx commits so the membership
     // is durable before we advertise it.
-    for (const ws of this.inviteWorkspaces(invite.workspaceMemberships)) {
+    for (const ws of grants) {
       void this.fireWebhook(ws.workspaceId, 'member.joined', {
         workspaceId: ws.workspaceId,
         userId: result.userId,

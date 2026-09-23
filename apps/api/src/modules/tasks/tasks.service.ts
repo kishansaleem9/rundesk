@@ -5470,7 +5470,10 @@ export class TasksService {
       where: eq(taskActivity.taskId, taskId),
       orderBy: desc(taskActivity.createdAt),
       limit,
-      with: { actor: true },
+      // The public columns, never `true`: the whole row carried every actor's
+      // password hash, lockout counters and preferences to anyone who could
+      // open the task — guests included. See `public-user.ts`.
+      with: { actor: PUBLIC_USER_WITH },
     })
   }
 

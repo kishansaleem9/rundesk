@@ -1,11 +1,11 @@
-import { Body, Controller, Get, Header, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException } from '@nestjs/common'
+import { Body, Controller, Get, Header, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException, Req } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
-import { WorkspacesService } from './workspaces.service'
+import { WorkspacesService, withoutDomainToken } from './workspaces.service'
 import { PlansService } from '../plans/plans.service'
 import type { PlanLimitsOverride } from '../plans/plans.constants'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceAdminGuard, WORKSPACE_ADMIN_ROLES } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { canCreateWorkspace } from './workspace-creation-policy'
@@ -49,8 +49,11 @@ export class WorkspacesController {
   @Get(':workspaceId')
   @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Get a workspace by id (must be a member)' })
-  async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
-    return this.workspacesService.findById(workspaceId)
+  async getOne(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string, @Req() req: any) {
+    const ws = await this.workspacesService.findById(workspaceId)
+    // The domain's verification secret goes to the people who may change the
+    // domain — the same roles `PATCH` admits — and to nobody else.
+    return WORKSPACE_ADMIN_ROLES.includes(req.workspaceMember?.role) ? ws : withoutDomainToken(ws)
   }
 
   @Get(':workspaceId/plan')

@@ -494,8 +494,13 @@ export class TasksController {
    * §V2-08, frame `15:32` — "Send email to task". The address that turns an
    * email into a comment on this task. It has worked since email-to-task was
    * written; nothing has ever told anybody it exists.
+   *
+   * Behind the task's own access rule. With sign-in alone, anybody in any
+   * workspace who knew a task id read the list's secret inbound address — the
+   * `local_part` that lets mail create tasks and comments.
    */
   @Get(':taskId/email-address')
+  @UseGuards(ResourceMemberGuard)
   emailAddress(@Param('taskId') taskId: string) {
     return this.emailToTask.taskEmailAddress(taskId)
   }

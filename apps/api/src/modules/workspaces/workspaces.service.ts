@@ -144,6 +144,20 @@ const STARTER_CONTENT: Record<string, { space: string; project: string; list: st
   default: { space: 'Space', project: 'Projects', list: 'To do' },
 }
 
+/**
+ * A workspace as its MEMBERS see it: everything but `customDomainToken`, the
+ * `rundesk-verify=…` secret that proves control of the custom domain. The
+ * member list, the archived list and the sign-in answer (which carries this
+ * list) sent it to every member, guests included; the organisation roster had
+ * already been narrowed for the same reason. The people who may change the
+ * domain still read it from `GET /workspaces/:id`, which the settings page uses.
+ */
+export function withoutDomainToken<T extends { customDomainToken?: string | null }>(ws: T): Omit<T, 'customDomainToken'> {
+  const { customDomainToken: _token, ...rest } = ws
+  void _token
+  return rest
+}
+
 @Injectable()
 export class WorkspacesService {
   constructor(
@@ -186,12 +200,13 @@ export class WorkspacesService {
    * reading of a list that a security decision is taken from.
    */
   async findByMember(userId: string) {
-    return this.db
+    const rows = await this.db
       .select({ workspace: workspaces, role: workspaceMembers.role })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, false)))
       .orderBy(asc(workspaceMembers.joinedAt))
+    return rows.map((r) => ({ ...r, workspace: withoutDomainToken(r.workspace) }))
   }
 
   /** Soft-delete (archive) a workspace so it disappears from members' lists. */
@@ -241,12 +256,13 @@ export class WorkspacesService {
    * so an admin can restore one. Restore itself is admin-guarded.
    */
   async listArchivedWorkspaces(userId: string) {
-    return this.db
+    const rows = await this.db
       .select({ workspace: workspaces, role: workspaceMembers.role })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, true)))
       .orderBy(desc(workspaces.updatedAt))
+    return rows.map((r) => ({ ...r, workspace: withoutDomainToken(r.workspace) }))
   }
 
   /**

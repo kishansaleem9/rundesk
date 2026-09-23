@@ -68,6 +68,11 @@ export class InvitationsController {
       )
       .limit(1)
     if (!membership) throw new ForbiddenException('Workspace admin or manager access required')
+    // Nobody grants more than they hold: a manager may invite managers,
+    // members and guests, and only a workspace admin may invite an admin.
+    if (membership.role === 'manager' && body.role === 'workspace_admin') {
+      throw new ForbiddenException('Only a workspace admin can invite a workspace admin')
+    }
 
     // 1. Find organization for this workspace
     // We'll use the raw DB for a quick lookup
