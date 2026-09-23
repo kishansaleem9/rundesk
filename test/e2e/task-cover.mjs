@@ -41,7 +41,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 41
+const EXPECTED_CHECKS = 42
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -801,6 +801,25 @@ try {
   const boardCard = page.locator(`[data-testid="board-task-card"][data-task-id="${task.id}"]`)
   const cardImage = boardCard.locator('[data-testid="board-card-cover"][data-cover-kind="image"] img')
   const drawnBefore = await waitUntil(async () => (await cardImage.count()) > 0, { timeoutMs: 25_000 })
+  /*
+   * AND A SECOND BOARD, open at the same time, where nobody touches a sheet.
+   * The first board also hears the TASK's event, through the sheet's own
+   * subscription, so it cannot tell whether the list was told: a patch that
+   * dropped the list's event reddened nothing (`task-cover-19`, 41/41). A
+   * teammate's board hears only the list, which is who that event is for.
+   */
+  const teammate = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
+  await teammate.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+  await teammate.fill('input[type=email]', ME.email)
+  await teammate.fill('input[type=password]', ME.password)
+  await teammate.click('button[type=submit]')
+  await teammate.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+  await teammate.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`, { waitUntil: 'domcontentloaded' })
+  await teammate.getByTestId('work-view-tab-type-board').click({ timeout: 15_000 }).catch(() => {})
+  const teammateImage = teammate.locator(
+    `[data-testid="board-task-card"][data-task-id="${task.id}"] [data-testid="board-card-cover"][data-cover-kind="image"] img`,
+  )
+  const teammateDrawnBefore = await waitUntil(async () => (await teammateImage.count()) > 0, { timeoutMs: 25_000 })
   await boardCard.click({ timeout: 15_000 }).catch(() => {})
   await page.getByTestId('task-tab-attachments').click({ timeout: 15_000 }).catch(() => {})
   await page.locator(`[data-testid="attachment-more"][data-attachment-id="${shown.id}"]`).click({ timeout: 15_000 }).catch(() => {})
@@ -819,6 +838,15 @@ try {
         ? 'the sheet never removed the attachment'
         : 'the card still draws an image, and its URL is to an object that was deleted',
   )
+  const teammateCleared = removedInSheet && (await waitUntil(async () => (await teammateImage.count()) === 0, { timeoutMs: 10_000 }))
+  chk(
+    teammateDrawnBefore && removedInSheet && teammateCleared,
+    'and so does a second board open at the same time, where nobody touched the sheet',
+    !teammateDrawnBefore
+      ? 'the second board never drew the cover, so there was nothing to take off'
+      : 'the second board still draws the image: nothing told the list',
+  )
+  await teammate.context().close().catch(() => {})
 
   await A(`/tasks/${task.id}`, { method: 'DELETE' })
 } catch (e) {
