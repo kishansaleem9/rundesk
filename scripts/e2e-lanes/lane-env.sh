@@ -86,17 +86,30 @@ lane_store_up () {
 # something to answer.
 #
 # GATED ON `RUNDESK_LANE_MODEL=1`, DELIBERATELY, AND THIS IS THE WHOLE POINT.
-# Six suites — ai-answer-rendering, ai-assign, ai-create-containers,
-# clip-created-card, create-menu-ai, task-ai-bar — currently assert the REFUSAL:
-# 503, and the words "not configured". Every one of them flips the day a lane
-# can answer, which is precisely the defect class this audit found twice in one
-# night: a green that depended on the environment being broken. The difference
-# is that this one is known in advance, so it is opt-in until each of those six
-# has had its refusal re-aimed from STARVED to ARRANGED — the shape `task-cover`
-# already uses for storage, and which `model-stub.mjs` supports through
-# `POST /__control/next` with a `count` that outlasts the SDK's retries.
+# FOUR suites assert the model refusal — 503 and the words "not configured" —
+# and every one flips the day a lane can answer:
 #
-# Turning this on before that work is done would take six green suites red at
+#     ai-create-containers   5 assertions
+#     create-menu-ai         7
+#     task-ai-bar            7
+#     ai-answer-rendering    2
+#
+# That is 21, COUNTED INSIDE `chk(` CALLS rather than grepped for. A grep over
+# whole files says six suites, because `ai-assign` and `clip-created-card` each
+# carry a header sentence about the missing key and assert nothing about it —
+# `clip-created-card`'s mentions are all about STORAGE. Overstating the cost of
+# this work in the one comment somebody will read before starting it would be
+# the same habit this audit spent a night finding in its own ledger.
+#
+# It is the defect class found twice in one night — a green that depended on
+# the environment being broken — except known in advance. So it is opt-in until
+# each of those four has had its refusal re-aimed from STARVED to ARRANGED: the
+# shape `task-cover` already uses for storage, which `model-stub.mjs` supports
+# through `POST /__control/next` with a `count` that outlasts the SDK's retries.
+# The two stale header sentences want fixing at the same time; neither is a
+# check, so neither blocks the flag.
+#
+# Turning this on before that work is done would take four green suites red at
 # once, which is how a gate gets switched off rather than satisfied.
 #
 # Lane k gets port 92<k>, beside storage on 91<k>.

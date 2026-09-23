@@ -14,8 +14,11 @@
  * does, lazily, on the first action that needs it.
  *
  * AND WHY PART OF THIS IS STUBBED, said plainly. Clip storage is R2, and R2 is
- * not configured here or in CI — presign answers `400 R2 is not configured`
- * and share answers `500 Storage is not configured`. So the browser half stubs
+ * not configured in CI — presign answers `400 R2 is not configured` and share
+ * answers `500 Storage is not configured`. IT IS CONFIGURED IN A LANE, since
+ * `s3-stub.mjs`: both routes answer 201 there, which is why the guard below
+ * accepts a 2xx and why the pending-clip check found a real defect rather than
+ * an empty library. So the browser half stubs
  * presign, the PUT and share, which means these checks are about THIS CODE
  * calling the right things with the right arguments, and NOT about R2 working.
  *

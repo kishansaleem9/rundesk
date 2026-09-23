@@ -39,7 +39,7 @@
  * own tasks under a run-unique tag, and asserts the answer before against the
  * answer after. Its tasks are archived in `finally`.
  *
- * NO PROVIDER KEY EXISTS HERE, so `/ai/chat` 503s and the `suggest_assignee`
+ * NO PROVIDER KEY IS CONFIGURED BY DEFAULT, so `/ai/chat` 503s and `suggest_assignee`
  * TOOL cannot be exercised through a model. The tool's schema and its "does NOT
  * assign" instruction are pinned in `apps/api/src/modules/ai/ai-assign.test.ts`;
  * what is exercised here is the service and the route beneath it, which is
