@@ -44,13 +44,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Load me/permissions into the role hook and gate the permission-backed controls on it.
 
-### `ledger-rows/defect-mention-picker-200-cap` — open, medium
+### `ledger-rows/defect-mention-picker-200-cap` — **closed**, break run pending
 
 **@ picker Tasks tab fetches limit=200 and filters in the browser — task 201 cannot be mentioned and shows 'no matches'**
 
 *Evidence:* reaudit.md:2706-2718 ('Not fixed'). task-detail-sheet.tsx:5937 and :8965 call `/tasks/workspace/${workspaceId}?limit=200` and filter locally. Locations is searched server-side.
 
 *To close:* Send the typed query to the server, as Locations does, for Tasks/Docs/Whiteboards/Channels.
+
+*Closed (with `commit-log/log-d85dcad-1`):* `GET /tasks/workspace/:id` takes `q` — the title and the list's and project's names, matched in SQL BEFORE the limit, with `%`, `_` and `\` taken as text — and every task picker asks it through one hook, `lib/use-task-search.ts`, with the typed words in the query key and the previous answer kept on screen while the next loads: the @ Tasks tab, chat's mention list and its insert picker, merge, convert to subtask, dependencies, a Tasks custom field (which had no search at all — a `<select>` of 200 — and now names chosen tasks by fetching each, not from the 200) and adding to a sprint. Found on the way and fixed: the convert picker left subtasks out by `parentTaskId`, which the listing never sent, so it offered them (the server then refused); the @ Tasks tab said "No matching tasks" while the search was still in flight. `task-pickers-search` 8/8 on a workspace of 236 tasks whose target is not among the newest 200 — the server's search (the word, `%`, a list's name, `parentTaskId`) and four pickers on screen (@ tab with the search held in flight, merge, convert with the subtask left out, the Tasks field relating and drawing it) — 0 of 8 on the old code. `tps-1..11`, each compiled. `task-menu`'s own-parent check read the list in the same tick it typed, which only worked while filtering was instant; it now waits for that search's answer (37/37). Regression 12/12: task-mentions, task-merge, task-menu, custom-field-types, custom-field-progress, chat-message-actions, comment-plus-menu, doc-task-links, task-depth, task-boundaries, video1-fast-items and the new suite. *Not checked one by one:* chat's two pickers, dependencies and the sprint picker — same hook, same three-line change, no check of their own.
 
 ### `product-siblings/export-visible-columns-ignores-view` — open, medium
 
@@ -60,13 +62,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Send fields from the view's visible set, mapping the web keys to the server keys, and add custom-field columns to the export. Extend the export suite to hide a column and assert it is absent.
 
-### `commit-log/log-d85dcad-1` — open, medium
+### `commit-log/log-d85dcad-1` — **closed**, break run pending
 
 **The @ picker's Tasks tab loads 200 tasks and filters them in the browser; Docs, Whiteboards and Channels also filter in the browser**
 
 *Evidence:* Commit d85dcad 'Also recorded, not fixed'. It is still true. task-detail-sheet.tsx:5935-5939 and :8965 fetch /tasks/workspace/:ws?limit=200. The same cap appears at workspace-chat-page.tsx:491 and :4451, task-merge-dialog.tsx:72 and task-convert-dialog.tsx:68. Only Locations searches on the server (task-detail-sheet.tsx:5965-5972). Ledger lines 2706-2718 say 'Not fixed'. The 201st task shows 'no matches'.
 
 *To close:* Search on the server with a q parameter, as Locations does, for Tasks, Docs, Whiteboards and Channels, and in the other pickers. Add a check that seeds more than 200 tasks and mentions the newest, with a break patch.
+
+*Closed:* the same fix as `ledger-rows/defect-mention-picker-200-cap`, which carries the evidence and the numbers.
 
 ### `resume-defects/resume-8-reply-routing` — open, medium
 

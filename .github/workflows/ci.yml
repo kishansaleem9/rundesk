@@ -427,11 +427,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND TWENTY-THREE — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND TWENTY-FOUR — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 135 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123.
+    # that is about 136 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1730,6 +1730,17 @@ jobs:
       - name: Avatars and logos are saved at an address that lasts
         if: '!cancelled()'
         run: node test/e2e/stable-images.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Every task picker finds a task by its words, wherever it is. They all
+      # read the newest 200 tasks and filtered in the browser, so task 201
+      # answered "no matches". Seeds 236 tasks, so it is one of the longer
+      # suites here.
+      - name: Task pickers search the whole workspace
+        if: '!cancelled()'
+        run: node test/e2e/task-pickers-search.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

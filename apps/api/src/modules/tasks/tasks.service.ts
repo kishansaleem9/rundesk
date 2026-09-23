@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { eq, and, or, asc, desc, inArray, isNull, sql, type SQL } from 'drizzle-orm'
+import { eq, and, or, asc, desc, ilike, inArray, isNull, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
   tasks,
@@ -2186,10 +2186,23 @@ export class TasksService {
        * "Overdue: 0" as a fact.
        */
       assigneeId?: string
+      /**
+       * Words the person typed, matched IN SQL against the task's title and
+       * the names of its list and project — before the limit.
+       *
+       * Every task picker (the @ Tasks tab, chat mentions, merge, convert,
+       * dependencies) asked for the newest 200 and filtered those in the
+       * browser, so task 201 answered "no matches" however exactly it was
+       * typed. Filtering here means the limit applies to what matched.
+       */
+      q?: string
     } = {},
   ) {
     const { includeAssignees = true, actorId, actorRole, assigneeId } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
+    const words = (opts.q ?? '').trim().slice(0, 200)
+    // `%`, `_` and `\` are LIKE's own syntax; a title containing them is text.
+    const like = words ? `%${words.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null
 
     const rawRows = await this.db
       .select({
@@ -2199,6 +2212,9 @@ export class TasksService {
         statusCategory:    tasks.statusCategory,
         priority:          tasks.priority,
         isMilestone:       tasks.isMilestone,
+        // The convert-to-subtask picker leaves subtasks out (a subtask cannot
+        // be a parent) by this field — which was never sent, so it offered them.
+        parentTaskId:      tasks.parentTaskId,
         listId:            lists.id,
         listName:          lists.name,
         projectId:         projects.id,
@@ -2227,6 +2243,9 @@ export class TasksService {
           eq(tasks.isArchived, false),
           assigneeId
             ? sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${assigneeId})`
+            : undefined,
+          like
+            ? or(ilike(tasks.title, like), ilike(lists.name, like), ilike(projects.name, like))
             : undefined,
         ),
       )

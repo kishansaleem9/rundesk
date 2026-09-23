@@ -145,6 +145,7 @@ export class TasksController {
     @CurrentUser() user: CurrentUserPayload,
     @Query('limit') limit?: string,
     @Query('assigneeId') assigneeId?: string,
+    @Query('q') q?: string,
   ) {
     // Pass the caller so the listing is scoped to containers they can access
     // (the guard only checks workspace membership, not private space/project
@@ -159,6 +160,7 @@ export class TasksController {
        * check. The member-scoped endpoint below is the one for that.
        */
       assigneeId: assigneeId === 'me' ? user.id : undefined,
+      q,
     })
   }
 

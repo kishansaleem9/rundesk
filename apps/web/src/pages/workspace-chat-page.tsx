@@ -77,6 +77,7 @@ import { openPersonPanel } from '../store/person-panel'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
 import { InlineSkeleton, ListSkeleton } from '../components/loading-skeletons'
+import { useTaskSearch } from '../lib/use-task-search'
 
 type Channel = {
   id: string
@@ -516,10 +517,9 @@ export function ChatPage() {
   const mentionCandidates = (membersQuery.data ?? []).filter((m) =>
     (m.displayName || m.email).toLowerCase().includes(mentionQuery),
   )
-  const mentionTasksQuery = useQuery({
-    queryKey: ['chat-mention-tasks', workspaceId],
-    queryFn: () => api<MentionTask[]>(`/tasks/workspace/${workspaceId}?limit=200`),
-    enabled: !!workspaceId && !!mentionTrigger && mentionTab === 'tasks',
+  const mentionTasksQuery = useTaskSearch<MentionTask>(workspaceId, mentionQuery, {
+    key: 'chat-mention-tasks',
+    enabled: !!mentionTrigger && mentionTab === 'tasks',
   })
   const mentionDocsQuery = useQuery({
     queryKey: ['chat-mention-docs', workspaceId],
@@ -4603,11 +4603,7 @@ function InsertReferencePicker({
   const { t } = useTranslation()
   const [tab, setTab] = useState<'tasks' | 'docs'>('tasks')
   const [q, setQ] = useState('')
-  const tasksQuery = useQuery({
-    queryKey: ['chat-insert-tasks', workspaceId],
-    queryFn: () => api<MentionTask[]>(`/tasks/workspace/${workspaceId}?limit=200`),
-    enabled: !!workspaceId && tab === 'tasks',
-  })
+  const tasksQuery = useTaskSearch<MentionTask>(workspaceId, q, { key: 'chat-insert-tasks', enabled: tab === 'tasks' })
   const docsQuery = useQuery({
     queryKey: ['chat-insert-docs', workspaceId],
     queryFn: () => api<MentionDoc[]>(`/workspaces/${workspaceId}/docs`),

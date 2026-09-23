@@ -438,6 +438,15 @@ try {
   chk(converter, 'Convert to opens a parent picker', 'Convert to opened nothing')
 
   await page.getByTestId('task-convert-search').fill(`History check ${stamp}`, { timeout: 8000 }).catch(() => {})
+  // The picker searches on the server now, and the previous answer stays on
+  // screen while the next one loads — so this search has ANSWERED when the
+  // list is empty (itself left out) or offers itself, and not before.
+  await waitUntil(
+    async () =>
+      (await page.getByTestId('task-convert-empty').count()) > 0 ||
+      (await page.getByTestId('task-convert-candidate').filter({ hasText: `History check ${stamp}` }).count()) > 0,
+    { timeoutMs: 10_000 },
+  )
   const offersItself = await page.getByTestId('task-convert-candidate').count()
   chk(
     offersItself === 0,

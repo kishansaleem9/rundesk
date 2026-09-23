@@ -33,6 +33,7 @@ import {
 import { Merge } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { useTaskSearch } from '../lib/use-task-search'
 
 type Candidate = {
   id: string
@@ -66,11 +67,7 @@ export function TaskMergeDialog({
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
 
-  const candidatesQuery = useQuery({
-    enabled: open && !!workspaceId,
-    queryKey: ['merge-targets', workspaceId],
-    queryFn: () => api<Candidate[]>(`/tasks/workspace/${workspaceId}?limit=200`),
-  })
+  const candidatesQuery = useTaskSearch<Candidate>(workspaceId, search, { key: 'merge-targets', enabled: open })
 
   const merge = useMutation({
     mutationFn: (targetTaskId: string) =>
@@ -97,7 +94,8 @@ export function TaskMergeDialog({
 
   const candidates = (candidatesQuery.data ?? [])
     .filter((c) => c.id !== taskId)
-    .filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
+    // Narrowed by the server, which also matches the list's and project's
+    // names; a title-only filter here would drop those.
     .slice(0, 50)
 
   return (

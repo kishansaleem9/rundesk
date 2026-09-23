@@ -1,4 +1,4 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueries, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from '@tanstack/react-router'
 import {
   Badge,
@@ -137,6 +137,7 @@ import {
 } from '../lib/task-dates'
 import { TaskSheetSkeleton } from './loading-skeletons'
 import { InlineSkeleton } from './loading-skeletons'
+import { useTaskSearch } from '../lib/use-task-search'
 
 /**
  * Stream a task/project summary from the SSE endpoint (Plan §7.5), invoking
@@ -4924,14 +4925,11 @@ function DependenciesPanel({
   const [relatedId, setRelatedId] = useState('')
   const [type, setType] = useState<'blocks' | 'blocked_by' | 'related_to'>('blocks')
   const [taskSearch, setTaskSearch] = useState('')
-  const tasksQuery = useQuery({
-    queryKey: ['dependency-task-picker', workspaceId],
-    queryFn: () =>
-      api<Array<{ id: string; title: string; listName?: string; projectName?: string }>>(
-        `/tasks/workspace/${workspaceId}?limit=1000`,
-      ),
-    enabled: !!workspaceId,
-  })
+  const tasksQuery = useTaskSearch<{ id: string; title: string; listName?: string; projectName?: string }>(
+    workspaceId,
+    taskSearch,
+    { key: 'dependency-task-picker' },
+  )
   const graphQuery = useQuery({
     queryKey: ['task', taskId, 'dependency-graph'],
     queryFn: () =>
@@ -5932,10 +5930,9 @@ function CommentsPanel({
     queryFn: () => api<WorkspaceMemberLite[]>(`/workspaces/${workspaceId}/members`),
     enabled: !!workspaceId,
   })
-  const mentionTasksQuery = useQuery({
-    queryKey: ['mention-tasks', workspaceId],
-    queryFn: () => api<MentionTaskLite[]>(`/tasks/workspace/${workspaceId}?limit=200`),
-    enabled: !!workspaceId && mentionTab === 'tasks',
+  const mentionTasksQuery = useTaskSearch<MentionTaskLite>(workspaceId, mentionQuery, {
+    key: 'mention-tasks',
+    enabled: mentionTab === 'tasks',
   })
   const mentionDocsQuery = useQuery({
     queryKey: ['mention-docs', workspaceId],
@@ -6765,13 +6762,17 @@ function CommentsPanel({
             )}
             {mentionTab === 'tasks' && (
               <div className="max-h-40 overflow-auto">
-                {taskMentionCandidates.length === 0 ? (
-                  <div className="px-3 py-3 text-xs text-muted-foreground">{t('taskDetail.noMatchingTasks')}</div>
+                {/* The server is still searching: shapes, not "no matching tasks". */}
+                {mentionTasksQuery.isPending ? (
+                  <div className="px-3 py-3" data-testid="mention-tasks-searching"><InlineSkeleton /></div>
+                ) : taskMentionCandidates.length === 0 ? (
+                  <div className="px-3 py-3 text-xs text-muted-foreground" data-testid="mention-tasks-none">{t('taskDetail.noMatchingTasks')}</div>
                 ) : (
                   taskMentionCandidates.slice(0, 8).map((task, idx) => (
                     <button
                       key={task.id}
                       type="button"
+                      data-testid="mention-task-row"
                       className={cn(
                         'w-full px-2.5 py-2 text-left text-xs',
                         idx === mentionIndex ? 'bg-muted' : 'hover:bg-muted/70',
@@ -8942,9 +8943,12 @@ function PeopleFieldEditor({
  * writes its own value and claims nothing about the dependency graph.
  *
  * The chosen tasks are drawn as rows with their titles, because a list of
- * uuids is not a reference anybody can follow. Titles come from the same query
- * the picker offers from, which is the same set the API will accept — a picker
- * that could offer more than the write takes is a 400 waiting for a click.
+ * uuids is not a reference anybody can follow. Each title is fetched by its
+ * task's id: the picker used to take titles from the newest 200 tasks it had
+ * asked for, so a chosen task outside them was drawn as "unknown" — and it
+ * could only OFFER those 200, from a <select> with no search. Now it searches
+ * on the server (`useTaskSearch`), the same tasks of the same workspace the
+ * write accepts.
  */
 function TasksFieldEditor({
   value,
@@ -8960,15 +8964,20 @@ function TasksFieldEditor({
   onCommit: (next: CustomFieldValue) => void
 }) {
   const { t } = useTranslation()
-  const { data: candidates = [] } = useQuery({
-    queryKey: ['workspace-tasks-lite', workspaceId],
-    queryFn: () => api<MentionTaskLite[]>(`/tasks/workspace/${workspaceId}?limit=200`),
-    enabled: !!workspaceId,
+  const [search, setSearch] = useState('')
+  const [picking, setPicking] = useState(false)
+  const chosen = useQueries({
+    queries: value.map((id) => ({
+      queryKey: ['task', id, 'title'],
+      queryFn: () => api<{ id: string; title: string }>(`/tasks/${id}`),
+      staleTime: 60_000,
+    })),
   })
-  const titleOf = (id: string) => candidates.find((c) => c.id === id)?.title
+  const titleOf = (id: string) => chosen[value.indexOf(id)]?.data?.title
+  const results = useTaskSearch<MentionTaskLite>(workspaceId, search, { key: 'cf-tasks', enabled: picking })
   /* The task itself is never offered: the API refuses a self-reference, and a
    * row that navigates to the page you are already on is not a reference. */
-  const offerable = candidates.filter((c) => c.id !== taskId && !value.includes(c.id))
+  const offerable = (results.data ?? []).filter((c) => c.id !== taskId && !value.includes(c.id)).slice(0, 8)
 
   return (
     <div className="space-y-1" data-testid="cf-tasks">
@@ -8979,8 +8988,8 @@ function TasksFieldEditor({
           className="flex items-center gap-2 rounded border border-border px-2 py-1 text-xs"
         >
           <span className="truncate">
-            {/* An id with no title is a task outside the 200 this picker
-                asked for. Saying so is better than drawing a uuid as a name. */}
+            {/* No title: a task this person cannot open, or one since deleted.
+                Saying so is better than drawing a uuid as a name. */}
             {titleOf(id) ?? t('taskDetail.fieldType.tasksUnknown')}
           </span>
           <button
@@ -8995,24 +9004,44 @@ function TasksFieldEditor({
           </button>
         </div>
       ))}
-      <select
-        data-testid="cf-tasks-add"
+      <Input
+        data-testid="cf-tasks-search"
         aria-label={t('taskDetail.fieldType.tasksAdd')}
-        disabled={disabled || offerable.length === 0}
-        value=""
+        placeholder={t('taskDetail.fieldType.tasksAdd')}
+        disabled={disabled}
+        value={search}
+        onFocus={() => setPicking(true)}
         onChange={(e) => {
-          if (!e.target.value) return
-          onCommit([...value, e.target.value])
+          setSearch(e.target.value)
+          setPicking(true)
         }}
-        className="h-7 w-full rounded-md border border-input bg-transparent px-2 text-xs"
-      >
-        <option value="">{t('taskDetail.fieldType.tasksAdd')}</option>
-        {offerable.map((c) => (
-          <option key={c.id} value={c.id}>
-            {c.title}
-          </option>
-        ))}
-      </select>
+        className="h-7 text-xs"
+      />
+      {picking && !disabled && (
+        <div className="max-h-48 overflow-auto rounded-md border border-border" data-testid="cf-tasks-options">
+          {results.isPending ? (
+            <div className="px-2 py-1.5"><InlineSkeleton /></div>
+          ) : offerable.length === 0 ? (
+            <p className="px-2 py-1.5 text-[11px] text-muted-foreground">{t('taskDetail.fieldType.tasksNoMatch')}</p>
+          ) : (
+            offerable.map((c) => (
+              <button
+                key={c.id}
+                type="button"
+                data-testid={`cf-tasks-option-${c.id}`}
+                className="block w-full truncate px-2 py-1 text-left text-xs hover:bg-muted/60"
+                onClick={() => {
+                  onCommit([...value, c.id])
+                  setSearch('')
+                  setPicking(false)
+                }}
+              >
+                {c.title}
+              </button>
+            ))
+          )}
+        </div>
+      )}
     </div>
   )
 }

@@ -31,6 +31,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import type { SprintDetail, SprintVelocityRow } from '../lib/sprint-types'
 import { isSprintTaskDone, sprintDayProgress } from '../lib/sprint-types'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { useTaskSearch } from '../lib/use-task-search'
 
 const STATUS_LABEL: Record<string, TranslationKey> = {
   planned: 'sprintDetail.status.planned',
@@ -57,14 +58,11 @@ export function SprintDetailPage() {
     queryFn: () => api<SprintVelocityRow[]>(`/workspaces/${workspaceId}/reports/sprints`),
   })
 
-  const workspaceTasksQuery = useQuery({
-    queryKey: ['workspace-tasks-picker', workspaceId],
-    queryFn: () =>
-      api<Array<{ id: string; title: string; listName: string; projectName: string }>>(
-        `/tasks/workspace/${workspaceId}?limit=200`,
-      ),
-    enabled: addOpen,
-  })
+  const workspaceTasksQuery = useTaskSearch<{ id: string; title: string; listName: string; projectName: string }>(
+    workspaceId,
+    taskSearch,
+    { key: 'workspace-tasks-picker', enabled: addOpen },
+  )
 
   const updateSprint = useMutation({
     mutationFn: (body: { status?: string }) =>
@@ -135,11 +133,8 @@ export function SprintDetailPage() {
   const onTrack = sprint.completedPoints >= idealProgress * 0.85
 
   const sprintTaskIds = new Set(sprint.tasks.map((task) => task.id))
-  const pickerTasks = (workspaceTasksQuery.data ?? []).filter(
-    (task) =>
-      !sprintTaskIds.has(task.id) &&
-      task.title.toLowerCase().includes(taskSearch.trim().toLowerCase()),
-  )
+  // Narrowed by the server (title, list and project), before its limit.
+  const pickerTasks = (workspaceTasksQuery.data ?? []).filter((task) => !sprintTaskIds.has(task.id))
 
   return (
     <WorkPageShell>

@@ -35,6 +35,7 @@ import {
 } from '@rundesk/ui'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { useTaskSearch } from '../lib/use-task-search'
 
 type Candidate = {
   id: string
@@ -62,10 +63,9 @@ export function TaskConvertDialog({
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
 
-  const candidatesQuery = useQuery({
-    enabled: open && !!workspaceId && !hasSubtasks,
-    queryKey: ['convert-parents', workspaceId],
-    queryFn: () => api<Candidate[]>(`/tasks/workspace/${workspaceId}?limit=200`),
+  const candidatesQuery = useTaskSearch<Candidate>(workspaceId, search, {
+    key: 'convert-parents',
+    enabled: open && !hasSubtasks,
   })
 
   const convert = useMutation({
@@ -86,7 +86,8 @@ export function TaskConvertDialog({
     // Itself, and anything that is already a subtask: both are refused by the
     // API, so offering them would be offering an error.
     .filter((c) => c.id !== taskId && !c.parentTaskId)
-    .filter((c) => c.title.toLowerCase().includes(search.trim().toLowerCase()))
+    // Narrowed by the server, which also matches the list's and project's
+    // names; a title-only filter here would drop those.
     .slice(0, 50)
 
   return (
@@ -123,7 +124,7 @@ export function TaskConvertDialog({
                   ))}
                 </li>
               ) : candidates.length === 0 ? (
-                <li className="py-6 text-center text-sm text-muted-foreground">{t('taskConvert.noMatches')}</li>
+                <li className="py-6 text-center text-sm text-muted-foreground" data-testid="task-convert-empty">{t('taskConvert.noMatches')}</li>
               ) : (
                 candidates.map((c) => (
                   <li key={c.id}>
