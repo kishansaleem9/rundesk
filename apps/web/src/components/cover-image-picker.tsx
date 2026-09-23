@@ -100,7 +100,23 @@ export type CoverChoice =
  * The presign POST still SENDS `contentType`, because that is the request's
  * own shape. Only the read was wrong.
  */
-type Attachment = { id: string; fileName: string; mimeType?: string | null; storageKey: string; url?: string | null }
+/*
+ * `kind`, BECAUSE A LINK IS NOT A KEY. "Attach by link" stores the URL where an
+ * upload stores its object key, and this tab committed both as a stored key —
+ * so choosing a linked image wrote a URL into `coverStorageKey`, which the
+ * server now refuses (a stored cover must be one of the task's own objects),
+ * and before that signed as `${CDN}/https://…`, a cover that never drew. The
+ * API says which one each row is; a link becomes the cover's LINK, which is
+ * what the Link tab would have written for the same address.
+ */
+type Attachment = {
+  id: string
+  fileName: string
+  mimeType?: string | null
+  storageKey: string
+  kind?: 'link' | 'file'
+  url?: string | null
+}
 
 export function CoverImagePicker({
   open,
@@ -358,7 +374,13 @@ export function CoverImagePicker({
                     <button
                       key={a.id}
                       data-testid="cover-attachment-option"
-                      onClick={() => commit({ kind: 'stored', storageKey: a.storageKey })}
+                      onClick={() =>
+                        commit(
+                          a.kind === 'link'
+                            ? { kind: 'link', url: a.url ?? a.storageKey }
+                            : { kind: 'stored', storageKey: a.storageKey },
+                        )
+                      }
                       className="aspect-[5/3] rounded-lg border-2 border-transparent hover:border-accent transition-all relative overflow-hidden bg-card/40"
                     >
                       {a.url && <img src={a.url} alt={a.fileName} className="h-full w-full object-cover" />}

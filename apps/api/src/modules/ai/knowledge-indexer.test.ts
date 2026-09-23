@@ -226,6 +226,19 @@ describe('KnowledgeIndexerService — attachment contents (§15.1)', () => {
     assert.equal(res.total, 0)
   })
 
+  it('skips a linked attachment — its key IS the URL, and there is no object to read', async () => {
+    // "Attach by link" posts contentType text/url, which isExtractableAttachment
+    // accepts as text/* — so the type check alone let every link through to a
+    // bucket read that could only fail, logged as "unreadable" on every pass.
+    const { db } = makeIndexerDb({
+      task_attachments: [attachmentRow({ id: 'a3', fileName: 'spec', contentType: 'text/url', storageKey: 'https://example.com/spec' })],
+    })
+    const { r2, reads } = makeR2({})
+    const svc = new KnowledgeIndexerService(db, localEmbeddings, r2)
+    assert.deepEqual(await svc.collectAttachmentSources('w1'), [])
+    assert.deepEqual(reads, [], 'a link is never fetched from the bucket')
+  })
+
   it('skips a text attachment larger than the byte cap without reading it', async () => {
     const { db } = makeIndexerDb({
       task_attachments: [attachmentRow({ sizeBytes: 5_000_000 })], // > MAX_ATTACHMENT_BYTES

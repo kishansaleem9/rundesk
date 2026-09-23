@@ -18,8 +18,10 @@ p = '/home/user/rundesk/apps/web/src/components/cover-image-picker.tsx'
 # only the filter and `r.contentType` became a type error — a patch that does
 # not build proves nothing, and it is worse than no patch because it reports as
 # a confirmation.
-a = "type Attachment = { id: string; fileName: string; mimeType?: string | null; storageKey: string; url?: string | null }"
-b = "type Attachment = { id: string; fileName: string; contentType?: string | null; storageKey: string; url?: string | null }"
+# Re-anchored on 23 September: the type became multi-line when it gained
+# `kind`, so the field is matched on its own line.
+a = "  mimeType?: string | null\n  storageKey: string\n"
+b = "  contentType?: string | null\n  storageKey: string\n"
 c = "(r.mimeType ?? '').startsWith('image/')"
 d = "(r.contentType ?? '').startsWith('image/')"
 s = io.open(p, encoding='utf-8').read()

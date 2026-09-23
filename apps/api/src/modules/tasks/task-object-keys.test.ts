@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { isTaskUploadKey, isTaskOwnObjectKey } from './task-object-keys'
+import { attachmentKind, isLinkAttachmentKey, isTaskUploadKey, isTaskOwnObjectKey } from './task-object-keys'
 
 /**
  * Which storage keys belong to a task. See the module header for why this is a
@@ -95,5 +95,41 @@ describe('isTaskOwnObjectKey — what a cover may point at', () => {
 
   it('refuses an http URL — a linked cover is coverImageUrl, not a key', () => {
     assert.equal(isTaskOwnObjectKey('https://example.com/cover.png', TASK, WS), false)
+  })
+})
+
+describe('isLinkAttachmentKey — a link stored where a key goes', () => {
+  it('recognises the http(s) link "attach by link" writes into storage_key', () => {
+    assert.equal(isLinkAttachmentKey('https://example.com/spec.pdf'), true)
+    assert.equal(isLinkAttachmentKey('http://example.com/spec.pdf'), true)
+    assert.equal(isLinkAttachmentKey('HTTPS://EXAMPLE.COM/X'), true)
+  })
+
+  it('does not mistake an object key in either shape for a link', () => {
+    assert.equal(isLinkAttachmentKey(upload(WS, TASK, '1790000000000-https-notes.txt')), false)
+    assert.equal(isLinkAttachmentKey(`inbound-email/${TASK}/1-photo.jpg`), false)
+  })
+
+  it('and a key that merely CONTAINS a scheme is still a key', () => {
+    assert.equal(isLinkAttachmentKey(`workspaces/${WS}/https://example.com`), false)
+  })
+
+  it('an empty key — a file still arriving — is not a link, and neither is a non-string', () => {
+    assert.equal(isLinkAttachmentKey(''), false)
+    assert.equal(isLinkAttachmentKey(null), false)
+    assert.equal(isLinkAttachmentKey(undefined), false)
+  })
+
+  it('refuses other schemes — javascript: and data: are not links this path writes', () => {
+    assert.equal(isLinkAttachmentKey('javascript:alert(1)'), false)
+    assert.equal(isLinkAttachmentKey('data:text/html,<b>x</b>'), false)
+  })
+})
+
+describe('attachmentKind — what the API tells a client each row is', () => {
+  it('link for a link, file for everything else', () => {
+    assert.equal(attachmentKind('https://example.com/a.png'), 'link')
+    assert.equal(attachmentKind(upload(WS, TASK, '1-a.png')), 'file')
+    assert.equal(attachmentKind(''), 'file')
   })
 })

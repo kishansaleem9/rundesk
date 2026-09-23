@@ -88,7 +88,7 @@ import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
-import { isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
+import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { pickUpdatable } from './task-update-fields'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -2826,24 +2826,36 @@ export class TasksService {
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
       storageKey: row.storageKey,
-      /*
-       * NO KEY, NO URL — and the store is what made this visible.
-       *
-       * An attachment row exists from the moment the upload is recorded, and a
-       * file still arriving has an EMPTY `storage_key`. With R2 unconfigured
-       * this branch handed that empty string back and the browser read it as
-       * falsy, which is how the "still arriving" state was ever reached. With a
-       * store configured, `getObjectUrl('')` mints a perfectly good presigned
-       * URL for an object that does not exist — so the card stopped saying the
-       * clip was on its way and started offering a link to nothing.
-       *
-       * That is worse than the paperclip-to-nowhere it replaced: a dead link
-       * announces itself, a signed URL to a missing object looks live until it
-       * is pressed. `clip-created-card` caught it as a red baseline the day the
-       * lanes got an object store, against a product nobody had touched.
-       */
-      url: row.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey) : null,
+      kind: attachmentKind(row.storageKey),
+      url: await this.attachmentUrl(row.storageKey),
     })))
+  }
+
+  /**
+   * The URL an attachment row is fetched from — ONE rule, for the three places
+   * a row is turned into a link (this list, the row `addAttachment` returns,
+   * and the files on comments).
+   *
+   * NO KEY, NO URL — and the store is what made this visible. A row exists from
+   * the moment the upload is recorded, and a file still arriving has an EMPTY
+   * `storage_key`. With a store configured, `getObjectUrl('')` mints a perfectly
+   * good presigned URL for an object that does not exist, so the card stopped
+   * saying the clip was on its way and started offering a link to nothing — a
+   * signed URL to a missing object looks live until it is pressed.
+   * `clip-created-card` caught it the day the lanes got an object store.
+   *
+   * A LINK IS HANDED BACK AS IT IS. "Attach by link" stores the URL in
+   * `storage_key`, and signing it produced `${CDN}/https://…` or a presigned GET
+   * for a key that does not exist: every linked attachment's href was dead. See
+   * `isLinkAttachmentKey`.
+   *
+   * These were three copies of one ternary; a fourth rule added to one of them
+   * would have been the duplicated list again.
+   */
+  private async attachmentUrl(storageKey: string | null | undefined): Promise<string | null> {
+    if (!storageKey) return null
+    if (isLinkAttachmentKey(storageKey)) return storageKey
+    return this.r2.configured ? this.r2.getObjectUrl(storageKey) : storageKey
   }
 
   async addAttachment(
@@ -2910,23 +2922,8 @@ export class TasksService {
       uploadedBy: row.uploadedById,
       createdAt: row.createdAt,
       storageKey: row.storageKey,
-      /*
-       * NO KEY, NO URL — and the store is what made this visible.
-       *
-       * An attachment row exists from the moment the upload is recorded, and a
-       * file still arriving has an EMPTY `storage_key`. With R2 unconfigured
-       * this branch handed that empty string back and the browser read it as
-       * falsy, which is how the "still arriving" state was ever reached. With a
-       * store configured, `getObjectUrl('')` mints a perfectly good presigned
-       * URL for an object that does not exist — so the card stopped saying the
-       * clip was on its way and started offering a link to nothing.
-       *
-       * That is worse than the paperclip-to-nowhere it replaced: a dead link
-       * announces itself, a signed URL to a missing object looks live until it
-       * is pressed. `clip-created-card` caught it as a red baseline the day the
-       * lanes got an object store, against a product nobody had touched.
-       */
-      url: row.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(row.storageKey) : row.storageKey) : null,
+      kind: attachmentKind(row.storageKey),
+      url: await this.attachmentUrl(row.storageKey),
     }
   }
 
@@ -2954,7 +2951,9 @@ export class TasksService {
     await this.db
       .delete(taskAttachments)
       .where(and(eq(taskAttachments.id, attachmentId), eq(taskAttachments.taskId, taskId)))
-    if (this.r2.configured) {
+    // A link has no object behind it, and a file still arriving has no key:
+    // neither is anything to delete from the bucket.
+    if (this.r2.configured && attachment.storageKey && !isLinkAttachmentKey(attachment.storageKey)) {
       try {
         await this.r2.deleteObject(attachment.storageKey)
       } catch {
@@ -4429,10 +4428,10 @@ export class TasksService {
         fileName: f.fileName,
         fileSize: f.sizeBytes,
         mimeType: f.contentType,
-        // NO KEY, NO URL — the third site of the same rule; see the note on
-        // `listAttachments` above. This is the one the comment cards read, so
-        // it is the one a clip still arriving is drawn from.
-        url: f.storageKey ? (this.r2.configured ? await this.r2.getObjectUrl(f.storageKey as string) : f.storageKey) : null,
+        // The third site of `attachmentUrl`'s rule. This is the one the comment
+        // cards read, so it is the one a clip still arriving is drawn from.
+        kind: attachmentKind(f.storageKey),
+        url: await this.attachmentUrl(f.storageKey as string | null),
       })
       byComment.set(f.commentId as string, list)
     }

@@ -18,12 +18,20 @@
  * is checked. Building a grid/list toggle to satisfy the row's wording would
  * have been building to a summary of a frame instead of to the frame.
  *
- * WHY THE FIXTURE USES LINK ATTACHMENTS. R2 is not configured here or in CI, so
- * a real upload cannot be part of a suite that has to pass on a clean machine.
- * `POST /tasks/:id/attachments` with a `url` is the product's own second
- * attachment path (the composer's "attach by link"), it needs no storage, and
- * it produces rows with a resolvable `url` — which is exactly what the two link
- * actions are about.
+ * WHY THE FIXTURE USES LINK ATTACHMENTS. `POST /tasks/:id/attachments` with a
+ * `url` is the product's own second attachment path (the composer's "attach by
+ * link"), and it produces rows with a resolvable `url` — which is exactly what
+ * the two link actions are about. This paragraph used to add that R2 was not
+ * configured here or in CI; every lane and the CI job now run `s3-stub.mjs`,
+ * and the last section uploads a real file to prove that removing one still
+ * deletes its object while removing a link deletes nothing.
+ *
+ * AND THE LINKS WERE BEING SIGNED. "Attach by link" stores the URL where an
+ * upload stores its key, and every reader signed it as a key: the API handed
+ * back `${CDN}/https://…` or a presigned GET for an object named after the
+ * URL, and removing one sent the bucket a DELETE for it. The anchor checks
+ * compared the card with the API's url and passed, because both were the same
+ * dead address. The checks added below compare with what was LINKED.
  *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
@@ -33,6 +41,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { storeBase, storeRequests } from './lib/store.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -40,12 +49,13 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 17
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
+const STORE = storeBase(API_PORT, argOf('--store', undefined))
 const ME = {
   email: process.env.E2E_EMAIL ?? 'admin@rundesk.internal',
   password: process.env.E2E_PASSWORD ?? 'Admin@123!',
@@ -290,6 +300,21 @@ try {
   )
 
   /*
+   * A LINK IS HANDED BACK AS IT WAS LINKED. The two checks above compare an
+   * anchor with the url the API returned — and passed for as long as the API
+   * signed every link as though it were a key in the bucket, because both sides
+   * were the same dead address. This one compares with what the fixture
+   * LINKED, which is what somebody pressing it expects to reach.
+   */
+  const LINK0 = `https://example.invalid/${TAG}/0.png`
+  chk(
+    firstRow?.kind === 'link' && firstRow?.url === LINK0 && dlHref === LINK0,
+    'and for a linked file that url IS the link, byte for byte — not signed as if it were a key in the bucket',
+    `the API answered kind=${JSON.stringify(firstRow?.kind)} url=${JSON.stringify(firstRow?.url)} and the card ` +
+      `links ${JSON.stringify(dlHref)}; the fixture linked ${JSON.stringify(LINK0)}`,
+  )
+
+  /*
    * NO DEAD LINKS, over a set proved non-empty first. `href="#"` on a file that
    * is still arriving was a real defect in the comment clip player (§0), and a
    * negative assertion over a list that can be empty is true when there is
@@ -318,6 +343,9 @@ try {
    * reason the removal could not be tried, and a reason belongs in the detail of
    * a failing check.
    */
+  // What the bucket had been asked before this removal, so the check after it
+  // reads only this removal's traffic.
+  const logBefore = await storeRequests(STORE)
   await page.getByTestId('attachment-more').first().click({ timeout: 8000 }).catch(() => {})
   const removeItem = page.getByTestId('attachment-remove')
   const menuOpened = await waitUntil(() => removeItem.isVisible().catch(() => false), {
@@ -347,6 +375,27 @@ try {
     'and the header\'s count follows the removal rather than staying where it was drawn',
     `the header still reads ${JSON.stringify(headerCountAfter)} after a removal — a count that is rendered ` +
       'once and never recomputed is the facade this audit names first',
+  )
+
+  /*
+   * AND A LINK HAS NO OBJECT TO DELETE. Removing one sent the bucket a DELETE
+   * for the link itself, which S3 answers 204 whatever the key — so nothing
+   * failed and nothing showed. The stub's request log is the only witness.
+   * Its positive twin is the last section: removing an uploaded FILE still
+   * deletes its object, so this cannot pass by the API deleting nothing.
+   */
+  const logAfter = await storeRequests(STORE)
+  const linkDeletes = (logAfter?.requests ?? []).filter(
+    (r) => r.n > (logBefore?.seq ?? Infinity) && r.method === 'DELETE' && /^https?:/i.test(r.key),
+  )
+  chk(
+    logBefore !== null && logAfter !== null && gone && linkDeletes.length === 0,
+    'and removing a linked file sends nothing to the bucket — there is no object behind a link',
+    logBefore === null || logAfter === null
+      ? `the store at ${STORE} gave no request log, so what the removal sent cannot be read`
+      : gone
+        ? `the removal sent ${linkDeletes.length} DELETE(s) for a link: ${JSON.stringify(linkDeletes.map((r) => r.key))}`
+        : 'the removal never happened, so there is nothing to read the bucket traffic of',
   )
 
   // -------------------------------------------------------------------------
@@ -384,6 +433,54 @@ try {
       ? `${await panel.count()} Related Items panels are in the document, and the icon reports ` +
         `aria-pressed=${JSON.stringify(railPressed)}`
       : 'the icon did not open the panel: a tooltip over a dead control',
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ removing an uploaded file still deletes its object')
+
+  /*
+   * THE TWIN OF THE LINK CHECK ABOVE. An uploaded file, the product's own way —
+   * presign, PUT, record — and then removed: its object must be deleted, and
+   * that DELETE must be in the log. Without this, "removing a link sends
+   * nothing" would pass for an API that stopped deleting anything at all.
+   */
+  const FILE_NAME = `upload-${TAG}.txt`
+  const FILE_BYTES = Buffer.from(`attachment bytes ${TAG}`)
+  const pre = await A(`/tasks/${task.id}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: FILE_NAME, contentType: 'text/plain', sizeBytes: FILE_BYTES.length },
+  })
+  const FILE_KEY = pre.data?.storageKey ?? null
+  const put = pre.data?.uploadUrl
+    ? await fetch(pre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'text/plain' }, body: FILE_BYTES })
+        .then((r) => r.status, () => 0)
+    : 0
+  const recorded = FILE_KEY
+    ? await A(`/tasks/${task.id}/attachments`, {
+        method: 'POST',
+        body: { fileName: FILE_NAME, storageKey: FILE_KEY, contentType: 'text/plain', sizeBytes: FILE_BYTES.length },
+      })
+    : { status: 0, data: null }
+  chk(
+    recorded.status < 300 && recorded.data?.kind === 'file' && typeof recorded.data?.url === 'string' &&
+      recorded.data.url !== FILE_KEY,
+    'an uploaded file is recorded as a file, and its url is signed rather than the bare key',
+    `presign answered ${pre.status}, the PUT ${put}, recording it ${recorded.status} with kind=` +
+      `${JSON.stringify(recorded.data?.kind)} url=${JSON.stringify(recorded.data?.url ?? null).slice(0, 120)}`,
+  )
+  const beforeFileDelete = await storeRequests(STORE)
+  const removed = recorded.data?.id
+    ? await A(`/tasks/${task.id}/attachments/${recorded.data.id}`, { method: 'DELETE' })
+    : { status: 0 }
+  const afterFileDelete = await storeRequests(STORE)
+  const fileDeletes = (afterFileDelete?.requests ?? []).filter(
+    (r) => r.n > (beforeFileDelete?.seq ?? Infinity) && r.method === 'DELETE' && r.key === FILE_KEY,
+  )
+  chk(
+    removed.status < 300 && fileDeletes.length === 1,
+    'and removing it deletes exactly its object from the bucket',
+    `the removal answered ${removed.status} and the bucket saw ${fileDeletes.length} DELETE(s) for ` +
+      `${JSON.stringify(FILE_KEY)}${afterFileDelete === null ? ' — the store gave no request log at all' : ''}`,
   )
 } catch (err) {
   failed += 1

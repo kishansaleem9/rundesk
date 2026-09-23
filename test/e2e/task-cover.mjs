@@ -23,10 +23,12 @@
  */
 import path from 'node:path'
 import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { storeBase } from './lib/store.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -39,7 +41,7 @@ const argOf = (name, fallback) => {
  * branch that quietly skipped becomes a shorter run that still passes. Exact,
  * so a skipped branch is a failure.
  */
-const EXPECTED_CHECKS = 37
+const EXPECTED_CHECKS = 38
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -100,6 +102,11 @@ try {
   if (!task?.id) throw new Error('could not make a task')
   const T = () => A(`/tasks/${task.id}`)
   const setCover = (body) => A(`/tasks/${task.id}`, { method: 'PATCH', body })
+  // A one-pixel PNG: small enough to compare byte for byte after a round trip.
+  const TINY_PNG = Buffer.from(
+    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARgwMDAwMAA8IAWYAAAAASUVORK5CYII=',
+    'base64',
+  )
 
   console.log('\n▶ §V2-09 — a colour cover')
   const colour = 'linear-gradient(135deg, hsl(268 88% 60%), hsl(330 88% 65%))'
@@ -415,16 +422,71 @@ try {
       `state is on screen ${await page.getByTestId('cover-attachments-empty').count()} time(s)`,
   )
   await option.first().click({ timeout: 10_000 }).catch(() => {})
-  const fromFile = await waitUntil(
-    async () => ((await T()).data?.coverStorageKey ?? '') === IMAGE,
+  /*
+   * A LINKED IMAGE BECOMES THE COVER'S LINK. This asserted `coverStorageKey ===
+   * IMAGE` — the URL in the KEY column — which was the attachments' own bug
+   * carried into the cover: the key column is signed on read, so that cover
+   * was served as `${CDN}/https://…` and never drew, while the check passed on
+   * the stored field. It went red, rightly, when the server started refusing
+   * any stored cover that is not one of the task's own objects. What matters
+   * is what the task SERVES: the image, byte for byte, from the link column.
+   */
+  const fromLink = await waitUntil(
+    async () => ((await T()).data?.coverImageUrl ?? '') === IMAGE,
     { timeoutMs: 8000 },
   )
   const storedRow = (await T()).data
   chk(
-    fromFile && storedRow?.coverStorageKey === IMAGE,
-    'and choosing it sets the cover from that file',
-    `after choosing the only option the task holds coverStorageKey=` +
-      `${JSON.stringify(storedRow?.coverStorageKey ?? null)}, expected ${JSON.stringify(IMAGE)}`,
+    fromLink && storedRow?.coverUrl === IMAGE && storedRow?.coverStorageKey == null,
+    'and choosing it makes that image the cover — served as it was linked, not signed as a key',
+    `after choosing the only option the task holds coverImageUrl=${JSON.stringify(storedRow?.coverImageUrl ?? null)} ` +
+      `and coverStorageKey=${JSON.stringify(storedRow?.coverStorageKey ?? null)}, and serves ` +
+      `coverUrl=${JSON.stringify(storedRow?.coverUrl ?? null)} — expected the link ${JSON.stringify(IMAGE)}`,
+  )
+
+  /*
+   * AND AN UPLOADED IMAGE BECOMES THE STORED COVER — the other branch of the
+   * same click, so a picker that sent every attachment as a link fails here
+   * rather than nowhere. Uploaded the product's own way (presign, PUT, record),
+   * so its key is exactly what the server's cover rule has to accept, and the
+   * cover is fetched back to prove it was signed rather than echoed.
+   */
+  const FILE_NAME = `file-cover-${stamp}.png`
+  const pre = await A(`/tasks/${task.id}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: FILE_NAME, contentType: 'image/png', sizeBytes: TINY_PNG.length },
+  })
+  const FILE_KEY = pre.data?.storageKey ?? null
+  const put = pre.data?.uploadUrl
+    ? await fetch(pre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'image/png' }, body: TINY_PNG })
+        .then((r) => r.status, () => 0)
+    : 0
+  const recorded = FILE_KEY
+    ? await A(`/tasks/${task.id}/attachments`, {
+        method: 'POST',
+        body: { fileName: FILE_NAME, storageKey: FILE_KEY, contentType: 'image/png', sizeBytes: TINY_PNG.length },
+      })
+    : { status: 0 }
+  await page.keyboard.press('Escape')
+  await page.waitForTimeout(400)
+  await page.getByTestId('cover-change').click({ timeout: 10_000 }).catch(() => {})
+  await page.getByTestId('cover-tab-attachments').click({ timeout: 10_000 }).catch(() => {})
+  await option.filter({ hasText: FILE_NAME }).first().click({ timeout: 10_000 }).catch(() => {})
+  const fromFile = await waitUntil(
+    async () => FILE_KEY !== null && ((await T()).data?.coverStorageKey ?? '') === FILE_KEY,
+    { timeoutMs: 8000 },
+  )
+  const fileRow = (await T()).data
+  const served = typeof fileRow?.coverUrl === 'string' && fileRow.coverUrl !== FILE_KEY
+    ? await fetch(fileRow.coverUrl).then(async (r) => (r.ok ? Buffer.from(await r.arrayBuffer()) : null), () => null)
+    : null
+  chk(
+    fromFile && fileRow?.coverImageUrl == null && served !== null && served.equals(TINY_PNG),
+    'and an uploaded image chosen the same way becomes the stored cover, served signed, with its own bytes',
+    `presign answered ${pre.status}, the PUT ${put}, recording it ${recorded.status}; after choosing it the task ` +
+      `holds coverStorageKey=${JSON.stringify(fileRow?.coverStorageKey ?? null)} (wanted ${JSON.stringify(FILE_KEY)}), ` +
+      `coverImageUrl=${JSON.stringify(fileRow?.coverImageUrl ?? null)}, and its coverUrl ` +
+      `${served === null ? 'fetched nothing' : `fetched ${served.length} byte(s) that are not the file`}`,
   )
 
   /*
@@ -498,9 +560,9 @@ try {
   )
 
   // Lane k runs its API on 302k and its store on 91k, so one follows from the
-  // other; `--store` overrides for a lane laid out differently.
-  const STORE_PORT = Number(argOf('--store', process.env.E2E_STORE_PORT ?? 9100 + (API_PORT - 3020)))
-  const STORE = `http://127.0.0.1:${STORE_PORT}`
+  // other (`lib/store.mjs`); `--store` overrides for a lane laid out
+  // differently, and CI sets `E2E_STORE_PORT`.
+  const STORE = storeBase(API_PORT, argOf('--store', undefined))
   /*
    * DISARMED AT THE START, not trusted to have been cleaned up at the end of
    * the last run. The store outlives any one run of this suite, and an
@@ -520,12 +582,9 @@ try {
   )
 
   // A real file, because `setInputFiles` dispatches a change event whatever the
-  // input held and the handler reads `files[0]`.
-  const TINY_PNG = Buffer.from(
-    'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8AARgwMDAwMAA8IAWYAAAAASUVORK5CYII=',
-    'base64',
-  )
-  const pngPath = `/tmp/claude-0/cover-upload-${stamp}.png`
+  // input held and the handler reads `files[0]`. `TINY_PNG` is declared at the
+  // top: the Attachments tab's check above uploads it too.
+  const pngPath = path.join(tmpdir(), `cover-upload-${stamp}.png`)
   writeFileSync(pngPath, TINY_PNG)
 
   /*
@@ -621,7 +680,7 @@ try {
   }
   const reopened = await appears(page.getByTestId('cover-upload-button'), 8000)
   const beforeRefused = (await T()).data
-  const secondPng = `/tmp/claude-0/cover-upload-refused-${stamp}.png`
+  const secondPng = path.join(tmpdir(), `cover-upload-refused-${stamp}.png`)
   writeFileSync(secondPng, Buffer.concat([TINY_PNG, Buffer.from('second')]))
   await chooser.setInputFiles(secondPng, { timeout: 8000 }).catch(() => {})
   const said = await waitUntil(

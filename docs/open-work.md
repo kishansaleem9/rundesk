@@ -4,6 +4,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`, and one found while fixing them, `harness/ci-suites-read-a-database-that-does-not-exist`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+
 ## Product defects — 46
 
 ### `resume-defects/resume-7` — open, large
@@ -118,9 +120,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* In removeAttachment, clear cover_storage_key where it equals the removed key (or keep the object while referenced).
 
-### `product-siblings/cover-storage-key-unvalidated` — open, small
+### `product-siblings/cover-storage-key-unvalidated` — **closed**
 
 **PATCH /tasks/:id accepts any coverStorageKey and getTask signs it: a signed URL to another tenant's object**
+
+*Closed (edecc0b, 5f687d3, c035b87):* a cover must be one of the task's own objects BY SHAPE — `task-object-keys.ts` `isTaskOwnObjectKey`, exactly one trailing segment in the sanitisers' alphabet, so `..` cannot walk out of the prefix — checked when written (400) and again when signed, in `getTask` and in the list rows, so a row poisoned by any other path is not turned into a URL. A prefix check, as proposed below, would have been bypassable: `getObjectUrl` in public-CDN mode returns the key unencoded and a browser collapses dot segments. `test/e2e/task-boundaries.mjs` §2, 19/19 on lane 1; `tb-3`…`tb-6`, `tb-13`, `tb-16` each redden the check they name.
 
 *Evidence:* tasks.controller.ts:315 accepts coverStorageKey and :347 spreads the whole body into the patch. tasks.service.ts:2954-2961 checks only coverImageUrl and coverOffsetY, and :3011 writes `{...patch}`. The key is then signed at :2752-2754 (getTask) and :2417 (list rows). Compare addAttachment at :2815-2825, which refuses any key outside `workspaces/${ws}/tasks/${taskId}/attachments/` for exactly this threat. cover-image-picker.tsx:172-173 says the cover 'lands in the task's own storage prefix and inherits its access rules', but the server does not enforce that.
 
@@ -318,9 +322,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Extract one guarded helper (use the forms version) and use it at all sites.
 
-### `product-siblings/task-listid-mass-assign-cross-workspace-move` — open, small
+### `product-siblings/task-listid-mass-assign-cross-workspace-move` — **closed**
 
 **PATCH /tasks/:id and POST /tasks/:id/move accept any listId, which moves a task into another workspace; only the bulk path checks the boundary**
+
+*Closed (edecc0b, 5f687d3, c035b87):* `task-update-fields.ts` is the one list of writable fields; the route REFUSES anything else by name (400, and names the move route when it is `listId`) and the service drops it as defence in depth. `moveTask` now resolves the target and requires the same workspace (404), the space's create gate (`assertCanCreateInSpace`, 403) and container visibility (`checkContainerAccess`, 403). Found beside it and closed in the same change: `parentTaskId` on update AND create never asked where the parent lived (now 404 across workspaces, and the parent must be readable), and `addAttachment`'s `startsWith` check let a `..` key through (now `isTaskUploadKey`). `task-boundaries.mjs` §1, §3–§5; 18 break patches, each reddening the check it names on lane 2.
 
 *Evidence:* tasks.controller.ts:29 has only JwtAuthGuard at class level. PATCH :297-351 has no ResourceMemberGuard and spreads the inline body (:347). tasks.service.ts updateTask :3011 `set = {...patch}` → :3046 db.update(tasks).set(set). No key whitelist exists, so listId, statusCategory, completedAt, createdById, taskTypeId and recurrence are all writable. moveTask :3621-3628 checks write access on the SOURCE task only, then sets listId to the body's targetListId. By contrast, bulkUpdateTasks :3244-3256 and :3310 resolve the target list's workspace and 'reject moves that would cross a workspace boundary'. RLS does not help: 0071_row_level_security.sql:8-18 says the app role owns the tables and bypasses RLS. Same unchecked-reference family as coverStorageKey. projects.service.ts:185, spaces.service.ts:447 and users.service.ts:248 already fixed this shape for their own PATCHes.
 
@@ -424,13 +430,23 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Capture each node exit status and on non-zero write 'planner failed' and exit with a distinct code. Also require never-run-plan's '[never-run-plan] N patch(es)' stderr summary to be present for both modes before accepting an empty plan.
 
-### `harness/ci-missing-doc-import` — open, small
+### `harness/ci-missing-doc-import` — **closed**
 
 **test/e2e/doc-import.mjs is not in ci.yml, and nothing checks that every suite is**
+
+*Closed:* registered as the ci.yml step "Document import". `scripts/check-suites-registered.mjs` compares `test/e2e/*.mjs` with the `run:` lines of ci.yml (not a grep of the file: a suite named in a comment, a step name or behind a shell `#` is run by nothing) and fails on an empty read; `check-suites-registered-cases.mjs --mutate` plants 12 trees built to fool it and 10 of 10 mutations of the reader and the gate redden a case. Both run in preflight and in the verify job. 116 of 116 suites registered.
 
 *Evidence:* comm of `ls test/e2e/*.mjs` against the test/e2e/*.mjs paths in .github/workflows/ci.yml leaves doc-import. It has 4 break patches and a 13/13 run (f634982). No script in scripts/ ties the suite directory to ci.yml. local-sweep.mjs:10-14 derives its suite list FROM ci.yml, so it also misses doc-import.
 
 *To close:* Add doc-import to the postgres-harnesses job. Add a preflight check that every test/e2e/*.mjs appears in ci.yml, or is listed with a reason.
+
+### `harness/ci-suites-read-a-database-that-does-not-exist` — **closed** (found while registering `task-boundaries`)
+
+**25 CI steps pointed their suite at `rundesk_ci`, a database the job never creates**
+
+*Evidence:* the postgres-harnesses service creates only `rundesk_calls` (`POSTGRES_DB`), and the job-level `DATABASE_URL` names it — the database the API writes. From 2ae54b4 (20 September) onward, 25 steps overrode it per step with `postgres://…@127.0.0.1:5432/rundesk_ci`, each copied from the one before. Nothing creates `rundesk_ci`, so every one of those suites would have failed to connect on the first day CI ran — and had it existed, they would have read a different database from the one the API writes. Unseen because CI has not run since the Actions quota ran out.
+
+*Closed:* the 25 overrides are removed; every step inherits the job's `DATABASE_URL`, and a comment on the job env says not to override it per step.
 
 ### `harness/deps-omit-suite-libs` — open, small
 
@@ -464,9 +480,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* When CI can run again (1 October), split the job and validate it. Until then, correct the count and delete the leftover paragraph.
 
-### `commit-log/log-c592545-1` — open, small
+### `commit-log/log-c592545-1` — **closed**
 
 **doc-import.mjs is the one e2e suite not registered in CI, and nothing checks for that**
+
+*Closed:* the same item as `harness/ci-missing-doc-import` above, closed there.
 
 *Evidence:* Commits f634982 and c592545 ran it green (15 of 15, 4 of 4 patches) and closed the Importers row. A loop over test/e2e/*.mjs against ci.yml finds exactly one suite missing: doc-import.mjs. No script compares the two lists (git grep over scripts and .github finds no guard for unregistered suites). The resume doc says 'ALL 113 are registered'.
 
@@ -610,9 +628,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Export apiAs(base)(token) from lib/fixture.mjs with the null-token rule and the message field, move suites onto it, and have the one copy expose `ok` and a `must(res, what)` helper, which would also remove most of finding unguarded-derefs.
 
-### `suite-hygiene/ci-no-store-for-store-suites` — open, medium
+### `suite-hygiene/ci-no-store-for-store-suites` — **closed** (unvalidated on a runner until CI runs again)
 
 **CI runs task-cover and attach-on-create with no object store; task-cover also writes to a sandbox-only path**
+
+*Closed:* the postgres-harnesses job starts `s3-stub.mjs --strict` before the API, waits for its ready line, and gives the API the four variables `lane_store_env` exports. The port is set ONCE, as the job-level `E2E_STORE_PORT`, which `task-cover` and `attach-on-create` already read and the API's `R2_ENDPOINT` is built from. `task-cover` and `doc-import` write their fixtures under `os.tmpdir()`. Cannot be run on a runner before 1 October; the lanes run the same configuration.
 
 *Evidence:* task-cover.mjs:502-520 computes STORE_PORT = 9100 + (API_PORT - 3020), which is 9091 for `--api 3011`, and fails 'the lane has an object store' when nothing answers. attach-on-create.mjs:82-83 and 321 arm `${STORE}/__control/fail-next-put` on the same formula. ci.yml's postgres-harnesses job (383-384, runs on code changes) starts the API with only PORT=3011 (522-541), with no R2_ENDPOINT and no s3-stub, then runs both suites (753, 1803). check-s3-stub runs at ci.yml:336, but only as its own self-test. task-cover.mjs:528 and 624 writeFileSync to `/tmp/claude-0/cover-upload-…png` with no mkdirSync; ci.yml never creates /tmp/claude-0, so this throws ENOENT on a runner. doc-import.mjs:172 and 310 do the same (not in CI). This is inferred from code; I did not read a CI log.
 

@@ -25,6 +25,7 @@ import {
   extractAttachmentText,
   isExtractableAttachment,
 } from './attachment-text'
+import { isLinkAttachmentKey } from '../tasks/task-object-keys'
 
 /** A piece of workspace content to embed, resolved to its citation shape. */
 export type KnowledgeSourceItem = {
@@ -226,6 +227,10 @@ export class KnowledgeIndexerService {
     for (const a of attachmentRows) {
       // Skip non-text binaries cleanly (no parser dependency).
       if (!isExtractableAttachment(a.contentType)) continue
+      // A linked attachment has no object in the bucket to read — its key IS
+      // the URL — so fetching it only ever failed, and logged every link as
+      // "unreadable" on every pass.
+      if (isLinkAttachmentKey(a.storageKey)) continue
       // Don't pull a very large object fully into memory just to truncate it.
       if (typeof a.sizeBytes === 'number' && a.sizeBytes > MAX_ATTACHMENT_BYTES) continue
       try {

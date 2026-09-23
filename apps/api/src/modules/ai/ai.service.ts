@@ -40,6 +40,7 @@ import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { EmbeddingService } from './embedding.service'
 import { embedText, cosineSimilarity } from './embedding'
 import { ATTACHMENT_TEXT_CAP, extractAttachmentText, isExtractableAttachment } from './attachment-text'
+import { isLinkAttachmentKey } from '../tasks/task-object-keys'
 import { checkContainerAccess, isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
@@ -2594,7 +2595,8 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
         .where(inArray(taskAttachments.id, attachmentIds))
       await Promise.all(
         attachmentRows
-          .filter((a) => isExtractableAttachment(a.contentType))
+          // Not a link: its key is the URL, and there is no object to read.
+          .filter((a) => isExtractableAttachment(a.contentType) && !isLinkAttachmentKey(a.storageKey))
           .map(async (a) => {
             try {
               const bytes = await r2.getObject(a.storageKey)
