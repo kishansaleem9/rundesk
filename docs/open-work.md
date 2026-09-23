@@ -1414,9 +1414,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 ## Stale documentation — 18
 
-### `harness/break-queue-references-stale` — partly-fixed, small
+### `harness/break-queue-references-stale` — **closed**
 
-*Fixed:* `check-break-freshness.mjs` says `break-queue.sh` was deleted and names what reads these logs now; `break-report.sh` no longer calls the classifier "shared with the runner" — only it calls it, and `log-tree.mjs` holds the same four outcomes as `NOT_RUN`. *Still open:* the two references in `wt-break.sh`, which is running the break plan and is not edited mid-run.
+*Closed:* `check-break-freshness.mjs` says `break-queue.sh` was deleted and names what reads these logs now; `break-report.sh` no longer calls the classifier "shared with the runner" — only it calls it, and `log-tree.mjs` holds the same four outcomes as `NOT_RUN`. `wt-break.sh`'s two, edited between plans: the first says `break-queue.sh` was the reader THEN, since deleted; the second names today's readers of a crashed run — `classify-break-log.awk` counts it CRASHED, `check-break-reddened.mjs` as a run that died before its totals (`log-tree.mjs` does not read the marker; checked, not assumed).
 
 **Comments still name the deleted break-queue.sh, and break-report calls the awk classifier 'shared with the runner'**
 

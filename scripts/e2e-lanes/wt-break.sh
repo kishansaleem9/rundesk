@@ -456,8 +456,9 @@ for b in "$@"; do
     #    `video-regression`'s G13-10 block that reports three checks where the
     #    other branch reports seven; the suite printed `✗ 88 of 92 checks ran`
     #    and exited 1, and this file recorded `84 passed, 4 failed` with
-    #    nothing to say four checks never happened. `break-queue.sh` counted it
-    #    as a clean reddening, which is exactly the shape this whole audit
+    #    nothing to say four checks never happened. `break-queue.sh` (the
+    #    reader then, since deleted) counted it as a clean reddening, which is
+    #    exactly the shape this whole audit
     #    calls the confident zero.
     #  - AND A RUN THAT CRASHED PRINTED NO SUMMARY AT ALL, which was recorded as
     #    a patch line with some FAIL lines under it and nothing else — the exact
@@ -467,7 +468,9 @@ for b in "$@"; do
     #    TimeoutError that killed the process before the totals were printed.
     #    A crash is not a proof: the checks after the throw did not run, and the
     #    ones before it were measured against a process that then died. Named
-    #    here so `break-queue.sh` can count it as its own outcome.
+    #    here so the readers of these logs count it as its own outcome —
+    #    `classify-break-log.awk` as CRASHED (for `break-report.sh`), and
+    #    `check-break-reddened.mjs` as a run that died before its totals.
     NFAIL=$(fail_lines "/tmp/claude-0/brk-$b.log" | wc -l)
     SUMMARY=$(grep -E 'passed,' "/tmp/claude-0/brk-$b.log" | tail -1 | sed 's/\x1b\[[0-9;]*m//g')
     { echo "== $b"
