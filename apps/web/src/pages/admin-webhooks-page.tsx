@@ -4,8 +4,9 @@ import { Button, Card, Input, cn } from '@rundesk/ui'
 import { Webhook, Plus, Trash2 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
-import type { TranslationKey } from '../lib/i18n'
+import { webhookEventLabel } from '../lib/webhook-events'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { WebhookSecretOnce } from '../components/webhook-secret-once'
 
 type WorkspaceEntry = {
   workspace: { id: string; name: string; slug: string }
@@ -21,36 +22,16 @@ type Hook = {
   failureCount: number
 }
 
-// Display labels for the server's webhook event identifiers. The raw event
-// string stays the canonical value sent to / stored by the API; only the
-// rendered label is localized. Unknown events fall back to their raw id.
-const EVENT_LABEL_KEYS: Record<string, TranslationKey> = {
-  'task.created': 'adminWebhooks.event.taskCreated',
-  'task.updated': 'adminWebhooks.event.taskUpdated',
-  'task.deleted': 'adminWebhooks.event.taskDeleted',
-  'task.status_changed': 'adminWebhooks.event.taskStatusChanged',
-  'task.assigned': 'adminWebhooks.event.taskAssigned',
-  'task.assignee_changed': 'adminWebhooks.event.taskAssigneeChanged',
-  'comment.created': 'adminWebhooks.event.commentCreated',
-  'project.created': 'adminWebhooks.event.projectCreated',
-  'project.updated': 'adminWebhooks.event.projectUpdated',
-  'member.invited': 'adminWebhooks.event.memberInvited',
-  'member.removed': 'adminWebhooks.event.memberRemoved',
-  'time.logged': 'adminWebhooks.event.timeLogged',
-  'form.submitted': 'adminWebhooks.event.formSubmitted',
-}
-
 export function AdminWebhooksPage() {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
-  const eventLabel = (event: string) => {
-    const key = EVENT_LABEL_KEYS[event]
-    return key ? t(key) : event
-  }
+  const eventLabel = (event: string) => webhookEventLabel(t, event)
   const [workspaceId, setWorkspaceId] = useState('')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [events, setEvents] = useState<string[]>([])
+  // The signing secret, from the one answer that carries it — see WebhookSecretOnce.
+  const [madeSecret, setMadeSecret] = useState<{ name: string; secret: string } | null>(null)
 
   const workspaces = useQuery({
     queryKey: ['workspaces'],
@@ -71,14 +52,15 @@ export function AdminWebhooksPage() {
 
   const createHook = useMutation({
     mutationFn: () =>
-      api(`/workspaces/${resolvedWorkspaceId}/webhooks`, {
+      api<{ name: string; secret?: string }>(`/workspaces/${resolvedWorkspaceId}/webhooks`, {
         method: 'POST',
         body: { name, url, events },
       }),
-    onSuccess: async () => {
+    onSuccess: async (made) => {
       setName('')
       setUrl('')
       setEvents([])
+      setMadeSecret(made?.secret ? { name: made.name, secret: made.secret } : null)
       await qc.invalidateQueries({ queryKey: ['admin-webhooks', resolvedWorkspaceId] })
     },
   })
@@ -104,8 +86,12 @@ export function AdminWebhooksPage() {
 
       <Card className="p-4 space-y-3">
         <select
+          data-testid="admin-webhook-workspace"
           value={resolvedWorkspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
+          onChange={(e) => {
+            setWorkspaceId(e.target.value)
+            setMadeSecret(null)
+          }}
           className="rounded-md border border-border bg-card px-3 py-2 text-sm w-full md:w-auto"
         >
           {(workspaces.data ?? []).map((entry) => (
@@ -116,8 +102,8 @@ export function AdminWebhooksPage() {
         </select>
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={t('adminWebhooks.namePlaceholder')} />
-          <Input value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('adminWebhooks.urlPlaceholder')} />
+          <Input data-testid="admin-webhook-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('adminWebhooks.namePlaceholder')} />
+          <Input data-testid="admin-webhook-url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder={t('adminWebhooks.urlPlaceholder')} />
         </div>
         <div className="flex flex-wrap gap-1">
           {(eventCatalog.data ?? []).map((eventName) => {
@@ -125,6 +111,7 @@ export function AdminWebhooksPage() {
             return (
               <button
                 key={eventName}
+                data-testid={`admin-webhook-event-${eventName}`}
                 onClick={() =>
                   setEvents((prev) => (prev.includes(eventName) ? prev.filter((e) => e !== eventName) : [...prev, eventName]))
                 }
@@ -140,20 +127,30 @@ export function AdminWebhooksPage() {
         </div>
         <Button
           size="sm"
+          data-testid="admin-webhook-create"
           onClick={() => createHook.mutate()}
           disabled={!name.trim() || !url.trim() || events.length === 0 || createHook.isPending}
         >
           <Plus className="h-3.5 w-3.5 mr-1" />
           {t('adminWebhooks.createWebhook')}
         </Button>
+        {madeSecret && <WebhookSecretOnce name={madeSecret.name} secret={madeSecret.secret} onDone={() => setMadeSecret(null)} />}
       </Card>
 
       <Card className="overflow-hidden">
-        <div className="px-4 py-3 border-b border-border text-sm font-medium">
-          {tCount('adminWebhooks.configuredCount', (hooks.data ?? []).length)}
-        </div>
-        {hooks.isLoading ? (
+        {/* A count only once the list has answered: "0 configured" while it
+            loads, or after it failed, is not what the server holds. */}
+        {hooks.data && (
+          <div className="px-4 py-3 border-b border-border text-sm font-medium">
+            {tCount('adminWebhooks.configuredCount', hooks.data.length)}
+          </div>
+        )}
+        {/* Pending, not loading: until the workspace list answers, the hooks
+            query is disabled — not loading — and would read as "none". */}
+        {workspaces.isPending || (Boolean(resolvedWorkspaceId) && hooks.isPending) ? (
           <div className="px-4 py-6 text-sm text-muted-foreground"><InlineSkeleton /></div>
+        ) : hooks.isError ? (
+          <div className="px-4 py-6 text-sm text-destructive" data-testid="webhooks-load-failed">{t('webhooks.loadFailed')}</div>
         ) : (hooks.data ?? []).length === 0 ? (
           <div className="px-4 py-6 text-sm text-muted-foreground">{t('adminWebhooks.noWebhooks')}</div>
         ) : (

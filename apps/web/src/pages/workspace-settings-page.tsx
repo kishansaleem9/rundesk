@@ -18,6 +18,8 @@ import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { WebhookSecretOnce } from '../components/webhook-secret-once'
+import { webhookEventLabel } from '../lib/webhook-events'
 
 type Workspace = {
   id: string
@@ -1457,8 +1459,15 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const [whName, setWhName] = useState('')
   const [whUrl, setWhUrl] = useState('')
   const [whEvents, setWhEvents] = useState<string[]>(['task.created', 'task.status_changed'])
+  // The signing secret, from the one answer that carries it — see WebhookSecretOnce.
+  const [madeSecret, setMadeSecret] = useState<{ name: string; secret: string } | null>(null)
 
-  const ALL_EVENTS = ['task.created','task.updated','task.deleted','task.status_changed','task.assigned','comment.created','project.created','member.invited','member.removed','form.submitted']
+  // The server's catalog is the one list of events — this card kept its own
+  // ten, shown as raw ids and four short of the server's fourteen.
+  const eventCatalog = useQuery({
+    queryKey: ['webhook-events', workspaceId],
+    queryFn: () => api<string[]>(`/workspaces/${workspaceId}/webhooks/events`),
+  })
 
   type Webhook = { id: string; name: string; url: string; events: string[]; isEnabled: boolean; successCount: number; failureCount: number }
   const whQuery = useQuery({
@@ -1467,8 +1476,15 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   })
 
   const createWh = useMutation({
-    mutationFn: () => api(`/workspaces/${workspaceId}/webhooks`, { method: 'POST', body: { name: whName, url: whUrl, events: whEvents } }),
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['webhooks', workspaceId] }); setShowWebhookForm(false); setWhName(''); setWhUrl('') },
+    mutationFn: () =>
+      api<{ name: string; secret?: string }>(`/workspaces/${workspaceId}/webhooks`, { method: 'POST', body: { name: whName, url: whUrl, events: whEvents } }),
+    onSuccess: (made) => {
+      qc.invalidateQueries({ queryKey: ['webhooks', workspaceId] })
+      setShowWebhookForm(false)
+      setWhName('')
+      setWhUrl('')
+      setMadeSecret(made?.secret ? { name: made.name, secret: made.secret } : null)
+    },
   })
 
   const deleteWh = useMutation({
@@ -1535,42 +1551,55 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
             <h3 className="font-semibold text-sm">{t('settings.webhooks')}</h3>
             <p className="text-xs text-muted-foreground">{t('settings.webhooksDesc')}</p>
           </div>
-          <Button size="sm" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
+          <Button size="sm" data-testid="webhook-add" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
             <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.addWebhook')}
           </Button>
         </div>
 
         {showWebhookForm && (
           <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
-            <Input value={whName} onChange={(e) => setWhName(e.target.value)} placeholder={t('settings.webhookNamePlaceholder')} />
-            <Input value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
+            <Input data-testid="webhook-form-name" value={whName} onChange={(e) => setWhName(e.target.value)} placeholder={t('settings.webhookNamePlaceholder')} />
+            <Input data-testid="webhook-form-url" value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
             <div className="flex flex-wrap gap-1">
-              {ALL_EVENTS.map((ev) => (
+              {(eventCatalog.data ?? []).map((ev) => (
                 <button
                   key={ev}
+                  data-testid={`webhook-form-event-${ev}`}
                   onClick={() => setWhEvents((prev) => prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev])}
                   className={cn('text-xs px-2 py-0.5 rounded-full border transition-colors', whEvents.includes(ev) ? 'bg-brand-700 text-white border-brand-700' : 'border-border text-muted-foreground')}
                 >
-                  {ev}
+                  {webhookEventLabel(t, ev)}
                 </button>
               ))}
             </div>
             <div className="flex gap-2">
-              <Button size="sm" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>{t('common.save')}</Button>
+              <Button size="sm" data-testid="webhook-form-save" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>{t('common.save')}</Button>
               <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>{t('common.cancel')}</Button>
             </div>
           </div>
         )}
 
-        {hooks.length === 0 && !showWebhookForm && (
-          <p className="text-xs text-muted-foreground">{t('settings.noWebhooks')}</p>
+        {madeSecret && (
+          <div className="mb-3">
+            <WebhookSecretOnce name={madeSecret.name} secret={madeSecret.secret} onDone={() => setMadeSecret(null)} />
+          </div>
         )}
+
+        {/* Nothing listed is "none" only once the list has ANSWERED: while it
+            loads, or when it fails, zero is not what the server holds. */}
+        {whQuery.isLoading ? (
+          <InlineSkeleton />
+        ) : whQuery.isError ? (
+          <p className="text-xs text-destructive" data-testid="webhooks-load-failed">{t('webhooks.loadFailed')}</p>
+        ) : hooks.length === 0 && !showWebhookForm ? (
+          <p className="text-xs text-muted-foreground">{t('settings.noWebhooks')}</p>
+        ) : null}
         {hooks.map((hook) => (
-          <div key={hook.id} className="flex items-center gap-3 py-2 border-t border-border/50">
+          <div key={hook.id} data-testid={`webhook-row-${hook.id}`} className="flex items-center gap-3 py-2 border-t border-border/50">
             <div className="flex-1 min-w-0">
               <div className="font-medium text-sm">{hook.name}</div>
               <div className="text-xs text-muted-foreground font-mono truncate">{hook.url}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{(hook.events as string[]).join(', ')}</div>
+              <div className="text-xs text-muted-foreground mt-0.5">{(hook.events as string[]).map((ev) => webhookEventLabel(t, ev)).join(', ')}</div>
             </div>
             <div className="text-xs text-muted-foreground shrink-0">
               <span className="text-emerald-600">{hook.successCount}✓</span>

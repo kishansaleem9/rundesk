@@ -427,11 +427,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND SEVENTEEN — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND NINETEEN — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 129 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117.
+    # that is about 131 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -451,8 +451,9 @@ jobs:
     # Splitting shortens the WALL CLOCK and not the bill: the minutes are the
     # same either way, plus one more setup.
     #
-    # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "node test/e2e/"` over
-    # this job gives the count; multiply by 1.1 and add a few minutes of setup.
+    # IF YOU ADD A SUITE, RE-DO THIS ARITHMETIC. `grep -c "^ *run: node test/e2e/"`
+    # over this job gives the count — unanchored, it also counts this comment —
+    # then multiply by 1.1 and add a few minutes of setup.
     # A limit that is merely old reads as a flaky pipeline, and a flaky pipeline
     # is one nobody looks at.
     #
@@ -1659,6 +1660,28 @@ jobs:
       - name: Chat history pages back, threads show their newest
         if: '!cancelled()'
         run: node test/e2e/chat-history.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # A workspace's webhooks are read by whoever holds `webhook.manage`, and
+      # the signing secret is shown once. Any member could list every webhook
+      # with its secret, and an admin-or-manager guard in front of the
+      # permission made a custom role granting it useless.
+      - name: Webhooks and their secrets belong to webhook.manage
+        if: '!cancelled()'
+        run: node test/e2e/webhook-access.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # SSO, SCIM tokens and integration connections answer to the permission
+      # that names them. An admin-or-manager guard stood in front of
+      # `sso.manage` and `integrations.manage`, and SCIM tokens had no
+      # permission at all, so every manager held them.
+      - name: SSO, SCIM and integrations answer to their permissions
+        if: '!cancelled()'
+        run: node test/e2e/permission-guards.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

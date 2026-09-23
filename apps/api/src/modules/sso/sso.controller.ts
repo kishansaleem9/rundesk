@@ -13,7 +13,6 @@ import {
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { SsoService, type SsoConnectionUpdate } from './sso.service'
@@ -26,7 +25,9 @@ type CurrentUserPayload = { id: string; email: string }
 @ApiTags('sso-admin')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/sso')
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard, PermissionsGuard)
+// The permission alone decides. An admin-or-manager guard in front of it
+// meant a custom role granting `sso.manage` to anybody else was never usable.
+@UseGuards(JwtAuthGuard, PermissionsGuard)
 @RequirePermissions('sso.manage')
 export class SsoAdminController {
   constructor(private sso: SsoService) {}

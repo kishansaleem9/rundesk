@@ -776,6 +776,40 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* `bail` returns a promise that never settles and every call site is `await bail(…)`, so execution stops there until the exit; the backstop timer is no longer unref'd (a parked caller must not end as an unsettled top-level await, exit 13). `check-migration-order`'s helper is async and awaited at each of its nine call sites. `scripts/check-bail.mjs --mutate` (preflight, verify job): piped with 200KB queued, redirected, and idle — exit 3, every byte delivered, the line after never runs — and 3 of 3 mutations caught (returns instead of parking, exits without draining, forgets the code).
 
+### `found-23-sep/webhook-secrets-readable-by-any-member` — **closed**, break run pending (found mapping the custom-role routes)
+
+**Any workspace member could read every webhook's target URL and HMAC signing secret, and every delivery's payload**
+
+*Evidence:* `GET /workspaces/:ws/webhooks` and `GET …/webhooks/:id/deliveries` were guarded by workspace membership alone, and the list returned `select()` of the table — `secret` included. Measured on lane 1 before the change: a plain member was answered 200 with the secret the admin had set, and 200 on the delivery log. The manage routes had the opposite problem: an admin-or-manager guard in front of `webhook.manage`, so a custom role granting it to anybody else was saved and useless. The same shape stood in front of `sso.manage` and `integrations.manage`, and SCIM token management had the admin-or-manager guard and NO permission, so every manager held it though the catalog files SCIM under `sso.manage`.
+
+*Closed:* both reads require `webhook.manage`; the list and an edit answer without the secret (`hasSecret` instead) — it is returned once, by the call that creates the webhook; the manage routes are gated by the permission alone. SSO configuration and integration connections lose the guard in front of their permission, and SCIM tokens require `sso.manage`. Hiding the secret moved a duty onto the pages: both pages that make webhooks (workspace settings → Integrations, and `/app/admin/webhooks`) threw the create answer away, so a webhook made in the browser signed with a secret nobody could read. Both now show it once (`WebhookSecretOnce`: copy, the signature header it keys, "I have copied it"). Found on the same card and fixed with it: the list said "No webhooks configured yet" while loading and after failing (now a skeleton, and "Could not load webhooks."); the settings form offered its own ten event ids, raw and four short of the server's fourteen, while the admin page lacked a name for `member.joined` — both now read the server's catalog through one label map (`lib/webhook-events.ts`). Measured on lane 1: `webhook-access` 15/15 (its API half failed 5 of 8 on the old API; the browser half compares the secret shown with the one STORED, and holds and fails the list by route, with the service worker blocked — see `found-23-sep/routes-bypassed-by-the-service-worker`), `permission-guards` 8/8 (6 of 8 failed on the old API). Regression on lane 1, 8/8: app-catalogue, calendar-accounts, integration-error-card, settings-depth, ui-sweep, addressability-live and the two. Break patches: `whk-1..19` (API 1–9, pages 10–19) and `pgd-1..8`, each compiled against the fix; the break run waits for lanes 2–4.
+
+*Still open, and its own item:* the web cannot use a custom grant here — settings is admin-only in the router — which is `product-siblings/custom-role-permissions-unread-by-web`.
+
+### `found-23-sep/service-worker-keeps-api-answers` — open, high (found when a route in `webhook-access` never fired)
+
+**The service worker stores every authenticated API answer for a day, keyed by URL alone, and nothing deletes them at sign-out**
+
+*Evidence:* `vite.config.ts`'s workbox `runtimeCaching` sends every `GET /api/v1/*` through `NetworkFirst` into the `rundesk-api` cache (`maxAgeSeconds` one day, `networkTimeoutSeconds: 5`). Measured on lane 1 with a real browser: after signing in as the super admin, `rundesk-api` held `/api/v1/users/me` (with the email), `/ops/metrics`, `/ops/tenant-databases`, `/ops/organizations` and the organisation's workspaces; after the session was cleared it held 11 answers, all still there. The only `caches.delete` in `apps/web/src` is the chunk-reload recovery. So on a shared machine the next person's slow request (over five seconds) or offline request is answered with the previous person's data, and the answers sit on disk for anyone with the profile.
+
+*To close:* stop caching authenticated API answers (drop the rule — "offline reads of recently viewed data" was never measured and is not worth another user's data), delete the existing `rundesk-api` cache on start-up and at sign-out, and prove it in a browser suite: sign in, read, sign out, and the cache holds nothing; a second account on the same profile never sees the first's answer. Research what ClickUp's web app keeps offline before deciding whether any read deserves a cache, and if one does, key it by account and clear it at sign-out.
+
+### `found-23-sep/routes-bypassed-by-the-service-worker` — open, medium (test tooling; found with the item above)
+
+**A page route never sees a request the service worker answers, so a suite that holds or fails an API call by route can be looking at an answer that already arrived**
+
+*Evidence:* Playwright's `page.route` is not consulted for requests the service worker intercepts, and the app's worker intercepts every API GET. `webhook-access`'s first run: the route predicate was never called (`held false`), and both loading checks looked at a list that had answered. Twenty suites passed `serviceWorkers: 'block'` before `webhook-access` (21 now, counted with `grep -l serviceWorkers test/e2e/*.mjs`); four route requests without it — `chat-history` (the held first page), `clip-created-card` (3 routes), `create-menu-ai` and `ui-sweep` — and whether their routes fire depends on whether the worker has claimed the page yet.
+
+*To close:* `serviceWorkers: 'block'` in each of the four, and every hold asserts that it held (a flag set in the handler, as `webhook-access` does), so a route that never fires fails its check instead of passing it. A rule in the suite checkers: a `.route(` in a file whose contexts do not block service workers.
+
+### `found-23-sep/secret-and-credential-reads` — open, high (from a read-only sweep of every credential column; each still to be measured)
+
+**Five read routes hand a credential or a secret to people who should not have it**
+
+*Evidence (read, not yet run):* (1) `GET /tasks/:taskId/activity` embeds `with: { actor: true }` (`tasks.service.ts` `listActivity`) — the whole `users` row, `password_hash` included, for everyone who acted on the task, to anyone who can open it, guests too; every other embed uses `PUBLIC_USER_WITH`. (2) `GET /lists/:listId/inbound-webhooks` returns each hook's `token` — the only credential for the unauthenticated `POST /inbound/webhook/:token`, which creates tasks as the hook's creator — to any member who can see the list; create and delete are open to any member too. (3) `GET /tasks/:taskId/email-address` has no guard beyond sign-in and no access check, and returns the list's secret inbound address to any signed-in user in any workspace. (4) Client-portal tokens go to any project member (`listForProject`, `toAdminView`), and `PATCH portals/:id` has no guard at all. (5) `workspaces.custom_domain_token` goes to every member through `GET /workspaces/:id`, `GET /workspaces` and the login bundle, though the org roster already strips it. Also found: `POST /invitations/:orgId/bulk` does not check that the workspaces it grants belong to the caller's organisation, and invitation tokens come back in the list and create answers; `POST /invitations` does not validate the role; federated search runs every member's query with the workspace's connected account.
+
+*To close:* measure each on lane 1 first; then the fix, a suite with each refusal paired with the grant that works, break patches, CI. Security order: the password hashes, the cross-organisation invitation, then the rest.
+
 ### `found-23-sep/admin-grant-taken-and-not-put-back` — **closed**, measurement pending (found in plan-2)
 
 **`space-default-permission` removed the admin's space grant for one check and never restored it, so `sdp-7` ended the run one section on**
@@ -1468,7 +1502,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 ### `harness/resume-doc-harness-stale` — **closed**
 
-*Closed:* §2's drain paragraph had already been corrected (run-plan.sh, never-run-plan.mjs, drain.sh deleted) and §5 is accurate; §6 now gives 117 suites, about 129 minutes, `timeout-minutes: 180`, and points at the job comment and `check-suites-registered.mjs` instead of a count that drifts.
+*Closed:* §2's drain paragraph had already been corrected (run-plan.sh, never-run-plan.mjs, drain.sh deleted) and §5 is accurate; §6 now gives the dated count (117 when this closed, 119 after `webhook-access` and `permission-guards`), about 1.1 minutes each, `timeout-minutes: 180`, and points at the job comment and `check-suites-registered.mjs` instead of a count that drifts.
 
 **video2-resume.md describes retired harness state**
 

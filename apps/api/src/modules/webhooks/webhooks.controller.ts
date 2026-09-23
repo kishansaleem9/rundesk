@@ -3,7 +3,6 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WebhooksService } from './webhooks.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CreateWebhookDto, UpdateWebhookDto } from './dto/webhook.dto'
@@ -21,16 +20,29 @@ export class WebhooksController {
     return this.svc.getAvailableEvents()
   }
 
+  /*
+   * READING WEBHOOKS NEEDS THE PERMISSION THAT MANAGES THEM.
+   *
+   * This list answered any workspace member — guests included — with every
+   * webhook's target URL and HMAC signing SECRET, and the deliveries route
+   * below with each delivery's payload. A member could copy a secret and sign
+   * requests the receiving system would trust as coming from this workspace.
+   * Both reads now require `webhook.manage`, and the list never carries the
+   * secret (`hasSecret` instead): it is shown once, in the answer that
+   * creates it.
+   */
   @Get()
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   @ApiOperation({ summary: 'List all webhooks in a workspace' })
   list(@Param('workspaceId') workspaceId: string) {
     return this.svc.list(workspaceId)
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @UseGuards(PermissionsGuard)
   @RequirePermissions('webhook.manage')
-  @ApiOperation({ summary: 'Create a new webhook (admin only)' })
+  @ApiOperation({ summary: 'Create a new webhook (needs webhook.manage)' })
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -40,7 +52,7 @@ export class WebhooksController {
   }
 
   @Patch(':webhookId')
-  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @UseGuards(PermissionsGuard)
   @RequirePermissions('webhook.manage')
   update(
     @Param('workspaceId') workspaceId: string,
@@ -51,7 +63,7 @@ export class WebhooksController {
   }
 
   @Delete(':webhookId')
-  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @UseGuards(PermissionsGuard)
   @RequirePermissions('webhook.manage')
   delete(
     @Param('workspaceId') workspaceId: string,
@@ -61,7 +73,7 @@ export class WebhooksController {
   }
 
   @Post(':webhookId/test')
-  @UseGuards(WorkspaceAdminGuard, PermissionsGuard)
+  @UseGuards(PermissionsGuard)
   @RequirePermissions('webhook.manage')
   @ApiOperation({ summary: 'Send a test event to the webhook' })
   test(
@@ -72,6 +84,8 @@ export class WebhooksController {
   }
 
   @Get(':webhookId/deliveries')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('webhook.manage')
   @ApiOperation({ summary: 'List recent deliveries for a webhook' })
   deliveries(
     @Param('workspaceId') workspaceId: string,

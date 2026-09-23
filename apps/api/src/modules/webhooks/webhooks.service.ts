@@ -7,6 +7,15 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { assertSafeUrl, safeFetch, SsrfBlockedError } from '../../common/http/safe-fetch'
 import type { CreateWebhookDto, UpdateWebhookDto } from './dto/webhook.dto'
 
+/**
+ * A webhook as it is shown after it is made: everything but the signing
+ * secret, which is only ever returned by the call that creates it.
+ */
+function withoutSecret<T extends { secret?: string | null }>(row: T): Omit<T, 'secret'> & { hasSecret: boolean } {
+  const { secret, ...rest } = row
+  return { ...rest, hasSecret: Boolean(secret) }
+}
+
 const WEBHOOK_EVENTS = [
   'task.created',
   'task.updated',
@@ -33,11 +42,12 @@ export class WebhooksService {
   }
 
   async list(workspaceId: string) {
-    return this.db
+    const rows = await this.db
       .select()
       .from(webhooks)
       .where(eq(webhooks.workspaceId, workspaceId))
       .orderBy(desc(webhooks.createdAt))
+    return rows.map(withoutSecret)
   }
 
   /**
@@ -105,7 +115,7 @@ export class WebhooksService {
       .where(eq(webhooks.id, webhookId))
       .returning()
     if (!row) throw new NotFoundException('Webhook not found')
-    return row
+    return withoutSecret(row)
   }
 
   async delete(workspaceId: string, webhookId: string) {

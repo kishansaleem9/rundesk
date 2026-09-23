@@ -15,7 +15,7 @@ import {
 } from '@nestjs/common'
 import { ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ScimService } from './scim.service'
 
@@ -25,7 +25,11 @@ type CurrentUserPayload = { id: string; email: string }
 
 @ApiTags('scim-admin')
 @Controller('workspaces/:workspaceId/scim/tokens')
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
+// Provisioning tokens are SSO configuration — `sso.manage`, as the permission
+// catalog describes it ("OIDC, SAML, and SCIM provisioning"). This route was
+// behind the admin-or-manager guard alone, with no permission at all.
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@RequirePermissions('sso.manage')
 export class ScimAdminController {
   constructor(private scim: ScimService) {}
 
