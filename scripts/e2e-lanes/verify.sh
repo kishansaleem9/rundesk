@@ -85,6 +85,45 @@ if [ -f "$DIST/index.html" ]; then
   fi
 fi
 
+# ── AND THE API IS A BUILD TOO, WHICH COST A WRONG ANSWER THE DAY THIS WENT IN.
+#
+# The refusal above was written for the web bundle and the API has exactly the
+# same shape: `fleet-up.sh` and `fleet-restart.sh` both run
+# `dist/apps/api/src/main.js`, a `tsc` output, so a lane restarted after a
+# source change still serves the previous build. Unlike the bundle it is
+# SHARED across every lane, so one forgotten build is wrong everywhere at once.
+#
+# What it looked like: `folder-dialog` reported "the row came back with null
+# for a typed …" — the suite's own words for a box wired to nothing — against a
+# service that had been writing the column for twenty minutes. The build was
+# two days old. Nothing in the run said so, and the failure named the product.
+#
+# `packages/db/src` is in the scan because the schema is compiled into that
+# same output: a column added to `schema/folders.ts` and not rebuilt is a
+# column Drizzle will not select, which reads as a write that never happened.
+#
+# Same conservatism as above, and the same asymmetry behind it: an mtime moved
+# by `git checkout` costs one rebuild, a stale API costs an afternoon.
+#
+# THE REFERENCE IS THE BUILD'S NEWEST FILE, NOT `main.js`. Written against
+# `main.js` first, and it refused a build made twenty minutes earlier: `tsc`
+# rewrites `main.js` only when `main.ts` changes, so the one file named after
+# the build is the one least likely to have moved. The newest output anywhere
+# in `dist` is what "when did this last build" actually means.
+API_BUILT=$(find apps/api/dist -name '*.js' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+if [ -n "$API_BUILT" ]; then
+  API_NEWER=$(find apps/api/src packages/db/src -name '*.ts' 2>/dev/null \
+              | xargs -r -I{} sh -c '[ {} -nt "'"$API_BUILT"'" ] && echo {}' 2>/dev/null | head -3)
+  if [ -n "$API_NEWER" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — the API build is older than the source it is built from"
+    echo "   newer, among others:"
+    echo "$API_NEWER" | sed 's/^/     /'
+    echo "   rebuild and restart:  pnpm --filter @rundesk/db build && pnpm --filter @rundesk/api build \\"
+    echo "                         && bash scripts/e2e-lanes/fleet-restart.sh \"$LANE\""
+    exit 7
+  fi
+fi
+
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 export E2E_EMAIL=admin@rundesk.internal
