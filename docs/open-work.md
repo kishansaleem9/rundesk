@@ -1454,15 +1454,17 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
 
-### `harness/dist-brk-committed` — open, small
+### `harness/dist-brk-committed` — **closed** (one item with `commit-log/log-39863ff-2` below)
 
 **A break-run web bundle (apps/web/dist-brk, 80 files) is committed and not ignored**
+
+*Closed:* both directories removed from the repository — 1,838 files, 16 MB of API build and 6.7 MB of bundle — and `dist-*` added to `.gitignore` beside `dist`, which is why these slipped through. Before removing them: nothing tracked references either directory (`grep -rn dist-brk` outside them finds only this ledger), nothing else tracked matches `dist-*`, and no lane, script or workflow serves them, so whatever they contain could not have reached a deployment. A search of both for the signatures break patches leave (`Exception('No')` and friends) found none.
 
 *Evidence:* `git ls-files apps/web/dist-brk | wc -l` gives 80. It was added in 39863ff. `git check-ignore apps/web/dist-brk/index.html` exits 1, because .gitignore:5 `dist` does not match dist-brk. No tracked file other than the bundle itself references dist-brk.
 
 *To close:* git rm -r --cached apps/web/dist-brk and add `dist-*` to .gitignore.
 
-### `commit-log/log-39863ff-2` — open, small
+### `commit-log/log-39863ff-2` — **closed** (the same files as `harness/dist-brk-committed` above; closed there)
 
 **About 1,840 build-output files were committed under apps/*/dist-brk**
 

@@ -1,1 +1,0 @@
-import{d as e}from"./vendor-react-core-BCFc4XZL.js";import{dz as o,az as s}from"./vendor-DsaCphQ1.js";import"./vendor-utils-D19diF5V.js";function t(){return e.jsxDEV(s,{},void 0,!1,{fileName:"/home/user/rundesk/apps/web/src/routes/app.$workspaceId.goals.lazy.tsx",lineNumber:6,columnNumber:10},this)}const u=o("/app/$workspaceId/goals")({component:t});export{u as Route};

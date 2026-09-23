@@ -3,6 +3,9 @@ node_modules
 .idea
 .vscode
 dist
+# A second build of either app beside its `dist` — `dist-brk` was one, a
+# break run's bundle, and 1,838 of its files were committed before this line.
+dist-*
 build
 .next
 .turbo
