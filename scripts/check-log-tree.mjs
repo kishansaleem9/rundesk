@@ -142,6 +142,11 @@ const PATCH = [
   "q = '/home/user/rundesk/packages/ui/src/components/toaster.tsx'",
   "tmp = '/tmp/claude-0/scratch.tsx'",
   "again = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'",
+  // THE ROUTE FILE WITH PARAMETERS IN ITS NAME, which is the case that was
+  // missing and cost 75 patches their product dependency: without `$` in the
+  // path class the match stopped at `apps/web/src/routes/app.` and `drifted()`
+  // watched a file that does not exist.
+  "r = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'",
 ].join('\n')
 const deps = patchDeps(PATCH, 'folder-dialog')
 ok(deps.includes('apps/web/src/components/quick-create-modal.tsx'), 'an apps/ file the patch edits is a dep')
@@ -150,6 +155,14 @@ ok(deps.includes('test/e2e/folder-dialog.mjs'), 'and the suite that does the mea
 ok(!deps.some((d) => d.includes('/tmp/')), 'a scratch path outside the repo is not a dep')
 ok(deps.filter((d) => d.endsWith('quick-create-modal.tsx')).length === 1, 'a file named twice is one dep')
 ok(!patchDeps(PATCH, null).some((d) => d.startsWith('test/e2e/')), 'with no suite named, no suite dep is invented')
+ok(
+  deps.includes('apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'),
+  'and a route whose NAME carries `$` parameters — 75 patches edit that one file',
+)
+ok(
+  !deps.includes('apps/web/src/routes/app.'),
+  'and not the truncated prefix, which is a path that exists nowhere and can never drift',
+)
 
 console.log('▶ has anything it depended on changed since')
 
@@ -310,7 +323,10 @@ if (process.argv.includes('--mutate')) {
        */
       ['the newest log stops winning', 'if (!prev || prev.mtime < mtime) at.set', 'if (true) at.set'],
       ['a patch stops depending on its own suite', 'if (suite) deps.add(`test/e2e/${suite}.mjs`)', 'void suite'],
-      ['a patch stops depending on the product files it edits', '/\\/home\\/user\\/rundesk\\/((?:apps|packages)\\/[A-Za-z0-9_./-]+)/g', '/__never_matches__()/g'],
+      // The character class, back to what it was: the mutation that costs 75
+      // patches their dependency on the route file they edit.
+      ['a route with `$` in its name stops being a dependency', '[A-Za-z0-9_.$/-]+', '[A-Za-z0-9_./-]+'],
+      ['a patch stops depending on the product files it edits', '/\\/home\\/user\\/rundesk\\/((?:apps|packages)\\/[A-Za-z0-9_.$/-]+)/g', '/__never_matches__()/g'],
       ['an unreadable commit reads as no drift', "out = ['<unknown commit>']", 'out = []'],
       ['a Re-run: line with nothing after it counts', '/^#[ \\t]*Re-run:[ \\t]*\\S/im', '/^#[ \\t]*Re-run:/im'],
     ],

@@ -115,8 +115,29 @@ export const declaresRerun = (text) => /^#[ \t]*Re-run:[ \t]*\S/im.test(text)
 // address the checkout absolutely (`p = '/home/user/rundesk/apps/web/...'`), so
 // the repo-relative tail is what git wants.
 export function patchDeps(text, suite) {
+  /*
+   * `$` IS IN THE CLASS, AND LEAVING IT OUT COST 75 PATCHES THEIR PRODUCT
+   * DEPENDENCY.
+   *
+   * TanStack Router names its files after their parameters, so the biggest
+   * route in this product is
+   * `apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx` —
+   * the list, board, calendar and Gantt views in one file. Without `$` the
+   * match stopped at `apps/web/src/routes/app.`, a path that does not exist,
+   * and `drifted()` cannot report a change to a file it is not looking at. So
+   * every one of the 75 patches that edits that route recorded a dependency on
+   * nothing, and a change to it marked none of them as needing a re-run.
+   *
+   * The sweep's terminal sentence — "every log on disk measured the current
+   * tree" — was false for those 75 whenever that file moved, and nothing said
+   * so. Found by `check-plan-population`, which exists because these two
+   * instruments have to answer one question the same way.
+   *
+   * 77 files under `apps/` and `packages/` carry a `$`, and no tracked path
+   * needs any character outside this class.
+   */
   const deps = new Set(
-    [...text.matchAll(/\/home\/user\/rundesk\/((?:apps|packages)\/[A-Za-z0-9_./-]+)/g)].map(
+    [...text.matchAll(/\/home\/user\/rundesk\/((?:apps|packages)\/[A-Za-z0-9_.$/-]+)/g)].map(
       (m) => m[1],
     ),
   )
