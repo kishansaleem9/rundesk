@@ -1479,6 +1479,28 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # What a task may be POINTED AT. `PATCH /tasks/:id` spread its JSON body
+      # into the row, so any assignee could move a task into another workspace's
+      # list, make themselves its creator, or set a cover key the server then
+      # signed — a working URL to any object in the bucket. `parentTaskId` and
+      # `POST /tasks/:id/move` never asked where their target lived, and
+      # `addAttachment`'s prefix check was walked through by `..` on a public-CDN
+      # deployment. Every refusal is asserted by status AND by the row; every
+      # guard has a positive twin. The attacker is a member of TWO workspaces,
+      # so the same-workspace rule is the only thing that can stop the move.
+      #
+      # NEEDS AN OBJECT STORE for its two signing checks, which pair "the foreign
+      # cover is not signed" with "this task's own cover is" so that neither can
+      # pass on a lane that signs nothing. This job runs none yet — the same gap
+      # `task-cover` and `attach-on-create` have, recorded in docs/open-work.md.
+      - name: Task references stay inside their workspace
+        if: '!cancelled()'
+        run: node test/e2e/task-boundaries.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
+
       # §S09 `[08:55]` — a folder name collision is reported, not swallowed. The
       # direct-SQL-insert check proves the INDEX refuses, so the rule cannot be
       # bypassed by anything that writes folders another way.

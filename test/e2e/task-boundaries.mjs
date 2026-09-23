@@ -173,6 +173,17 @@ try {
       select list_id, created_by_id, completed_at, status_category, title, cover_storage_key, parent_task_id
       from tasks where id = ${id}`)[0] ?? null
   const refused = (res, status) => res.status === status
+  /*
+   * EVERY ATTACK IS PUT BACK BEFORE THE NEXT CHECK. Under a break the attack
+   * lands — that is what its check is there to see — and a task left in
+   * workspace B, or in the view-only list, then fails every later check for
+   * that reason instead of its own. The first break run showed it: removing
+   * both layers of the whitelist reddened twelve checks, nine of them only
+   * because T had been moved into B by the first. So once a check has read the
+   * row, the columns its attack could have written go back by SQL, and each
+   * check starts from the fixtures — a patch reddens what it breaks.
+   */
+  const putBack = (id, cols) => sql`update tasks set ${sql(cols)} where id = ${id}`
 
   // ══ 1. THE WHITELIST ═════════════════════════════════════════════════════
   console.log('\n▶ PATCH /tasks/:id changes the fields it names, and refuses every other column by name')
@@ -185,6 +196,7 @@ try {
     `it answered ${said(viaPatch)} and the row's list is ${afterListPatch?.list_id} (was ${LE1}); a 200 here moved ` +
       'a task into another tenant’s list past every check the move route makes',
   )
+  await putBack(T, { list_id: LE1 })
 
   const asCreator = await M(`/tasks/${T2}`, { method: 'PATCH', body: { createdById: memberId } })
   const afterCreator = await row(T2)
@@ -193,6 +205,7 @@ try {
     'an assignee cannot make themselves the creator — which is itself a grant of write access',
     `it answered ${said(asCreator)} and created_by_id is ${afterCreator?.created_by_id} (the admin is ${admin.id})`,
   )
+  await putBack(T2, { created_by_id: admin.id })
 
   const beforeClose = await row(T)
   const asClosed = await M(`/tasks/${T}`, {
@@ -206,6 +219,7 @@ try {
     `it answered ${said(asClosed)}; completed_at=${afterClose?.completed_at}, status_category ` +
       `${beforeClose?.status_category} → ${afterClose?.status_category}`,
   )
+  await putBack(T, { completed_at: null, status_category: beforeClose?.status_category })
 
   const retitled = await M(`/tasks/${T}`, { method: 'PATCH', body: { title: `${TAG} renamed` } })
   chk(
@@ -224,6 +238,7 @@ try {
     `it answered ${said(foreignCover)}; a stored foreign key is signed for whoever opens the task — a working URL ` +
       'to another tenant’s file',
   )
+  await putBack(T, { cover_storage_key: null })
 
   const traversal = `workspaces/${WA}/tasks/${T}/attachments/../../../../workspaces/${WC}/tasks/${TC}/attachments/${stamp}-secret.pdf`
   const walked = await M(`/tasks/${T}`, { method: 'PATCH', body: { coverStorageKey: traversal } })
@@ -232,6 +247,7 @@ try {
     'and so is one that starts with this task’s own prefix and walks out of it with ..',
     `it answered ${said(walked)}; a public-CDN URL collapses the dots and lands on workspace C`,
   )
+  await putBack(T, { cover_storage_key: null })
 
   const OWN = `workspaces/${WA}/tasks/${T}/attachments/${stamp}-cover.png`
   const ownCover = await M(`/tasks/${T}`, { method: 'PATCH', body: { coverStorageKey: OWN } })
@@ -248,9 +264,11 @@ try {
     'and so is its own inbound-email attachment, which the Attachments tab also offers',
     `it answered ${said(inboundCover)} — a mailed-in image is the task’s own object in its other shape`,
   )
-  // Back to the upload, so the read-side check below has a key of T's to sign.
-  const reset = await M(`/tasks/${T}`, { method: 'PATCH', body: { coverStorageKey: OWN } })
-  if (reset.status !== 200) console.log(`  \x1b[33mnote\x1b[0m could not put T's own cover back: ${said(reset)}`)
+  // Back to the upload, so the read-side checks below have a key of T's to
+  // sign. By SQL, not the route: writing a cover is checked just above, and a
+  // break that refuses the write should redden those checks — not the two
+  // signing checks as well, which are about reading.
+  await putBack(T, { cover_storage_key: OWN })
 
   // A row poisoned from outside the route — before the fix, or by any path
   // added later. The read side must not turn it into a URL.
@@ -288,6 +306,7 @@ try {
     `it answered ${said(foreignParent)}; the row's parent is ${(await row(T))?.parent_task_id} and the read gave ` +
       `parent ${JSON.stringify(readBack?.parent ?? null).slice(0, 120)}`,
   )
+  await putBack(T, { parent_task_id: null })
 
   const CHILD = `${TAG} created under B`
   const createdUnder = await M('/tasks', { method: 'POST', body: { listId: LE1, title: CHILD, parentTaskId: TB } })
@@ -305,8 +324,7 @@ try {
     'while a parent in the same workspace is accepted and stored',
     `it answered ${said(localParent)}`,
   )
-  const unparent = await M(`/tasks/${T}`, { method: 'PATCH', body: { parentTaskId: null } })
-  if (unparent.status !== 200) console.log(`  \x1b[33mnote\x1b[0m could not detach T again: ${said(unparent)}`)
+  await putBack(T, { parent_task_id: null })
 
   // ══ 4. THE MOVE ══════════════════════════════════════════════════════════
   console.log('\n▶ POST /tasks/:id/move checks where the task is going, not only where it is')
@@ -317,6 +335,7 @@ try {
     'a list in another workspace is NOT FOUND — even for a caller who belongs to both',
     `it answered ${said(moveOut)}; the task is in ${(await row(T))?.list_id}`,
   )
+  await putBack(T, { list_id: LE1 })
 
   const moveView = await M(`/tasks/${T}/move`, { method: 'POST', body: { listId: LV } })
   chk(
@@ -324,6 +343,7 @@ try {
     'a list in a view-only space is refused — the same gate creating a task there faces',
     `it answered ${said(moveView)}; the task is in ${(await row(T))?.list_id}`,
   )
+  await putBack(T, { list_id: LE1 })
 
   const movePrivate = await M(`/tasks/${T}/move`, { method: 'POST', body: { listId: LP } })
   chk(
@@ -331,6 +351,7 @@ try {
     'and so is a list in a private project the caller cannot see, in a space they may otherwise edit',
     `it answered ${said(movePrivate)}; the task is in ${(await row(T))?.list_id}`,
   )
+  await putBack(T, { list_id: LE1 })
 
   const moveHome = await M(`/tasks/${T}/move`, { method: 'POST', body: { listId: LE2 } })
   chk(
