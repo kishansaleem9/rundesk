@@ -16,6 +16,7 @@ import {
   Sun,
   Trash2,
   Circle,
+  AlarmClock,
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { isReplyNotification } from '../lib/reply-types'
@@ -79,9 +80,24 @@ const HOME_SECTIONS = [
   'assigned-to-me',
   'today-overdue',
   'personal-list',
+  'reminders',
   'more',
 ] as const
 type HomeSection = (typeof HOME_SECTIONS)[number]
+
+/** One of the caller's still-pending reminders, as GET /workspaces/:ws/reminders answers. */
+type PendingReminder = {
+  id: string
+  taskId: string | null
+  taskTitle: string | null
+  messageId: string | null
+  messageBody: string | null
+  channelId: string | null
+  channelName: string | null
+  note: string | null
+  remindAt: string
+  notifiedAt: string | null
+}
 
 export const Route = createFileRoute('/app/$workspaceId')({
   validateSearch: (search: Record<string, unknown>): { section?: HomeSection } => {
@@ -149,6 +165,26 @@ function WorkspaceHome() {
     },
   })
 
+  /*
+   * REMINDERS HAD NO READER. `+ Create › Reminder` makes a standalone one and
+   * invalidates `['reminders', ws]`, and nothing on the page held that key:
+   * `GET /workspaces/:ws/reminders` answered, and no screen asked. A reminder
+   * made there could be neither seen nor taken back until it went off — only a
+   * task's own reminders were ever listed, from inside that task. Home is where
+   * the rest of your own work already is, so this is where they are listed,
+   * under the key the modal was already refreshing.
+   */
+  const remindersQuery = useQuery({
+    queryKey: ['reminders', workspaceId],
+    enabled: Boolean(workspaceId),
+    queryFn: () => api<PendingReminder[]>(`/workspaces/${workspaceId}/reminders`),
+  })
+  const deleteReminder = useMutation({
+    mutationFn: (id: string) => api(`/workspaces/${workspaceId}/reminders/${id}`, { method: 'DELETE' }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ['reminders', workspaceId] }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('appWorkspace.couldNotDeleteReminder')),
+  })
+
   const personalTasksQuery = useQuery({
     queryKey: ['personal-tasks', workspaceId],
     enabled: Boolean(workspaceId),
@@ -199,6 +235,21 @@ function WorkspaceHome() {
     return isToday(due) || isPast(due)
   })
   const personalTasks = personalTasksQuery.data ?? []
+  const pendingReminders = remindersQuery.data ?? []
+  // Where a reminder leads: its task, through the same resolver the Inbox
+  // uses, or its message in the channel it was said in.
+  const openReminder = async (r: PendingReminder) => {
+    if (r.taskId) {
+      try {
+        const nav = await api<{ url: string }>(`/tasks/${r.taskId}/navigation`)
+        navigate({ to: nav.url as any })
+      } catch {
+        toast.error(t('appWorkspace.reminderTargetGone'))
+      }
+      return
+    }
+    if (r.channelId) navigate({ to: `/app/${workspaceId}/chat?channel=${r.channelId}${r.messageId ? `&message=${r.messageId}` : ''}` as any })
+  }
   const visibleAnnouncement = (announcementsQuery.data ?? [])[0]
   // §A6.5 — the scheduled briefing arrives as a notification; Home is where the
   // user starts their day, so the most recent one is shown here rather than
@@ -304,6 +355,7 @@ function WorkspaceHome() {
             <HomeItem icon={CircleCheck} label={t('appWorkspace.assignedToMe')} active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
             <HomeItem icon={CalendarClock} label={t('appWorkspace.todayOverdue')} active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
             <HomeItem icon={ListChecks} label={t('appWorkspace.personalList')} active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalTasks.filter((task) => !task.done).length} />
+            <HomeItem icon={AlarmClock} label={t('appWorkspace.reminders')} active={section === 'reminders'} onClick={() => setSection('reminders')} count={pendingReminders.length} testId="home-nav-reminders" />
             <HomeItem icon={MoreHorizontal} label={t('appWorkspace.more')} active={section === 'more'} onClick={() => setSection('more')} />
           </div>
         </Card>
@@ -470,6 +522,63 @@ function WorkspaceHome() {
             </div>
           )}
 
+          {section === 'reminders' && (
+            <div className="space-y-2" data-testid="home-section-reminders">
+              {remindersQuery.isPending ? (
+                <ListSkeleton rows={3} rowClassName="h-14" />
+              ) : pendingReminders.length === 0 ? (
+                <EmptyStateCard
+                  icon={<AlarmClock className="h-6 w-6" />}
+                  title={t('appWorkspace.emptyRemindersTitle')}
+                  description={t('appWorkspace.emptyRemindersBody')}
+                />
+              ) : (
+                pendingReminders.map((r) => {
+                  const label = r.note?.trim() || r.taskTitle || r.messageBody || t('appWorkspace.reminders')
+                  const where = r.taskTitle ?? (r.channelName ? `#${r.channelName}` : null)
+                  const leads = Boolean(r.taskId || r.channelId)
+                  return (
+                    <Card
+                      key={r.id}
+                      variant="glass"
+                      data-testid="home-reminder"
+                      data-reminder-id={r.id}
+                      className={`p-3 ${leads ? 'cursor-pointer hover:border-accent/30' : ''}`}
+                      onClick={() => {
+                        if (leads) void openReminder(r)
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <div className="text-sm font-medium truncate" data-testid="home-reminder-label">{label}</div>
+                          <div className="text-[11px] text-muted-foreground mt-1" data-testid="home-reminder-when">
+                            {formatDistanceToNowStrict(new Date(r.remindAt), { addSuffix: true })}
+                            {where && label !== where ? ` · ${where}` : ''}
+                          </div>
+                        </div>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 w-7 p-0 shrink-0"
+                          aria-label={t('appWorkspace.deleteReminder')}
+                          title={t('appWorkspace.deleteReminder')}
+                          data-testid="home-reminder-delete"
+                          disabled={deleteReminder.isPending}
+                          onClick={(e) => {
+                            e.stopPropagation()
+                            deleteReminder.mutate(r.id)
+                          }}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </Card>
+                  )
+                })
+              )}
+            </div>
+          )}
+
           {section === 'more' && (
             <div className="space-y-2">
               <Button variant="outline" onClick={() => navigate({ to: '/app/$workspaceId/inbox', params: { workspaceId } })}>
@@ -574,17 +683,20 @@ function HomeItem({
   active,
   count,
   onClick,
+  testId,
 }: {
   icon: typeof Bell
   label: string
   active: boolean
   count?: number
   onClick: () => void
+  testId?: string
 }) {
   return (
     <button
       type="button"
       onClick={onClick}
+      data-testid={testId}
       className={`w-full flex items-center gap-2 rounded-md px-2 py-2 text-sm ${
         active ? 'bg-accent/15 text-foreground' : 'text-muted-foreground hover:bg-accent/10 hover:text-foreground'
       }`}
@@ -592,7 +704,7 @@ function HomeItem({
       <Icon className="h-4 w-4 shrink-0" />
       <span className="truncate">{label}</span>
       {!!count && (
-        <Badge variant="soft" className="ml-auto text-[10px]">
+        <Badge variant="soft" className="ml-auto text-[10px]" data-testid={testId ? `${testId}-count` : undefined}>
           {count}
         </Badge>
       )}
