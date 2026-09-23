@@ -84,6 +84,7 @@ import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
+import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
@@ -950,10 +951,6 @@ export class TasksService {
     if (!member) throw new ForbiddenException('Managers can only delete tasks in their own spaces')
   }
 
-  private sanitizeFileName(input: string): string {
-    return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  }
-
   /**
    * §4.5 — enforce the declared attachment size on the presign/create paths.
    * A valid, positive `sizeBytes` is now MANDATORY: reject when it is missing,
@@ -1070,7 +1067,7 @@ export class TasksService {
     const ctx = await this.assertTaskWriteAccess(taskId, actorId)
     if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
     this.assertAttachmentSize(body.sizeBytes)
-    const fileName = this.sanitizeFileName(body.fileName)
+    const fileName = safeFileName(body.fileName)
     const key = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
       uploadedby: actorId,
@@ -3257,7 +3254,7 @@ export class TasksService {
     const contentType = head.ContentType || 'video/webm'
     const fileName =
       (data.fileName?.trim() || head.Metadata?.title || data.storageKey.split('/').pop() || 'clip.webm').slice(0, 255)
-    const storageKey = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${this.sanitizeFileName(fileName)}`
+    const storageKey = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/${Date.now()}-${safeFileName(fileName)}`
     await this.r2.copyObject(data.storageKey, storageKey, {
       contentType,
       metadata: { uploadedby: actorId, taskid: taskId },

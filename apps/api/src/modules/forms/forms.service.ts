@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { R2Service } from '../../common/storage/r2.service'
+import { safeFileName } from '../../common/storage/file-name'
 import { WebhooksService } from '../webhooks/webhooks.service'
 
 /** Hard cap on a single form-upload file (public intake). */
@@ -436,10 +437,6 @@ export class FormsService {
 
   // ─── Public file uploads (form intake) ─────────────────────────────────────
 
-  private sanitizeFileName(input: string): string {
-    return (input || '').replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  }
-
   /** Object-key prefix owning a form's uploaded files. */
   private formUploadPrefix(formId: string): string {
     return `forms/${formId}/uploads/`
@@ -459,7 +456,7 @@ export class FormsService {
     if (body.sizeBytes != null && Number.isFinite(body.sizeBytes) && body.sizeBytes > MAX_FORM_UPLOAD_BYTES) {
       throw new BadRequestException(`File exceeds the ${Math.round(MAX_FORM_UPLOAD_BYTES / (1024 * 1024))} MB limit`)
     }
-    const fileName = this.sanitizeFileName(body.fileName)
+    const fileName = safeFileName(body.fileName)
     const key = `${this.formUploadPrefix(form.id)}${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
       formid: form.id,

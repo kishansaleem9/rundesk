@@ -356,13 +356,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Apply the timeline technique. Bound the heat-map pane with a max-height and overflow-auto, and use overflow-clip on the card if the rounded corner is still wanted. Add a check that scrolls the pane and measures that the header stays at offset 0, plus a break patch that removes the bound.
 
-### `product-siblings/sanitize-filename-deref-before-fallback` — open, small
+### `product-siblings/sanitize-filename-deref-before-fallback` — **closed**, break run pending
 
 **Three sanitizeFileName copies dereference input before their own fallback; a missing fileName gives a 500**
 
 *Evidence:* tasks.service.ts:765-767, chat.service.ts:130-132 and clips.service.ts:17-19 all do `input.replace(...)… || 'file'`, so the fallback is unreachable for undefined. forms.service.ts:439-441 is the guarded copy (`(input || '')`). The callers take inline body types that ValidationPipe cannot check (tasks.controller.ts:649-659, clips.controller.ts:20-27, chat.controller.ts:302-318, used at chat.service.ts:163, :188 and :1219). A presign with no fileName throws TypeError and returns 500, not 400. This is the same shape clips.remove already fixed for storageKey (clips.service.ts:83-84).
 
 *To close:* Extract one guarded helper (use the forms version) and use it at all sites.
+
+*Closed:* four copies, not three: forms had the guarded one. `common/storage/file-name.ts` `safeFileName(input, fallback)` is that one, and all seven call sites use it: the task attachment presign and clip attach, the clip presign, the chat attachment presign and record, the custom-emoji presign, the form upload. Measured on lane 1 before: all five routes that can take a missing name (task, clip, chat presign, chat record, emoji) answered 500. `object-key-boundaries` §6, 23/23: each now names the key `…-file` (a clip `…-clip.webm`) and the chat record shows "file", beside a named file keeping its name, made safe. Unit tests `file-name.test.ts` (3). `sfn-1..3` compiled; `sfn-4` is a unit claim, shown to fail its named test.
 
 ### `product-siblings/task-listid-mass-assign-cross-workspace-move` — **closed**
 

@@ -30,6 +30,7 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
+import { safeFileName } from '../../common/storage/file-name'
 import { isKeyDirectlyUnder } from '../../common/storage/object-key-shape'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -128,10 +129,6 @@ export class ChatService {
     private skills: SkillsService,
   ) {}
 
-  private sanitizeFileName(input: string): string {
-    return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'file'
-  }
-
   /**
    * §6.8 — enforce the declared attachment size on the presign/record paths.
    * A valid, positive `sizeBytes` is mandatory (reject missing/≤0/over cap). The
@@ -161,7 +158,7 @@ export class ChatService {
     this.assertCanPost(await this.assertChannelAccess(channelId, userId))
     if (!this.r2.configured) throw new BadRequestException('R2 storage is not configured')
     this.assertAttachmentSize(body.sizeBytes)
-    const fileName = this.sanitizeFileName(body.fileName)
+    const fileName = safeFileName(body.fileName)
     const key = `chat/${channelId}/attachments/${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(key, body.contentType || 'application/octet-stream', {
       uploadedby: userId,
@@ -193,7 +190,7 @@ export class ChatService {
       .insert(chatMessageAttachments)
       .values({
         channelId,
-        fileName: this.sanitizeFileName(data.fileName),
+        fileName: safeFileName(data.fileName),
         contentType: data.contentType || 'application/octet-stream',
         sizeBytes: Math.max(0, Math.floor(data.sizeBytes || 0)),
         storageKey: data.storageKey,
@@ -1246,7 +1243,7 @@ export class ChatService {
     if (body.sizeBytes != null && body.sizeBytes > MAX_CUSTOM_EMOJI_BYTES) {
       throw new BadRequestException(`Emoji image exceeds the ${Math.round(MAX_CUSTOM_EMOJI_BYTES / 1024)} KB limit`)
     }
-    const fileName = this.sanitizeFileName(body.fileName)
+    const fileName = safeFileName(body.fileName)
     const key = `chat/${workspaceId}/emoji/${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(key, contentType, { uploadedby: userId })
     return { uploadUrl, storageKey: key }

@@ -38,7 +38,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 21
+const EXPECTED_CHECKS = 23
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -460,6 +460,52 @@ try {
     'while the workspace’s own clip is deleted, and leaves the library',
     `the library ${listedBefore ? 'listed' : 'did not list'} it; delete answered ${said(ownRemove)}; ` +
       `afterwards it is ${listedAfter ? 'still listed' : 'gone'}`,
+  )
+
+  // ══ 6. THE NAME IN THE KEY ═══════════════════════════════════════════════
+  console.log('\n▶ an upload with no file name is given a safe one, on every route that names an object')
+
+  /*
+   * `sanitize-filename-deref-before-fallback`. The name rule was four private
+   * copies, and three called `.replace` before their `|| 'file'`, so a request
+   * with no `fileName` answered 500 on five routes (measured on lane 1). One
+   * rule now, `common/storage/file-name.ts`: the guarded copy forms already had.
+   */
+  const lastSegment = (key) => String(key ?? '').split('/').pop() ?? ''
+  const unnamed = [
+    ['a task attachment presign', await A(`/tasks/${aTask}/attachments/presign`, { method: 'POST', body: { contentType: 'image/png', sizeBytes: PNG.length } })],
+    ['a clip presign', await A(`/workspaces/${WA}/clips/presign`, { method: 'POST', body: { contentType: 'video/webm' } })],
+    ['a chat attachment presign', await A(`/chat/channels/${CH}/attachments/presign`, { method: 'POST', body: { contentType: 'image/png', sizeBytes: PNG.length } })],
+    ['a custom emoji presign', await A(`/chat/workspaces/${WA}/custom-emoji/presign`, { method: 'POST', body: { contentType: 'image/png', sizeBytes: PNG.length } })],
+  ]
+  const misnamed = unnamed.filter(([, r]) => !(r.status < 300 && /^\d+-(file|clip\.webm)$/.test(lastSegment(r.data?.storageKey))))
+  // And the chat record, where the name is the one shown on the attachment.
+  const recPresign = await A(`/chat/channels/${CH}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: `${stamp}-rec.png`, contentType: 'image/png', sizeBytes: PNG.length },
+  })
+  const recPut = recPresign.data?.uploadUrl ? await put(recPresign.data.uploadUrl, PNG, 'image/png') : 0
+  const unnamedRecord = recPresign.data?.storageKey
+    ? await A(`/chat/channels/${CH}/attachments`, {
+        method: 'POST',
+        body: { storageKey: recPresign.data.storageKey, contentType: 'image/png', sizeBytes: PNG.length },
+      })
+    : { status: 0 }
+  chk(
+    misnamed.length === 0 && unnamedRecord.status < 300 && unnamedRecord.data?.fileName === 'file',
+    'an upload with no file name is given a safe one on every route that names an object — not a 500',
+    `${misnamed.map(([what, r]) => `${what} answered ${said(r)}`).join('; ') || 'every presign named its key'}; ` +
+      `the chat record (PUT ${recPut}) answered ${said(unnamedRecord)}`,
+  )
+
+  const named = await A(`/tasks/${aTask}/attachments/presign`, {
+    method: 'POST',
+    body: { fileName: 'Q3 report (final).pdf', contentType: 'application/pdf', sizeBytes: 10 },
+  })
+  chk(
+    named.status < 300 && /^\d+-Q3_report__final_\.pdf$/.test(lastSegment(named.data?.storageKey)),
+    'while a named file keeps its name, made safe for the key',
+    `the presign answered ${said(named)}`,
   )
 } catch (e) {
   failed += 1

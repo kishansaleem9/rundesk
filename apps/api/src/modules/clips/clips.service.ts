@@ -3,6 +3,7 @@ import { and, eq } from 'drizzle-orm'
 import { users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { R2Service } from '../../common/storage/r2.service'
+import { safeFileName } from '../../common/storage/file-name'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
 import { clipPrefix, isWorkspaceClipKey } from './clip-keys'
@@ -15,10 +16,6 @@ export class ClipsService {
     @Inject(DB_TOKEN) private readonly db: Db,
   ) {}
 
-  private sanitizeFileName(input: string): string {
-    return input.replace(/[^a-zA-Z0-9._-]/g, '_').slice(0, 120) || 'clip.webm'
-  }
-
   async createUploadUrl(
     workspaceId: string,
     actorEmail: string,
@@ -30,7 +27,7 @@ export class ClipsService {
     },
   ) {
     if (!this.r2.configured) throw new BadRequestException('R2 is not configured')
-    const fileName = this.sanitizeFileName(body.fileName)
+    const fileName = safeFileName(body.fileName, 'clip.webm')
     const key = `${clipPrefix(workspaceId)}${Date.now()}-${fileName}`
     const uploadUrl = await this.r2.presignPutObject(
       key,
