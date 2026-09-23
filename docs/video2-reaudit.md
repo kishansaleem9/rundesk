@@ -6508,12 +6508,45 @@ daily schedule) · Task Ideas (Brainstorm project task ideas)"* and serves them
 from `GET /ai/starters`, chosen from how much of your work is overdue rather
 than from a constant array.
 
-**What is missing is the SHELL.** `workspace-ai-page.tsx` is a horizontal TAB
-STRIP — chat · knowledge · commands · generate · notes · writing · analytics —
-where the frame draws a left nav in two groups (**AI**: Ask or Create ·
-Analytics · Skills (Beta) · Connections; **Super Agents**: Create Agent · All
-Agents · My Agents) over a **Recent Chats** list. There is no Ask|Agents toggle,
-no agents hub, and no credit meter.
+**What is missing is LESS OF THE SHELL THAN THIS PARAGRAPH FIRST SAID**, and
+the correction is the point. It read: "there is no Ask|Agents toggle, no agents
+hub, and no credit meter", over a list of shell pieces that included **Recent
+Chats**. Recent Chats is built. `workspace-sidebar.tsx` has an
+`ai-chats-section` carrying `data-total` and `data-shown`, with `ai-chats-more`
+and `ai-chats-less` under it — the frame's list-plus-More, closed by frame
+`06:25` in an earlier pass, and its comment records that the sixth conversation
+onwards used to be unreachable from the UI entirely.
+
+I missed it by grepping the web app for `threads` when the route is `ai-chats`,
+and then reading the empty result as an absence. A null grep is not a finding;
+it is a grep. `chat-threads.controller.ts` even opens with "§15 — the sidebar's
+'AI Chats' list", which names the reader I had just concluded did not exist.
+
+So what is actually absent from frame `16:30`, after checking each row against
+the schema rather than against this ledger:
+
+  · **the `/ai/brain` route** — Rundesk serves this at `/app/:workspaceId/ai`.
+    A URL, not a feature.
+  · **the nav SHAPE** — a horizontal tab strip where the frame draws a
+    two-group left nav. A layout, and the frame's four AI rows are a strict
+    SUBSET of the seven tabs that exist, so matching it exactly means either
+    hiding working surfaces or inventing a grouping for them.
+  · **Super Agents — Create Agent · All Agents · My Agents.** Genuinely
+    absent: no table, no module, no route. Three menu rows over nothing is the
+    facade at scale this ledger already refuses for the ten importers, and the
+    precedent there is to draw them with their reason and no control.
+  · **the Ask|Agents toggle**, which needs the half above to mean anything. A
+    toggle with one reachable value is what `ai_usage`'s own header calls "a
+    dropdown with one reachable value — the facade this audit exists to catch".
+  · **the rotating placeholder.** Verified absent: `ai-panel.tsx` has three
+    placeholder states — working, unavailable, ready — and none of them
+    rotates. The frame's four strings are nowhere in the tree. This is the one
+    cleanly buildable item left in the cluster.
+  · **the credit meter**, on the narrowed reason above.
+
+Every one of the rest — composer, tiered model picker with hover cards, skill
+chips, word suggestions, the trace, the four starter cards, Recent Chats with
+its More — is built.
 
 **And two of those are blocked — but the recorded reason for one of them was
 itself stale, four hours after I wrote it.** It read: "the credit meter reads
