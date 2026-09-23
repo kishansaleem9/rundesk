@@ -6635,3 +6635,50 @@ absent. That asymmetry is itself a finding. A ledger that overstates gaps costs
 time; a ledger that understates them costs trust, and this one has not done
 that. But reading a row against the tree has been worth more per hour tonight
 than building against it, and the next pass should start there.
+
+---
+
+## The rotating placeholder: built, then reverted, because nothing here can see it
+
+`16:30`–`16:45` cycles the prompt placeholder through four sentences with
+nobody touching the page, and after the seven-row audit above it was the one
+cleanly buildable item left in the Brain² cluster. It was built — the four
+strings in all four catalogues, a 3.8-second rotation on the resting state
+only, busy and unavailable keeping their precedence — and then reverted
+unbuilt, for a reason worth more than the feature.
+
+**The resting state never renders in a lane.** `GET /ai/status` answers
+`{"available": false}` on every one of them, because no lane carries a model
+key, so `ai-panel.tsx` takes its `placeholderUnavailable` branch permanently.
+A rotation on the branch underneath it cannot be observed by any suite in this
+harness. Shipping it would mean adding code no check can see, which is the
+facade in its purest form — and it would be MY facade, not one found in the
+tree.
+
+`ai-answer-rendering` demonstrates the point from the other side: its composer
+check reads the placeholder off a DISABLED input and had to be renamed from
+`restingPlaceholder` to `disabledPlaceholder`, because the name said one state
+and the value held another.
+
+### What would make it measurable, and what that costs
+
+`scripts/e2e-lanes/model-stub.mjs` exists, is Anthropic-compatible, and
+`check-model-stub.mjs` drives it every preflight. **It is wired into no lane.**
+Wiring it is the same move `s3-stub.mjs` already made one subsystem over: the
+ledger's old verdict that the AI surfaces were unmeasurable "for want of a key
+this repository does not hold" was retired when the stub was written, and the
+remaining gap is the four lines of `lane-env.sh` that would point an API at it.
+
+The cost is not the wiring. **Six suites assert the AI-unavailable state** —
+`ai-answer-rendering`, `ai-assign`, `ai-create-containers`, `clip-created-card`,
+`create-menu-ai`, `task-ai-bar` — and every one of them would flip the day a
+lane could answer. That is exactly the class this pass found twice tonight in
+`attach-on-create` and `clip-created-card`, where a green depended on the
+environment being broken, except six at once and knowingly rather than by
+surprise. Each needs its refusal re-aimed from *starved* to *arranged*, the way
+`task-cover` already does it, and each has a patch set to re-measure.
+
+So it is recorded rather than started: a known piece of work, with a measured
+cost instead of a guess, and the thing it unlocks is not one placeholder but
+every AI surface that is currently only measured in its refusal. Starting it
+and stopping halfway would leave those six suites worse than they are now.
