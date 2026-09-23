@@ -427,11 +427,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND TWENTY-FOUR — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND TWENTY-SIX — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 136 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124.
+    # that is about 139 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1707,6 +1707,28 @@ jobs:
       - name: Hook addresses and client portals stay with their owners
         if: '!cancelled()'
         run: node test/e2e/hook-portal-access.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Reads across a workspace show only what the CALLER may open: a
+      # member's assigned tasks took anybody's user id and applied no access,
+      # and the timeline applied only the private-item rule, so a member (and a
+      # guest) read tasks in a private space they were refused. Rows staged in
+      # Postgres (DATABASE_URL).
+      - name: Workspace-wide reads, as the caller may see them
+        if: '!cancelled()'
+        run: node test/e2e/workspace-read-access.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Home's "Assigned to me" and "Today & overdue" hold open work only,
+      # soonest due first, counted honestly (500+ when cut), and a failed read
+      # says so rather than "no tasks". Rows staged in Postgres.
+      - name: Home's own open work
+        if: '!cancelled()'
+        run: node test/e2e/home-my-work.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -208,13 +208,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (1561b5a, with the Inbox scope item):* the Inbox, Replies, Home and both badges read one workspace's notifications (plus account-level ones), page to the end by cursor, and take their counts from the server; Home's assigned-comment list reads the assignment types. `inbox-scope` 23/23; `ibx-1..24` 24 of 24 reddened, every run all 23 checks long (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `product-siblings/home-today-overdue-includes-closed` — open, small
+### `product-siblings/home-today-overdue-includes-closed` — **closed**, break run pending
 
 **Home 'Today & overdue' counts completed tasks, and the member-task read is capped at 100 by updatedAt**
 
 *Evidence:* app.$workspaceId.tsx:196-200: todayAndOverdue keeps any task with a dueDate today or past, with no status or category filter. getTasksForMember (tasks.service.ts:1869-1897) returns closed tasks (only isArchived is excluded) with statusCategory, orders by updatedAt desc and applies .limit(100). Every finished task with a past due date is therefore listed and counted as overdue (HomeItem count :305). A person with 100 recently touched tasks loses older open ones from both 'Assigned to me' and 'Today & overdue', which is a confident count.
 
 *To close:* Filter statusCategory !== 'closed' for both sections. Move the open filter into SQL before the limit, or page it.
+
+*Closed:* `getTasksForMember` returns open work only (category not `closed`) and nothing in the Trash (a binned task is not archived, and it stayed listed), in SQL before the limit; soonest due first, undated last, so a cut takes the least urgent; and `?limit=` (default 500, at most 1000). Home drops its own status-KEY filter (renamable keys: a task in a closed status called "shipped" stayed in Assigned to me), asks for 501, and counts "500+" when the answer runs to the limit; a failed read says "Your tasks could not be loaded." instead of the empty state; rows and counts carry test ids. The same read is also the caller's now: `found-23-sep/workspace-reads-skip-the-container-rule`. New suite `home-my-work`, 7/7 on lane 1: the member's list has nothing finished (a `done` and a `shipped` task) or binned, still has a private task assigned to them, soonest first with `?limit=1` taking the overdue one; on Home, Assigned to me and Today & overdue list and count exactly that, a failed read (held to 500 by route, the route proven to fire) says so, and a 501-row answer is counted "500+". `hmw-1..9`, each compiled. In CI.
 
 ### `product-siblings/inbox-capped-confident-zero` — **closed**
 
@@ -501,6 +503,16 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* `clips.service.ts` `list` asks `listObjects(prefix, 200)`. ListObjectsV2 returns keys in ascending order, and every clip key starts with `Date.now()`, so the 200 keys it returns are the oldest 200. They are then sorted newest-first for display, which makes the page look current. There is no paging or cursor, and nothing on the page says the list was cut off. Read, not yet measured: the lane store lists in the order objects were written, which is also oldest first, so it can be measured by uploading 201 clips.
 
 *To close:* page through the listing (continuation token) and show the newest, or, as `s4-clip-link` proposes, read a clips table. Check: after 201 uploads the newest is listed.
+
+### `found-23-sep/workspace-reads-skip-the-container-rule` — partly-fixed, LARGE (security; found fixing `home-today-overdue-includes-closed`)
+
+**Routes that read across a workspace are guarded by membership alone, and most do not apply the caller's container access, so a member (and often a guest) reads private spaces they are refused**
+
+*Evidence, measured (lane 1):* a member who gets 403 on a private space's list read that space's task, with the space's and the list's names, through `GET /tasks/workspace/:ws/members/<admin>` (no rule applied at all), and on `GET /tasks/workspace/:ws/timeline` (only the private-item rule). A guest read both too.
+
+*Fixed for those two:* both apply the container rule (`containerVisibilityFilter`, the guard's own SQL twin) and the private-item rule (`taskVisibilityFilter`) in SQL, as the caller. New suite `workspace-read-access`, 6/6 on lane 1: for each read, the member and the guest get the open space's task and neither the private space's nor a private task, and the admin gets all three. `wra-1..7`, each compiled. In CI. The JS filter the workspace read uses (`filterTasksByContainerAccess`) hides a private task from its ASSIGNEES, unlike the canonical rule; noted, not changed here.
+
+*Still open: a read-only audit (23 September, code read, NOTHING MEASURED YET) lists about 25 more routes.* Each must be measured before it is fixed. Readable by members and guests: people pages (`/workspaces/:ws/people/:userId`, activity, calendar, standup, priorities, shared); the planner's team schedules; the iCal feed (every dated task, minted by any member); search (tasks, comments, files, lists, folders, spaces, docs) and custom-field search; task custom-field values (GET and PUT); sprint tasks; the dependency graph (6 hops); blocker titles in a PATCH error; `/lists/workspace/:ws`; move targets' projects and lists; a member's chat activity (reported to include private channels and DMs); realtime `subscribe` to any list or task room; and id-to-title lookups through favourites, planner blocks (reported cross-tenant), sprint task add and AI refs. Members only: several reports (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI chat/command (reported to check no workspace membership at all: cross-tenant), suggest-tasks, workload-balance, project-status. Also reported: meeting action items created in any list id, and new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the cross-tenant ones first, then DMs and private channels, realtime, search and the iCal feed, then the rest.
 
 ## Verification-harness defects — 27
 

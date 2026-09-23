@@ -87,6 +87,9 @@ const HOME_SECTIONS = [
 ] as const
 type HomeSection = (typeof HOME_SECTIONS)[number]
 
+/** How many of your open tasks Home lists; it asks the server for one more, to know when it cut. */
+const HOME_TASKS_SHOWN = 500
+
 /** One of the caller's still-pending reminders, as GET /workspaces/:ws/reminders answers. */
 type PendingReminder = {
   id: string
@@ -166,10 +169,16 @@ function WorkspaceHome() {
     queryFn: () =>
       api<Notification[]>(notificationsUrl('/notifications', { workspaceId, types: ['ai_briefing'], limit: 1 })),
   })
+  /*
+   * One more than Home shows, so a list that was cut says "500+" instead of a
+   * confident 500. The server returns OPEN tasks only (not binned), soonest
+   * due first, so a cut takes the least urgent.
+   */
   const myTasksQuery = useQuery({
     queryKey: ['home-my-tasks', workspaceId, user?.id],
     enabled: !!workspaceId && !!user?.id,
-    queryFn: () => api<MemberTask[]>(`/tasks/workspace/${workspaceId}/members/${user!.id}`),
+    queryFn: () =>
+      api<MemberTask[]>(`/tasks/workspace/${workspaceId}/members/${user!.id}?limit=${HOME_TASKS_SHOWN + 1}`),
   })
   const announcementsQuery = useQuery({
     queryKey: ['workspace-announcements', workspaceId],
@@ -239,13 +248,25 @@ function WorkspaceHome() {
 
   const { namesById } = useMentionNames(workspaceId)
   const notifications = notificationsQuery.rows
-  const myTasks = myTasksQuery.data ?? []
-  const assignedToMe = myTasks.filter((task) => !['done', 'cancelled'].includes(task.status))
+  /*
+   * NO STATUS FILTER HERE ANY MORE. "Assigned to me" kept tasks whose status
+   * KEY was not `done` or `cancelled`, and status keys are renamable, so a
+   * task in a closed status called anything else stayed listed; "Today &
+   * overdue" did not filter at all, so every finished task with a past due
+   * date was counted overdue. The server now returns open work only, by
+   * category, before its limit, which is where that rule belongs.
+   */
+  const myTasksCut = (myTasksQuery.data?.length ?? 0) > HOME_TASKS_SHOWN
+  const myTasks = (myTasksQuery.data ?? []).slice(0, HOME_TASKS_SHOWN)
+  const assignedToMe = myTasks
   const todayAndOverdue = myTasks.filter((task) => {
     if (!task.dueDate) return false
     const due = new Date(task.dueDate)
     return isToday(due) || isPast(due)
   })
+  // Rows come soonest-due first, so a cut can only have dropped more of these
+  // when every row shown was already due.
+  const todayAndOverdueCut = myTasksCut && todayAndOverdue.length === myTasks.length
   const personalTasks = personalTasksQuery.data ?? []
   const pendingReminders = remindersQuery.data ?? []
   // Where a reminder leads: its task, through the same resolver the Inbox
@@ -354,8 +375,8 @@ function WorkspaceHome() {
             <HomeItem icon={MessageCircleReply} label={t('appWorkspace.replies')} active={section === 'replies'} onClick={() => setSection('replies')} count={repliesUnread.data?.count} testId="home-nav-replies" />
             <HomeItem icon={UserRoundCheck} label={t('appWorkspace.assignedComments')} active={section === 'assigned-comments'} onClick={() => setSection('assigned-comments')} count={assignedUnread.data?.count} testId="home-nav-assigned-comments" />
             <div className="pt-2 pb-1 text-xs uppercase tracking-wider text-muted-foreground">{t('appWorkspace.myTasks')}</div>
-            <HomeItem icon={CircleCheck} label={t('appWorkspace.assignedToMe')} active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} />
-            <HomeItem icon={CalendarClock} label={t('appWorkspace.todayOverdue')} active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} />
+            <HomeItem icon={CircleCheck} label={t('appWorkspace.assignedToMe')} active={section === 'assigned-to-me'} onClick={() => setSection('assigned-to-me')} count={assignedToMe.length} more={myTasksCut} testId="home-nav-assigned-to-me" />
+            <HomeItem icon={CalendarClock} label={t('appWorkspace.todayOverdue')} active={section === 'today-overdue'} onClick={() => setSection('today-overdue')} count={todayAndOverdue.length} more={todayAndOverdueCut} testId="home-nav-today-overdue" />
             <HomeItem icon={ListChecks} label={t('appWorkspace.personalList')} active={section === 'personal-list'} onClick={() => setSection('personal-list')} count={personalTasks.filter((task) => !task.done).length} />
             <HomeItem icon={AlarmClock} label={t('appWorkspace.reminders')} active={section === 'reminders'} onClick={() => setSection('reminders')} count={pendingReminders.length} testId="home-nav-reminders" />
             <HomeItem icon={MoreHorizontal} label={t('appWorkspace.more')} active={section === 'more'} onClick={() => setSection('more')} />
@@ -455,6 +476,8 @@ function WorkspaceHome() {
                   params={{ workspaceId, spaceId: task.spaceId, projectId: task.projectId, listId: task.listId }}
                   search={{ task: task.id } as any}
                   className="block"
+                  data-testid="home-task-row"
+                  data-task-id={task.id}
                 >
                   <Card variant="glass" className="p-3 hover:border-accent/30">
                     <div className="text-sm font-medium">{task.title}</div>
@@ -463,7 +486,16 @@ function WorkspaceHome() {
                 </Link>
               ))}
               {myTasksQuery.isPending && <ListSkeleton rows={3} rowClassName="h-14" />}
-              {!myTasksQuery.isPending &&
+              {/*
+                A failed read is not an empty list. It fell through to "no
+                tasks" below, the confident zero this page must not show.
+              */}
+              {myTasksQuery.isError && (
+                <p className="text-sm text-destructive" data-testid="home-tasks-failed">
+                  {t('appWorkspace.tasksLoadFailed')}
+                </p>
+              )}
+              {myTasksQuery.isSuccess &&
                 (section === 'assigned-to-me' ? assignedToMe : todayAndOverdue).length === 0 && (
                   <EmptyStateCard icon={<ListChecks className="h-6 w-6" />} title={t('appWorkspace.emptyTasksTitle')} description={t('appWorkspace.emptyTasksBody')} />
                 )}
@@ -692,6 +724,7 @@ function HomeItem({
   label,
   active,
   count,
+  more,
   onClick,
   testId,
 }: {
@@ -699,6 +732,8 @@ function HomeItem({
   label: string
   active: boolean
   count?: number
+  /** The list behind the count was cut: the count is a floor, drawn "500+". */
+  more?: boolean
   onClick: () => void
   testId?: string
 }) {
@@ -716,6 +751,7 @@ function HomeItem({
       {!!count && (
         <Badge variant="soft" className="ml-auto text-[10px]" data-testid={testId ? `${testId}-count` : undefined}>
           {count}
+          {more ? '+' : ''}
         </Badge>
       )}
     </button>

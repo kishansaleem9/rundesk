@@ -164,13 +164,26 @@ export class TasksController {
     })
   }
 
+  /**
+   * One member's open assigned tasks, as the CALLER may see them: the route is
+   * guarded by membership alone and `userId` is anybody's, so the caller's
+   * access is applied inside (see `getTasksForMember`). `limit` lets Home ask
+   * for one more than it shows, to know when the list was cut.
+   */
   @Get('workspace/:workspaceId/members/:userId')
   @UseGuards(WorkspaceMemberGuard)
   async getMemberTasks(
     @Param('workspaceId') workspaceId: string,
     @Param('userId') userId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Query('limit') limit?: string,
   ) {
-    return this.tasks.getTasksForMember(workspaceId, userId)
+    return this.tasks.getTasksForMember(
+      workspaceId,
+      userId,
+      { id: user.id, role: user.role },
+      limit ? Number(limit) : undefined,
+    )
   }
 
   /**

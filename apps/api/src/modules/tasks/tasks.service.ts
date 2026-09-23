@@ -88,7 +88,7 @@ import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
-import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { checkContainerAccess, containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
@@ -148,6 +148,14 @@ type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 
 /** Hard cap on a single task/comment attachment (Plan §4). */
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
+
+/**
+ * How many of a member's open tasks one read returns (`getTasksForMember`).
+ * Home asks for one more than it shows, so it knows when the list was cut and
+ * can say "500+" rather than a confident 500.
+ */
+export const MEMBER_TASKS_DEFAULT_LIMIT = 500
+export const MEMBER_TASKS_MAX_LIMIT = 1000
 
 /**
  * §V2-08 — how long consecutive edits by one person collapse into one entry of
@@ -2035,7 +2043,23 @@ export class TasksService {
     workspaceId: string,
     opts: { from?: Date; to?: Date; projectId?: string; actor?: { id: string; role?: string } } = {},
   ) {
-    const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, opts.actor)
+    /*
+     * READ AS THE CALLER, BY BOTH RULES. The route is guarded by workspace
+     * membership alone, and this applied only the private-item rule, so a
+     * member refused a private space's list (403) read its dated tasks on the
+     * timeline; measured on lane 1, and so did a guest. The container rule
+     * (`containerVisibilityFilter`, the guard's twin) applies too now, in SQL.
+     * No actor is an internal caller, unfiltered as before.
+     */
+    const isManager = opts.actor
+      ? await resolveIsManager(this.db, workspaceId, opts.actor.id, opts.actor.role)
+      : true
+    const visFilter = opts.actor
+      ? and(
+          containerVisibilityFilter(this.db, opts.actor.id, isManager),
+          taskVisibilityFilter(this.db, opts.actor.id, isManager),
+        )
+      : undefined
     const rows = await this.db
       .select({
         id: tasks.id,
@@ -2070,7 +2094,34 @@ export class TasksService {
     return rows.filter((r) => r.startDate || r.dueDate)
   }
 
-  async getTasksForMember(workspaceId: string, userId: string) {
+  /**
+   * One member's OPEN assigned tasks: Home's "Assigned to me" and "Today &
+   * overdue", and the planner's Backlog rail.
+   *
+   * READ AS THE CALLER. The route is guarded by workspace membership alone,
+   * `userId` can be anybody's, and this applied no visibility at all. Measured
+   * on lane 1: a member refused a private space's list (403) read its task
+   * through "the admin's assigned tasks", title and the space's and list's
+   * names, and so did a guest. The container rule (`containerVisibilityFilter`,
+   * the guard's own twin) and the private-item rule now apply, in SQL, so the
+   * limit counts only what the caller may see.
+   *
+   * OPEN AND NOT BINNED, IN SQL, BEFORE THE LIMIT. Both screens leave finished
+   * work out, and did it in the browser: Home by status KEY (`done`,
+   * `cancelled`, both renamable), the planner by category. Today & overdue did
+   * not do it at all, so every finished task with a past due date was counted
+   * overdue. Closed tasks also took places under a limit of 100 by last
+   * update, so a busy person's older open tasks fell off both lists. And a
+   * task in the Trash is not archived, so it stayed on Home. The soonest due
+   * come first, so when the limit cuts, it cuts the least urgent.
+   */
+  async getTasksForMember(
+    workspaceId: string,
+    userId: string,
+    actor: { id: string; role?: string },
+    limit = MEMBER_TASKS_DEFAULT_LIMIT,
+  ) {
+    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
     return this.db
       .select({
         id: tasks.id,
@@ -2096,9 +2147,19 @@ export class TasksService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(taskAssignees.userId, userId), eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false)))
-      .orderBy(desc(tasks.updatedAt))
-      .limit(100)
+      .where(
+        and(
+          eq(taskAssignees.userId, userId),
+          eq(spaces.workspaceId, workspaceId),
+          eq(tasks.isArchived, false),
+          isNull(tasks.deletedAt),
+          or(isNull(tasks.statusCategory), sql`${tasks.statusCategory} <> 'closed'`),
+          containerVisibilityFilter(this.db, actor.id, isManager),
+          taskVisibilityFilter(this.db, actor.id, isManager),
+        ),
+      )
+      .orderBy(sql`${tasks.dueDate} asc nulls last`, desc(tasks.updatedAt))
+      .limit(Math.min(Math.max(Math.floor(limit) || MEMBER_TASKS_DEFAULT_LIMIT, 1), MEMBER_TASKS_MAX_LIMIT))
   }
 
   /**
@@ -2325,16 +2386,6 @@ export class TasksService {
       .limit(1)
     if (!ctx) return undefined
     const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
-    return taskVisibilityFilter(this.db, actor.id, isManager)
-  }
-
-  /** §2 per-item task-visibility WHERE fragment for workspace-wide task reads. */
-  private async taskVisibilityFilterForWorkspace(
-    workspaceId: string,
-    actor?: { id: string; role?: string },
-  ): Promise<SQL | undefined> {
-    if (!actor) return undefined
-    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
     return taskVisibilityFilter(this.db, actor.id, isManager)
   }
 
