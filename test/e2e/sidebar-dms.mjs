@@ -151,7 +151,13 @@ try {
     const email = `dm-peer-${TAG}@rundesk.internal`
     const made = await api('/auth/register', {
       method: 'POST',
-      body: { email, password: 'Peer@12345!', name: `DM peer ${TAG}` },
+      // `displayName`, not `name`. `RegisterDto` has required it all along and
+      // every other suite that registers a peer sends it; this one sent `name`
+      // and was never caught, because the branch only runs when the workspace
+      // does NOT already have a third member — so on a lane whose database had
+      // been used it never fired, and on a freshly restored one it threw
+      // before the first check. It refused this whole set in the sweep.
+      body: { email, password: 'Peer@12345!', displayName: `DM peer ${TAG}` },
     })
     if (made.status >= 300) {
       throw new Error(`could not register a second peer: ${made.status} ${JSON.stringify(made.error)}`)
