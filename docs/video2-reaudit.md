@@ -755,7 +755,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | **"Clip created!" card** — Create a task · New tab · Copy link, and "Link copied" |
 | B | Clip in a comment is a card with its name; a clip still arriving says so |
 | — | …its download / expand / `00:16` are the NATIVE player's, already there; Copy link deliberately absent (15-min signed URL) |
-| P | Composer hint — the "/" half, which is the half that works; no space-for-AI hook exists |
+| B | Composer hint — **both halves work and both are break-tested**. The row read "the \"/\" half, which is the half that works; no space-for-AI hook exists", and that is stale on its face: `task-detail-sheet.tsx` swallows a space pressed on an EMPTY composer, opens `comment-ai-panel`, and focuses its prompt, while a space typed after any text is an ordinary space. `task-ai-bar.mjs` measures the hint's own wording, the gesture, the swallow, and the negative case — *"space did nothing: the hint promises a gesture the composer does not honour, which is the printed-but-not-followable defect this audit keeps finding"* is the sentence that would print if it regressed |
 | B | Threads — `comment-thread-panel`, headed *"Thread by \<name\>"*, carrying the comment, its reactions and a *"Reply to comment…"* composer whose parent is the panel's own root. 13 checks, 13 of 13; the one that carries the row reads `parent_comment_id` out of Postgres |
 | B | Reactions, react/reply/assign hover actions, resolve/reopen |
 | B | **"Save" a comment** — per-person bookmark → Inbox › Later, comment-anchored link |
@@ -894,7 +894,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 147 built · 12 partial · 14 missing.**
+**173 rows: 148 built · 11 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -930,12 +930,13 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 115 | 8 | 9 | 132 |
+| §2, the sections table | 116 | 7 | 9 | 132 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **147** | **12** | **14** | **173** |
+| **consolidated** | **148** | **11** | **14** | **173** |
 
-THREE ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
-only shape of movement this table should ever show for a build: *Threads* is
+FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
+only shape of movement this table should ever show for a build — and the fourth
+moved because it was READ, not because anything was written: *Threads* is
 now `comment-thread.mjs`, 13 of 13, 11 break patches; *Create Folder* is
 `folder-dialog.mjs`, 29 of 29, 8 patches, its description no longer blocked;
 and *Importers* is closed by `doc-import.mjs`, 15 of 15, 4 patches, which makes
@@ -943,15 +944,15 @@ every row of frame `12:08`'s submenu either built or drawn with its reason and
 no control. A build that raised the total would mean a row had been invented
 rather than answered.
 
-§2's 115 built includes the four marked `B*` — built, but the row also records
+§2's 116 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
-115 above is 112 plus the Threads, Create Folder and Importers rows closing,
-not the strike being undone.
+116 above is 112 plus the Threads, Create Folder, Importers and Composer-hint
+rows closing, not the strike being undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
 countdown anywhere in the walkthrough; the row existed only because of the
