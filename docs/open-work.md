@@ -82,13 +82,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* This closes with resume-8. Have send() set and return a Message-ID, and record outbound IDs with their taskId and listId, either in the same table with a direction column or in an outbound table. Make resolveReplyContext consult them. Set Reply-To on notification mail to the task's +task- address. Add an API-level test: send a comment notification, post a synthetic inbound reply whose In-Reply-To is that Message-ID, and assert a comment lands on the task. A patch that stops recording the outbound ID should redden it. Until then, correct the comment at :35-36.
 
-### `product-siblings/standalone-reminders-invisible` — open, medium
+### `product-siblings/standalone-reminders-invisible` — **closed** (the row had stayed open after its fix)
 
 **Reminders made from + Create are never listed or deletable: GET /workspaces/:ws/reminders has no reader**
 
 *Evidence:* reminders.controller.ts:16-20 lists 'the caller's still-pending reminders across the workspace', and :36-46 creates standalone ones. quick-create-modal.tsx:2133-2141 creates one and invalidates ['reminders', ws], which no useQuery in apps/web uses (confirmed by a key-head survey). The only reader is task-scoped (task-reminders.tsx:45-48), and delete is reachable only from there (:68). ClickUp lists reminders (Home reminders card / Inbox) with edit and delete.
 
 *To close:* Add a Reminders list (a Home section or Inbox tab) on GET /workspaces/:ws/reminders, with delete, under the key the modal already invalidates.
+
+*Closed (0c06643):* Home › Reminders reads `GET /workspaces/:ws/reminders` under `['reminders', ws]` — the key `+ Create › Reminder` refreshes — with delete. `home-reminders` 9 checks: made through the modal and listed without a reload, another member's reminder absent, one already gone off not listed as waiting, a delete checked in the row, and the empty state; its 10 patches 10 of 10 reddened (plan-3; `hr-9` re-aimed on the way, `found-23-sep/checks-read-textContent-not-what-is-shown`). Found still open on 23 September by sweeping every open row for a suite that names it: this was the only one.
 
 ### `product-siblings/admin-audit-first-workspace-only` — open, small
 
