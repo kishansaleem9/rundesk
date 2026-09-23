@@ -1,5 +1,5 @@
-import { and, eq } from 'drizzle-orm'
-import { spaceMembers, projectMembers, workspaceMembers } from '@rundesk/db'
+import { and, eq, inArray, isNull, ne, or, type SQL } from 'drizzle-orm'
+import { spaceMembers, projectMembers, workspaceMembers, spaces, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 
 const WS_MANAGER_ROLE_SET = ['workspace_admin', 'manager', 'super_admin']
@@ -72,4 +72,33 @@ export async function checkContainerAccess(
   }
 
   return true
+}
+
+/**
+ * `checkContainerAccess` as a WHERE fragment, for a query that lists rows from
+ * many containers at once — the same rule, row for row: a manager sees every
+ * container; a private space needs space membership; a private project needs
+ * project membership or admin of its space. Joins `spaces` and `projects`
+ * unaliased. `undefined` for a manager, so `and(...)` drops it.
+ *
+ * Written beside the per-row check on purpose: two statements of one rule are
+ * only safe while they sit where a change to one is seen next to the other.
+ */
+export function containerVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
+  if (isManager) return undefined
+  const memberSpaces = db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId))
+  const adminSpaces = db
+    .select({ id: spaceMembers.spaceId })
+    .from(spaceMembers)
+    .where(and(eq(spaceMembers.userId, actorId), eq(spaceMembers.role, 'admin')))
+  const memberProjects = db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actorId))
+  return and(
+    or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)),
+    or(
+      isNull(projects.visibility),
+      ne(projects.visibility, 'private'),
+      inArray(projects.id, memberProjects),
+      inArray(projects.spaceId, adminSpaces),
+    ),
+  )
 }

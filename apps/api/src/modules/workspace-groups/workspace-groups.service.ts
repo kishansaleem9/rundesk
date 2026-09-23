@@ -21,6 +21,8 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { listVisibilityFilter, resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 
 export type GroupCreateInput = {
@@ -328,8 +330,20 @@ export class WorkspaceGroupsService {
    * both archived and trashed tasks (see the note in schema/tasks.ts), so
    * neither shows up as somebody's current work.
    */
-  async workPreview(workspaceId: string, opts: { perPerson?: number } = {}) {
+  async workPreview(
+    workspaceId: string,
+    opts: { perPerson?: number; actorId: string; globalRole?: string | null },
+  ) {
     const limit = Math.min(Math.max(Math.trunc(opts.perPerson ?? 5) || 5, 1), 10)
+    /*
+     * WHAT THE VIEWER MAY SEE, not what exists. This listed every member's open
+     * tasks across the workspace with no viewer at all, so a member kept out of
+     * a private space, project or list — or a private task — read its titles
+     * and due dates off a teammate's card. The rules are the ones every other
+     * task list applies; the count below is of what is shown, since a count of
+     * hidden tasks says they exist.
+     */
+    const isManager = await resolveIsManager(this.db, workspaceId, opts.actorId, opts.globalRole)
 
     const people = await this.db
       .select({
@@ -376,6 +390,9 @@ export class WorkspaceGroupsService {
           inArray(taskAssignees.userId, ids),
           eq(tasks.isArchived, false),
           ne(tasks.statusCategory, 'closed'),
+          containerVisibilityFilter(this.db, opts.actorId, isManager),
+          listVisibilityFilter(opts.actorId, isManager),
+          taskVisibilityFilter(this.db, opts.actorId, isManager),
         ),
       )
       // Soonest first, undated last — the order the card's 1…5 numbering means.

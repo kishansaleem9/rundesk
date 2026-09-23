@@ -125,9 +125,16 @@ export class TeamsHubController {
 
   /** Everyone in the workspace, with the work each of them actually has open. */
   @Get('work-preview')
-  workPreview(@Param('workspaceId') workspaceId: string, @Query('perPerson') perPerson?: string) {
+  workPreview(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload & { role?: string | null },
+    @Query('perPerson') perPerson?: string,
+  ) {
+    // The viewer, so the cards show only what THEY may see — see workPreview.
     return this.groups.workPreview(workspaceId, {
       perPerson: perPerson ? Number(perPerson) : undefined,
+      actorId: user.id,
+      globalRole: user.role,
     })
   }
 
