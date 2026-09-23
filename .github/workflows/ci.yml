@@ -1039,6 +1039,23 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S06 frame `05:50` — the thread on a comment.
+      #
+      # The panel is the easiest kind of thing in this audit to fake: it can
+      # carry the frame's header, the frame's placeholder and the frame's
+      # reaction row, take a reply, show it — and post a ROOT comment. On
+      # screen the two are identical, because the panel is drawing a list it
+      # just refetched and the new comment is in it either way. So the check
+      # that carries this row reads `parent_comment_id` out of Postgres, and
+      # the reaction check reads `task_comment_reactions` rather than watching
+      # a button light up.
+      - name: Comment thread panel
+        if: '!cancelled()'
+        run: node test/e2e/comment-thread.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §V2-S05b, frame `04:50` — the comment composer's "+" menu.
       #
       # A menu is the easiest thing in a UI to fake: ten rows that open, close
