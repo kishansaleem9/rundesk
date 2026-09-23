@@ -401,11 +401,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND THIRTEEN — every suite in the repo, which
+    # The job now runs ONE HUNDRED AND FIFTEEN — every suite in the repo, which
     # `check-suites-registered.mjs` now enforces rather than this comment
-    # asserting it. At the measured 1.1 minutes each that is about 124
+    # asserting it. At the measured 1.1 minutes each that is about 126
     # minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113.
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1588,6 +1588,27 @@ jobs:
       - name: Reads show the reader what they may see
         if: '!cancelled()'
         run: node test/e2e/read-visibility.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Home › Reminders. `+ Create › Reminder` made reminders nothing listed:
+      # the modal refreshed a query key no screen held. The first reminder is
+      # made through the modal and must appear without a reload; another
+      # member's, and one that already went off, must not appear at all.
+      - name: Home lists the reminders that are waiting
+        if: '!cancelled()'
+        run: node test/e2e/home-reminders.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The timesheet's Mine is the viewer's own week. It read every entry the
+      # caller could see, so an admin's Mine carried the team's hours and
+      # "Total this week" summed everything fetched.
+      - name: The Mine timesheet is the viewer's own week
+        if: '!cancelled()'
+        run: node test/e2e/timesheet-mine.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -191,7 +191,7 @@ export class TimeEntriesService {
 
   async listForWorkspace(
     workspaceId: string,
-    opts: { userId?: string; since?: Date; actorId?: string; actorRole?: string | null } = {},
+    opts: { userId?: string; since?: Date; until?: Date; actorId?: string; actorRole?: string | null } = {},
   ) {
     // Per-item task privacy (§2): drop entries whose task is a private task the
     // caller may not see (a private task's title would otherwise leak via
@@ -203,6 +203,9 @@ export class TimeEntriesService {
       eq(spaces.workspaceId, workspaceId),
       opts.userId ? eq(timeEntries.userId, opts.userId) : undefined,
       opts.since ? gte(timeEntries.startedAt, opts.since) : undefined,
+      // The other end of a window. Without it a week was "since Monday", so
+      // stepping BACK a week still fetched everything after that Monday.
+      opts.until ? lt(timeEntries.startedAt, opts.until) : undefined,
       taskVisibilityFilter(this.db, opts.actorId ?? '', isManager),
     )
     const rows = await this.db

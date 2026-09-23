@@ -103,6 +103,31 @@ export function TimePage() {
   })
 
   const entries = entriesQuery.data ?? []
+  /*
+   * MINE MEANS MINE, AND THIS WEEK MEANS THIS WEEK. The grid, the week's log,
+   * Submit and the three figures above them all read `entries` — the latest
+   * 500 of EVERY entry the caller can see, which for anybody who can approve
+   * time is the whole workspace — filtered by day only. So an admin's "Mine"
+   * timesheet held the team's hours as their own, "Total this week" counted
+   * every entry ever fetched, and Submit could send a week the admin never
+   * worked. This asks for the caller's entries in the displayed week, bounded
+   * at both ends by the week's own local midnights.
+   */
+  const mineWeekQuery = useQuery({
+    queryKey: ['time-entries', workspaceId, 'mine', weekStartIso],
+    enabled: Boolean(currentUserId),
+    queryFn: async () => {
+      const since = weekStart.toISOString()
+      const until = addDays(weekStart, 7).toISOString()
+      try {
+        return await api<TimeEntry[]>(
+          `/workspaces/${workspaceId}/time-entries?userId=${currentUserId}&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`,
+        )
+      } catch {
+        return [] as TimeEntry[]
+      }
+    },
+  })
   const activeTimerQuery = useQuery({
     queryKey: ['active-timer'],
     queryFn: async () => {
@@ -222,16 +247,20 @@ export function TimePage() {
     },
   })
 
-  const totalBySeconds = entries.reduce((sum, e) => sum + e.durationSeconds, 0)
-  const billableSeconds = entries.filter((e) => e.billable).reduce((sum, e) => sum + e.durationSeconds, 0)
 
   // A5.14 — the week stepper has to actually select a week: the grid and the
   // log below it are the displayed week's entries, not every entry ever.
   const weekDayKeys = useMemo(() => new Set(days.map((d) => format(d, 'yyyy-MM-dd'))), [days])
   const weekEntries = useMemo(
-    () => entries.filter((e) => weekDayKeys.has(format(new Date(e.loggedAt), 'yyyy-MM-dd'))),
-    [entries, weekDayKeys],
+    () =>
+      (mineWeekQuery.data ?? []).filter(
+        (e) => e.userId === currentUserId && weekDayKeys.has(format(new Date(e.loggedAt), 'yyyy-MM-dd')),
+      ),
+    [mineWeekQuery.data, currentUserId, weekDayKeys],
   )
+  // The figures above the timesheet are the caller's, for the displayed week.
+  const totalBySeconds = weekEntries.reduce((sum, e) => sum + e.durationSeconds, 0)
+  const billableSeconds = weekEntries.filter((e) => e.billable).reduce((sum, e) => sum + e.durationSeconds, 0)
 
   const byDay = useMemo(() => {
     const map = new Map<string, number>()
@@ -243,12 +272,14 @@ export function TimePage() {
   }, [weekEntries])
   const quickStartTasks = useMemo(() => {
     const byTask = new Map<string, TimeEntry>()
+    // The caller's own recent tasks — somebody else's work is not a quick start.
     for (const entry of entries) {
+      if (entry.userId !== currentUserId) continue
       if (!entry.taskId || byTask.has(entry.taskId)) continue
       byTask.set(entry.taskId, entry)
     }
     return [...byTask.values()].slice(0, 6)
-  }, [entries])
+  }, [entries, currentUserId])
   const exportCsv = () => {
     const header = ['Task', 'User', 'Description', 'DurationSeconds', 'Billable', 'LoggedAt']
     const rows = entries.map((entry) => [
@@ -304,9 +335,9 @@ export function TimePage() {
 
       <div className="flex-1 overflow-auto p-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-          <StatCard icon={Clock} label={t('time.stat.totalThisWeek')} value={formatHours(totalBySeconds)} />
-          <StatCard icon={DollarSign} label={t('time.billable')} value={formatHours(billableSeconds)} />
-          <StatCard icon={Clock} label={t('time.entries')} value={`${entries.length}`} />
+          <StatCard icon={Clock} label={t('time.stat.totalThisWeek')} value={formatHours(totalBySeconds)} testId="time-stat-total" />
+          <StatCard icon={DollarSign} label={t('time.billable')} value={formatHours(billableSeconds)} testId="time-stat-billable" />
+          <StatCard icon={Clock} label={t('time.entries')} value={`${weekEntries.length}`} testId="time-stat-entries" />
         </div>
 
         {tab === 'timer' && (
@@ -356,6 +387,7 @@ export function TimePage() {
                 type="button"
                 aria-label={t('time.previousWeek')}
                 title={t('time.previousWeek')}
+                data-testid="time-week-prev"
                 onClick={() => setWeekOffset((w) => w - 1)}
                 className="h-7 w-7 rounded-md border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground"
               >
@@ -367,6 +399,7 @@ export function TimePage() {
                 type="button"
                 aria-label={t('time.nextWeek')}
                 title={t('time.nextWeek')}
+                data-testid="time-week-next"
                 disabled={weekOffset >= 0}
                 onClick={() => setWeekOffset((w) => Math.min(0, w + 1))}
                 className="h-7 w-7 rounded-md border border-border text-muted-foreground hover:bg-muted/40 hover:text-foreground disabled:opacity-40"
@@ -392,6 +425,7 @@ export function TimePage() {
                 {(['mine', 'team'] as const).map((mode) => (
                   <button
                     key={mode}
+                    data-testid={`time-sheet-${mode}`}
                     onClick={() => setSheetMode(mode)}
                     className={cn(
                       'px-2 py-1 text-xs rounded',
@@ -446,7 +480,7 @@ export function TimePage() {
               ) : (
                 <div className="space-y-1">
                   {(teamWeekQuery.data ?? []).map((row) => (
-                    <div key={row.userId} className="grid grid-cols-9 gap-2 items-center py-1.5 text-sm border-b border-border/40">
+                    <div key={row.userId} data-testid="time-team-row" data-user-id={row.userId} className="grid grid-cols-9 gap-2 items-center py-1.5 text-sm border-b border-border/40">
                       <div className="col-span-1 truncate">{row.displayName || t('time.member')}</div>
                       {days.map((d, i) => (
                         <div key={d.toISOString()} className="text-center tabular-nums text-muted-foreground">
@@ -687,7 +721,7 @@ function EntryRow({
   }
 
   return (
-    <div className="flex items-center gap-3 py-2 text-sm group">
+    <div className="flex items-center gap-3 py-2 text-sm group" data-testid="time-entry-row" data-entry-id={entry.id} data-user-id={entry.userId}>
       <div className="min-w-0 flex-1">
         <p className="truncate text-foreground">{entry.taskTitle ?? t('time.taskFallback')}</p>
         <p className="truncate text-xs text-muted-foreground">
@@ -736,7 +770,7 @@ function formatTimer(seconds: number): string {
   return `${hh}:${mm}:${ss}`
 }
 
-function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: string }) {
+function StatCard({ icon: Icon, label, value, testId }: { icon: React.ElementType; label: string; value: string; testId?: string }) {
   return (
     <Card className="p-4 flex items-center gap-3">
       <div className="h-10 w-10 rounded-lg bg-accent/15 flex items-center justify-center shrink-0">
@@ -744,7 +778,7 @@ function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label
       </div>
       <div>
         <div className="text-xs text-muted-foreground uppercase tracking-wider">{label}</div>
-        <div className="font-display text-xl font-semibold text-foreground tabular-nums">{value}</div>
+        <div className="font-display text-xl font-semibold text-foreground tabular-nums" data-testid={testId}>{value}</div>
       </div>
     </Card>
   )

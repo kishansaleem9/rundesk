@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
+import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
@@ -21,12 +21,14 @@ export class WorkspaceTimeEntriesController {
     @CurrentUser() actor: CurrentUserPayload,
     @Query('userId') userId?: string,
     @Query('since') since?: string,
+    @Query('until') until?: string,
   ) {
     // Members may only see their own time logs; admins can filter by anyone.
     const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
     return this.time.listForWorkspace(workspaceId, {
       userId: canModerate ? userId : actor.id,
-      since: since ? new Date(since) : undefined,
+      since: parseInstant(since, 'since'),
+      until: parseInstant(until, 'until'),
       actorId: actor.id,
       actorRole: actor.role,
     })
@@ -132,4 +134,16 @@ export class WorkspaceTimeEntriesController {
       reason: body?.reason ?? null,
     })
   }
+}
+
+/**
+ * A window bound from the query string. An unparseable one is refused by name:
+ * `new Date('nonsense')` is an Invalid Date, which Postgres rejects deep inside
+ * the query as a 500 that names nothing the caller sent.
+ */
+function parseInstant(value: string | undefined, name: string): Date | undefined {
+  if (value === undefined || value === '') return undefined
+  const at = new Date(value)
+  if (Number.isNaN(at.getTime())) throw new BadRequestException(`${name} must be a date or an ISO instant`)
+  return at
 }
