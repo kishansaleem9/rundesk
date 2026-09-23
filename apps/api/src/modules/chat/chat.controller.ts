@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
+import { BadRequestException, Controller, Get, Post, Patch, Put, Delete, Param, Body, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -8,6 +8,28 @@ import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ChatService } from './chat.service'
 import type { CurrentUserPayload } from '../tasks/types'
+
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+
+/**
+ * `?limit=`, refused when it is not a whole number in range. `Number('ten')`
+ * reached the query as NaN; an absent limit keeps the route's default.
+ */
+function pageSize(raw: string | undefined, max: number): number | undefined {
+  if (raw === undefined) return undefined
+  const n = Number(raw)
+  if (!Number.isInteger(n) || n < 1 || n > max) {
+    throw new BadRequestException(`limit must be a whole number from 1 to ${max}`)
+  }
+  return n
+}
+
+/** `?before=`, a message id when it is there at all. */
+function cursorId(raw: string | undefined): string | undefined {
+  if (raw === undefined) return undefined
+  if (!UUID.test(raw)) throw new BadRequestException('before must be the id of a message')
+  return raw
+}
 
 @ApiTags('chat')
 @ApiBearerAuth()
@@ -270,6 +292,12 @@ export class ChatController {
     return this.chat.removeChannelMember(channelId, user.id, userId)
   }
 
+  /**
+   * One page of a channel's root messages, oldest first within the page.
+   * `before` is the id of the oldest message the caller already holds;
+   * `limit` is 1–201, so a caller showing 200 can ask for one more to learn
+   * whether there is another page.
+   */
   @Get('chat/channels/:channelId/messages')
   listMessages(
     @Param('channelId') channelId: string,
@@ -277,7 +305,10 @@ export class ChatController {
     @Query('limit') limit?: string,
     @Query('before') before?: string,
   ) {
-    return this.chat.listMessages(channelId, user.id, { limit: limit ? Number(limit) : undefined, before })
+    return this.chat.listMessages(channelId, user.id, {
+      limit: pageSize(limit, 201),
+      before: cursorId(before),
+    })
   }
 
   @Post('chat/channels/:channelId/messages')
@@ -356,8 +387,9 @@ export class ChatController {
     @Param('messageId') messageId: string,
     @CurrentUser() user: CurrentUserPayload,
     @Query('limit') limit?: string,
+    @Query('before') before?: string,
   ) {
-    return this.chat.getThread(messageId, user.id, limit ? Number(limit) : 100)
+    return this.chat.getThread(messageId, user.id, pageSize(limit, 200) ?? 100, cursorId(before))
   }
 
   @Delete('chat/messages/:messageId')

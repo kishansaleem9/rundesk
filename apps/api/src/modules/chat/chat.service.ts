@@ -1326,27 +1326,40 @@ export class ChatService {
 
   async listMessages(channelId: string, userId: string, opts: { limit?: number; before?: string } = {}) {
     await this.assertChannelAccess(channelId, userId)
-    const limit = Math.min(opts.limit ?? 50, 200)
+    const limit = Math.min(opts.limit ?? 50, 201)
     // Keyset pagination (§6): when a `before` message id is supplied, only load
     // root messages strictly older than that message so the client can page
     // backwards through channel history. Without this the cursor was a no-op
     // and only the newest `limit` messages were ever reachable.
-    let beforeCreatedAt: Date | null = null
+    //
+    // COMPARED IN THE DATABASE, AT THE COLUMN'S PRECISION, TIES BROKEN BY ID.
+    // The anchor's timestamp used to come back as a JS Date — milliseconds —
+    // and `created_at < that` then skipped every message written in the same
+    // millisecond as the anchor but before it, and every message at the same
+    // instant: they fell between two pages and were never shown. And a cursor
+    // that named no message in this channel was IGNORED, answering with the
+    // newest page again — so a client paging back got the same page for ever.
     if (opts.before) {
-      const [cursor] = await this.db
-        .select({ createdAt: chatMessages.createdAt })
+      const [anchor] = await this.db
+        .select({ id: chatMessages.id })
         .from(chatMessages)
-        .where(and(eq(chatMessages.id, opts.before), eq(chatMessages.channelId, channelId)))
-        .limit(1)
-      beforeCreatedAt = cursor?.createdAt ?? null
-    }
-    const where = beforeCreatedAt
-      ? and(
-          eq(chatMessages.channelId, channelId),
-          isNull(chatMessages.parentMessageId),
-          lt(chatMessages.createdAt, beforeCreatedAt),
+        .where(
+          and(
+            eq(chatMessages.id, opts.before),
+            eq(chatMessages.channelId, channelId),
+            isNull(chatMessages.parentMessageId),
+          ),
         )
-      : and(eq(chatMessages.channelId, channelId), isNull(chatMessages.parentMessageId))
+        .limit(1)
+      if (!anchor) throw new BadRequestException('before must be a message in this channel')
+    }
+    const where = and(
+      eq(chatMessages.channelId, channelId),
+      isNull(chatMessages.parentMessageId),
+      opts.before
+        ? sql`(${chatMessages.createdAt}, ${chatMessages.id}) < (select m.created_at, m.id from ${chatMessages} m where m.id = ${opts.before})`
+        : undefined,
+    )
     const rows = await this.db
       .select({
         id: chatMessages.id,
@@ -1369,7 +1382,7 @@ export class ChatService {
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
       .where(where)
-      .orderBy(desc(chatMessages.createdAt))
+      .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
       .limit(limit)
     const ordered = rows.reverse()
     if (ordered.length === 0) return ordered
@@ -1759,7 +1772,7 @@ export class ChatService {
     return { ...row, reactions, threadFollowState: stance?.state ?? null }
   }
 
-  async getThread(messageId: string, userId: string, limit = 100) {
+  async getThread(messageId: string, userId: string, limit = 100, before?: string) {
     /*
      * §G12-2 — a thread is the same thread whichever message in it you name.
      *
@@ -1773,6 +1786,23 @@ export class ChatService {
     const parent = named.parentMessageId
       ? await this.getMessageById(named.parentMessageId, userId)
       : named
+    /*
+     * THE NEWEST REPLIES, NOT THE OLDEST. This read the first `limit` replies
+     * in time order, so a thread past a hundred replies showed its first
+     * hundred and never the ones being written now — the end a reader opens a
+     * thread for. Newest first, handed back in reading order, with `hasOlder`
+     * and a `before` cursor (compared in the database, ties by id) for the
+     * rest.
+     */
+    const size = Math.min(Math.max(limit, 1), 200)
+    if (before) {
+      const [anchor] = await this.db
+        .select({ id: chatMessages.id })
+        .from(chatMessages)
+        .where(and(eq(chatMessages.id, before), eq(chatMessages.parentMessageId, parent.id)))
+        .limit(1)
+      if (!anchor) throw new BadRequestException('before must be a reply in this thread')
+    }
     const rows = await this.db
       .select({
         id: chatMessages.id,
@@ -1789,11 +1819,21 @@ export class ChatService {
       })
       .from(chatMessages)
       .leftJoin(users, eq(users.id, chatMessages.authorId))
-      .where(eq(chatMessages.parentMessageId, parent.id))
-      .orderBy(asc(chatMessages.createdAt))
-      .limit(Math.min(Math.max(limit, 1), 200))
+      .where(
+        and(
+          eq(chatMessages.parentMessageId, parent.id),
+          before
+            ? sql`(${chatMessages.createdAt}, ${chatMessages.id}) < (select m.created_at, m.id from ${chatMessages} m where m.id = ${before})`
+            : undefined,
+        ),
+      )
+      .orderBy(desc(chatMessages.createdAt), desc(chatMessages.id))
+      // One more than asked for, never returned: whether it came back is
+      // whether there are older replies.
+      .limit(size + 1)
 
-    return { parent, replies: rows }
+    const hasOlder = rows.length > size
+    return { parent, replies: rows.slice(0, size).reverse(), hasOlder }
   }
 
   async postMessage(data: {

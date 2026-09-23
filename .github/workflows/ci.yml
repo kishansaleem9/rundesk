@@ -422,11 +422,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND SIXTEEN — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND SEVENTEEN — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 128 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116.
+    # that is about 129 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1643,6 +1643,17 @@ jobs:
       - name: The Inbox is the workspace's, every page of it
         if: '!cancelled()'
         run: node test/e2e/inbox-scope.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # A channel's whole history is reachable and a thread shows its newest
+      # replies. The page read the newest 100 messages and nothing older; a
+      # thread read its FIRST 100 replies. Two page boundaries staged in
+      # Postgres (DATABASE_URL, the job's own).
+      - name: Chat history pages back, threads show their newest
+        if: '!cancelled()'
+        run: node test/e2e/chat-history.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

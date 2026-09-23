@@ -1,6 +1,13 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import {
+  useInfiniteQuery,
+  useQuery,
+  useMutation,
+  useQueryClient,
+  type InfiniteData,
+  type QueryClient,
+} from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { PersonAvatar, Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from '@rundesk/ui'
 import { ChatSidebar } from '../components/chat/chat-sidebar'
@@ -10,6 +17,7 @@ import { AddPeopleDialog } from '../components/chat/add-people-dialog'
 import { SharePanel } from '../components/share-panel'
 import { ChatComposer, ThreadReplyComposer } from '../components/chat/chat-composer'
 import { EmojiPicker } from '../components/emoji/emoji-picker'
+import { LoadOlder } from '../components/load-older'
 import { CallCard } from '../components/call/call-card'
 import { useSkillCommands } from '../lib/skills-api'
 import {
@@ -68,7 +76,7 @@ import { useSidebarStore } from '../store/sidebar'
 import { openPersonPanel } from '../store/person-panel'
 import { ChatMessageBody } from '../components/chat/chat-message-body'
 import { ChatAttachmentList } from '../components/chat/chat-attachments'
-import { InlineSkeleton } from '../components/loading-skeletons'
+import { InlineSkeleton, ListSkeleton } from '../components/loading-skeletons'
 
 type Channel = {
   id: string
@@ -193,6 +201,28 @@ type Message = {
     presentCount: number
     youArePresent: boolean
   } | null
+}
+
+/** Root messages per page of channel history. */
+const CHAT_PAGE = 100
+/** How far back a deep link pages before saying the message is too far. */
+const DEEP_LINK_MAX_PAGES = 50
+
+/** One page of a channel: its messages, oldest first, and whether older ones exist. */
+type MessagePage = { items: Message[]; hasOlder: boolean }
+
+/** Edit every loaded page of a channel in one cache write. */
+function editChannelPages(qc: QueryClient, channelId: string, edit: (items: Message[], page: number) => Message[]) {
+  qc.setQueryData<InfiniteData<MessagePage, string | undefined>>(['chat-messages', channelId], (prev) =>
+    prev ? { ...prev, pages: prev.pages.map((p, i) => ({ ...p, items: edit(p.items, i) })) } : prev,
+  )
+}
+
+/** A new message goes on the end of the newest page, once. */
+function appendToChannel(qc: QueryClient, msg: Message) {
+  const loaded = qc.getQueryData<InfiniteData<MessagePage, string | undefined>>(['chat-messages', msg.channelId])
+  if (!loaded || loaded.pages.some((p) => p.items.some((m) => m.id === msg.id))) return
+  editChannelPages(qc, msg.channelId, (items, page) => (page === 0 ? [...items, msg] : items))
 }
 
 /** A task the mention picker can reference (§A3.6) — carries the ids the chat
@@ -581,21 +611,72 @@ export function ChatPage() {
   const customEmoji = customEmojiQuery.data ?? []
   const emojiByCode = useMemo(() => new Map(customEmoji.map((e) => [e.shortcode, e.imageUrl])), [customEmoji])
 
-  const messagesQuery = useQuery({
+  /*
+   * A channel's history, a page at a time — the newest page first, older ones
+   * as you scroll up, as ClickUp's chat does.
+   *
+   * It read the newest 100 root messages and nothing else. The server's
+   * `before` cursor had no client, so everything older was unreachable, and a
+   * link to an older message opened a channel that did not contain it and did
+   * nothing at all. Each page asks for one message more than it shows: whether
+   * that one came back is whether there is an older page — kept on the page,
+   * because live messages lengthen the newest page after it has loaded.
+   */
+  const messagesQuery = useInfiniteQuery({
     queryKey: ['chat-messages', selectedId],
-    queryFn: () => api<Message[]>(`/chat/channels/${selectedId}/messages?limit=100`),
     enabled: !!selectedId,
+    initialPageParam: undefined as string | undefined,
+    queryFn: async ({ pageParam }): Promise<MessagePage> => {
+      const rows = await api<Message[]>(
+        `/chat/channels/${selectedId}/messages?limit=${CHAT_PAGE + 1}${pageParam ? `&before=${pageParam}` : ''}`,
+      )
+      const hasOlder = rows.length > CHAT_PAGE
+      return { items: hasOlder ? rows.slice(1) : rows, hasOlder }
+    },
+    getNextPageParam: (last) => (last.hasOlder ? last.items[0]?.id : undefined),
   })
-  const messages = messagesQuery.data ?? []
+  const messages = useMemo(() => {
+    const seen = new Set<string>()
+    const out: Message[] = []
+    for (const page of [...(messagesQuery.data?.pages ?? [])].reverse()) {
+      for (const m of page.items) {
+        if (seen.has(m.id)) continue
+        seen.add(m.id)
+        out.push(m)
+      }
+    }
+    return out
+  }, [messagesQuery.data])
 
-  // Once the linked channel's messages are loaded, scroll to + highlight the
-  // deep-linked message (reuses the existing highlight machinery).
+  /*
+   * A deep link to a message that is not loaded pages BACK until it is — the
+   * same pages a scroll up would load — rather than doing nothing. Bounded,
+   * and said out loud when the bound or the start of the channel is reached
+   * without it.
+   */
+  const deepLinkSettled = useRef<string | null>(null)
   useEffect(() => {
     if (!deepLink.message || !deepLink.channel) return
-    if (selectedId !== deepLink.channel) return
-    if (!messages.some((m) => m.id === deepLink.message)) return
-    setHighlightedMessageId(deepLink.message)
-  }, [deepLink.message, deepLink.channel, selectedId, messages])
+    if (selectedId !== deepLink.channel || messagesQuery.isPending) return
+    if (deepLinkSettled.current === deepLink.message) return
+    if (messages.some((m) => m.id === deepLink.message)) {
+      deepLinkSettled.current = deepLink.message
+      setHighlightedMessageId(deepLink.message)
+      return
+    }
+    if (messagesQuery.isFetchingNextPage) return
+    const pages = messagesQuery.data?.pages.length ?? 0
+    if (messagesQuery.hasNextPage && pages < DEEP_LINK_MAX_PAGES) {
+      void messagesQuery.fetchNextPage()
+      return
+    }
+    deepLinkSettled.current = deepLink.message
+    toast.error(
+      messagesQuery.hasNextPage
+        ? t('chat.linkedMessageTooFar', { count: pages * CHAT_PAGE })
+        : t('chat.linkedMessageMissing'),
+    )
+  }, [deepLink.message, deepLink.channel, selectedId, messages, messagesQuery, t])
 
   // Read receipts (Plan §6): who has seen the latest message. A member has seen
   // it when their lastReadAt is at/after that message's timestamp.
@@ -674,18 +755,26 @@ export function ChatPage() {
   // The thread's replies are NOT in the channel query (that one returns root
   // messages only), so the panel has to fetch them (§A3.2). Live replies that
   // arrive over the socket are merged on top.
-  const threadQuery = useQuery({
+  // Newest replies first from the server, older ones a page at a time: a
+  // thread past a hundred replies used to show its first hundred and never
+  // the ones being written now.
+  const threadQuery = useInfiniteQuery({
     queryKey: ['chat-thread', threadParentId],
-    queryFn: () => api<{ parent: Message; replies: Message[] }>(`/chat/messages/${threadParentId}/thread`),
     enabled: !!threadParentId,
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) =>
+      api<{ parent: Message; replies: Message[]; hasOlder?: boolean }>(
+        `/chat/messages/${threadParentId}/thread${pageParam ? `?before=${pageParam}` : ''}`,
+      ),
+    getNextPageParam: (last) => (last.hasOlder ? last.replies[0]?.id : undefined),
   })
   const threadParent = threadParentId
-    ? messages.find((m) => m.id === threadParentId) ?? threadQuery.data?.parent ?? null
+    ? messages.find((m) => m.id === threadParentId) ?? threadQuery.data?.pages[0]?.parent ?? null
     : null
   const threadReplies = useMemo(() => {
     if (!threadParentId) return [] as Message[]
     const byId = new Map<string, Message>()
-    for (const reply of threadQuery.data?.replies ?? []) byId.set(reply.id, reply)
+    for (const page of threadQuery.data?.pages ?? []) for (const reply of page.replies) byId.set(reply.id, reply)
     for (const reply of repliesByParent.get(threadParentId) ?? []) byId.set(reply.id, reply)
     return [...byId.values()].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
   }, [threadParentId, threadQuery.data, repliesByParent])
@@ -767,11 +856,7 @@ export function ChatPage() {
       if (event.workspaceId && event.workspaceId !== workspaceId) return
       if (event.type === 'chat.message.created' && event.message) {
         const msg = event.message
-        qc.setQueryData<Message[] | undefined>(['chat-messages', msg.channelId], (prev) => {
-          if (!prev) return prev
-          if (prev.some((m) => m.id === msg.id)) return prev
-          return [...prev, msg]
-        })
+        appendToChannel(qc, msg)
         // Delivery receipt (Plan §6.2): a message from someone else reached this
         // client — mark it delivered even if the channel isn't open, so the
         // sender can see "Delivered" before it's actually read.
@@ -780,15 +865,14 @@ export function ChatPage() {
         }
       }
       if (event.type === 'chat.message.updated' && event.channelId && event.messageId) {
-        qc.setQueryData<Message[] | undefined>(['chat-messages', event.channelId], (prev) => {
-          if (!prev) return prev
-          return prev.map((m) => (m.id === event.messageId ? { ...m, ...(event.patch ?? {}) } : m))
-        })
+        // Whichever page holds it: an edit to a message three pages back is as
+        // live as one to the newest.
+        editChannelPages(qc, event.channelId, (items) =>
+          items.map((m) => (m.id === event.messageId ? { ...m, ...(event.patch ?? {}) } : m)),
+        )
       }
       if (event.type === 'chat.message.deleted' && event.channelId && event.messageId) {
-        qc.setQueryData<Message[] | undefined>(['chat-messages', event.channelId], (prev) =>
-          prev ? prev.filter((m) => m.id !== event.messageId) : prev,
-        )
+        editChannelPages(qc, event.channelId, (items) => items.filter((m) => m.id !== event.messageId))
       }
       if (event.type === 'chat.channel.created') {
         // Reused for channel edits + archive/unarchive too (§6.1): refetch both lists.
@@ -852,10 +936,32 @@ export function ChatPage() {
     }
   }, [workspaceId, qc])
 
+  /*
+   * TO THE BOTTOM WHEN THE NEWEST MESSAGE CHANGES — not when the count does.
+   * Older pages arrive at the TOP, and keyed on the length this jumped the
+   * reader to the bottom every time they scrolled up far enough to load one.
+   * Loading older keeps them where they were instead (below).
+   */
+  const newestId = messages[messages.length - 1]?.id
+  const oldestId = messages[0]?.id
+  const [bottomedFor, setBottomedFor] = useState<string | null>(null)
   useEffect(() => {
     if (!scrollRef.current) return
     scrollRef.current.scrollTop = scrollRef.current.scrollHeight
-  }, [messages.length, selectedId])
+    if (newestId) setBottomedFor(selectedId)
+  }, [newestId, selectedId])
+  const olderScroll = useRef<{ height: number; top: number } | null>(null)
+  const rememberScroll = () => {
+    const el = scrollRef.current
+    if (el) olderScroll.current = { height: el.scrollHeight, top: el.scrollTop }
+  }
+  useLayoutEffect(() => {
+    const el = scrollRef.current
+    const before = olderScroll.current
+    if (!el || !before) return
+    el.scrollTop = before.top + (el.scrollHeight - before.height)
+    olderScroll.current = null
+  }, [oldestId])
 
   // Freeze the read cursor the moment a channel is opened (§A3.3) so the divider
   // has something to sit on after the mark-read below moves the real cursor.
@@ -868,8 +974,9 @@ export function ChatPage() {
 
   // Mark the open channel read once its messages load (and whenever new ones
   // arrive while it's open), then refresh the channel list to clear its badge.
+  // Keyed on the NEWEST message: loading older history is not something new.
   useEffect(() => {
-    if (!selectedId || messages.length === 0) return
+    if (!selectedId || !newestId) return
     let cancelled = false
     // Opening a channel implies both delivery and read (Plan §6.2). Mark
     // delivered first so senders never see "Seen" without "Delivered".
@@ -885,7 +992,7 @@ export function ChatPage() {
     return () => {
       cancelled = true
     }
-  }, [selectedId, messages.length, workspaceId, qc])
+  }, [selectedId, newestId, workspaceId, qc])
 
   useEffect(() => {
     if (!highlightedMessageId) return
@@ -903,9 +1010,7 @@ export function ChatPage() {
         body: JSON.stringify({ body, parentMessageId, attachmentIds: attachmentIds?.length ? attachmentIds : undefined }),
       }),
     onSuccess: (msg) => {
-      qc.setQueryData<Message[] | undefined>(['chat-messages', msg.channelId], (prev) =>
-        prev && !prev.some((m) => m.id === msg.id) ? [...prev, msg] : prev,
-      )
+      appendToChannel(qc, msg)
       if (msg.parentMessageId) {
         void qc.invalidateQueries({ queryKey: ['chat-thread', msg.parentMessageId] })
         void qc.invalidateQueries({ queryKey: ['chat-messages', msg.channelId] })
@@ -2204,6 +2309,10 @@ export function ChatPage() {
         <div
           ref={scrollRef}
           className={cn('flex-1 overflow-y-auto px-5 py-4', dmSharedOpen && 'hidden')}
+          // The browser's own scroll anchoring would ALSO shift this when older
+          // messages land above; the layout effect that keeps the reader in
+          // place is the one rule, so the browser's is switched off.
+          style={{ overflowAnchor: 'none' }}
           onDragOver={(e) => {
             if (!selectedId || !Array.from(e.dataTransfer.types).includes('Files')) return
             e.preventDefault()
@@ -2236,7 +2345,26 @@ export function ChatPage() {
               <Paperclip className="h-4 w-4" /> {t('chat.dropToShare')}
             </div>
           )}
-          {rootMessages.length === 0 ? (
+          {/* "This is the start of the conversation" is a claim about the
+              channel, so it waits for the channel's answer: shapes while the
+              first page loads, and a failure said as one — both used to
+              render as an empty channel. */}
+          {selectedId && messagesQuery.isPending ? (
+            <div className="max-w-3xl mx-auto" data-testid="chat-messages-loading">
+              <ListSkeleton rows={6} rowClassName="h-12" />
+            </div>
+          ) : messagesQuery.isError && rootMessages.length === 0 ? (
+            <div className="py-16 text-center space-y-2" data-testid="chat-load-failed">
+              <p className="text-sm text-destructive">{t('chat.loadFailed')}</p>
+              <button
+                type="button"
+                onClick={() => void messagesQuery.refetch()}
+                className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
+              >
+                {t('common.retry')}
+              </button>
+            </div>
+          ) : rootMessages.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-16 text-center max-w-md mx-auto">
               <div className="h-14 w-14 rounded-2xl bg-violet-500/10 flex items-center justify-center mb-4">
                 {selectedChannel?.isDm ? (
@@ -2324,6 +2452,18 @@ export function ChatPage() {
             </div>
           ) : (
             <div className="space-y-0 max-w-3xl mx-auto">
+              {/* Older history, on scroll-up. Offered only once the channel has
+                  been scrolled to its bottom, so opening one does not page back
+                  on its own while the view is still at the top. */}
+              {messagesQuery.hasNextPage && bottomedFor === selectedId && (
+                <LoadOlder
+                  query={messagesQuery}
+                  testId="chat-load-older"
+                  label={t('chat.loadOlderMessages')}
+                  failedLabel={t('chat.loadOlderMessagesFailed')}
+                  onBeforeLoad={rememberScroll}
+                />
+              )}
               {rootMessages.map((m, i) => {
                 const showAuthor = shouldShowMessageHeader(rootMessages, i)
                 const showDate = shouldShowDateDivider(rootMessages, i)
@@ -3383,6 +3523,7 @@ export function ChatPage() {
             parent={threadParent}
             replies={threadReplies}
             loading={threadQuery.isLoading}
+            olderReplies={threadQuery.hasNextPage ? threadQuery : null}
             channelLabel={channelLabel}
             currentUserId={me?.id}
             onClose={() => setThreadParentId(null)}
@@ -4114,6 +4255,7 @@ function ThreadPanel({
   parent,
   replies,
   loading,
+  olderReplies,
   channelLabel,
   currentUserId,
   onClose,
@@ -4133,6 +4275,12 @@ function ThreadPanel({
   parent: Message
   replies: Message[]
   loading: boolean
+  /** The thread's pages when there are earlier replies to load. */
+  olderReplies: {
+    fetchNextPage: () => Promise<unknown>
+    isFetchingNextPage: boolean
+    isFetchNextPageError: boolean
+  } | null
   channelLabel: string
   currentUserId?: string
   onClose: () => void
@@ -4382,6 +4530,15 @@ function ThreadPanel({
           {reactionRow(parent)}
           {quickReact(parent)}
         </div>
+        {olderReplies && (
+          <LoadOlder
+            query={olderReplies}
+            testId="thread-load-older"
+            label={t('chat.loadEarlierReplies')}
+            failedLabel={t('chat.loadEarlierRepliesFailed')}
+            auto={false}
+          />
+        )}
         {replies.map((reply) => (
           <div key={reply.id} className="group/msg rounded-lg border border-border/70 bg-background p-3">
             <div className="mb-1 flex items-baseline gap-1.5">

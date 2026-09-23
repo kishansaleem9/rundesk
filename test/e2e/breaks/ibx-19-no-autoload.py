@@ -2,7 +2,7 @@
 # Reddens: inbox-scope: "scrolling to the end loads the rest — 59 rows, the oldest included — and "Load older" goes away"
 import io
 p = '/home/user/rundesk/apps/web/src/components/load-older.tsx'
-a = "    if (!el || failed || loading || typeof IntersectionObserver === 'undefined') return\n"
+a = "    if (!el || !auto || failed || loading || typeof IntersectionObserver === 'undefined') return\n"
 b = '    if (el || !el) return\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

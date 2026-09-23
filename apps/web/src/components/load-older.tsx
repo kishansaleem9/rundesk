@@ -22,7 +22,27 @@ type PagedQuery = {
  * failed, for as long as the button stayed on screen; it says so instead and
  * waits for a click.
  */
-export function LoadOlder({ query, testId }: { query: PagedQuery; testId: string }) {
+export function LoadOlder({
+  query,
+  testId,
+  label,
+  failedLabel,
+  auto = true,
+  onBeforeLoad,
+}: {
+  query: PagedQuery
+  testId: string
+  /** What the button says; the Inbox's words when not given. */
+  label?: string
+  failedLabel?: string
+  /**
+   * Load on sight. Off where the button is on screen from the start — a
+   * thread opens at its top — so opening it does not page back by itself.
+   */
+  auto?: boolean
+  /** Called just before a page is asked for — chat records its scroll here. */
+  onBeforeLoad?: () => void
+}) {
   const { t } = useTranslation()
   const ref = useRef<HTMLButtonElement>(null)
   const loading = query.isFetchingNextPage
@@ -32,28 +52,32 @@ export function LoadOlder({ query, testId }: { query: PagedQuery; testId: string
   // the first page has started cannot ask for the same page twice.
   const latest = useRef(query)
   latest.current = query
+  const before = useRef(onBeforeLoad)
+  before.current = onBeforeLoad
   const inFlight = useRef(false)
   inFlight.current = loading
   const load = () => {
     if (inFlight.current) return
     inFlight.current = true
+    before.current?.()
     void latest.current.fetchNextPage()
   }
   useEffect(() => {
     const el = ref.current
-    if (!el || failed || loading || typeof IntersectionObserver === 'undefined') return
+    if (!el || !auto || failed || loading || typeof IntersectionObserver === 'undefined') return
     const observer = new IntersectionObserver((entries) => {
       if (!entries.some((e) => e.isIntersecting) || inFlight.current) return
-      inFlight.current = true
-      void latest.current.fetchNextPage()
+      load()
     })
     observer.observe(el)
     return () => observer.disconnect()
-  }, [loading, failed])
+    // `load` reads everything it needs through refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, failed, auto])
   if (loading) return <ListSkeleton rows={3} rowClassName="h-14" />
   return (
     <div className="flex flex-col items-center gap-1 pt-1">
-      {failed && <p className="text-xs text-destructive">{t('inbox.loadOlderFailed')}</p>}
+      {failed && <p className="text-xs text-destructive">{failedLabel ?? t('inbox.loadOlderFailed')}</p>}
       <button
         ref={ref}
         type="button"
@@ -61,7 +85,7 @@ export function LoadOlder({ query, testId }: { query: PagedQuery; testId: string
         data-testid={testId}
         className="inline-flex h-7 items-center rounded-md border border-border/70 px-2.5 text-xs font-medium text-muted-foreground hover:bg-muted/50 hover:text-foreground"
       >
-        {t('inbox.loadOlder')}
+        {label ?? t('inbox.loadOlder')}
       </button>
     </div>
   )
