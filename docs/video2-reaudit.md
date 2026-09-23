@@ -894,7 +894,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 144 built · 15 partial · 14 missing.**
+**173 rows: 145 built · 14 partial · 14 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -930,16 +930,23 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 112 | 11 | 9 | 132 |
+| §2, the sections table | 113 | 10 | 9 | 132 |
 | §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **144** | **15** | **14** | **173** |
+| **consolidated** | **145** | **14** | **14** | **173** |
 
-§2's 112 built includes the four marked `B*` — built, but the row also records
+ONE ROW MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the only
+shape of movement this table should ever show for a build: *Threads* is now
+`comment-thread.mjs`, 13 of 13, 11 break patches. A build that raised the total
+would mean a row had been invented rather than answered.
+
+§2's 113 built includes the four marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down.
 
-**AND IT IS 112 RATHER THAN 113 BECAUSE ONE ROW WAS STRUCK, NOT CLOSED.**
+**AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
+STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
+113 above is 112 plus the Threads row closing, not the strike being undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
 countdown anywhere in the walkthrough; the row existed only because of the
