@@ -1,0 +1,1366 @@
+# Open work — verified inventory, 23 September 2026
+
+Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
+
+**The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
+
+## Product defects — 46
+
+### `resume-defects/resume-7` — open, large
+
+**The clip's 'Copy link' still yields an expiring signed URL, and nothing tells the person**
+
+*Evidence:* apps/web/src/components/comment-recorder.tsx:320-351: copyClipLink calls ensureLink, which calls clipShareUrl, and the toast says only t('clipCreated.linkCopied'). apps/web/src/lib/i18n/catalogs.ts:2961 is 'Link copied', with no expiry. apps/web/src/lib/clip-publish.ts:101-117 asks for `expiresInMinutes: 60 * 24`. apps/api/src/modules/clips/clips.service.ts:107-111 caps expiry at 7 days and returns the bare signed URL for mode 'public'. Only the email path states an expiry (email.service.ts:355-370, 'This secure link expires on ...'). The clips-page share dialog signs for 60 minutes (workspace-clips-page.tsx:108-124), shows and copies the URL with no expiry (509-517), and describes itself without one (catalogs.ts:683). Worse: 'Create a task' writes the 24-hour URL into a permanent task description (comment-recorder.tsx:358-373), and clip-created-card.mjs:405-406 asserts that the description holds it. The suite also stubs the share route with a fixed URL (clip-created-card.mjs:64, 246), so nothing checks expiry. The actual lifetime depends on deployment: r2.service.ts:109-121 returns a permanent public URL when a non-R2-API public URL is configured, so the UI cannot even state the expiry truthfully without knowing the mode. task-detail-sheet.tsx:5744-5751 already records this reasoning for not offering Copy link on comment clips. ClickUp research: Clips are shared by a public, unguessable URL that does not expire. Link expiry is an explicit Enterprise-only choice of 7, 30 or 90 days (help.clickup.com 'Share locations and items with a public link'; ClickUp changelog 'Public Sharing: Expiring URL [Enterprise]').
+
+*To close:* Build to ClickUp, which shares the dependency on section 4's clips table (see s4-clip-link). Give each clip a stable, unguessable share token and an app route such as /clips/:token that re-signs the storage object on every view. Copy link, New tab and Create a task then use that route, never a signed URL, so task descriptions stop rotting. If an expiry is offered at all, make it an explicit choice and state it in the toast and dialog. Checks: the copied link still resolves after the signing window (sign with a short TTL in the test); the task description holds the stable route, not a storage URL; if the toast or dialog carries an expiry, it matches the server's.
+
+### `product-siblings/avatar-logo-persist-expiring-signed-url` — open, medium
+
+**Avatar and workspace-logo uploads persist a 15-minute presigned URL as avatarUrl/logoUrl**
+
+*Evidence:* users.service.ts:298-301 returns `publicUrl = getObjectUrl(key)`. Its comment admits it is only 'stable … with a public R2/CDN domain'. workspaces.service.ts:318-321 does the same. r2.service.ts:109-121 returns a 900-second presigned GET whenever R2_PUBLIC_URL is unset or is the raw r2 endpoint, and R2_PUBLIC_URL is marked Optional in .env.example:66-67 and empty in deploy/env.production.template:50. The web persists it: app-profile-page.tsx:332-335 PATCHes `avatarUrl: presign.publicUrl`, and workspace-settings-page.tsx:708 does `setLogoUrl(presign.publicUrl)`. Nothing re-signs on read (users.service.ts:511 publicProfile). Failure: on a default deployment, an uploaded avatar or logo shows a broken image everywhere 15 minutes later.
+
+*To close:* Store the key (avatar_storage_key / logo_storage_key) and sign on read, as covers and meetings do. Or refuse the upload when no public URL is configured.
+
+### `product-siblings/chat-history-unreachable` — open, medium
+
+**Chat loads only the newest 100 root messages; the server's `before` cursor has no client**
+
+*Evidence:* chat.controller.ts:273-281 accepts ?before. chat.service.ts:1298-1301 says 'Without this the cursor was a no-op and only the newest limit messages were ever reachable'. The only reader is workspace-chat-page.tsx:584-588, `messages?limit=100` with no before. A search for useInfiniteQuery, fetchNextPage and loadOlder across apps/web found nothing. A search deep link to an older message silently does nothing (:590-597 returns when the id is not in the loaded 100). Threads: chat.service.ts:1760-1762 orders replies oldest-first with limit 100 and the web never sends a limit, so a thread over 100 replies drops its NEWEST replies. ClickUp loads older messages on scroll-up.
+
+*To close:* Use an infinite query keyed by the oldest loaded id (before=). Load around the target message for deep links. For threads, page newest-first or cursor forward.
+
+### `product-siblings/custom-role-permissions-unread-by-web` — open, medium
+
+**GET /workspaces/:ws/roles/me/permissions has no caller; web gating ignores custom-role permissions the server enforces**
+
+*Evidence:* custom-roles.controller.ts:37-47 returns the effective permission set. Searches of apps/web/src for 'me/permissions', 'roles/me' and 'permissions' found no caller. use-workspace-role.ts:5-22 gates on the base role only. The server enforces custom permissions, e.g. task-templates.controller.ts:51 @RequirePermissions('template.manage') and reports.controller.ts:19 'report.view.basic'. Failure: a custom role that revokes report.view.basic from a manager still gets the Reports UI, and every request 403s.
+
+*To close:* Load me/permissions into the role hook and gate the permission-backed controls on it.
+
+### `ledger-rows/defect-mention-picker-200-cap` — open, medium
+
+**@ picker Tasks tab fetches limit=200 and filters in the browser — task 201 cannot be mentioned and shows 'no matches'**
+
+*Evidence:* reaudit.md:2706-2718 ('Not fixed'). task-detail-sheet.tsx:5937 and :8965 call `/tasks/workspace/${workspaceId}?limit=200` and filter locally. Locations is searched server-side.
+
+*To close:* Send the typed query to the server, as Locations does, for Tasks/Docs/Whiteboards/Channels.
+
+### `product-siblings/export-visible-columns-ignores-view` — open, medium
+
+**Export 'Visible columns' never sends ?fields, so it always exports the same five columns**
+
+*Evidence:* tasks.controller.ts:188 accepts `fields`, and :213 passes it through. tasks.service.ts:2553-2561: in 'visible' mode, a missing fields list falls back to title/status/assignees/priority/dueDate. The web export panel builds its query at list route :7318-7332 with columns/format/dateFormat/timeFormat/includeClosed/includeArchived/view and no fields, even though the list hides columns (BUILTIN_COLUMNS :519-525, showCol :4796-4810). The key names also differ (web 'col:due'/'col:created' vs server 'dueDate'/'createdAt'), and custom-field columns are never in COLUMNS (:2535-2547). ClickUp's Export view 'Visible columns' exports what the view shows, including custom fields.
+
+*To close:* Send fields from the view's visible set, mapping the web keys to the server keys, and add custom-field columns to the export. Extend the export suite to hide a column and assert it is absent.
+
+### `commit-log/log-d85dcad-1` — open, medium
+
+**The @ picker's Tasks tab loads 200 tasks and filters them in the browser; Docs, Whiteboards and Channels also filter in the browser**
+
+*Evidence:* Commit d85dcad 'Also recorded, not fixed'. It is still true. task-detail-sheet.tsx:5935-5939 and :8965 fetch /tasks/workspace/:ws?limit=200. The same cap appears at workspace-chat-page.tsx:491 and :4451, task-merge-dialog.tsx:72 and task-convert-dialog.tsx:68. Only Locations searches on the server (task-detail-sheet.tsx:5965-5972). Ledger lines 2706-2718 say 'Not fixed'. The 201st task shows 'no matches'.
+
+*To close:* Search on the server with a q parameter, as Locations does, for Tasks, Docs, Whiteboards and Channels, and in the other pickers. Add a check that seeds more than 200 tasks and mentions the newest, with a break patch.
+
+### `resume-defects/resume-8-reply-routing` — open, medium
+
+**The claim that replies to notification emails route by header is false: only inbound Message-IDs are ever recorded**
+
+*Evidence:* apps/api/src/modules/email-to-task/email-to-task.service.ts:35-36 says 'Replies to notification emails are also routed by `In-Reply-To` / `References` headers'. But resolveReplyContext (345-362) matches those headers only against inbound_email_messages.messageId. The only insert into that table is for accepted inbound mail (line 524). Outbound notification mail (notifications.service.ts:1213 sendComment, going through email.service.ts:596-603) sets no Message-ID, records none, and sets no Reply-To, so a reply to a notification goes to `this.from` and cannot match. Header routing works only for replies to mail that was itself inbound.
+
+*To close:* This closes with resume-8. Have send() set and return a Message-ID, and record outbound IDs with their taskId and listId, either in the same table with a direction column or in an outbound table. Make resolveReplyContext consult them. Set Reply-To on notification mail to the task's +task- address. Add an API-level test: send a comment notification, post a synthetic inbound reply whose In-Reply-To is that Message-ID, and assert a comment lands on the task. A patch that stops recording the outbound ID should redden it. Until then, correct the comment at :35-36.
+
+### `product-siblings/standalone-reminders-invisible` — open, medium
+
+**Reminders made from + Create are never listed or deletable: GET /workspaces/:ws/reminders has no reader**
+
+*Evidence:* reminders.controller.ts:16-20 lists 'the caller's still-pending reminders across the workspace', and :36-46 creates standalone ones. quick-create-modal.tsx:2133-2141 creates one and invalidates ['reminders', ws], which no useQuery in apps/web uses (confirmed by a key-head survey). The only reader is task-scoped (task-reminders.tsx:45-48), and delete is reachable only from there (:68). ClickUp lists reminders (Home reminders card / Inbox) with edit and delete.
+
+*To close:* Add a Reminders list (a Home section or Inbox tab) on GET /workspaces/:ws/reminders, with delete, under the key the modal already invalidates.
+
+### `product-siblings/admin-audit-first-workspace-only` — open, small
+
+**The super-admin 'Audit log' shows only the admin's first workspace, with no picker**
+
+*Evidence:* admin-audit-page.tsx:127-133 uses `wsQuery.data?.[0]?.workspace.id` from GET /workspaces. app.admin.tsx:8-14 is the platform console ('Audit log — See who changed what'), limited to super_admin.
+
+*To close:* Add a workspace picker (or a platform-wide audit endpoint).
+
+### `product-siblings/chat-attachment-key-unvalidated` — open, small
+
+**POST /chat/channels/:id/attachments records any storageKey and returns a signed URL for it**
+
+*Evidence:* chat.service.ts:176-203 (recordAttachment) checks only `!data.storageKey` (:183), with no prefix check. It signs at :201, and again on every read at :1400, :1854 and :2803. chat.controller.ts:311-318 takes an inline body type, so ValidationPipe checks nothing. The EMPTY-key shape from tonight is NOT reachable here: the column is NOT NULL (packages/db/src/schema/chat.ts:136) and :183 rejects ''. The unvalidated-key shape is reachable: a channel member (or an ex-member of another workspace who kept a key) posts `{storageKey:'workspaces/<other>/tasks/<id>/attachments/<file>'}` and gets a working signed URL. Minor: with R2 unconfigured the raw key comes back as `url`, which is the same branch tasks kept.
+
+*To close:* Require storageKey to start with `chat/${channelId}/attachments/`, the prefix createAttachmentUploadUrl mints at :164.
+
+### `product-siblings/clip-create-task-persists-24h-url` — open, small
+
+**'Create a task' from a clip writes a 24-hour signed URL into the task description and keeps no key**
+
+*Evidence:* comment-recorder.tsx:320-338 ensureLink returns clipShareUrl(...), which clip-publish.ts:108-121 requests with a 24h expiry (clips.service.ts:107-108 signs it). createTaskFromClip at :358-373 POSTs `description: url`. The task keeps no attachment or key reference to the clip. docs/video2-resume.md:244-246 (item 7) covers Copy link's unstated expiry, not this persisted copy. Failure: the next day the task created from a clip has a dead link and no way back to the recording.
+
+*To close:* Attach the clip to the new task as a task attachment (or a clip reference) and render the link by signing on read.
+
+### `product-siblings/contribution-sprint-unselectable` — open, small
+
+**The contribution report's 'Sprint' period cannot choose a sprint; ?sprintId has no client**
+
+*Evidence:* reports.controller.ts:204-205 accepts sprintId. reports.service.ts:1666-1678 falls back, when it is absent, to the most recently started ACTIVE sprint in the whole workspace. workspace-insights-page.tsx:186-190 sends only period, and :498 offers the 'sprint' chip with no picker. The PDF download at :218-224 does the same. Failure: two spaces run concurrent sprints and the chip always reports whichever started last. A finished sprint can never be reported. ClickUp sprint reports let you pick the sprint.
+
+*To close:* Add a sprint picker that sends sprintId to both the JSON and the PDF endpoints.
+
+### `product-siblings/cover-dangles-after-attachment-delete` — open, small
+
+**Deleting the attachment used as a task's cover deletes the object, but the cover keeps signing its key**
+
+*Evidence:* cover-image-picker.tsx:361 sets the cover to an existing attachment's key (`commit({kind:'stored', storageKey: a.storageKey})`). tasks.service.ts:2902-2911 (removeAttachment) deletes the row and calls r2.deleteObject(storageKey) without touching tasks.cover_storage_key. getTask (:2752-2754) and the list path (:2417) keep signing it. Failure: pick an attachment as the cover, then remove that attachment. The banner and the board card now load a live-looking signed URL to a deleted object, which renders as a broken image.
+
+*To close:* In removeAttachment, clear cover_storage_key where it equals the removed key (or keep the object while referenced).
+
+### `product-siblings/cover-storage-key-unvalidated` — open, small
+
+**PATCH /tasks/:id accepts any coverStorageKey and getTask signs it: a signed URL to another tenant's object**
+
+*Evidence:* tasks.controller.ts:315 accepts coverStorageKey and :347 spreads the whole body into the patch. tasks.service.ts:2954-2961 checks only coverImageUrl and coverOffsetY, and :3011 writes `{...patch}`. The key is then signed at :2752-2754 (getTask) and :2417 (list rows). Compare addAttachment at :2815-2825, which refuses any key outside `workspaces/${ws}/tasks/${taskId}/attachments/` for exactly this threat. cover-image-picker.tsx:172-173 says the cover 'lands in the task's own storage prefix and inherits its access rules', but the server does not enforce that.
+
+*To close:* In updateTask, when coverStorageKey is non-null, require it to start with `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/` (or to equal the storage_key of an attachment row on this task). Reject anything else with 400. Add a break to task-cover.mjs that sets a foreign key.
+
+### `ledger-rows/defect-ai-create-refusal-and-warnings` — open, small
+
+**Create-with-AI shows a refusal key instead of the sentence, and never renders plan warnings**
+
+*Evidence:* reaudit.md:2690-2704 ('Not fixed'). ai-containers.ts:108 returns `message: CONTAINER_REFUSAL_TEXT[reason]`, but ai.service.ts:3802-3808 returns only `reason: result.reason`. quick-create-modal.tsx:282-288 AiActionResult has no message, and the result line prints `(${r.reason})`. The AiPlan type declares warnings (:281), but :362-368 renders only create-ai-nothing when actions are empty.
+
+*To close:* Pass result.message through executeOne and render it. Render plan.warnings where the 'nothing to create' line is.
+
+### `ledger-rows/defect-calendar-toggles-before-settings` — open, small
+
+**Holidays/Time-off calendars read ON and fetch before planner settings arrive**
+
+*Evidence:* reaudit.md:2630-2639 ('Not fixed'). workspace-planner-page.tsx:444-446 derives both from `settings?.hiddenCalendarIds ?? []`, so they are true while settings is undefined. The queries at :562 and :684 are enabled on them without waiting for settings.
+
+*To close:* Gate both queries on settings having loaded, with a check that reddens on a reload with the calendars hidden.
+
+### `ledger-rows/defect-planner-connect-empty-consent` — partly-fixed, small
+
+**Planner onboarding 'Connect Google/Outlook' still posts oauth/start with no readiness check (Zoom row now gated)**
+
+*Evidence:* reaudit.md:2617-2628 ('Not fixed'). Fixed half: planner-settings-dialog.tsx:965-972 derives `available` from provider availability, and :1043-1047 disables Connect when unavailable. Still open: workspace-planner-page.tsx:823-835 connectCalendar POSTs oauth/start and assigns window.location.href with no availability check. integration-connections.service.ts:201-214 builds client_id from cfg.clientId without consulting readiness.
+
+*To close:* Apply the same availability check to connectCalendar (client side, as the ledger says the server-side fix breaks app-catalogue).
+
+### `ledger-rows/defect-projects-position-unordered` — open, small
+
+**getProjectsBySpace has no ORDER BY, so a dragged order holds only in the sidebar**
+
+*Evidence:* reaudit.md:2658-2665 ('Not fixed'). projects.service.ts:129-153: both selects have no orderBy on position.
+
+*To close:* orderBy(projects.position, projects.createdAt) in both branches, with a check through a non-sidebar surface.
+
+### `product-siblings/docs-patch-mass-assign-public-share` — open, small
+
+**PATCH /docs/:id spreads the body into the row: a doc can be moved to another workspace, or made public despite blockPublicSharing**
+
+*Evidence:* docs.controller.ts:190-206 takes an inline body type and passes it whole. docs.service.ts:~451 `set = {...patch, updatedAt}` (only expectedUpdatedAt is deleted) → db.update(docs).set(set). The docs table (packages/db/src/schema/docs.ts:10-30) has workspaceId, publicShareId, publicShareEnabledAt, createdById and archivedById, all writable this way. enablePublicShare (docs.service.ts:561-577) enforces workspaces.blockPublicSharing, but PATCH {publicShareId:'anything'} skips that check. getByPublicShare (:611-627) then serves the doc anonymously by that slug. PATCH {workspaceId:<other>} re-homes the doc across tenants (FK only).
+
+*To close:* Pick only title/icon/coverImageUrl/content/parentDocId/spaceId/position/isArchived in update. Verify that spaceId and parentDocId belong to the doc's workspace.
+
+### `product-siblings/home-assigned-comments-shows-mentions` — open, small
+
+**The Home 'Assigned comments' section shows mentions; real assignment notifications and /chat/assigned-to-me are never read**
+
+*Evidence:* app.$workspaceId.tsx:193 filters `['task_mentioned','mention']` and labels the result 'Assigned comments' (:302). The assignment notification types exist: comment_assigned (tasks.service.ts:4656) and message_assigned (chat.service.ts:2423), both declared at notifications.service.ts:174 and :183. GET /workspaces/:ws/chat/assigned-to-me (chat.controller.ts:483-489) has no web reader. workspace-chat-page.tsx:1177, :1189 and :1200 invalidate ['chat-assigned-to-me', ws], which no query uses. Sibling on the same page: 'Assigned to me' (:195) filters `task.status` against 'done'/'cancelled', although the endpoint returns statusCategory precisely because status keys are renamable (tasks.service.ts:1870-1876). Tasks in a renamed closed status stay listed.
+
+*To close:* Filter on comment_assigned/message_assigned (or read /chat/assigned-to-me plus the task comment assignments). Use statusCategory !== 'closed' for Assigned to me.
+
+### `product-siblings/home-today-overdue-includes-closed` — open, small
+
+**Home 'Today & overdue' counts completed tasks, and the member-task read is capped at 100 by updatedAt**
+
+*Evidence:* app.$workspaceId.tsx:196-200: todayAndOverdue keeps any task with a dueDate today or past, with no status or category filter. getTasksForMember (tasks.service.ts:1869-1897) returns closed tasks (only isArchived is excluded) with statusCategory, orders by updatedAt desc and applies .limit(100). Every finished task with a past due date is therefore listed and counted as overdue (HomeItem count :305). A person with 100 recently touched tasks loses older open ones from both 'Assigned to me' and 'Today & overdue', which is a confident count.
+
+*To close:* Filter statusCategory !== 'closed' for both sections. Move the open filter into SQL before the limit, or page it.
+
+### `product-siblings/inbox-capped-confident-zero` — open, small
+
+**The Inbox reads 50 notifications with no pagination; chip counts and 'All caught up' are computed from those 50**
+
+*Evidence:* notifications.service.ts:722 `.limit(opts.limit ?? 50)`. notifications.controller.ts:18-28 exposes no limit, offset or cursor. workspace-inbox-page.tsx:648-651 derives unread and chip counts 'from the list already loaded', and :1057-1059 shows 'All caught up' when those 50 are read, while the server's counts.unread (:645, :770-773) can still be greater than 0.
+
+*To close:* Add a cursor (before=) and progressive loading. Take chip and unread counts from GET /notifications/counts.
+
+### `product-siblings/link-attachment-signed-as-key` — open, small
+
+**Hyperlink task attachments are stored in storage_key and signed as if they were object keys**
+
+*Evidence:* tasks.service.ts:2832 `storageKey = data.storageKey ?? data.url`. :2798, :2877 and :4312 then call getObjectUrl('https://…'), producing `${CDN}/https://…` or a presigned GET for a nonexistent key. The code admits it at :2401-2402 ('is the bug task attachments still have') and :2746-2748. The web posts links this way (task-detail-sheet.tsx:5259-5269) and renders `a.url` as the download href (:5527-5538). Side effects: knowledge-indexer.service.ts:228-232 and ai.service.ts:2597-2600 call r2.getObject('https://…') for contentType 'text/url' (isExtractableAttachment accepts text/*, attachment-text.ts:43), so every reindex logs each link as 'unreadable'. removeAttachment (:2905-2907) calls deleteObject on the URL. No ledger doc lists it; the only mentions are code comments, a migration comment and two e2e headers.
+
+*To close:* Give links their own column or kind (for example external_url) and pass http(s) through untouched, as covers do. Skip link rows in the indexers and in deleteObject.
+
+### `commit-log/log-462ed70-1` — open, small
+
+**The create menu's AI shows the key '(no_permission)' instead of the refusal sentence, and a plan's warnings are never shown**
+
+*Evidence:* Commit 462ed70: 'Five defects recorded from the create-menu work, four unfixed'. ai.service.ts:3721 turns a ForbiddenException into the key 'no_permission' and throws away err.message. quick-create-modal.tsx:401 then prints it as `(${r.reason})`. AiPlan.warnings is declared at quick-create-modal.tsx:281 and read nowhere, so a plan that refuses everything shows create-ai-nothing (:366) instead. Ledger lines 2690-2704 mark both 'Not fixed'.
+
+*To close:* Return the message along with the reason, and render the sentence. Render plan.warnings in the create menu the way workspace-ai-page does. Add checks and break patches.
+
+### `commit-log/log-666f15f-1` — partly-fixed, small
+
+**Only the sidebar honours projects.position; getProjectsBySpace still has no ORDER BY**
+
+*Evidence:* Commits 666f15f and 462ed70: 'honoured in one surface and contradicted by twenty'. A writer now exists (workspaces.service.ts:1060-1070), and the sidebar sorts in the browser (workspace-sidebar.tsx:1088-1104). projects.service.ts:118-152 getProjectsBySpace still returns rows with no orderBy, while its own comment says 'Fourteen surfaces ... every one of them reads this endpoint' (the Move dialog, pickers, the palette filter).
+
+*To close:* Add orderBy(asc(projects.position), asc(projects.createdAt)) to getProjectsBySpace, drop the sort the sidebar does in the browser, and add a check that reads a second surface.
+
+### `commit-log/log-a0b4108-1` — open, small
+
+**The sidebar's inline 'new folder here' dialog posts only {name}**
+
+*Evidence:* Commit a0b4108: 'One asymmetry recorded rather than built'. workspace-sidebar.tsx:751 still sends POST /spaces/:id/folders with body { name } only. The main folder dialog has description, private and status-scope fields (ledger rows 780-781). ClickUp opens its full Create Folder modal from the sidebar.
+
+*To close:* Point the sidebar entry at the same folder dialog, so there is one create surface, or send the same fields. Add a check.
+
+### `commit-log/log-ea0b946-1` — open, small
+
+**Doc create, import and create-from-template accept a spaceId, and a parentDocId, from another workspace**
+
+*Evidence:* Commit ea0b946: 'neither create nor the import validates that spaceId belongs to the workspace ... could show another tenant's space NAME. Pre-existing, recorded here rather than folded into this change'. It is still true. docs.controller.ts:64-79 passes body.spaceId and body.parentDocId straight through. docs.service.ts:241-244 (create), :300-305 (import) and :399-400 (from template) insert them without checking. The list query at docs.service.ts:111 and :127 left-joins spaces and returns spaceName. Commit a866d86 fixed workspace membership only. Grep of docs/*.md finds no record of this defect, so the commit message is the only place it is written down.
+
+*To close:* In all three writers, refuse a spaceId whose space is not in the path's workspace, and a parentDocId whose doc is not in it. Add an e2e check that uses a second workspace, and a break patch that removes the check.
+
+### `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` — open, small
+
+**The AI page meeting card writes the 15-minute signed recording URL back over the durable key on every Update**
+
+*Evidence:* workspace-ai-page.tsx:1092-1095 reads GET /workspaces/:ws/meetings, which signs recordingUrl (meetings.service.ts:214 via withRecordings/playableRecording). :1106 loads that signed URL into the Recording input, and :1124-1127 PATCHes `recordingUrl: recordingUrl.trim() || null` even when the field was never touched. meetings.service.ts:389-391 stores it. :65-69 says 'a signed URL written into this column is a dead link before the meeting notes have been read once'. Failure: a SyncUp-recorded meeting (key written at calls.service.ts:848), opened in the AI meeting card with a notes edit and Update, now has meetings.recording_url set to a presigned GET. 15 minutes later its Recording link is dead permanently when R2_PUBLIC_URL is unset (optional per .env.example:66-67).
+
+*To close:* Web: send recordingUrl only when the user changed the input. Server: reject or ignore a value that is a signature of the stored key (a signed URL for our own bucket), and keep the key.
+
+### `product-siblings/meeting-record-panel-startsat-utc-shift` — open, small
+
+**The AI page meeting card shifts startsAt by the viewer's UTC offset on every load and save**
+
+*Evidence:* workspace-ai-page.tsx:1104-1105 comments 'datetime-local wants a local wall-clock string, not an ISO instant' and then uses `new Date(m.startsAt).toISOString().slice(0,16)`, which is UTC wall-clock. :1115 saves `new Date(startsAt).toISOString()`, which parses that string as LOCAL time. Failure in UTC+5: a meeting at 10:00Z loads as '10:00' and saves as 05:00Z, moving 5 hours earlier on every Update. quick-create-modal.tsx:2126-2131 does the conversion correctly (subtracts getTimezoneOffset).
+
+*To close:* Use the same local-offset conversion as ReminderForm (or date-fns format(date, "yyyy-MM-dd'T'HH:mm")).
+
+### `product-siblings/meeting-recording-key-unvalidated` — open, small
+
+**A meeting's recordingUrl with no scheme is treated as a storage key and signed, whatever it names**
+
+*Evidence:* meetings.service.ts:71-76 (playableRecording): empty returns null (guarded), '://' passes through, and anything else goes to r2.getObjectUrl. create stores body.recordingUrl unchecked at :321, and update at :389-391. The body types are at meetings.controller.ts:42 and :88. So a member can store 'workspaces/<other-ws>/…' and GET /meetings returns a signed URL for it. calls.service.ts:791 is the correct model: it checks the key against `calls/${workspaceId}/${callId}/`.
+
+*To close:* From clients, accept only http(s) URLs for recordingUrl. Keys should be written only by the server (calls.service.ts:848), or accepted only under `calls/${workspaceId}/`.
+
+### `product-siblings/meetings-tag-filter-client-side` — open, small
+
+**The meetings page filters tags in the browser over a 200-row list, which the server comment says must not happen**
+
+*Evidence:* meetings.service.ts:180-187 says to filter in SQL, 'not after the limit… would make a tag on the 201st meeting unreachable'. The SQL filter is at :196 and the cap at :202. meetings-api.ts:48-54 never sends ?tag. workspace-meetings-page.tsx:51-85 filters client-side. The chips are de-duplicated case-insensitively (:62-70), but the filter compares exact case (:77), so meetings tagged 'standup' vanish under the chip 'Standup'.
+
+*To close:* Send tag to the server (and include it in the query key). Compare case-insensitively on both sides.
+
+### `commit-log/missed-docs-patch-1` — open, small
+
+**PATCH /docs/:docId is a fourth unchecked writer of spaceId and parentDocId, and it also writes undeclared columns**
+
+*Evidence:* docs.controller.ts:190-206 declares the body as an inline type literal. The global ValidationPipe (main.ts:38-46, whitelist:true) does not validate or strip a body whose metatype is plain Object, so every key reaches the service. docs.service.ts:452 then does `const set = { ...patch, updatedAt: new Date() }` and :455 writes it with db.update(docs).set(set). Consequences: (1) spaceId and parentDocId from another workspace are written with no check, the same defect ea0b946 recorded for create and import, through a route the finder did not list. (2) Columns the body never declares, including workspaceId, createdById, publicShareId (docs.ts:27) and plaintext, are also written. (3) There is no cycle check, so a doc can be made its own parent or its descendant's child (searching the docs module for 'cycle' or 'descendant' finds nothing). assertDocAccess (:179-188) checks only membership of the doc's CURRENT workspace, not a role. Reasoned from the code, not run against a live API.
+
+*To close:* Whitelist the patchable fields explicitly, rather than spreading the body. Refuse a spaceId or parentDocId outside the doc's workspace, and refuse a parent that is the doc itself or one of its descendants. Add an edit-permission check. Cover it with an e2e check that uses a second workspace, plus a break patch that restores the spread.
+
+### `product-siblings/planner-block-prefix-cannot-clear` — open, small
+
+**The planner block-title prefix cannot be cleared back to the default**
+
+*Evidence:* planner-settings-dialog.tsx:643 sends `blockPrefix: value.trim() || undefined`, which JSON drops. planner.service.ts:442-452 merges `{...currentPlanner, ...plannerOnly}`, so the old value stays. Failure: set 'Deep work:', clear the field and blur, reload, and it is still 'Deep work:'. The two readers disagree on '' (workspace-planner-page.tsx:964 uses ??, use-focus-tab-title.ts:248 uses ?.trim() ||), so the fix should send null, not ''.
+
+*To close:* Send null. Server: on null, delete the key from the blob (or store null so both readers fall back).
+
+### `resume-defects/resume-1-move` — open, small
+
+**The container create gate has a second side door: moving a list, project or folder INTO a view-only space checks only the source**
+
+*Evidence:* lists.service.ts:362-386 moveList calls assertManageable (:407-430), which runs assertCanManageContainer with the SOURCE list's spaceId. The destination project is checked only for workspace and archived status (:374-383). projects.service.ts:240-290 moveProject calls assertManageable on the source and checks the destination space only for workspace and archived status (:255-267). folders.service.ts:177-215 calls assertCanManageContainer with the source spaceId (:207-214), never targetSpaceId. Routes: POST /lists/:listId/move (lists.controller.ts:114-122) and POST /projects/:projectId/move (projects.controller.ts:57-65) carry no permission requirement. POST folders/:folderId/move needs the role permission space.create (folders.controller.ts:53). So a member with edit in space A and view in space B can make a list in A (the create gate passes) and then move it into B.
+
+*To close:* In moveList, moveProject and folders.move, call assertCanCreateInSpace(db,{spaceId: destinationSpaceId, actorId, kind}) before the update. Add checks to space-default-permission.mjs: moving the member's own list, folder and project into the view-only space is refused, while moving them into an edit space succeeds. Add a break patch for each call.
+
+### `resume-defects/resume-1-residual` — partly-fixed, small
+
+**Container create gate: fixed on the three services, but applying a template still creates projects and lists in a space without the gate**
+
+*Evidence:* The fix is present: assertCanCreateInSpace (common/permissions/container-access.ts:148) is called from projects.service.ts:84, folders.service.ts:104 and lists.service.ts:157. But POST /workspaces/:workspaceId/project-templates/apply is guarded only by the class-level JwtAuthGuard and WorkspaceMemberGuard (project-templates.controller.ts:11, 90-107, with no WorkspaceAdminGuard on apply). project-templates.service.ts:711-800 then inserts a project into dto.targetSpaceId (744-773: the space is looked up by workspace only) and inserts lists into dto.targetProjectId (736-743, 790-799), with no assertCanCreateInSpace and no container permission check. So a member in a 'View only' space can create a folder and lists there through the templates page (workspace-templates-page.tsx:663) or the API. I grepped for every `.insert(lists|folders|projects)` in apps/api/src. The other direct inserts are workspace seeding, sample data, and imports behind WorkspaceAdminGuard (clickup-import.controller.ts:26, 54; spreadsheet-import.controller.ts:58), or new-space creation.
+
+*To close:* Call assertCanCreateInSpace(db, {spaceId, actorId: userId, kind}) in apply for targetType 'folder' (the target space) and 'list' (the project's space) before any insert. Add a check to space-default-permission.mjs: a member in a view-only space is refused a template apply there, while the same member in an edit space succeeds. Add a break patch that removes the call.
+
+### `resume-defects/resume-6-list-table` — open, small
+
+**The list Table view's sticky header is the same sticky-in-name-only facade**
+
+*Evidence:* apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx:4838 is `rounded-lg border bg-card overflow-hidden`, :4859 is `<div className="overflow-x-auto">` with no height bound, and :4862-4866 is data-testid list-table-head `sticky top-0`. Rows are bounded only when useTableVirtualization is on (≥120 tasks; TABLE_VIRTUALIZE_THRESHOLD :671; :4929-4931 `max-h-[70vh] overflow-auto`). The header sits outside that rows scroller, so it stays in place without sticky. Below 120 tasks, the header's scrollport is the unbounded overflow-x-auto div, and it scrolls away with the page. In neither mode does `sticky` do anything. The finder's scan missed this because it filtered on glass cards.
+
+*To close:* Bound the table pane (max-height plus overflow-auto on the element that also scrolls horizontally) in both modes, with overflow-clip rather than overflow-hidden on the wrapper. Add a check in list-view-controls that scrolls a list of about 30 rows and measures list-table-head holding offset 0, plus a break patch that removes the bound.
+
+### `resume-defects/resume-6-workload` — open, small
+
+**The sticky-in-name-only header survives on the Workload heat map**
+
+*Evidence:* apps/web/src/pages/workspace-workload-page.tsx:245-249: `<Card variant="glass" className="overflow-hidden p-0">` > `<div className="overflow-x-auto">` (no height bound) > `<div className="flex border-b ... sticky top-0 ...">`. This is the exact shape the timeline page's comment at 787-807 diagnoses: overflow-x:auto forces overflow-y to auto, making that div the header's scrollport, and an unbounded element never scrolls vertically, so the header can never stick. I scanned every .tsx file that uses variant="glass" or card-glass together with `sticky`. The only other hits are dashboard-widget-builder.tsx:266 (the card itself is xl:sticky, which is not this shape), docs-panel.tsx:1251-1253 (an overflow-auto wrapper whose height I did not confirm) and landing-page.
+
+*To close:* Apply the timeline technique. Bound the heat-map pane with a max-height and overflow-auto, and use overflow-clip on the card if the rounded corner is still wanted. Add a check that scrolls the pane and measures that the header stays at offset 0, plus a break patch that removes the bound.
+
+### `product-siblings/sanitize-filename-deref-before-fallback` — open, small
+
+**Three sanitizeFileName copies dereference input before their own fallback; a missing fileName gives a 500**
+
+*Evidence:* tasks.service.ts:765-767, chat.service.ts:130-132 and clips.service.ts:17-19 all do `input.replace(...)… || 'file'`, so the fallback is unreachable for undefined. forms.service.ts:439-441 is the guarded copy (`(input || '')`). The callers take inline body types that ValidationPipe cannot check (tasks.controller.ts:649-659, clips.controller.ts:20-27, chat.controller.ts:302-318, used at chat.service.ts:163, :188 and :1219). A presign with no fileName throws TypeError and returns 500, not 400. This is the same shape clips.remove already fixed for storageKey (clips.service.ts:83-84).
+
+*To close:* Extract one guarded helper (use the forms version) and use it at all sites.
+
+### `product-siblings/task-listid-mass-assign-cross-workspace-move` — open, small
+
+**PATCH /tasks/:id and POST /tasks/:id/move accept any listId, which moves a task into another workspace; only the bulk path checks the boundary**
+
+*Evidence:* tasks.controller.ts:29 has only JwtAuthGuard at class level. PATCH :297-351 has no ResourceMemberGuard and spreads the inline body (:347). tasks.service.ts updateTask :3011 `set = {...patch}` → :3046 db.update(tasks).set(set). No key whitelist exists, so listId, statusCategory, completedAt, createdById, taskTypeId and recurrence are all writable. moveTask :3621-3628 checks write access on the SOURCE task only, then sets listId to the body's targetListId. By contrast, bulkUpdateTasks :3244-3256 and :3310 resolve the target list's workspace and 'reject moves that would cross a workspace boundary'. RLS does not help: 0071_row_level_security.sql:8-18 says the app role owns the tables and bypasses RLS. Same unchecked-reference family as coverStorageKey. projects.service.ts:185, spaces.service.ts:447 and users.service.ts:248 already fixed this shape for their own PATCHes.
+
+*To close:* Whitelist updateTask's writable keys. In moveTask (and on PATCH listId, or drop listId from PATCH), resolveWorkspaceForList(target), require it to equal the task's workspace, and assert write access on the target list.
+
+### `product-siblings/task-sheet-refetch-storm` — open, small
+
+**The task sheet invalidates the ['task', id] prefix on every realtime event, then re-invalidates the children it already covered**
+
+*Evidence:* The realtime handler at task-detail-sheet.tsx:1205-1211 invalidates ['task', taskId]. As a prefix that refetches every active sub-query (comments, attachments, activity, time, subtasks, dependency-graph, mention-candidates, email-address, description-history: 35+ keys under this prefix in the file). It then invalidates ['task', taskId, 'comments'] and ['activity'] again, which cancels and restarts them (react-query's default cancelRefetch). One updateTask emits task.updated (tasks.service.ts:3110-3115) and activity.created (:3101 via logActivity :575), and the mutation's own onSuccess invalidates the same prefix (34 sites, e.g. :1043, :1070, :1092). So a single priority change re-fetches each open sub-query about three times, and comments/activity up to four. The attachments panel (:5273-5275, :5313-5315) awaits three sequential invalidations, which fetches attachments and activity twice.
+
+*To close:* Invalidate ['task', taskId] with exact: true for the detail, plus the specific sub-keys per event type. Drop the narrower invalidations that follow a prefix invalidation.
+
+### `product-siblings/teams-work-preview-ignores-privacy` — open, small
+
+**GET /workspaces/:ws/teams/work-preview returns every member's open task titles with no visibility filter**
+
+*Evidence:* workspace-groups.controller.ts:119-131 uses WorkspaceMemberGuard only and passes no actor. workspace-groups.service.ts:358-380 selects tasks by assignee across the workspace without taskVisibilityFilter or a private space/project check. workspace-groups is absent from the 14 services that call taskVisibilityFilter (rg -l). Failure: a member with no access to a private space sees the titles and due dates of tasks in it on the Teams page.
+
+*To close:* Pass the actor and apply taskVisibilityFilter / resolveIsManager as the other readers do.
+
+### `product-siblings/timeline-projectid-param` — open, small
+
+**Timeline ?projectId (resume §3 item 4): still unsent, and harmless in effect; the from/to options are a reader of nothing**
+
+*Evidence:* tasks.controller.ts:126-137 accepts projectId. workspace-timeline-page.tsx:227-230 never sends it, and filters client-side at :260-263 over an UNCAPPED read (tasks.service.ts:1834-1865 has no limit), so users see the same result. The cost is a whole-workspace payload, filtered in JS for `startDate || dueDate` (:1864). getTimelineForWorkspace declares opts.from and opts.to (:1831) that nothing applies.
+
+*To close:* Send projectId when projectFilter !== 'all' (and put it in the query key), or delete the param. Apply or delete from/to, and move the date filter into SQL.
+
+### `product-siblings/timesheet-mine-includes-everyone` — open, small
+
+**The time page's 'Mine' timesheet is built from an unfiltered, 500-row list: admins see everyone's hours as their own**
+
+*Evidence:* time-entries.controller.ts:17-31 supports userId and since, and returns ALL users when the caller can moderate and sends no userId. time-entries.service.ts:204-205 filters and :230 applies .limit(500). workspace-time-page.tsx:93-102 sends neither param. weekEntries (:231-234) filters by day only, not by user. The Submit button is gated on it (:415), and 'mine' mode renders it (:509-521). Failures: (a) a workspace admin whose three teammates each logged 8h on Monday sees 32h on their own 'Mine' grid, and Submit is enabled for a week they logged nothing. (b) In any workspace past 500 entries, earlier weeks render as 0h. ClickUp's My timesheet shows only your own entries.
+
+*To close:* For the Mine grid, request userId=<me> with since=<weekStart>, and add an until bound. Keep the 'team' path separate.
+
+### `product-siblings/workload-csv-dates-shifted-east-of-utc` — open, small
+
+**Workload CSV headers label each day one day early in UTC+ zones**
+
+*Evidence:* workspace-workload-page.tsx:57-66 builds dates as LOCAL midnights (setHours(0,0,0,0)), and :93 formats them with `d.toISOString().slice(0, 10)`. East of UTC (for example Asia/Karachi, the walkthrough's own zone), local midnight is the previous day in UTC, so every column header is the day before the load it carries. workspace-planner-page.tsx:225-236 documents and fixes exactly this defect for the planner. Same family as the AI meeting card's startsAt shift.
+
+*To close:* Use date-fns format(d, 'yyyy-MM-dd'), or the planner's local-day helper.
+
+### `product-siblings/workspace-inbox-unscoped-by-workspace` — open, small
+
+**The workspace Inbox and Home list notifications from every workspace, while the switcher badge counts per workspace**
+
+*Evidence:* notifications table has workspace_id (packages/db/src/schema/notifications.ts:10). NotificationsService.list (notifications.service.ts:707-721) filters only userId, unreadOnly and view. The controller (notifications.controller.ts:18-28) takes no workspaceId. The workspace-scoped pages call it unscoped: workspace-inbox-page.tsx:565 `/notifications?view=${view}` and app.$workspaceId.tsx:125-129 (keyed ['notifications', workspaceId] but fetching `/notifications`). unreadByWorkspace (:875-895), read by workspace-sidebar.tsx:981-982, groups by workspace_id. So workspace A's Inbox shows, counts and 'mark all read's workspace B's items, while B's switcher badge implies they are separate. It is a mirror: the column is stored and the list honours none of it.
+
+*To close:* Add an optional workspaceId filter to list/counts and send it from the Inbox and Home, or state in the UI that the inbox is cross-workspace. ClickUp's inbox is per workspace.
+
+## Verification-harness defects — 27
+
+### `suite-hygiene/branch-checker-confident-zero` — open, medium
+
+**check-suite-check-branches reports 0 because it cannot see bad(), uncounted SKIPs, or unequal branches**
+
+*Evidence:* The checker printed '0 conditional check block(s) with no else, in 0 of 115 suite(s) read.' It has three blind spots. First, CHECK_CALL = /\b(chk|check)\s*\(/ at line 79 never matches bad(…)/ok(…) (a39-dm-tabs:178, ui-sweep:421/461, video-regression:325/328/693/713, list-view-controls:239, list-empty-states:357) or a console.log SKIP (video-regression:465). Second, line 160 only asks whether an `else` exists, never whether both sides report the same count, so every imbalance in finding unbalanced-else-branches passes. Third, its header (187-191: 'ZERO NOW, ACROSS ALL 113 SUITES') and the ledger (docs/video2-reaudit.md:4008-4011: 'Every one of the 113 suites now reports the same number of checks whichever way it goes') are false, and the suite count is now 115.
+
+*To close:* Count reporting calls per branch: chk, check, ok, bad, skip, .step (1 each), with .rest/.skipRest treated as 'fills to declared length'. Flag if/else pairs whose counts differ, and flag loops with literal bounds. Add fixture cases to check-branches-cases.mjs for a bad()-only else and a 9-vs-8 else. Then correct ledger lines 4008-4011.
+
+### `commit-log/log-68c0345-1` — open, medium
+
+**Search indexing cannot be measured on any lane because none runs Meilisearch**
+
+*Evidence:* Commit 68c0345: 'Indexing is unmeasurable in this environment, so it is RECORDED as unmeasurable'. doc-import.mjs:252-267 says so. There is no 'meili' anywhere in scripts/e2e-lanes. This is the same kind of reason that storage and the model both shed this week by getting a stub.
+
+*To close:* Give the lanes a search stub or a real Meilisearch the way s3-stub and model-stub work. Then aim doc-import-2 at indexing again and check indexDocInSearch across docs, tasks and the rest.
+
+### `commit-log/log-ad00a7c-1` — open, medium
+
+**The model stub is wired but off by default, and nothing routes each suite to a lane with or without a model**
+
+*Evidence:* Commits ad00a7c ('still the open piece') and b5a52bc ('the next piece and is not done') record this. lane-env.sh:131-132 still says: 'Wiring that choice into the dispatcher is the next piece of this work and is NOT done.' run-plan.sh:50-74 gives any set to whichever lane is free and never considers the model. Consequences: create-menu-ai and task-ai-bar can only run where no lane has a model. Only ai-create-containers and ai-answer-rendering have been converted. No sweep exercises any AI happy path through the real API with a model, because no lane has one by default (4cb50d3: 'the rewrite is the next piece of work').
+
+*To close:* Give the plan a per-suite requirement: model, no-model, or either. Have run-plan.sh and sweep-until-clean.sh start a mixed fleet (for example RUNDESK_LANE_MODEL='3 4') and send each set to a matching lane. Then write model-lane checks and break patches for the AI surfaces that today are measured only by their refusal.
+
+### `harness/section-enders-blind-to-check-spelling` — open, medium
+
+**check-suite-section-enders only recognises `chk(`, so 13 suites (about 700 checks) spelled `check(` are never scanned**
+
+*Evidence:* Rules 1, 2, 5 and 8 test /^\s*chk\(/ (check-suite-section-enders.mjs:275, 321, 375, 433, 442). Rule 7 uses src.indexOf('chk(') (:690). Rule 6 uses src.indexOf('chk(') in suite-reads.mjs:109. By contrast, check-suite-check-branches.mjs:79 uses /\b(chk|check)\s*\(/. Thirteen suites have zero chk( and define `const check =`: addressability-live, chat-message-actions, comment-thread, emoji-picker, loading-states, panel-collapse, person-panel, settings-depth, stale-chunk-recovery, syncup-live, task-depth, ui-sweep and video1-fast-items. The checker reports '0 site(s)' on the real tree. I copied those 13 into the scratchpad with check( renamed to chk( (line numbers unchanged) and ran it with SUITE_DIR pointed there. It then reports 21 sites across 6 suites. Real sites read by hand: person-panel.mjs:237 (`await page.getByTestId('menu-my-profile').click()` straight after a check that it is visible); settings-depth.mjs:208 (menu-set-status); task-depth.mjs:232; video1-fast-items.mjs:1071 and :1114; emoji-picker.mjs:213, 224 and 238 (page.fill on an asserted emoji-search); task-depth.mjs:980 (an uncaught innerText in a check message). panel-collapse.mjs:471 and :475 are false positives, `?.` inside evaluate. The same blind spot was found and fixed in check-break-coverage (docs/video2-reaudit.md:3673-3677, §8b: 'A suite whose helper is named check( counted zero checks'). This checker was not brought along.
+
+*To close:* Use one shared CHECK_CALL regex (\b(chk|check)\s*\(), exported from a lib and used by section-enders, suite-reads.messageReads and check-suite-check-branches, and consider chain `.step(` too. Add a check( fixture to check-suite-enders.mjs. Then fix the roughly 19 real sites the widened rules report.
+
+### `harness/section-enders-blind-to-variable-locators` — open, medium
+
+**Rules 1, 5, 8 and 9 cannot see a press or read through a locator held in a variable, and 12 real sites sit in that gap**
+
+*Evidence:* Rules 1, 5 and 8 match the literal getByTestId('<id>') or [data-testid="<id>"] on the press line (check-suite-section-enders.mjs:307, 391, 448). Rule 4 only pairs a variable guarded through textOf/attrOf/boxOf, or catch plus click/fill/innerText/getAttribute/boundingBox (:648-651); isVisible, the usual existence check, is not in that list. Rule 9 requires a literal testid in the statement (:517). Yet locatorVars (suite-reads.mjs:84-88) exists and rules 6 and 7 already use it. Real sites where a check asserts the variable's element exists and the next press is bare, with no catch or timeout: activity-rail.mjs:221 (toggle, asserted at :205); call-survives-navigation.mjs:150 (start, asserted at :148); clip-setup.mjs:211 (clipButton, asserted at :205-209); command-palette.mjs:273, 365, 376, 385 and 793 (input, assignee, search, driveRow); replies-inline-thread.mjs:150 (opener); save-comment.mjs:204 and :356 (saveBtn and replyBtn). Rule 9's gap: video1-fast-items.mjs:353 (`await gear.first().getAttribute('href')` after a count check) and emoji-picker.mjs:271 (frequentButtons.first().getAttribute). Found by scratchpad gaps.mjs and each confirmed by reading the file.
+
+*To close:* Resolve each locatorVars name to its testid and treat `await <var>.<verb>(` as that testid in rules 1, 5 and 8. Count `<var>.isVisible()` and `<var>.count()` in a check as asserting the variable. Let rule 9 accept a locator variable as rule 7 does. Add fixtures, then bound the 12 sites with timeout and catch, keeping each check's absence semantics.
+
+### `harness/chain-planner-crash-reads-as-clean` — open, small
+
+**chain-plan.sh and sweep-until-clean.sh report 'nothing left' when the planner crashes**
+
+*Evidence:* Both scripts use `set -uo pipefail` without -e (chain-plan.sh:24, sweep-until-clean.sh:28). They run `node never-run-plan.mjs >> "$plan" 2>>"$LOG"` without checking its status (chain-plan.sh:39-40, sweep-until-clean.sh:60-61), and they do the same for the merge `node -` step (chain-plan.sh:44, sweep-until-clean.sh:65). An empty plan gives sets=0, and the scripts then say 'round N: nothing left — every log on disk measured the current tree' and exit 0 (chain-plan.sh:58-62, sweep-until-clean.sh:79-83). Replicated in the scratchpad: a planner that throws gives planner-rc=1, and the script then prints the 'nothing left' sentence. Possible crash triggers include a syntax error in log-tree.mjs or suite-of-patch.mjs, and a missing /tmp/claude-0 (measuredAt's readdirSync throws).
+
+*To close:* Capture each node exit status and on non-zero write 'planner failed' and exit with a distinct code. Also require never-run-plan's '[never-run-plan] N patch(es)' stderr summary to be present for both modes before accepting an empty plan.
+
+### `harness/ci-missing-doc-import` — open, small
+
+**test/e2e/doc-import.mjs is not in ci.yml, and nothing checks that every suite is**
+
+*Evidence:* comm of `ls test/e2e/*.mjs` against the test/e2e/*.mjs paths in .github/workflows/ci.yml leaves doc-import. It has 4 break patches and a 13/13 run (f634982). No script in scripts/ ties the suite directory to ci.yml. local-sweep.mjs:10-14 derives its suite list FROM ci.yml, so it also misses doc-import.
+
+*To close:* Add doc-import to the postgres-harnesses job. Add a preflight check that every test/e2e/*.mjs appears in ci.yml, or is listed with a reason.
+
+### `harness/deps-omit-suite-libs` — open, small
+
+**A measurement's dependencies leave out the test/e2e/lib helpers every suite imports**
+
+*Evidence:* patchDeps (log-tree.mjs:139-145) adds only files under /home/user/rundesk/(apps|packages)/ plus test/e2e/<suite>.mjs. Suites import ./lib/signin.mjs (97), playwright.mjs (88), local-stack.mjs (87), wait.mjs (79), db.mjs (40), fixture.mjs (36) and chain.mjs (10), counted by git grep over test/e2e/*.mjs. A change to waitUntil or to chain.mjs changes what every importing suite measures. The planner, the reddened checker and freshness all still call those logs current. chain.mjs has changed behaviour before (580793d 'The chain helper had the hole it exists to prevent'). Today's logs postdate the last lib commit (8b788d5, 22 Sep 08:34), so nothing is affected yet.
+
+*To close:* In patchDeps, when a suite is named, add the test/e2e/lib/*.mjs files that suite imports (a static parse of `from './lib/...'`). Add a check-log-tree case.
+
+### `harness/fleet-scripts-exit-zero-when-down` — open, small
+
+**fleet-up.sh and fleet-restart.sh exit 0 when no lane came up; build-api.sh inherits that**
+
+*Evidence:* fleet-up.sh:105 (`echo "$ok/${#LANES[@]} lanes up"`) and fleet-restart.sh:158 are each script's last command, so '0 of 4 lanes up' exits 0. build-api.sh:48-51 ends with fleet-restart.sh, so it also exits 0 with every lane down. sweep-until-clean.sh:185 (heal) discards fleet-up's status. PLAUSIBLE, not demonstrated: fleet-restart.sh:113-114 sends kill and relaunches without waiting for the port to free. wt-break.sh:92-99 does wait. So the health loop at :151-154 could pass against the dying old process.
+
+*To close:* `[ "$ok" = "${#LANES[@]}" ] || exit 1` at the end of both scripts. In fleet-restart, wait for health to go down before relaunching, as wt-break's restart() does.
+
+### `commit-log/log-8ac33d9-1` — partly-fixed, small
+
+**A bare lane number means a count in fleet-up.sh, which drops databases, but a single lane in the other scripts**
+
+*Evidence:* Commit 8ac33d9 fixed fleet-restart, so '9' means lane nine (fleet-restart.sh:5, 38-47). RUNDESK_LANE_MODEL=9 also means lane nine (lane-env.sh:147). fleet-up.sh:12 and :29-30 still read '9' as lanes 1 to 9, and that script drops and restores every lane in the range (its own header at :16-18 calls this a mistake you get to make once).
+
+*To close:* Make fleet-up.sh take lists only, as fleet-restart.sh now does (a count must be spelled with seq), so one spelling means one thing everywhere.
+
+### `commit-log/log-a5b6b69-1` — open, small
+
+**The long CI e2e job is still not split, and the suite count in its comment is stale**
+
+*Evidence:* Commit a5b6b69 raised the limit to 180 and deferred the split to 'whoever has a working pipeline'. ci.yml:393-396 says 'ONE HUNDRED AND SEVEN', but the job now has 109 `node test/e2e/` steps (about 120 minutes at 1.1 minutes each, under the 180 limit at :428). A leftover paragraph at :421-423 still argues for 120.
+
+*To close:* When CI can run again (1 October), split the job and validate it. Until then, correct the count and delete the leftover paragraph.
+
+### `commit-log/log-c592545-1` — open, small
+
+**doc-import.mjs is the one e2e suite not registered in CI, and nothing checks for that**
+
+*Evidence:* Commits f634982 and c592545 ran it green (15 of 15, 4 of 4 patches) and closed the Importers row. A loop over test/e2e/*.mjs against ci.yml finds exactly one suite missing: doc-import.mjs. No script compares the two lists (git grep over scripts and .github finds no guard for unregistered suites). The resume doc says 'ALL 113 are registered'.
+
+*To close:* Add doc-import.mjs to postgres-harnesses. Add a checker, run in preflight and CI, that fails when a suite file has no ci.yml step.
+
+### `commit-log/log-d840b55-1` — open, small
+
+**sweep.sh and drain.sh still run copies of scripts from /tmp instead of the committed ones**
+
+*Evidence:* Commit d840b55 deleted break-queue.sh because 'the copy without the guard is the one that would eventually be used by mistake'. Commit 4a43a1d fixed batch.sh calling a verifier in /tmp. sweep.sh:14 still runs `bash /tmp/claude-0/verify.sh`, which skips the committed verify.sh and its stale-build refusals. drain.sh runs /tmp/claude-0/wt-break.sh, reads patches from /tmp/claude-0/breaks, and carries a hard-coded queue from 21 September. docs/video2-resume.md:185 and :285 still tell the next session to use drain.sh.
+
+*To close:* Delete drain.sh and sweep.sh, or point them at scripts/e2e-lanes/*.sh and test/e2e/breaks. Update the resume doc to name run-plan.sh and sweep-until-clean.sh.
+
+### `commit-log/log-d92d58f-1` — open, small
+
+**Nothing stops two builds writing the same per-lane web bundle at once**
+
+*Evidence:* Commit d92d58f: 'verify.sh refuses a stale bundle and nothing refuses two writers to the same one'. grep for lock or flock in verify.sh and refresh-dists.sh finds only the stale-build notes (verify.sh:115, 125).
+
+*To close:* Take a lock per lane around the vite build and the run, in the style of the wt<lane>.lock that wt-break.sh uses.
+
+### `harness/measuredat-counts-nonmeasurements` — open, small
+
+**measuredAt records PATCH FAILED / MISSING / CHANGED NOTHING / BUILD FAILED lines as measurements at that sha**
+
+*Evidence:* scripts/lib/log-tree.mjs:74-77 accepts any '^== <lowercase-name>' line that CONTROL (:50) does not exclude. wt-break.sh writes '== $b MISSING', '== $b PATCH FAILED', '== $b PATCH CHANGED NOTHING' and '== $b BUILD FAILED' at :383, :389, :403 and :477. Demonstrated with a synthetic log in the scratchpad: measuredAt returned x-1-rotted, x-2-typo, x-3-noop and x-4-gone, each 'measured' at sha 16349c51. On those outcomes wt-break.sh never truncates or rewrites brk-$b.log, which is only written at :433-434 in the OK branch. So check-break-reddened.mjs:323-350 reads the PREVIOUS run's brk log and dates it by the new sha. never-run-plan.mjs:81 skips the patch as measured. The comment in check-break-reddened.mjs:107-108 says wt-break truncates brk-<patch>.log at the start of each patch run, and that is false for these four outcomes. On disk: 9 such lines exist across the break-*.txt logs, and none is currently the newest line for its patch (scratchpad nonmeasure.mjs), so this is latent. classify-break-log.awk:46-48 already knows these outcomes. log-tree does not.
+
+*To close:* measuredAt should skip, or record as outcome:'not-run', any line carrying MISSING, PATCH FAILED, PATCH CHANGED NOTHING or BUILD FAILED, so that the patch reads as unmeasured and the planner schedules it. wt-break.sh should `rm -f brk-$b.log` before each patch attempt. Add a check-log-tree case and a mutation for it.
+
+### `harness/planner-ignores-patch-body` — open, small
+
+**never-run-plan --drifted ignores a change to a patch's own code, but check-break-reddened treats it as drift**
+
+*Evidence:* CONFIRMED. scripts/check-break-reddened.mjs:350 calls notCurrent(rec, patchDeps(text, suite), { name, text }), so makeMeasurementCheck (scripts/lib/log-tree.mjs:155-164) reaches patchCodeMoved (log-tree.mjs:191-204) and a changed body (comments stripped) comes back as '<path> <body>'. It also comes back as '<not committed when it ran>' when the patch has no blob at that sha. scripts/e2e-lanes/never-run-plan.mjs:53 imports only makeDriftCheck. At :115-116 it checks drifted(rec.sha, patchDeps(text, suite)), and patchDeps (log-tree.mjs:117-146) leaves the patch file out, so a body-only change is `continue`d. A patch file is only looked at in the declaresRerun branch at :115. scripts/check-break-freshness.mjs:157-167 also leaves out the patch body, so there is a third instrument using the second rule. Demonstrated without editing the repo: /tmp/.../scratchpad/harness/disagree.mjs took po-3-one-provider (rec sha 5f66058c), added one line of code in memory, and got checker = ['test/e2e/breaks/po-3-one-provider.py <body>'] and planner --drifted = 'current (not scheduled)'. Result: chain-plan.sh:58-61 and sweep-until-clean.sh:79-82 would print 'nothing left — every log on disk measured the current tree' while the checker files that patch under drifted. The contradiction is not silent: check-plan-population.mjs:196-209 (preflight step, preflight.sh:36) would fail with 'checkerOnly'. But the chain can never clear it, because the patch is never scheduled, so it needs a manual wt-break run. There are 0 instances today: both tools report 0 drifted and check-plan-population agrees on 0. History: commit 4b16dc4 added patchCodeMoved and changed check-break-reddened.mjs, and never touched never-run-plan.mjs or check-break-freshness.mjs.
+
+*To close:* In never-run-plan.mjs --drifted, replace the drifted(...) test with makeMeasurementCheck({root})(rec, patchDeps(text, suite), { name, text }), keeping the Re-run branch. Give check-break-freshness.mjs the same per-patch body comparison, or have it consume makeMeasurementCheck. Add --mutate entries to scripts/check-log-tree.mjs:312-332 for patchCodeMoved; today none of its mutations touch the body rule or the `if (moved.length || !patch)` line. Add a check-plan-population fixture case in which only a patch body changed.
+
+### `harness/process-exit-remaining` — partly-fixed, small
+
+**process.exit() is still used in local-sweep.mjs and smoke-phase1.mjs; bail.mjs's suite count is stale**
+
+*Evidence:* Every checker in preflight uses bail() or process.exitCode: 12 files import bail, and check-plan-population and check-log-tree set exitCode. The remaining calls: local-sweep.mjs:114, 122, 166 and 168, where :168 follows a per-failure listing of up to 12 lines each, so a piped run can lose the tail (bail.mjs:10-20 measured up to 129,904 bytes lost); smoke-phase1.mjs:9 and :167. model-stub.mjs:49 and s3-stub.mjs:54 exit after one short stderr line at startup, which is benign. The SIGINT/SIGTERM handlers (model-stub.mjs:188, s3-stub.mjs:274) are benign. bail.mjs:27-34 says '113 suites' and '945 recorded runs'. test/e2e now holds 115 .mjs, though the largest brk log is still 11.6KB, so the argument holds.
+
+*To close:* Replace the local-sweep and smoke-phase1 exits with bail(). Refresh bail.mjs's counts.
+
+### `harness/rerun-declaration-mirror` — open, small
+
+**A '# Re-run:' declaration is honoured by the planner and invisible to the reddened checker**
+
+*Evidence:* never-run-plan.mjs:115 schedules a patch that declares Re-run and whose file changed since its sha. check-break-reddened.mjs:61 does not import declaresRerun. Its body comparison (log-tree.mjs:184-189) strips every '#' line, and '# Re-run:' is one of those lines. So while a Re-run is pending, the checker credits as a current REDDENED measurement a log the patch itself says is not evidence, and check-plan-population.mjs:180-194 fails with planOnly. A second asymmetry: the planner's Re-run test uses git diff sha HEAD, which sees committed changes only. The checker compares the working-copy text, and the working copy is what wt-break.sh:381-385 actually runs. No patch declares Re-run today (grep of test/e2e/breaks/*.py for the declaresRerun regex returned none), so this is latent.
+
+*To close:* Have makeMeasurementCheck return a '<declares Re-run>' reason when declaresRerun(text) holds and the patch file differs from its blob at rec.sha, so both callers share it. Compare the working copy in both.
+
+### `suite-hygiene/section-enders-blind-to-check-suites` — open, small
+
+**The section-enders pairing rules only read chk(, so 13 check()-style suites are never scanned**
+
+*Evidence:* Rules one, two, five and eight all gate on `/^\s*chk\(/` (check-suite-section-enders.mjs:275, 321, 375, 433, 442). Thirteen suites define `const check =` instead: addressability-live, chat-message-actions, comment-thread, emoji-picker, loading-states, panel-collapse, person-panel, settings-depth, stale-chunk-recovery, syncup-live, task-depth, ui-sweep and video1-fast-items. The checker printed '0 site(s) across 0 suite(s)'. Re-running rule eight's pairing with `check(` (scratch) found the exact rule-one shape: person-panel.mjs:233-237 (check isVisible on menu-my-profile, then a bare `.click()`), also 291, 308, 709, 820; emoji-picker.mjs:200 then 213, 224, 238, 255; task-depth.mjs:219 then 232; settings-depth.mjs:208, 464; video1-fast-items.mjs:1071, 1114. panel-collapse.mjs:1052/1058 (`check(await box.isVisible())` then `box.fill(...)`) is also missed because the rule only pairs literal testids, not locator variables.
+
+*To close:* Match `^\s*(chk|check)\(`, and pair locator variables assigned from getByTestId. Add a fixture suite using check( to the checker's cases so the scope cannot silently shrink again. Then bound or catch the sites found.
+
+### `harness/stale-lock-dirs-hang-dispatch` — open, small
+
+**No lock carries a PID or is ever checked for staleness, so a reaped runner leaves chain-plan waiting silently forever and run-plan spinning silently**
+
+*Evidence:* wt-break.sh:131-137 takes /tmp/claude-0/wt$LANE.lock with mkdir and releases it only in an EXIT trap. run-plan.sh:35-39 does the same for run-plan.lock. git grep '\.lock' in scripts/e2e-lanes finds no code that removes or ages a lock, and no PID is stored in either one. chain-plan.sh:35 does `while [ -d /tmp/claude-0/run-plan.lock ]; do sleep 30; done` without logging. run-plan.sh:62 skips a locked lane on every pass, and when every lane in $LANES is locked, `running` stays 0 while `next` is less than the number of work items, so the loop at :49-85 sleeps 20s forever and logs nothing after 'PLAN:'. sweep-until-clean.sh:5-11 itself records that processes here get reaped mid-round, and a SIGKILL skips the EXIT trap. No lock exists today (ls /tmp/claude-0/*.lock is empty), so this is PLAUSIBLE and latent, not observed.
+
+*To close:* Write $$ into each lock dir, and on contention check `kill -0` on the recorded PID. If the holder is gone, log 'stale lock from PID N, taking it' and take it. In chain-plan.sh:35 and run-plan.sh:62, log once when waiting starts and give up with a distinct exit after a bound.
+
+### `harness/sweep-drain-run-stale-tmp-copies` — open, small
+
+**sweep.sh and drain.sh still run uncommitted /tmp copies of verify.sh and wt-break.sh**
+
+*Evidence:* sweep.sh:14 runs `bash /tmp/claude-0/verify.sh`. batch.sh:6-8 records exactly this defect as fixed ('a committed script whose only action was to invoke something no checkout has'). The /tmp copy exists (4005 bytes, 21 Sep 17:49), and diff against scripts/e2e-lanes/verify.sh shows it lacks the API-staleness refusal (exit 7, repo :88-139). drain.sh:15 and :34 run /tmp/claude-0/wt-break.sh (293 diff lines against the repo copy) over /tmp/claude-0/breaks, which holds 614 patches against 833 in test/e2e/breaks. drain.sh:17-26 also hardcodes an 8-suite QUEUE. Neither script is called by any other script. fleet-up.sh:19 still cites sweep.sh's lane-list shape, and docs/video2-resume.md:185-187 and :284-288 present drain.sh as current tooling.
+
+*To close:* Delete sweep.sh and drain.sh, since run-plan.sh and chain-plan.sh supersede them. Alternatively, repoint them at the repo scripts and at never-run-plan output. Then update fleet-up.sh:19 and resume §2 and §5.
+
+### `harness/sweep-until-clean-drops-exit3-guard` — open, small
+
+**sweep-until-clean.sh counts a run-plan lock refusal (exit 3) as a round, then stops on 'no progress'**
+
+*Evidence:* sweep-until-clean.sh:95-96 runs run-plan.sh and only logs '($?)'. run-plan.sh:37-40 exits 3 when another dispatcher holds /tmp/claude-0/run-plan.lock. The next round's plan is then identical, so sweep-until-clean.sh:85-89 prints 'asked for exactly what round N-1 asked for — stopping rather than looping' and exits 1. chain-plan.sh:74-84 carries the guard ('EXIT 3 IS "SOMEBODY ELSE HAS THE LANES", not a round that happened'). It was added in e9a90d2 on 22 Sep at 07:13. sweep-until-clean.sh was written 12 hours later (593165c, 19:29) without the guard. The two files also carry byte-for-byte copies of the merge script (chain-plan.sh:44-56 and sweep-until-clean.sh:65-77). d840b55 deleted break-queue.sh for exactly this reason ('a lane refusal (exit 3) read as a set that ran').
+
+*To close:* Keep one round loop. Make sweep-until-clean.sh call heal() and then chain-plan's loop, or move the loop and the merge into one sourced function that handles rc 3 the way chain-plan.sh:80-84 does.
+
+### `harness/verify-scan-blind-to-dollar-filenames` — open, small
+
+**verify.sh's staleness scans pass each path through `sh -c '[ {} -nt … ]'`, so every source file with `$` in its name (77 web files, including the list/board/calendar/Gantt route) is invisible to the exit-6 refusal**
+
+*Evidence:* verify.sh:75-77 runs `find … | xargs -r -I{} sh -c '[ {} -nt "$DIST/index.html" ] && echo {}'`, which substitutes the path unquoted into a shell string, so `$token` and `$workspaceId` expand to empty. `find apps/web/src packages/ui/src packages/feature-flags/src -name '*.ts' -o -name '*.tsx' -o -name '*.css' | grep -c '\$'` gives 77. `echo 'apps/web/src/routes/portal.$token.tsx' | xargs -I{} sh -c 'echo "[{}]"'` prints [apps/web/src/routes/portal..tsx]. I demonstrated it in scratchpad/harness-verify/dollar with a dist/index.html and, touched after it, 'src/app.$workspaceId.tsx' and src/plain.tsx. The verify.sh pipeline reports only src/plain.tsx. So an edit confined to app.$workspaceId.$spaceId.$projectId.$listId.tsx (the file log-tree.mjs:119-137 says 75 patches depend on) never triggers the refusal, and verify.sh measures a stale bundle. This is the same `$` defect log-tree.mjs already fixed for patchDeps. The API scan at :130-131 uses the same construct but has 0 `$` files today.
+
+*To close:* Pass the path as an argument rather than splicing it into the script: `xargs -r -I{} sh -c '[ "$1" -nt "$2" ] && echo "$1"' _ {} "$DIST/index.html"`, or better `find … -newer "$DIST/index.html" -print | head -3`. Do the same for :130-131. Add a fixture (a `$`-named file) to whatever checks verify.sh, or move the scan into node as local-stack.mjs's refuseStaleBundle does.
+
+### `harness/verify-sh-exit-masked` — open, small
+
+**verify.sh exits 0 when the suite fails or crashes, because its last command is `grep | sed | tail`**
+
+*Evidence:* scripts/e2e-lanes/verify.sh:146-149 captures `code=$?`, echoes 'exit=$code', and ends with `grep -E 'passed,|FAIL' "$OUT" | sed ... | tail -8`. There is no `exit $code` and no pipefail (the script uses only `set -u` at :44). Only the staleness refusals return non-zero: exit 6 at :84 and exit 7 at :137. batch.sh:17 and :31, and sweep.sh:14, never read verify's status either. batch.sh's own exit is sed's.
+
+*To close:* End verify.sh with `exit "$code"` after the summary. Have batch.sh record each suite's status and exit non-zero if any suite failed.
+
+### `harness/verify-staleness-scan-gaps` — open, small
+
+**verify.sh's API staleness scan misses packages/feature-flags and never asks whether the lane was restarted; the web scan misses the non-src inputs**
+
+*Evidence:* API: verify.sh:130 scans only apps/api/src and packages/db/src. apps/api/tsconfig.json paths map @rundesk/feature-flags to ../../packages/feature-flags/src/index.ts, and 13 compiled files require it. At runtime `require.resolve('@rundesk/feature-flags', {paths:[apps/api/dist/...]})` resolves to /home/user/rundesk/packages/feature-flags/src/index.ts, and '@rundesk/db' to packages/db/src/index.ts. Both are loaded from SOURCE under tsx when the process starts, not from dist. So the question that matters is whether the lane PROCESS started after the source changed. verify.sh:127-139 only compares source against the build stamp, and build-api.sh:48-51 builds without restarting unless lanes are named. A build-only run therefore clears the refusal while every lane still serves the old process. build-api.sh:34-36 says 'a column added there is invisible to Drizzle until THIS build runs'. That is a stale reason: the running API reads the schema from source on restart, as e2e-lanes/README.md:52-54 itself says. Web: verify.sh:75-77 scans apps/web/src, packages/ui/src and packages/feature-flags/src. That covers every workspace package the bundle imports (@rundesk/ui 142 and @rundesk/feature-flags 14 imports; apps/web/src does not import @rundesk/db). It misses apps/web/index.html (the Vite entry and in tailwind.config.ts content), tailwind.config.ts, postcss.config.js, vite.config.ts and public/push-sw.js. README.md:44-47 documents exit 6 but not exit 7.
+
+*To close:* Add packages/feature-flags/src to the API scan. Compare the build stamp against the lane API's start time, e.g. `ps -o lstart` of the PID listening on 302k, or a stamp fleet-restart and wt-break touch on launch, and refuse when the process predates the stamp. Add the apps/web root config files and index.html to the web scan. Correct build-api.sh:34-36 and README.
+
+### `harness/wt-break-double-vite-build` — open, small
+
+**wt-break.sh builds the web bundle twice on every restore**
+
+*Evidence:* wt-break.sh:497 and :498 are identical `pnpm -C apps/web exec vite build > /dev/null 2>&1` lines. git blame shows :497 came from f449365, which added the explanatory comment block (:488-496) above the pre-existing :498 from 95b4d67 without removing it. Every set pays one extra vite build.
+
+*To close:* Delete one of the two lines.
+
+### `harness/wt-break-unchecked-restart-and-restore` — open, small
+
+**wt-break.sh ignores restart failures and the restore/sync build and push steps**
+
+*Evidence:* restart() returns 1 when the lane API never answers health (wt-break.sh:121-125). Its return value is ignored at :431, before each API patch's suite run, and also at :261 and :499. A lane that failed to come up for environmental reasons (for example 'too many clients', verify.sh:20-22) then runs the suite against a dead port. Every check fails, and check-break-reddened.mjs:473-479 credits the claim as REDDENED. The sync-block schema push at :243-245 is unchecked, while the per-patch push at :411-415 is checked. The restore steps at :484-487 (push, API tsc) are unchecked, which leaves the lane on the last patch's binary if tsc dies. A same-sha next set then skips the sync block at :236, so nothing rebuilds the API before its baseline.
+
+*To close:* `restart || { echo "== $b API DID NOT COME UP" >> "$OUT"; continue; }`, and add that suffix to the non-measurement list in measuredAt. Check the sync push and the restore tsc, and on failure refuse with exit 4 the way the builds do.
+
+## Test-suite defects (chains, catches, fingerprints, branches) — 21
+
+### `suite-hygiene/hand-rolled-chains` — open, large
+
+**103 literal check(false, …) calls in 15 suites, plus 5 other hand-rolled chains, instead of lib/chain.mjs**
+
+*Evidence:* Literal `(chk|check)(false,` count per suite: chat-message-actions 31, panel-collapse 23, person-panel 8, addressability-live 8, task-depth 7, settings-depth 5, planner-priorities 5, list-statuses-seeded 4, video-regression 3, a61-meeting-record 3, loading-states 2, and 1 each in video1-fast-items, video1-acceptance, planner-settings, emoji-picker. Six of these suites already import makeChain (chat-message-actions, panel-collapse, person-panel, task-depth, video-regression, video1-fast-items). Other hand-rolled chains: video-regression.mjs:927-1000 (G13 with its own `emitted`/`stopped` counters and `while (emitted < G13.length)`), video-regression.mjs:575-613 (A2.6b else re-types three labels), emoji-picker.mjs:406-413 (a literal label array duplicating 439/442/456), and the fixed-count loops list-empty-states.mjs:357 and list-view-controls.mjs:239. Fail branches that report fixture sentences instead of the product claim, which the ledger ruled out at docs/video2-reaudit.md:4030-4034: chat-message-actions.mjs:566-571 ('so "Assign to" was never checked'… against the product sentences at 515-561), :493-494; task-depth.mjs:1025-1028, 964, 994-995; person-panel.mjs:597-602; settings-depth.mjs:424-426, 500-501; addressability-live.mjs:221, 343, 365; panel-collapse.mjs:343-345, 401-402, 413. The first label at panel-collapse.mjs:811 ('a tool can be turned off') has already drifted from its pass twin at 817 ('Docs is in the dock to begin with').
+
+*To close:* Move every one onto makeChain: declare the pass-path sentences once with chain(...), use step() on the pass path, and put the reason in rest(why) on the fail path. Replace the G13 emitted/stopped machinery with makeChain(chk). Consider a checker rule that flags `(chk|check)(false,` and bare `bad('` in suites once converted.
+
+### `suite-hygiene/apiAs-duplicated-62` — open, medium
+
+**62 suites hand-roll an API client in 5 variants beside lib/fixture.mjs apiClient**
+
+*Evidence:* `^const apiAs = ` appears in 62 suites. Hashing the whole function bodies gives 5 variants: 54 copies (activity-rail…), 5 copies (addressability-live…) that always send `authorization: Bearer ${token}`, so an anonymous call sends 'Bearer null'; 1 in task-ai-bar that adds a `message` field; 1 GET-only in malformed-ids; and 1 multi-line in chat-message-actions. lib/fixture.mjs:28-46 apiClient differs again: it parses text and keeps `raw`. syncup-live has a third shape, api(token, method, path, body). The ledger extracted chain.mjs (docs/video2-reaudit.md:4076-4078) for two copies and claim-match.mjs (4071-4075) for two.
+
+*To close:* Export apiAs(base)(token) from lib/fixture.mjs with the null-token rule and the message field, move suites onto it, and have the one copy expose `ok` and a `must(res, what)` helper, which would also remove most of finding unguarded-derefs.
+
+### `suite-hygiene/ci-no-store-for-store-suites` — open, medium
+
+**CI runs task-cover and attach-on-create with no object store; task-cover also writes to a sandbox-only path**
+
+*Evidence:* task-cover.mjs:502-520 computes STORE_PORT = 9100 + (API_PORT - 3020), which is 9091 for `--api 3011`, and fails 'the lane has an object store' when nothing answers. attach-on-create.mjs:82-83 and 321 arm `${STORE}/__control/fail-next-put` on the same formula. ci.yml's postgres-harnesses job (383-384, runs on code changes) starts the API with only PORT=3011 (522-541), with no R2_ENDPOINT and no s3-stub, then runs both suites (753, 1803). check-s3-stub runs at ci.yml:336, but only as its own self-test. task-cover.mjs:528 and 624 writeFileSync to `/tmp/claude-0/cover-upload-…png` with no mkdirSync; ci.yml never creates /tmp/claude-0, so this throws ENOENT on a runner. doc-import.mjs:172 and 310 do the same (not in CI). This is inferred from code; I did not read a CI log.
+
+*To close:* In the CI job, start s3-stub.mjs on the port the suites compute (or pass --store) and export R2_ENDPOINT/R2_* to the API, sharing lane_store_env's values. Write fixtures under os.tmpdir() via mkdtempSync instead of /tmp/claude-0.
+
+### `suite-hygiene/inert-catches` — open, medium
+
+**39 inert .catch(() => {}) on apiClient-shaped calls, several restoring shared account state; the recorded count of 292 does not reproduce**
+
+*Evidence:* A paren-matching scan of calls to apiClient/apiAs-bound names found 32 direct `.catch(` sites in 20 suites. It also found 6 cleanup runners `for (const fn of cleanup.reverse()) await fn().catch(() => {})` (doc-task-links:273, list-filters:211, planner-blocks:228, space-default-permission:492, space-presets:177, view-visibility:250), plus video-regression.mjs:452 (`API(...)`, missed by name). All 62 local apiAs copies and lib/fixture.mjs:28-46 return {status,data,error} and never throw on an HTTP status. The worst are restores of shared state that fail silently. video-regression.mjs:482-485 sets the admin's inbox preferences as the starting state, 594 reads them back through an inert catch, and 616-619 restores them for 'every other' suite. video-regression.mjs:452 and video1-acceptance.mjs:324-326 re-mark notifications unread. panel-collapse.mjs:612 clears a seeded notification. ai-value.mjs:317-321 restores the workspace's real benchmark. task-provenance.mjs:169-173 restores a task-type name 'against a real workspace'. Setup: replies-inline-thread.mjs:95 adds the peer to the channel, and the checks below assume that worked. The docs say '292 … across 63 of the 66 suites' (e2e-shared-state-audit.md:105-118, dated 2026-09-20; video2-resume.md:230). Today there are 115 suites and 778 `.catch(() => {})` in total, mostly on Playwright calls that DO reject, so 292 most likely counted those and overstates the inert set.
+
+*To close:* Replace each with a status check. For restores and setup, fail or log loudly with the status. For cleanup, collect non-2xx statuses and print them in the summary. Correct the doc's count to the measured client-call sites and state how it was measured.
+
+### `commit-log/log-944e47f-1` — partly-fixed, medium
+
+**Shared-database hazards in the e2e suites are only partly fixed**
+
+*Evidence:* Commit 944e47f found 46 of 66 suites picking a workspace by index. Now 57 of 115 suites contain workspaces[0], and 26 use pickWorkspace. comment-recording.mjs:353 still switches the shared admin account to Urdu, restoring it only in a finally (:667). apiClient never throws on an HTTP status (fixture.mjs:28-46), and inert .catch(() => {}) calls on it remain, for example addressability-live.mjs:329 and ai-answer-rendering.mjs:856-859. The '292' in resume §3 #3 cannot be re-derived: there are now 778 .catch(() => {}) across 109 files, most of them intended bounds on Playwright calls.
+
+*To close:* Re-measure the catches that follow an apiClient call, then replace them with status assertions. Move the remaining suites to pickWorkspace or a tagged workspace. Give comment-recording its own account.
+
+### `resume-defects/resume-3` — open, medium
+
+**Inert .catch(() => {}) on API clients: the doc's 292 is a miscount; the real figure is 33 direct plus 10 wrapped, and it is still open**
+
+*Evidence:* test/e2e/lib/fixture.mjs:28-46: apiClient returns {status,data,error} for any HTTP status. It does reject when fetch itself rejects (line 32 is unguarded), so each .catch swallows only a dead API, never an HTTP failure. Most suites use a local apiAs(token) of the same shape (e.g. activity-rail.mjs:70-78, chat-message-actions.mjs:157-170), and none of the 16 apiAs I checked throws. THE 292 IS A MISCOUNT: git grep at 944e47f (the commit that wrote docs/e2e-shared-state-audit.md) finds 292 `.catch(() => {})` in 63 suites, but the figure counts every such catch. I parsed each site's call head with a bracket-matching script, using the same method on both trees. At 944e47f only 32 sites (20 suites) were on an API client. The rest were Playwright calls, which do throw and whose bounded `.click().catch(() => {})` form scripts/check-suite-section-enders.mjs:782-783 prescribes, plus postgres tagged templates, browser.close and sql.end. CURRENT TREE (115 suites): 778 `.catch(() => {})` in 109 suites, of which 33 sit directly on an API client in 20 suites (A:24, api:5, rootApi:2, API:1, cleanupA:1), plus video-regression.mjs:594 `.catch(() => null)`. Another 10 wrap closures that call A: `for (const fn of cleanup.reverse()) await fn().catch(() => {})` at doc-task-links:273, list-filters:211, planner-blocks:228, space-default-permission:492, space-presets:177 and view-visibility:250 (14 `cleanup.push(() => A(...))` closures), and `restore?.().catch` at panel-collapse:145, person-panel:138, settings-depth:133 and chat-message-actions:180. The count has not come down. The two newest suites added the pattern (ai-answer-rendering.mjs:856-859, doc-import.mjs:364), and no checker forbids it. WORST CLEANUP THAT SILENTLY DOES NOT CLEAN: task-menu.mjs:509, where an inbound-email alias whose own comment says it 'must not persist into whatever runs next' is DELETEd with a catch and no status read. panel-collapse.mjs:1041-1042 deletes three seeded spaces in the shared workspace, unchecked. assign-to-priorities.mjs:341 and planner-priorities.mjs:314 delete priorities in finally. teams-destination.mjs:259 deletes a group. request-access.mjs:304-307: the comment says 'this is a 404 it ignores', but the code ignores every status. WORST RESTORES OF SHARED ADMIN STATE, never checked: panel-collapse.mjs:183 and 457-458 (PATCH /users/me panelsCollapsed and sidebarCollapsed), settings-depth.mjs:172-176 (presence, mute, highContrast), ai-value.mjs:318-322 ('this workspace's real setting'), task-provenance.mjs:169-173 ('this runs against a real workspace'), and video1-acceptance.mjs:324-325, which re-marks notifications unread after mark-all-read on the shared admin with no after-check. video-regression.mjs:453 has the same shape but is guarded by the chk at 455-460. SETUP THAT DOES NOT SET UP: among the 33 only replies-inline-thread.mjs:95 (adding the peer to a channel), and the chk at 106-110 guards it. The larger instance has no .catch at all: fixture.mjs ensureShared discards the statuses of the assignee POSTs (230, 256), the close PATCH (258, a hard-coded status 'done', which contradicts the fixture's own warning at 105-110) and the solo-meeting POST (281-290). If that last one fails, the negative check its comment at 234-248 exists for passes vacuously again. SEPARATE LIVE CLASS: about 140 postgres cleanups in 38 suites (e.g. assign-to-priorities.mjs:345-347, `sql\`delete ...\`.catch(() => {})`) catch real rejections and discard them.
+
+*To close:* Replace every direct and wrapped site with an explicit acceptable-status assertion, following the audit's own recipe at docs/e2e-shared-state-audit.md:142-151. DELETE cleanup accepts 200/204/404; restores of shared state must succeed. Make a failed restore a counted FAIL (restore closures return the response, and done() or the finally checks it). Change the cleanup.push loops to push closures whose result is checked. Fix fixture.mjs ensureShared to check each POST/PATCH and resolve the closed status from the list's statuses, not 'done'. Add a read-only checker (in the style of check-suite-section-enders) that refuses `.catch(` attached to a call on any identifier bound from apiClient or apiAs, so the count cannot regrow. Correct the 292 in docs/video2-resume.md:230 and docs/e2e-shared-state-audit.md:105,118,194 to the true split: 33 plus 10 on API clients; about 140 SQL swallowers as a separate class; Playwright catches deliberate.
+
+### `suite-hygiene/unbalanced-else-branches` — open, medium
+
+**14 if/else branches report a different number of checks on the failure path; one is a drifted magic count**
+
+*Evidence:* Checks counted per side by hand after a scratch balance scan. list-view-controls.mjs:167-240: the if side has 9 chk calls (168,181,188,191,210,228,230,232,234) and the else is `for (let i = 0; i < 8; i++) bad(...)` at 239. Commit 3a4f426 added the cluster-box check at 210 and raised EXPECTED_CHECKS to 50 (line 53) but left the loop at 8. chat-message-actions.mjs:775-780: no modal gives 4 checks, the modal path gives 3 + 8 = 11 (781,785,799 + 814..869). Two of its else sentences are stale copies: 'with the message it is about' vs 783, and 'and the eleventh conversation is reachable' vs 801. chat-message-actions.mjs:948/982-985 is 2 vs 1: 'and that dialog closes again' at 977 has no else twin. chat-message-actions.mjs:918/993-997 is 5 vs 3. person-panel.mjs:826-828 is 1 vs 3 (829 plus a 2-step chain at 840). task-depth.mjs:943/963-965 is 2 vs 1. a39-dm-tabs.mjs:168/177-179 is 2 vs 1. ui-sweep.mjs:395/420-422 is a 4-label chain vs one bad(). ui-sweep.mjs:443/460-462 is 2 vs 1. video-regression.mjs:266/327-329 is at least 10 vs 1, :645/692-694 is 7 vs 1, :700/712-714 is 4 vs 1, and :410/462-466 is 3 vs 0 (an uncounted console.log SKIP). command-palette.mjs:512-516: `.catch(async () => bad(...))` adds a 44th check only when the click fails. In every case a product regression prints '✗ N of M checks ran — this run stopped early', the exact headline lib/chain.mjs:4-15 was written to remove.
+
+*To close:* Convert each block to makeChain(check) using the pass branch's own sentences, and call .rest(why) in the else. Delete the literal counts and re-typed labels. For command-palette, report the click failure in the detail of the next check rather than as an extra check. After converting, force each else path (for example, remove the testid) and confirm the count still matches EXPECTED_CHECKS.
+
+### `suite-hygiene/unguarded-derefs` — open, medium
+
+**Raw .data.X dereferences after a check that is allowed to fail, and in fixture helpers**
+
+*Evidence:* Classified 160 `.data.X` sites with a scratch script. About 80 are behind explicit throw-guards and 27 are guarded inline. The ones after a null-safe check that may fail: space-default-permission.mjs:271-277 checks `viewList.data?.id`, then 322, 343, 361, 368, 380, 391, 414 and 436 use `viewList/commentList/editList.data.id` bare; one top-level try (99-488) means 15 of 25 checks are lost. task-depth.mjs:476 checks `reuse.data?.id` (the product 500ing on the unique index is the case under test), then 477-478 use `reuse.data.id`/`second.data.id`; one try 161-1146 means up to 58 later check sites are lost. bookmarks.mjs:84-98 checks, then 161 and 170 use `external.data.id`/`internal.data.id`. list-filters.mjs:89 then 200 and 204 (`saved.data.id`). planner-blocks.mjs:91 then 218 and 222 (`made.data.id`). list-name-taken.mjs:105 then 170 (`first.data.id` inside sql). Bare mid-run: task-depth.mjs:1034-1053 (`parent.data.id`, `c1.data.id`, `c2.data.id`, all unchecked creates); chat-message-actions.mjs:424 (`(await A(...)).data.find(...).id`, two throws). Shared fixture: lib/fixture.mjs:226-230 ensureShared uses `task.id` after an unchecked POST. Setup: addressability-live.mjs:112-117 and task-depth.mjs:180-182 (`spaces.data[0].id`), planner-priorities.mjs:181 and planner-views.mjs:106 (`(await A('/users/me')).data.id`). Nothing gates this class: check-suite-section-enders.mjs covers Playwright reads only.
+
+*To close:* At each site, optional-chain the id into a const, and gate what follows on it with a chain whose .rest() names the missing fixture (as folder-dialog now does). In ensureShared, throw a sentence when the POST fails. Consider adding a rule to the section-enders checker: `X.data.` used after a chk whose condition mentions `X.data?.`.
+
+### `suite-hygiene/ai-activity-filters-model-refusal` — open, small
+
+**A fifth suite pins the model refusal; the harness says four**
+
+*Evidence:* ai-activity-filters.mjs:125-135 checks `forced.status === 503` ('asking for a task while AI is unconfigured is refused with a 503'), and :152-156 checks `row?.errorCode === 'not_configured'`. The checks at 139-160 depend on that refusal having produced a failed row, and 166/448 then pass vacuously (see vacuous-absence-on-empty-read). lane-env.sh:88-100 and commit 7c4ac44 say 'FOUR suites … 21 assertions, COUNTED INSIDE chk( CALLS' and list ai-create-containers, create-menu-ai, task-ai-bar and ai-answer-rendering, which omits this one. No dispatcher routes any suite to a modelless lane: grep of scripts/ for create-menu-ai|task-ai-bar|ai-activity-filters|needsModel finds only comments, and lane-env.sh:131-133 says the routing is 'NOT done'. So create-menu-ai and task-ai-bar (known) and this suite would all break on a model lane.
+
+*To close:* Convert this one: the refusal is scenery. Arrange a real provider failure on a model lane via model-stub `POST /__control/next` (model-stub.mjs:103), and on a modelless lane keep the not_configured path. Assert the row's errorCode equals what the configuration predicts (read /ai/status first), so the same checks hold either way. Update the count in lane-env.sh.
+
+### `suite-hygiene/conversion-reintroduced-fingerprint` — open, small
+
+**Tonight's AI-configuration conversions put the fingerprint back on the model-configured branch**
+
+*Evidence:* ai-answer-rendering.mjs:544: `modelConfigured ? beforePlaceholder !== UNAVAILABLE : …`. beforePlaceholder comes from attrOf (line 124), which returns null when the composer is missing, so on a model lane a composer that is absent, empty, or still reading 'Working on it…' passes. This is the absence-of-a-string shape commit 8af9618 removed, reintroduced by b5a52bc. ai-create-containers.mjs:372 and 390: `modelConfigured ? status !== 503 : …` accepts a 404 (route removed) or 500 when a model is configured. The failure message at ai-answer-rendering.mjs:592 still says 'against a disabled' placeholder on a lane where it was not disabled.
+
+*To close:* On the configured branch, assert the resting placeholder string positively (the i18n resting text) and non-null. For the endpoints, assert a 2xx (or the specific success status and shape) when available. Run both on a model lane with a break that removes the composer or the route.
+
+### `suite-hygiene/fingerprint-negations` — open, small
+
+**Facts asserted by the absence of a word from another string**
+
+*Evidence:* ai-answer-rendering.mjs:617 `!/^working$/i.test(stepWords)` means 'its own words' only by lacking the fallback word; if the fallback becomes 'Thinking', a missing translation passes. chat-message-actions.mjs:514 `!/^thread$/i` claims 'named after whoever started the thread' by not being 'Thread', though the suite knows the starter (it posted BODY as A). team-view.mjs:289 `!/Admin|Omar/.test(last)` claims 'unowned work is last' by the absence of two seed names; any third member in the shared lane DB passes. tab-title-countdown.mjs:204 `!/left|\d+m \d+s/i` claims no countdown only by the absence of today's countdown format. list-empty-states.mjs:231 `!/create task/i` claims no create CTA by the absence of today's button copy. no-dead-ends.mjs:167 `!/Something went wrong/i` claims 'does not crash' by the absence of the error-boundary copy, with no positive anchor; the sidebar wait at 163 is caught. ui-sweep.mjs:429 `!/Due date.*checklist item/i`. addressability-live.mjs:150 and command-palette.mjs:298 `!/No matches/i` fingerprint the palette's empty copy; both have positive twins above, so they are weaker.
+
+*To close:* Assert the positive fact. Match the create_list step's expected label exactly; compare the thread title to A's display name; assert the last row is the unassigned row by testid or data attribute; compare the tab title with the base title read before any block; count the CTA testid in the filtered state; assert workspace-sidebar and the notifications panel are visible; check that the checklist item's first control is the assignee picker; check that the cmdk-empty element count is 0.
+
+### `commit-log/log-1e7f092-1` — partly-fixed, small
+
+**team-schedules stubs every API call yet is cited as closing its row, against the 'real API' rule**
+
+*Evidence:* Commit 1e7f092: ts-9 'patched a line nothing in the repository executes'. De-duplication is now unit-tested (team-schedule-columns.test.ts). team-schedules.mjs:162 still intercepts every **/api/** call, so the server endpoint never runs in e2e. Ledger row 821 says 'closed by team-schedules.mjs', while resume :36-37 says a row closes only against a real API and Postgres.
+
+*To close:* Add a real-API section, or a small real-API suite, for the team schedules endpoint, or record on row 821 that it is closed by the browser suite plus the unit test.
+
+### `commit-log/log-30183c3-1` — open, small
+
+**process.exit() is still used at 216 places in the suites; recorded as harmless for now**
+
+*Evidence:* Commit 30183c3 recorded it as 'the wrong pattern that cannot bite today' (11.6 KB of output against a 64 KB pipe buffer). A count now finds 216 calls across 114 suites. Ledger line 6448 says 215, so the count has already grown by one. The checkers were already switched to process.exitCode (ledger 5527).
+
+*To close:* Convert the suites to set process.exitCode, or at least stop the count growing with a ratchet.
+
+### `commit-log/log-641be6c-1` — open, small
+
+**The stale-chunk 'no reload loop' check allows up to three reloads and cannot catch a missing cooldown**
+
+*Evidence:* Commit 641be6c: 'The bound is real and the check is loose'. stale-chunk-recovery.mjs:486 still asserts reloads <= 3. The scr-5 patch header records PASS with 2 loads while the cooldown was removed.
+
+*To close:* Widen the observation window or assert the cooldown directly (for example exactly one recovery reload, then the error boundary), so that scr-5 reddens both checks.
+
+### `commit-log/log-6d8e26f-1` — open, small
+
+**syncup-live skips its storage checks on any error, which a real bug can now trigger; two suites still claim storage is unconfigured**
+
+*Evidence:* Commit 6d8e26f named these as sibling suites 'the sweep will say'. The sweep cannot say, because a skip never turns red. syncup-live.mjs:1142-1147 skips the whole storageChain whenever upload-url answers >= 400. Every lane now has s3-stub, so a product 5xx is recorded as SKIP, which cbb92ab defines as 'a check that cannot fail'. Stale premises remain at syncup-live.mjs:1083 and 1126-1127 ('locally and in CI there is no bucket') and settings-depth.mjs:760-762 ('unconfigured here and in CI').
+
+*To close:* Skip only when the deployment reports storage as unconfigured, never on any error status. Arrange the failure case through s3-stub's fail-next-put. Rewrite the three comments.
+
+### `suite-hygiene/more-hand-rolled-chains` — open, small
+
+**Further hand-rolled chains and literal-count loops the finder did not list**
+
+*Evidence:* panel-collapse.mjs:674-710 hand-rolls a chain: a `drawerChain` label array, a manual `drawerAt` counter incremented before each check (695, 701, 704), and `drawerRest = (why) => { while (drawerAt < drawerChain.length) check(false, drawerChain[drawerAt++], why) }`. The same suite imports makeChain (28) and builds `chain` at 120. panel-collapse.mjs:1097-1106 keeps a literal 6-label array for the seeding-failed path that duplicates the pass sentences at 1052-1095. ui-sweep.mjs:584-587 reports `for (let n = 0; n < 4; n += 1) pal.step(false, …)` instead of a rest. pal is one 16-label chain (534-550) whose later steps continue after this block (sort chips, Docs/Tasks multi-select), so if the ⋯ section gains or loses a step, the literal 4 shifts every later sentence onto the wrong check instead of throwing.
+
+*To close:* Use makeChain for drawerChain. Declare the tree-search sentences once and use rest(). In ui-sweep, split the ⋯ steps into their own chain so a rest() can fill exactly that section, or replace the literal 4 with a count derived from the labels.
+
+### `suite-hygiene/skips-reachable-by-product` — open, small
+
+**Counted skips gated on product state rather than on the machine**
+
+*Evidence:* syncup-live.mjs:1093-1107 skips recordChain as 'the AI Notes entitlement is off' whenever the Record BUTTON is not visible, so a regression that hides the button becomes 3 SKIPs and exit 0 (done() at 268 exits 0 on skips). syncup-live.mjs:1142-1146 skips the 5-step storageChain on ANY upload-url status >= 400. calls.service.ts:769 answers 400 'This call was never recorded' before the storage check at 770, so a recording-start regression, or the exact historical bug that comment 755-767 describes, reads as 'object storage is not configured here'. A 5xx does the same. ui-sweep.mjs:450-459 calls skip('no known card on the board to click') when the Board shows no card, although ensureSweepFixture (lib/fixture.mjs:87-139) guarantees at least 6 tasks, so an empty board is a product failure.
+
+*To close:* syncup-live: read the entitlement from the API and skip only when it is off; if it is on and there is no Record button, fail. For storage, skip only when a configuration read says storage is unconfigured (or an explicit env flag); otherwise step(false) with the status and message. ui-sweep: replace the skip with a chain step that fails.
+
+### `suite-hygiene/syncup-live-dead-peer-branch` — open, small
+
+**syncup-live's 'peer state is not exposed' branch is unreachable and states a stale reason; if reached it would shorten the run**
+
+*Evidence:* syncup-live.mjs:779-781: `if (!peers.instrumented) { console.log('  SKIP  peer state is not exposed for tests — falling back to the rendered tiles') } else { check(...) }` is 0 checks vs 1, and the SKIP is not counted (skip() at 200-203 is not called). But `window.__rundeskPeers` is set unconditionally by the suite's own addInitScript (388-396), and grep finds it nowhere in apps/. So `instrumented` is always true and the branch is dead. Its sentence describes a test-only product hook that the comment at 380-386 says was deliberately NOT built. The same pattern appears at 860-862 in outgoingVideoLabel.
+
+*To close:* Delete the dead branch, or turn it into a failing check that says the instrumentation did not install. Do not print an uncounted SKIP.
+
+### `suite-hygiene/task-depth-inline-list-unbalanced` — open, small
+
+**task-depth's 'project with no list' branch reports 1 check one way and 0 (plus an uncounted log line) the other, and its check never runs on seeded data**
+
+*Evidence:* task-depth.mjs:315-327. When the list select holds 1 option or fewer, `check(offered, 'a project with no list offers to make one right here', …)` reports 1 check. The else (324-327) reports 0 and prints `console.log('  ·  this project already has a list, so the inline creator was not needed')`. On the seeded DB the chosen project has lists, so the normal path is the uncounted one and the inline list-creator (§G15 [21:59]) is never exercised: a confident zero. Against a project with no list the run reports one check more than EXPECTED_CHECKS and prints the 'stopped early' headline. My balance scan found this. It is not among the 14 in unbalanced-else-branches.
+
+*To close:* Arrange the precondition instead of reading it from ambient data: create a project with no list in the fixture and drive the inline creator there, so the check always runs. If it must stay conditional, make both sides report the same labelled check via makeChain(check).rest(why).
+
+### `suite-hygiene/vacuous-absence-on-empty-read` — open, small
+
+**Absence checks that pass when the read came back empty or the fixture id is null**
+
+*Evidence:* video-regression.mjs:381-384 reads controls with `.catch(() => '')`, and 399-403 `!/\bOther\b/i.test(controls)` then passes when the inbox-controls row is gone. task-cover.mjs:181 reads tabsText with `.catch(() => '')`; 182-186 ('nothing that only pretends to work') and 202-208 ('Search tab stays absent') both pass on a missing tablist. panel-collapse.mjs:959-967 reads emptied with `.catch(() => '')` and 'an emptied list is not silently refilled' passes when nav-favorites-list is missing. space-wizard.mjs:386-388 `!/Gantt/.test(row)` passes on an empty row. ai-activity-filters.mjs:166 `!idsOf(succeeded).has(forcedFailureId)` and 448 `[data-run-id="${forcedFailureId}"]` count === 0 both pass when forcedFailureId is null (no failed row was made). That happens on any model lane, and on a regression of the failure write. lib/fixture.mjs:244-247 states the rule these break: 'An absence is a claim only when the thing could have been present.'
+
+*To close:* Carry the precondition into the condition: require controls/tabsText/emptied/row to be non-empty (or the container count to be 1), and require forcedFailureId to be non-null, in the same chk.
+
+### `suite-hygiene/vr-invocation-skip-unreachable` — open, small
+
+**video-regression's counted skip for a WS-given invocation can never run; that path reports 3 checks short**
+
+*Evidence:* NOTIFIED is assigned only inside `if (!WS)` (video-regression.mjs:58-77, line 70). When WS is given, `if (NOTIFIED)` at 410 is false, so the counted skip() calls at 429-432 (which exist for exactly the WS-given case, per 152-163) are unreachable. Execution falls into the else at 462-466, which prints an uncounted 'SKIP … "Clear all" not checked' through console.log and reports 0 of the branch's 3 checks. The comment at 152-163 and the ledger at docs/video2-reaudit.md:4035-4039 describe a fix that never takes effect. A failed ensureNotification (lib/fixture.mjs:177-201 returns null) also shortens the run by 3.
+
+*To close:* Hoist the skip decision: if !API (invocation), skip all 3 via skip(); else if !NOTIFIED, fail all 3 with the reason (arranging a notification failed); otherwise run them. Use makeChain(chk, skip) for the block.
+
+## Unbuilt features (buildable: research ClickUp where the frames stop) — 31
+
+### `commit-log/log-214dac0-1` — open, large
+
+**The Brain² hub and everything that depends on it is unbuilt**
+
+*Evidence:* Recorded in commits 214dac0, 4dacd13, 10c3194, d626849, 601eacc and 4cb50d3 ('Brain²'s hub still needs a runtime'). The API has no agents module (ls apps/api/src/modules). quick-create-modal.tsx:275 says 'SUPER AGENT ... is deliberately absent', and task-detail-sheet.tsx:578 says the Brain² button 'does not exist and is not being built'. workspace-ai-page.tsx:123 and 184-196 is a seven-tab strip, not the frame's two-group left nav, and has no Ask|Agents toggle. ai-panel.tsx has no composer '+' and no generated-artifact or slide-deck output. The ledger still counts these rows as M, P or excluded: 743 (task-header Brain²), 745 (@ picker Brain and Agents), 751 ('Brain' in the + menu), 770 (Super Agent), 848 (Agents, excluded), 852 (hub, left nav, Ask|Agents, Super Agents), 853 (composer +, artifacts) and 870 (image generation).
+
+*To close:* Research how ClickUp Brain and Super Agents work: the hub layout, what an agent is, its tools and triggers, and Ask vs Agents. Build an agents table, module and route first, then the hub shell, the toggle and the entry points (task header, + menu, @ picker, create menu). Test on a lane that has the model stub.
+
+### `commit-log/log-601eacc-2` — open, large
+
+**Importers: Basecamp, Confluence and Slack are shown as text only, .xlsx is not read, and document import takes only .md and .txt**
+
+*Evidence:* spreadsheet-import.util.ts:241-258 lists Basecamp ('needs the Basecamp API'), Confluence (exports HTML/XML) and Slack (conversation JSON) with a reason and no control. Monday and Wrike at :148-151 and :216-219 tell the user to 'save as CSV' because .xlsx is not read. Ledger row 816 is P. Commits 68bc188 and 4a1fee7 refused Word import as 'a heavy parser dependency'.
+
+*To close:* Research which files and APIs ClickUp's importers accept for each tool, including .xlsx and .docx. Decide with the owner which to build. Credential-based imports can use a stub the way storage and the model do.
+
+### `commit-log/log-68bc188-1` — open, large
+
+**Activity and Workload view types were researched against ClickUp and are still not built; Map, Mind Map and Timeline are also not offered**
+
+*Evidence:* Commit 68bc188 researched both views against ClickUp and called them 'buildable rather than inventable'. It names the parts already in the tree: task_activity, tasks.timeEstimate, and findOverloadedAssignees for the colour bands. Commit 9609106 then HELD them because 'the walkthrough does not make' the decision. Commits 30183c3 and 716d25c say 'View types is exact at six'. The tree agrees: packages/db/src/schema/enums.ts:162-170 viewTypeEnum is list, board, calendar, gantt, table, team, and apps/web/src/lib/space-views.ts:65 SPACE_VIEW_KEYS holds the same six. Ledger row 777 reads 'View types 6 of 11 ... Map / Mind Map / Timeline deliberately NOT offered ... Activity and Workload remain buildable'. A workspace-level /workload page exists (routes/app.$workspaceId.workload.tsx), but it is not a list view type.
+
+*To close:* Build Activity and Workload as view types to the ClickUp design already written into 68bc188. Workload colour bands must reuse findOverloadedAssignees and must not add a second threshold. Research ClickUp's Map, Mind Map and Timeline views and build each one with a real renderer, so no view is stored that nothing reads. Add a suite and break patches for each view.
+
+### `commit-log/log-713a611-1` — open, large
+
+**'Add to ›' (one task in several lists) is blocked because it is ClickUp's feature rather than the video's**
+
+*Evidence:* Commit 713a611 and ledger row 845: 'The gloss ... a task in more than one list is ClickUp's real product, not anything in the video ... Blocked on the reference'. Under the new instruction, ClickUp's real product is the spec to build to. packages/db/src/schema/tasks.ts:17 has listId as a single notNull foreign key, and no task-to-list join table exists in the schema.
+
+*To close:* Research ClickUp's Tasks in Multiple Lists: the Add to submenu, the home list vs added lists, and how filters, views and moves treat a task in more than one list. Add a join table with readers in every list query, then a suite and break patches.
+
+### `commit-log/log-c980bee-1` — open, large
+
+**Ten custom field types are unbuilt, and the ledger still gives a reason that commit 4cb50d3 retired**
+
+*Evidence:* custom-fields.ts:7-52 has 22 types. Commits c980bee and ac1d0fa recorded ten as decisions: eight AI fields (Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items), plus Relationship and Button. Ledger row 719 still says the AI eight wait because 'ANTHROPIC_API_KEY is empty here and in CI'. Commit 4cb50d3 retired that exact reason ('The reason is retired and the seam is proven'): the SDK reads ANTHROPIC_BASE_URL, and model-stub.mjs answers there. Button waits on 'AutomationsService has no manual trigger'.
+
+*To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
+
+### `resume-defects/resume-8` — open, large
+
+**email.service send() still has no replyTo, cc or messageId, and task_comments still has no channel column**
+
+*Evidence:* apps/api/src/modules/email/email.service.ts:584-611: send(opts: {to, subject, html, attachments}) calls transport.sendMail({from, to, subject, html, attachments}). There is no replyTo, cc, bcc, messageId, inReplyTo or headers. packages/db/src/schema/comments.ts:16-29: task_comments has id, taskId, authorId, assignedToUserId, resolvedByUserId, resolvedAt, parentCommentId, body, mentions, editedAt and createdAt, with no channel column and no email metadata. The migrations end at 0160_folder_description.sql, and the only ALTER of task_comments is 0006. Inbound mail becomes a comment with no channel marker (email-to-task.service.ts:284-316, appendComment inserts {taskId, authorId, body}), so today the thread cannot distinguish a comment that arrived by email either. I searched apps/api/src for an outbound composed-body route (`@Post(...email...)`, `this.email.send*` callers in task and comment modules): the only senders are notification templates (notifications.service.ts:1179, 1203, 1213).
+
+*To close:* Extend send() with replyTo, cc, bcc and messageId/headers, and return the Message-ID. Add migration 0161: task_comments.channel ('comment'|'email', default 'comment') plus email metadata (to, cc, subject, message_id). Record outbound Message-IDs where resolveReplyContext can find them (see resume-8-reply-routing). Set the Reply-To to the task's `list-<alias>+task-<id>@domain` address; mint the list alias if none exists, because GET /tasks/:id/email-address (tasks.controller.ts:482-485) is the existing source of that address. Mark inbound appendComment rows channel='email' and render the channel in the thread. That is the mirror-defect guard: a stored channel must have a reader.
+
+### `ledger-rows/row-719` — open, large
+
+**Field types: 10 of the frame's 29 absent; the 'ANTHROPIC_API_KEY is empty' blocker for the 8 AI types is stale**
+
+*Evidence:* reaudit.md:719: the 10 absent are 'not a build'. Eight need a language model and 'ANTHROPIC_API_KEY is empty here and in CI'. Relationship 'would be a second store for what task_doc_links already holds'. Button has no manual trigger. Tree: custom-fields.ts:7-53 has 22 types including 'tasks' (a named task→task reference, 0158). The key reason is retired by the ledger itself (reaudit.md:2843-2863) and by the model stub now being wired into the lanes (commits 6fbd79b, ad00a7c: RUNDESK_LANE_MODEL). For Button: AutomationsService.fire(triggerType, ctx) takes any trigger string (automations.service.ts:209-236), so a button trigger type is an addition, not a missing engine. The Relationship reason names task_doc_links (task↔doc), while the `tasks` field type already stores task→task references.
+
+*To close:* Build the 8 AI field types on ai.service's existing Anthropic path, measured on a model-stub lane. Add Button as a new automation trigger type fired by the field. Decide Relationship against ClickUp's actual Relationship field (list-scoped, rollups) versus the existing `tasks` type. Rewrite the row's reason.
+
+### `ledger-rows/row-770` — open, large
+
+**Create-menu 'Super Agent' — still absent**
+
+*Evidence:* reaudit.md:770 (P): 'Super Agent stays open and is blocked, not pending: Rundesk has no agents'. Confirmed: no agents table in packages/db/src/schema and no agents module in apps/api/src/modules. 'Describe anything to create' and Create with AI are built (create-menu-ai.mjs).
+
+*To close:* Depends on row-852's Super Agents build. Once that exists, a create-menu entry that opens 'Create Agent' is small.
+
+### `ledger-rows/row-777` — open, large
+
+**View types 6 of 11: the premise is partly stale — Workload, Timeline, Mind-map pages and a workspace activity feed already exist**
+
+*Evidence:* The row (reaudit.md:777), §12 (reaudit.md:6191-6250, 6476-6482) and space-views.ts:59-63 ('The five Rundesk does not have (Map, Activity, Mind Map, Timeline, Workload) are not offered') all treat these as absent. SPACE_VIEW_KEYS is six (space-presets.ts:32, space-views.ts:65). But these already exist at WORKSPACE level: (1) Workload: routes/app.$workspaceId.workload.lazy.tsx → workspace-workload-page.tsx (656 lines, people × day heat map, capacity, days off, estimated vs tracked hours), fed by GET /workspaces/:ws/reports/workload and /workload/day (reports.controller.ts:143-163). (2) Timeline: workspace-timeline-page.tsx (1124 lines) over /tasks/workspace/:id/timeline. (3) Mind maps: workspace-mindmaps-page.tsx:71-89 (canvases of type=mindmap, i.e. blank mode, not task mode). (4) Activity: GET /workspaces/:ws/reports/activity (reports.controller.ts:184-192) → reports.service.ts:1323-1353, task_activity joined to actor name/avatar and list/project/space, visibility filtered (used by dashboard-widget-builder.tsx:956). (5) Map: the `location` custom-field type exists (custom-fields.ts:26). There are also TWO rules for 'overloaded' already: the Workload page uses a load/capacity ratio (workspace-workload-page.tsx:85-88, 480-485), while §12 tells the new view to use findOverloadedAssignees (ai.service.ts:817).
+
+*To close:* Treat this as building list/space VIEW TYPES over the existing aggregators, not as greenfield. Add a listId/spaceId filter to /reports/activity and /reports/workload. Add 'activity' and 'workload' (then timeline/map/mind_map, using ClickUp research for their shape) to SPACE_VIEW_KEYS in both places. Settle which overload rule is canonical so the page, the new view and AI assign agree. Fix the space-views.ts comment and the §12 text.
+
+### `ledger-rows/row-852` — partly-fixed, large
+
+**Brain² hub row is still M as a whole, but its main column exists at /app/:ws/ai; only Super Agents, Ask|Agents, nav shape and onboarding are absent**
+
+*Evidence:* reaudit.md:852 is `| M | Brain² hub, /ai/brain, AI-scoped left nav, Ask|Agents toggle, Super Agents |`. The ledger's own read at reaudit.md:6500-6550 says the main column is 'largely built' and that the hub lives at /app/:workspaceId/ai. Tree: routes/app.$workspaceId.ai.tsx → workspace-ai-page.tsx:123 and :188-235 have seven tabs (chat, knowledge, commands, generate, notes, writing, analytics); the shell AI dock is at routes/app.tsx:168-190. There is still no agents table, module or route: packages/db/src/schema lists none, and apps/api/src/modules has no agents module. skills.ts:1-29 separates Skills (built) from ClickUp's Super Agents (instructions, triggers, skills, knowledge, memory). The 16:25 'Personalize Brain²' onboarding appears in no row except inside the Brain² decision (reaudit.md:2774).
+
+*To close:* Split the row. Mark the hub's main column B, then build Super Agents (Create / All / My) plus the Ask|Agents toggle from ClickUp research. Parts to reuse: `skills` (instructions), AutomationsService.fire() (triggers, automations.service.ts:209-236), COMMAND_TOOLS including create_list/create_folder (ai-command.ts), and the model stub lanes (RUNDESK_LANE_MODEL, ad00a7c) to measure it. The /ai/brain URL and left-nav shape are cosmetic.
+
+### `ledger-rows/row-853` — open, large
+
+**Credit meter, rotating placeholder, composer '+', generated artifacts/slide deck — absent; the placeholder's revert reason is weakening now lanes can carry a model**
+
+*Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
+
+*To close:* Rotating placeholder: rebuild it and measure on a model lane. Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
+
+### `ledger-rows/row-869` — open, large
+
+**Credits (tab, category table, trend chart with limit, Add credits, My Agent Performance) — absent; a recorded decision plus parts no frame opens**
+
+*Evidence:* reaudit.md:869 (M). §3 decision at reaudit.md:889-891. §6 at reaudit.md:2819 says the usage-trend chart is separable and 'STILL OPEN'. Parts that exist: GET /ai/usage (ai.controller.ts:183-190) and an AI Usage settings tab (workspace-settings-page.tsx:1287-1330) with per-user and per-model spend over 7/30/90 days. The response has totals/byUser/byModel and no per-day series, so there is no trend. rollUpByCategory gives the 8 categories (ai-categories.ts). No AI quota exists in PlanLimits.
+
+*To close:* Build the dollar trend chart now: a per-day series from ai_usage. Take the credit unit, allowance and 'Add credits' flow from ClickUp research, and get the owner to reconsider the §3 decision. 'My Agent Performance' waits for Super Agents (row-852).
+
+### `resume-defects/s4-clip-link` — open, large
+
+**Section 4: 'A pasted clip link renders as the clip' is still unbuilt. There is no clips table, no per-clip route and no paste handling**
+
+*Evidence:* No clips table: I grepped packages/db/src/schema for a pgTable named with 'clip', and packages/db/src/migrations for CREATE TABLE with clip, and found nothing. A clip is a storage object. clips.service.ts:21-23 builds the prefix `workspaces/<id>/clips/`, :37 builds the key, and :50-80 lists the clips by listing storage objects, using the storage key as `id` and title and duration from object metadata. The routes are only the library /app/$workspaceId/clips (routeTree.gen.ts:419-423, 591); there is no per-clip route. For paste handling, the comment composer has no onPaste or unfurl: grep of apps/web/src finds unfurl only in chat (chat-message-body.tsx:124-169, 315-328), which unfurls task URLs and OG metadata, not clips. Copy link signs the storage object (clip-publish.ts:111-117), so a pasted link carries no clip identity and no title. The ledger entry is docs/video2-reaudit.md:1307-1330 (status M), with the row at 1532. ClickUp research: clip URLs are stable, unguessable public links (see resume-7).
+
+*To close:* The order is forced. First, a `clips` table (id, workspace_id, storage_key unique, title, duration_seconds, created_by, share_token, created_at), backfilled from the existing storage prefix, with list() reading the table. Second, a stable app route that resolves a token to a freshly signed playback URL, shared with resume-7. Third, paste handling in the comment composer (and chat) that recognises the route, stores a clip reference on the comment rather than a bare URL, and renders the existing comment-video card (task-detail-sheet.tsx:5732-5770) with its processing state. Checks: paste a copied clip link and assert the card shows the clip's title and plays; paste a foreign URL and assert it stays a link. Break patches: the route ignores the token; the paste handler falls back to plain text.
+
+### `resume-defects/s4-composer-email` — open, large
+
+**Section 4: 'The composer posts as Email' is still unbuilt. The mode menu now exists with Email disabled, a suite locks that state in, and the ledger's 'today' text is stale**
+
+*Evidence:* task-detail-sheet.tsx:7202-7260: the `Comment ▾` DropdownMenu has comment-mode-item-comment (ticked) and comment-mode-item-email, which is `disabled` and data-available="no" with no onSelect, carrying the reason catalogs.ts:2717-2718 'Rundesk cannot send a comment as email...'. test/e2e/task-mentions.mjs:357-400 asserts exactly this disabled state ('Comment carries the tick and Email is not selectable', and the reason length is over 30), so building the feature must rewrite those checks. The ledger entry docs/video2-reaudit.md:1252-1270 still says 'There is no mode switch on the comment composer', which is stale now that the switch exists. The row is M at docs/video2-reaudit.md:1532. Plumbing status, verified: the inbound threading exists (email-to-task.service.ts:28-33 and 184-187). Missing: replyTo, cc and bcc on send() (email.service.ts:584-589); a channel column (comments.ts:16-29); any route that sends a composed body; outbound Message-ID recording (resume-8-reply-routing). ClickUp research: in the task comment box, click Comment, then choose Email; fill To/CC/BCC, subject and body, add attachments and a signature, then Send (or schedule it). Responses appear in the task's activity feed, and a reply to an emailed comment can be sent as a comment or as an email (help.clickup.com 'Use Email in ClickUp', 'Create tasks and comments via email').
+
+*To close:* Build to ClickUp. Selecting Email switches the composer into an email form (To, CC and BCC with member and contact suggestions, Subject, body, attachments). Add a route such as POST /tasks/:id/comments/email. It sends through the extended send() with Reply-To set to the task's +task- address, stores the comment with channel='email' and the metadata, and records the outbound Message-ID. The thread renders email comments distinctly, and inbound replies land as channel='email'. Rewrite the task-mentions checks to assert the working mode, not the disabled one. Add e2e checks against a captured transport (the email itself, its Reply-To, and the stored channel read back in the thread), and a break patch for each (drop replyTo; store the channel but do not render it). Update docs/video2-reaudit.md:1260-1270 and the row at 1532.
+
+### `commit-log/log-3943965-1` — open, medium
+
+**Credit meter, Credits tab, usage-trend chart and the metered 'uses have expired' paywall are all unbuilt; the data for them already exists**
+
+*Evidence:* Commit 3943965 found its own blocker stale: ai_usage records every call, and ai.controller.ts:183 @Get('usage') serves it. It re-blocked the work on 'allowance, reset policy, Add credits ... no frame specifies', which is the reason the owner no longer accepts. workspace-settings-page.tsx:1304-1318 shows usage tables only. There is no trend chart with a limit line, and grep for 'credits left', 'creditMeter' and 'usage-trend' finds nothing in apps/web/src. Ledger §6 line 2819 still has the usage-trend chart as STILL OPEN (e07683b, d8d1e04). Row 788's metered state was blocked on the same reason (446cdba). Row 869 counts Credits as M, while §3 lines 889-891 call Credits a decision.
+
+*To close:* Research ClickUp's AI credits: the allowance per plan, reset timing, Add credits, and the usage chart with its limit line. Decide with the owner whether the §3 'no in-app currency' decision still stands. Build the usage-trend chart now, since §6 already says it is separable from credits. Then build the meter and the metered paywall state on top of ai_usage.
+
+### `commit-log/log-601eacc-1` — open, medium
+
+**The cover picker's Search tab is still absent because no photo provider is configured**
+
+*Evidence:* Commits 601eacc, 39863ff, 2ae54b4 and 716d25c keep the tab absent. cover-image-picker.tsx:23-53 says 'SEARCH IS DELIBERATELY ABSENT ... if a photo provider is ever configured'. Ledger row 739 is P. 'No credential configured' is the same kind of reason that went stale twice in this window: storage, fixed by s3-stub, and the model, fixed by model-stub.
+
+*To close:* Research ClickUp's cover Search (it searches a stock-photo library). Add a provider behind an environment variable, give the lanes a stub for it the way s3-stub works, and build a Search tab that really searches, with checks and break patches.
+
+### `commit-log/log-716d25c-1` — open, medium
+
+**'+ Add a new section' in Calendar settings › Sidebar is not built**
+
+*Evidence:* Commits 716d25c and 41f0ec5, and ledger row 835: 'blocked rather than pending ... what a NEW section would contain is a decision no frame makes'. git grep for 'add a new section', 'newSection' and 'customSection' in apps/web/src finds no such control. The rail sections are the fixed list in planner-settings-dialog.tsx.
+
+*To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
+
+### `harness/model-lane-routing-unbuilt` — open, medium
+
+**No suite can be routed to a lane with or without a model; the model stub is wired but no suite exercises it**
+
+*Evidence:* lane-env.sh:126-132 says 'Wiring that choice into the dispatcher is the next piece of this work and is NOT done'. Confirmed open. run-plan.sh:47-68 hands a set to any lane that is free and unlocked, and it never sources lane-env.sh or calls lane_has_model. No suite declares a lane need: a git grep for RUNDESK_LANE_MODEL, needsModel, 'Lane:' and LANE_NEEDS finds only two comments, at ai-create-containers.mjs:343 and ai-answer-rendering.mjs:532. wt-break.sh applies lane_model_env only inside restart() (:105 and :116), and restart runs only on a sync or an API patch. So a lane keeps whatever model configuration its last launcher had. create-menu-ai.mjs:193,323,489 and task-ai-bar.mjs:95,126,245 assert 'not configured' and would red their baseline on a model lane (wt-break exit 5). No suite drives the model stub's /__control seam: the only __control users in test/e2e are the storage stub in attach-on-create.mjs:321 and task-cover.mjs:512,598. So the modelConfigured===true branches in ai-create-containers and ai-answer-rendering have never been measured. Stale around it: fleet-restart.sh:120-121 says 'Off unless RUNDESK_LANE_MODEL=1 ... the six suites'. =1 now means lane 1 only (lane-env.sh:156-160), and there are four suites. lane-env.sh:89-95 says all four flip, but its own :111-116 says two were converted. docs/video2-reaudit.md:6665-6674 says 'It is wired into no lane' and 'Six suites'.
+
+*To close:* Smallest correct routing: (1) each suite declares its need in a greppable header, e.g. `// Lane: no-model` on create-menu-ai and task-ai-bar, and `// Lane: model` on any suite that stages __control/next. (2) run-plan.sh sources lane-env.sh and skips a lane whose lane_has_model answer differs from the suite's declared need. If no lane in $LANES matches, it refuses loudly with a new exit code, so the plan is never silently burned. (3) wt-break.sh, before the baseline, asks the lane's GET /api/v1/ai/status and refuses (new exit) when `available` differs from lane_has_model, or else restarts. (4) A checker asserts that every suite asserting 'not configured' in a chk declares no-model. Then write the model-path checks against model-stub's __control/next, since the frames-do-not-specify reason is no longer accepted.
+
+### `ledger-rows/row-1962` — open, medium
+
+**Calendar Automations (which tasks sync, to which calendar) — held by §3 parking, which is a 'walkthrough never explains' reason**
+
+*Evidence:* reaudit.md:1962-1991 (P, 'contested' against §3). planner-settings-dialog.tsx:66-73 parks Automations because 'the explanation was never given'. Yet frame 14:32 draws the page: the 'Sync ClickUp tasks to Google Calendar' card, the empty state 'Pick a list, folder, or space…' and '+ Add sync'. calendar-sync.service.ts:71-101: pushTask sends every due-dated, non-archived task to every connection, with no scope table and no off switch.
+
+*To close:* Research ClickUp's Calendar Automations. Add a sync-rule table (scope = list/folder/space, target calendar), make pushTask read it, and add the Automations settings page. The default becomes 'nothing is syncing', as the frame shows.
+
+### `ledger-rows/row-745` — open, medium
+
+**@ picker Brain section and Agents — still absent**
+
+*Evidence:* reaudit.md:745 says Brain and Agents are 'blocked rather than pending'. task-detail-sheet.tsx:299-305: MentionTab is 'people'|'tasks'|'docs'|'whiteboards'|'locations'|'channels', and the comment refuses Brain/Agents because 'The Brain² hub is a recorded decision'. The AI service and dock exist (see row-743), so an @Brain mention that asks the AI in the thread has something to call. Agents have nothing: no agents schema or module.
+
+*To close:* @Brain: research how ClickUp's @Brain answers in a comment thread, then build it on ai.service + comment create, measured on a model-stub lane. Agents: wait for row-852's Super Agents.
+
+### `ledger-rows/row-788` — open, medium
+
+**Paywall's metered 'uses have expired' state (B* remainder) — absent, held only because frame 09:30 shows no allowance or reset**
+
+*Evidence:* reaudit.md:788 B*: the metered state is 'blocked on the reference'; reaudit.md:2887-2891 repeats that. Tree: plans.constants.ts:40-55 has PLAN_FEATURES ['teamView','boardExport'] and PlanLimits {maxMembers, maxProjects} only. A grep for expired/usesLeft/feature_uses across feature-gate.tsx, the plans module and billing schema finds nothing. Parts that exist: plan-feature.guard.ts (server refusal), FeatureGateDialog.
+
+*To close:* Research ClickUp's limited-uses model for Free-plan features (the allowance and whether it resets). Add a per-workspace per-feature use counter incremented by the guard's allowed path, and render 09:30's state (preview, sentence, one Contact admin button) when the counter is exhausted.
+
+### `ledger-rows/row-835` — open, medium
+
+**Planner sidebar '+ Add a new section' — absent, held only because no frame says what a new section contains**
+
+*Evidence:* reaudit.md:835 (P): 'blocked rather than pending … what no frame supplies is what a NEW section would contain'. planner-settings-dialog.tsx:233-246 fixes RAIL_SECTIONS at five; :618-630 renders show/hide/reorder over them and has no add control. Parts that exist: the `railSections` planner setting, and saved-filter storage in packages/db/src/schema/list-filter-presets.ts and saved-searches.ts.
+
+*To close:* Research how ClickUp's planner sidebar 'Add a new section' works (custom section contents and rule). Store custom sections next to railSections and render them in the planner rail.
+
+### `ledger-rows/row-845` — open, medium
+
+**Task menu 'Add to ›' — absent, held only because no frame opens the submenu**
+
+*Evidence:* reaudit.md:845 and 2905-2936. Task menu testids (task-detail-sheet.tsx:1619-1788) run from description-history to delete, with no add-to. Parts that exist: tasks.list_id is a single notNull FK (tasks.ts:17), so tasks-in-multiple-lists would need a join table; sprint_tasks join (sprints.ts:22); user_priorities (priorities.ts:32); favorites.
+
+*To close:* Research ClickUp's 'Add to' submenu contents and build to them. If it includes a list (tasks in multiple lists), that is a new join table plus list-read changes. Items like sprint or priorities reuse existing tables.
+
+### `ledger-rows/section3-team-analytics` — open, medium
+
+**§3 'Team analytics' is held only because 'she never opens it', and a suite enforces its absence**
+
+*Evidence:* reaudit.md:892-893: 'the frames list the tab, nothing is behind it, she never opens it. Guarded against by teams-destination.mjs'. teams-destination.mjs:16, :212-235 asserts Analytics must NOT appear. workspace-teams-page.tsx:22-24 and :218-224 give tabs teams/people/chart only. Under the new policy this is an unbuilt feature, and building it will redden teams-destination.mjs by design. Parts that exist: reports workload and activity endpoints, and the time-entries and people modules.
+
+*To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
+
+### `commit-log/log-4ad25f6-1` — open, small
+
+**The rotating composer placeholder (frames 16:30-16:45) was built and then reverted; the reason for reverting has since gone away**
+
+*Evidence:* Commit 4ad25f6 reverted the rotation because GET /ai/status answers available:false on every lane, so no suite could see it. It said wiring model-stub.mjs would make it measurable. Commit 6fbd79b then wired the stub behind RUNDESK_LANE_MODEL (lane-env.sh:161-177). ai-panel.tsx:1817-1822 still has three fixed placeholder states (working, unavailable, inputPlaceholder) and nothing rotates. Commit 4dacd13 also lists it as absent.
+
+*To close:* Rebuild the four-sentence rotation on the resting state. Measure it on a lane started with RUNDESK_LANE_MODEL, and write a break patch that freezes the rotation. This depends on log-ad00a7c-1 so the suite lands on a lane that has a model.
+
+### `commit-log/log-6b140c5-1` — open, small
+
+**The 'Create Task ▾' chevron menu is missing**
+
+*Evidence:* Commits 6b140c5, 4840344 and 446cdba held this back as 'blocked on the frames'. Ledger row 730 is marked B* with 'Create Task ▾ is the part still missing'. quick-create-modal.tsx:1596 has only the quick-create-submit button, with no chevron segment or menu.
+
+*To close:* Research which options ClickUp's Create Task chevron offers, then build the split button with each option wired to real behaviour, plus checks.
+
+### `ledger-rows/row-730` — open, small
+
+**Comment ▾ is built (B*), but the 'Create Task ▾' menu is still missing, held only because no frame opens the chevron**
+
+*Evidence:* reaudit.md:730 B*: the Email mode is listed but disabled with its reason, and 'Create Task ▾'s menu has no frame behind it'. Tree: task-detail-sheet.tsx:7224-7260 is the comment-mode menu (Comment ticked; Email `disabled`, data-available=no, with comment-mode-reason-email). quick-create-modal.tsx:1593-1600 `quick-create-submit` is a plain submit button with no chevron and no menu. The Email half depends on row-1252.
+
+*To close:* Build the Create Task split button with the menu ClickUp actually offers (research lens: e.g. create-and-open / create-and-start-another / create-and-duplicate). Enable the Email mode once row-1252 lands.
+
+### `resume-defects/row-730-create-task-chevron` — open, small
+
+**Ledger row 730's 'Create Task ▾' is recorded as 'Blocked on the reference', so under the new policy it is simply unbuilt**
+
+*Evidence:* docs/video2-reaudit.md:730 (B*) says '"Create Task ▾" is the part still missing, and its MENU has no frame behind it… Blocked on the reference'. :2822 repeats this. quick-create-modal.tsx:1586-1600 has Cancel and a plain `quick-create-submit` button with no chevron. A grep of apps/web/src for createAndOpen/createAnother finds only the workspace-index string. ClickUp research (help.clickup.com 'Create tasks and subtasks on mobile' and 'Create a task'): the Create Task split button offers Create and close, Create and open, Create and start another, and Create and duplicate. The same row must also be rewritten by the s4-composer-email work. This may belong to the blocked-rows lens rather than this one.
+
+*To close:* Build the chevron menu to ClickUp's four options: close, open the created task's sheet, reset the form keeping list and location, and keep the content for a duplicate. Add checks that each option leaves the modal and route in the stated state and creates exactly one task, plus a break patch per option. Rewrite row 730 without the 'blocked on the reference' reason.
+
+### `ledger-rows/row-743` — open, small
+
+**Task header 'Brain²' button — absent; the reason 'the hub does not exist' is stale because the AI dock it would open exists**
+
+*Evidence:* reaudit.md:743 `| M | Task header "Brain²" button — deliberate: the hub does not exist |`. task-detail-sheet.tsx:1445-1459 builds only the Created chip, and :1452-1454 says 'NOT "Brain²" beside it: that button leads to a hub this product does not have'. That hub now exists at /app/:ws/ai (workspace-ai-page.tsx), and every route has a dock: routes/app.tsx:78 aiAsk state, :91-94 `askAi(question)` opens the dock and asks, :173-190 `<AiPanel currentView=... ask=aiAsk persist>`. The same stale premise is repeated in TaskAiBar's comment at task-detail-sheet.tsx:577-581.
+
+*To close:* Add the header button so it opens the shell AI dock with the task as context, using the same askAi/currentView seam the palette uses. Get the exact ClickUp behaviour (opens Brain scoped to the task) from the ClickUp research lens. Measure it on a model-stub lane. Update the stale comments.
+
+### `ledger-rows/row-751` — open, small
+
+**'Brain' in the comment '+' menu — absent; an AI destination already exists (the comment AI panel), so the reason is stale**
+
+*Evidence:* reaudit.md:751 `| M | "Brain" in the "+" menu — the Brain² hub does not exist |`. CommentPlusMenu (task-detail-sheet.tsx:7298+) renders assign, clip, mention-task, file, slash, emoji, new task/doc/whiteboard and no Brain. The comment AI panel exists: task-detail-sheet.tsx:6982-6995 `comment-ai-panel` (instruction in, draft out, Keep to apply), opened today by a space on an empty composer. The menu's header comment at :7285-7291 is itself stale: it says 'EIGHT are here' and that slash commands are absent, but `comment-plus-slash` is rendered.
+
+*To close:* Add a 'Brain' item that opens comment-ai-panel (ClickUp research for any extra behaviour). Correct the CommentPlusMenu header comment.
+
+### `ledger-rows/row-850` — open, small
+
+**Add to a colleague's priorities — refused on purpose; the frame's prompt names the assignee, so ClickUp research should settle it**
+
+*Evidence:* reaudit.md:850 (M, 'the write takes no :userId, deliberately'). people.controller.ts:100-119: PrioritiesController writes only the caller's own. Reading someone else's already exists at people.controller.ts:90-97 (GET /people/:userId/priorities). task-detail-sheet.tsx:2611-2635 shows the prompt only when `userId === currentUserId`.
+
+*To close:* Decide from ClickUp's behaviour whether assigning someone else offers to add the task to THEIR priorities. If yes, add a permissioned write, for example allowed to managers or the assigner of a task they can see.
+
+## Ledger rows still open — 18
+
+### `harness/ai-rows-blocked-on-empty-key` — open, large
+
+**Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
+
+*Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
+
+*To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
+
+### `resume-defects/resume-5` — partly-fixed, large
+
+**Gantt ledger row: the Today part is now true, but on a different surface from the one the frame shows. Zoom, drag and critical path have no check, and there are now two Gantts that have drifted apart**
+
+*Evidence:* Ledger docs/video2-reaudit.md:789 reads `B | Calendar view, Gantt (today line, zoom, drag, critical path)` and names no closing suite. Line 790 reads `B | Gantt: Auto fit, week numbers, collapsible panels, local export`. Neither wording has changed since 39863ff. The Today control now exists and is checked, but only on the WORKSPACE timeline page: workspace-timeline-page.tsx:219-223, 290, 333 (goToToday), 630 (data-testid timeline-today) and 869 (timeline-today-line), checked by gantt-controls.mjs:528-600. Breaks 13 and 14 redden it (/tmp/claude-0/brk-gantt-controls-13-today-noscroll.log, -14-today-onceonly.log), and the 8083f88 baseline was 29/0. But docs/video2-frame-observations.md:230,245-247 places the 09:40 Gantt in the list's five view tabs (line 206). The list's own Gantt tab renders a different component: app.$workspaceId.$spaceId.$projectId.$listId.tsx:3538-3539 renders GanttView (6005-6013). That component has zoom as Day/Week/Month buttons (6307-6308, 6438-6456), a today line only when today is in range (6425-6426, 6518-6523, which is the exact 'Today nowhere on the chart' problem the timeline page solved at 276-290), drag (6063, 6106) and critical path (import at 107). It has no Today button, no Auto fit, no week numbers, no collapsible panel, no export and no data-testid at all, so no suite can check it. Going the other way, the timeline page has no dependency arrows or critical path (grep for depend/critical finds only the comment at line 694). Zoom is used in gantt-controls only as a reset click (536), never checked to change px/day. Drag is unchecked on both surfaces. Critical path has no unit or e2e test (no *.test for apps/web/src/lib/gantt.ts). ClickUp research: the Gantt view defaults to a Week time period, has Auto fit and Export as PDF/PNG (Business plan and up), and a 'Show critical path' toggle that highlights the path in red (help.clickup.com Gantt view and 'Critical Path and Slack Time'). Rundesk's export is CSV.
+
+*To close:* Re-read row 789 against the tree and split it. The Calendar half is closed by list-view-controls, per docs/video2-reaudit.md:1750-1760. For the Gantt half, choose one Gantt, preferably one shared component used by both the list tab and /app/:ws/timeline. Give the list tab the frame's toolbar (Tasks panel toggle, Today, Week ▾ time-scale dropdown, Auto fit, Export) plus week numbers and collapsible panels. Give the timeline page ClickUp's 'Show critical path' toggle and dependency arrows. Add testids and checks on the list tab for zoom (measured px/day changes), drag (a PATCHed start and due date that survive reload), critical path (the red set equals the computed longest dependency chain, and a patch that returns [] reddens it) and Today. Add break patches for each, and name the closing suite in the row. Decide and record whether Export follows ClickUp (PDF/PNG) or keeps CSV.
+
+### `ledger-rows/row-1252` — open, large
+
+**Composer posts as Email — absent (Email mode listed but disabled)**
+
+*Evidence:* reaudit.md:1252-1269 (M); resume.md:247-249 and 253-257. email.service.ts:584-603: the private send() takes {to, subject, html, attachments} with no replyTo or cc. comments.ts has no channel column. The mode menu exists with Email disabled (task-detail-sheet.tsx:7242-7258). The inbound half exists: the email-to-task address (tasks.controller GET /tasks/:id/email-address).
+
+*To close:* Add replyTo (the task's inbound address) and cc to send(), a channel column on task_comments that the thread renders, and a route that sends a composed body. Then enable the Email mode (it also closes row-730's first remainder).
+
+### `ledger-rows/row-1307` — open, large
+
+**A pasted clip link renders as a player — absent**
+
+*Evidence:* reaudit.md:1307-1322 (M); resume.md:258-262. There is no onPaste or unfurl handling in task-detail-sheet.tsx. clips.controller.ts:10-37 has only GET list, POST presign and POST share. There is no clips table in packages/db/src/schema, so a link carries no clip identity. resume §3.7: Copy link expires in 24h and says nothing.
+
+*To close:* Add a clips record plus a stable app route first, then paste detection that renders the clip card/player in comments.
+
+### `ledger-rows/row-2294` — open, large
+
+**The AI acts inside a connected app — absent**
+
+*Evidence:* reaudit.md:2294-2321 (M). COMMAND_TOOLS (ai-command.ts:179-246, plus create_list/create_folder at :118-123 and :265) are all internal. ai-categories.ts:62-78 marks externalActions/externalSearches unsupported with reasons. Parts that exist: calendar-sync's Google event upsert, and the Gmail/SharePoint search providers. The §5 note that AiService injects SearchService and never calls it is FIXED: it was removed (ai.service.ts:915-921).
+
+*To close:* Add connector tools, e.g. book a meeting via calendar-sync, and search/send via Gmail. Measure them on a model-stub lane with provider stubs.
+
+### `ledger-rows/row-816` — open, large
+
+**Import P row (7 of 10 named tools) is still accurate, and it contradicts the B 'Importers' row for the same frame**
+
+*Evidence:* reaudit.md:816 (P): Basecamp needs its API, Confluence exports pages, Slack exports JSON, and Monday/Wrike .xlsx is not read. reaudit.md:817 (B) covers the same submenu and says 'every row of frame 12:08's submenu is now either built or drawn with its reason'. Tree: spreadsheet-import.util.ts:115-230 has seven named presets; :241-277 UNSUPPORTED_SOURCES = basecamp/confluence/slack/documents; monday/wrike hints at :151 and :219 say 'save as CSV'. common/export/xlsx.ts is a dependency-free xlsx WRITER (zlib), so an xlsx READER is its inverse, the same move document import made.
+
+*To close:* Merge 816 and 817 into one row. Build xlsx reading (ClickUp's spreadsheet import accepts XLS/XLSX). Basecamp and Confluence become API importers per ClickUp research. Confluence could target Docs through the existing doc importer.
+
+### `ledger-rows/row-870` — open, large
+
+**Image generation — absent; needs an image-capable provider**
+
+*Evidence:* reaudit.md:870 (M). A grep for generateImage|image generation|dall-e|imagen|gpt-image in apps/api/src and apps/web/src finds only comments (ai-value-panel.tsx:29). ai-categories.ts:42-45 records images as having no code path. The only model client is Anthropic, which outputs no images.
+
+*To close:* Needs the owner's choice of image provider plus a harness stub. After that, a tool in COMMAND_TOOLS and the 'images' category becomes countable.
+
+### `suite-hygiene/task-mentions-pins-unbuilt-email-mode` — open, large
+
+**task-mentions pins the unbuilt 'Comment ▾ → Email' mode as disabled; the ledger row's 'Create Task ▾' half is blocked for a reason the owner no longer accepts**
+
+*Evidence:* task-detail-sheet.tsx:7242-7258 hard-codes `data-testid="comment-mode-item-email" data-available="no" disabled`, with the reason from catalogs.ts:2717-2718 ('Rundesk cannot send a comment as email'). task-mentions.mjs:378-409 asserts `data-available === 'no'`, that a reason is present, and that clicking it does not change the mode, so the suite locks the unbuilt state in. Ledger docs/video2-reaudit.md:730 (row B*) records Email as deliberately disabled and 'Create Task ▾' as 'Blocked on the reference … no frame in the video ever opens that chevron', a reason the owner's policy no longer accepts. I did not research ClickUp's behaviour in this session; the lens was suites.
+
+*To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
+
+### `product-siblings/assign-with-ai-picker-unbuilt` — partly-fixed, medium
+
+**'⚡ Assign with AI' is marked B in the ledger but closed only via the API; the assignee picker still says it is not built, for a reason that is no longer true**
+
+*Evidence:* The frame (docs/video2-frame-observations.md:396-399, 15:45) puts the control in the ASSIGNEE PICKER footer. docs/video2-reaudit.md:847 marks it 'B … closed by ai-assign.mjs', but :231-236 of the same doc says 'Not built there, on purpose'. task-detail-sheet.tsx:3256 and :3264-3270 say NOT built because the AI 'cannot CHOOSE the person'. That is stale: ai.service.ts:3036 suggestAssignee does exactly that, and ai.controller.ts:519-540 exposes it 'because the assignee picker is a menu'. The only callers of /ai/assignee-suggestion are test/e2e/ai-assign.mjs:99 and the chat tool (ai.service.ts:1814). No web code calls it (searched 'assignee-suggestion', 'suggestAssignee', 'assign with ai').
+
+*To close:* Add the picker footer item: call GET /ai/assignee-suggestion?taskId, show the pick and its numbers, and assign on confirm. Correct the comments at :786-790 and :3256-3270 and the two contradictory ledger passages. Add a UI check to ai-assign.mjs.
+
+### `ledger-rows/row-1060` — open, medium
+
+**Create-modal Templates menu — 1 of 4 actions (Use Template only)**
+
+*Evidence:* reaudit.md:1060-1088 (P). quick-create-modal.tsx:1478-1494: only a `<select data-testid=quick-create-template>`, instantiated at :868. Save as template exists only on an existing task (task-templates-section.tsx → POST from-task). The API has POST /, PATCH /:id (accepts a payload), from-task, duplicate and instantiate (task-templates.controller.ts:49-123), but the create modal has no one-press 'Create instantly' and no 'Update existing template'. The frame specifies all four.
+
+*To close:* Replace the select with the frame's four-item menu: Use Template, Create instantly (instantiate with no form), Save as template (POST / with a payload snapshotted from the form), Update existing (PATCH /:id with that payload).
+
+### `ledger-rows/row-1874` — open, medium
+
+**Template Center Tags and Created-by facets — absent; created_by_id is written and never read**
+
+*Evidence:* reaudit.md:1874-1896 (M). templates.ts:86 createdById, :103-104 relation. It is written at project-templates.service.ts:636, 675 and 812, and no other createdById reference exists in the module or in workspace-templates-page.tsx. There is no tags column.
+
+*To close:* Add a Created-by facet (count in SQL like the others) and a tags column or join table with a Tags facet.
+
+### `ledger-rows/row-1904` — open, medium
+
+**Planner 'Sync now' — absent, and the service header claims a scheduler that does not exist**
+
+*Evidence:* reaudit.md:1904-1927 (M). No RefreshCw, sync or pullEvents in workspace-planner-page.tsx. pullEvents' only caller is calendar-sync.controller.ts:108. There is no @Cron or @Interval in the calendar-sync module. calendar-sync.service.ts:25 says 'a manual or scheduled pullEvents call'.
+
+*To close:* Add a sync button in the planner header that calls pullEvents for the user's connections, and either add a scheduled pull or correct the comment.
+
+### `ledger-rows/row-739` — open, medium
+
+**Cover 'Search' tab — absent; the reason (no image provider) still holds**
+
+*Evidence:* reaudit.md:739 (P). cover-image-picker.tsx:20-58 records the decision and the grep. Re-running `grep -rliE "unsplash|pexels|pixabay|imageProvider" apps packages .env.example` finds only cover-image-picker.tsx. The frame does draw the tab, so this is not a 'no frame' block: it needs an external provider.
+
+*To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
+
+### `commit-log/log-3100ba1-1` — open, small
+
+**The create-modal placeholder and its ⚡AI button are built and tested, but the ledger counts the row as missing**
+
+*Evidence:* Commit 3100ba1 (21 Sep 19:10) wrote 'Left M with the reason on the row'. Ledger row 791 still reads 'M ... Left M rather than built'. The feature went in three hours earlier in 666f15f (16:15). catalogs.ts:2211 has 'Add description, or write with ⚡AI'. quick-create-modal.tsx:703-734 and 1330-1351 wire a live button to /ai/task/generate. create-menu-ai.mjs:449-484 checks both. The frame citations also conflict: the code and the suite cite frame 10:04, while ledger §7 (line 2981) says 09:54-10:08 are all Board view.
+
+*To close:* Re-extract frame 10:04. Then move row 791 to B, or strike it as answering no frame (as the tab-title countdown was), and let check-video2-counts recompute 148/11/14.
+
+### `commit-log/log-6f62af6-1` — partly-fixed, small
+
+**The end of the third Teams carousel card is our own wording and is not checked**
+
+*Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
+
+*To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
+
+### `ledger-rows/row-2398-remainder` — open, small
+
+**Teams 'All People' count badge — an open remainder inside a B row, counted nowhere**
+
+*Evidence:* reaudit.md:2404 draws 'All People' with a count (2); :2416-2417 says 'The People count badge … is NOT part of this closure and stays open'. workspace-teams-page.tsx:218-241: the tabs teams/people/chart render a label and icon and no count.
+
+*To close:* Add the member count to the People tab and a check for it. Record it as a B* or its own row so it is counted.
+
+### `ledger-rows/row-780-remainder` — open, small
+
+**Sidebar 'new folder here' dialog still posts only {name} — a second create path that the frame's dialog fields never reached**
+
+*Evidence:* reaudit.md:780 (B) says 'The sidebar's own inline "new folder here" dialog still posts { name } alone — recorded rather than built, because it answers no frame'. workspace-sidebar.tsx:745-751 submitCreateFolder does `api(`/spaces/${...}/folders`, { method: 'POST', body: { name } })`. The quick-create Folder tab carries description, private and location.
+
+*To close:* Point the sidebar entry at the shared Create Folder dialog (quick-create-modal FolderForm with initialSpaceId) instead of a second form.
+
+### `ledger-rows/row-835-reorder` — open, small
+
+**Planner rail 'reorder' is recorded as built but does not exist; the stored order is a mirror no reader honours**
+
+*Evidence:* Frame 14:10 draws 'Show, hide and reorder…' with drag handles (video2-frame-observations.md:353-355). reaudit.md:835 and :6617 both say the five sections 'are built there with show, hide and reorder'. planner-settings-dialog.tsx:618-633 renders only a Switch per section, with no drag, sortable, move or arrow code in the file. workspace-planner-page.tsx draws sections in fixed JSX order (railOn gates at :1242, :1336, :1482, :1506, :1550) and reads settings.railSections only via .includes (:1011), so the array's order is read by nothing. The planner-settings.mjs checks (:314-328) assert only on/off. This falsifies the ledger's claim at reaudit.md:6624-6632 that 'Not one error ran the other way — nothing recorded as built turned out to be absent'.
+
+*To close:* Add drag or up/down reorder to the Sidebar settings page. Render the rail in railSections order, with RAIL_SECTIONS as the default order. Add a check that a reordered rail renders in the stored order and survives reload. Correct rows 835 and 6617 and the 'one direction' paragraph.
+
+## Stale documentation — 18
+
+### `harness/break-queue-references-stale` — open, small
+
+**Comments still name the deleted break-queue.sh, and break-report calls the awk classifier 'shared with the runner'**
+
+*Evidence:* d840b55 deleted scripts/e2e-lanes/break-queue.sh, and its message says 'The three comments that referenced it now name the runner'. It changed only break-report.sh, classify-break-log.awk, never-run-plan.mjs and the ledger. wt-break.sh:450 and :461 and check-break-freshness.mjs:132 still name break-queue.sh. break-report.sh:11 says classify-break-log.awk is 'shared with the runner', but no runner uses it: the only callers are break-report.sh:87, :105 and :143.
+
+*To close:* Repoint the comments at break-report.sh / classify-break-log.awk.
+
+### `harness/fleet-up-cites-nonexistent-break-fleet` — open, small
+
+**fleet-up.sh points readers at break-fleet.sh, which has never existed in this repository**
+
+*Evidence:* scripts/e2e-lanes/fleet-up.sh:10-11 says 'Break tests, which must rebuild, get their own dist directory per lane — see break-fleet.sh.' `git log --all -- '*break-fleet.sh'` returns nothing, and `git grep break-fleet` finds only this line. The per-lane break worktrees are wt-break.sh, and the per-lane dists are refresh-dists.sh or verify.sh's /tmp/claude-0/dist-<lane>. The same header's :19 also cites sweep.sh (see sweep-drain-run-stale-tmp-copies).
+
+*To close:* Repoint the sentence at wt-break.sh and refresh-dists.sh.
+
+### `ledger-rows/ledger-defects-fixed-unmarked` — open, small
+
+**'Defects found while checking' carries four entries fixed in code but not marked fixed (one explicitly says 'Not fixed')**
+
+*Evidence:* (1) reaudit.md:2572-2580: ai-value-panel tiles outside the loading guard. Fixed: ai-value-panel.tsx:461-477 'DEFECT, FIXED HERE' plus ai-value-categories-skeleton. (2) reaudit.md:2581-2587: SearchService injected and never called. Removed: ai.service.ts:916-922. (3) reaudit.md:2588-2590: disabled input keeps the ask placeholder. Fixed: ai-panel.tsx:1817-1823. (4) reaudit.md:2641-2645: palette-more-types-menu has no Escape, '*Not fixed.*'. Fixed: command-palette.tsx:705-709 onEscapeKeyDown closes typeMenuOpen and preventDefaults the dialog close. Also reaudit.md:4599-4603 says container create is ungated and 'it is open', while resume.md:201-206 records it FIXED 21 September (assertCanCreateInSpace).
+
+*To close:* Strike each one with the fixing location, so the open-defect list is only what is open.
+
+### `ledger-rows/ledger-model-stub-stale` — open, small
+
+**The ledger still says the model stub is wired into no lane and that six suites assert the refusal, which is the premise behind the placeholder revert and 'AI unmeasurable'**
+
+*Evidence:* reaudit.md:2876-2882 says 'Not wired into the lanes, deliberately'. reaudit.md:6664-6674 says 'It is wired into no lane' and 'Six suites assert the AI-unavailable state'. scripts/e2e-lanes/lane-env.sh:88-175 wires it per lane (RUNDESK_LANE_MODEL=all | list | unset, lane_model_env exports ANTHROPIC_BASE_URL) and counts FOUR suites / 21 assertions. Two are already converted (ai-create-containers 33/33, ai-answer-rendering 51/51, run both ways). Commits 6fbd79b and ad00a7c. What is still genuinely open, per lane-env.sh:131-132: 'Wiring that choice into the dispatcher is the next piece of this work and is NOT done'.
+
+*To close:* Rewrite both ledger passages to the current state and name the one remaining step (dispatcher routes create-menu-ai/task-ai-bar to no-model lanes, the rest to model lanes). That step is what unblocks the rotating placeholder (row 853) and the AI field types (row 719).
+
+### `commit-log/log-666f15f-2` — open, small
+
+**The ledger's B* legend still says those suites have never been run or registered**
+
+*Evidence:* Ledger lines 801-810 say the B* suites 'have not been run' and 'are not registered in ci.yml'. list-customize and list-assignee-filter, cited on the B* rows, are in ci.yml, and resume :94 lists list-customize as a green baseline (762c22d: 'Every suite is registered'). §4 line 947 already uses B* to mean something else: 'built, with the remainder written down'.
+
+*To close:* Replace the legend with the §4 meaning and drop the not-run claim.
+
+### `commit-log/log-ad00a7c-2` — open, small
+
+**Comments still describe the model flag as it was before it changed**
+
+*Evidence:* fleet-restart.sh:120-121 says 'Off unless RUNDESK_LANE_MODEL=1 - see lane-env.sh for the six suites'. Commit 7c4ac44 re-measured it as four suites, and commit ad00a7c changed =1 to mean lane 1 only. lane-env.sh:88 ('GATED ON RUNDESK_LANE_MODEL=1') and :129 ('RUNDESK_LANE_MODEL=1 is read per lane') still present =1 as the on-switch. ai-create-containers.mjs:343 and ai-answer-rendering.mjs:532 use the same spelling.
+
+*To close:* Reword all of these to the list syntax (all, or a list of lane numbers) and to the count of four suites.
+
+### `commit-log/log-e44622e-1` — open, small
+
+**The handoff doc docs/video2-resume.md is stale again in many places**
+
+*Evidence:* Commits e44622e and 10b4086 corrected this doc once already. Now: :41 says '113 suites ... ALL 113 are registered' (there are 115 suite files and doc-import is unregistered). :66-74 has a table of 50 green, 1 refused, 6 unreadable and 44 not run, while check-break-reddened reports 115 of 115 proven and 828 reddened. §3 #4 (:234-236) lists the timeline projectId as open, but commit 07d9208 settled it as not a defect and added a check (gantt-29). §6 :316-322 says 150 minutes and 98 suites and 'Split the job before adding the tenth', while ci.yml:428 is 180 and the job has 109 steps, unsplit. :185 and :285 recommend drain.sh. check-video2-counts guards only the headline count.
+
+*To close:* Rewrite §2, §3, §5 and §6 from the checkers' current output, and consider guarding the suite and registration counts the same way the headline is guarded.
+
+### `harness/log-tree-header-contradicts-body-rule` — open, small
+
+**log-tree.mjs header and check-break-freshness still say the patch file is not a dependency**
+
+*Evidence:* scripts/lib/log-tree.mjs:33-37 says 'WHAT A RUN DEPENDS ON: the suite ... and the product files the patch edits. Not the patch file itself'. The same file at :166-178 says 'THE PATCH'S OWN CODE IS A DEPENDENCY, AND ITS COMMENTS ARE NOT'. scripts/check-break-freshness.mjs:157-160 repeats the old premise ('The patch files themselves are left out') and acts on it. That old premise is what never-run-plan.mjs also still follows (see planner-ignores-patch-body).
+
+*To close:* Rewrite log-tree.mjs:33-37 to state the body rule. Fix freshness in code as part of planner-ignores-patch-body, not by editing the comment only.
+
+### `commit-log/missed-ci-meili-1` — open, small
+
+**ci.yml claims the e2e job runs a real Meilisearch; it runs none**
+
+*Evidence:* ci.yml:405-407 ('duplicating the Postgres + Meilisearch + build setup') and :576-578 ('a real Postgres and a real Meilisearch' for addressability-live) claim a Meilisearch. The job's services block (ci.yml:430-453) defines only postgres. A case-insensitive search for 'meili' across .github/workflows finds only those two comments, with no service and no MEILI environment variable. So search in CI always takes SearchService's database fallback, which means log-68c0345-1's 'unmeasurable' also covers CI.
+
+*To close:* Either add a getmeili/meilisearch service and its environment variables to postgres-harnesses, and then point doc-import at indexing, or correct both comments so they stop claiming coverage that does not exist.
+
+### `commit-log/missed-d840b55-1` — open, small
+
+**d840b55 said every comment naming break-queue.sh was updated; four still name it as a live consumer**
+
+*Evidence:* Commit d840b55 deleted scripts/e2e-lanes/break-queue.sh and says 'The three comments that referenced it now name the runner'. Yet syncup-live.mjs:259 and video-regression.mjs:1055 still say the summary line is kept because `scripts/e2e-lanes/break-queue.sh` parses it. wt-break.sh:461 says 'Named here so `break-queue.sh` can count it'. test/e2e/breaks/emoji-picker-2-data-inlined.py:28 says 'break-queue.sh counts a run with no summary as CRASHED'. In the same class, fleet-up.sh:11 sends the reader to 'break-fleet.sh', which `git log --all` shows never existed.
+
+*To close:* Rename each reference to the real consumer (wt-break.sh plus classify-break-log.awk, or run-plan.sh), and fix the pointer in fleet-up.sh. Consider having check-suite or preflight fail on comments that name a script path that does not exist.
+
+### `harness/resume-doc-harness-stale` — open, small
+
+**video2-resume.md describes retired harness state**
+
+*Evidence:* docs/video2-resume.md:185-187 says 'drain.sh walks that queue ... The patch scripts themselves live in the scratch directory and do NOT survive the container'. 833 patches are tracked in test/e2e/breaks, and drain.sh runs /tmp copies (see sweep-drain-run-stale-tmp-copies). :284-288 presents drain.sh as current. §6 at :316-322 says postgres-harnesses runs 98 suites under a 150-minute timeout. ci.yml now has 115 test/e2e invocations and timeout-minutes: 180 (ci.yml:428).
+
+*To close:* Rewrite §2's drain paragraph and §5 to point at run-plan.sh, chain-plan.sh and never-run-plan.mjs. Update §6's numbers.
+
+### `ledger-rows/row-2270` — open, small
+
+**§5 row 2270 (P, project-status per-status breakdown) is STALE: the breakdown is built and measured**
+
+*Evidence:* reaudit.md:2270-2286 says P: 'There is no per-statusCategory count anywhere in the context'. Tree: ai.service.ts:176-201 WorkspaceStatusBreakdown and :230-241 emit 'Task status breakdown (EVERY task in this workspace…)' with by-category and by-status lines. It is wired into the chat context at :1996 and :2018, workspaceStatusBreakdown is at :2041, and GET /ai/project-status is at ai.controller.ts:592-599. Measured by ai-create-containers.mjs:425-455. Built in 43f7b57 (2026-09-20). The §5 counts table (reaudit.md:2747) and §4's '4 P' in §5 (reaudit.md:937) still count it P.
+
+*To close:* Re-read and mark it B, keeping only the model-written answer as a remainder, which can be measured on a model-stub lane. Adjust §4 §5 split (P 4 -> 3 or fewer).
+
+### `ledger-rows/row-2374` — open, small
+
+**§5 row 2374 (P, AI busy state in words) is STALE: built and measured; only the frame's exact words differ**
+
+*Evidence:* reaudit.md:2385-2388 says 'a spinner and nothing else' and that the disabled input keeps 'Ask Rundesk AI anything…'. Tree: ai-panel.tsx:523-570 AiBusyState (ai-busy-state, ai-busy-label, states thinking/acting/writing derived from stream signals). :1817-1823 shows 'Working on it…' while streaming and placeholderUnavailable when disabled. Measured by ai-answer-rendering.mjs:577-590 through route interception, so no model is needed. The remaining difference: labels are Thinking/Handling/Writing the answer (catalogs.ts:3691-3693) against the frame's Cookin'/Handling/Brain.
+
+*To close:* Mark B (or B* with the label-wording remainder). Adjust §4. The ledger's separate defect at reaudit.md:2588-2590 (disabled input keeps the ask placeholder) is also fixed.
+
+### `ledger-rows/row-791` — open, small
+
+**Row 791 (M, create-modal placeholder 'Add description, or write with ⚡AI') is STALE: built, measured, and was already built when the row was written**
+
+*Evidence:* reaudit.md:791 reads M: 'Left M rather than built: a string with no frame is a summary'. Tree: catalogs.ts:2211 'quickCreate.descriptionPlaceholder': 'Add description, or write with ⚡AI'. quick-create-modal.tsx:1331 uses it, and :1334-1345 adds a working ⚡AI button (quick-create-describe-ai, writeDescription.mutate) commented as frame `10:04`. It is measured by create-menu-ai.mjs:449-462 and break test/e2e/breaks/cma-14-old-description-placeholder.py. git: the string landed in 5494c0f (2026-09-21 16:03) and the suite in 666f15f (16:15). The row was rewritten to 'left M' in 3100ba1 (19:10 the same day), so it was wrong when written. The suite says frame 10:04 while the ledger says 09:54-10:08 are all Board view, a frame-citation conflict to settle. It is also one of §2's 9 M in the §4 table (reaudit.md:937).
+
+*To close:* Mark row 791 B, closed by create-menu-ai (cite its check count), and move §2/§4 counts 9 M -> 8 M. Reconcile the 10:04 vs Board-view frame claim. Under the new policy ClickUp's own create-task modal settles the placeholder.
+
+### `ledger-rows/row-793-796-798-799` — open, small
+
+**Four B* rows keep an asterisk whose reason ('suite has not been run, not in ci.yml') is no longer true**
+
+*Evidence:* The legend at reaudit.md:801-810 says the suites had not run and were not registered in ci.yml. Now: ci.yml:1748 runs list-customize and :1761 runs list-assignee-filter. Break logs show verified green baselines: /tmp/claude-0/break-list-customize-20260922-205727.txt '== BASELINE (no patch) 37 passed, 0 failed' at ea0b946a; break-list-assignee-filter-20260923-023405.txt '29 passed, 0 failed' at 8083f883. `node scripts/check-break-reddened.mjs` reports '115 of 115 suite(s) have a patch measured against this tree'. Rows 793 and 796 cite 'list-customize 29' while EXPECTED_CHECKS=37 (list-customize.mjs:59). §4 at reaudit.md:947 says 'the four marked B*', but §2 has six (730, 788, 793, 796, 798, 799). check-video2-counts.mjs passes because it checks letters, not the product.
+
+*To close:* Mark 793/796/798/799 plain B with their suites and current counts. Delete or rewrite the B* legend. Fix the §4 'four' to match the two real B* rows (730, 788).
+
+### `suite-hygiene/stale-env-premises` — open, small
+
+**Suite headers, comments and harness notes still state 'no key' or 'no bucket' as facts about the lanes**
+
+*Evidence:* Model: ai-answer-rendering.mjs:51-58 ('NO PROVIDER KEY EXISTS HERE, so /ai/chat 503s'), 551, 766-768. ai-create-containers.mjs:32-37 ('THE MODEL-FACING HALF 503s HONESTLY. There is no provider key in this environment'). Both suites were converted tonight (350743c, b5a52bc) but their headers were not. ai-activity-filters.mjs:22-25 and 119-121; ai-action-categories.mjs:31-33 and ai-value.mjs:148-150 ('a test environment has no API key, so no endpoint can create one'). Storage (lanes have s3-stub): syncup-live.mjs:229-236 ('no bucket is configured (upload-url -> 400)'), 224 ('the total is 58' while EXPECTED_CHECKS is 59 at 246), 1083, 1126-1128, 1143-1145. settings-depth.mjs:760-763 ('unconfigured here and in CI, so the library is empty everywhere'). task-attachments.mjs:21 ('R2 is not configured here or in CI'). comment-recording.mjs:215-216 ('R2 is not configured locally, so the presign step is skipped'). Harness: lane-env.sh:88 ('GATED ON RUNDESK_LANE_MODEL=1'; =1 now means lane 1 only, per 145-147), :89 ('FOUR suites'), :129. fleet-restart.sh:120-121 ('Off unless RUNDESK_LANE_MODEL=1 … the six suites').
+
+*To close:* Restate each as configuration-dependent ('with no model configured …', 'CI starts no store; lanes do'), or delete the premise where the suite now asks /ai/status. Fix syncup-live's 58 to 59. Correct lane-env and fleet-restart to the list spelling and the true suite count.
+
+### `ledger-rows/stale-reason-comments` — open, small
+
+**Code comments still carry blocking reasons that are no longer true**
+
+*Evidence:* task-detail-sheet.tsx:7285-7291: CommentPlusMenu says 'EIGHT are here' and that slash commands are absent, but comment-plus-slash is rendered. task-detail-sheet.tsx:577-581 and :1452-1454: 'Brain² HUB … does not exist', although the /app/:ws/ai hub and the shell AI dock exist. space-views.ts:59-63: 'The five Rundesk does not have (Map, Activity, Mind Map, Timeline, Workload)', although workload/timeline/mindmaps pages exist. calendar-sync.service.ts:25: 'manual or scheduled pullEvents', with no scheduler.
+
+*To close:* Rewrite each comment when its row is built, or now, so the reason no longer blocks investigation.
+
+### `harness/suite-reads-untested-claim-stale` — open, small
+
+**suite-reads.mjs still says rules one to five are untested**
+
+*Evidence:* scripts/lib/suite-reads.mjs:19-21 says 'Rules one to five are still line-based and still untested, which is a gap named in the ledger'. check-suite-enders.mjs was added in 571c7f1 ('Rules one to five get a case file'), and check-suite-section-enders.mjs:163-176 describes those fixtures. The case file names rule one 16 times and rules two to five 2 to 9 times each, and preflight.sh:43 runs it with --mutate.
+
+*To close:* Delete or correct the sentence.
+
+## Stale documentation — 2
+
+### `resume-defects/resume-4` — open, small
+
+**Item 4 (timeline projectId) was resolved as a recorded decision plus a check; the handoff doc still lists it as open**
+
+*Evidence:* docs/video2-resume.md:234-236 still lists it as an open defect. test/e2e/gantt-controls.mjs:193-230 records the reframing: the client is right not to send projectId, because the query has no window and projectOptions derive from the full rows. It then checks that the server narrows on it, using the run's own ids. The client still sends none (workspace-timeline-page.tsx:229 `/tasks/workspace/${workspaceId}/timeline`). The break gantt-29-projectid-ignored reddens it: /tmp/claude-0/break-gantt-controls.txt shows the baseline at 8083f883 at 29/0 and the patch at 28/1. Residue: tasks.service.ts:1832 getTimelineForWorkspace declares opts.from/opts.to, and nothing reads them (body :1834-1867). The controller (tasks.controller.ts:127-137) never passes them. That is a small mirror (class 2).
+
+*To close:* Mark item 4 closed-by-decision in docs/video2-resume.md with the check's name (gantt-controls, the 'really narrows on projectId' check) and its break gantt-29. Either remove the unread from/to from the opts type or wire them to a query param with a check.
+
+### `resume-defects/resume-6` — open, small
+
+**Item 6 (sticky headers inside overflow-hidden) is fixed and has been observed green; the handoff doc's 'not observed' is stale**
+
+*Evidence:* workspace-timeline-page.tsx:696 has Card glass with overflow-clip, and :804-811 is timeline-chart-viewport with maxHeight PANE_MAX_H and overflow-auto, holding the sticky header at :816-820. /tmp/claude-0/break-gantt-controls-20260922-090756.txt shows the baseline at bfe705d6 at 29/0, and the three sticky breaks redden: gantt-controls-15-sticky-unbounded 27/2, -16-sticky-notsticky 28/1, -17-panes-unsynced 28/1. /tmp/claude-0/break-gantt-controls.txt shows a baseline of 29/0 at 8083f883. docs/video2-resume.md:240-243 still says 'the fix has not been observed green'.
+
+*To close:* Update docs/video2-resume.md item 6 to fixed-and-observed, citing the three reddening breaks. Keep the Workload page instance (resume-6-workload) and the list Table view instance below as the open residue of the same class.
+
+## Other — 5
+
+### `commit-log/log-39863ff-1` — open, medium
+
+**Four recorded 'decisions' need owner confirmation: ChatGPT/Gemini, the three AI categories that can never be filled, AI Notetaker, Automations**
+
+*Evidence:* Commit 39863ff 'DECISIONS RECORDED RATHER THAN QUIETLY BUILT'. ChatGPT and Gemini are listed and not selectable (ledger row 860). ai-categories.ts:76-78: images, externalActions and externalSearches are unsupported and print a reason. AI Notetaker (needs a meeting bot) and Automations (parked, [14:29]) are in §3. Automations was parked by the client, so it is not simply unbuilt. The rest are product decisions, not gaps in the frames.
+
+*To close:* Put each one to the owner: which stay parked, and which to research and build now that frame silence is not an accepted reason.
+
+### `harness/dist-brk-committed` — open, small
+
+**A break-run web bundle (apps/web/dist-brk, 80 files) is committed and not ignored**
+
+*Evidence:* `git ls-files apps/web/dist-brk | wc -l` gives 80. It was added in 39863ff. `git check-ignore apps/web/dist-brk/index.html` exits 1, because .gitignore:5 `dist` does not match dist-brk. No tracked file other than the bundle itself references dist-brk.
+
+*To close:* git rm -r --cached apps/web/dist-brk and add `dist-*` to .gitignore.
+
+### `commit-log/log-39863ff-2` — open, small
+
+**About 1,840 build-output files were committed under apps/*/dist-brk**
+
+*Evidence:* git ls-files lists 1,758 files under apps/api/dist-brk and 80 under apps/web/dist-brk, all added in 39863ff (1,923 files changed, and the commit message does not mention them). Nothing references dist-brk (git grep outside those folders is empty). .gitignore line 5 ignores only 'dist'. The 'brk' suffix suggests a break-test build.
+
+*To close:* Check whether the bundles contain any break patch, git rm them, and add dist-* to .gitignore.
+
+### `commit-log/log-b7ee313-1` — open, small
+
+**Whether a subtask may be merged into its own parent is still an unanswered product question**
+
+*Evidence:* Commits b7ee313 and 13bc7b4 record 'a decision not taken'. task-merge.ts:133 and :149 still refuse with 'A subtask cannot be merged into its own parent', although the ledger says the stated reason never applied (lines 102-115).
+
+*To close:* Research ClickUp's merge rules for a parent and its subtask, then allow or refuse to match, with a check either way.
+
+### `product-siblings/other-get-routes-without-reader` — open, small
+
+**Other GET routes with no web reader: digest preview, webhook deliveries, goal history**
+
+*Evidence:* notifications.controller.ts:45-52 (digest/preview), webhooks.controller.ts:74-80 (:webhookId/deliveries) and goals.controller.ts:105-108 (goals/:goalId/history). Searches of apps/web/src (excluding i18n catalogs) for 'digest/preview', 'deliveries' and '/history' returned nothing. A route survey that matched full paths found 52 GETs without a literal caller, most of them helper-built URLs; these three were checked by hand.
+
+*To close:* Either surface each one (a digest preview in the notification settings, a delivery log under webhooks, history on the goal page) or delete it.
+
