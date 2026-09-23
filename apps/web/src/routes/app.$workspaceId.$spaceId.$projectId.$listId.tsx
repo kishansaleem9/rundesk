@@ -3756,7 +3756,7 @@ function ListDetail() {
         focusCommentId={commentParam ?? null}
       />
       <ListStatusesManager listId={listId} open={statusManagerOpen} onOpenChange={setStatusManagerOpen} />
-      <ListEmailAliasPanel listId={listId} open={emailAliasOpen} onOpenChange={setEmailAliasOpen} />
+      <ListEmailAliasPanel listId={listId} workspaceId={workspaceId} open={emailAliasOpen} onOpenChange={setEmailAliasOpen} />
       <SharePanel
         open={sharePanelOpen}
         onOpenChange={setSharePanelOpen}

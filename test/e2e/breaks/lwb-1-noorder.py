@@ -4,10 +4,11 @@
 # reordering the list, which is the defect, because an UPDATE is not a
 # membership event and must not move anything.
 #
-# Reddens: login-workspace-binding: "renaming the older workspace does not move it behind the newer one"
 # Re-anchored 23 September: `findByMember` now maps its rows through
 # `withoutDomainToken` (credential-reads), so the query is followed by a
 # `return rows.map(` rather than the closing brace. Same break: no ORDER BY.
+#
+# Reddens: login-workspace-binding: "renaming the older workspace does not move it behind the newer one"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/workspaces/workspaces.service.ts'
 s = io.open(p, encoding='utf-8').read()

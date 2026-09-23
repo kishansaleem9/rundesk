@@ -10,6 +10,7 @@ import { and, eq } from 'drizzle-orm'
 import { workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../../common/database/database.module'
+import { isManagerRole } from '../../../common/permissions/item-visibility'
 
 /**
  * Workspace-admin or super-admin only. Apply AFTER JwtAuthGuard.
@@ -17,9 +18,6 @@ import { DB_TOKEN } from '../../../common/database/database.module'
  * workspace-level resources (members, integrations, webhooks, API keys,
  * feature flags, audit log access, etc.).
  */
-/** The workspace roles this guard admits — also who may see what only they manage. */
-export const WORKSPACE_ADMIN_ROLES: readonly string[] = ['workspace_admin', 'manager', 'super_admin']
-
 @Injectable()
 export class WorkspaceAdminGuard implements CanActivate {
   constructor(@Inject(DB_TOKEN) private readonly db: Db) {}
@@ -55,7 +53,7 @@ export class WorkspaceAdminGuard implements CanActivate {
       .limit(1)
 
     if (!member) throw new NotFoundException('Workspace not found')
-    if (!WORKSPACE_ADMIN_ROLES.includes(member.role)) {
+    if (!isManagerRole(member.role)) {
       throw new ForbiddenException('Workspace admin or manager role required')
     }
 

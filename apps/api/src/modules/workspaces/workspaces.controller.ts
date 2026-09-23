@@ -5,7 +5,8 @@ import { PlansService } from '../plans/plans.service'
 import type { PlanLimitsOverride } from '../plans/plans.constants'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard, WORKSPACE_ADMIN_ROLES } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { isManagerRole } from '../../common/permissions/item-visibility'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { canCreateWorkspace } from './workspace-creation-policy'
@@ -53,7 +54,7 @@ export class WorkspacesController {
     const ws = await this.workspacesService.findById(workspaceId)
     // The domain's verification secret goes to the people who may change the
     // domain — the same roles `PATCH` admits — and to nobody else.
-    return WORKSPACE_ADMIN_ROLES.includes(req.workspaceMember?.role) ? ws : withoutDomainToken(ws)
+    return isManagerRole(req.workspaceMember?.role) ? ws : withoutDomainToken(ws)
   }
 
   @Get(':workspaceId/plan')

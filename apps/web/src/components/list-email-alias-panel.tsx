@@ -10,10 +10,12 @@ import {
   DialogTitle,
   Input,
   cn,
+  toast,
 } from '@rundesk/ui'
 import { Check, Copy, Mail, RefreshCcw, Trash2, Webhook } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type Alias = {
   id: string
@@ -32,14 +34,20 @@ type Alias = {
  */
 export function ListEmailAliasPanel({
   listId,
+  workspaceId,
   open,
   onOpenChange,
 }: {
   listId: string
+  workspaceId: string
   open: boolean
   onOpenChange: (open: boolean) => void
 }) {
   const { t } = useTranslation()
+  // A hook adds tasks as its creator, and a guest may not add tasks — the
+  // server refuses, so the button is not offered.
+  const { role } = useWorkspaceRole(workspaceId)
+  const mayCreateWebhook = role !== 'guest'
   const qc = useQueryClient()
   const { data: alias, refetch } = useQuery({
     queryKey: ['list-email-alias', listId],
@@ -62,18 +70,24 @@ export function ListEmailAliasPanel({
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-email-alias', listId] }),
   })
 
-  const { data: webhooks = [] } = useQuery({
+  // `token` only on the hooks this viewer made or manages — see the service.
+  const webhooksQuery = useQuery({
     queryKey: ['list-inbound-webhooks', listId],
-    queryFn: () => api<Array<{ id: string; name: string; token: string }>>(`/lists/${listId}/inbound-webhooks`),
+    queryFn: () =>
+      api<Array<{ id: string; name: string; token?: string; canManage?: boolean }>>(`/lists/${listId}/inbound-webhooks`),
     enabled: open,
   })
+  const webhooks = webhooksQuery.data ?? []
+  const refused = (err: unknown) => toast.error(err instanceof ApiError ? err.message : t('webhooks.loadFailed'))
   const createWebhook = useMutation({
     mutationFn: () => api(`/lists/${listId}/inbound-webhooks`, { method: 'POST', body: { name: 'Inbound webhook' } }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-inbound-webhooks', listId] }),
+    onError: refused,
   })
   const deleteWebhook = useMutation({
     mutationFn: (id: string) => api(`/lists/${listId}/inbound-webhooks/${id}`, { method: 'DELETE' }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ['list-inbound-webhooks', listId] }),
+    onError: refused,
   })
   const webhookUrl = (token: string) =>
     `${typeof window !== 'undefined' ? window.location.origin : ''}/api/v1/inbound/webhook/${token}`
@@ -140,16 +154,44 @@ export function ListEmailAliasPanel({
                 {t('listEmailAlias.webhookDescPrefix')}<code className="font-mono">{'{ title, description?, priority?, dueDate? }'}</code>{t('listEmailAlias.webhookDescSuffix')}
               </div>
             </div>
-            <Button size="sm" variant="outline" onClick={() => createWebhook.mutate()} disabled={createWebhook.isPending}>
-              {createWebhook.isPending ? t('listEmailAlias.creating') : t('listEmailAlias.newWebhook')}
-            </Button>
+            {mayCreateWebhook && (
+              <Button size="sm" variant="outline" data-testid="inbound-webhook-new" onClick={() => createWebhook.mutate()} disabled={createWebhook.isPending}>
+                {createWebhook.isPending ? t('listEmailAlias.creating') : t('listEmailAlias.newWebhook')}
+              </Button>
+            )}
           </div>
-          {webhooks.length === 0 ? (
+          {webhooksQuery.isError ? (
+            <div className="rounded-md border border-dashed border-destructive/40 p-3 text-xs text-destructive" data-testid="inbound-webhooks-load-failed">
+              {t('webhooks.loadFailed')}
+            </div>
+          ) : webhooksQuery.isPending ? null : webhooks.length === 0 ? (
             <div className="rounded-md border border-dashed border-border/70 p-3 text-xs text-muted-foreground">
               {t('listEmailAlias.noWebhooks')}
             </div>
           ) : (
-            webhooks.map((w) => <WebhookRow key={w.id} url={webhookUrl(w.token)} onDelete={() => deleteWebhook.mutate(w.id)} />)
+            webhooks.map((w) =>
+              w.token ? (
+                <WebhookRow
+                  key={w.id}
+                  id={w.id}
+                  url={webhookUrl(w.token)}
+                  onDelete={w.canManage ? () => deleteWebhook.mutate(w.id) : undefined}
+                />
+              ) : (
+                // Somebody else's hook: listed, so nobody is told there is none,
+                // but its address is a credential and stays with its creator.
+                <div key={w.id} data-testid={`inbound-webhook-${w.id}`} className="flex items-center gap-2 rounded-md border border-border/60 px-3 py-2 text-xs">
+                  <Webhook className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="font-medium">{w.name}</span>
+                  <span className="text-muted-foreground">{t('listEmailAlias.webhookHidden')}</span>
+                  {w.canManage && (
+                    <Button variant="ghost" size="sm" className="ml-auto h-7 text-xs text-rose-600 hover:text-rose-700" onClick={() => deleteWebhook.mutate(w.id)} title={t('listEmailAlias.deleteWebhookTitle')}>
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  )}
+                </div>
+              ),
+            )
           )}
         </div>
 
@@ -162,7 +204,7 @@ export function ListEmailAliasPanel({
   )
 }
 
-function WebhookRow({ url, onDelete }: { url: string; onDelete: () => void }) {
+function WebhookRow({ id, url, onDelete }: { id: string; url: string; onDelete?: () => void }) {
   const { t } = useTranslation()
   const [copied, setCopied] = useState(false)
   const copy = async () => {
@@ -175,21 +217,23 @@ function WebhookRow({ url, onDelete }: { url: string; onDelete: () => void }) {
     }
   }
   return (
-    <div className="flex items-center gap-2">
+    <div className="flex items-center gap-2" data-testid={`inbound-webhook-${id}`}>
       <Input readOnly value={url} onFocus={(e) => e.currentTarget.select()} className="h-8 text-xs font-mono" />
       <Button variant="outline" size="sm" className="h-8 text-xs" onClick={copy}>
         {copied ? <Check className="h-3.5 w-3.5 mr-1" /> : <Copy className="h-3.5 w-3.5 mr-1" />}
         {copied ? t('listEmailAlias.copied') : t('listEmailAlias.copy')}
       </Button>
-      <Button
-        variant="ghost"
-        size="sm"
-        className="h-8 text-xs text-rose-600 hover:text-rose-700"
-        onClick={onDelete}
-        title={t('listEmailAlias.deleteWebhookTitle')}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      {onDelete && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-8 text-xs text-rose-600 hover:text-rose-700"
+          onClick={onDelete}
+          title={t('listEmailAlias.deleteWebhookTitle')}
+        >
+          <Trash2 className="h-3.5 w-3.5" />
+        </Button>
+      )}
     </div>
   )
 }

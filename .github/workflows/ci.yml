@@ -427,11 +427,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND TWENTY — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND TWENTY-ONE — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 132 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120.
+    # that is about 133 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1695,6 +1695,18 @@ jobs:
       - name: Credentials and invitations stay inside their owners
         if: '!cancelled()'
         run: node test/e2e/credential-reads.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # An inbound webhook's address is its creator's and the workspace
+      # admins'; a client portal is not minted while public sharing is
+      # blocked, and is not a guest's. Every member read every hook's token —
+      # the whole credential for adding tasks as its creator — and the switch
+      # stopped docs and not portals. Rows checked in Postgres (DATABASE_URL).
+      - name: Hook addresses and client portals stay with their owners
+        if: '!cancelled()'
+        run: node test/e2e/hook-portal-access.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

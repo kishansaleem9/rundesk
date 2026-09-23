@@ -112,6 +112,9 @@ export class ClientPortalService {
       .where(and(eq(workspaceMembers.workspaceId, proj.workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
     if (!member) throw new ForbiddenException('You are not a member of this workspace')
+    // A portal is an anonymous window onto the project — not a guest's to open,
+    // list or revoke. Guests read portal tokens and could mint new ones.
+    if (member.role === 'guest') throw new ForbiddenException('Guests cannot manage client portals')
     const ok = await checkContainerAccess(
       this.db,
       {
@@ -156,6 +159,17 @@ export class ClientPortalService {
     body: { name?: string | null; clientId?: string | null; showCompleted?: boolean } = {},
   ) {
     const proj = await this.assertProjectManageAccess(projectId, userId)
+
+    // §A4.2 — "Block public sharing" stops anyone minting an anonymous link,
+    // and a portal is one: its `/portal/<token>` needs no sign-in. Docs refused
+    // under the switch and portals did not. Existing portals can still be
+    // disabled and revoked, as the setting says of existing links.
+    const [ws] = await this.db
+      .select({ blockPublicSharing: workspaces.blockPublicSharing })
+      .from(workspaces)
+      .where(eq(workspaces.id, proj.workspaceId))
+      .limit(1)
+    if (ws?.blockPublicSharing) throw new ForbiddenException('Public sharing is disabled for this workspace')
 
     let clientId: string | null = null
     if (body.clientId) {

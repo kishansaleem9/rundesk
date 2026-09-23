@@ -32,8 +32,8 @@ export class InboundWebhooksController {
   constructor(private readonly hooks: InboundWebhooksService) {}
 
   @Get()
-  list(@Param('listId') listId: string) {
-    return this.hooks.listForList(listId)
+  list(@Param('listId') listId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.hooks.listForList(listId, { id: user.id, role: user.role })
   }
 
   @Post()
@@ -46,8 +46,8 @@ export class InboundWebhooksController {
   }
 
   @Delete(':id')
-  remove(@Param('listId') listId: string, @Param('id') id: string) {
-    return this.hooks.remove(id, listId)
+  remove(@Param('listId') listId: string, @Param('id') id: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.hooks.remove(id, listId, { id: user.id, role: user.role })
   }
 }
 

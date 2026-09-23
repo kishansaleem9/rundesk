@@ -29,6 +29,7 @@ import { ContainerMembersSheet } from '../components/container-members-sheet'
 import { ContainerEditDialog, type ContainerEditValues } from '../components/container-edit-dialog'
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type List = {
   id: string
@@ -367,7 +368,7 @@ function ProjectHome() {
 
       <ClientInvoicesSection workspaceId={workspaceId} projectId={projectId} />
 
-      <ClientPortalSection projectId={projectId} />
+      <ClientPortalSection projectId={projectId} workspaceId={workspaceId} />
 
       <ContainerMembersSheet
         kind="project"
@@ -1447,14 +1448,25 @@ type AdminPortal = {
   lastViewedAt: string | null
 }
 
-function ClientPortalSection({ projectId }: { projectId: string }) {
+function ClientPortalSection({ projectId, workspaceId }: { projectId: string; workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [newName, setNewName] = useState('')
+  // Portals are not a guest's to manage — the server refuses them — and a
+  // workspace that blocks public sharing mints none.
+  const { role } = useWorkspaceRole(workspaceId)
+  const isGuest = role === 'guest'
+  const workspaceQuery = useQuery({
+    queryKey: ['workspace', workspaceId],
+    queryFn: () => api<{ blockPublicSharing?: boolean }>(`/workspaces/${workspaceId}`),
+    enabled: !isGuest,
+  })
+  const sharingBlocked = workspaceQuery.data?.blockPublicSharing === true
 
   const portalsQuery = useQuery({
     queryKey: ['client-portals', projectId],
     queryFn: () => api<AdminPortal[]>(`/projects/${projectId}/portal`),
+    enabled: !isGuest,
   })
   const portals = portalsQuery.data ?? []
   const invalidate = () => qc.invalidateQueries({ queryKey: ['client-portals', projectId] })
@@ -1495,8 +1507,10 @@ function ClientPortalSection({ projectId }: { projectId: string }) {
       .catch(() => toast.error(t('clientPortal.copyError')))
   }
 
+  if (isGuest) return null
+
   return (
-    <section>
+    <section data-testid="client-portal-section">
       <WorkSectionTitle>
         <span className="flex items-center gap-2">
           <Globe className="h-4 w-4 text-muted-foreground" />
@@ -1519,8 +1533,9 @@ function ClientPortalSection({ projectId }: { projectId: string }) {
             onChange={(e) => setNewName(e.target.value)}
             placeholder={t('clientPortal.namePlaceholder')}
             className="h-8 flex-1"
+            disabled={sharingBlocked}
           />
-          <Button type="submit" size="sm" disabled={createPortal.isPending}>
+          <Button type="submit" size="sm" data-testid="client-portal-create" disabled={createPortal.isPending || sharingBlocked}>
             {createPortal.isPending ? (
               <Loader2 className="h-3.5 w-3.5 animate-spin" />
             ) : (
@@ -1529,8 +1544,18 @@ function ClientPortalSection({ projectId }: { projectId: string }) {
           </Button>
         </form>
 
-        {portals.length === 0 ? (
-          <p className="text-[13px] text-muted-foreground">{t('clientPortal.noPortal')}</p>
+        {sharingBlocked && (
+          <p className="text-[13px] text-muted-foreground" data-testid="client-portal-blocked">{t('clientPortal.publicSharingBlocked')}</p>
+        )}
+
+        {portalsQuery.isError ? (
+          <p className="text-[13px] text-destructive" data-testid="client-portal-load-failed">{t('clientPortal.loadFailed')}</p>
+        ) : portalsQuery.isPending ? (
+          <InlineSkeleton />
+        ) : portals.length === 0 ? (
+          // "Create one to share this project" under a note that says none can be
+          // made would contradict it; the note stands alone.
+          sharingBlocked ? null : <p className="text-[13px] text-muted-foreground">{t('clientPortal.noPortal')}</p>
         ) : (
           <ul className="space-y-3">
             {portals.map((portal) => (

@@ -1,8 +1,7 @@
 import { and, eq, inArray, isNull, ne, or, type SQL } from 'drizzle-orm'
 import { spaceMembers, projectMembers, workspaceMembers, spaces, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-
-const WS_MANAGER_ROLE_SET = ['workspace_admin', 'manager', 'super_admin']
+import { isManagerRole } from './item-visibility'
 
 /** True if the user holds a manager-tier role in the workspace. */
 export async function isWorkspaceManager(db: Db, workspaceId: string, userId: string): Promise<boolean> {
@@ -11,7 +10,7 @@ export async function isWorkspaceManager(db: Db, workspaceId: string, userId: st
     .from(workspaceMembers)
     .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
     .limit(1)
-  return !!wm && WS_MANAGER_ROLE_SET.includes(wm.role as string)
+  return !!wm && isManagerRole(wm.role as string)
 }
 
 /**
@@ -42,7 +41,7 @@ export async function checkContainerAccess(
   ctx: ContainerAccessContext,
   actor: { userId: string; workspaceRole?: string },
 ): Promise<boolean> {
-  if (actor.workspaceRole && WS_MANAGER_ROLE_SET.includes(actor.workspaceRole)) return true
+  if (isManagerRole(actor.workspaceRole)) return true
 
   const spacePrivate = ctx.spaceVisibility === 'private'
   if (spacePrivate) {
