@@ -6515,12 +6515,36 @@ Analytics · Skills (Beta) · Connections; **Super Agents**: Create Agent · All
 Agents · My Agents) over a **Recent Chats** list. There is no Ask|Agents toggle,
 no agents hub, and no credit meter.
 
-**And two of those are blocked for the reason already recorded, not for want of
-effort.** The credit meter reads *"500 Credits left"*, and `PlanUsage.usage` is
-`{ members, projects }` — a count of things that EXIST, not of times a feature
-was USED. Building the meter means inventing the allowance and the reset policy
-and then writing checks against my own invention, which is the trade §2 already
-refuses for the metered paywall state at `09:30`. The rotating placeholder is
+**And two of those are blocked — but the recorded reason for one of them was
+itself stale, four hours after I wrote it.** It read: "the credit meter reads
+*"500 Credits left"*, and `PlanUsage.usage` is `{ members, projects }` — a count
+of things that EXIST, not of times a feature was USED."
+
+`PlanUsage.usage` is indeed that. It is also not the only thing in the tree.
+**`ai_usage` records one row per Claude API call** — workspace, user, feature,
+model, input and output tokens, and since migration 0150 a `status` of
+`succeeded` or `failed` with an error code, so that a Status filter has more
+than one reachable value. `recordUsage` fires at three sites in `ai.service.ts`
+and `GET /ai/usage` already serves "AI usage + estimated cost per user / per
+model". Times a feature was used is exactly what that table counts, and it has
+counted them since before this pass began.
+
+So the blocker is real and it is NARROWER than the sentence it replaces. What
+is missing is not the metering:
+
+  · **the allowance** — what "500" is. No frame says.
+  · **the reset policy** — when it refills. No frame says.
+  · **"Add credits"** (row 869) — a purchase flow. No frame opens it.
+
+Those three are the invention, and inventing them and then checking my own
+invention is the trade §2 refuses for the metered paywall state at `09:30`.
+Showing "N used this month" instead would be a different control from the one
+the frame draws, which is the same substitution.
+
+**The third stale reason this ledger has produced, and the shortest-lived.**
+The other two went stale over weeks — a column that grew a reader, a harness
+that grew an object store. This one was wrong when written, because it named
+one table and stopped looking. The rotating placeholder is
 four exact strings on a timer and is cheap; `ai-panel.tsx` already argues, in a
 comment about the starter CARDS, that a set rotating on a timer is
 indistinguishable from a set that responds to anything — which is the note to
