@@ -18,12 +18,22 @@
  * requests themselves are unexercised, and saying so is better than implying a
  * coverage that does not exist.
  *
+ * AND WHOSE ACCOUNT A SOURCE IS. A connection is one person's Google or
+ * Microsoft account, and every member used to search it — the connector's mail
+ * subjects, senders and snippets for anybody in the workspace. It now answers
+ * the person who connected it (the unit tests in `search.service.test.ts` prove
+ * the query side; nothing here can reach Google). What is checked here is what
+ * each person is TOLD: the source list says whose account it is, a member is
+ * not offered a Connect button that would lead to settings they cannot open,
+ * and the connection is staged straight into Postgres (DATABASE_URL).
+ *
  *   node test/e2e/search-sources.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -32,7 +42,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 7
+const EXPECTED_CHECKS = 10
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -68,10 +78,13 @@ const apiAs = (token) => async (route, init = {}) => {
 
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
+let sql = null
+let A = null
+let heldWs = null
 
 try {
   const login = await signInApi(API, ME.email, ME.password)
-  const A = apiAs(login.accessToken)
+  A = apiAs(login.accessToken)
   const workspaces = (await A('/workspaces')).data ?? []
   const workspaceId = workspaces[0]?.workspace?.id ?? workspaces[0]?.id
 
@@ -158,11 +171,79 @@ try {
     'and offers the way to connect it',
     'the message names no way out',
   )
+
+  // ══ WHOSE ACCOUNT ════════════════════════════════════════════════════════
+  console.log('\n▶ a connected account answers the person who connected it, and says so to everyone else')
+
+  sql = await openDb()
+  if (!sql) throw new Error('no DATABASE_URL — the connection is staged in Postgres; no test environment holds a Google grant')
+  const stamp = Date.now()
+  const made = await A('/workspaces', { method: 'POST', body: { name: `sources-${stamp}` } })
+  heldWs = made.data?.id
+  if (!heldWs) throw new Error(`could not make the workspace: ${made.status}`)
+  const adminId = (await A('/users/me')).data?.id
+  const memberEmail = `sources-member-${stamp}@rundesk.invalid`
+  const signup = await fetch(`${API}/auth/signup`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ fullName: 'Sources member', email: memberEmail, password: 'Member@12345!', organizationName: `Sources ${stamp}`, organizationSlug: `sources-${stamp}` }),
+  })
+  const memberToken = (await signup.json().catch(() => null))?.data?.accessToken
+  const added = await A(`/workspaces/${heldWs}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
+  if (!memberToken || added.status >= 300) throw new Error(`could not add the member: signup ${signup.status}, add ${added.status}`)
+  const M = apiAs(memberToken)
+  // The admin's own Gmail, as `/oauth/callback` would have stored it.
+  await sql`
+    insert into workspace_integration_connections (workspace_id, provider, status, scopes, access_token, connected_by_id)
+    values (${heldWs}, 'gmail', 'connected', ${['https://www.googleapis.com/auth/gmail.readonly']}, 'staged-by-search-sources', ${adminId})`
+  const gmailOf = async (as) => ((await as(`/search/sources/${heldWs}`)).data ?? []).find((x) => x.id === 'gmail')
+  const adminGmail = await gmailOf(A)
+  const memberGmail = await gmailOf(M)
+  chk(
+    adminGmail?.connected === true && adminGmail?.heldBy === 'you' &&
+      memberGmail?.connected === false && memberGmail?.heldBy === 'someone-else',
+    'the admin’s Gmail is connected for the admin, and for a member it is somebody else’s',
+    `admin ${JSON.stringify(adminGmail)}; member ${JSON.stringify(memberGmail)}`,
+  )
+
+  const mpage = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
+  await mpage.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+  await mpage.fill('input[type=email]', memberEmail)
+  await mpage.fill('input[type=password]', 'Member@12345!')
+  await mpage.click('button[type=submit]')
+  await mpage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
+  await mpage.goto(`${stack.base}/app/${heldWs}/inbox`, { waitUntil: 'domcontentloaded' })
+  await mpage.waitForTimeout(2500)
+  await mpage.keyboard.press('Control+k')
+  const mGmail = mpage.getByTestId('palette-source-gmail')
+  await mGmail.waitFor({ state: 'visible', timeout: 15000 }).catch(() => {})
+  await mGmail.click({ timeout: 10_000 }).catch(() => {})
+  const mNotice = mpage.getByTestId('palette-source-disconnected')
+  await mNotice.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
+  const noticeText = ((await mNotice.innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const mConnect = await mpage.getByTestId('palette-source-connect').count()
+  chk(
+    /someone else/i.test(noticeText) && mConnect === 0,
+    'a member choosing Gmail is told it is somebody else’s account — and offered no Connect that would replace it',
+    `notice ${JSON.stringify(noticeText)}; Connect buttons ${mConnect}`,
+  )
+  await mpage.getByTestId('palette-source-sharepoint').click({ timeout: 10_000 }).catch(() => {})
+  await mpage.waitForTimeout(600)
+  const spText = ((await mNotice.innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const spConnect = await mpage.getByTestId('palette-source-connect').count()
+  chk(
+    /not connected/i.test(spText) && !/someone else/i.test(spText) && spConnect === 0,
+    'and a source nobody connected says so, with no Connect for a member who cannot open settings',
+    `notice ${JSON.stringify(spText)}; Connect buttons ${spConnect}`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
   await browser.close().catch(() => {})
+  if (sql && heldWs) await sql`delete from workspace_integration_connections where workspace_id = ${heldWs}`.catch(() => {})
+  if (A && heldWs) await A(`/workspaces/${heldWs}`, { method: 'DELETE' }).catch(() => {})
+  await sql?.end({ timeout: 5 }).catch(() => {})
   stack?.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

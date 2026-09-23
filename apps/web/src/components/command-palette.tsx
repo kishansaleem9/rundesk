@@ -48,6 +48,7 @@ import { api } from '../lib/api'
 import { forgetSearch, recentSearches, rememberSearch } from '../lib/recent-searches'
 import { rememberRevealedTypes, revealedTypesFor } from '../lib/revealed-types'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
 
@@ -245,11 +246,14 @@ export function CommandPalette({
     enabled: open && Boolean(workspaceId),
     queryKey: ['search-sources', workspaceId],
     queryFn: () =>
-      api<Array<{ id: string; connected: boolean; provider: string | null }>>(
+      api<Array<{ id: string; connected: boolean; provider: string | null; heldBy?: 'you' | 'someone-else' | null }>>(
         `/search/sources/${workspaceId}`,
       ),
   })
   const activeSource = sourcesQuery.data?.find((s) => s.id === source) ?? null
+  // Connecting happens in workspace settings, which only admins can open — a
+  // Connect button for anybody else led to a page that sent them back.
+  const { isAdmin } = useWorkspaceRole(workspaceId ?? undefined)
 
   const labelsQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -841,7 +845,11 @@ export function CommandPalette({
           className="mx-3 mt-2 flex items-center gap-2 rounded-md border border-border/60 bg-card/60 px-2 py-1.5 text-[11px] text-muted-foreground"
           data-testid="palette-source-disconnected"
         >
-          <span>{t('palette.sourceNotConnected')}</span>
+          {/* Somebody else's account answers them alone (search.service
+              `federatedCredential`), so it is not connected for this person —
+              and "Connect" would replace theirs, not add one. */}
+          <span>{t(activeSource.heldBy === 'someone-else' ? 'palette.sourceSomeoneElses' : 'palette.sourceNotConnected')}</span>
+          {isAdmin && activeSource.heldBy !== 'someone-else' && (
           <button
             type="button"
             data-testid="palette-source-connect"
@@ -853,6 +861,7 @@ export function CommandPalette({
           >
             {t('palette.sourceConnect')}
           </button>
+          )}
         </div>
       )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 px-3 py-2 border-b border-border/60">

@@ -19,11 +19,14 @@
 # Reddens exactly the one check that asks. Gmail and SharePoint are unconnected
 # either way, so the honest-empty half of the suite is untouched.
 #
+# Re-anchored 23 September: `listSources` now tells each person whose account a
+# grant is (`heldBy`), so the line this patched is two lines now. Same break.
+#
 # Reddens: search-sources: "and Rundesk itself is always answerable"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
-a = "      if (provider === null) return { id, provider, connected: true }"
-b = "      if (provider === null) return { id, provider, connected: false }"
+a = "      if (provider === null) return { id, provider, connected: true, heldBy: null }"
+b = "      if (provider === null) return { id, provider, connected: false, heldBy: null }"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

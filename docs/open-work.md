@@ -818,7 +818,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* `serviceWorkers: 'block'` in each of the four, and every hold asserts that it held (a flag set in the handler, as `webhook-access` does), so a route that never fires fails its check instead of passing it. A rule in the suite checkers: a `.route(` in a file whose contexts do not block service workers.
 
-### `found-23-sep/secret-and-credential-reads` — partly-fixed, high (from a read-only sweep of every credential column, each measured before it was fixed; federated search and admin-side invitation tokens remain)
+### `found-23-sep/secret-and-credential-reads` — partly-fixed, low now (from a read-only sweep of every credential column, each measured before it was fixed; only admin-side invitation tokens remain)
 
 **Read routes handed credentials to people who should not have them, and an invitation could grant another organisation's workspace**
 
@@ -828,7 +828,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (2 and 4):* a hook's token goes to its creator and to `isManagerRole` — the one list, now also used by `WorkspaceAdminGuard` and `container-access.guard-helper`, which had kept their own copies — and every other hook is still LISTED, by name, with `canManage`; guests may not add a hook; only the creator or a manager deletes one; and `receive` stops when the creator is no longer a member who can see the list (a hook no longer outlives the person it acts as). The list panel lists somebody else's hook by name with "Only its creator and workspace admins see its address.", shows no delete it would be refused, offers guests no "New webhook", and says so when the list fails instead of "no webhooks". Portals: guests are refused all portal management; `create` refuses under `blockPublicSharing` with the docs' own wording, while an existing portal can still be switched off (the setting's own words: "Existing links can still be revoked"); the project page disables the form under the switch and says why, hides the section from guests, and shows a failed list as failed. `hook-portal-access` 11/11 on lane 1 (8 API, 3 on screen); against the old code 0 of 11. `hpa-1..19`, each compiled. Regression on lane 1: credential-reads, doc-boundaries, space-features, task-boundaries, task-menu, settings-depth 7/7 with the new suite, custom-field-progress 58/58; unit tests for portals, hooks, guards and workspaces 114/114.
 
-*Still open:* federated search runs every member's query through the connecting admin's account; invitation tokens still come back to org admins in the list and create answers (low — the same admins can fetch the link); whether an existing portal's link should die when sharing is blocked is a ClickUp question (today's setting text says existing links stay revocable, and portals now match it).
+*Closed (federated search):* a connection is one person's Google or Microsoft account, and every member's query ran through it — the connector's mail subjects, senders and snippets, Drive files and SharePoint documents, for anybody in the workspace, guests included. Measured on lane 1 before the change: a member's `/search/sources` reported the admin's Gmail as connected for them. The frame is somebody searching "meri Gmail" — MY Gmail. Now `federatedCredential` and `searchDrive` answer only `connectedById` (which the OAuth callback records), and `listSources` tells each person whose it is (`heldBy`: you / someone-else / none), so the palette says "Connected with someone else's account — its mail and files are searched only for them" rather than promising results, and offers Connect only to admins — for a member it opened settings that sent them back. The query side is proven by unit tests (nothing in a test environment reaches Google): 48/48, three new, each reddened by `fsr-1..3` through `check-unit-claims` (9/9). `search-sources` 10/10 with three new checks, which failed 3 of 3 on the old code; `search-sources-5..7`. `app-catalogue` staged its grants with no connector — a row naming nobody is now connected for nobody — and stages them as the admin's, as the callback would; `search-sources-1/2` and `app-catalogue-5/6/7` re-anchored to the new `listSources`. Regression: app-catalogue, search-sources, command-palette, video1-acceptance 4/4. *Not built:* each member connecting their OWN account (ClickUp's per-person connected search) — today a second member connecting Google replaces the first's connection; that is a feature, listed with the unbuilt ones.
+
+*Still open:* invitation tokens still come back to org admins in the list and create answers (low — the same admins can fetch the link); whether an existing portal's link should die when sharing is blocked is a ClickUp question (today's setting text says existing links stay revocable, and portals now match it).
 
 ### `found-23-sep/break-patch-check-died-on-an-exit` — **closed** (found closing the credential item)
 
@@ -1053,6 +1055,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *To close:* Hoist the skip decision: if !API (invocation), skip all 3 via skip(); else if !NOTIFIED, fail all 3 with the reason (arranging a notification failed); otherwise run them. Use makeChain(chk, skip) for the block.
 
 ## Unbuilt features (buildable: research ClickUp where the frames stop) — 31
+
+### `found-23-sep/connected-search-per-person` — open, medium (unbuilt; found closing federated search)
+
+**Each member should search their OWN mail and files; today one person's connection is the workspace's only one**
+
+*Evidence:* `workspace_integration_connections` is unique on (workspace, provider), so a second member connecting Google replaces the first's grant — and since 23 September a grant answers only the person who connected it, so everyone else's Gmail, Drive and SharePoint tabs say "Connected with someone else's account". The frame (§V2-11 `19:07`, "meri Gmail pe jaa ke") is a person searching their own mailbox.
+
+*To close:* research ClickUp's Connected Search — which apps each person connects for themselves and which an admin connects for the workspace, and what a member sees of the latter — then store per-person grants beside the workspace one (the calendar accounts already do: `user_calendar_accounts`), connect from the person's own settings, and search with the searcher's own grant. A suite per source: two members, each finding only their own.
 
 ### `commit-log/log-214dac0-1` — open, large
 

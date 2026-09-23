@@ -48,8 +48,8 @@ export class SearchController {
    */
   @Get('sources/:workspaceId')
   @UseGuards(ResourceMemberGuard)
-  async sources(@Param('workspaceId') workspaceId: string) {
-    return this.search.listSources(workspaceId)
+  async sources(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string }) {
+    return this.search.listSources(workspaceId, user.id)
   }
 
   @Get(':workspaceId')

@@ -466,10 +466,10 @@ export class SearchService implements OnModuleInit {
       const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
-      const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
-      const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit) : []
+      const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
+      const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit, userId) : []
       const sharePointHits = wantSharePoint
-        ? await this.searchSharePoint(workspaceId, trimmed, limit)
+        ? await this.searchSharePoint(workspaceId, trimmed, limit, userId)
         : []
       return this.merge(
         filters.sort,
@@ -563,10 +563,10 @@ export class SearchService implements OnModuleInit {
     // Uploaded files: task attachments (Postgres, access-scoped) + clips (R2).
     const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit) : []
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
-    const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit) : []
-    const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit) : []
+    const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
+    const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit, userId) : []
     const sharePointHits = wantSharePoint
-      ? await this.searchSharePoint(workspaceId, trimmed, limit)
+      ? await this.searchSharePoint(workspaceId, trimmed, limit, userId)
       : []
 
     // Extras only for a general text search (no type/task-specific filter).
@@ -651,27 +651,34 @@ export class SearchService implements OnModuleInit {
    */
   async listSources(
     workspaceId: string,
-  ): Promise<Array<{ id: SearchSource; connected: boolean; provider: string | null }>> {
+    userId: string,
+  ): Promise<Array<{ id: SearchSource; connected: boolean; provider: string | null; heldBy: 'you' | 'someone-else' | null }>> {
     const rows = await this.db
       .select({
         provider: workspaceIntegrationConnections.provider,
         status: workspaceIntegrationConnections.status,
         accessToken: workspaceIntegrationConnections.accessToken,
         scopes: workspaceIntegrationConnections.scopes,
+        connectedById: workspaceIntegrationConnections.connectedById,
       })
       .from(workspaceIntegrationConnections)
       .where(eq(workspaceIntegrationConnections.workspaceId, workspaceId))
-    const live = new Map<string, readonly string[]>()
+    const live = new Map<string, { scopes: readonly string[]; mine: boolean }>()
     for (const row of rows) {
       if (row.status !== 'connected' || !row.accessToken) continue
-      live.set(row.provider as string, row.scopes ?? [])
+      live.set(row.provider as string, { scopes: row.scopes ?? [], mine: row.connectedById === userId })
     }
     return SEARCH_SOURCES.map((id) => {
       const provider = SOURCE_PROVIDER[id]
       // Our own data needs no credential and is always available.
-      if (provider === null) return { id, provider, connected: true }
-      const scopes = live.get(provider)
-      return { id, provider, connected: scopes !== undefined && grantCoversSource(id, scopes) }
+      if (provider === null) return { id, provider, connected: true, heldBy: null }
+      const grant = live.get(provider)
+      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }
+      // Somebody else's account answers them alone — see `federatedCredential` —
+      // so for everyone else this source is not connected, and says whose it is.
+      return grant.mine
+        ? { id, provider, connected: true, heldBy: 'you' as const }
+        : { id, provider, connected: false, heldBy: 'someone-else' as const }
     })
   }
 
@@ -952,7 +959,7 @@ export class SearchService implements OnModuleInit {
    * token has gone stale, or when Google is having a bad day: an integration
    * being down must not take the whole search down with it.
    */
-  private async searchDrive(workspaceId: string, query: string, limit: number): Promise<SearchHit[]> {
+  private async searchDrive(workspaceId: string, query: string, limit: number, userId: string): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
     const [conn] = await this.db
@@ -960,6 +967,7 @@ export class SearchService implements OnModuleInit {
         status: workspaceIntegrationConnections.status,
         accessToken: workspaceIntegrationConnections.accessToken,
         scopes: workspaceIntegrationConnections.scopes,
+        connectedById: workspaceIntegrationConnections.connectedById,
       })
       .from(workspaceIntegrationConnections)
       .where(
@@ -970,6 +978,8 @@ export class SearchService implements OnModuleInit {
       )
       .limit(1)
     if (!conn || conn.status !== 'connected' || !conn.accessToken) return []
+    // Somebody's own Drive, searched for them alone — see `federatedCredential`.
+    if (conn.connectedById !== userId) return []
 
     /*
      * A grant that cannot answer the question we are about to ask.
@@ -1045,6 +1055,7 @@ export class SearchService implements OnModuleInit {
   private async federatedCredential(
     workspaceId: string,
     source: SearchSource,
+    userId: string,
   ): Promise<string | null> {
     const provider = SOURCE_PROVIDER[source]
     if (!provider) return null
@@ -1053,6 +1064,7 @@ export class SearchService implements OnModuleInit {
         status: workspaceIntegrationConnections.status,
         accessToken: workspaceIntegrationConnections.accessToken,
         scopes: workspaceIntegrationConnections.scopes,
+        connectedById: workspaceIntegrationConnections.connectedById,
       })
       .from(workspaceIntegrationConnections)
       .where(
@@ -1063,6 +1075,15 @@ export class SearchService implements OnModuleInit {
       )
       .limit(1)
     if (!conn || conn.status !== 'connected' || !conn.accessToken) return null
+    /*
+     * THE GRANT IS ONE PERSON'S, SO IT ANSWERS ONE PERSON. The connection is a
+     * single Google or Microsoft account — somebody's own mailbox and Drive —
+     * and every member who searched, guests included, used to search it: the
+     * connector's mail subjects, senders and snippets for anybody in the
+     * workspace. The frame is somebody searching "meri Gmail" — MY Gmail. So
+     * it answers the person who connected it, and nobody else.
+     */
+    if (conn.connectedById !== userId) return null
     if (!grantCoversSource(source, conn.scopes)) {
       // Named from the table rather than from a ternary here: a log line that
       // reports the wrong missing scope sends somebody to fix the wrong thing.
@@ -1089,10 +1110,10 @@ export class SearchService implements OnModuleInit {
    * requests on one keystroke — so a wide query returns the first few with
    * their real subjects rather than a page of "(no subject)".
    */
-  private async searchGmail(workspaceId: string, query: string, limit: number): Promise<SearchHit[]> {
+  private async searchGmail(workspaceId: string, query: string, limit: number, userId: string): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
-    const token = await this.federatedCredential(workspaceId, 'gmail')
+    const token = await this.federatedCredential(workspaceId, 'gmail', userId)
     if (!token) return []
 
     /*
@@ -1168,10 +1189,11 @@ export class SearchService implements OnModuleInit {
     workspaceId: string,
     query: string,
     limit: number,
+    userId: string,
   ): Promise<SearchHit[]> {
     const trimmed = query.trim()
     if (!trimmed) return []
-    const token = await this.federatedCredential(workspaceId, 'sharepoint')
+    const token = await this.federatedCredential(workspaceId, 'sharepoint', userId)
     if (!token) return []
 
     const base = process.env.MICROSOFT_GRAPH_API_URL ?? 'https://graph.microsoft.com/v1.0'

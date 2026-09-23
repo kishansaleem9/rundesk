@@ -424,7 +424,9 @@ describe('§4 Google Drive in search', () => {
     // `searchDrive` correctly refuses to send an account-wide query, because
     // `drive.file` cannot answer one — see drive-scope.ts.
     workspace_integration_connections: [
-      { status: 'connected', accessToken: 'tok', scopes: [DRIVE_SEARCH_SCOPE] },
+      // Connected by u1, who is the searcher in every case but the one
+      // that asks what somebody else sees.
+      { status: 'connected', accessToken: 'tok', scopes: [DRIVE_SEARCH_SCOPE], connectedById: 'u1' },
     ],
     tasks: [],
     docs: [],
@@ -483,6 +485,17 @@ describe('§4 Google Drive in search', () => {
     assert.ok(q.includes('trashed = false'), `deleted files should stay deleted: ${q}`)
   })
 
+  it('searches the connected Drive for the person who connected it, and for nobody else', async () => {
+    // The grant is one person's own Drive. Every member used to search it.
+    const { db } = makeDb(connected)
+    const svc = drive(db, [{ id: 'F1', name: 'Q3 budget.xlsx', webViewLink: 'https://drive.google.com/file/d/F1/view' }])
+    const theirs = await svc.search('w1', 'u2', 'budget', 10, { types: ['drive'] })
+    assert.equal(svc.seen.length, 0, 'searched u1’s Drive for u2')
+    assert.equal(theirs.filter((h) => h.entityType === 'drive').length, 0)
+    const own = await svc.search('w1', 'u1', 'budget', 10, { types: ['drive'] })
+    assert.equal(own.filter((h) => h.entityType === 'drive').length, 1, 'the connector lost their own Drive')
+  })
+
   it('asks Drive for nothing when no Drive is linked', async () => {
     const { db } = makeDb({ workspace_integration_connections: [], tasks: [], docs: [] })
     const svc = drive(db, [])
@@ -493,7 +506,7 @@ describe('§4 Google Drive in search', () => {
 
   it('ignores a connection that is not connected', async () => {
     const { db } = makeDb({
-      workspace_integration_connections: [{ status: 'revoked', accessToken: 'tok' }],
+      workspace_integration_connections: [{ status: 'revoked', accessToken: 'tok', connectedById: 'u1' }],
       tasks: [],
       docs: [],
     })
@@ -516,7 +529,7 @@ describe('§4 Google Drive in search', () => {
      */
     const { db } = makeDb({
       workspace_integration_connections: [
-        { status: 'connected', accessToken: 'tok', scopes: ['https://www.googleapis.com/auth/drive.file'] },
+        { status: 'connected', accessToken: 'tok', scopes: ['https://www.googleapis.com/auth/drive.file'], connectedById: 'u1' },
       ],
       tasks: [],
       docs: [],
@@ -687,7 +700,7 @@ describe('§V2-11 Gmail and SharePoint in search', () => {
 
   const withGrant = (provider: string, scopes: string[]) => ({
     workspace_integration_connections: [
-      { provider, status: 'connected', accessToken: 'tok', scopes },
+      { provider, status: 'connected', accessToken: 'tok', scopes, connectedById: 'u1' },
     ],
     tasks: [],
     docs: [],
@@ -713,6 +726,26 @@ describe('§V2-11 Gmail and SharePoint in search', () => {
     assert.ok(hit, `no gmail hit: ${JSON.stringify(res)}`)
     assert.equal(hit.title, 'Q3 budget')
     assert.match(hit.url, /^https:\/\/mail\.google\.com\//, 'a mail opens in Gmail')
+  })
+
+  it('reads nobody’s mail but the searcher’s own', async () => {
+    // §V2-11 — "meri Gmail": MY Gmail. The connection is one mailbox.
+    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+    const svc = new FakeFederated(db as never, () => ({ status: 200, body: { messages: [{ id: 'M1' }] } }))
+    const res = await svc.search('w1', 'u2', 'budget', 10, { types: ['gmail'] })
+    assert.equal(svc.seen.length, 0, 'searched u1’s mailbox for u2')
+    assert.equal(res.filter((h) => h.entityType === 'gmail').length, 0)
+  })
+
+  it('lists a source as the searcher’s own, somebody else’s, or not connected', async () => {
+    const { db } = makeDb(withGrant('gmail', [GMAIL_SCOPE]))
+    const svc = new SearchService(db as never, config)
+    const mine = (await svc.listSources('w1', 'u1')).find((x) => x.id === 'gmail')
+    const theirs = (await svc.listSources('w1', 'u2')).find((x) => x.id === 'gmail')
+    const none = (await svc.listSources('w1', 'u1')).find((x) => x.id === 'sharepoint')
+    assert.deepEqual([mine?.connected, mine?.heldBy], [true, 'you'])
+    assert.deepEqual([theirs?.connected, theirs?.heldBy], [false, 'someone-else'])
+    assert.deepEqual([none?.connected, none?.heldBy], [false, null])
   })
 
   it('names a subject-less mail by its sender rather than dropping it', async () => {

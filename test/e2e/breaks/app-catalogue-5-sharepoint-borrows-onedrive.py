@@ -8,6 +8,9 @@
 # scope can answer the query. Removing one leaves the other holding the row, and
 # a patch that proves nothing is worse than no patch.
 #
+# Re-anchored 23 September: `listSources` now tells each person whose account a
+# grant is (`heldBy`); the second half drops the scope test there. Same break.
+#
 # Reddens: app-catalogue: "the SharePoint source names its own credential",
 #          "a connected OneDrive no longer makes SharePoint say it is
 #          connected", "a SharePoint credential holding only Files.ReadWrite
@@ -29,8 +32,8 @@ p1 = '/home/user/rundesk/apps/api/src/modules/search/sources.ts'
 s1 = io.open(p1, encoding='utf-8').read()
 assert s1.count(a1) == 1, f'anchor appears {s1.count(a1)} times in {p1}, expected exactly 1'
 
-a2 = "      return { id, provider, connected: scopes !== undefined && grantCoversSource(id, scopes) }\n"
-b2 = "      return { id, provider, connected: scopes !== undefined }\n"
+a2 = '      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }\n'
+b2 = '      if (!grant) return { id, provider, connected: false, heldBy: null }\n'
 p2 = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
 s2 = io.open(p2, encoding='utf-8').read()
 assert s2.count(a2) == 1, f'anchor appears {s2.count(a2)} times in {p2}, expected exactly 1'

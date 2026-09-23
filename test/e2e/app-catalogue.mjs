@@ -123,12 +123,17 @@ try {
    * alternative is to skip the three checks that are the whole point of the
    * row, and a skipped check reads as a passing one.
    */
+  // Connected BY THE ADMIN, as the callback records it (`connectedById`): a
+  // grant answers the person who connected it and nobody else, so a row
+  // naming nobody is connected for nobody.
+  const adminId = (await api('/users/me')).data?.id
+  if (!adminId) throw new Error('could not read the admin account')
   const stageGrant = (provider, scopes) => sql`
     insert into workspace_integration_connections
-      (workspace_id, provider, status, access_token, scopes)
-    values (${ws.id}, ${provider}, 'connected', ${'tok-' + TAG}, ${scopes})
+      (workspace_id, provider, status, access_token, scopes, connected_by_id)
+    values (${ws.id}, ${provider}, 'connected', ${'tok-' + TAG}, ${scopes}, ${adminId})
     on conflict (workspace_id, provider)
-    do update set status = 'connected', access_token = excluded.access_token, scopes = excluded.scopes`
+    do update set status = 'connected', access_token = excluded.access_token, scopes = excluded.scopes, connected_by_id = excluded.connected_by_id`
   const dropGrant = (provider) => sql`
     delete from workspace_integration_connections
     where workspace_id = ${ws.id} and provider = ${provider}`
