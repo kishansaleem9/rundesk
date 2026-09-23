@@ -16,13 +16,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Build to ClickUp, which shares the dependency on section 4's clips table (see s4-clip-link). Give each clip a stable, unguessable share token and an app route such as /clips/:token that re-signs the storage object on every view. Copy link, New tab and Create a task then use that route, never a signed URL, so task descriptions stop rotting. If an expiry is offered at all, make it an explicit choice and state it in the toast and dialog. Checks: the copied link still resolves after the signing window (sign with a short TTL in the test); the task description holds the stable route, not a storage URL; if the toast or dialog carries an expiry, it matches the server's.
 
-### `product-siblings/avatar-logo-persist-expiring-signed-url` — open, medium
+### `product-siblings/avatar-logo-persist-expiring-signed-url` — **closed**, break run pending
 
 **Avatar and workspace-logo uploads persist a 15-minute presigned URL as avatarUrl/logoUrl**
 
 *Evidence:* users.service.ts:298-301 returns `publicUrl = getObjectUrl(key)`. Its comment admits it is only 'stable … with a public R2/CDN domain'. workspaces.service.ts:318-321 does the same. r2.service.ts:109-121 returns a 900-second presigned GET whenever R2_PUBLIC_URL is unset or is the raw r2 endpoint, and R2_PUBLIC_URL is marked Optional in .env.example:66-67 and empty in deploy/env.production.template:50. The web persists it: app-profile-page.tsx:332-335 PATCHes `avatarUrl: presign.publicUrl`, and workspace-settings-page.tsx:708 does `setLogoUrl(presign.publicUrl)`. Nothing re-signs on read (users.service.ts:511 publicProfile). Failure: on a default deployment, an uploaded avatar or logo shows a broken image everywhere 15 minutes later.
 
 *To close:* Store the key (avatar_storage_key / logo_storage_key) and sign on read, as covers and meetings do. Or refuse the upload when no public URL is configured.
+
+*Closed:* not by signing on read — avatars are embedded in every user projection, so that would be a signing call per embed — but by saving an address that does not expire: `/api/v1/public/images/<key>` (`public-images.controller.ts`), which answers each request with a redirect to a freshly signed URL, cached ten minutes (inside the fifteen it lives). Unauthenticated, like the pictures (a logo is drawn on the custom-domain sign-in page); only `avatars/` and `workspace-logos/` keys, checked with `isKeyDirectlyUnder`, so no other object and no `..` is reachable. Both presign answers now return that address. Saved rows are repaired by migration 0161 — presigned URLs only (`X-Amz-Signature`), under the two prefixes; CDN and OAuth avatars untouched — measured by running the SQL against a lane database with a presigned avatar, a presigned logo, a CDN avatar and a Google avatar planted: the first two rewritten, the others left. (CI and the lanes build the schema with `drizzle-kit push`, which never runs data migrations; production applies them with `drizzle-kit migrate`.) `stable-images` 6/6 on lane 1, whose store has no public domain — the default this was about: the saved address has no signature, answers 302 to a signed URL serving the very bytes, the route refuses other prefixes and dot segments, and both pictures are drawn on screen; against the old API 3 of 6 failed (the on-screen pair and the refusal pass there: a fresh presigned URL loads, and a route that does not exist refuses everything). `sti-1..8`, each compiled. Regression: settings-depth, person-panel, object-key-boundaries, task-cover 4/4. *Not done:* `avatarUrl` and `logoUrl` accept any string — an avatar can point anywhere, which shows the viewer's address to whatever it points at; restricting both to our own addresses and the OAuth providers' is its own item.
 
 ### `product-siblings/chat-history-unreachable` — open, medium
 
@@ -887,6 +889,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* `brk-pgd-5-scim-mints-nothing.log`: "threw: signup of manager failed: 429", 1 of 8 checks ran. `/auth/signup` allows 10 a minute per IP and every suite is 127.0.0.1; a break plan replays a people-making suite once per patch. The local-stack proxy already waited out a throttled LOGIN (and `signInApi` did so for direct calls), but not a sign-up — 18 suites sign people up. 1 of the 1,170 break logs on this machine died this way; it is the newest suites, making three or four people each, that hit it.
 
 *Closed:* the proxy's retry covers the sign-up POST on the same budget (a 429 is refused before the handler, so a retry makes no second account), and `signUpApi` in `signin.mjs` does the same for the two suites that sign up against the API directly (`search-sources`, `view-visibility`). Measured through the proxy: twelve sign-ups in a burst — 12 × 201 after waiting 48 seconds for the window, where the old proxy handed back 429 to the last four. search-sources, view-visibility, credential-reads, permission-guards 4/4. `pgd-5` is re-run in the next plan.
+
+### `found-23-sep/avatar-and-logo-accept-any-url` — open, small (found closing the expiring-avatar item)
+
+**`avatarUrl` and `logoUrl` are saved as whatever string arrives**
+
+*Evidence:* `PATCH /users/me` takes `avatarUrl?: string | null` with no validation (users.controller.ts:24, an inline type, no DTO), and `PATCH /workspaces/:id` the same for `logoUrl`. So a picture can point at any host — every viewer's browser then asks that host for it, handing over the viewer's address and when they looked — or at a string that is no image at all.
+
+*To close:* accept only our own `/api/v1/public/images/…` address and the OAuth providers' avatar hosts (whatever the sign-in flows store), refuse the rest with a 400 in the service, and a suite pairing a refused foreign URL with an accepted upload. Research what ClickUp allows (it takes uploads only).
 
 ### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
 

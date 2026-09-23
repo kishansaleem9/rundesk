@@ -15,6 +15,7 @@ import { SecurityService } from '../security/security.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
 import { seedListStatuses } from '../lists/list-statuses.defaults'
+import { publicImagePath } from '../../common/storage/public-images.controller'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -333,7 +334,8 @@ export class WorkspacesService {
     }
     const key = `workspace-logos/${workspaceId}-${randomBytes(8).toString('hex')}.${ext}`
     const uploadUrl = await this.r2.presignPutObject(key, contentType, { workspaceid: workspaceId })
-    const publicUrl = await this.r2.getObjectUrl(key)
+    // Saved as the logo's URL, so it must not expire — see public-images.controller.ts.
+    const publicUrl = publicImagePath(key)
     return { uploadUrl, publicUrl, storageKey: key }
   }
 

@@ -21,6 +21,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isValidTimeZone } from '../../common/time/zone'
 import { R2Service } from '../../common/storage/r2.service'
+import { publicImagePath } from '../../common/storage/public-images.controller'
 
 /** Locales the web app ships translations for (Plan §13). */
 export const SUPPORTED_LOCALES = ['en', 'es', 'ar', 'ur'] as const
@@ -295,9 +296,10 @@ export class UsersService {
     }
     const key = `avatars/${userId}-${randomBytes(8).toString('hex')}.${ext}`
     const uploadUrl = await this.r2.presignPutObject(key, contentType, { uploadedby: userId })
-    // Resolve the browser-facing URL the same way clips/attachments do; with a
-    // public R2/CDN domain this is a stable URL suitable for persisting.
-    const publicUrl = await this.r2.getObjectUrl(key)
+    // The address the avatar is SAVED as, so it must not expire: the public
+    // images route signs a fresh URL per request. `getObjectUrl` here saved a
+    // 15-minute presigned GET wherever no public domain is configured.
+    const publicUrl = publicImagePath(key)
     return { uploadUrl, publicUrl, storageKey: key }
   }
 

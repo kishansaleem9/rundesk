@@ -427,11 +427,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND TWENTY-TWO — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND TWENTY-THREE — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 134 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122.
+    # that is about 135 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1719,6 +1719,17 @@ jobs:
       - name: The worker keeps no API answer, and signing out ends the session
         if: '!cancelled()'
         run: node test/e2e/sw-api-cache.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # An uploaded avatar or logo is saved at an address that does not
+      # expire. Uploads saved a 15-minute presigned URL wherever no public
+      # R2 domain is set — the default — so every one broke a quarter of an
+      # hour later. Needs the job's S3 store, as the other upload suites do.
+      - name: Avatars and logos are saved at an address that lasts
+        if: '!cancelled()'
+        run: node test/e2e/stable-images.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
