@@ -26,13 +26,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* not by signing on read — avatars are embedded in every user projection, so that would be a signing call per embed — but by saving an address that does not expire: `/api/v1/public/images/<key>` (`public-images.controller.ts`), which answers each request with a redirect to a freshly signed URL, cached ten minutes (inside the fifteen it lives). Unauthenticated, like the pictures (a logo is drawn on the custom-domain sign-in page); only `avatars/` and `workspace-logos/` keys, checked with `isKeyDirectlyUnder`, so no other object and no `..` is reachable. Both presign answers now return that address. Saved rows are repaired by migration 0161 — presigned URLs only (`X-Amz-Signature`), under the two prefixes; CDN and OAuth avatars untouched — measured by running the SQL against a lane database with a presigned avatar, a presigned logo, a CDN avatar and a Google avatar planted: the first two rewritten, the others left. (CI and the lanes build the schema with `drizzle-kit push`, which never runs data migrations; production applies them with `drizzle-kit migrate`.) `stable-images` 6/6 on lane 1, whose store has no public domain — the default this was about: the saved address has no signature, answers 302 to a signed URL serving the very bytes, the route refuses other prefixes and dot segments, and both pictures are drawn on screen; against the old API 3 of 6 failed (the on-screen pair and the refusal pass there: a fresh presigned URL loads, and a route that does not exist refuses everything). `sti-1..8`, each compiled. Regression: settings-depth, person-panel, object-key-boundaries, task-cover 4/4. *Not done:* `avatarUrl` and `logoUrl` accept any string — an avatar can point anywhere, which shows the viewer's address to whatever it points at; restricting both to our own addresses and the OAuth providers' is its own item.
 
-### `product-siblings/chat-history-unreachable` — open, medium
+### `product-siblings/chat-history-unreachable` — **closed**
 
 **Chat loads only the newest 100 root messages; the server's `before` cursor has no client**
 
 *Evidence:* chat.controller.ts:273-281 accepts ?before. chat.service.ts:1298-1301 says 'Without this the cursor was a no-op and only the newest limit messages were ever reachable'. The only reader is workspace-chat-page.tsx:584-588, `messages?limit=100` with no before. A search for useInfiniteQuery, fetchNextPage and loadOlder across apps/web found nothing. A search deep link to an older message silently does nothing (:590-597 returns when the id is not in the loaded 100). Threads: chat.service.ts:1760-1762 orders replies oldest-first with limit 100 and the web never sends a limit, so a thread over 100 replies drops its NEWEST replies. ClickUp loads older messages on scroll-up.
 
 *To close:* Use an infinite query keyed by the oldest loaded id (before=). Load around the target message for deep links. For threads, page newest-first or cursor forward.
+
+*Closed (e419039):* a channel pages back 100 at a time by an `(created_at, id)` cursor to its first message, a thread opens on its newest replies with the rest on request, and a link to an old message pages back to it. `chat-history` 14/14; `chx-1..16` 16 of 16 reddened their claims, each run full-length (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `product-siblings/custom-role-permissions-unread-by-web` — open, medium
 
@@ -176,13 +178,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Pick only title/icon/coverImageUrl/content/parentDocId/spaceId/position/isArchived in update. Verify that spaceId and parentDocId belong to the doc's workspace.
 
-### `product-siblings/home-assigned-comments-shows-mentions` — open, small
+### `product-siblings/home-assigned-comments-shows-mentions` — **closed**
 
 **The Home 'Assigned comments' section shows mentions; real assignment notifications and /chat/assigned-to-me are never read**
 
 *Evidence:* app.$workspaceId.tsx:193 filters `['task_mentioned','mention']` and labels the result 'Assigned comments' (:302). The assignment notification types exist: comment_assigned (tasks.service.ts:4656) and message_assigned (chat.service.ts:2423), both declared at notifications.service.ts:174 and :183. GET /workspaces/:ws/chat/assigned-to-me (chat.controller.ts:483-489) has no web reader. workspace-chat-page.tsx:1177, :1189 and :1200 invalidate ['chat-assigned-to-me', ws], which no query uses. Sibling on the same page: 'Assigned to me' (:195) filters `task.status` against 'done'/'cancelled', although the endpoint returns statusCategory precisely because status keys are renamable (tasks.service.ts:1870-1876). Tasks in a renamed closed status stay listed.
 
 *To close:* Filter on comment_assigned/message_assigned (or read /chat/assigned-to-me plus the task comment assignments). Use statusCategory !== 'closed' for Assigned to me.
+
+*Closed (1561b5a, with the Inbox scope item):* the Inbox, Replies, Home and both badges read one workspace's notifications (plus account-level ones), page to the end by cursor, and take their counts from the server; Home's assigned-comment list reads the assignment types. `inbox-scope` 23/23; `ibx-1..24` 24 of 24 reddened, every run all 23 checks long (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `product-siblings/home-today-overdue-includes-closed` — open, small
 
@@ -192,13 +196,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Filter statusCategory !== 'closed' for both sections. Move the open filter into SQL before the limit, or page it.
 
-### `product-siblings/inbox-capped-confident-zero` — open, small
+### `product-siblings/inbox-capped-confident-zero` — **closed**
 
 **The Inbox reads 50 notifications with no pagination; chip counts and 'All caught up' are computed from those 50**
 
 *Evidence:* notifications.service.ts:722 `.limit(opts.limit ?? 50)`. notifications.controller.ts:18-28 exposes no limit, offset or cursor. workspace-inbox-page.tsx:648-651 derives unread and chip counts 'from the list already loaded', and :1057-1059 shows 'All caught up' when those 50 are read, while the server's counts.unread (:645, :770-773) can still be greater than 0.
 
 *To close:* Add a cursor (before=) and progressive loading. Take chip and unread counts from GET /notifications/counts.
+
+*Closed (1561b5a, with the Inbox scope item):* the Inbox, Replies, Home and both badges read one workspace's notifications (plus account-level ones), page to the end by cursor, and take their counts from the server; Home's assigned-comment list reads the assignment types. `inbox-scope` 23/23; `ibx-1..24` 24 of 24 reddened, every run all 23 checks long (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `product-siblings/link-attachment-signed-as-key` — **closed**
 
@@ -374,13 +380,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Send projectId when projectFilter !== 'all' (and put it in the query key), or delete the param. Apply or delete from/to, and move the date filter into SQL.
 
-### `product-siblings/timesheet-mine-includes-everyone` — open, small
+### `product-siblings/timesheet-mine-includes-everyone` — **closed**
 
 **The time page's 'Mine' timesheet is built from an unfiltered, 500-row list: admins see everyone's hours as their own**
 
 *Evidence:* time-entries.controller.ts:17-31 supports userId and since, and returns ALL users when the caller can moderate and sends no userId. time-entries.service.ts:204-205 filters and :230 applies .limit(500). workspace-time-page.tsx:93-102 sends neither param. weekEntries (:231-234) filters by day only, not by user. The Submit button is gated on it (:415), and 'mine' mode renders it (:509-521). Failures: (a) a workspace admin whose three teammates each logged 8h on Monday sees 32h on their own 'Mine' grid, and Submit is enabled for a week they logged nothing. (b) In any workspace past 500 entries, earlier weeks render as 0h. ClickUp's My timesheet shows only your own entries.
 
 *To close:* For the Mine grid, request userId=<me> with since=<weekStart>, and add an until bound. Keep the 'team' path separate.
+
+*Closed (5fd9718):* "Mine" asks for the viewer's own entries within the week, and the week's figures sum those. `timesheet-mine` 8/8; its 8 patches 8 of 8 reddened (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `product-siblings/workload-csv-dates-shifted-east-of-utc` — open, small
 
@@ -390,13 +398,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Use date-fns format(d, 'yyyy-MM-dd'), or the planner's local-day helper.
 
-### `product-siblings/workspace-inbox-unscoped-by-workspace` — open, small
+### `product-siblings/workspace-inbox-unscoped-by-workspace` — **closed**
 
 **The workspace Inbox and Home list notifications from every workspace, while the switcher badge counts per workspace**
 
 *Evidence:* notifications table has workspace_id (packages/db/src/schema/notifications.ts:10). NotificationsService.list (notifications.service.ts:707-721) filters only userId, unreadOnly and view. The controller (notifications.controller.ts:18-28) takes no workspaceId. The workspace-scoped pages call it unscoped: workspace-inbox-page.tsx:565 `/notifications?view=${view}` and app.$workspaceId.tsx:125-129 (keyed ['notifications', workspaceId] but fetching `/notifications`). unreadByWorkspace (:875-895), read by workspace-sidebar.tsx:981-982, groups by workspace_id. So workspace A's Inbox shows, counts and 'mark all read's workspace B's items, while B's switcher badge implies they are separate. It is a mirror: the column is stored and the list honours none of it.
 
 *To close:* Add an optional workspaceId filter to list/counts and send it from the Inbox and Home, or state in the UI that the inbox is cross-workspace. ClickUp's inbox is per workspace.
+
+*Closed (1561b5a, with the Inbox scope item):* the Inbox, Replies, Home and both badges read one workspace's notifications (plus account-level ones), page to the end by cursor, and take their counts from the server; Home's assigned-comment list reads the assignment types. `inbox-scope` 23/23; `ibx-1..24` 24 of 24 reddened, every run all 23 checks long (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `found-23-sep/watchers-route-open-to-any-account` — **closed** (found while closing the task-reference items)
 
@@ -746,21 +756,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* refused lanes are recorded and reported `NOT RESTARTED (above)` without being polled or counted — measured on lane 9 (behind), which exits 1.
 
-### `found-23-sep/refuses-all-patches-never-built` — **closed**, measurement pending (found in today's break plan)
+### `found-23-sep/refuses-all-patches-never-built` — **closed** (found in today's break plan)
 
 **Five "refuses everything" patches never compiled, in either of their runs**
 
 *Evidence:* `tb-23`, `sdp-22`, `db-11`, `db-12` and `okb-16` each replaced a guard with an unconditional `throw` or `return`. TypeScript drops every narrowing in unreachable code, so a later `eq(…, actorId)` or `cursor` failed the build (reproduced one by one in a scratch worktree), and each ran as BUILD FAILED — no evidence — twice. Their suites' ledger rows still read as though every patch had reddened.
 
-*Closed:* each condition is now one that is always true at runtime and not provable to the compiler (`if (actorId) throw …` after the `!actorId` return; `if (parentDocId) …`; `if (storageKey) {`), with the reason in the patch header; all five type-check clean. Their re-run is in the next plan.
+*Closed:* each condition is now one that is always true at runtime and not provable to the compiler (`if (actorId) throw …` after the `!actorId` return; `if (parentDocId) …`; `if (storageKey) {`), with the reason in the patch header; all five type-check clean. Measured: `tb-23` ran all 45 checks (6 red), `sdp-22` 36 (4), `db-11` 17 (1), `db-12` 17 (3), `okb-16` 15 (1) — each reddening the check it names (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `found-23-sep/fixtures-built-through-the-route-under-test` — **closed**, measurement pending
+### `found-23-sep/fixtures-built-through-the-route-under-test` — **closed**
 
 **Three patches were unreadable because the suite built its fixtures through the very route the patch broke**
 
 *Evidence:* `tb-30` (assignment refuses all) and `tb-37` (dependencies refuse all) broke `task-boundaries`' SETUP, which assigned T2 and made the B dependency through those routes — 1 of 45 checks ran. `sdp-7` (admins narrowed) broke `space-default-permission`'s placement section, whose admin made a project straight into the view-only space — 27 of 36 ran. `check-plan-population` listed all three as needing a person.
 
-*Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Both suites are re-run in the next plan.
+*Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Measured: `tb-30` ran all 45 checks (2 red, its own), `tb-37` 45 (4), `sdp-7` 36 (1) — none short (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `found-23-sep/role-editor-offers-unenforced-permissions` — open, large (found reading the custom-role item)
 
@@ -778,13 +788,13 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* `bail` returns a promise that never settles and every call site is `await bail(…)`, so execution stops there until the exit; the backstop timer is no longer unref'd (a parked caller must not end as an unsettled top-level await, exit 13). `check-migration-order`'s helper is async and awaited at each of its nine call sites. `scripts/check-bail.mjs --mutate` (preflight, verify job): piped with 200KB queued, redirected, and idle — exit 3, every byte delivered, the line after never runs — and 3 of 3 mutations caught (returns instead of parking, exits without draining, forgets the code).
 
-### `found-23-sep/webhook-secrets-readable-by-any-member` — **closed**, break run pending (found mapping the custom-role routes)
+### `found-23-sep/webhook-secrets-readable-by-any-member` — **closed** (found mapping the custom-role routes)
 
 **Any workspace member could read every webhook's target URL and HMAC signing secret, and every delivery's payload**
 
 *Evidence:* `GET /workspaces/:ws/webhooks` and `GET …/webhooks/:id/deliveries` were guarded by workspace membership alone, and the list returned `select()` of the table — `secret` included. Measured on lane 1 before the change: a plain member was answered 200 with the secret the admin had set, and 200 on the delivery log. The manage routes had the opposite problem: an admin-or-manager guard in front of `webhook.manage`, so a custom role granting it to anybody else was saved and useless. The same shape stood in front of `sso.manage` and `integrations.manage`, and SCIM token management had the admin-or-manager guard and NO permission, so every manager held it though the catalog files SCIM under `sso.manage`.
 
-*Closed:* both reads require `webhook.manage`; the list and an edit answer without the secret (`hasSecret` instead) — it is returned once, by the call that creates the webhook; the manage routes are gated by the permission alone. SSO configuration and integration connections lose the guard in front of their permission, and SCIM tokens require `sso.manage`. Hiding the secret moved a duty onto the pages: both pages that make webhooks (workspace settings → Integrations, and `/app/admin/webhooks`) threw the create answer away, so a webhook made in the browser signed with a secret nobody could read. Both now show it once (`WebhookSecretOnce`: copy, the signature header it keys, "I have copied it"). Found on the same card and fixed with it: the list said "No webhooks configured yet" while loading and after failing (now a skeleton, and "Could not load webhooks."); the settings form offered its own ten event ids, raw and four short of the server's fourteen, while the admin page lacked a name for `member.joined` — both now read the server's catalog through one label map (`lib/webhook-events.ts`). Measured on lane 1: `webhook-access` 15/15 (its API half failed 5 of 8 on the old API; the browser half compares the secret shown with the one STORED, and holds and fails the list by route, with the service worker blocked — see `found-23-sep/routes-bypassed-by-the-service-worker`), `permission-guards` 8/8 (6 of 8 failed on the old API). Regression on lane 1, 8/8: app-catalogue, calendar-accounts, integration-error-card, settings-depth, ui-sweep, addressability-live and the two. Break patches: `whk-1..19` (API 1–9, pages 10–19) and `pgd-1..8`, each compiled against the fix; the break run waits for lanes 2–4.
+*Closed:* both reads require `webhook.manage`; the list and an edit answer without the secret (`hasSecret` instead) — it is returned once, by the call that creates the webhook; the manage routes are gated by the permission alone. SSO configuration and integration connections lose the guard in front of their permission, and SCIM tokens require `sso.manage`. Hiding the secret moved a duty onto the pages: both pages that make webhooks (workspace settings → Integrations, and `/app/admin/webhooks`) threw the create answer away, so a webhook made in the browser signed with a secret nobody could read. Both now show it once (`WebhookSecretOnce`: copy, the signature header it keys, "I have copied it"). Found on the same card and fixed with it: the list said "No webhooks configured yet" while loading and after failing (now a skeleton, and "Could not load webhooks."); the settings form offered its own ten event ids, raw and four short of the server's fourteen, while the admin page lacked a name for `member.joined` — both now read the server's catalog through one label map (`lib/webhook-events.ts`). Measured on lane 1: `webhook-access` 15/15 (its API half failed 5 of 8 on the old API; the browser half compares the secret shown with the one STORED, and holds and fails the list by route, with the service worker blocked — see `found-23-sep/routes-bypassed-by-the-service-worker`), `permission-guards` 8/8 (6 of 8 failed on the old API). Regression on lane 1, 8/8: app-catalogue, calendar-accounts, integration-error-card, settings-depth, ui-sweep, addressability-live and the two. Break patches: `whk-1..19` (API 1–9, pages 10–19) 19 of 19 reddened; `pgd-1..8` 7 of 8 — `pgd-5`'s run died in setup on the sign-up throttle (`found-23-sep/signup-throttle-killed-a-break-run`) and is re-run in plan-4 (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 *Still open, and its own item:* the web cannot use a custom grant here — settings is admin-only in the router — which is `product-siblings/custom-role-permissions-unread-by-web`.
 
@@ -850,13 +860,13 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* the bytes AND the times go back — `utimesSync` with the fractional milliseconds (`mtimeMs / 1000`; a `Date` rounded .570933974 UP to .571). Measured: the six mtimes drift at most one microsecond, older, across a run; 6/6 unit claims still redden.
 
-### `found-23-sep/admin-grant-taken-and-not-put-back` — **closed**, measurement pending (found in plan-2)
+### `found-23-sep/admin-grant-taken-and-not-put-back` — **closed** (found in plan-2)
 
 **`space-default-permission` removed the admin's space grant for one check and never restored it, so `sdp-7` ended the run one section on**
 
 *Evidence:* to test "a workspace admin is not narrowed … with no explicit grant", the suite deletes the admin's seeded `space_members` row on the view-only space. It stayed deleted; the placement section's `withEditable` then leaned on the admin's ROLE alone, which is exactly what `sdp-7` takes away — "could not raise …: 403", 27 of 36 checks ran, even after that section's own project was moved inside `withEditable`.
 
-*Closed:* the grant is put back straight after the check, and a failure to put it back stops the run by name. Re-run pending.
+*Closed:* the grant is put back straight after the check, and a failure to put it back stops the run by name. Measured: `sdp-7` now runs all 36 checks (1 red, its own); `space-default-permission`'s 22 patches 22 of 22 reddened (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
 ### `found-23-sep/break-guard-floor-counted-build-output` — **closed** (found by preflight)
 
