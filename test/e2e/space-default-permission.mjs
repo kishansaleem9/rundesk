@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
  * with `<`, a branch that silently skipped turns into a shorter run that still
  * reports "0 failed".
  */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 34
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -484,6 +484,151 @@ try {
     `the admin's move-targets (status ${adminTargets.status}) held ${JSON.stringify(
       [viewSpace.id, commentSpace.id, editSpace.id].filter((id) => adminIds.has(id)),
     )}`,
+  )
+
+  // ── and the SERVER holds the line the picker draws ─────────────────────────
+  /*
+   * THE PICKER WAS THE ONLY GATE. The checks above prove the view-only space
+   * is not OFFERED as a destination; the move routes themselves checked the
+   * source and the workspace and nothing about the destination, so the same
+   * `POST` from outside the picker put the member's list, project — or a
+   * template's whole folder — into a "View only" space. Every refusal is
+   * checked by status and by where the thing ended up, and paired with the
+   * same move into a space the member may edit.
+   */
+  let seq = 0
+  const named = (what) => `${TAG} ${what} ${++seq}`
+  const makeAs = async (as, route, body, what) => {
+    const res = await as(route, { method: 'POST', body })
+    if (res.status >= 400 || !res.data?.id) throw new Error(`could not make ${what}: ${res.status} ${JSON.stringify(res.error)}`)
+    return res.data.id
+  }
+  // THE FIRST SIDE DOOR IS A PERMISSION, not a space. `POST /projects` needs
+  // `project.create`, which a plain member does not hold, and applying a
+  // folder template makes a project with no check at all. So the templates
+  // page made folders for anybody in the workspace.
+  const template = await A(`/workspaces/${workspaceId}/project-templates`, {
+    method: 'POST',
+    body: { name: named('folder template'), targetType: 'folder', payload: { lists: [{ name: 'Only list' }] } },
+  })
+  if (template.status >= 400 || !template.data?.id) throw new Error(`could not make the folder template: ${template.status}`)
+  cleanup.push(() => A(`/workspaces/${workspaceId}/project-templates/${template.data.id}`, { method: 'DELETE' }))
+  const projectsNamed = async (spaceId, name) =>
+    ((await A(`/projects/space/${spaceId}`)).data ?? []).filter((p) => p.name === name).length
+  const SIDE_DOOR = named('applied without project.create')
+  const sideDoor = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
+    method: 'POST',
+    body: { templateId: template.data.id, targetSpaceId: editSpace.id, projectName: SIDE_DOOR },
+  })
+  chk(
+    sideDoor.status === 403 && (await projectsNamed(editSpace.id, SIDE_DOOR)) === 0,
+    'a member without project.create cannot make a folder by applying a template either — the templates page was a way round the permission',
+    `it answered ${sideDoor.status} ${JSON.stringify(sideDoor.error ?? '')} and ${await projectsNamed(editSpace.id, SIDE_DOOR)} project(s) were made`,
+  )
+
+  /*
+   * THEN THE MEMBER IS GIVEN project.create — by a custom role, so they are
+   * still NOT a manager. Managers are exempt from a space's default
+   * permission, so for them the destination rule could not refuse anything;
+   * a member who may make projects but may not write to the view-only space
+   * is the one actor for whom that rule, and nothing else, decides.
+   */
+  const maker = await A(`/workspaces/${workspaceId}/roles`, {
+    method: 'POST',
+    body: { name: named('project maker'), permissions: ['project.create'] },
+  })
+  if (maker.status >= 400 || !maker.data?.id) throw new Error(`could not make the custom role: ${maker.status} ${JSON.stringify(maker.error)}`)
+  cleanup.push(() => A(`/workspaces/${workspaceId}/roles/${maker.data.id}`, { method: 'DELETE' }))
+  const memberRow = ((await A(`/workspaces/${workspaceId}/members`)).data ?? []).find((m) => m.userId === memberId)
+  const roleGiven = memberRow
+    ? await A(`/workspaces/${workspaceId}/members/${memberRow.workspaceMemberId}/roles/${maker.data.id}`, { method: 'POST' })
+    : { status: 0 }
+  if (roleGiven.status >= 400 || roleGiven.status === 0) throw new Error(`could not give the member the role: ${roleGiven.status}`)
+
+  const mine = await makeAs(M, '/projects', { spaceId: editSpace.id, name: named('member project') }, "the member's project")
+  const myList = await makeAs(M, '/lists', { projectId: mine, name: named('member list') }, "the member's list")
+  const inView = await makeAs(A, '/projects', { spaceId: viewSpace.id, name: named('project in view') }, 'a project in the view-only space')
+  const otherEdit = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('other edit project') }, 'another project in the edit space')
+  const hidden = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('private project') }, 'a private project')
+  const madeHidden = await A(`/projects/${hidden}/visibility`, { method: 'PATCH', body: { visibility: 'private' } })
+  if (madeHidden.status >= 400) throw new Error(`could not make the project private: ${madeHidden.status}`)
+  const listIn = async (id) => (await M(`/lists/${id}`)).data?.projectId ?? (await A(`/lists/${id}`)).data?.projectId
+
+  const listIntoView = await M(`/lists/${myList}/move`, { method: 'POST', body: { projectId: inView } })
+  chk(
+    listIntoView.status === 403 && (await listIn(myList)) === mine,
+    'the member cannot move their own list into a project in the view-only space',
+    `it answered ${listIntoView.status} and the list is in ${await listIn(myList)} (was ${mine})`,
+  )
+  const listIntoHidden = await M(`/lists/${myList}/move`, { method: 'POST', body: { projectId: hidden } })
+  chk(
+    listIntoHidden.status === 403 && (await listIn(myList)) === mine,
+    'nor into a private project they are not in, even in a space they may edit',
+    `it answered ${listIntoHidden.status} and the list is in ${await listIn(myList)}`,
+  )
+  const listIntoEdit = await M(`/lists/${myList}/move`, { method: 'POST', body: { projectId: otherEdit } })
+  chk(
+    listIntoEdit.status < 300 && (await listIn(myList)) === otherEdit,
+    'while moving it into another project they may edit still works',
+    `it answered ${listIntoEdit.status} ${JSON.stringify(listIntoEdit.error ?? '')}`,
+  )
+
+  const secondEdit = await A('/spaces', { method: 'POST', body: { workspaceId, name: named('second edit space'), defaultPermission: 'edit' } })
+  if (secondEdit.status >= 400 || !secondEdit.data?.id) throw new Error(`could not make a second edit space: ${secondEdit.status}`)
+  cleanup.push(() => A(`/spaces/${secondEdit.data.id}`, { method: 'DELETE' }))
+  const editSpace2 = secondEdit.data
+  const projectIn = async (id) => (await A(`/projects/${id}`)).data?.spaceId
+  const projectIntoView = await M(`/projects/${mine}/move`, { method: 'POST', body: { spaceId: viewSpace.id } })
+  chk(
+    projectIntoView.status === 403 && (await projectIn(mine)) === editSpace.id,
+    'nor their own project into the view-only space',
+    `it answered ${projectIntoView.status} and the project is in ${await projectIn(mine)}`,
+  )
+  const projectIntoEdit = await M(`/projects/${mine}/move`, { method: 'POST', body: { spaceId: editSpace2.id } })
+  chk(
+    projectIntoEdit.status < 300 && (await projectIn(mine)) === editSpace2.id,
+    'while moving it into another space they may edit works',
+    `it answered ${projectIntoEdit.status} ${JSON.stringify(projectIntoEdit.error ?? '')}`,
+  )
+
+  const INTO_VIEW = named('applied into view')
+  const appliedIntoView = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
+    method: 'POST',
+    body: { templateId: template.data.id, targetSpaceId: viewSpace.id, projectName: INTO_VIEW },
+  })
+  chk(
+    appliedIntoView.status === 403 && (await projectsNamed(viewSpace.id, INTO_VIEW)) === 0,
+    'nor apply a template into the view-only space — nothing is created there',
+    `it answered ${appliedIntoView.status} and ${await projectsNamed(viewSpace.id, INTO_VIEW)} project(s) named "${INTO_VIEW}" exist`,
+  )
+  const INTO_EDIT = named('applied into edit')
+  const appliedIntoEdit = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
+    method: 'POST',
+    body: { templateId: template.data.id, targetSpaceId: editSpace.id, projectName: INTO_EDIT },
+  })
+  chk(
+    appliedIntoEdit.status < 300 && (await projectsNamed(editSpace.id, INTO_EDIT)) === 1,
+    'while applying it into a space they may edit makes it there',
+    `it answered ${appliedIntoEdit.status} ${JSON.stringify(appliedIntoEdit.error ?? '')}`,
+  )
+
+  const listTemplate = await A(`/workspaces/${workspaceId}/project-templates`, {
+    method: 'POST',
+    body: { name: named('list template'), targetType: 'list', payload: { lists: [{ name: 'The list' }] } },
+  })
+  if (listTemplate.status >= 400 || !listTemplate.data?.id) throw new Error(`could not make the list template: ${listTemplate.status}`)
+  cleanup.push(() => A(`/workspaces/${workspaceId}/project-templates/${listTemplate.data.id}`, { method: 'DELETE' }))
+  const LIST_INTO_VIEW = named('list applied into view')
+  const listsNamed = async (projectId, name) =>
+    ((await A(`/lists/project/${projectId}`)).data ?? []).filter((l) => l.name === name).length
+  const listAppliedIntoView = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
+    method: 'POST',
+    body: { templateId: listTemplate.data.id, targetProjectId: inView, projectName: LIST_INTO_VIEW },
+  })
+  chk(
+    listAppliedIntoView.status === 403 && (await listsNamed(inView, LIST_INTO_VIEW)) === 0,
+    'and a list template cannot be applied into a project in the view-only space either',
+    `it answered ${listAppliedIntoView.status} and ${await listsNamed(inView, LIST_INTO_VIEW)} list(s) named "${LIST_INTO_VIEW}" exist`,
   )
 } catch (e) {
   failed += 1

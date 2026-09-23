@@ -5,7 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { resolveIsManager, folderVisibilityFilter } from '../../common/permissions/item-visibility'
-import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 
 @Injectable()
 export class FoldersService {
@@ -212,6 +212,8 @@ export class FoldersService {
         kind: 'folder',
         spaceId,
       })
+      // And the destination space's gate — see assertCanPlaceIn.
+      await assertCanPlaceIn(this.db, { spaceId: targetSpaceId, actorId, kind: 'folder' })
     }
 
     const movedProjects = await this.db

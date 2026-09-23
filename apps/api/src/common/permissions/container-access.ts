@@ -1,8 +1,9 @@
-import { ForbiddenException } from '@nestjs/common'
+import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
-import { workspaceMembers, spaceMembers } from '@rundesk/db'
+import { workspaceMembers, spaceMembers, spaces, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { assertSpaceLevel } from './space-default-permission'
+import { checkContainerAccess } from './container-access.guard-helper'
 
 const ADMIN_ROLES = new Set(['super_admin', 'workspace_admin'])
 
@@ -156,4 +157,55 @@ export async function assertCanCreateInSpace(
     required: 'edit',
     kind: params.kind,
   })
+}
+
+/**
+ * PUTTING A CONTAINER SOMEWHERE — by creating it there, moving it there, or
+ * applying a template there — needs the same two things of the DESTINATION:
+ * the space's create gate (`assertCanCreateInSpace`), and a container the
+ * actor can see at all (`checkContainerAccess`).
+ *
+ * Creating checked the first. Moving a list, a project or a folder checked
+ * neither: each asked whether the actor could manage the thing being moved
+ * and whether the target was in the same workspace, and not whether the
+ * target was a "View only" space or a private project they are not in.
+ * Applying a template checked neither either. Every one of them is the same
+ * side door onto a space whose default permission says no.
+ *
+ * `projectId` when the destination is a project (a list moving into it); the
+ * space's visibility and the project's are both part of what the actor must
+ * be able to see. No actor, no check — the system paths that pass none.
+ */
+export async function assertCanPlaceIn(
+  db: Db,
+  params: { spaceId: string; projectId?: string | null; actorId: string | null | undefined; kind: string },
+): Promise<void> {
+  if (!params.actorId) return
+  const [space] = await db
+    .select({ workspaceId: spaces.workspaceId, visibility: spaces.visibility })
+    .from(spaces)
+    .where(eq(spaces.id, params.spaceId))
+    .limit(1)
+  if (!space) throw new NotFoundException('Space not found')
+  let projectVisibility: string | null = null
+  if (params.projectId) {
+    const [project] = await db
+      .select({ visibility: projects.visibility })
+      .from(projects)
+      .where(eq(projects.id, params.projectId))
+      .limit(1)
+    projectVisibility = project?.visibility ?? null
+  }
+  const [member] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, space.workspaceId), eq(workspaceMembers.userId, params.actorId)))
+    .limit(1)
+  const reachable = await checkContainerAccess(
+    db,
+    { spaceId: params.spaceId, spaceVisibility: space.visibility, projectId: params.projectId ?? null, projectVisibility },
+    { userId: params.actorId, workspaceRole: member?.role },
+  )
+  if (!reachable) throw new ForbiddenException(`You do not have access to where this ${params.kind} would go`)
+  await assertCanCreateInSpace(db, { spaceId: params.spaceId, actorId: params.actorId, kind: params.kind })
 }

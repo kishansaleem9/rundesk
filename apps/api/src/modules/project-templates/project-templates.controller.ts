@@ -103,7 +103,7 @@ export class ProjectTemplatesController {
       projectName?: string
     },
   ) {
-    return this.svc.apply(workspaceId, user.id, body)
+    return this.svc.apply(workspaceId, user.id, body, user.role)
   }
 
   @Delete(':templateId')

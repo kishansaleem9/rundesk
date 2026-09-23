@@ -9,7 +9,7 @@ import { eq, and, ne, asc, sql, type SQL } from 'drizzle-orm'
 import { lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
@@ -372,7 +372,7 @@ export class ListsService {
     if (!src) throw new NotFoundException('List not found')
 
     const [dest] = await this.db
-      .select({ name: projects.name, workspaceId: spaces.workspaceId, isArchived: projects.isArchived })
+      .select({ name: projects.name, workspaceId: spaces.workspaceId, spaceId: projects.spaceId, isArchived: projects.isArchived })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(projects.id, targetProjectId))
@@ -382,6 +382,9 @@ export class ListsService {
       throw new BadRequestException('A list can only be moved within its own workspace')
     }
     if (dest.isArchived) throw new BadRequestException('Cannot move into a deleted project')
+    // The destination, not only the source: its space's create gate and a
+    // project the actor can see. See assertCanPlaceIn.
+    await assertCanPlaceIn(this.db, { spaceId: dest.spaceId, projectId: targetProjectId, actorId, kind: 'list' })
 
     const [row] = await this.db
       .update(lists)

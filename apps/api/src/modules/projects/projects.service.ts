@@ -3,7 +3,7 @@ import { eq, and, or, inArray, sql } from 'drizzle-orm'
 import { projects, spaces, projectMembers, spaceMembers, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { assertCanManageContainer, assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
@@ -264,6 +264,9 @@ export class ProjectsService {
         throw new BadRequestException('A project can only be moved within its own workspace')
       }
       if (dest.isArchived) throw new BadRequestException('Cannot move into a deleted space')
+      // Into a DIFFERENT space: that space's create gate, and one the actor
+      // can see. See assertCanPlaceIn.
+      await assertCanPlaceIn(this.db, { spaceId: destSpaceId, actorId, kind: 'project' })
     }
 
     // A folder target must actually live in the destination space, otherwise the

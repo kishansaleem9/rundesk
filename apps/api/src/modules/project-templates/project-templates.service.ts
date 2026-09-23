@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException, Logger, type OnModuleInit } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, Logger, type OnModuleInit } from '@nestjs/common'
 import { and, eq, desc, isNull, or, asc, ilike, inArray, sql } from 'drizzle-orm'
 import {
   projectTemplates,
@@ -19,6 +19,8 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SpacesService } from '../spaces/spaces.service'
 import { seedListStatuses } from '../lists/list-statuses.defaults'
+import { assertCanPlaceIn } from '../../common/permissions/container-access'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 
 type TemplatePayload = NonNullable<typeof projectTemplates.$inferSelect.payload>
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -323,7 +325,25 @@ export class ProjectTemplatesService implements OnModuleInit {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private readonly spacesService: SpacesService,
+    private readonly roles: CustomRolesService,
   ) {}
+
+  /**
+   * The permission the thing a template MAKES needs — asked here because it
+   * depends on the template's own type, which the route cannot know before
+   * the template is loaded. The same check and the same words as
+   * PermissionsGuard, which guards the direct routes.
+   *
+   * WHY. `POST /projects` requires `project.create`, which members do not
+   * hold, and applying a folder template creates a project with no check at
+   * all: the templates page was a way round the permission for anybody in the
+   * workspace. A space template creates a space, so it needs `space.create`.
+   */
+  private async assertMayMake(workspaceId: string, userId: string, globalRole: string | undefined, key: 'project.create' | 'space.create') {
+    if (globalRole === 'super_admin') return
+    const resolution = await this.roles.resolveForUser(workspaceId, userId)
+    if (!resolution?.permissions.includes(key)) throw new ForbiddenException(`Missing required permission: ${key}`)
+  }
 
   async onModuleInit() {
     try {
@@ -660,6 +680,14 @@ export class ProjectTemplatesService implements OnModuleInit {
     },
   ) {
     if (!dto.payload?.lists) throw new BadRequestException('Template payload must contain lists')
+    // Refused here rather than discovered by whoever applies it: a list needs a
+    // name, and its tasks — when it has any — are an array of titled tasks.
+    for (const list of dto.payload.lists) {
+      if (typeof list?.name !== 'string' || !list.name.trim()) throw new BadRequestException('Every list in a template needs a name')
+      if (list.tasks !== undefined && (!Array.isArray(list.tasks) || list.tasks.some((t) => typeof t?.title !== 'string' || !t.title.trim()))) {
+        throw new BadRequestException('A template list’s tasks must each have a title')
+      }
+    }
     const targetType: TemplateTargetType = isTargetType(dto.targetType) ? dto.targetType : 'folder'
     if (targetType === 'list' && dto.payload.lists.length !== 1) {
       throw new BadRequestException('A list template must carry exactly one list')
@@ -717,9 +745,12 @@ export class ProjectTemplatesService implements OnModuleInit {
       targetProjectId?: string
       projectName?: string
     },
+    globalRole?: string,
   ) {
     const tpl = await this.getOne(workspaceId, dto.templateId)
     const targetType: TemplateTargetType = isTargetType(tpl.targetType) ? tpl.targetType : 'folder'
+    if (targetType === 'folder') await this.assertMayMake(workspaceId, userId, globalRole, 'project.create')
+    if (targetType === 'space') await this.assertMayMake(workspaceId, userId, globalRole, 'space.create')
     const name = dto.projectName?.trim() || tpl.name
 
     let createdSpace: typeof spaces.$inferSelect | null = null
@@ -741,6 +772,9 @@ export class ProjectTemplatesService implements OnModuleInit {
         .where(and(eq(projects.id, dto.targetProjectId), eq(spaces.workspaceId, workspaceId)))
         .limit(1)
       if (!found) throw new NotFoundException('Target project not found in this workspace')
+      // Applying a template CREATES in the target, so it faces the create
+      // gate every other create faces. See assertCanPlaceIn.
+      await assertCanPlaceIn(this.db, { spaceId: found.spaces.id, projectId: found.projects.id, actorId: userId, kind: 'list' })
       project = found.projects
     } else {
       let spaceId: string
@@ -760,6 +794,7 @@ export class ProjectTemplatesService implements OnModuleInit {
           .where(and(eq(spaces.id, dto.targetSpaceId), eq(spaces.workspaceId, workspaceId)))
           .limit(1)
         if (!space) throw new NotFoundException('Target space not found in this workspace')
+        await assertCanPlaceIn(this.db, { spaceId: space.id, actorId: userId, kind: 'project' })
         spaceId = space.id
       }
 
@@ -806,7 +841,10 @@ export class ProjectTemplatesService implements OnModuleInit {
       if (createdList) await seedListStatuses(this.db, createdList.id)
       listsCreated++
 
-      for (const task of list.tasks) {
+      // `?? []`: a list with no `tasks` is a list with nothing in it, as
+      // `complexityOf` already reads it. This iterated it bare and answered 500
+      // to anybody applying a template whose list carried none.
+      for (const task of list.tasks ?? []) {
         await this.db.insert(tasks).values({
           listId: createdList.id,
           createdById: userId,
