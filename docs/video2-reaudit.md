@@ -6426,6 +6426,22 @@ The two siblings that carry the same premise in comments — `settings-depth` an
 about the chrome rather than the library, the other skips where storage is
 absent and therefore measures MORE now, not less.
 
+**AND IT IS DELIBERATELY NOT MECHANISED**, which is worth as much as the fix.
+The obvious checker greps the suites for "storage is unconfigured", "R2 is
+unconfigured", "`R2_ACCOUNT_ID` is empty" and asserts the lane does not in fact
+provide one. It would have caught both — and it would fail on this very pass,
+because the repaired suites QUOTE their old premise in the comment explaining
+why it was wrong, which is the most useful sentence in each file. Telling a
+live claim from a recorded history is a tense judgement, and a rule that
+demands the history be deleted to stay green is a rule that deletes the reason.
+
+The same bar rule one sets for the section-enders: six working call sites
+reported as defects is a checker nobody keeps. What catches this class is the
+thing that already caught it — a break-test that REFUSES a non-green baseline,
+on every suite, every sweep. That guard cost about a hundred seconds per
+refusal and found both within twenty minutes of the round starting. It does not
+need help from a text rule.
+
 **`process.exit()` in the suites is the wrong pattern and cannot bite today.**
 `console.log` to a pipe is asynchronous and `process.exit()` discards pending
 writes; 215 call sites across 114 suites still use it. It is recorded rather
