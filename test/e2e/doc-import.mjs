@@ -36,6 +36,7 @@
  */
 import path from 'node:path'
 import { writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
@@ -169,7 +170,7 @@ try {
 
   // ── the import itself ─────────────────────────────────────────────────────
   console.log('\n▶ a Markdown file becomes a Doc, titled from its own first heading')
-  const mdPath = `/tmp/claude-0/${TAG}.md`
+  const mdPath = path.join(tmpdir(), `${TAG}.md`)
   writeFileSync(mdPath, FILE)
   await page.getByTestId('import-doc-file').setInputFiles(mdPath, { timeout: 10_000 }).catch(() => {})
   const landed = await waitUntil(
@@ -307,7 +308,7 @@ try {
   )
 
   console.log('\n▶ what it refuses, and whether it says why')
-  const docxPath = `/tmp/claude-0/${TAG}.docx`
+  const docxPath = path.join(tmpdir(), `${TAG}.docx`)
   writeFileSync(docxPath, 'PK\u0003\u0004 not really a docx')
   await page.getByTestId('import-doc-file').setInputFiles(docxPath, { timeout: 10_000 }).catch(() => {})
   const refused = await waitUntil(
@@ -363,7 +364,11 @@ try {
   // counting and nothing is removed by pattern.
   if (api && madeDocId) await api(`/docs/${madeDocId}`, { method: 'DELETE' }).catch(() => {})
   await browser.close().catch(() => {})
-  await stack.stop?.().catch?.(() => {})
+  // `close`, not `stop`: the stack has no `stop`, and `stack.stop?.()` was an
+  // optional call on nothing — it closed nothing, the server held two
+  // keep-alive sockets open, and every run finished its checks and then sat
+  // until `timeout` killed it at 900s (exit 124 under a "15 passed" line).
+  stack.close()
 }
 
 const ran = passed + failed

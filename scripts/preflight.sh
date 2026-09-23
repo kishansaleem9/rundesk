@@ -36,6 +36,8 @@ step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "the plan asks for what is unmeasured" node scripts/check-plan-population.mjs
 step "and the unit claims redden too"   node scripts/check-unit-claims.mjs
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
+step "every suite has a CI step"        node scripts/check-suites-registered.mjs
+step "and that gate can fail"           node scripts/check-suites-registered-cases.mjs --mutate
 step "no conditional check has no else" node scripts/check-suite-check-branches.mjs
 step "and that rule can fail at all"    node scripts/check-branches-cases.mjs --mutate
 step "nothing ends a section on a throw" node scripts/check-suite-section-enders.mjs

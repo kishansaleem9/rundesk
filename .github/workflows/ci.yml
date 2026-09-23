@@ -332,6 +332,17 @@ jobs:
       - name: Every workspace write proves the caller belongs there
         run: node scripts/check-workspace-guards.mjs
 
+      # A suite that is not registered is verified once on a lane and never
+      # again. `doc-import` was in that state while the resume doc said every
+      # suite was registered, and nothing compared the directory with this
+      # file. Reads `run:` lines only — a suite named in a comment, a step name
+      # or behind a shell `#` is run by nothing — and fails on an empty read.
+      - name: Every e2e suite has a CI step
+        run: node scripts/check-suites-registered.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-suites-registered-cases.mjs --mutate
+
       - name: The S3 stub is faithful to the SDK, and each case bites
         run: node scripts/check-s3-stub.mjs --mutate
 
@@ -390,10 +401,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND SEVEN — every suite in the repo, with
-    # none unregistered. At the measured 1.1 minutes each that is about 118
+    # The job now runs ONE HUNDRED AND TEN — every suite in the repo, which
+    # `check-suites-registered.mjs` now enforces rather than this comment
+    # asserting it. At the measured 1.1 minutes each that is about 121
     # minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 in two days.
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -453,9 +465,18 @@ jobs:
           --health-retries 20
 
     env:
+      # THE ONE DATABASE this job has — the service above creates only this
+      # one — and every suite reads it, because it is the one the API writes.
+      # Twenty-five steps used to override it with `rundesk_ci`, a database
+      # nothing creates, so each of those suites would have failed to connect
+      # on the first day CI ran again. Do not override it per step.
       DATABASE_URL: postgres://rundesk:rundesk@localhost:5432/rundesk_calls
       JWT_ACCESS_SECRET: ci-access-secret
       JWT_REFRESH_SECRET: ci-refresh-secret
+      # Where the object store listens. Suites reach the stub's control routes
+      # through `test/e2e/lib/store.mjs`, which reads this; unset, it falls back
+      # to the lane formula (9100 + api - 3020), which is 9091 for this job.
+      E2E_STORE_PORT: 9100
 
     steps:
       - name: Checkout
@@ -518,6 +539,26 @@ jobs:
         if: '!cancelled()'
         run: pnpm --filter @rundesk/web exec vite build
 
+      # THE OBJECT STORE EVERY LANE HAS. Each suite below is verified on a lane
+      # whose API points at `scripts/e2e-lanes/s3-stub.mjs` — `lane-env.sh`
+      # gives every launcher the same four variables — so a job with no store
+      # runs them in a configuration none of them was checked in: uploads fail
+      # on "Storage is not configured", and the signing checks in `task-cover`,
+      # `attach-on-create` and `task-boundaries` have nothing to sign. Same stub,
+      # same `--strict` (an unsigned PUT is refused), readiness read from the
+      # line it prints rather than slept through.
+      - name: Start the object store
+        if: '!cancelled()'
+        run: |
+          RUNDESK_S3_STUB=1 nohup node scripts/e2e-lanes/s3-stub.mjs \
+            --port "$E2E_STORE_PORT" --bucket rundesk-ci --strict > /tmp/s3.log 2>&1 &
+          disown
+          for i in $(seq 1 50); do
+            if grep -q '"ready":true' /tmp/s3.log; then echo "store up"; exit 0; fi
+            sleep 0.2
+          done
+          echo "The object store never announced itself. Its output:"; cat /tmp/s3.log; exit 1
+
       # Backgrounded and waited for: a suite that starts talking to an API that
       # is not up yet fails for a reason that has nothing to do with calls.
       - name: Start the API
@@ -540,6 +581,12 @@ jobs:
           echo "API never came up. Its output:"; cat /tmp/api.log; exit 1
         env:
           PORT: 3011
+          # The store started above — the same four variables `lane_store_env`
+          # exports. Not credentials: the stub checks no signature.
+          R2_ENDPOINT: http://127.0.0.1:${{ env.E2E_STORE_PORT }}
+          R2_ACCESS_KEY_ID: stub-key
+          R2_SECRET_ACCESS_KEY: stub-secret
+          R2_BUCKET_NAME: rundesk-ci
 
       - name: A real SyncUp, in two browsers
         if: '!cancelled()'
@@ -1402,6 +1449,18 @@ jobs:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
 
+      # §V2-S13 frame `12:05` — Create › Imports › Document files. The load-
+      # bearing check is a ROUND TRIP (file → Doc → export → the same file),
+      # because an importer that dumped everything into one paragraph passes
+      # every "a doc exists" check. The one suite that was never registered;
+      # `check-suites-registered.mjs` now fails the build if another one isn't.
+      - name: Document import
+        if: '!cancelled()'
+        run: node test/e2e/doc-import.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
       # §P frame `18:39` — the integration error card carries the PROVIDER'S own
       # message. A card rendering a constant string is the facade defect.
       - name: Integration error card
@@ -1410,7 +1469,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §M — a countdown in the tab title, which must MOVE and must be RESTORED.
       # Set-once and never-cleared are both easy to miss and both covered.
@@ -1489,17 +1547,15 @@ jobs:
       # guard has a positive twin. The attacker is a member of TWO workspaces,
       # so the same-workspace rule is the only thing that can stop the move.
       #
-      # NEEDS AN OBJECT STORE for its two signing checks, which pair "the foreign
-      # cover is not signed" with "this task's own cover is" so that neither can
-      # pass on a lane that signs nothing. This job runs none yet — the same gap
-      # `task-cover` and `attach-on-create` have, recorded in docs/open-work.md.
+      # NEEDS THE OBJECT STORE started above, for its two signing checks, which
+      # pair "the foreign cover is not signed" with "this task's own cover is"
+      # so that neither can pass where nothing can be signed.
       - name: Task references stay inside their workspace
         if: '!cancelled()'
         run: node test/e2e/task-boundaries.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S09 `[08:55]` — a folder name collision is reported, not swallowed. The
       # direct-SQL-insert check proves the INDEX refuses, so the rule cannot be
@@ -1510,7 +1566,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S01 `[06:25]` — the sidebar's Channels and My Tasks sections, drag into a
       # folder, and Recent Chats past the first five. The drag check asserts the
@@ -1522,7 +1577,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S18 `[17:44]`/`[18:45]` — the AI can create a list or a folder.
       # `COMMAND_TOOLS` was six task-only tools and `chatStream` passed none at
@@ -1535,7 +1589,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S20 `[20:10]` — AI answers render markdown, with task chips carrying a
       # live status badge and a ghost reference degrading to inert text rather
@@ -1546,7 +1599,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S16 frame `15:20` — the task header's next-status and mark-complete
       # controls. Statuses are PER LIST, so the suite deletes all six defaults
@@ -1570,7 +1622,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §S01 `[15:30]` — defining a custom field from an open task. Two lists in
       # one project, so `scope` can be falsified against a sibling rather than
@@ -1629,7 +1680,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S02/S04/S05d `01:20`, `03:25`, `04:00` — the three AI surfaces on a
       # task. ANTHROPIC_API_KEY is empty here, so every one of them ends in
@@ -1642,7 +1692,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S07 `00:05`/`06:25`. `chat_channels.is_dm` and the split in
       # workspace-chat-page.tsx both predate this: the data was there and the
@@ -1656,7 +1705,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S09 `08:32` — what the Create Folder dialog asks. The private
       # toggle and the Use-Templates footer, both asserted against the server.
@@ -1669,7 +1717,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S13 `08:23`/`14:16`. `projects.position` existed since the table
       # did with neither end attached: updateProject left it out of its
@@ -1683,7 +1730,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-15b `12:48` — "See calendars for anyone in your team, find a time".
       # The planner's "Meet with" takes ONE person and hatches their busy time
@@ -1699,7 +1745,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-11 `19:07` — App Center → Connections. Four ledger rows live in one
       # screenshot and share one failure mode: a control that cannot do the
@@ -1714,7 +1759,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-06 `15:20`–`16:20` — the live focus countdown in the app header.
       # The row was marked BUILT and the pill did not exist: the hook computed
@@ -1728,7 +1772,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-05 `04:00`/`04:11` — the @ picker's six sections and the keyboard
       # hint footer. Rundesk had three tabs and no footer. The Locations check
@@ -1741,7 +1784,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S18 `17:16` — the model picker's hover card. The ledger carried both
       # `B | Model picker — "Best models", hover cards…` and `M | …hover cards
@@ -1756,7 +1798,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2 `10:35` — the BOARD Customize panel: Stack fields · Show empty
       # fields · Collapse empty columns. Measured off the geometry, not the
@@ -1771,7 +1812,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2 `11:30` — "Tasks where I have assigned", over Comments · Subtasks ·
       # Checklists. Each is a separate server source, and the fixture gives
@@ -1784,7 +1824,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S01 `00:20`/`00:42` — the field-type picker, counted off the frame
       # rather than off the ledger row: 32 types, not "~30", and the row's
@@ -1808,7 +1847,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S02 `01:10` — files staged on the CREATE modal, before the task
       # exists. `input.files` is a LIVE FileList and the change handler clears
@@ -1826,7 +1864,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-S13 `17:44`/`18:45` — the create menu's AI row. Asserted against
       # BOTH doors: a list made from a space with no project lands in that
@@ -1841,7 +1878,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2 — "⚡ Assign with AI". `assign_task` existed; choosing the person
       # did not. The ranking is the feature, so the suite adds work to the
@@ -1855,7 +1891,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-15 `12:40`/`12:45` — the planner's onboarding panel and its
       # carousel. The Connect check asserts the browser LANDS on the URL the
@@ -1872,7 +1907,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
       # §V2-15 — the planner's bottom command bar, which must open the SHARED
       # palette rather than grow a second search surface beside it. ⌘K has to
@@ -1887,7 +1921,6 @@ jobs:
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!
-          DATABASE_URL: postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_ci
 
   browser-suites:
     name: Browser suites
