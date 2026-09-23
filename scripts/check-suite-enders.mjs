@@ -805,6 +805,34 @@ chk(
 
 chk(
   run({
+    'deref-optional-as-test.mjs': [
+      `await page.evaluate(() => {`,
+      `  const v = document.querySelector('[data-testid="preview"]')`,
+      `  return v?.parentElement ? getComputedStyle(v.parentElement).backgroundColor : null`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor a dereference inside a branch an optional chain TESTS — that branch only runs when the chain was truthy',
+  'a dereference guarded by its own optional chain was reported; this is the shape that took `syncup-live` from clean to one false site',
+)
+
+chk(
+  run({
+    'deref-optional-and.mjs': [
+      `await page.waitForFunction(() => {`,
+      `  const v = document.querySelector('[data-testid="preview"]')`,
+      `  return v?.parentElement && getComputedStyle(v.parentElement).display === 'block'`,
+      `})`,
+      '',
+    ].join('\n'),
+  }).counts?.derefs === 0,
+  'nor one to the right of `&&` behind the same chain',
+  'a short-circuited optional chain was reported',
+)
+
+chk(
+  run({
     'deref-optional-then-bare.mjs': [
       `await page.evaluate(() => {`,
       `  const el = document.querySelector('[data-testid="thing"]')`,
@@ -814,7 +842,7 @@ chk(
       '',
     ].join('\n'),
   }).counts?.derefs === 1,
-  'but an optional chain followed by a BARE dereference still is — the chain guards its own line and nothing below it',
+  'but an optional chain used as a STATEMENT, followed by a bare dereference, still is — it guards its own line and nothing below it',
   'a bare dereference below an optional chain was missed',
 )
 
@@ -1056,6 +1084,8 @@ if (process.argv.includes('--mutate')) {
     ['rule ten stops sparing querySelectorAll, which answers a list', '(querySelector|closest)\\(', '(querySelector|closest)'],
     ['rule ten forgets a fallback given on the declaration line', "if (/\\?\\?|\\|\\|/.test(lines[i].slice(lines[i].indexOf('=')))) continue", 'if (false) continue'],
     ['rule ten stops looking past the line below the declaration', 'for (let j = i + 1; j < Math.min(i + 40, lines.length); j++) {\n    out.push(lines[j])', 'for (let j = i + 1; j < Math.min(i + 2, lines.length); j++) {\n    out.push(lines[j])'],
+    ['rule ten treats every optional chain as a guard, however it is used', "if (/\\?[^.?]|&&|\\|\\|/.test(rest)) return 'guard'\n      continue", "return 'guard'"],
+    ['rule ten stops sparing an optional chain used as a test', "if (/^\\s*\\?\\./.test(after)) {", 'if (false) {'],
   ]
   console.log('\n▶ and each mutation of the checker reddens a case')
   for (const [label, from, to] of MUTATIONS) {

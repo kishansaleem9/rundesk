@@ -591,14 +591,28 @@ const firstUseOf = (body, v) => {
     const after = body.slice(m.index + v.length, m.index + v.length + 14)
     if (/!\s*$/.test(before)) return 'guard'
     /*
-     * `el?.foo` and `el ?? x` are NOT listed as guards, and that is deliberate
-     * rather than an omission. Both fall through as neutral, so the walk goes
-     * on — which is the only way to catch the mixed shape, an optional chain
-     * on one line and a bare dereference on the next. Listing them would have
-     * stopped the walk at the safe use and called the unsafe one guarded.
-     * Written as guards first; no mutation could tell the two spellings apart,
-     * which is how the mixed case came to light.
+     * AN OPTIONAL CHAIN GUARDS WHAT IT TESTS, NOT WHAT COMES AFTER IT, and
+     * both halves of that cost a wrong answer to find.
+     *
+     * Listed as a plain guard, the walk stopped at `el?.dispatchEvent(…)` and
+     * called a bare `el.textContent` on the next line guarded — the chain
+     * protects its own line and nothing below it. Dropped entirely, the walk
+     * ran straight past `v?.parentElement ? v.parentElement : null` and
+     * reported the dereference inside a branch that only runs when the chain
+     * was truthy: `syncup-live.mjs` went from clean to one false site, which is
+     * the answer rule one refuses a checker for.
+     *
+     * So the question is what the chain is FOR. Used as a test — a ternary
+     * condition, the left of `&&` or `||` — it guards the branch beside it and
+     * the walk stops. Used as a statement, it guards only itself and the walk
+     * goes on.
      */
+    if (/^\s*\?\./.test(after)) {
+      const eol = body.indexOf('\n', m.index)
+      const rest = body.slice(m.index + v.length, eol === -1 ? body.length : eol).replace(/\?\./g, '')
+      if (/\?[^.?]|&&|\|\|/.test(rest)) return 'guard'
+      continue
+    }
     if (/^\s*\?[^.?]/.test(after)) return 'guard'
     if (/^\s*(&&|\|\||===|!==|==|!=)/.test(after)) return 'guard'
     if (/^\s+instanceof\b/.test(after)) return 'guard'
