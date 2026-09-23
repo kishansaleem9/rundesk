@@ -62,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 44
+const EXPECTED_CHECKS = 45
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -545,6 +545,21 @@ try {
     `it answered ${said(assignHidden)} and the member is ${hiddenAssigned ? '' : 'not '}assigned`,
   )
   await sql`delete from task_assignees where task_id = ${TP} and user_id = ${memberId}`
+
+  /*
+   * A PRIVATE TASK IS SHARED BY ASSIGNING IT. Its creator, its assignees and
+   * the managers see it, so an assignee who could not open it before being
+   * assigned can open it after — the flow `comment-recording` draws. The
+   * first version of the rule refused this, and the regression run caught it.
+   */
+  const sharePrivate = await A(`/tasks/${TPRIV}/assignees`, { method: 'POST', body: { userId: memberId } })
+  const opensNow = await M(`/tasks/${TPRIV}`)
+  chk(
+    sharePrivate.status < 300 && (await holds('task_assignees', TPRIV, 'user_id', memberId)) && opensNow.status === 200,
+    'but a PRIVATE task is shared by assigning it — the member it could not be shown to opens it once assigned',
+    `assigning answered ${said(sharePrivate)} and the member's GET answered ${opensNow.status}`,
+  )
+  await sql`delete from task_assignees where task_id = ${TPRIV} and user_id = ${memberId}`
 
   const assignVisible = await A(`/tasks/${T3}/assignees`, { method: 'POST', body: { userId: memberId } })
   chk(

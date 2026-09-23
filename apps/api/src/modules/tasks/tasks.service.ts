@@ -678,7 +678,7 @@ export class TasksService {
    * project. Used by read paths that hand back sensitive data (e.g. signed R2
    * attachment URLs) as a service-layer defense-in-depth behind the route guard.
    */
-  private async assertTaskReadAccess(taskId: string, actorId: string) {
+  private async assertTaskReadAccess(taskId: string, actorId: string, opts: { asAssignee?: boolean } = {}) {
     const [ctx] = await this.db
       .select({
         taskId: tasks.id,
@@ -715,11 +715,15 @@ export class TasksService {
         throw new ForbiddenException('This list is private')
       }
       if (ctx.taskVisibility === 'private') {
-        const [assigned] = await this.db
-          .select({ userId: taskAssignees.userId })
-          .from(taskAssignees)
-          .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
-          .limit(1)
+        // `asAssignee`: the question is whether they could see it ONCE
+        // assigned — see assertPersonCanSeeTask.
+        const [assigned] = opts.asAssignee
+          ? [{ userId: actorId }]
+          : await this.db
+              .select({ userId: taskAssignees.userId })
+              .from(taskAssignees)
+              .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
+              .limit(1)
         if (
           !canSeePrivateItem(
             { visibility: ctx.taskVisibility, createdById: ctx.createdById },
@@ -849,10 +853,20 @@ export class TasksService {
    *
    * 400 with the reason, not 404: the caller can see the task, and what they
    * need to know is why this person cannot be put on it.
+   *
+   * AN ASSIGNEE IS JUDGED AS AN ASSIGNEE. A PRIVATE task is its creator's, its
+   * assignees' and the managers' — so assigning somebody is exactly how a
+   * private task is shared, and `comment-recording` draws that flow: mention
+   * somebody who cannot open the task, the picker warns, assign them, the
+   * warning goes. The first version of this check asked whether they could
+   * see the task BEFORE being assigned, refused, and broke it; the regression
+   * run caught it. The workspace, its private spaces and projects and a
+   * private list still have to let them in — assignment grants none of those.
+   * A follower gets no such grant, so a follower must see the task already.
    */
   private async assertPersonCanSeeTask(taskId: string, userId: string, as: 'assignee' | 'follower') {
     try {
-      await this.assertTaskReadAccess(taskId, userId)
+      await this.assertTaskReadAccess(taskId, userId, { asAssignee: as === 'assignee' })
     } catch {
       throw new BadRequestException(PERSON_CANNOT_SEE[as])
     }
