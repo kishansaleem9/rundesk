@@ -4,7 +4,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
-**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted; then `product-siblings/chat-attachment-key-unvalidated`, `product-siblings/meeting-recording-key-unvalidated`, `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` and `product-siblings/teams-work-preview-ignores-privacy`. The docs item `product-siblings/docs-patch-mass-assign-public-share` is closed below as well. And `resume-defects/resume-1-move` and `resume-defects/resume-1-residual` (container moves and template apply into view-only spaces), with two found beside them; plus `found-23-sep/call-meeting-record-lost` (a regression of mine, found by the sweep and fixed) and `found-23-sep/stale-chunk-recovery-writes-the-shared-tree`. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted; then `product-siblings/chat-attachment-key-unvalidated`, `product-siblings/meeting-recording-key-unvalidated`, `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` and `product-siblings/teams-work-preview-ignores-privacy`. The docs item `product-siblings/docs-patch-mass-assign-public-share` is closed below as well. And `resume-defects/resume-1-move` and `resume-defects/resume-1-residual` (container moves and template apply into view-only spaces), with two found beside them; plus `found-23-sep/call-meeting-record-lost` (a regression of mine, found by the sweep and fixed) and `found-23-sep/stale-chunk-recovery-writes-the-shared-tree`. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Then `harness/dist-brk-committed` (and its duplicate `commit-log/log-39863ff-2`) and `harness/fleet-scripts-exit-zero-when-down`, with `found-23-sep/fleet-up-never-stopped-the-old-api` and `found-23-sep/fleet-restart-counted-refused-lanes-up` found beside it; `harness/chain-planner-crash-reads-as-clean`, `harness/deps-omit-suite-libs`, `harness/planner-ignores-patch-body`, `harness/rerun-declaration-mirror` and `harness/sweep-until-clean-drops-exit3-guard`, with `found-23-sep/refuses-all-patches-never-built` and `found-23-sep/fixtures-built-through-the-route-under-test` found beside them (their re-runs pending); then `harness/measuredat-counts-nonmeasurements`, `harness/stale-lock-dirs-hang-dispatch`, `harness/verify-scan-blind-to-dollar-filenames` and `harness/verify-staleness-scan-gaps`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
 
 ## Product defects — 46
 
@@ -494,9 +494,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Resolve each locatorVars name to its testid and treat `await <var>.<verb>(` as that testid in rules 1, 5 and 8. Count `<var>.isVisible()` and `<var>.count()` in a check as asserting the variable. Let rule 9 accept a locator variable as rule 7 does. Add fixtures, then bound the 12 sites with timeout and catch, keeping each check's absence semantics.
 
-### `harness/chain-planner-crash-reads-as-clean` — open, small
+### `harness/chain-planner-crash-reads-as-clean` — **closed**
 
 **chain-plan.sh and sweep-until-clean.sh report 'nothing left' when the planner crashes**
+
+*Closed:* the plan-building lines the two scripts each carried — both planner modes, then the merge — are one helper, `scripts/e2e-lanes/build-plan.sh`, which reads all three steps' exit statuses and accepts an EMPTY plan only from a planner that finished: each mode must print its `[never-run-plan] N patch(es)` summary, the last thing it does. Anything else is exit 4, with the reason in the log, and both scripts then say "the PLANNER FAILED — this is not 'nothing left'" and exit 4, a code neither used. Against the real planner it builds the same 29-set plan as before. `scripts/check-build-plan.sh --mutate` (preflight and the verify job) runs five fake planners — one that throws, one that dies after printing its summary (only the exit status tells), one that exits 0 without it (only the summary tells), a genuinely empty one, and two modes naming the same suite — and 4 of 4 mutations of the helper are caught: exit status unread, summary unasked, failure reported as 0, and no merge.
 
 *Evidence:* Both scripts use `set -uo pipefail` without -e (chain-plan.sh:24, sweep-until-clean.sh:28). They run `node never-run-plan.mjs >> "$plan" 2>>"$LOG"` without checking its status (chain-plan.sh:39-40, sweep-until-clean.sh:60-61), and they do the same for the merge `node -` step (chain-plan.sh:44, sweep-until-clean.sh:65). An empty plan gives sets=0, and the scripts then say 'round N: nothing left — every log on disk measured the current tree' and exit 0 (chain-plan.sh:58-62, sweep-until-clean.sh:79-83). Replicated in the scratchpad: a planner that throws gives planner-rc=1, and the script then prints the 'nothing left' sentence. Possible crash triggers include a syntax error in log-tree.mjs or suite-of-patch.mjs, and a missing /tmp/claude-0 (measuredAt's readdirSync throws).
 
@@ -520,17 +522,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* the 25 overrides are removed; every step inherits the job's `DATABASE_URL`, and a comment on the job env says not to override it per step.
 
-### `harness/deps-omit-suite-libs` — open, small
+### `harness/deps-omit-suite-libs` — **closed**
 
 **A measurement's dependencies leave out the test/e2e/lib helpers every suite imports**
+
+*Closed:* `patchDeps(text, suite)` adds `suiteLibs(suite)` — the `test/e2e/lib` files the suite imports, followed through the helpers that import each other (static `from`/`import` and dynamic `import()` alike), cached per suite. So the planner, `check-break-reddened` and `check-break-freshness`, which all read `patchDeps`, now call a log stale when a helper under it changed. `inbox-scope`'s six helpers and `task-cover`'s five (store included) are found. `check-log-tree.mjs` (44 cases) builds a tree holding each import shape, a cycle and a non-helper import, and checks folder-dialog's five real helpers; 12 of 12 mutations bite, three of them new — helpers dropped, helpers of helpers not followed, `import()` not read. Effect on disk: `store.mjs` changed at 13:59 today (7e12844), so the three suites importing it read as drifted where their logs predate that, which is the rule doing its job.
 
 *Evidence:* patchDeps (log-tree.mjs:139-145) adds only files under /home/user/rundesk/(apps|packages)/ plus test/e2e/<suite>.mjs. Suites import ./lib/signin.mjs (97), playwright.mjs (88), local-stack.mjs (87), wait.mjs (79), db.mjs (40), fixture.mjs (36) and chain.mjs (10), counted by git grep over test/e2e/*.mjs. A change to waitUntil or to chain.mjs changes what every importing suite measures. The planner, the reddened checker and freshness all still call those logs current. chain.mjs has changed behaviour before (580793d 'The chain helper had the hole it exists to prevent'). Today's logs postdate the last lib commit (8b788d5, 22 Sep 08:34), so nothing is affected yet.
 
 *To close:* In patchDeps, when a suite is named, add the test/e2e/lib/*.mjs files that suite imports (a static parse of `from './lib/...'`). Add a check-log-tree case.
 
-### `harness/fleet-scripts-exit-zero-when-down` — open, small
+### `harness/fleet-scripts-exit-zero-when-down` — **closed**
 
 **fleet-up.sh and fleet-restart.sh exit 0 when no lane came up; build-api.sh inherits that**
+
+*Closed:* both scripts end `[ "$ok" = "${#LANES[@]}" ] || exit 1`, and `build-api.sh`, whose last command is `fleet-restart.sh`, exits with it. The PLAUSIBLE half was real and is fixed with it: both now stop the old API through one function, `lane_api_down` in `lane-env.sh` — by port, then WAITED on until nothing listens there, SIGKILL after a grace — before starting the new one, so the health loop can no longer pass against the dying process. Measured: `fleet-restart.sh "9"` on a lane whose database is behind printed `NOT RESTARTED (above)`, `0 of 1 lanes up` and exited 1 in 0.7 s; before, it polled a lane it had refused for 90 s and exited 0. `scripts/check-lane-api-down.sh --mutate` (preflight and the verify job) starts real servers on a spare port — one that exits on SIGTERM, one that ignores it, and none — and requires the port to end free, the polite one BEFORE the grace ran out; 3 of 3 mutations are caught (no wait; no SIGKILL; `fleet-up`'s kill that stops nothing, which only the timing reveals). Two siblings found doing it, below.
 
 *Evidence:* fleet-up.sh:105 (`echo "$ok/${#LANES[@]} lanes up"`) and fleet-restart.sh:158 are each script's last command, so '0 of 4 lanes up' exits 0. build-api.sh:48-51 ends with fleet-restart.sh, so it also exits 0 with every lane down. sweep-until-clean.sh:185 (heal) discards fleet-up's status. PLAUSIBLE, not demonstrated: fleet-restart.sh:113-114 sends kill and relaunches without waiting for the port to free. wt-break.sh:92-99 does wait. So the health loop at :151-154 could pass against the dying old process.
 
@@ -578,17 +584,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Take a lock per lane around the vite build and the run, in the style of the wt<lane>.lock that wt-break.sh uses.
 
-### `harness/measuredat-counts-nonmeasurements` — open, small
+### `harness/measuredat-counts-nonmeasurements` — **closed**
 
 **measuredAt records PATCH FAILED / MISSING / CHANGED NOTHING / BUILD FAILED lines as measurements at that sha**
+
+*Fixed in log-tree:* `NOT_RUN` (exported beside `CONTROL`) matches the four lines, and `measuredAt` skips them — a failed attempt says nothing, and an older real measurement of the same patch stands or falls by its own drift. It had gone LIVE by the time it was fixed: five "refuses everything" patches (`tb-23`, `sdp-22`, `db-11`, `db-12`, `okb-16`) failed to build in both their runs and were on record as measured; after the fix the planner lists them as unmeasured (42 → 47 patches, 3 → 7 suites). `check-log-tree.mjs` holds the case — all four shapes, and a newer failed attempt that must not overwrite an older real run — and the mutation that removes the skip reddens two cases. And `wt-break.sh` removes `brk-<patch>.log` at the start of each attempt (7b201d5), so a patch that goes no further than MISSING, PATCH FAILED, CHANGED NOTHING or BUILD FAILED leaves no log at all rather than the previous run's, and `check-break-reddened` reads "no usable log" instead of old numbers under a new commit.
 
 *Evidence:* scripts/lib/log-tree.mjs:74-77 accepts any '^== <lowercase-name>' line that CONTROL (:50) does not exclude. wt-break.sh writes '== $b MISSING', '== $b PATCH FAILED', '== $b PATCH CHANGED NOTHING' and '== $b BUILD FAILED' at :383, :389, :403 and :477. Demonstrated with a synthetic log in the scratchpad: measuredAt returned x-1-rotted, x-2-typo, x-3-noop and x-4-gone, each 'measured' at sha 16349c51. On those outcomes wt-break.sh never truncates or rewrites brk-$b.log, which is only written at :433-434 in the OK branch. So check-break-reddened.mjs:323-350 reads the PREVIOUS run's brk log and dates it by the new sha. never-run-plan.mjs:81 skips the patch as measured. The comment in check-break-reddened.mjs:107-108 says wt-break truncates brk-<patch>.log at the start of each patch run, and that is false for these four outcomes. On disk: 9 such lines exist across the break-*.txt logs, and none is currently the newest line for its patch (scratchpad nonmeasure.mjs), so this is latent. classify-break-log.awk:46-48 already knows these outcomes. log-tree does not.
 
 *To close:* measuredAt should skip, or record as outcome:'not-run', any line carrying MISSING, PATCH FAILED, PATCH CHANGED NOTHING or BUILD FAILED, so that the patch reads as unmeasured and the planner schedules it. wt-break.sh should `rm -f brk-$b.log` before each patch attempt. Add a check-log-tree case and a mutation for it.
 
-### `harness/planner-ignores-patch-body` — open, small
+### `harness/planner-ignores-patch-body` — **closed**
 
 **never-run-plan --drifted ignores a change to a patch's own code, but check-break-reddened treats it as drift**
+
+*Closed:* all three instruments ask one function. `never-run-plan.mjs --drifted` and `check-break-freshness.mjs` call `makeMeasurementCheck` (which `check-break-reddened.mjs` already used) per patch, with the patch's name and text, so a rewritten body is drift everywhere. Measured after the change: `check-plan-population` reports "the plan and the reddened checker agree on all 118 patch(es) needing a run"; freshness now names the six patches whose bodies were rewritten today and the logs that predate `local-stack.mjs`'s last change, which its own copy of the question could not see. No fixture was added to `check-plan-population` — it compares the tools' printed output against the real logs, and with one shared function there is no second implementation for a fixture to catch; the body rule's cases and mutations are in `check-log-tree.mjs`.
 
 *Evidence:* CONFIRMED. scripts/check-break-reddened.mjs:350 calls notCurrent(rec, patchDeps(text, suite), { name, text }), so makeMeasurementCheck (scripts/lib/log-tree.mjs:155-164) reaches patchCodeMoved (log-tree.mjs:191-204) and a changed body (comments stripped) comes back as '<path> <body>'. It also comes back as '<not committed when it ran>' when the patch has no blob at that sha. scripts/e2e-lanes/never-run-plan.mjs:53 imports only makeDriftCheck. At :115-116 it checks drifted(rec.sha, patchDeps(text, suite)), and patchDeps (log-tree.mjs:117-146) leaves the patch file out, so a body-only change is `continue`d. A patch file is only looked at in the declaresRerun branch at :115. scripts/check-break-freshness.mjs:157-167 also leaves out the patch body, so there is a third instrument using the second rule. Demonstrated without editing the repo: /tmp/.../scratchpad/harness/disagree.mjs took po-3-one-provider (rec sha 5f66058c), added one line of code in memory, and got checker = ['test/e2e/breaks/po-3-one-provider.py <body>'] and planner --drifted = 'current (not scheduled)'. Result: chain-plan.sh:58-61 and sweep-until-clean.sh:79-82 would print 'nothing left — every log on disk measured the current tree' while the checker files that patch under drifted. The contradiction is not silent: check-plan-population.mjs:196-209 (preflight step, preflight.sh:36) would fail with 'checkerOnly'. But the chain can never clear it, because the patch is never scheduled, so it needs a manual wt-break run. There are 0 instances today: both tools report 0 drifted and check-plan-population agrees on 0. History: commit 4b16dc4 added patchCodeMoved and changed check-break-reddened.mjs, and never touched never-run-plan.mjs or check-break-freshness.mjs.
 
@@ -602,9 +612,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Replace the local-sweep and smoke-phase1 exits with bail(). Refresh bail.mjs's counts.
 
-### `harness/rerun-declaration-mirror` — open, small
+### `harness/rerun-declaration-mirror` — **closed**
 
 **A '# Re-run:' declaration is honoured by the planner and invisible to the reddened checker**
+
+*Closed:* a pending declaration is a reason `makeMeasurementCheck` returns — `<declares Re-run>` while the patch's WORKING COPY differs from its blob at the measured sha, spent by a measurement taken after it — so the planner and the checker share it, and both compare the working copy `wt-break.sh` runs. The planner counts declarations from that reason instead of its own `git diff`. `check-log-tree.mjs`: a declaration written after the measurement is pending though the code is unchanged, and one committed before the measurement is spent; the mutations that hide it and that never spend it each redden a case (48 cases, 15 of 15 mutations).
 
 *Evidence:* never-run-plan.mjs:115 schedules a patch that declares Re-run and whose file changed since its sha. check-break-reddened.mjs:61 does not import declaresRerun. Its body comparison (log-tree.mjs:184-189) strips every '#' line, and '# Re-run:' is one of those lines. So while a Re-run is pending, the checker credits as a current REDDENED measurement a log the patch itself says is not evidence, and check-plan-population.mjs:180-194 fails with planOnly. A second asymmetry: the planner's Re-run test uses git diff sha HEAD, which sees committed changes only. The checker compares the working-copy text, and the working copy is what wt-break.sh:381-385 actually runs. No patch declares Re-run today (grep of test/e2e/breaks/*.py for the declaresRerun regex returned none), so this is latent.
 
@@ -618,7 +630,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Match `^\s*(chk|check)\(`, and pair locator variables assigned from getByTestId. Add a fixture suite using check( to the checker's cases so the scope cannot silently shrink again. Then bound or catch the sites found.
 
-### `harness/stale-lock-dirs-hang-dispatch` — open, small
+### `harness/stale-lock-dirs-hang-dispatch` — **closed**
+
+*Closed (7b201d5):* both locks are taken with `lock_take` (lane-env.sh), which signs the directory with the holder's PID; a lock is HELD only while that process lives (an unsigned one for its first minute), and one whose holder is gone is taken with a line saying so. `run-plan.sh` skips a lane only when it is held by a live process, and when every lane stays held it says so once and gives up after `LANE_WAIT_MAX` (an hour) with exit 5; the round loop waits for the dispatcher the same way, bounded by `LOCK_WAIT_MAX`, exit 5. `scripts/check-locks.sh --mutate`: free, live holder, dead holder, unsigned new, unsigned old, absent — 4 of 4 mutations caught; `check-rounds.sh` adds a dead dispatcher's lock (ignored) and a live one (exit 5), and the mutations restoring the old bare-directory wait and the unbounded wait are caught.
 
 **No lock carries a PID or is ever checked for staleness, so a reaped runner leaves chain-plan waiting silently forever and run-plan spinning silently**
 
@@ -636,15 +650,19 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Delete sweep.sh and drain.sh, since run-plan.sh and chain-plan.sh supersede them. Alternatively, repoint them at the repo scripts and at never-run-plan output. Then update fleet-up.sh:19 and resume §2 and §5.
 
-### `harness/sweep-until-clean-drops-exit3-guard` — open, small
+### `harness/sweep-until-clean-drops-exit3-guard` — **closed**
 
 **sweep-until-clean.sh counts a run-plan lock refusal (exit 3) as a round, then stops on 'no progress'**
+
+*Closed:* one round loop, `scripts/e2e-lanes/rounds.sh`, sourced by both scripts — `sweep-until-clean.sh` is now "heal the fleet, then the same loop" (`before_round`). The loop carries chain-plan's exit-3 guard, builds its plan through `build-plan.sh` (the merge copy the two files each carried is gone with it), and ends with one set of codes for both: 0 nothing left, 2 no progress, 3 rounds used up, 4 planner failed (sweep-until-clean used 1 for two of those). `heal` also says when `fleet-up.sh`, which now exits 1 for a lane that stays down, could not bring one back. `scripts/check-rounds.sh --mutate` (preflight, verify job) drives the loop with a fake planner and dispatcher — empty, stuck, BUSY (3, then the same plan, then nothing: it must dispatch twice and end 0), a failed planner, endless — and 4 of 4 mutations are caught, the old sweep-until-clean shape first.
 
 *Evidence:* sweep-until-clean.sh:95-96 runs run-plan.sh and only logs '($?)'. run-plan.sh:37-40 exits 3 when another dispatcher holds /tmp/claude-0/run-plan.lock. The next round's plan is then identical, so sweep-until-clean.sh:85-89 prints 'asked for exactly what round N-1 asked for — stopping rather than looping' and exits 1. chain-plan.sh:74-84 carries the guard ('EXIT 3 IS "SOMEBODY ELSE HAS THE LANES", not a round that happened'). It was added in e9a90d2 on 22 Sep at 07:13. sweep-until-clean.sh was written 12 hours later (593165c, 19:29) without the guard. The two files also carry byte-for-byte copies of the merge script (chain-plan.sh:44-56 and sweep-until-clean.sh:65-77). d840b55 deleted break-queue.sh for exactly this reason ('a lane refusal (exit 3) read as a set that ran').
 
 *To close:* Keep one round loop. Make sweep-until-clean.sh call heal() and then chain-plan's loop, or move the loop and the merge into one sourced function that handles rc 3 the way chain-plan.sh:80-84 does.
 
-### `harness/verify-scan-blind-to-dollar-filenames` — open, small
+### `harness/verify-scan-blind-to-dollar-filenames` — **closed**
+
+*Closed (7b201d5):* both scans use `find … -newer <stamp> -print`, so no path is spliced into a shell string. Measured on lane 1: touching `apps/web/src/routes/app.$workspaceId.inbox.tsx` now refuses with exit 6 naming that file; the old pipeline over the same state printed nothing. mtimes restored afterwards, and a clean run went through (home-reminders 9/9).
 
 **verify.sh's staleness scans pass each path through `sh -c '[ {} -nt … ]'`, so every source file with `$` in its name (77 web files, including the list/board/calendar/Gantt route) is invisible to the exit-6 refusal**
 
@@ -662,7 +680,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* End verify.sh with `exit "$code"` after the summary. Have batch.sh record each suite's status and exit non-zero if any suite failed.
 
-### `harness/verify-staleness-scan-gaps` — open, small
+### `harness/verify-staleness-scan-gaps` — **closed**
+
+*Closed (7b201d5):* the API scan includes `packages/feature-flags/src` (measured: touching its `index.ts`, with the bundle made newer so the web check stays quiet, refuses with exit 7 naming it); a lane whose API process STARTED before the build stamp is refused with exit 7 (measured by touching the stamp: "the API on 3021 started at 17:02:20, before the build at 17:03:00"); the web scan includes `apps/web/index.html`, the Vite/Tailwind/PostCSS configs and `public/` (measured on `index.html`, exit 6). `build-api.sh`'s comment now says the running API reads the schema from source when it starts, and the README tabulates exits 6, 7 and 8.
 
 **verify.sh's API staleness scan misses packages/feature-flags and never asks whether the lane was restarted; the web scan misses the non-src inputs**
 
@@ -701,6 +721,38 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* after the store stub gained its request log, lane 1's stub answered `/__control/requests` with NoSuchBucket — it was the old process.
 
 *Closed (7e12844):* both stubs report a hash of their own source at `/__control/version`; `lane_store_up` and `lane_model_up` restart a stub whose hash differs from the file on disk. Proven live on lane 1; `check-s3-stub` and `check-model-stub` each carry the case and a mutation that reddens it.
+
+### `found-23-sep/fleet-up-never-stopped-the-old-api` — **closed** (found closing `fleet-scripts-exit-zero-when-down`)
+
+**`fleet-up.sh` stopped a lane's API with a pattern that matches nothing, so the old API went on serving the "fresh" lane**
+
+*Evidence:* it ran `pkill -f "PORTMARK=$k "`. PORTMARK is an environment variable and in no command line — `wt-break.sh` found exactly this in its own restart and fixed it there; the sibling in `fleet-up.sh` was never brought along. The old API kept the port, the new one could not bind, and the health loop reported the old process as the lane coming up: old code, on a database the script had just dropped and restored under it.
+
+*Closed:* `lane_api_down "$PORT"` — the shared stop-and-wait above — in place of the pkill. The third mutation in `check-lane-api-down.sh` is this exact kill, and it is caught.
+
+### `found-23-sep/fleet-restart-counted-refused-lanes-up` — **closed** (found closing `fleet-scripts-exit-zero-when-down`)
+
+**A lane `fleet-restart.sh` refused to restart was still counted UP — on the old build**
+
+*Evidence:* the refusals (database missing, schema behind the newest migration) `continue` before the kill, so the old API is still listening; the final loop then polled every lane, found it answering, and printed `lane k: UP` for a lane this run had refused to put on the new build. With every lane refused, the script still reported them all up.
+
+*Closed:* refused lanes are recorded and reported `NOT RESTARTED (above)` without being polled or counted — measured on lane 9 (behind), which exits 1.
+
+### `found-23-sep/refuses-all-patches-never-built` — **closed**, measurement pending (found in today's break plan)
+
+**Five "refuses everything" patches never compiled, in either of their runs**
+
+*Evidence:* `tb-23`, `sdp-22`, `db-11`, `db-12` and `okb-16` each replaced a guard with an unconditional `throw` or `return`. TypeScript drops every narrowing in unreachable code, so a later `eq(…, actorId)` or `cursor` failed the build (reproduced one by one in a scratch worktree), and each ran as BUILD FAILED — no evidence — twice. Their suites' ledger rows still read as though every patch had reddened.
+
+*Closed:* each condition is now one that is always true at runtime and not provable to the compiler (`if (actorId) throw …` after the `!actorId` return; `if (parentDocId) …`; `if (storageKey) {`), with the reason in the patch header; all five type-check clean. Their re-run is in the next plan.
+
+### `found-23-sep/fixtures-built-through-the-route-under-test` — **closed**, measurement pending
+
+**Three patches were unreadable because the suite built its fixtures through the very route the patch broke**
+
+*Evidence:* `tb-30` (assignment refuses all) and `tb-37` (dependencies refuse all) broke `task-boundaries`' SETUP, which assigned T2 and made the B dependency through those routes — 1 of 45 checks ran. `sdp-7` (admins narrowed) broke `space-default-permission`'s placement section, whose admin made a project straight into the view-only space — 27 of 36 ran. `check-plan-population` listed all three as needing a person.
+
+*Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Both suites are re-run in the next plan.
 
 ### `found-23-sep/stale-chunk-recovery-writes-the-shared-tree` — **closed**
 
