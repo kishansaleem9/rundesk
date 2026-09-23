@@ -94,6 +94,17 @@ export class MeetingsService {
    * an hour later. A URL of our own bucket naming the key already stored keeps
    * the key; one naming any other object of ours is refused.
    */
+  /** What a new meeting's pointer holds: the server's own key when it passed one, else the client's input. */
+  private recordingForCreate(workspaceId: string, input: string | null | undefined, serverKey?: string | null): string | null {
+    if (serverKey) {
+      // Checked by shape even so — a server path that one day passes the wrong
+      // thing should fail here, not sign it for every reader.
+      if (!isWorkspaceCallRecordingKey(serverKey, workspaceId)) throw new BadRequestException('Not a recording of this workspace')
+      return serverKey
+    }
+    return this.acceptRecordingInput(input, null)
+  }
+
   private acceptRecordingInput(input: string | null | undefined, stored: string | null): string | null {
     const value = typeof input === 'string' ? input.trim() : null
     if (!value) return null
@@ -340,6 +351,18 @@ export class MeetingsService {
       taskId?: string | null
       attendeeIds?: string[]
     },
+    /**
+     * SERVER-ONLY: a recording this server wrote itself — a call's recording
+     * key, passed by calls.service when the call ends. The route passes `body`
+     * alone, so no client reaches this; `body.recordingUrl` is what a client
+     * sends, and a key there is refused (acceptRecordingInput).
+     *
+     * It is a separate parameter because the first version of the client rule
+     * went through `body` for both, refused the call's own key, and the
+     * `.catch` around the call's create swallowed it: every recorded call ended
+     * with no meeting record. `syncup-live` caught it the same afternoon.
+     */
+    internal: { recordingKey?: string | null } = {},
   ) {
     await this.assertMember(workspaceId, userId)
     const title = (body.title ?? '').trim()
@@ -357,7 +380,7 @@ export class MeetingsService {
         endsAt: body.endsAt ? new Date(body.endsAt) : null,
         provider: body.provider ?? 'manual',
         joinUrl: body.joinUrl ?? null,
-        recordingUrl: this.acceptRecordingInput(body.recordingUrl, null),
+        recordingUrl: this.recordingForCreate(workspaceId, body.recordingUrl, internal.recordingKey),
         notes: body.notes ?? null,
         taskId: body.taskId ?? null,
         createdById: userId,

@@ -42,3 +42,25 @@ describe('MeetingsService — what a client may store as a recording', () => {
     assert.throws(() => accept('javascript://%0aalert(1)', null), /http/)
   })
 })
+
+describe('MeetingsService — the server’s own recording key, on create', () => {
+  const forCreate = (input: string | null | undefined, serverKey?: string | null) =>
+    (MeetingsService.prototype as any).recordingForCreate.call(
+      { acceptRecordingInput: (MeetingsService.prototype as any).acceptRecordingInput, r2: { keyFromOwnUrl: () => null } },
+      'w1',
+      input,
+      serverKey,
+    )
+
+  it('a call recording of this workspace, passed by the server, is stored as the key', () => {
+    assert.equal(forCreate(undefined, 'calls/w1/c1/recording-1.webm'), 'calls/w1/c1/recording-1.webm')
+  })
+
+  it('one of another workspace is refused even from the server', () => {
+    assert.throws(() => forCreate(undefined, 'calls/w2/c1/recording-1.webm'), /Not a recording of this workspace/)
+  })
+
+  it('without a server key the client rule applies — and a key from the client is still refused', () => {
+    assert.throws(() => forCreate('calls/w1/c1/recording-1.webm', null), /http/)
+  })
+})

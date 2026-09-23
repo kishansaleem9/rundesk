@@ -467,18 +467,24 @@ export class CallsService {
     // The KEY, not a signed URL. A signed R2 URL lasts fifteen minutes, so
     // writing one into a permanent column produces a recording link that is
     // dead before anybody opens the notes. Meetings signs it on the way out.
-    const recordingUrl = call.recordingStorageKey ?? null
+    // Passed as the SERVER's key, not as `body.recordingUrl` — that is the
+    // client's field, where a key is refused (see MeetingsService.create).
+    const recordingKey = call.recordingStorageKey ?? null
 
     const meeting = await this.meetings
-      .create(call.workspaceId, userId, {
-        title: call.title?.trim() || `Call in ${new Date(call.startedAt).toLocaleDateString()}`,
-        startsAt: call.startedAt.toISOString(),
-        endsAt: endedAt.toISOString(),
-        provider: 'manual',
-        attendeeIds: people.map((p) => p.userId),
-        notes,
-        recordingUrl,
-      })
+      .create(
+        call.workspaceId,
+        userId,
+        {
+          title: call.title?.trim() || `Call in ${new Date(call.startedAt).toLocaleDateString()}`,
+          startsAt: call.startedAt.toISOString(),
+          endsAt: endedAt.toISOString(),
+          provider: 'manual',
+          attendeeIds: people.map((p) => p.userId),
+          notes,
+        },
+        { recordingKey },
+      )
       .catch(() => null)
 
     /*

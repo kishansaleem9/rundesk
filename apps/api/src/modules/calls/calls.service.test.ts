@@ -275,10 +275,16 @@ function makeService(over: {
   )
 }
 // Typed with the real signature so `arguments[2]` — the body the service
-// hands it — is reachable from the assertions rather than an empty tuple.
+// hands it — and `arguments[3]`, the server-only recording key, are reachable
+// from the assertions rather than an empty tuple.
 const meetings = () => ({
   create: mock.fn(
-    async (_workspaceId: string, _userId: string, _body: Record<string, unknown>) => ({
+    async (
+      _workspaceId: string,
+      _userId: string,
+      _body: Record<string, unknown>,
+      _internal?: { recordingKey?: string | null },
+    ) => ({
       id: 'meeting-1',
     }),
   ),
@@ -862,15 +868,21 @@ describe('§2.8 the recording goes straight to storage', () => {
     })
     const m = meetings()
     await makeService({ db, meetings: m }).end('call1', 'me')
+    // The key travels as the SERVER's key (the fourth argument), not as the
+    // client's `recordingUrl` — where MeetingsService refuses a key. Sent the
+    // client's way, the create threw, the catch around it swallowed it, and a
+    // recorded call ended with no meeting at all (found by syncup-live).
     const created = m.create.mock.calls[0]?.arguments[2] as Record<string, unknown>
-    assert.match(String(created.recordingUrl), /recording-1\.webm/, 'the recording was lost')
+    const internal = m.create.mock.calls[0]?.arguments[3]
+    assert.match(String(internal?.recordingKey), /recording-1\.webm/, 'the recording was lost')
+    assert.equal(created.recordingUrl, undefined, 'the key was sent through the client field, which refuses it')
   })
 
   it('leaves recordingUrl null when there was no recording', async () => {
     const { db } = fakeDb({ calls: [{ ...LIVE_CALL }], participants: [{ userId: 'me', leftAt: null }] })
     const m = meetings()
     await makeService({ db, meetings: m }).end('call1', 'me')
-    assert.equal((m.create.mock.calls[0]?.arguments[2] as Record<string, unknown>).recordingUrl, null)
+    assert.equal(m.create.mock.calls[0]?.arguments[3]?.recordingKey, null)
   })
 })
 
