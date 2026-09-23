@@ -177,8 +177,14 @@ try {
   const T = (await M('/tasks', { method: 'POST', body: { listId: LE1, title: `${TAG} mine` } })).data?.id
   if (!T) throw new Error('the member could not create a task in a space they may edit')
   const T2 = await make('/tasks', { listId: LE1, title: `${TAG} assigned` }, 'the assigned task')
-  const assigned = await A(`/tasks/${T2}/assignees`, { method: 'POST', body: { userId: memberId } })
-  if (assigned.status >= 300) throw new Error(`could not assign the member: ${said(assigned)}`)
+  /*
+   * THE MEMBER IS PUT ON T2 BY SQL — the row `POST /tasks/:id/assignees`
+   * writes — and not through that route, because §8 is ABOUT that route. A
+   * patch that breaks assignment ended this run right here: `tb-30` reddened
+   * its own check's precondition, 1 of 45 checks ran, and its evidence was
+   * unreadable. A fixture built through the thing under test measures the test.
+   */
+  await sql`insert into task_assignees (task_id, user_id) values (${T2}, ${memberId}) on conflict do nothing`
   const T3 = await make('/tasks', { listId: LE1, title: `${TAG} poisoned` }, 'the read-side task')
 
   const row = async (id) =>
@@ -245,9 +251,12 @@ try {
   // A dependency wholly inside B, for the member to try to delete through a
   // task of their own in A.
   const TB2 = await make('/tasks', { listId: LB, title: `${TAG} second in B` }, 'the second task in B')
-  const depInB = await A(`/tasks/${TB}/dependencies`, { method: 'POST', body: { relatedTaskId: TB2, type: 'related_to' } })
-  if (depInB.status >= 300 || !depInB.data?.id) throw new Error(`could not make the dependency in B: ${said(depInB)}`)
-  const DEP_B = depInB.data.id
+  // By SQL for the reason T2's assignee is: §9 is about the dependency route,
+  // and `tb-37` ended the run here. The same row the put-back below restores.
+  const [depInB] = await sql`
+    insert into task_dependencies (task_id, related_task_id, type, created_by_id)
+    values (${TB}, ${TB2}, 'related_to', ${admin.id}) returning id`
+  const DEP_B = depInB.id
 
   /** Whether `table` holds a row tying `taskId` to `value` in column `col`. */
   const holds = async (table, taskId, col, value) =>

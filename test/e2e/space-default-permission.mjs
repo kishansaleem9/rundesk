@@ -547,7 +547,12 @@ try {
 
   const mine = await makeAs(M, '/projects', { spaceId: editSpace.id, name: named('member project') }, "the member's project")
   const myList = await makeAs(M, '/lists', { projectId: mine, name: named('member list') }, "the member's list")
-  const inView = await makeAs(A, '/projects', { spaceId: viewSpace.id, name: named('project in view') }, 'a project in the view-only space')
+  // Made while the space is briefly editable, as the lists above are: an admin
+  // making it straight into the view-only space leans on the admin bypass, and
+  // `sdp-7` — a patch that takes the bypass away — then ended the run here.
+  const inView = await withEditable(viewSpace, () =>
+    makeAs(A, '/projects', { spaceId: viewSpace.id, name: named('project in view') }, 'a project in the view-only space'),
+  )
   const otherEdit = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('other edit project') }, 'another project in the edit space')
   const hidden = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('private project') }, 'a private project')
   const madeHidden = await A(`/projects/${hidden}/visibility`, { method: 'PATCH', body: { visibility: 'private' } })
