@@ -6386,6 +6386,46 @@ ELEVEN sites and SIX were already guarded, in five spellings a window-of-text
 rule cannot see, so the rule classifies the variable's first USE instead. Five
 were real and all five are fixed.
 
+**TWO SUITES WERE GREEN BECAUSE THE ENVIRONMENT WAS BROKEN**, and the sweep
+found both within twenty minutes of starting. This is a direction this audit
+had not seen: a stale reason arriving from the harness getting BETTER.
+
+`s3-stub.mjs` gave every lane a working object store at 19:29. Uploads that had
+always failed began to succeed, and two suites that were asserting the FAILURE
+went red against a product nobody had touched.
+
+  · **`attach-on-create`** read, in its own words, "storage is unconfigured
+    here, so every upload fails — and it says which". Its last green baseline
+    was 13:49, five and a half hours before the store came up. The refusal is
+    now arranged through the store's control seam — the same one `task-cover`
+    uses, whose comment already said it "survives storage being configured
+    because failure is no longer a property of the environment". The check is
+    stronger for it: it used to assert a name in a toast the whole environment
+    guaranteed; it now asserts that the ONE upload refused is the one named.
+
+  · **`clip-created-card`** was hiding a real defect behind the same premise.
+    It seeds an attachment with an EMPTY storage key — what a file still
+    arriving looks like — and with R2 off the API handed that empty string back
+    as the url, which the browser read as falsy. With a store configured,
+    `getObjectUrl('')` mints a perfectly good presigned URL for an object that
+    does not exist, so the card stopped saying the clip was on its way and
+    offered a link to nothing. **That is worse than the paperclip-to-nowhere it
+    replaced**: a dead link announces itself, a signed URL to a missing object
+    looks live until it is pressed. Fixed at all three sites in
+    `tasks.service.ts` that mint an attachment url — no key, no url — and the
+    third of them is the one the comment cards actually read from.
+
+Its other two failures were the shape worth naming separately: a guard reading
+the error message for the word "storage" is pinning a status one level up. It
+demands the call FAIL, and it does not fail any more. A 2xx proves "the route
+matched and the handler ran" better than any error does; the 404 that guard was
+written against is still refused.
+
+The two siblings that carry the same premise in comments — `settings-depth` and
+`syncup-live` — were checked rather than assumed, and both are green: one asks
+about the chrome rather than the library, the other skips where storage is
+absent and therefore measures MORE now, not less.
+
 **`process.exit()` in the suites is the wrong pattern and cannot bite today.**
 `console.log` to a pipe is asynchronous and `process.exit()` discards pending
 writes; 215 call sites across 114 suites still use it. It is recorded rather
