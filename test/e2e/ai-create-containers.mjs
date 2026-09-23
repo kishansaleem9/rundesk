@@ -331,34 +331,65 @@ try {
   )
 
   // ── The model-facing half ──────────────────────────────────────────────────
-  console.log('\n▶ with no provider key, the model-facing endpoints refuse honestly')
+  /*
+   * ASKED AGAINST THE CONFIGURATION, NOT AGAINST THE ENVIRONMENT THIS HAPPENED
+   * TO RUN IN.
+   *
+   * These three checks were `=== 503` three times, under the heading "with no
+   * provider key". True of every lane, because no lane had a model — and the
+   * third check said so itself: "if this says available:true, the two 503s
+   * above mean something else entirely and this suite is measuring the wrong
+   * thing." That trap was right, and `lane-env.sh` can now spring it:
+   * `RUNDESK_LANE_MODEL=1` points the API at `model-stub.mjs` and the two 503s
+   * become 200s.
+   *
+   * So the claim is rewritten as the one that was always meant: THE THREE
+   * AGREE. `/ai/status` says whether a model is configured, and `/ai/command`
+   * and `/ai/chat` must answer the same question the same way — 503 when it
+   * says no, something other than 503 when it says yes. That holds in either
+   * environment, it is a stronger statement than "503" was, and it still
+   * reddens for every patch that made the old one redden: a route that 503s
+   * while the status says available is exactly as broken as the reverse.
+   *
+   * THE COUNT IS THE SAME EITHER WAY, deliberately. A suite that runs three
+   * checks in one environment and two in another cannot hold an EXACT
+   * `EXPECTED_CHECKS`, and "0 failed" would stop meaning "it ran".
+   */
+  const status = await api('/ai/status')
+  const modelConfigured = status.status === 200 && status.data?.available === true
+  console.log(
+    `\n▶ the model-facing endpoints answer what /ai/status says (a model is ` +
+      `${modelConfigured ? 'CONFIGURED' : 'not configured'} on this lane)`,
+  )
+  chk(
+    status.status === 200 && typeof status.data?.available === 'boolean',
+    'the product says plainly whether a model is configured',
+    `/ai/status returned ${status.status} ${JSON.stringify(status.data)} — the two checks below ` +
+      'are about agreeing with it, so an answer that is neither true nor false makes them meaningless',
+  )
   const planned = await api('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'create a list' } })
   chk(
-    planned.status === 503,
-    '/ai/command answers 503 rather than pretending to plan',
-    `it returned ${planned.status} ${JSON.stringify(planned.data).slice(0, 160)}`,
+    modelConfigured ? planned.status !== 503 : planned.status === 503,
+    '/ai/command agrees with it — refusing outright when there is no model, and not refusing when there is',
+    `it returned ${planned.status} ${JSON.stringify(planned.data).slice(0, 160)} while /ai/status said ` +
+      `available=${JSON.stringify(status.data?.available)}`,
   )
   const streamed = await fetch(`${B}/api/v1/ai/chat`, {
     method: 'POST',
     headers: { authorization: `Bearer ${auth.accessToken}`, 'content-type': 'application/json' },
     body: JSON.stringify({ workspaceId: WS, messages: [{ role: 'user', content: 'create a list' }] }),
   })
-  chk(
-    streamed.status === 503,
-    'and /ai/chat answers 503 before opening a stream, so the refusal is a status code',
-    `it returned ${streamed.status}`,
-  )
   /*
-   * THE DISTINCTION THIS SUITE EXISTS TO KEEP VISIBLE. "No key" and "no tools"
-   * both produce a chat that cannot create anything. The execute path above
-   * proves the tools are real; this proves the 503 is about the key.
+   * THE DISTINCTION THIS SUITE EXISTS TO KEEP VISIBLE, and it survives the
+   * rewrite. "No key" and "no tools" both produce a chat that cannot create
+   * anything. The execute path above proves the tools are real; this proves
+   * the refusal — when there is one — is about the key and arrives as a status
+   * code before a stream is opened, rather than as an error inside one.
    */
-  const status = await api('/ai/status')
   chk(
-    status.status === 200 && status.data?.available === false,
-    'and the product says plainly that no model is configured',
-    `/ai/status returned ${status.status} ${JSON.stringify(status.data)} — if this says available:true, ` +
-      'the two 503s above mean something else entirely and this suite is measuring the wrong thing',
+    modelConfigured ? streamed.status !== 503 : streamed.status === 503,
+    'and /ai/chat agrees too, before opening a stream, so a refusal is a status code rather than a message inside one',
+    `it returned ${streamed.status} while /ai/status said available=${JSON.stringify(status.data?.available)}`,
   )
 
   // ── What a chip in an answer resolves to ───────────────────────────────────
