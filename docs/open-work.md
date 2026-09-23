@@ -872,6 +872,22 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* `isManagerRole`, the one list. `view-visibility` 23/23 with two new checks in a workspace of its own — an admin and a manager may both change a member's protected view; neither may touch the member's private view — the first of which failed on the old API (403 against the manager's 200). `view-visibility-5` (the old list) and `-6` (the lookup that hides a private view). Regression: list-save-view, read-visibility, view-visibility 3/3.
 
+### `found-23-sep/role-lists-copied-per-module` — open, small (found closing the views role list)
+
+**The manager-role list is kept in four more places, and the assignable workspace roles in two**
+
+*Evidence:* `item-visibility.ts` exports `WS_MANAGER_ROLES`/`isManagerRole`; the same three roles are also `WS_MANAGE_ROLES` (`container-members.service.ts:15`) and `WS_STAFF_ROLES` (`support.service.ts:46`) — identical today, which is how `views.service.ts`'s copy drifted into naming roles that do not exist before anybody noticed. `workspaces.service.ts:837` `ASSIGNABLE_ROLES` and `invitations.service.ts` `INVITE_WORKSPACE_ROLES` are one list twice. `container-access.ts:8` `ADMIN_ROLES` (admins only) is a different set and stays.
+
+*To close:* import the one list at each site (no behaviour changes, so: type-check, the modules' unit tests, and a sweep of the suites that exercise each module), and a checker that fails on a new array literal of workspace role names outside `common/permissions`.
+
+### `found-23-sep/signup-throttle-killed-a-break-run` — **closed** (found reading plan-3's logs)
+
+**A break run died in setup on the sign-up rate limit, and measured nothing**
+
+*Evidence:* `brk-pgd-5-scim-mints-nothing.log`: "threw: signup of manager failed: 429", 1 of 8 checks ran. `/auth/signup` allows 10 a minute per IP and every suite is 127.0.0.1; a break plan replays a people-making suite once per patch. The local-stack proxy already waited out a throttled LOGIN (and `signInApi` did so for direct calls), but not a sign-up — 18 suites sign people up. 1 of the 1,170 break logs on this machine died this way; it is the newest suites, making three or four people each, that hit it.
+
+*Closed:* the proxy's retry covers the sign-up POST on the same budget (a 429 is refused before the handler, so a retry makes no second account), and `signUpApi` in `signin.mjs` does the same for the two suites that sign up against the API directly (`search-sources`, `view-visibility`). Measured through the proxy: twelve sign-ups in a burst — 12 × 201 after waiting 48 seconds for the window, where the old proxy handed back 429 to the last four. search-sources, view-visibility, credential-reads, permission-guards 4/4. `pgd-5` is re-run in the next plan.
+
 ### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
 
 **A check that reads `textContent` cannot tell a shown message from a hidden one**

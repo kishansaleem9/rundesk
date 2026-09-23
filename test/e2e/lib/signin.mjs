@@ -109,6 +109,31 @@ export async function signInApi(base, email, password, { attempts = 4 } = {}) {
   }
 }
 
+/**
+ * Sign somebody up over HTTP and return the session payload — for the suites
+ * that call the API directly rather than through `local-stack.mjs`, whose
+ * proxy retries the same 429. Sign-up shares login's budget and its window, and
+ * a 429 is refused before the handler runs, so retrying makes no second account.
+ */
+export async function signUpApi(base, body, { attempts = 4 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    const res = await fetch(`${base}/auth/signup`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const json = await res.json().catch(() => null)
+    if (json?.data?.accessToken) return json.data
+    if (!isRateLimited(res.status)) {
+      throw new Error(`could not sign up ${body?.email}: ${res.status} ${JSON.stringify(json).slice(0, 200)}`)
+    }
+    if (attempt >= attempts) {
+      throw new Error(`could not sign up ${body?.email}: rate limited ${attempts} times running`)
+    }
+    await sleep(retryAfterMs(res.headers.get('retry-after'), json?.error?.details?.retryAfter))
+  }
+}
+
 /*
  * There is deliberately no `signInUi` here.
  *

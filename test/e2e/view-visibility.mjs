@@ -17,7 +17,7 @@
  *
  *   node test/e2e/view-visibility.mjs --api 3011
  */
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, signUpApi } from './lib/signin.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -256,14 +256,9 @@ try {
   cleanup.push(() => A(`/workspaces/${roleWs}`, { method: 'DELETE' }))
   const person = async (label, role) => {
     const email = `views-${label}-${stamp}@rundesk.invalid`
-    const res = await fetch(`${API}/auth/signup`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ fullName: `Views ${label}`, email, password: 'Member@12345!', organizationName: `Views ${label} ${stamp}`, organizationSlug: `views-${label}-${stamp}` }),
-    })
-    const token = (await res.json().catch(() => null))?.data?.accessToken
+    const token = (await signUpApi(API, { fullName: `Views ${label}`, email, password: 'Member@12345!', organizationName: `Views ${label} ${stamp}`, organizationSlug: `views-${label}-${stamp}` }))?.accessToken
     const added = await A(`/workspaces/${roleWs}/members`, { method: 'POST', body: { email, role } })
-    if (!token || added.status >= 300) throw new Error(`could not add the ${label}: ${res.status}, ${added.status}`)
+    if (!token || added.status >= 300) throw new Error(`could not add the ${label}: ${added.status}`)
     return apiAs(token)
   }
   const owner = await person('owner', 'member')

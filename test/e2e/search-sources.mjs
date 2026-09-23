@@ -32,7 +32,7 @@
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
-import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -183,14 +183,9 @@ try {
   if (!heldWs) throw new Error(`could not make the workspace: ${made.status}`)
   const adminId = (await A('/users/me')).data?.id
   const memberEmail = `sources-member-${stamp}@rundesk.invalid`
-  const signup = await fetch(`${API}/auth/signup`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ fullName: 'Sources member', email: memberEmail, password: 'Member@12345!', organizationName: `Sources ${stamp}`, organizationSlug: `sources-${stamp}` }),
-  })
-  const memberToken = (await signup.json().catch(() => null))?.data?.accessToken
+  const memberToken = (await signUpApi(API, { fullName: 'Sources member', email: memberEmail, password: 'Member@12345!', organizationName: `Sources ${stamp}`, organizationSlug: `sources-${stamp}` }))?.accessToken
   const added = await A(`/workspaces/${heldWs}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
-  if (!memberToken || added.status >= 300) throw new Error(`could not add the member: signup ${signup.status}, add ${added.status}`)
+  if (!memberToken || added.status >= 300) throw new Error(`could not add the member: add ${added.status}`)
   const M = apiAs(memberToken)
   // The admin's own Gmail, as `/oauth/callback` would have stored it.
   await sql`

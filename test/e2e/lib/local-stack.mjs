@@ -51,6 +51,13 @@ const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') ||
  *
  * Only 429 is retried, and only for the login POST: every other response,
  * including a real 401, is handed back untouched and immediately.
+ *
+ * AND THE SIGN-UP POST, on the same budget (`@RateLimit` 10 a minute per IP).
+ * Suites make their people by signing them up, three or four at a time, and a
+ * break plan replays a suite once per patch: `pgd-5-scim-mints-nothing` died
+ * in setup on "signup of manager failed: 429" — 1 check of 8 — measuring
+ * nothing. Retrying a sign-up is safe because the limiter answers before the
+ * handler runs: a 429 made no account.
  */
 /*
  * THREE ATTEMPTS, not four, and the reason is the caller's patience.
@@ -63,7 +70,7 @@ const isApi = (url) => url.startsWith('/api') || url.startsWith('/socket.io') ||
  * asking for more sign-ins than it should, which is worth failing over.
  */
 const LOGIN_ATTEMPTS = 3
-const isLogin = (req) => req.method === 'POST' && req.url.includes('/auth/login')
+const isLogin = (req) => req.method === 'POST' && (req.url.includes('/auth/login') || req.url.includes('/auth/signup'))
 
 /** Collect a request body so it can be sent more than once. Login bodies are tiny. */
 const readBody = (req) =>
