@@ -4,7 +4,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
-**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`, and one found while fixing them, `harness/ci-suites-read-a-database-that-does-not-exist`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
 
 ## Product defects — 46
 
@@ -194,9 +194,11 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Add a cursor (before=) and progressive loading. Take chip and unread counts from GET /notifications/counts.
 
-### `product-siblings/link-attachment-signed-as-key` — open, small
+### `product-siblings/link-attachment-signed-as-key` — **closed**
 
 **Hyperlink task attachments are stored in storage_key and signed as if they were object keys**
+
+*Closed (51a371b):* `isLinkAttachmentKey` (task-object-keys.ts) is the one rule — no writer produces an object key that starts with a scheme. `attachmentUrl` replaces the three copies of the signing ternary and hands a link back untouched; `removeAttachment` sends nothing to the bucket for a link; both indexers skip links; the API reports each attachment's `kind`, and the cover picker makes a linked image the cover's LINK. Found through a regression: `task-cover` went red on the new cover-key rule because the picker had been writing link URLs into `coverStorageKey` — a cover that was signed as a key and never drew. `task-attachments` 17/17 (a link's url is the link; removing one sends no DELETE, read from the stub's new request log; an upload is a file and removing it deletes exactly its object), `task-cover` 38/38. Break patches tat-9..12 and task-cover-15/16 each redden their check on lane 2/3; unit claims ki-1 and tok-1 redden theirs (check-unit-claims 6/6). No new column: the scheme is the discriminator, which the item's own "or kind" allowed.
 
 *Evidence:* tasks.service.ts:2832 `storageKey = data.storageKey ?? data.url`. :2798, :2877 and :4312 then call getObjectUrl('https://…'), producing `${CDN}/https://…` or a presigned GET for a nonexistent key. The code admits it at :2401-2402 ('is the bug task attachments still have') and :2746-2748. The web posts links this way (task-detail-sheet.tsx:5259-5269) and renders `a.url` as the download href (:5527-5538). Side effects: knowledge-indexer.service.ts:228-232 and ai.service.ts:2597-2600 call r2.getObject('https://…') for contentType 'text/url' (isExtractableAttachment accepts text/*, attachment-text.ts:43), so every reindex logs each link as 'unreadable'. removeAttachment (:2905-2907) calls deleteObject on the URL. No ledger doc lists it; the only mentions are code comments, a migration comment and two e2e headers.
 
@@ -379,6 +381,54 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* notifications table has workspace_id (packages/db/src/schema/notifications.ts:10). NotificationsService.list (notifications.service.ts:707-721) filters only userId, unreadOnly and view. The controller (notifications.controller.ts:18-28) takes no workspaceId. The workspace-scoped pages call it unscoped: workspace-inbox-page.tsx:565 `/notifications?view=${view}` and app.$workspaceId.tsx:125-129 (keyed ['notifications', workspaceId] but fetching `/notifications`). unreadByWorkspace (:875-895), read by workspace-sidebar.tsx:981-982, groups by workspace_id. So workspace A's Inbox shows, counts and 'mark all read's workspace B's items, while B's switcher badge implies they are separate. It is a mirror: the column is stored and the list honours none of it.
 
 *To close:* Add an optional workspaceId filter to list/counts and send it from the Inbox and Home, or state in the UI that the inbox is cross-workspace. ClickUp's inbox is per workspace.
+
+### `found-23-sep/watchers-route-open-to-any-account` — **closed** (found while closing the task-reference items)
+
+**`POST /tasks/:id/watchers` had no access check, in the route or the service: any signed-in account could follow any task by id and was answered with the whole task**
+
+*Evidence:* proven on lane 1 before the change — an account sharing no workspace with the task got `403` from `GET /tasks/:id` and `201` from `POST /tasks/:id/watchers`, whose body carried the task's title and description; the watcher row then routed every later notification to it. `DELETE /tasks/:id/watchers/:userId` was equally open.
+
+*Closed (cdf5fbc):* following needs read access; putting somebody else on, or taking them off, needs write; the person followed must be able to see the task (`assertPersonCanSeeTask`); both routes carry `ResourceMemberGuard`, like the task's own GET. `task-boundaries` §6, 8 checks; tb-19..26.
+
+### `found-23-sep/task-relationship-references-unchecked` — **closed**
+
+**Assignees, labels and dependencies took any id: an outsider could be assigned, another workspace's label worn, and a dependency used to read any task**
+
+*Evidence:* `addAssignee` asserted write on the task and nothing about the person; `createTask` wrote `assigneeIds` and `labelIds` unchecked; `addLabel` took any label; `addDependency` checked nothing about the related task while `getTask` returns each dependency's related task row whole; `removeDependency` took the dependency's id alone, so any member could delete any dependency. The service's `assertTaskReadAccess` ignored item privacy (private lists and tasks), which `ResourceMemberGuard` enforces — so every service path asking "can this person see the task" said yes for a private one.
+
+*Closed (cdf5fbc):* an assignee must be able to see the task (and for `createTask`, the list, checked before anything is written); a label must be the workspace's own; a dependency obeys the parent rule, now one helper `assertTaskReference`; a dependency is removed only through a task it touches; the read check includes item privacy. `getTask` shows parent, subtasks, dependencies and labels only from its own workspace, and the dependency graph stops at the workspace's edge — the read-side twin for rows written before the writes checked. `task-boundaries` §7–§10, 17 checks, the read side against rows poisoned by SQL, each paired with a neighbour that belongs; tb-27..44. API unit tests 1561/1561.
+
+### `found-23-sep/assign-someone-who-cannot-see` — open, medium (feature, ClickUp behaviour to confirm)
+
+**Assigning a member who cannot see the task is now refused with a reason; ClickUp, as understood, shares the task with them instead**
+
+*Evidence:* the refusal closes the leak (an assignee who cannot open a task was still notified with its title), and is honest — before, the assignment succeeded and the assignee could not open what they were assigned. ClickUp's behaviour for private locations, as I understand it, grants the assignee access to that one task. Unverified: help.clickup.com is unreachable from this environment.
+
+*To close:* confirm ClickUp's rule from its docs; if it shares, add task-level access for assignees to `assertTaskReadAccess` and the guard's item rule, and the list/home reads that filter by container — with checks that the assignee sees exactly that task and nothing else in the container.
+
+### `found-23-sep/related-tasks-ignore-private-containers` — open, small
+
+**Within one workspace, `getTask`'s dependency rows and the dependency graph show related tasks from private spaces/projects the reader cannot see**
+
+*Evidence:* the new read filters stop at the WORKSPACE; a dependency created by somebody who can see both ends still shows the private end's title and status to a reader who can see only the other. `addDependency` now requires the creator to read both ends, so this needs two people with different access.
+
+*To close:* decide the policy (hide, or show as a restricted placeholder — check what ClickUp draws), then filter related tasks by the reader's access in `getTask` and `getDependencyGraph`.
+
+### `found-23-sep/container-read-rule-twice` — open, small
+
+**The container read rule exists twice: `assertContainerReadAccess` in tasks.service inline, and `checkContainerAccess` used by the guard**
+
+*Evidence:* both implement manager bypass, private-space membership, private-project membership or space admin; they agree today (compared on 23 September). Two copies of an access rule is the duplicated-list defect: the day one learns a case, the guard and the service disagree.
+
+*To close:* make `assertContainerReadAccess` call `checkContainerAccess` and keep its two distinct error messages by asking which half failed.
+
+### `found-23-sep/labels-editable-by-any-member` — open, small (policy to confirm)
+
+**`PATCH /labels/:id` and `DELETE /labels/:id` need only workspace membership: any member renames or deletes the workspace's labels**
+
+*Evidence:* labels.controller.ts, class-level `ResourceMemberGuard` resolves `:labelId` to its workspace and checks membership; the service checks nothing else.
+
+*To close:* check ClickUp's rule for who may edit and delete tags; enforce it in the service.
 
 ## Verification-harness defects — 27
 
@@ -609,6 +659,22 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* restart() returns 1 when the lane API never answers health (wt-break.sh:121-125). Its return value is ignored at :431, before each API patch's suite run, and also at :261 and :499. A lane that failed to come up for environmental reasons (for example 'too many clients', verify.sh:20-22) then runs the suite against a dead port. Every check fails, and check-break-reddened.mjs:473-479 credits the claim as REDDENED. The sync-block schema push at :243-245 is unchecked, while the per-patch push at :411-415 is checked. The restore steps at :484-487 (push, API tsc) are unchecked, which leaves the lane on the last patch's binary if tsc dies. A same-sha next set then skips the sync block at :236, so nothing rebuilds the API before its baseline.
 
 *To close:* `restart || { echo "== $b API DID NOT COME UP" >> "$OUT"; continue; }`, and add that suffix to the non-measurement list in measuredAt. Check the sync push and the restore tsc, and on failure refuse with exit 4 the way the builds do.
+
+### `found-23-sep/doc-import-never-exits` — **closed**
+
+**`doc-import.mjs` finished its checks and then hung until `timeout` killed it at 900s**
+
+*Evidence:* its teardown called `stack.stop?.()`, and the local stack has no `stop`, only `close` — an optional call on nothing. A handle dump after the run showed the static server and two keep-alive sockets still open. Every run printed "15 passed, 0 failed" and exited 124.
+
+*Closed (da2b4d4):* `stack.close()`. The suite now exits 0 in about four seconds.
+
+### `found-23-sep/lane-stubs-never-restart` — **closed**
+
+**A lane kept serving its stub from before a change: the launchers left any running stub alone**
+
+*Evidence:* after the store stub gained its request log, lane 1's stub answered `/__control/requests` with NoSuchBucket — it was the old process.
+
+*Closed (7e12844):* both stubs report a hash of their own source at `/__control/version`; `lane_store_up` and `lane_model_up` restart a stub whose hash differs from the file on disk. Proven live on lane 1; `check-s3-stub` and `check-model-stub` each carry the case and a mutation that reddens it.
 
 ## Test-suite defects (chains, catches, fingerprints, branches) — 21
 
