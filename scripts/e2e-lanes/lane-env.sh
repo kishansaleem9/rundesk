@@ -42,6 +42,18 @@ lane_store_env () {
   export R2_BUCKET_NAME="$(lane_store_bucket "$k")"
 }
 
+# IS THE STUB ON <port> RUNNING THE SOURCE IN <file>? Both stubs report a hash
+# of their own source at `/__control/version`; a stub from before a change, or
+# one too old to have the route at all, answers something else and is
+# restarted. Keeping a running stub is right — its state is the lane's — but
+# only while it is the stub the tree describes.
+stub_is_current () {
+  local port="$1" file="$2" want
+  want="$(sha1sum "$file" | cut -c1-12)"
+  curl -s --noproxy '*' --max-time 2 "http://127.0.0.1:$port/__control/version" 2>/dev/null |
+    grep -q "\"source\":\"$want\""
+}
+
 lane_store_up () {
   local k="$1"
   local port bucket log
@@ -52,8 +64,7 @@ lane_store_up () {
   # Already listening for this lane — leave it, and leave its objects alone.
   # A restart that emptied the bucket would make a suite's second run differ
   # from its first for a reason nothing in the suite mentions.
-  if grep -q '"ready":true' "$log" 2>/dev/null &&
-     curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/$bucket/__probe"; then
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/s3-stub.mjs"; then
     return 0
   fi
 
@@ -186,8 +197,7 @@ lane_model_up () {
   # Already listening for this lane — leave it, and leave its staging alone, for
   # the reason the store helper gives: a restart mid-run changes a suite's
   # second run from its first with nothing in the suite to explain it.
-  if grep -q '"ready":true' "$log" 2>/dev/null &&
-     curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$port/__control/seen"; then
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/model-stub.mjs"; then
     return 0
   fi
 

@@ -28,6 +28,7 @@
  *   node scripts/check-model-stub.mjs --mutate   # and that each one bites
  */
 import { readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -162,6 +163,9 @@ let out
 try {
   console.log('\n▶ the real Anthropic SDK, constructed as the service constructs it')
   out = probe()
+  // Which source the running stub reports — what `lane-env.sh` compares with
+  // the file on disk to restart a stale one.
+  out.version = await fetch(`http://127.0.0.1:${PORT}/__control/version`).then((r) => r.json()).catch(() => null)
 } finally {
   stub.kill('SIGTERM')
 }
@@ -219,6 +223,12 @@ if (out.none !== undefined) {
     `the arranged failure came back as ${JSON.stringify(out.arranged)}`,
   )
   chk(out.afterReset === 0, 'and reset clears the record, so a section can establish its own starting state', `after reset the stub still held ${out.afterReset} call(s)`)
+  const wantSource = createHash('sha1').update(readFileSync(STUB)).digest('hex').slice(0, 12)
+  chk(
+    out.version?.source === wantSource,
+    'the stub reports the hash of the source it is running — what the launcher compares, to restart a stale one',
+    `it reported ${JSON.stringify(out.version)} against ${wantSource} for the file on disk`,
+  )
 }
 
 console.log(
@@ -240,6 +250,7 @@ if (process.argv.includes('--mutate')) {
     ['a staged status is read after it has been cleared', 'const status = staged.status\n    const err =', 'const err ='],
     ['the arranged status is replaced by a constant', 'return json(res, status, err)', 'return json(res, 400, err)'],
     ['usage is zeroes, so a metering check passes on nothing', 'usage: { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }', 'usage: { input_tokens: 0, output_tokens: 0 }'],
+    ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['reset keeps the record of the run before', 'seen.length = 0', 'void seen'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')

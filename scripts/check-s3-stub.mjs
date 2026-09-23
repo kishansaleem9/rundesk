@@ -29,6 +29,7 @@
  *   node scripts/check-s3-stub.mjs --mutate   # and that each one bites
  */
 import { readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { join, dirname } from 'node:path'
 import { spawn, spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -62,6 +63,7 @@ const chk = (cond, good, bad) => {
  */
 const PORT = 9300 + (process.pid % 400)
 const BUCKET = 'rundesk-stub-cases'
+const KEY_NAME = 'tasks/probe/cover.png'
 
 /*
  * THE PROBE RUNS IN `apps/api`, because that is where `R2Service` and its
@@ -78,7 +80,7 @@ const env: Record<string, string> = {
   R2_BUCKET_NAME: '${BUCKET}',
 }
 const r2 = new R2Service({ get: (k: string) => env[k] } as never)
-const KEY = 'tasks/probe/cover.png'
+const KEY = '${KEY_NAME}'
 const BYTES = Buffer.from('\\x89PNG\\r\\n\\x1a\\nRUNDESK-COVER-BYTES')
 async function main() {
   const out: Record<string, unknown> = {}
@@ -107,6 +109,11 @@ async function main() {
     out.unsignedPut = (await fetch('http://127.0.0.1:${PORT}/' + '${BUCKET}' + '/' + KEY, { method: 'PUT', body: BYTES })).status
     await r2.deleteObject(KEY)
     out.afterDelete = await r2.getObject(KEY).then(() => 'still-there').catch((e: Error) => e.name)
+    // The request log: what a suite reads to prove the product did, or did
+    // NOT, ask the bucket for something.
+    const log = await (await fetch('http://127.0.0.1:${PORT}/__control/requests')).json()
+    out.logSeq = log.seq
+    out.logged = (log.requests as Array<{ n: number; method: string; key: string; bucket: string }>).map((r) => [r.n, r.method, r.key, r.bucket])
     out.missingHead = await r2.headObject('tasks/probe/never.png').then(() => 'answered').catch((e: Error) => e.name)
   } catch (err) {
     out.threw = err instanceof Error ? \`\${err.name}: \${err.message}\` : String(err)
@@ -166,6 +173,9 @@ let out
 try {
   console.log('\n▶ the real R2Service, against the stub, with nothing mocked')
   out = probe()
+  // Which source the running stub reports — what `lane-env.sh` compares with
+  // the file on disk to restart a stale one.
+  out.version = await fetch(`http://127.0.0.1:${PORT}/__control/version`).then((r) => r.json()).catch(() => null)
 } finally {
   stub.kill('SIGTERM')
 }
@@ -188,6 +198,31 @@ if (out.none !== undefined) {
   chk(out.unsignedPut === 403, 'an UNSIGNED PUT is refused — a product that stopped signing would be caught, not quietly served', `an unsigned PUT answered ${out.unsignedPut}`)
   chk(out.afterDelete === 'NoSuchKey', 'a deleted object is gone, and says so with the code the SDK names', `after delete it answered ${out.afterDelete}`)
   chk(out.missingHead !== 'answered', 'and HEAD on a key that was never written does not answer as though it were', 'HEAD answered for an object that does not exist')
+  const logged = Array.isArray(out.logged) ? out.logged : []
+  const has = (method, key) => logged.some(([, m, k]) => m === method && k === key)
+  chk(
+    has('PUT', KEY_NAME) && has('DELETE', KEY_NAME),
+    'the request log names the PUT and the DELETE the product sent, by key — so a suite can see what reached the bucket',
+    `the log held ${JSON.stringify(logged).slice(0, 200)}`,
+  )
+  chk(
+    logged.length > 0 && logged.every(([n], i) => i === 0 || n > logged[i - 1][0]) && out.logSeq === logged[logged.length - 1][0],
+    'in order, numbered, with the latest number reported — a suite reads the number first and looks only after it',
+    `the numbers were ${JSON.stringify(logged.map(([n]) => n))} against seq ${out.logSeq}`,
+  )
+  chk(
+    // By BUCKET: `/__control/requests` parses as bucket `__control`, key
+    // `requests`, so a test on the key would be true of every log there is.
+    logged.length > 0 && logged.every(([, , , b]) => b === BUCKET),
+    'and the control routes are not in it — only what the product asked of the bucket',
+    `the log includes a request outside the bucket: ${JSON.stringify(logged.find(([, , , b]) => b !== BUCKET))}`,
+  )
+  const wantSource = createHash('sha1').update(readFileSync(STUB)).digest('hex').slice(0, 12)
+  chk(
+    out.version?.source === wantSource,
+    'the stub reports the hash of the source it is running — what the launcher compares, to restart a stale one',
+    `it reported ${JSON.stringify(out.version)} against ${wantSource} for the file on disk`,
+  )
 }
 
 console.log(
@@ -225,6 +260,11 @@ if (process.argv.includes('--mutate')) {
     ['HEAD answers for an object that was never written', "res.writeHead(404)\n      return res.end()", "res.writeHead(200, { 'content-length': 0 })\n      return res.end()"],
     ['the list is empty whatever is in the bucket', 'const hits = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).slice(0, max)', 'const hits = []'],
     ['a stored object comes back with a byte changed', 'return res.end(found.body)', "return res.end(Buffer.concat([Buffer.from('X'), found.body.subarray(1)]))"],
+    ['the request log records nothing', 'requests.push({ n: requestSeq, method: req.method, bucket, key })', 'void 0'],
+    ['the request log forgets which key', 'requests.push({ n: requestSeq, method: req.method, bucket, key })', "requests.push({ n: requestSeq, method: req.method, bucket, key: '' })"],
+    ['the log reports no position to read from', 'JSON.stringify({ seq: requestSeq, requests })', 'JSON.stringify({ seq: 0, requests })'],
+    ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
+    ['control routes are logged as bucket traffic', "  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {", "  requests.push({ n: ++requestSeq, method: req.method, bucket, key })\n  if (url.pathname === '/__control/fail-next-put' && req.method === 'POST') {"],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

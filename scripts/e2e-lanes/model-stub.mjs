@@ -42,6 +42,8 @@
  * than sleeping.
  */
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 if (process.env.RUNDESK_MODEL_STUB !== '1') {
   console.error('[model-stub] refusing to start without RUNDESK_MODEL_STUB=1 — this is a test double')
@@ -54,6 +56,16 @@ const arg = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 const PORT = Number(arg('port', 9200))
+/*
+ * WHICH SOURCE THIS PROCESS IS RUNNING. A lane's stub lives for days and the
+ * launcher leaves a running one alone, so a change to this file never reached
+ * a lane that was already up. The object store met it first — its request log
+ * was added and every lane went on serving the store from before it — and this
+ * stub has the same launcher, so the same hazard. `lane-env.sh` compares this
+ * with the file on disk and restarts a stub whose source has moved — the same
+ * refusal `verify.sh` makes of an API built from older source.
+ */
+const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
 
 /*
  * WHAT THE STUB SAYS BACK, keyed on a phrase from the system prompt the
@@ -103,6 +115,10 @@ const server = createServer(async (req, res) => {
   if (url.pathname === '/__control/next' && req.method === 'POST') {
     staged = await readBody(req)
     return json(res, 200, { staged: true })
+  }
+  if (url.pathname === '/__control/version' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ source: SOURCE }))
   }
   if (url.pathname === '/__control/seen' && req.method === 'GET') {
     return json(res, 200, { calls: seen })
@@ -182,7 +198,7 @@ const server = createServer(async (req, res) => {
 })
 
 server.listen(PORT, '127.0.0.1', () => {
-  console.log(JSON.stringify({ ready: true, port: PORT, endpoint: `http://127.0.0.1:${PORT}` }))
+  console.log(JSON.stringify({ ready: true, port: PORT, endpoint: `http://127.0.0.1:${PORT}`, source: SOURCE }))
 })
 
 for (const sig of ['SIGINT', 'SIGTERM']) process.on(sig, () => server.close(() => process.exit(0)))

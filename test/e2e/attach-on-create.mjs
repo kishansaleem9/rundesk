@@ -59,6 +59,7 @@ import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { storeBase } from './lib/store.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -76,11 +77,10 @@ const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 /*
  * THE LANE'S OBJECT STORE, for the refusal at the end of this suite. Lane k
  * runs the API on 302k and `s3-stub.mjs` on 91k, so the port follows from the
- * API port with no second flag to forget — the same arithmetic `task-cover`
- * uses, and for the same reason.
+ * API port with no second flag to forget. `lib/store.mjs` holds the formula,
+ * so this suite and `task-cover` cannot drift apart on it.
  */
-const STORE_PORT = Number(argOf('--store', process.env.E2E_STORE_PORT ?? 9100 + (API_PORT - 3020)))
-const STORE = `http://127.0.0.1:${STORE_PORT}`
+const STORE = storeBase(API_PORT, argOf('--store', undefined))
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'

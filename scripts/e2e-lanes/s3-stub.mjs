@@ -47,6 +47,8 @@
  *   {"ready":true,"port":9100,"bucket":"rundesk-test","endpoint":"http://127.0.0.1:9100"}
  */
 import { createServer } from 'node:http'
+import { readFileSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 
 if (process.env.RUNDESK_S3_STUB !== '1') {
   console.error('[s3-stub] refusing to start without RUNDESK_S3_STUB=1 — this is a test double, not a store')
@@ -59,6 +61,16 @@ const arg = (name, fallback) => {
   return i === -1 ? fallback : process.argv[i + 1]
 }
 const PORT = Number(arg('port', 9100))
+/*
+ * WHICH SOURCE THIS PROCESS IS RUNNING. A lane's stub lives for days and the
+ * launcher leaves a running one alone, so a change to this file never reached
+ * a lane that was already up: the request log was added, and every lane went
+ * on serving the stub from before it, where the new control route answered
+ * NoSuchBucket. `lane-env.sh` compares this with the file on disk and restarts
+ * a stub whose source has moved — the same refusal `verify.sh` makes of an API
+ * built from older source.
+ */
+const SOURCE = createHash('sha1').update(readFileSync(new URL(import.meta.url))).digest('hex').slice(0, 12)
 const BUCKET = arg('bucket', 'rundesk-test')
 const STRICT = process.argv.includes('--strict')
 
@@ -66,6 +78,19 @@ const STRICT = process.argv.includes('--strict')
 const objects = new Map()
 // Armed by `POST /__control/fail-next-put`, and consumed by the PUT it fires on.
 let failNextPut = false
+/*
+ * EVERY BUCKET REQUEST, IN ORDER, so "the product did NOT touch the bucket" is
+ * something a suite can read rather than assume. Removing a LINK attachment
+ * used to send a DELETE for the link itself, and nothing a suite could see
+ * changed: S3 deletes are idempotent, so the stub answered 204 to a key that
+ * never existed. `n` is monotonic and survives `reset`, so a suite reads the
+ * `n` before it acts and looks only at what came after — another suite's
+ * earlier traffic, or a reset in between, cannot leak into its answer.
+ * Capped, because a lane's stub lives for days.
+ */
+const requests = []
+let requestSeq = 0
+const REQUEST_LOG_CAP = 2000
 
 const xmlEscape = (s) =>
   String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
@@ -140,6 +165,16 @@ const server = createServer(async (req, res) => {
    * is to say it at the START of a section rather than trusting the end of the
    * last one.
    */
+  if (url.pathname === '/__control/version' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ source: SOURCE }))
+  }
+
+  if (url.pathname === '/__control/requests' && req.method === 'GET') {
+    res.writeHead(200, { 'content-type': 'application/json' })
+    return res.end(JSON.stringify({ seq: requestSeq, requests }))
+  }
+
   if (url.pathname === '/__control/reset' && req.method === 'POST') {
     failNextPut = false
     res.writeHead(200, { 'content-type': 'application/json' })
@@ -175,6 +210,12 @@ const server = createServer(async (req, res) => {
     return res.end()
   }
   for (const [k, v] of Object.entries(cors)) res.setHeader(k, v)
+
+  // Control routes returned above and preflights carry no intent, so what is
+  // recorded is exactly what the product asked the bucket to do.
+  requestSeq += 1
+  requests.push({ n: requestSeq, method: req.method, bucket, key })
+  if (requests.length > REQUEST_LOG_CAP) requests.shift()
 
   if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
 
@@ -267,7 +308,7 @@ server.listen(PORT, '127.0.0.1', () => {
    * asynchronous, so this must not be followed by anything that exits.
    */
   console.log(
-    JSON.stringify({ ready: true, port: PORT, bucket: BUCKET, endpoint: `http://127.0.0.1:${PORT}`, strict: STRICT }),
+    JSON.stringify({ ready: true, port: PORT, bucket: BUCKET, endpoint: `http://127.0.0.1:${PORT}`, strict: STRICT, source: SOURCE }),
   )
 })
 
