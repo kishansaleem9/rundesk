@@ -50,7 +50,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from '../lib/suite-of-patch.mjs'
-import { measuredAt, patchDeps, makeDriftCheck, declaresRerun } from '../lib/log-tree.mjs'
+import { measuredAt, patchDeps, makeMeasurementCheck } from '../lib/log-tree.mjs'
 
 const ROOT = new URL('../..', import.meta.url).pathname
 const LOGS = '/tmp/claude-0'
@@ -64,7 +64,12 @@ const DRIFTED = process.argv.includes('--drifted')
 // named after the feature, not the suite. `measuredAt` carries the sha each one
 // was measured at, which is what `--drifted` reads.
 const ran = measuredAt(LOGS)
-const drifted = makeDriftCheck({ root: ROOT })
+// The SAME question `check-break-reddened.mjs` asks, from the same function:
+// dependencies moved, the patch's own code changed, or a `# Re-run:` pending.
+// This read `git diff` over the dependencies alone, so a patch whose body was
+// rewritten stayed "current" here and "drifted" there — and a chain built on
+// this plan could never clear what the checker kept reporting.
+const notCurrent = makeMeasurementCheck({ root: ROOT })
 
 const SUITES = join(ROOT, 'test/e2e')
 const suiteOf = makeSuiteOf({
@@ -111,9 +116,10 @@ for (const f of readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()) {
     // A log from before `wt-break.sh` recorded what it synced to cannot be
     // placed in the history at all. UNKNOWN is not CURRENT, so it goes in the
     // work list and is counted out loud rather than passed over in silence.
+    const why = notCurrent(rec, patchDeps(text, suite), { name, text })
+    if (!why.length) continue
     if (!rec.sha) nosha++
-    else if (declaresRerun(text) && drifted(rec.sha, [`test/e2e/breaks/${name}.py`]).length) declared++
-    else if (!drifted(rec.sha, patchDeps(text, suite)).length) continue
+    else if (why.some((w) => w.endsWith('<declares Re-run>'))) declared++
   }
   if (!bySuite.has(suite)) bySuite.set(suite, [])
   bySuite.get(suite).push(name)

@@ -37,7 +37,8 @@
  * otherwise invalidate 26 more measurements than the code in it justifies.
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join, posix, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 
 // THE FOUR LINES THAT LOOK LIKE A PATCH AND ARE NOT. `wt-break.sh` writes its
@@ -48,6 +49,17 @@ import { execFileSync } from 'node:child_process'
 // `classify-break-log.awk` holds the third copy, in a language that cannot
 // import this one; the two that can, do.
 export const CONTROL = /^== (syncing|BASELINE|restoring|REFUSING)\b/
+
+// AND THE FOUR LINES THAT NAME A PATCH WHICH NEVER RAN. `wt-break.sh` writes
+// `== <patch> MISSING`, `PATCH FAILED`, `PATCH CHANGED NOTHING` and
+// `BUILD FAILED` when a patch could not be applied, changed nothing, or did not
+// compile — and the suite never ran against it. These were read as
+// measurements at that sha: the planner skipped the patch as measured, and the
+// reddened checker read the PREVIOUS run's `brk-<patch>.log` and dated it by
+// the new sha. It went live on 23 September: five "refuses everything" patches
+// failed to build in both of their runs and were on record as measured.
+// `classify-break-log.awk` already knew these four; this module did not.
+export const NOT_RUN = /^== \S+ (MISSING|PATCH FAILED|PATCH CHANGED NOTHING|BUILD FAILED)\b/
 
 // The sha in force at each patch's line, from the NEWEST log that names it.
 //
@@ -72,7 +84,7 @@ export function measuredAt(logsDir) {
         continue
       }
       const m = line.match(/^== ([a-z0-9][a-z0-9-]*)\b/)
-      if (!m || CONTROL.test(line)) continue
+      if (!m || CONTROL.test(line) || NOT_RUN.test(line)) continue
       const prev = at.get(m[1])
       if (!prev || prev.mtime < mtime) at.set(m[1], { sha, mtime, log: f })
     }
@@ -141,8 +153,53 @@ export function patchDeps(text, suite) {
       (m) => m[1],
     ),
   )
-  if (suite) deps.add(`test/e2e/${suite}.mjs`)
+  if (suite) {
+    deps.add(`test/e2e/${suite}.mjs`)
+    for (const lib of suiteLibs(suite)) deps.add(lib)
+  }
   return [...deps]
+}
+
+/*
+ * THE HELPERS A SUITE IMPORTS ARE PART OF WHAT IT MEASURES.
+ *
+ * A measurement depended on the files its patch edits and on the suite — and
+ * not on `test/e2e/lib`, which nearly every suite imports: `signin.mjs` in 97 of
+ * them, `wait.mjs` in 79, `chain.mjs` in 10. A change to `waitUntil` or to the
+ * chain helper changes what every importing suite measures, and the planner,
+ * the reddened checker and freshness all went on calling the old logs current.
+ * `chain.mjs` has changed behaviour before (580793d, "the chain helper had the
+ * hole it exists to prevent").
+ *
+ * Followed through the helpers that import each other (`signin.mjs` is
+ * imported by two of them), static `from`/`import` and dynamic `import()`
+ * alike, and cached per suite: the planner asks once per patch.
+ */
+const REPO_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..')
+const libCache = new Map()
+const IMPORTED = /(?:\bfrom\s*|\bimport\s*\(?\s*)['"](\.{1,2}\/[^'"]+\.mjs)['"]/g
+export function suiteLibs(suite, root = REPO_ROOT) {
+  const key = `${root}\0${suite}`
+  if (libCache.has(key)) return libCache.get(key)
+  const found = new Set()
+  const visit = (rel) => {
+    let src
+    try {
+      src = readFileSync(join(root, rel), 'utf8')
+    } catch {
+      return
+    }
+    for (const m of src.matchAll(IMPORTED)) {
+      const dep = posix.normalize(posix.join(posix.dirname(rel), m[1]))
+      if (!dep.startsWith('test/e2e/lib/') || found.has(dep)) continue
+      found.add(dep)
+      visit(dep)
+    }
+  }
+  visit(`test/e2e/${suite}.mjs`)
+  const libs = [...found].sort()
+  libCache.set(key, libs)
+  return libs
 }
 
 // `(record from measuredAt, deps) => why this measurement is not about HEAD`,
@@ -152,11 +209,23 @@ export function patchDeps(text, suite) {
 // every unplaceable log as current, which is the direction that turns a stale
 // green into a measurement. Two callers had that conditional written out by
 // hand, so it lives here with the test beside it.
+//
+// A `# Re-run:` declaration is ONE OF THOSE REASONS, and it lives here so the
+// planner and the reddened checker cannot disagree about it. The planner
+// honoured it and the checker could not see it (its body comparison strips
+// every `#` line, and the declaration is one), so while a re-run was pending
+// the checker credited as current a log the patch itself said was not
+// evidence. Both now compare the WORKING COPY, which is what `wt-break.sh`
+// runs; the planner's old test read `git diff sha HEAD`, committed changes
+// only.
 export function makeMeasurementCheck({ root }) {
   const drifted = makeDriftCheck({ root })
   return (rec, deps, patch = null) => {
     if (!rec) return ['<no run log>']
     if (!rec.sha) return ['<no commit recorded>']
+    if (patch && declaresRerun(patch.text) && patchFileMoved({ root, sha: rec.sha, name: patch.name, text: patch.text })) {
+      return [`test/e2e/breaks/${patch.name}.py <declares Re-run>`]
+    }
     const moved = drifted(rec.sha, deps)
     if (moved.length || !patch) return moved
     return patchCodeMoved({ root, sha: rec.sha, name: patch.name, text: patch.text })
@@ -188,19 +257,32 @@ const stripComments = (text) =>
     .join('\n')
     .trim()
 
-function patchCodeMoved({ root, sha, name, text }) {
-  const path = `test/e2e/breaks/${name}.py`
-  let was
+const patchAt = ({ root, sha, name }) => {
   try {
-    was = execFileSync('git', ['show', `${sha}:${path}`], {
+    return execFileSync('git', ['show', `${sha}:test/e2e/breaks/${name}.py`], {
       cwd: root,
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
     })
   } catch {
-    return [`${path} <not committed when it ran>`]
+    return null
   }
+}
+
+function patchCodeMoved({ root, sha, name, text }) {
+  const path = `test/e2e/breaks/${name}.py`
+  const was = patchAt({ root, sha, name })
+  if (was === null) return [`${path} <not committed when it ran>`]
   return stripComments(was) === stripComments(text) ? [] : [`${path} <body>`]
+}
+
+// The whole file, comments included — the declaration IS a comment, and it is
+// spent by the measurement that postdates it, whatever else the edit touched.
+// A patch with no blob at that sha had not been written when it ran, so its
+// declaration cannot have been measured either.
+const patchFileMoved = ({ root, sha, name, text }) => {
+  const was = patchAt({ root, sha, name })
+  return was === null || was !== text
 }
 
 // `(sha, paths) => the paths that changed between sha and HEAD`, memoised

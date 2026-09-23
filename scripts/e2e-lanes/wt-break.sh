@@ -129,12 +129,16 @@ cd "$WT" || exit 1
 # A lock, because two runs sharing one worktree check out, patch and build over
 # each other and every result is then about whichever run wrote last. That
 # happened once and produced a set of "passes" that meant nothing.
+#
+# SIGNED WITH THIS PROCESS'S PID (`lock_take`, lane-env.sh), because the EXIT
+# trap below is skipped by SIGKILL and a reaped run left a bare directory that
+# held the lane for ever. A lock whose holder is gone is now taken, and said.
 LOCK="/tmp/claude-0/wt$LANE.lock"
-if ! mkdir "$LOCK" 2>/dev/null; then
-  echo "lane $LANE is already break-testing — refusing to interleave" >&2
+if ! lock_take "$LOCK"; then
+  echo "lane $LANE is already break-testing (PID $(cat "$LOCK/pid" 2>/dev/null || echo 'unsigned')) — refusing to interleave" >&2
   exit 3
 fi
-trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; rmdir "$LOCK" 2>/dev/null' EXIT
+trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; lock_drop "$LOCK"' EXIT
 # Only now that the lane is ours. A refusal must not touch the results of the
 # run that legitimately holds it.
 : > "$OUT"
@@ -361,6 +365,11 @@ for b in "$@"; do
   # argument was spelled the obvious way is the stale-reason defect wearing a
   # shell script: the message named a real condition and meant something else.
   b="${b##*/}"; b="${b%.py}"
+  # THIS ATTEMPT'S LOG OR NONE. It was only written when the patch got as far as
+  # running the suite, so a patch that was missing, failed to apply, changed
+  # nothing or did not build left the PREVIOUS run's log in place — and the
+  # reddened checker read it as this run's, dated by this run's commit.
+  rm -f "/tmp/claude-0/brk-$b.log"
   # THE REPOSITORY IS THE SOURCE, AND THIS LINE WAS THE LAST PLACE THAT STILL
   # DISAGREED.
   #

@@ -71,10 +71,21 @@ DIST="/tmp/claude-0/dist-$LANE"
 # no longer exists, and an afternoon working out why. Hashing every source file
 # would be exact and would also read thousands of files before every suite;
 # when the two errors are that asymmetric, take the cheap one.
+#
+# `find -newer`, NOT `xargs sh -c '[ {} -nt … ]'`. That spliced each path into
+# a shell string unquoted, so `$workspaceId` in a file NAME expanded to nothing
+# and the test ran against a path that does not exist: all 77 `$`-named source
+# files — the list/board/calendar/Gantt route among them — were invisible to
+# this refusal, the same `$` defect `log-tree.mjs` fixed for patch deps.
+#
+# AND THE INPUTS OUTSIDE `src`: `index.html` is Vite's entry and in Tailwind's
+# content list, and the three config files and `public/` shape the bundle too.
 if [ -f "$DIST/index.html" ]; then
-  NEWER=$(find apps/web/src packages/ui/src packages/feature-flags/src \
-            -name '*.ts' -o -name '*.tsx' -o -name '*.css' 2>/dev/null \
-          | xargs -r -I{} sh -c '[ {} -nt "'"$DIST"'/index.html" ] && echo {}' 2>/dev/null | head -3)
+  NEWER=$( { find apps/web/src packages/ui/src packages/feature-flags/src \
+               \( -name '*.ts' -o -name '*.tsx' -o -name '*.css' \) -newer "$DIST/index.html" -print
+             find apps/web/index.html apps/web/vite.config.ts apps/web/tailwind.config.ts \
+               apps/web/postcss.config.js apps/web/public -type f -newer "$DIST/index.html" -print
+           } 2>/dev/null | head -3)
   if [ -n "$NEWER" ]; then
     echo "== $SUITE (lane $LANE) REFUSING — $DIST is older than the source it is built from"
     echo "   newer, among others:"
@@ -126,9 +137,12 @@ fi
 # wrapper either way.
 API_BUILT=apps/api/dist/.built-at
 [ -f "$API_BUILT" ] || API_BUILT=$(find apps/api/dist -name '*.js' -printf '%T@ %p\n' 2>/dev/null | sort -rn | head -1 | cut -d' ' -f2-)
+# `packages/feature-flags/src` too: the API requires it (13 compiled files do)
+# from SOURCE under tsx, like `@rundesk/db`. And `find -newer`, for the reason
+# the web scan above gives.
 if [ -n "$API_BUILT" ]; then
-  API_NEWER=$(find apps/api/src packages/db/src -name '*.ts' 2>/dev/null \
-              | xargs -r -I{} sh -c '[ {} -nt "'"$API_BUILT"'" ] && echo {}' 2>/dev/null | head -3)
+  API_NEWER=$(find apps/api/src packages/db/src packages/feature-flags/src -name '*.ts' \
+                -newer "$API_BUILT" -print 2>/dev/null | head -3)
   if [ -n "$API_NEWER" ]; then
     echo "== $SUITE (lane $LANE) REFUSING — the API build is older than the source it is built from"
     echo "   newer, among others:"
@@ -159,6 +173,19 @@ if [ -n "$LANE_PID" ]; then
     echo "   a break worktree's API is left running when wt-break.sh finishes; put the lane back on this build:"
     echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
     exit 8
+  fi
+  # AND IT HAS TO HAVE STARTED AFTER THE BUILD IT IS MEANT TO SERVE. The stamp
+  # check above clears the moment a build runs — and `build-api.sh` with no
+  # lanes named builds without restarting anything, so every lane went on
+  # serving the old process, and the schema it read from source when IT
+  # started, while this said nothing.
+  LANE_START=$(date -d "$(ps -o lstart= -p "$LANE_PID" 2>/dev/null)" +%s 2>/dev/null)
+  BUILT_AT=$(stat -c %Y "$API_BUILT" 2>/dev/null)
+  if [ -n "$LANE_START" ] && [ -n "$BUILT_AT" ] && [ "$LANE_START" -lt "$BUILT_AT" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — the API on $PORT started at $(date -d "@$LANE_START" +%H:%M:%S), before the build at $(date -d "@$BUILT_AT" +%H:%M:%S)"
+    echo "   it is still serving the previous build; restart it onto this one:"
+    echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
+    exit 7
   fi
 fi
 

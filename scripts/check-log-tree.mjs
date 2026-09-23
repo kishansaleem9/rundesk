@@ -14,7 +14,7 @@
  *
  *   node scripts/check-log-tree.mjs
  */
-import { mkdtempSync, writeFileSync, utimesSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, writeFileSync, utimesSync, mkdirSync, rmSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { execFileSync, spawnSync } from 'node:child_process'
@@ -33,7 +33,7 @@ import { proveMutationsBite } from './lib/mutate.mjs'
  */
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUBJECT = process.env.LOG_TREE_LIB ?? './lib/log-tree.mjs'
-const { measuredAt, patchDeps, makeDriftCheck, makeMeasurementCheck, declaresRerun } = await import(SUBJECT)
+const { measuredAt, patchDeps, suiteLibs, makeDriftCheck, makeMeasurementCheck, declaresRerun } = await import(SUBJECT)
 
 let failed = 0
 let ran = 0
@@ -134,6 +134,40 @@ ok(!at.has('REFUSING'), 'nor is a refusal')
 ok(!at.has('restoring'), 'nor is the restore line')
 ok(!at.has('syncing'), 'nor the sync line itself')
 
+// A PATCH THAT NEVER RAN IS NOT A MEASUREMENT. `wt-break.sh` names a patch it
+// could not apply, could not find, that changed nothing, or whose build failed
+// — and the suite never ran against any of them. Five patches that did not
+// build in either of their runs were on record as measured on 23 September.
+// The newer log sorts first, so a reader that took these lines would let the
+// failed attempt overwrite the older real measurement of `kept-1-real`.
+log(
+  'break-not-run-a-newer.txt',
+  [
+    '== syncing /tmp/claude-0/wt2 to 5555555',
+    '== kept-1-real BUILD FAILED',
+    '== gone-1-rotted PATCH FAILED',
+    '== gone-2-typo MISSING (not in /home/user/rundesk/test/e2e/breaks nor /tmp/claude-0/breaks)',
+    '== gone-3-noop PATCH CHANGED NOTHING',
+    '== gone-4-unbuilt BUILD FAILED',
+    '',
+  ].join('\n'),
+  1_700_009_000,
+)
+log(
+  'break-not-run-b-older.txt',
+  ['== syncing /tmp/claude-0/wt2 to 4444444', '== kept-1-real', '31 passed, 1 failed', ''].join('\n'),
+  1_700_000_300,
+)
+at = measuredAt(dir)
+ok(
+  ['gone-1-rotted', 'gone-2-typo', 'gone-3-noop', 'gone-4-unbuilt'].every((n) => !at.has(n)),
+  'a patch that failed to apply, was missing, changed nothing or did not build was not measured',
+)
+ok(
+  at.get('kept-1-real')?.sha === '4444444',
+  'and an attempt that did not build leaves the older real measurement standing',
+)
+
 console.log('▶ what a run depended on')
 
 const PATCH = [
@@ -163,6 +197,34 @@ ok(
   !deps.includes('apps/web/src/routes/app.'),
   'and not the truncated prefix, which is a path that exists nowhere and can never drift',
 )
+// THE HELPERS THE SUITE IMPORTS. folder-dialog imports five from test/e2e/lib;
+// a change to any of them changes what it measures.
+ok(
+  ['fixture', 'local-stack', 'playwright', 'signin', 'wait'].every((l) => deps.includes(`test/e2e/lib/${l}.mjs`)),
+  "and the test/e2e/lib helpers the suite imports — a change to waitUntil is a change to the measurement",
+)
+{
+  // A tree built to hold the three shapes an import can take here, a cycle,
+  // and an import that is not a suite helper at all.
+  const root = mkdtempSync(join(tmpdir(), 'log-tree-libs-'))
+  mkdirSync(join(root, 'test/e2e/lib'), { recursive: true })
+  mkdirSync(join(root, 'scripts'), { recursive: true })
+  writeFileSync(
+    join(root, 'test/e2e/s.mjs'),
+    "import { a } from './lib/a.mjs'\nimport '../../scripts/other.mjs'\nconst { c } = await import('./lib/c.mjs')\n",
+  )
+  writeFileSync(join(root, 'test/e2e/lib/a.mjs'), "import { b } from './b.mjs'\nexport const a = 1\n")
+  writeFileSync(join(root, 'test/e2e/lib/b.mjs'), "import { a } from './a.mjs'\nexport const b = 2\n")
+  writeFileSync(join(root, 'test/e2e/lib/c.mjs'), 'export const c = 3\n')
+  writeFileSync(join(root, 'scripts/other.mjs'), 'export default 0\n')
+  const libs = suiteLibs('s', root)
+  ok(libs.includes('test/e2e/lib/a.mjs'), 'a helper the suite imports is a dep')
+  ok(libs.includes('test/e2e/lib/b.mjs'), 'and a helper THAT helper imports, followed through a cycle without hanging')
+  ok(libs.includes('test/e2e/lib/c.mjs'), 'and one it loads with a dynamic import()')
+  ok(libs.length === 3, `and nothing that is not a suite helper (got ${JSON.stringify(libs)})`)
+  ok(suiteLibs('missing', root).length === 0, 'a suite that is not there has no helpers, rather than throwing')
+  rmSync(root, { recursive: true, force: true })
+}
 
 console.log('▶ has anything it depended on changed since')
 
@@ -271,6 +333,27 @@ ok(
   'and a moved dependency still answers first',
 )
 
+console.log('▶ a pending `# Re-run:` is a reason both instruments see')
+
+// THE PLANNER HONOURED IT AND THE CHECKER COULD NOT SEE IT: the body comparison
+// strips every `#` line, and the declaration is one. So it is a reason of the
+// shared measurement check now — pending while the working copy differs from
+// the patch as it stood when it was measured, spent by a measurement taken
+// after it was written.
+const DECLARED = '# the first explanation\n# Re-run: measured under the old runner\nimport io\ns = "one"\n'
+ok(
+  (patchOf(DECLARED)[0] ?? '').includes('<declares Re-run>'),
+  'a Re-run written after the measurement puts it back in the work list, though the code is unchanged',
+)
+writeFileSync(PATCH_PATH, DECLARED)
+git('add', '-A')
+git('commit', '-qm', 'declare a re-run')
+const atDeclared = git('rev-parse', 'HEAD').trim()
+ok(
+  current({ sha: atDeclared }, [], { name: 'p-1-thing', text: DECLARED }).length === 0,
+  'and a measurement taken after the declaration spends it',
+)
+
 /*
  * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true
  * of no assertions at all.
@@ -322,13 +405,19 @@ if (process.argv.includes('--mutate')) {
        * part, and it is the part that was once deleted while its case passed.
        */
       ['the newest log stops winning', 'if (!prev || prev.mtime < mtime) at.set', 'if (true) at.set'],
-      ['a patch stops depending on its own suite', 'if (suite) deps.add(`test/e2e/${suite}.mjs`)', 'void suite'],
+      ['a patch stops depending on its own suite', 'deps.add(`test/e2e/${suite}.mjs`)', 'void suite'],
+      ['a suite stops depending on the helpers it imports', 'for (const lib of suiteLibs(suite)) deps.add(lib)', 'void suiteLibs'],
+      ['a helper stops counting what IT imports', '      visit(dep)\n', '\n'],
+      ['a dynamic import() stops counting', '(?:\\bfrom\\s*|\\bimport\\s*\\(?\\s*)', '(?:\\bfrom\\s*)'],
       // The character class, back to what it was: the mutation that costs 75
       // patches their dependency on the route file they edit.
       ['a route with `$` in its name stops being a dependency', '[A-Za-z0-9_.$/-]+', '[A-Za-z0-9_./-]+'],
       ['a patch stops depending on the product files it edits', '/\\/home\\/user\\/rundesk\\/((?:apps|packages)\\/[A-Za-z0-9_.$/-]+)/g', '/__never_matches__()/g'],
       ['an unreadable commit reads as no drift', "out = ['<unknown commit>']", 'out = []'],
       ['a Re-run: line with nothing after it counts', '/^#[ \\t]*Re-run:[ \\t]*\\S/im', '/^#[ \\t]*Re-run:/im'],
+      ['a patch that never ran reads as measured', 'CONTROL.test(line) || NOT_RUN.test(line)', 'CONTROL.test(line)'],
+      ['a pending Re-run is invisible to the measurement check', 'if (patch && declaresRerun(patch.text) &&', 'if (false && declaresRerun(patch?.text ?? "") &&'],
+      ['a Re-run is never spent', 'return was === null || was !== text', 'return true'],
     ],
   })
 }

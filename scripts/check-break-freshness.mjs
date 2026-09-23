@@ -47,7 +47,7 @@ import { execFileSync } from 'node:child_process'
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
-import { patchDeps, makeDriftCheck, CONTROL, measuredAt } from './lib/log-tree.mjs'
+import { patchDeps, suiteLibs, makeDriftCheck, makeMeasurementCheck, CONTROL, measuredAt } from './lib/log-tree.mjs'
 import { bail } from './lib/bail.mjs'
 
 const ROOT = new URL('..', import.meta.url).pathname
@@ -77,6 +77,7 @@ const lastChanged = (name) => {
 }
 
 const drifted = makeDriftCheck({ root: ROOT })
+const notCurrent = makeMeasurementCheck({ root: ROOT })
 
 const rows = []
 for (const log of logs) {
@@ -154,17 +155,25 @@ for (const log of logs) {
   // only if BOTH trees are — the earlier run's numbers are still in it, and
   // reading line one would date the whole file by whichever run came first.
   const shas = [...text.matchAll(/^== syncing \S+ to ([0-9a-f]{7,40})/gm)].map((m) => m[1])
-  // The deps: the suite that did the measuring, and the product files that each
-  // patch NAMED IN THIS LOG edits. The patch files themselves are left out —
-  // they are re-worded constantly and `check-break-reddened.mjs` re-reads every
-  // claim against the log's own text, so a comment edit is not a re-measurement.
-  const deps = new Set([`test/e2e/${named}.mjs`])
-  for (const line of patchLines) {
-    const name = line.slice(3).split(/\s/)[0]
-    const file = join(ROOT, 'test/e2e/breaks', `${name}.py`)
-    if (existsSync(file)) for (const d of patchDeps(readFileSync(file, 'utf8'), null)) deps.add(d)
+  // What moved under this log, asked the way `check-break-reddened.mjs` and the
+  // planner ask it — one function, `makeMeasurementCheck` — for every patch the
+  // log names: the suite and the helpers it imports, the product files the
+  // patch edits, the patch's own CODE (a comment edit is still not a
+  // re-measurement) and a pending `# Re-run:`. This had its own copy of the
+  // question with the patch body and the helpers left out, so a rewritten patch
+  // read "fresh" here and "drifted" there.
+  const moved = new Set()
+  for (const sha of shas) {
+    for (const d of drifted(sha, [`test/e2e/${named}.mjs`, ...suiteLibs(named)])) moved.add(d)
+    for (const line of patchLines) {
+      const name = line.slice(3).split(/\s/)[0]
+      const file = join(ROOT, 'test/e2e/breaks', `${name}.py`)
+      if (!existsSync(file)) continue
+      const text = readFileSync(file, 'utf8')
+      for (const d of notCurrent({ sha }, patchDeps(text, named), { name, text })) moved.add(d)
+    }
   }
-  const moved = [...new Set(shas.flatMap((sha) => drifted(sha, [...deps])))]
+  const movedList = [...moved]
 
   // NO SHA IS NOT NO DRIFT. Logs from before `wt-break.sh` recorded what it
   // synced to cannot be placed in the history at all, and a check that cannot
@@ -175,7 +184,7 @@ for (const log of logs) {
   // refusal: `ai-assign` and `create-menu-ai` both refused their baselines
   // against suites that have since been fixed, and both printed as live
   // failures with nothing to say they were about a tree from this morning.
-  const tree = dirty || moved.length ? 'older' : shas.length ? 'current' : 'unknown'
+  const tree = dirty || movedList.length ? 'older' : shas.length ? 'current' : 'unknown'
   const verdict = refused
     ? 'REFUSED'
     : tree === 'older'
@@ -202,11 +211,11 @@ for (const log of logs) {
       (sliceOf ? `slice of ${sliceOf}: ` : '') +
       (dirty
         ? 'suite has UNCOMMITTED edits — the run cannot be about this file'
-        : moved.length
-          ? `measured at ${shas.join(',')}, since when ${moved.length} file(s) it depended on changed: ${moved
+        : movedList.length
+          ? `measured at ${shas.join(',')}, since when ${movedList.length} file(s) it depended on changed: ${movedList
               .slice(0, 3)
               .map((p) => p.replace(/^(apps|packages)\//, ''))
-              .join(' ')}${moved.length > 3 ? ' …' : ''}`
+              .join(' ')}${movedList.length > 3 ? ' …' : ''}`
           : shas.length
             ? `measured at ${shas.join(',')}, nothing it depended on has changed since`
             : 'the log records no commit — nothing can be said about which tree it measured'),

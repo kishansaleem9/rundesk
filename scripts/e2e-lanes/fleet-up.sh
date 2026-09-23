@@ -54,7 +54,9 @@ pg_dump -h 127.0.0.1 -U rundesk -d rundesk_pristine -Fc -f /tmp/claude-0/pristin
 # going quietly green.
 for k in "${LANES[@]}"; do
   DB="rundesk_v$k"; PORT=$((3020 + k)); S3PORT=$((9100 + k))
-  pkill -f "PORTMARK=$k " 2>/dev/null
+  # By port, and waited on — see `lane_api_down` for what `pkill -f "PORTMARK=…"`
+  # did here, which was nothing.
+  lane_api_down "$PORT" || { echo "lane $k: NOT STARTED — the old API would not let go of $PORT"; continue; }
   # Killed HERE as well as inside `lane_store_up`, and on purpose: this script
   # re-creates the database, so the lane must start with an EMPTY bucket. The
   # helper on its own would keep a running store and its objects, which is the
@@ -103,3 +105,6 @@ for k in "${LANES[@]}"; do
   else echo "lane $k: DID NOT COME UP"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok/${#LANES[@]} lanes up"
+# A lane that did not come up is a failure, not a line of output. This exited 0
+# with every lane down, and `build-api.sh` after it.
+[ "$ok" = "${#LANES[@]}" ] || exit 1

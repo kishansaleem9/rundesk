@@ -49,6 +49,18 @@ rather than rebuilding for the same reason `wt-break.sh` refuses: seven lanes
 each firing their own `vite build` on four cores turns one forgotten rebuild
 into a thundering herd.
 
+`verify.sh` exits with the suite's own code, or refuses before running it:
+
+| exit | refused because |
+|------|-----------------|
+| 6 | the lane's bundle is older than a web source file — anything under `apps/web/src`, `packages/ui/src`, `packages/feature-flags/src`, or `apps/web/index.html`, the Vite/Tailwind/PostCSS configs and `public/` |
+| 7 | the API build is older than `apps/api/src`, `packages/db/src` or `packages/feature-flags/src` — or the lane's API process started BEFORE the last build, so it still serves the previous one (`build-api.sh` with no lanes named builds and restarts nothing) |
+| 8 | the process on the lane's port is not serving this tree at all — a break worktree's API left running by `wt-break.sh` |
+
+The scans use `find -newer`, so a file with `$` in its name (TanStack routes:
+77 of them) is seen like any other; an earlier `xargs sh -c` expanded the `$`
+away and never saw them.
+
 **A running API already has the schema your WORKING TREE has.** The API build
 emits extensionless imports into `packages/db/src`, so it can only run under
 the tsx loader — which compiles the schema from *source* at require time. The

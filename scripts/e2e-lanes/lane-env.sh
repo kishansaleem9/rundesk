@@ -213,3 +213,88 @@ lane_model_up () {
   tail -3 "$log" 2>/dev/null >&2
   return 1
 }
+
+# ── STOP A LANE'S API, AND WAIT UNTIL IT HAS GONE ──────────────────────────
+#
+# `lane_api_down <port>`. Every script that starts a lane's API has to stop the
+# old one first, and two of them did not wait for it to stop — one did not stop
+# it at all:
+#
+#   - `fleet-up.sh` ran `pkill -f "PORTMARK=$k "`. PORTMARK is an environment
+#     variable, not part of any command line, so that pattern matched nothing
+#     (`wt-break.sh` found this first and says so). The old API kept the port,
+#     the new one failed to bind, and the health loop reported the OLD process
+#     as the lane coming UP — old code, reported as fresh.
+#   - `fleet-restart.sh` killed by port and relaunched at once. A process asked
+#     to exit still answers health for a moment, so the same health loop could
+#     pass against the dying process while the new one lost the port.
+#
+# By port, then waited on until nothing listens there; anything still holding
+# it after twenty seconds (LANE_API_DOWN_GRACE) is killed outright. Returns 1 if
+# the port is still held after that, so the caller can say so instead of
+# starting a second API that cannot bind. `scripts/check-lane-api-down.sh`
+# holds it to that, and proves it can tell when it does not.
+lane_api_down () {
+  local port="$1" pids left
+  pids=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | sort -u)
+  [ -z "$pids" ] && return 0
+  kill $pids 2>/dev/null
+  for _ in $(seq 1 "${LANE_API_DOWN_GRACE:-20}"); do
+    [ -z "$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null)" ] && return 0
+    sleep 1
+  done
+  left=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | sort -u)
+  [ -n "$left" ] && kill -9 $left 2>/dev/null
+  for _ in $(seq 1 5); do
+    [ -z "$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null)" ] && return 0
+    sleep 1
+  done
+  echo "port $port is still held after SIGKILL — not starting a second API on it" >&2
+  return 1
+}
+
+# ── LOCKS THAT SAY WHO HOLDS THEM ───────────────────────────────────────────
+#
+# `run-plan.sh` and `wt-break.sh` lock with `mkdir`, and released only in an
+# EXIT trap — which a SIGKILL skips, and processes here are reaped mid-round
+# (`sweep-until-clean.sh`'s header records it). A reaped holder left its
+# directory behind with nothing in it to say whose it was, and every waiter
+# then waited for ever, silently: `chain-plan` on the dispatcher's lock, and
+# `run-plan` skipping a locked lane on every pass.
+#
+# So a lock carries its holder's PID, and is HELD only while that process is
+# alive. One with no PID yet is either an old-style lock or one taken this
+# instant and not yet signed: held for its first minute, stale after that.
+#
+#   lock_take <dir>   0 when this shell now holds it; says so when it had to
+#                     clear a stale one first
+#   lock_held <dir>   0 when a live process holds it
+#   lock_drop <dir>   release (the directory holds the PID file, so not rmdir)
+lock_held () {
+  local dir="$1" pid age
+  [ -d "$dir" ] || return 1
+  pid=$(cat "$dir/pid" 2>/dev/null)
+  if [ -z "$pid" ]; then
+    age=$(( $(date +%s) - $(stat -c %Y "$dir" 2>/dev/null || echo 0) ))
+    [ "$age" -lt "${LOCK_UNSIGNED_GRACE:-60}" ]
+    return
+  fi
+  kill -0 "$pid" 2>/dev/null
+}
+
+lock_take () {
+  local dir="$1" holder
+  if mkdir "$dir" 2>/dev/null; then
+    echo "$$" > "$dir/pid"
+    return 0
+  fi
+  lock_held "$dir" && return 1
+  holder=$(cat "$dir/pid" 2>/dev/null)
+  echo "stale lock $dir from ${holder:+PID $holder}${holder:-an unsigned holder}, which is gone — taking it" >&2
+  rm -rf "$dir"
+  # Atomic: of two shells clearing the same stale lock, one mkdir wins.
+  mkdir "$dir" 2>/dev/null || return 1
+  echo "$$" > "$dir/pid"
+}
+
+lock_drop () { rm -rf "$1"; }

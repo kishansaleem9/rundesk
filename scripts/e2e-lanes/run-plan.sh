@@ -31,12 +31,15 @@ PLAN="${1:?usage: run-plan.sh <plan file> [log file]}"
 LOG="${2:-/tmp/claude-0/run-plan.log}"
 LANES="${LANES:-2 3 4}"
 GUARD=/tmp/claude-0/run-plan.lock
+# The locks carry their holder's PID — see `lock_take` in lane-env.sh for the
+# reaped dispatcher whose bare directory made every later one refuse for ever.
+. scripts/e2e-lanes/lane-env.sh
 
-if ! mkdir "$GUARD" 2>/dev/null; then
-  echo "run-plan.sh is already running (holding $GUARD) — refusing to start a second dispatcher" >&2
+if ! lock_take "$GUARD"; then
+  echo "run-plan.sh is already running (PID $(cat "$GUARD/pid" 2>/dev/null || echo 'unsigned'), holding $GUARD) — refusing to start a second dispatcher" >&2
   exit 3
 fi
-trap 'rmdir "$GUARD" 2>/dev/null' EXIT
+trap 'lock_drop "$GUARD"' EXIT
 
 mapfile -t WORK < "$PLAN"
 declare -A PID=()
@@ -58,8 +61,9 @@ while :; do
     [ "$next" -ge "${#WORK[@]}" ] && continue
     # A lock still held after the child exited means somebody else has the lane.
     # Skipping rather than launching is what keeps a refusal (exit 3) from
-    # burning a plan entry.
-    [ -d "/tmp/claude-0/wt$lane.lock" ] && continue
+    # burning a plan entry. HELD means a live holder: a lock left by a reaped
+    # run is not waited on — `wt-break.sh` takes it and says so.
+    lock_held "/tmp/claude-0/wt$lane.lock" && continue
     line="${WORK[$next]}"
     next=$((next + 1))
     [ -z "$line" ] && continue
@@ -81,6 +85,20 @@ while :; do
     [ -n "$p" ] && kill -0 "$p" 2>/dev/null && running=$((running + 1))
   done
   if [ "$running" = 0 ] && [ "$next" -ge "${#WORK[@]}" ]; then break; fi
+  # WORK LEFT, NOTHING OF OURS RUNNING, AND NOTHING LAUNCHED: every lane is held
+  # by somebody else. This used to sleep here for ever, logging nothing after
+  # "PLAN:". Said once, and given up on after a bound, with its own exit code.
+  if [ "$running" = 0 ]; then
+    if [ -z "${held_since:-}" ]; then
+      held_since=$(date +%s)
+      say "waiting: every lane in $LANES is held by another run — $(for l in $LANES; do printf 'wt%s=%s ' "$l" "$(cat "/tmp/claude-0/wt$l.lock/pid" 2>/dev/null || echo unsigned)"; done)"
+    elif [ $(( $(date +%s) - held_since )) -ge "${LANE_WAIT_MAX:-3600}" ]; then
+      say "GAVE UP: every lane stayed held by another run for $(( ($(date +%s) - held_since) / 60 )) min — $((${#WORK[@]} - next)) set(s) not launched"
+      exit 5
+    fi
+  else
+    held_since=''
+  fi
   sleep 20
 done
 say "PLAN DRAINED: $started set(s) launched of ${#WORK[@]}"

@@ -82,6 +82,11 @@ LATEST_SQL=$(ls "$R/packages/db/src/migrations"/*.sql | sort | tail -1)
 NEWEST_COL=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z_]+"' "$LATEST_SQL" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
 NEWEST_TBL=$(grep -oiE 'ALTER TABLE "[a-z_]+"' "$LATEST_SQL" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
 
+# The lanes this run REFUSED to restart. The count at the end has to leave them
+# out: a refused lane still has its old API listening, which answers health, so
+# it was counted "UP" — on the build this run was asked to replace.
+declare -A REFUSED=()
+
 for k in "${LANES[@]}"; do
   DB="rundesk_v$k"; PORT=$((3020 + k))
   # REFUSE A LANE WHOSE DATABASE IS GONE rather than starting an API that will
@@ -90,6 +95,7 @@ for k in "${LANES[@]}"; do
   if ! psql -h 127.0.0.1 -U rundesk -d postgres -tAc \
       "select 1 from pg_database where datname='$DB'" | grep -q 1; then
     echo "lane $k: $DB does not exist — use fleet-up.sh \"$k\" to create it"
+    REFUSED[$k]=1
     continue
   fi
   # The schema check, per lane, when the newest migration is one this can read.
@@ -102,6 +108,7 @@ for k in "${LANES[@]}"; do
       echo "lane $k: $DB is behind — $NEWEST_TBL.$NEWEST_COL is missing ($(basename "$LATEST_SQL"))"
       echo "         apply it:  psql -h 127.0.0.1 -U rundesk -d $DB -f $LATEST_SQL"
       echo "         REFUSING to start an API that would 500 on its first write"
+      REFUSED[$k]=1
       continue
     fi
   else
@@ -109,9 +116,9 @@ for k in "${LANES[@]}"; do
   fi
   # Kill by PORT, never by `pkill -f` on an environment variable: PORTMARK is
   # not in any command line, so that pattern matches nothing (and a looser one
-  # matches this script).
-  PIDS=$(lsof -t -i ":$PORT" -sTCP:LISTEN 2>/dev/null)
-  [ -n "$PIDS" ] && kill $PIDS 2>/dev/null
+  # matches this script). And WAIT for it to go: relaunching at once let the
+  # health loop below pass against the dying process — see `lane_api_down`.
+  lane_api_down "$PORT" || { echo "lane $k: NOT RESTARTED — the old API would not let go of $PORT"; REFUSED[$k]=1; continue; }
   # The store has to BE up, not merely be pointed at. `lane_store_up` keeps a
   # running one and its objects — a restart that emptied the bucket would make
   # a suite's second run differ from its first for a reason nothing in the
@@ -147,6 +154,7 @@ for k in "${LANES[@]}"; do
   # audit is named after — and it took saying it out loud ten times in a row
   # before it was read rather than skimmed.
   DB="rundesk_v$k"; PORT=$((3020 + k))
+  if [ -n "${REFUSED[$k]:-}" ]; then echo "lane $k: NOT RESTARTED (above)"; continue; fi
   up=""
   for i in $(seq 1 45); do
     if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health"; then up=yes; break; fi
@@ -156,3 +164,6 @@ for k in "${LANES[@]}"; do
   else echo "lane $k: DID NOT COME UP"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok of ${#LANES[@]} lanes up"
+# A lane that did not come up is a failure, not a line of output. This exited 0
+# with every lane down, and so did `build-api.sh`, whose last command it is.
+[ "$ok" = "${#LANES[@]}" ] || exit 1

@@ -346,6 +346,27 @@ jobs:
       - name: The S3 stub is faithful to the SDK, and each case bites
         run: node scripts/check-s3-stub.mjs --mutate
 
+      # A lane's old API really stops before a new one starts. Two lane scripts
+      # did not wait for it and one never stopped it at all, so a lane could be
+      # reported UP on the build it was meant to replace.
+      - name: A lane's old API stops before its port is reused
+        run: bash scripts/check-lane-api-down.sh --mutate
+
+      # A break planner that crashed wrote an empty plan, and both chain
+      # scripts read the empty plan as "nothing left" and exited 0.
+      - name: A failed break planner is never read as nothing left
+        run: bash scripts/check-build-plan.sh --mutate
+
+      # One round loop for both chain scripts. The second copy had lost the
+      # guard for "somebody else has the lanes" and stopped on no progress.
+      - name: The break round loop ends the way it says
+        run: bash scripts/check-rounds.sh --mutate
+
+      # Lane locks carry their holder's PID. A holder reaped by SIGKILL left a
+      # bare directory, and every waiter then waited for ever in silence.
+      - name: A dead holder's lane lock is taken, a live one kept
+        run: bash scripts/check-locks.sh --mutate
+
       # The same recorded reason, one subsystem over. A row of AI surfaces is
       # blocked in the ledger on ANTHROPIC_API_KEY being "empty here and in
       # CI", and their suites assert the refusal. But `ai.service.ts` writes

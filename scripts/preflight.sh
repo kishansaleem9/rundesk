@@ -44,6 +44,10 @@ step "nothing ends a section on a throw" node scripts/check-suite-section-enders
 step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs --mutate
 step "and every ender rule bites"        node scripts/check-suite-enders.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
+step "a lane's old API stops before reuse" bash scripts/check-lane-api-down.sh --mutate
+step "a failed planner is never 'nothing left'" bash scripts/check-build-plan.sh --mutate
+step "and the round loop ends as it says"  bash scripts/check-rounds.sh --mutate
+step "a dead holder's lock is taken, a live one kept" bash scripts/check-locks.sh --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs --mutate

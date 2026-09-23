@@ -32,8 +32,12 @@
 # The first draft of this file ran `pnpm --filter @rundesk/db build` and got
 # ERR_PNPM_RECURSIVE_RUN_NO_SCRIPT; the `-s` flag hid that the same command had
 # been failing silently by hand for an hour. `verify.sh` still scans
-# `packages/db/src` for staleness, and it is right to: a column added there is
-# invisible to Drizzle until THIS build runs.
+# `packages/db/src` for staleness, and it is right to — but not because this
+# build carries the schema. A lane's API runs under the tsx loader, which
+# compiles `@rundesk/db` (and `@rundesk/feature-flags`) from SOURCE when the
+# process starts, so a column added there reaches a lane when its API
+# RESTARTS. A build with no lanes named restarts nothing; that is why
+# `verify.sh` also refuses a lane whose API started before the last build.
 set -u
 cd /home/user/rundesk
 

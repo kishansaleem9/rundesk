@@ -43,7 +43,10 @@ heal () {
   done
   if [ ${#down[@]} -gt 0 ]; then
     say "lanes down: ${down[*]} — bringing them back"
-    bash scripts/e2e-lanes/fleet-up.sh "${down[*]}" >> "$LOG" 2>&1
+    # fleet-up exits 1 when a lane did not come up; that is worth a line here,
+    # because the round below will otherwise find the lane down in silence.
+    bash scripts/e2e-lanes/fleet-up.sh "${down[*]}" >> "$LOG" 2>&1 \
+      || say "fleet-up could not bring back every one of: ${down[*]} — see $LOG"
   fi
   # The stores are separate processes and die separately; `lane_store_up` keeps
   # a healthy one and its objects, so this is cheap when nothing is wrong.
@@ -51,49 +54,8 @@ heal () {
   for k in $LANES; do lane_store_up "$k" >> "$LOG" 2>&1; lane_model_up "$k" >> "$LOG" 2>&1; done
 }
 
-prev=''
-for round in $(seq 1 "$ROUNDS"); do
-  heal
-
-  plan="/tmp/claude-0/sweep-$round.txt"
-  : > "$plan"
-  node scripts/e2e-lanes/never-run-plan.mjs >> "$plan" 2>>"$LOG"
-  node scripts/e2e-lanes/never-run-plan.mjs --drifted >> "$plan" 2>>"$LOG"
-  # One suite can arrive from both modes — a new patch AND a moved tree. Running
-  # it twice would be two logs for one question and a second claimant for the
-  # lane, so the lines are merged on the suite.
-  node - "$plan" <<'JS' > "$plan.merged"
-const { readFileSync } = require('node:fs')
-const by = new Map()
-for (const line of readFileSync(process.argv[2], 'utf8').split('\n')) {
-  const [suite, ...patches] = line.trim().split(/\s+/).filter(Boolean)
-  if (!suite || !patches.length) continue
-  if (!by.has(suite)) by.set(suite, new Set())
-  for (const p of patches) by.get(suite).add(p)
-}
-for (const [suite, patches] of [...by].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0])))
-  console.log([suite, ...[...patches].sort()].join(' '))
-JS
-  mv "$plan.merged" "$plan"
-
-  sets=$(grep -c . "$plan")
-  patches=$(tr ' ' '\n' < "$plan" | grep -c .)
-  if [ "$sets" = 0 ]; then
-    say "round $round: nothing left — every log on disk measured the current tree"
-    exit 0
-  fi
-  now=$(cat "$plan")
-  if [ "$now" = "$prev" ]; then
-    say "round $round: asked for exactly what round $((round - 1)) asked for — stopping rather than looping"
-    say "  $sets set(s) unmoved: $(cut -d' ' -f1 "$plan" | tr '\n' ' ')"
-    exit 1
-  fi
-  prev="$now"
-
-  say "round $round: $sets set(s), $((patches - sets)) patch(es)"
-  # FOREGROUND, on purpose. Backgrounding it here is what lost the last sweep.
-  bash scripts/e2e-lanes/run-plan.sh "$plan" >> "$LOG" 2>&1
-  say "round $round: dispatcher returned ($?)"
-done
-say "stopped after $ROUNDS round(s) with work still outstanding"
-exit 1
+# The shared loop, with the fleet healed before each round. Exit codes are the
+# loop's: 0 nothing left, 2 no progress, 3 rounds used up, 4 planner failed.
+before_round () { heal; }
+. scripts/e2e-lanes/rounds.sh
+run_rounds sweep
