@@ -77,6 +77,7 @@ import {
   SlidersHorizontal,
   // §V2-S17 `15:20` — the ▶ welded to the status pill, and the ✓ beside it.
   ChevronRight,
+  ChevronLeft,
   Check as CheckIcon,
   // §V2-S02 `01:55` — an attachment thumbnail's hover actions, and the
   // `Comment ▾` split button of `04:11`.
@@ -5848,6 +5849,15 @@ function CommentsPanel({
   const [text, setText] = useState('')
   const [commentFiles, setCommentFiles] = useState<File[]>([])
   const [replyTo, setReplyTo] = useState<string | null>(null)
+  /*
+   * §V2-S06 frame `05:50` — which comment's THREAD is open, if any.
+   *
+   * Not the same question as `replyTo` above and deliberately kept apart from
+   * it. `replyTo` aims the page composer at a comment and survives whatever
+   * else you do on the page; this decides whether the comments column is a
+   * list or one thread, and it is the only thing the thread composer reads.
+   */
+  const [threadRootId, setThreadRootId] = useState<string | null>(null)
   const [editingCommentId, setEditingCommentId] = useState<string | null>(null)
   const [editingBody, setEditingBody] = useState('')
   const [selectedMentionUserIds, setSelectedMentionUserIds] = useState<string[]>([])
@@ -6304,6 +6314,30 @@ function CommentsPanel({
             : mentionTab === 'locations'
               ? locationMentionCandidates
               : channelMentionCandidates
+  /*
+   * §V2-S06 frame `05:50` — A THREAD REPLACES THE LIST, it does not float
+   * over it. The task detail is already a Sheet and a second one inside it is
+   * two dismissables where Escape means two different things; the frame draws
+   * the thread as where you ARE, with the way back in its header.
+   *
+   * `threadRoot` is looked up rather than stored, so a thread whose comment
+   * was deleted by somebody else falls back to the list instead of drawing a
+   * panel about nothing.
+   */
+  const threadRoot = threadRootId ? comments.find((c) => c.id === threadRootId) ?? null : null
+  if (threadRoot) {
+    return (
+      <CommentThreadPanel
+        taskId={taskId}
+        root={threadRoot}
+        replies={repliesByParent.get(threadRoot.id) ?? []}
+        namesById={namesById}
+        onBack={() => setThreadRootId(null)}
+        onReact={(commentId, emoji) => react.mutate({ commentId, emoji })}
+      />
+    )
+  }
+
   return (
     <div className="space-y-3" ref={commentListRef}>
       {comments.length === 0 ? (
@@ -6362,6 +6396,22 @@ function CommentsPanel({
                     onClick={() => setReplyTo(c.id)}
                   >
                     {t('taskDetail.reply')}
+                  </button>
+                  {/*
+                    §V2-S06 frame `05:50` — the way into the thread panel, ON
+                    EVERY ROOT COMMENT and not only on ones that already have
+                    replies. The frame's thread carries a composer, so starting
+                    one has to be reachable from a comment nobody has answered;
+                    hanging it off the replies count would make the first reply
+                    the one you cannot write there.
+                  */}
+                  <button
+                    type="button"
+                    data-testid={`comment-thread-open-${c.id}`}
+                    className="text-xs text-muted-foreground hover:text-foreground"
+                    onClick={() => setThreadRootId(c.id)}
+                  >
+                    {t('taskDetail.thread')}
                   </button>
                   {isAuthor(c) && (
                     <button
@@ -9086,6 +9136,184 @@ function SignatureFieldEditor({
             ? t('taskDetail.fieldType.signatureHint')
             : t('taskDetail.fieldType.signatureSigned')}
         </span>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * §V2-S06 frame `05:50` — THE THREAD ON A COMMENT.
+ *
+ * The frame, read off the pixels:
+ *
+ *     Thread by Hamda Tahir
+ *     ────────────────────────────────────────
+ *     [the comment, with its clip]
+ *     👍 🎉 ❤️                       ← its reactions, in the thread
+ *     [replies]
+ *     ────────────────────────────────────────
+ *     [ Reply to comment…                    ]
+ *
+ * WHAT WAS ALREADY THERE AND WHAT WAS NOT. Replies have nested inline under
+ * their root comment for a long time and the API has stored `parentCommentId`
+ * for longer, so nothing here is a new data path — `POST /tasks/:id/comments`
+ * with a parent is the same call the inline Reply control makes. What the
+ * frame has and the inline list does not is a PLACE: a panel that is about one
+ * comment, headed by whose comment it is, carrying that comment's own
+ * reactions, with a composer that can only ever answer this thread. In the
+ * inline list the composer at the bottom of the page answers whichever comment
+ * you last pressed Reply on, and the only thing saying which is a small
+ * preview above it.
+ *
+ * IT REPLACES THE LIST RATHER THAN FLOATING OVER IT. The task detail is
+ * already a Sheet; a second Sheet inside it is a stack of two dismissables
+ * where Escape means two different things. So opening a thread swaps the
+ * comments column for this panel and the header carries the way back, which is
+ * also what the frame draws — the thread is not a popover, it is where you are.
+ *
+ * ITS OWN COMPOSER, ITS OWN MUTATION. Deliberately not the page composer's:
+ * that one carries attachments, mentions, an assignee and a slash menu, and
+ * its `replyTo` is the state this panel exists to make unnecessary. Here the
+ * parent is the panel's own root and cannot be anything else, so a reply
+ * cannot land on the wrong comment however the page is left.
+ */
+function CommentThreadPanel({
+  taskId,
+  root,
+  replies,
+  namesById,
+  onBack,
+  onReact,
+}: {
+  taskId: string
+  root: TaskComment
+  replies: TaskComment[]
+  namesById: Record<string, string>
+  onBack: () => void
+  onReact: (commentId: string, emoji: string) => void
+}) {
+  const { t, tCount } = useTranslation()
+  const qc = useQueryClient()
+  const [body, setBody] = useState('')
+  const authorName = root.author?.displayName ?? root.author?.email ?? t('taskDetail.userFallback')
+
+  const reply = useMutation({
+    mutationFn: () =>
+      api(`/tasks/${taskId}/comments`, {
+        method: 'POST',
+        // The parent is the panel's root and is not reachable from any state a
+        // person can leave in the wrong place — that is the whole point of the
+        // panel over the shared composer's `replyTo`.
+        body: JSON.stringify({ body: body.trim(), parentCommentId: root.id }),
+      }),
+    onSuccess: async () => {
+      setBody('')
+      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
+    },
+  })
+
+  return (
+    <div className="space-y-3" data-testid="comment-thread-panel" data-root-comment-id={root.id}>
+      <div className="flex items-center gap-2 border-b border-border pb-2">
+        <button
+          type="button"
+          data-testid="comment-thread-back"
+          onClick={onBack}
+          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+          aria-label={t('common.back')}
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+        {/* The frame's header, and it names WHOSE comment this is — a panel
+            headed "Thread" would be the same panel with the one fact that
+            orients you taken out. */}
+        <h4 className="text-sm font-medium" data-testid="comment-thread-title">
+          {t('taskDetail.threadBy', { name: authorName })}
+        </h4>
+        <span className="ml-auto text-xs text-muted-foreground" data-testid="comment-thread-count">
+          {tCount('taskDetail.repliesCount', replies.length)}
+        </span>
+      </div>
+
+      <div className="rounded-md border border-border p-3 space-y-2" data-testid="comment-thread-root">
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-medium">{authorName}</span>
+          <span className="text-xs text-muted-foreground">{new Date(root.createdAt).toLocaleString()}</span>
+        </div>
+        <MentionText markdown text={root.body} namesById={namesById} className="mt-1 text-sm" />
+        <CommentAttachments files={root.attachments} />
+        {/* The frame carries the comment's reactions INSIDE the thread. Reading
+            them on the list and answering them here would be two places for one
+            comment, which is the split this panel is closing. */}
+        <div className="mt-2 flex gap-1" data-testid="comment-thread-reactions">
+          {['👍', '🎉', '❤️'].map((emoji) => (
+            <button
+              key={emoji}
+              type="button"
+              data-testid={`comment-thread-react-${emoji}`}
+              onClick={() => onReact(root.id, emoji)}
+              className="rounded border border-border px-1.5 py-0.5 text-xs hover:bg-muted"
+            >
+              {emoji}
+              {root.reactions?.filter((r) => r.emoji === emoji).length
+                ? ` ${root.reactions.filter((r) => r.emoji === emoji).length}`
+                : ''}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {replies.length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="comment-thread-empty">
+          {t('taskDetail.threadEmpty')}
+        </p>
+      ) : (
+        <ul className="space-y-1.5 border-l border-border pl-3" data-testid="comment-thread-replies">
+          {replies.map((r) => (
+            <li
+              key={r.id}
+              data-comment-id={r.id}
+              data-testid={`comment-thread-reply-${r.id}`}
+              className="rounded border border-border/70 p-2 bg-card/50"
+            >
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-medium">
+                  {r.author?.displayName ?? r.author?.email ?? t('taskDetail.userFallback')}
+                </span>
+                <span className="text-[11px] text-muted-foreground">
+                  {new Date(r.createdAt).toLocaleString()}
+                </span>
+              </div>
+              <MentionText markdown text={r.body} namesById={namesById} className="mt-1 text-sm" />
+              <CommentAttachments files={r.attachments} />
+            </li>
+          ))}
+        </ul>
+      )}
+
+      <div className="space-y-2 border-t border-border pt-2">
+        <Textarea
+          rows={2}
+          data-testid="comment-thread-composer"
+          placeholder={t('taskDetail.threadReplyPlaceholder')}
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
+        <div className="flex justify-end">
+          <Button
+            size="sm"
+            data-testid="comment-thread-send"
+            onClick={() => reply.mutate()}
+            disabled={!body.trim() || reply.isPending}
+          >
+            {reply.isPending ? t('common.saving') : t('taskDetail.threadSend')}
+          </Button>
+        </div>
+        {reply.isError && (
+          <p className="text-xs text-destructive" data-testid="comment-thread-error">
+            {reply.error instanceof Error ? reply.error.message : t('taskDetail.threadFailed')}
+          </p>
+        )}
       </div>
     </div>
   )
