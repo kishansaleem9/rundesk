@@ -3,7 +3,7 @@ import { Badge, Button } from '@rundesk/ui'
 import { ShieldCheck, ScrollText, Users, Settings, Webhook, Megaphone, Crown, LogOut, Plug, Globe, LifeBuoy } from 'lucide-react'
 import { MasterAdminPanel } from '../components/master-admin-panel'
 import { useAuthStore } from '../store/auth'
-import { api, ApiError } from '../lib/api'
+import { signOut } from '../lib/sign-out'
 
 export const Route = createFileRoute('/app/admin')({
   // The super-admin console is platform-level — only super_admins may enter.
@@ -40,23 +40,12 @@ function AdminShell() {
   const matches = useMatches()
   const isIndex = matches[matches.length - 1]?.routeId === '/app/admin'
   const navigate = useNavigate()
-  const refreshToken = useAuthStore((s) => s.refreshToken)
-  const clear = useAuthStore((s) => s.clear)
 
   async function handleSignOut() {
-    try {
-      if (refreshToken) {
-        await api('/auth/logout', {
-          method: 'POST',
-          body: JSON.stringify({ refreshToken }),
-        })
-      }
-    } catch (err) {
-      if (!(err instanceof ApiError)) console.error(err)
-    } finally {
-      clear()
-      navigate({ to: '/login' })
-    }
+    // The endpoint is called whether or not a refresh token is stored — this
+    // copy skipped it for cookie sessions and left them alive. lib/sign-out.ts.
+    await signOut()
+    navigate({ to: '/login' })
   }
 
   return (

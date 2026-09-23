@@ -14,6 +14,7 @@ import { PwaInstallPrompt } from './components/pwa-install-prompt'
 import { I18nProvider } from './lib/i18n'
 import { useCustomDomainBootstrap } from './lib/custom-domain'
 import { installChunkReloadHandlers } from './lib/chunk-reload'
+import { dropApiCache } from './lib/api-cache'
 import { useSidebarStore, setSidebarPersister, setPanelsPersister } from './store/sidebar'
 import { RoutePending } from './components/loading-skeletons'
 
@@ -23,6 +24,9 @@ const THEME_VALUES: Theme[] = ['system', 'light', 'dark']
 // import() awaited in an event handler. Installed before the router exists so
 // nothing can slip through during startup.
 installChunkReloadHandlers()
+// Answers an older service worker stored before its API rule was removed —
+// see lib/api-cache.ts. Not awaited: nothing on screen waits for it.
+void dropApiCache()
 
 /*
  * §1.3 — send the collapse to the member's row when they change it.

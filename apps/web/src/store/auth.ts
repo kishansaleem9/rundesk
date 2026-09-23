@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { persist, createJSONStorage } from 'zustand/middleware'
+import { dropApiCache } from '../lib/api-cache'
 
 export type AuthUser = {
   id: string
@@ -72,7 +73,11 @@ export const useAuthStore = create<AuthState>()(
       setUser: (user) => set({ user }),
       setOrganizations: (organizations) => set({ organizations }),
       setWorkspaces: (workspaces) => set({ workspaces }),
-      clear: () => set({ user: null, accessToken: null, refreshToken: null, organizations: [], workspaces: [] }),
+      clear: () => {
+        set({ user: null, accessToken: null, refreshToken: null, organizations: [], workspaces: [] })
+        // Whoever signs in next must not be answered from this person's data.
+        void dropApiCache()
+      },
       // Auth is now anchored on the httpOnly session cookie, not a persisted
       // token. We treat the presence of a hydrated user profile as "logged in"
       // (the route guard reads this synchronously); the cookie is what actually

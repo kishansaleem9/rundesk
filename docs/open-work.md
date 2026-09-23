@@ -786,13 +786,29 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Still open, and its own item:* the web cannot use a custom grant here — settings is admin-only in the router — which is `product-siblings/custom-role-permissions-unread-by-web`.
 
-### `found-23-sep/service-worker-keeps-api-answers` — open, high (found when a route in `webhook-access` never fired)
+### `found-23-sep/service-worker-keeps-api-answers` — **closed**, break run pending (found when a route in `webhook-access` never fired)
 
-**The service worker stores every authenticated API answer for a day, keyed by URL alone, and nothing deletes them at sign-out**
+**The service worker stored every authenticated API answer for a day, keyed by URL alone, and nothing deleted them at sign-out**
 
-*Evidence:* `vite.config.ts`'s workbox `runtimeCaching` sends every `GET /api/v1/*` through `NetworkFirst` into the `rundesk-api` cache (`maxAgeSeconds` one day, `networkTimeoutSeconds: 5`). Measured on lane 1 with a real browser: after signing in as the super admin, `rundesk-api` held `/api/v1/users/me` (with the email), `/ops/metrics`, `/ops/tenant-databases`, `/ops/organizations` and the organisation's workspaces; after the session was cleared it held 11 answers, all still there. The only `caches.delete` in `apps/web/src` is the chunk-reload recovery. So on a shared machine the next person's slow request (over five seconds) or offline request is answered with the previous person's data, and the answers sit on disk for anyone with the profile.
+*Evidence:* `vite.config.ts`'s workbox `runtimeCaching` sent every `GET /api/v1/*` through `NetworkFirst` into the `rundesk-api` cache (`maxAgeSeconds` one day, `networkTimeoutSeconds: 5`). Measured on lane 1 with a real browser: after signing in as the super admin, `rundesk-api` held `/api/v1/users/me` (with the email), `/ops/metrics`, `/ops/tenant-databases`, `/ops/organizations` and the organisation's workspaces; after the session was cleared it held 11 answers, all still there. The only `caches.delete` in `apps/web/src` was the chunk-reload recovery. So on a shared machine the next person's slow request (over five seconds) or offline request was answered with the previous person's data, and the answers sat on disk for anyone with the profile.
 
-*To close:* stop caching authenticated API answers (drop the rule — "offline reads of recently viewed data" was never measured and is not worth another user's data), delete the existing `rundesk-api` cache on start-up and at sign-out, and prove it in a browser suite: sign in, read, sign out, and the cache holds nothing; a second account on the same profile never sees the first's answer. Research what ClickUp's web app keeps offline before deciding whether any read deserves a cache, and if one does, key it by account and clear it at sign-out.
+*Closed:* the API rule is gone — an authenticated answer is not a static asset, and "offline reads of recently viewed data" was never measured or asked for; `lib/api-cache.ts` deletes `rundesk-api` at start-up (a worker installed before the change keeps writing there until the new one takes over) and in the auth store's `clear()`, the one path every sign-out and every auth failure takes. `sw-api-cache` runs WITH the worker (the one browser suite that must): the worker controls the page and keeps the app's files — the pairing that makes "no API answer cached" mean something — no API answer in any cache after reading home and the profile, a planted leftover gone after a restart, and one written after start-up gone at sign-out from both the console and the topbar. 5/5 on lane 1; against the old code 1 of 5 (the pairing), the other four naming the defect — 11 API answers cached, the leftover kept, the console session alive, the menu off-screen. `swc-1..7`, each compiled. Two defects found under it, below.
+
+### `found-23-sep/console-sign-out-leaves-the-session` — **closed** (found writing `sw-api-cache`)
+
+**"Sign out" in the super-admin console left a cookie session alive**
+
+*Evidence:* two copies of sign-out. The topbar's always calls `/auth/logout` — "it clears the httpOnly cookies and revokes the refresh session. Cookie sessions have no stored refreshToken" — and the console's (`app.admin.tsx`) called it only `if (refreshToken)`, which a cookie session never has. Measured: after the console's Sign out no logout request was made, and `/auth/refresh` with the cookies left behind (and the CSRF header the app sends) answered 200 — a new session; after the topbar's, 401.
+
+*Closed:* one `signOut()` (`lib/sign-out.ts`) — the endpoint always, then `clear()` — used by both; checked in `sw-api-cache` (refresh answers 401 after each).
+
+### `found-23-sep/dropdowns-taller-than-the-window` — **closed** (found writing `sw-api-cache`)
+
+**A dropdown as tall as its content ran off the window — the user menu's Sign out was out of reach at 1440×900**
+
+*Evidence:* `DropdownMenuContent` (packages/ui) had `overflow-hidden` and no max height. Measured in a 1440×900 window with a fresh account: the user menu spanned 52–951px, `overflow-y: hidden`, `max-height: none`, and "Sign out" sat at 914–946px — below the window, where a click cannot reach it and Playwright could not scroll it into view.
+
+*Closed:* both the content and the sub-content are capped at Radix's `--radix-dropdown-menu-content-available-height` and scroll (`overflow-y-auto`), so every menu fits the space on its side; the topbar check in `sw-api-cache` asserts the menu's bottom is inside the window before it signs out. Every dropdown in the app uses this component, so the suites that drive menus were re-run on lane 1, 16/16: comment-plus-menu, person-panel, planner-priorities, settings-depth, video1-fast-items, ai-activity-filters, ai-model-picker, create-menu-ai, space-create-menu, task-menu, task-menu-favorite-archive, task-delete, task-field-create, template-center, list-under-space and sw-api-cache.
 
 ### `found-23-sep/routes-bypassed-by-the-service-worker` — open, medium (test tooling; found with the item above)
 

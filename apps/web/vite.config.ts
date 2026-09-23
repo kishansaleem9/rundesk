@@ -136,18 +136,12 @@ export default defineConfig(({ mode }) => {
               networkTimeoutSeconds: 3,
             },
           },
-          {
-            // API GETs — short-lived stale-while-revalidate so offline reads
-            // still work for recently viewed data.
-            urlPattern: ({ url, request }) =>
-              url.pathname.startsWith('/api/v1') && request.method === 'GET',
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'rundesk-api',
-              networkTimeoutSeconds: 5,
-              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 },
-            },
-          },
+          // NO API RULE, DELIBERATELY. There was one — every `GET /api/v1/*`
+          // NetworkFirst into `rundesk-api`, keyed by URL alone, for a day —
+          // and it kept each signed-in person's answers past sign-out and served
+          // them to whoever signed in next when the network was slow. An
+          // authenticated answer is not a static asset. `lib/api-cache.ts`
+          // deletes what the old rule stored.
         ],
       },
       devOptions: {

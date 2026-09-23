@@ -56,6 +56,7 @@ import { applyBrandColor } from '../lib/branding'
 import { canInstall, onInstallabilityChange, promptInstall, watchForInstallPrompt } from '../lib/pwa-install'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { api, ApiError } from '../lib/api'
+import { signOut } from '../lib/sign-out'
 import { notificationsUrl, useUnreadCount } from '../lib/notifications-query'
 import { resolveNotificationDestination, goToDestination } from '../lib/notification-nav'
 import { QuickCreateModal } from './quick-create-modal'
@@ -1090,8 +1091,6 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   // §6 — pinning, from the menu behind the avatar.
   const pinned = usePinnedTopbarItems()
   const setTool = useSetTopbarItem()
-  const refreshToken = useAuthStore((s) => s.refreshToken)
-  const clear = useAuthStore((s) => s.clear)
   const navigate = useNavigate()
   const qc = useQueryClient()
   const { t } = useTranslation()
@@ -1235,20 +1234,9 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const muted = prefsQuery.data?.channels?.dndOn ?? false
 
   async function handleSignOut() {
-    try {
-      // Always hit the endpoint: it clears the httpOnly cookies and revokes the
-      // refresh session. Cookie sessions have no stored refreshToken — the
-      // server reads the refresh_token cookie instead.
-      await api('/auth/logout', {
-        method: 'POST',
-        body: refreshToken ? { refreshToken } : {},
-      })
-    } catch (err) {
-      if (!(err instanceof ApiError)) console.error(err)
-    } finally {
-      clear()
-      navigate({ to: '/login' })
-    }
+    // One sign-out for the whole app — see lib/sign-out.ts.
+    await signOut()
+    navigate({ to: '/login' })
   }
 
   return (
@@ -1683,7 +1671,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           {t('topbar.resetDock')}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem destructive onSelect={handleSignOut}>
+        <DropdownMenuItem destructive onSelect={handleSignOut} data-testid="menu-sign-out">
           <LogOut className="h-4 w-4" />
           {t('nav.signOut')}
         </DropdownMenuItem>
