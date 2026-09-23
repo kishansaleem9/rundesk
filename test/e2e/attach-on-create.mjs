@@ -33,13 +33,20 @@
  *     the POST comes back. The ORDER is asserted rather than assumed, because
  *     an upload that went out first would be going somewhere else.
  *
- * WHERE THE ROUND TRIP STOPS HERE, said out loud rather than worked around:
- * R2 is unconfigured in this environment (`R2_ACCOUNT_ID` is empty), so
- * `createAttachmentUploadUrl` refuses and no object is ever stored. That is a
- * real failure path, and it is what makes the LAST check worth having — a list
- * of four files whose uploads fail must say WHICH ones, and this build names
- * each one. The task itself is asserted against the server, which is the part
- * that does not depend on storage.
+ * HOW THE LAST CHECK GETS ITS FAILURE, and the paragraph this replaces is the
+ * reason it is worth saying. It used to read: "R2 is unconfigured in this
+ * environment (`R2_ACCOUNT_ID` is empty), so `createAttachmentUploadUrl`
+ * refuses and no object is ever stored. That is a real failure path, and it is
+ * what makes the LAST check worth having." Every word was true when it was
+ * written. Then `s3-stub.mjs` gave every lane a working object store, uploads
+ * began succeeding, and the check went red against a product that had not
+ * changed a line — a green that depended on the environment being broken.
+ *
+ * So the refusal is arranged: one PUT is refused through the store's own
+ * control seam, the same one `task-cover` uses, and the check asserts that the
+ * upload which was refused is the one the toast names. A list of four files
+ * whose uploads fail must say WHICH ones, and now the suite causes the failure
+ * it is asking about instead of waiting for the environment to supply it.
  *
  * ITS OWN FIXTURES: one space, one project, one list, all tagged with this
  * run's stamp, and every server-side read narrowed to them.
@@ -65,6 +72,16 @@ const argOf = (name, fallback) => {
 // held, which is the browser behaviour the defect is about.
 const EXPECTED_CHECKS = 14
 
+const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
+/*
+ * THE LANE'S OBJECT STORE, for the refusal at the end of this suite. Lane k
+ * runs the API on 302k and `s3-stub.mjs` on 91k, so the port follows from the
+ * API port with no second flag to forget — the same arithmetic `task-cover`
+ * uses, and for the same reason.
+ */
+const STORE_PORT = Number(argOf('--store', process.env.E2E_STORE_PORT ?? 9100 + (API_PORT - 3020)))
+const STORE = `http://127.0.0.1:${STORE_PORT}`
+
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -85,7 +102,7 @@ let B = (process.env.BASE ?? '').replace(/\/$/, '')
 if (!B) {
   stack = await startLocalStack({
     dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
-    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+    apiPort: API_PORT,
   })
   B = stack.base
 }
@@ -296,6 +313,15 @@ try {
     `the list read ${JSON.stringify(afterDupe)} — two rows you cannot tell apart is worse than dropping the pick`,
   )
 
+  /*
+   * ARRANGED BEFORE THE SUBMIT, because by the time the section below runs the
+   * PUTs have already happened. The store refuses the NEXT one it is asked
+   * for, which is the first staged file's, and everything after it succeeds.
+   */
+  const armed = await fetch(`${STORE}/__control/fail-next-put`, { method: 'POST' })
+    .then((r) => r.ok)
+    .catch(() => false)
+
   console.log('\n▶ then the task is created, and every staged file is uploaded to it')
   await page.getByTestId('quick-create-space').selectOption(SPACE)
   await page.getByTestId('quick-create-project').selectOption(PROJECT)
@@ -334,15 +360,50 @@ try {
     `the uploads were addressed to ${JSON.stringify([...sameTask])}`,
   )
 
-  console.log('\n▶ storage is unconfigured here, so every upload fails — and it says which')
-  const toastText = await waitUntil(
-    async () => (await readText(page.locator('[data-sonner-toast]').first())).includes(FILE_A),
-    { timeoutMs: 20_000 },
-  )
+  /*
+   * ARRANGED, NOT STARVED — and this section is the reason that distinction is
+   * worth a paragraph.
+   *
+   * It used to read "storage is unconfigured here, so every upload fails — and
+   * it says which", and for months that was true: the lanes had no object
+   * store, every PUT failed, and the toast that named the file was the thing
+   * under test. Then `s3-stub.mjs` gave every lane a working store, uploads
+   * started succeeding, and this check went red against a product that had not
+   * changed a line. A green that depended on the environment being broken is
+   * the stale reason this audit names last, arriving from the harness getting
+   * BETTER.
+   *
+   * So the failure is arranged. One PUT is refused by the store, which is the
+   * seam `task-cover` already uses and says survives storage being configured
+   * "because failure is no longer a property of the environment". The check is
+   * stronger for it: before, it asserted a name in a toast that the whole
+   * environment guaranteed; now it asserts that the ONE upload that was
+   * refused is the one named.
+   *
+   * WHICH file is read off the wire rather than assumed. The staging order in
+   * this suite is not the order the files were first picked — a row is removed
+   * and re-added on purpose — so `names[0]`, the first presign to leave the
+   * browser, is the upload the store refused. The arming itself happens above,
+   * before the submit: by the time this section runs both PUTs are already
+   * done, and a refusal armed here would sit waiting for an upload that never
+   * comes and report a product defect that is really an ordering mistake.
+   */
+  const refusedName = names[0] ?? null
+  const toastText = armed && refusedName
+    ? await waitUntil(
+        async () => (await readText(page.locator('[data-sonner-toast]').first())).includes(refusedName),
+        { timeoutMs: 20_000 },
+      )
+    : false
   chk(
     toastText,
     'a failed upload names the file it lost, so a four-file task can be retried',
-    'the failure did not name the file — "an attachment failed" on a multi-file task tells nobody which one',
+    armed
+      ? `the failure did not name ${JSON.stringify(refusedName)} — the toast read ` +
+        `${JSON.stringify((await readText(page.locator('[data-sonner-toast]').first())).slice(0, 120))}. ` +
+        '"an attachment failed" on a multi-file task tells nobody which one'
+      : `the store at ${STORE} would not arm a refusal, so nothing here was measured — ` +
+        'this check needs a failure it caused, not one the environment supplied',
   )
 
   console.log('\n▶ and none of that loses you the task')
