@@ -509,11 +509,25 @@ try {
   // ── The busy state ─────────────────────────────────────────────────────────
   console.log('\n▶ `18:45` — the busy state, while a request is genuinely in flight')
   const composer = page.getByTestId('ai-composer-input')
-  const restingPlaceholder = await attrOf(composer, 'placeholder')
+  /*
+   * ASKED FOR THE STRING, NOT FOR A WORD THAT IS MISSING FROM IT.
+   *
+   * Both of these checks tested `!/anything/i.test(...)`, where "anything"
+   * comes from the RESTING placeholder, "Ask Rundesk AI anything…". That is a
+   * fingerprint standing in for a fact, and it fails in two directions: it
+   * cannot tell the unavailable state from the working one, since neither says
+   * "anything"; and the day the resting string changes — a rotating
+   * placeholder is one frame away — it passes on every input in the product,
+   * including one still inviting you to type.
+   *
+   * The variable was also called `restingPlaceholder` while being read off a
+   * DISABLED composer, so the name said one state and the value held another.
+   */
+  const disabledPlaceholder = await attrOf(composer, 'placeholder')
   chk(
-    !!restingPlaceholder && !/anything/i.test(restingPlaceholder),
-    'a composer disabled because no model is configured no longer invites you to type',
-    `the placeholder on a disabled input read ${JSON.stringify(restingPlaceholder)}`,
+    disabledPlaceholder === 'AI is not configured on this server',
+    'a composer disabled because no model is configured says so, rather than inviting you to type',
+    `the placeholder on a disabled input read ${JSON.stringify(disabledPlaceholder)}`,
   )
 
   /*
@@ -556,9 +570,9 @@ try {
   )
   const busyPlaceholder = await attrOf(page.getByTestId('ai-composer-input'), 'placeholder')
   chk(
-    busyPlaceholder !== restingPlaceholder && !/anything/i.test(busyPlaceholder ?? ''),
-    'and the composer says it is working, not what it says at rest',
-    `it read ${JSON.stringify(busyPlaceholder)} against ${JSON.stringify(restingPlaceholder)}`,
+    busyPlaceholder === 'Working on it…' && busyPlaceholder !== disabledPlaceholder,
+    'and the composer says it is WORKING, which is a different sentence from either of the others',
+    `it read ${JSON.stringify(busyPlaceholder)} against a disabled ${JSON.stringify(disabledPlaceholder)}`,
   )
 
   release()
