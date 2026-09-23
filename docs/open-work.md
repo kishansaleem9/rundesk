@@ -4,7 +4,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
 
-**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted; then `product-siblings/chat-attachment-key-unvalidated`, `product-siblings/meeting-recording-key-unvalidated`, `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` and `product-siblings/teams-work-preview-ignores-privacy`. The docs item `product-siblings/docs-patch-mass-assign-public-share` is closed below as well. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
+**Closed since this inventory was taken:** `product-siblings/cover-storage-key-unvalidated`, `product-siblings/task-listid-mass-assign-cross-workspace-move`, `product-siblings/link-attachment-signed-as-key`, `harness/ci-missing-doc-import` (and its duplicate `commit-log/log-c592545-1`), `suite-hygiene/ci-no-store-for-store-suites`; and, found while fixing those, `harness/ci-suites-read-a-database-that-does-not-exist`, `found-23-sep/watchers-route-open-to-any-account`, `found-23-sep/task-relationship-references-unchecked`, `found-23-sep/doc-import-never-exits` and `found-23-sep/lane-stubs-never-restart`; and `harness/sweep-drain-run-stale-tmp-copies` and `harness/verify-sh-exit-masked`, fixed so the regression sweep could be trusted; then `product-siblings/chat-attachment-key-unvalidated`, `product-siblings/meeting-recording-key-unvalidated`, `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` and `product-siblings/teams-work-preview-ignores-privacy`. The docs item `product-siblings/docs-patch-mass-assign-public-share` is closed below as well. And `resume-defects/resume-1-move` and `resume-defects/resume-1-residual` (container moves and template apply into view-only spaces), with two found beside them; plus `found-23-sep/call-meeting-record-lost` (a regression of mine, found by the sweep and fixed) and `found-23-sep/stale-chunk-recovery-writes-the-shared-tree`. Four more were found and are open: `found-23-sep/assign-someone-who-cannot-see`, `found-23-sep/related-tasks-ignore-private-containers`, `found-23-sep/container-read-rule-twice`, `found-23-sep/labels-editable-by-any-member`. Each is marked **closed** where it stands, with its evidence. The section counts below are the inventory's, not what is still open.
 
 ## Product defects — 46
 
@@ -292,17 +292,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Send null. Server: on null, delete the key from the blob (or store null so both readers fall back).
 
-### `resume-defects/resume-1-move` — open, small
+### `resume-defects/resume-1-move` — **closed**
 
 **The container create gate has a second side door: moving a list, project or folder INTO a view-only space checks only the source**
+
+*Closed (b523e33, 56f87b2):* `assertCanPlaceIn` (container-access.ts) — the destination's create gate and a container the actor can see — is called by `moveList`, `moveProject` and the folder move. `space-default-permission` 36/36: a member's own list, project and folder are refused the view-only space (the list also a private project) and move into editable ones; the actor is a member given `project.create` by a custom role, so only the destination rule can refuse. sdp-20..24, sdp-30.
 
 *Evidence:* lists.service.ts:362-386 moveList calls assertManageable (:407-430), which runs assertCanManageContainer with the SOURCE list's spaceId. The destination project is checked only for workspace and archived status (:374-383). projects.service.ts:240-290 moveProject calls assertManageable on the source and checks the destination space only for workspace and archived status (:255-267). folders.service.ts:177-215 calls assertCanManageContainer with the source spaceId (:207-214), never targetSpaceId. Routes: POST /lists/:listId/move (lists.controller.ts:114-122) and POST /projects/:projectId/move (projects.controller.ts:57-65) carry no permission requirement. POST folders/:folderId/move needs the role permission space.create (folders.controller.ts:53). So a member with edit in space A and view in space B can make a list in A (the create gate passes) and then move it into B.
 
 *To close:* In moveList, moveProject and folders.move, call assertCanCreateInSpace(db,{spaceId: destinationSpaceId, actorId, kind}) before the update. Add checks to space-default-permission.mjs: moving the member's own list, folder and project into the view-only space is refused, while moving them into an edit space succeeds. Add a break patch for each call.
 
-### `resume-defects/resume-1-residual` — partly-fixed, small
+### `resume-defects/resume-1-residual` — **closed**
 
 **Container create gate: fixed on the three services, but applying a template still creates projects and lists in a space without the gate**
+
+*Closed (b523e33):* template apply calls `assertCanPlaceIn` for list templates (the project's space and the project) and folder templates (the space). Found beside it and closed: a folder template made a project with no `project.create` check — a permission members do not hold, which `POST /projects` enforces — so apply now requires `project.create` (folder) or `space.create` (space); and apply answered 500 for a template list with no `tasks`, now read as empty, with `create` refusing a nameless list or untitled task. `space-default-permission` checks all three; sdp-25..29.
 
 *Evidence:* The fix is present: assertCanCreateInSpace (common/permissions/container-access.ts:148) is called from projects.service.ts:84, folders.service.ts:104 and lists.service.ts:157. But POST /workspaces/:workspaceId/project-templates/apply is guarded only by the class-level JwtAuthGuard and WorkspaceMemberGuard (project-templates.controller.ts:11, 90-107, with no WorkspaceAdminGuard on apply). project-templates.service.ts:711-800 then inserts a project into dto.targetSpaceId (744-773: the space is looked up by workspace only) and inserts lists into dto.targetProjectId (736-743, 790-799), with no assertCanCreateInSpace and no container permission check. So a member in a 'View only' space can create a folder and lists there through the templates page (workspace-templates-page.tsx:663) or the API. I grepped for every `.insert(lists|folders|projects)` in apps/api/src. The other direct inserts are workspace seeding, sample data, and imports behind WorkspaceAdminGuard (clickup-import.controller.ts:26, 54; spreadsheet-import.controller.ts:58), or new-space creation.
 
@@ -439,6 +443,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *Evidence:* labels.controller.ts, class-level `ResourceMemberGuard` resolves `:labelId` to its workspace and checks membership; the service checks nothing else.
 
 *To close:* check ClickUp's rule for who may edit and delete tags; enforce it in the service.
+
+### `found-23-sep/call-meeting-record-lost` — **closed** (a regression introduced and fixed the same day)
+
+**For about an hour, every recorded call ended with no meeting record**
+
+*Evidence:* 10a1317 made `meetings.create` refuse a storage key in the client's `recordingUrl`. `calls.service` end() passed the call's own key through that field, `create` threw, and the `.catch(() => null)` around it swallowed the error. The unit tests mocked `meetings.create` and accepted anything; `object-key-boundaries` never ends a recorded call. The full sweep caught it: `syncup-live` 53/59, "it left a meeting record behind — the call named no record of itself".
+
+*Closed (35f4c6e):* the key travels in a server-only fourth argument the route cannot reach, still checked as one of the workspace's call recordings. `syncup-live` 59/59; unit tests pin the channel. The lesson this adds: a rule that tightens a shared service method has to be run against every internal caller, not only the route it was written for.
 
 ## Verification-harness defects — 27
 
@@ -690,11 +702,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (7e12844):* both stubs report a hash of their own source at `/__control/version`; `lane_store_up` and `lane_model_up` restart a stub whose hash differs from the file on disk. Proven live on lane 1; `check-s3-stub` and `check-model-stub` each carry the case and a mutation that reddens it.
 
+### `found-23-sep/stale-chunk-recovery-writes-the-shared-tree` — **closed**
+
+**`stale-chunk-recovery` edited two shared source files and rebuilt the shared `apps/web/dist` while other lanes were running**
+
+*Evidence:* it appended a marker to `command-palette.tsx` and a lazy route, ran `vite build` in `apps/web`, and wrote the sources back. The content returned, the timestamps did not: the full sweep had 26 suites refused on lanes 2 and 4 as "bundle older than its source" after this suite ran on lane 3. A concurrent build would have baked the marker in; in CI the shared `dist` later steps serve was left as release B.
+
+*Closed (cb13ddd):* the two releases are built in a throwaway copy of `apps/web` beside it (same depth, `node_modules` symlinked), removed afterwards. 27/27.
+
 ## Test-suite defects (chains, catches, fingerprints, branches) — 21
 
 ### `suite-hygiene/hand-rolled-chains` — open, large
 
 **103 literal check(false, …) calls in 15 suites, plus 5 other hand-rolled chains, instead of lib/chain.mjs**
+
+*Seen again on 23 September:* `person-panel.mjs:818` — an unbounded `page.getByTestId('user-menu').click()` after a reload — turned one slow reload on a loaded lane into a run that ended at 54 of 59 checks. The same suite passed 59/59 on the next run. The click should be bounded and its absence reported as a failing check.
 
 *Evidence:* Literal `(chk|check)(false,` count per suite: chat-message-actions 31, panel-collapse 23, person-panel 8, addressability-live 8, task-depth 7, settings-depth 5, planner-priorities 5, list-statuses-seeded 4, video-regression 3, a61-meeting-record 3, loading-states 2, and 1 each in video1-fast-items, video1-acceptance, planner-settings, emoji-picker. Six of these suites already import makeChain (chat-message-actions, panel-collapse, person-panel, task-depth, video-regression, video1-fast-items). Other hand-rolled chains: video-regression.mjs:927-1000 (G13 with its own `emitted`/`stopped` counters and `while (emitted < G13.length)`), video-regression.mjs:575-613 (A2.6b else re-types three labels), emoji-picker.mjs:406-413 (a literal label array duplicating 439/442/456), and the fixed-count loops list-empty-states.mjs:357 and list-view-controls.mjs:239. Fail branches that report fixture sentences instead of the product claim, which the ledger ruled out at docs/video2-reaudit.md:4030-4034: chat-message-actions.mjs:566-571 ('so "Assign to" was never checked'… against the product sentences at 515-561), :493-494; task-depth.mjs:1025-1028, 964, 994-995; person-panel.mjs:597-602; settings-depth.mjs:424-426, 500-501; addressability-live.mjs:221, 343, 365; panel-collapse.mjs:343-345, 401-402, 413. The first label at panel-collapse.mjs:811 ('a tool can be turned off') has already drifted from its pass twin at 817 ('Docs is in the dock to begin with').
 
