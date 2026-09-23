@@ -86,6 +86,10 @@ import { NotificationsService } from '../notifications/notifications.service'
 import { R2Service } from '../../common/storage/r2.service'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
+import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
+import { pickUpdatable } from './task-update-fields'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -723,6 +727,39 @@ export class TasksService {
     }
 
     return ctx
+  }
+
+  /**
+   * A subtask's parent: in the SAME WORKSPACE, and one the caller can see.
+   *
+   * Both subtask paths checked that the parent existed and was not itself a
+   * subtask, and neither asked where it lived. So `parentTaskId` could name a
+   * task in another tenant's workspace, and the link ran both ways at once:
+   * `getTask` returns the parent's details (`parent: …`), so the caller could
+   * read a task in a workspace they do not belong to, and the other workspace
+   * gained a subtask it never created.
+   *
+   * A parent in another workspace answers NOT FOUND rather than "must be in
+   * the same workspace". The distinct message would tell a caller probing ids
+   * that the one they guessed exists somewhere else, which is the enumeration
+   * this check is closing.
+   *
+   * Read access and not write: hanging a task under a parent does not edit the
+   * parent's own fields, but it does put the new subtask in front of everyone
+   * who opens it, and nobody should be able to attach work to a task in a
+   * private space or project they cannot see.
+   */
+  private async assertParentInWorkspace(parentTaskId: string, workspaceId: string, actorId: string) {
+    const [parent] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, parentTaskId))
+      .limit(1)
+    if (!parent || parent.workspaceId !== workspaceId) throw new NotFoundException('Parent task not found')
+    await this.assertTaskReadAccess(parentTaskId, actorId)
   }
 
   /**
@@ -1720,6 +1757,10 @@ export class TasksService {
       if (parent.parentTaskId) {
         throw new BadRequestException('Subtasks can only be nested one level deep')
       }
+      // …and it has to live where the new task will. See assertParentInWorkspace.
+      const home = await this.resolveWorkspaceForList(data.listId)
+      if (!home) throw new NotFoundException('List not found')
+      await this.assertParentInWorkspace(data.parentTaskId, home.workspaceId, data.createdById)
     }
     const resolved = await this.resolveStatusForList(data.listId, data.status)
     // A workspace that has nominated a default type gets it applied here, so
@@ -2409,7 +2450,11 @@ export class TasksService {
           coverUrlByTask.set(r.id, r.coverImageUrl ?? null)
           return
         }
-        if (!this.r2.configured) {
+        // Only ever sign this task's OWN object. The write path refuses any
+        // other key now, but a row that took one before it did — or from any
+        // path added later — must not become a signed URL to somebody else's
+        // file on read. Bound by the task id; see isTaskOwnObjectKey.
+        if (!this.r2.configured || !isTaskOwnObjectKey(r.coverStorageKey, r.id)) {
           coverUrlByTask.set(r.id, null)
           return
         }
@@ -2749,8 +2794,10 @@ export class TasksService {
        * shape that avoids repeating it. Null when the cover is a colour, or
        * when there is none.
        */
+      // Signed only when the key is this task's own object — the read-side twin
+      // of the check in updateTask, for rows written before it existed.
       coverUrl: row.coverStorageKey
-        ? this.r2.configured
+        ? this.r2.configured && isTaskOwnObjectKey(row.coverStorageKey, row.id)
           ? await this.r2.getObjectUrl(row.coverStorageKey)
           : null
         : row.coverImageUrl ?? null,
@@ -2818,9 +2865,14 @@ export class TasksService {
     // attachment pointing at another workspace's object and get a signed URL for
     // it. The `url` path stays open for genuine external hyperlinks but must be a
     // real http(s) URL, so it can't smuggle a raw storage key past this check.
-    const prefix = `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/`
+    //
+    // THE SHAPE, NOT THE PREFIX. This was `startsWith(prefix)`, and a prefix
+    // check does not hold on a public-CDN deployment: `getObjectUrl` returns
+    // `${publicUrl}/${key}` unencoded, a browser collapses `..` in a URL path,
+    // and `<prefix>../../../../workspaces/<other>/…` passes `startsWith` and
+    // fetches another workspace's object. See task-object-keys.ts.
     if (data.storageKey != null) {
-      if (!data.storageKey.startsWith(prefix)) {
+      if (!isTaskUploadKey(data.storageKey, ctx.workspaceId, taskId)) {
         throw new BadRequestException('storageKey must reference this task’s own upload prefix')
       }
     } else if (data.url != null && !isHttpUrl(data.url)) {
@@ -2940,7 +2992,13 @@ export class TasksService {
       parentTaskId: string | null
     }>,
   ) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    // FIRST, before anything reads it: only fields this update may write. The
+    // parameter's type is a promise the runtime never kept — both the route and
+    // this method spread what arrived, so every column of the row was writable.
+    // See task-update-fields.ts. Everything below, including the activity log,
+    // the webhook payload and the realtime event, now sees the filtered patch.
+    patch = pickUpdatable(patch)
+    const access = await this.assertTaskWriteAccess(taskId, actorId)
 
     /*
      * §V2-09 — the cover fields are spread into the update unchecked, so they
@@ -2958,6 +3016,21 @@ export class TasksService {
     // silently push the image out of its own banner.
     if (patch.coverOffsetY != null && (!Number.isFinite(patch.coverOffsetY) || patch.coverOffsetY < 0 || patch.coverOffsetY > 100)) {
       throw new BadRequestException('Cover position must be between 0 and 100')
+    }
+    /*
+     * A STORED cover is one of this task's own objects — and this was the one
+     * cover field nothing checked. `getTask` and the list rows sign
+     * `coverStorageKey` for whoever reads the task, so accepting any key here
+     * made this route a signing oracle: point your cover at another workspace's
+     * attachment and read back a working URL to it. The Upload tab presigns
+     * through the task's own attachment route and the Attachments tab offers
+     * the task's own attachments, so every key a real client sends passes.
+     *
+     * A shape match, not `startsWith` — see task-object-keys.ts for the `..`
+     * that walks a prefix check straight into another workspace.
+     */
+    if (patch.coverStorageKey != null && !isTaskOwnObjectKey(patch.coverStorageKey, taskId, access.workspaceId)) {
+      throw new BadRequestException('A cover image must be one of this task’s own attachments')
     }
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
@@ -2988,6 +3061,7 @@ export class TasksService {
       if (child) {
         throw new BadRequestException('A task with subtasks cannot become a subtask itself')
       }
+      await this.assertParentInWorkspace(patch.parentTaskId, access.workspaceId, actorId)
     }
 
     // Resolve the requested status to its canonical key + category bucket
@@ -3618,8 +3692,57 @@ export class TasksService {
     return row
   }
 
+  /**
+   * Move a task to another list.
+   *
+   * THIS CHECKED ONE SIDE OF THE MOVE. Write access to the task being moved,
+   * then `listId: targetListId` with nothing asked about the target: not that
+   * it existed, not that it was in the same workspace, not that the caller
+   * could see it or make tasks in it. Any assignee could move their task into
+   * a list in another tenant's workspace — one they do not belong to — or into
+   * a space whose default permission is view-only, the door
+   * `assertCanCreateInSpace` was put on the create path to shut. The bulk path
+   * two hundred lines up already refused "moves that would cross a workspace
+   * boundary"; this is the one-at-a-time route the Move dialog uses, and it had
+   * none of that.
+   *
+   * So the target faces what creating a task in it would face:
+   *   · the SAME workspace — a list elsewhere answers NOT FOUND rather than
+   *     "different workspace", which would confirm a guessed id exists;
+   *   · the space's create gate — `edit` or above, like any new task there;
+   *   · private-container visibility — a list in a private space or project
+   *     the caller cannot see is not a destination they can name.
+   */
   async moveTask(taskId: string, actorId: string, targetListId: string, position: number) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    if (typeof targetListId !== 'string' || !targetListId) {
+      throw new BadRequestException('listId is required')
+    }
+    const access = await this.assertTaskWriteAccess(taskId, actorId)
+    const [target] = await this.db
+      .select({
+        workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+      })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, targetListId))
+      .limit(1)
+    if (!target || target.workspaceId !== access.workspaceId) {
+      throw new NotFoundException('Target list not found')
+    }
+    await assertCanCreateInSpace(this.db, { spaceId: target.spaceId, actorId, kind: 'task' })
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, target.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    const canSee = await checkContainerAccess(this.db, target, { userId: actorId, workspaceRole: membership?.role })
+    if (!canSee) throw new ForbiddenException('You do not have access to that list')
+
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     await this.db

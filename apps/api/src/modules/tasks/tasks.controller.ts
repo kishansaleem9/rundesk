@@ -21,6 +21,7 @@ import { PlansService } from '../plans/plans.service'
 import type { PlanFeature } from '../plans/plans.constants'
 import { EmailToTaskService } from '../email-to-task/email-to-task.service'
 import { CreateTaskDto, AddAttachmentDto } from './dto/task.dto'
+import { unknownUpdateFields } from './task-update-fields'
 import type { CurrentUserPayload } from './types'
 
 @ApiTags('tasks')
@@ -321,6 +322,21 @@ export class TasksController {
       parentTaskId: string | null
     }>,
   ) {
+    /*
+     * REFUSED BY NAME, not dropped. The type above is erased at runtime and this
+     * body used to be spread straight into the row, so every column was
+     * writable — `listId`, `createdById`, `completedAt`. The service now keeps
+     * only the fields in TASK_UPDATABLE_FIELDS; this says so to the caller, so
+     * a client sending `listId` expecting a move hears where moves go instead
+     * of getting a 200 and no move. One list for both; see task-update-fields.ts.
+     */
+    const unknown = unknownUpdateFields(body)
+    if (unknown.length > 0) {
+      throw new BadRequestException(
+        `These fields cannot be changed here: ${unknown.join(', ')}.` +
+          (unknown.includes('listId') ? ' To move a task to another list, use POST /tasks/:taskId/move.' : ''),
+      )
+    }
     const toDate = (label: string, value: string | null | undefined) => {
       if (!value) return null
       const d = new Date(value)
