@@ -1,6 +1,6 @@
 # The original defect restored: a disabled input goes on inviting you to type into it,
 # whether the model is missing or an answer is already in flight.
-# Reddens: ai-answer-rendering: "a composer disabled because no model is configured no longer invites you to type"
+# Reddens: ai-answer-rendering: "the composer says which state it is in, and it is the state /ai/status reports"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 a = """            placeholder={
