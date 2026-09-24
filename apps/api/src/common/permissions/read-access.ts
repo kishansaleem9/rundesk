@@ -64,6 +64,49 @@ export async function readableProject(
   return ok ? { id: row.id, spaceId: row.spaceId, createdById: row.createdById } : null
 }
 
+/**
+ * The list, with the caller's role in its workspace, when `actor` may open it
+ * in `workspaceId`, else null: membership, the container rule, and the
+ * private-list rule — what `ResourceMemberGuard` asks of a list, for a route
+ * that names its list in the body, where the guard never looks (a meeting's
+ * action items, `found-24-sep/meeting-action-items-into-any-list`).
+ */
+export async function readableList(
+  db: Db,
+  workspaceId: string,
+  listId: string,
+  actor: ReadActor,
+): Promise<{ listId: string; spaceId: string; role: string } | null> {
+  if (!isUuid(listId)) return null
+  const [row] = await db
+    .select({
+      listId: lists.id,
+      listVisibility: lists.visibility,
+      listCreatedById: lists.createdById,
+      projectId: projects.id,
+      projectVisibility: projects.visibility,
+      spaceId: spaces.id,
+      spaceVisibility: spaces.visibility,
+    })
+    .from(lists)
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(and(eq(lists.id, listId), eq(spaces.workspaceId, workspaceId)))
+    .limit(1)
+  if (!row) return null
+  if (actor.role === 'super_admin') return { listId: row.listId, spaceId: row.spaceId, role: 'super_admin' }
+  const role = await workspaceRole(db, workspaceId, actor.id)
+  if (!role) return null
+  const inContainer = await checkContainerAccess(
+    db,
+    { spaceId: row.spaceId, spaceVisibility: row.spaceVisibility, projectId: row.projectId, projectVisibility: row.projectVisibility },
+    { userId: actor.id, workspaceRole: role },
+  )
+  if (!inContainer) return null
+  if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager: isManagerRole(role) })) return null
+  return { listId: row.listId, spaceId: row.spaceId, role }
+}
+
 /** The task's list and project when `actor` may open it in `workspaceId`, else null. */
 export async function readableTask(
   db: Db,

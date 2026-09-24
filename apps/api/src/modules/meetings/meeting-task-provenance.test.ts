@@ -39,13 +39,17 @@ function fakeDb(opts: { meetingTypeId: string | null }) {
 
 const MEETING = { id: 'm1', title: 'Weekly sync', notes: 'Ali to send the deck by Friday.' }
 
-function harness(opts: { meetingTypeId: string | null }) {
+function harness(opts: { meetingTypeId: string | null; listRefused?: boolean }) {
   const createCalls: Array<Record<string, unknown>> = []
+  let modelAsked = 0
   const svc = new MeetingsService(
     fakeDb(opts) as never,
     {
       isAvailable: () => true,
-      extractTasksFromNotes: async () => [{ title: 'Send the deck', description: '', priority: 'normal' }],
+      extractTasksFromNotes: async () => {
+        modelAsked += 1
+        return [{ title: 'Send the deck', description: '', priority: 'normal' }]
+      },
     } as never,
     {
       createTask: async (data: Record<string, unknown>) => {
@@ -59,7 +63,13 @@ function harness(opts: { meetingTypeId: string | null }) {
   // neither is what this test is about.
   ;(svc as unknown as { assertMember: () => Promise<void> }).assertMember = async () => {}
   ;(svc as unknown as { load: () => Promise<unknown> }).load = async () => MEETING
-  return { svc, createCalls }
+  // Whether the caller may make tasks in the list is read-access.ts's rule,
+  // driven end to end by `test/e2e/meeting-access.mjs`; here it answers yes,
+  // or refuses as it would for a list the caller may not open.
+  ;(svc as unknown as { assertCanMakeTasksIn: () => Promise<void> }).assertCanMakeTasksIn = async () => {
+    if (opts.listRefused) throw new Error('List not found')
+  }
+  return { svc, createCalls, modelAsked: () => modelAsked }
 }
 
 describe('§V2-04 a meeting stamps the tasks it produces', () => {
@@ -85,5 +95,16 @@ describe('§V2-04 a meeting stamps the tasks it produces', () => {
 
     assert.equal(createCalls.length, 1, 'a missing type stopped the task being made')
     assert.equal(createCalls[0].taskTypeId, null)
+  })
+
+  /*
+   * The destination is checked before the notes are sent anywhere: a list the
+   * caller may not use costs no model call, and makes nothing.
+   */
+  it('asks the model nothing, and makes nothing, when the list is refused', async () => {
+    const { svc, createCalls, modelAsked } = harness({ meetingTypeId: 'type-meeting', listRefused: true })
+    await assert.rejects(() => svc.extractActionItems('ws1', 'm1', 'u1', { createIn: 'list1' }), /List not found/)
+    assert.equal(modelAsked(), 0, 'the model was asked before the destination was checked')
+    assert.equal(createCalls.length, 0)
   })
 })

@@ -6,6 +6,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { readableList, readableTask } from '../../common/permissions/read-access'
 import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { AiService } from '../ai/ai.service'
 import { R2Service } from '../../common/storage/r2.service'
@@ -370,7 +371,7 @@ export class MeetingsService {
     if (!title) throw new BadRequestException('title is required')
     if (title.length > MAX_TITLE) throw new BadRequestException(`title must be ${MAX_TITLE} characters or fewer`)
 
-    if (body.taskId) await this.assertTaskInWorkspace(workspaceId, body.taskId)
+    if (body.taskId) await this.assertTaskOpenTo(workspaceId, body.taskId, userId)
 
     const [row] = await this.db
       .insert(meetings)
@@ -396,16 +397,23 @@ export class MeetingsService {
     return this.get(workspaceId, row.id, userId)
   }
 
-  private async assertTaskInWorkspace(workspaceId: string, taskId: string) {
-    const [t] = await this.db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(tasks.id, taskId), eq(spaces.workspaceId, workspaceId)))
-      .limit(1)
-    if (!t) throw new NotFoundException('Task not found in this workspace')
+  /** The destination of a meeting's action items: see extractActionItems. A seam, so a unit test can stand in for it. */
+  protected async assertCanMakeTasksIn(workspaceId: string, listId: string, userId: string) {
+    const list = await readableList(this.db, workspaceId, listId, { id: userId })
+    if (!list) throw new NotFoundException('List not found')
+    if (list.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
+  }
+
+  /**
+   * A meeting is linked only to a task its maker may open. This asked only
+   * that the task was in the workspace, so a member linked meetings — and
+   * their notes — to a private task they are refused, and learnt from the 201
+   * that the id was a task.
+   */
+  private async assertTaskOpenTo(workspaceId: string, taskId: string, userId: string) {
+    if (!(await readableTask(this.db, workspaceId, taskId, { id: userId }))) {
+      throw new NotFoundException('Task not found in this workspace')
+    }
   }
 
   /** Replace the member attendee set. Outsiders are added separately. */
@@ -611,6 +619,19 @@ export class MeetingsService {
   ) {
     await this.assertMember(workspaceId, userId)
     const meeting = await this.load(workspaceId, meetingId)
+    /*
+     * WHERE THE TASKS WILL GO, CHECKED FIRST — before any model is asked, so a
+     * refusal costs nothing and reads the same with or without one.
+     *
+     * `createIn` came from the body and went straight to `createTask`, which
+     * asks only whether the caller is a GUEST of the list's workspace. Measured:
+     * a member refused a private space made tasks in its list this way, and a
+     * user of another organisation aimed their own meeting at this workspace's
+     * list and was stopped only by the task type not matching. The list must be
+     * in this meeting's workspace and one the caller may open (the rule
+     * `ResourceMemberGuard` applies to `POST /tasks`), and a guest makes none.
+     */
+    if (opts.createIn) await this.assertCanMakeTasksIn(workspaceId, opts.createIn, userId)
     const source = (meeting.notes ?? '').trim() || (meeting.transcript ?? '').trim()
     if (!source) throw new BadRequestException('This meeting has no notes or transcript to read')
     if (!this.ai.isAvailable()) throw new BadRequestException('AI features are not configured')

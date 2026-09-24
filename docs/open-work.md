@@ -620,7 +620,9 @@ The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the mem
 
 *Fixed next: goals,* a HIGH item of their own below (`found-24-sep/goals-open-across-workspaces`): measured, they were open across organisations as well.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
+*Fixed next: meeting action items,* their own item below (`found-24-sep/meeting-action-items-into-any-list`).
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
@@ -663,6 +665,31 @@ The new suite `custom-field-access`, 4/4 on lane 1 (all 4 failed before; the mem
 The new suite `goal-access`, 13/13 on lane 1, 0/13 against the build before the fix (lane 4 at 6474be4). Goals and key results are planted by SQL, and every refusal is read back from its row beside a positive twin. `gac-1..13`, each compiled. The API keeps the whitelist in one place, the service, so that the break patch that spreads the body again (`gac-6`) has one layer to break. Regression on lane 1, 12/12: the new suite, `report-read-access` (the goals report), the suites of the other `read-access.ts` readers (`workspace-read-access`, `custom-field-access`, `dependency-read-access`, `lookup-read-access`, `planner-blocks`, `planner-priorities`), `malformed-ids`, `addressability-live`, and `video-regression` and `ui-sweep`, which open the Goals page. In CI.
 
 *Not changed:* ClickUp's goal folders and per-goal sharing are not built, so a guest cannot be given a goal. When a private space is deleted, `goals.space_id` is set to null, and its goals become the whole workspace's. The goals page's own defects, found beside this, are `found-24-sep/goals-page-reads-fields-the-api-never-sends`.
+
+### `found-24-sep/meeting-action-items-into-any-list` — **closed** (security, medium; found measuring the audit's "meeting action items created in any list id")
+
+**A meeting's action items became tasks in whatever list the request named**
+
+*Evidence, measured on lane 2 with the model stub (probe `measure-meetings`) before the fix:*
+- a member refused a private space (403 on its list) turned a meeting's notes into a task in that list: `POST /workspaces/:ws/meetings/:id/action-items` with `createIn` answered 201, and the task was there;
+- a user of another organisation aimed their own meeting's items at this workspace's list. They were stopped only because their workspace's "meeting" task type did not belong to this one (400, "That task type does not belong to this workspace"), so a workspace that had deleted that type would have been open to it;
+- a meeting could be linked to a private task its maker may not open (201): the check asked only that the task was in the workspace.
+
+`createIn` went from the body straight to `createTask`, which asks only whether the caller is a GUEST of the list's workspace. `POST /tasks` gets its list rule from `ResourceMemberGuard`, and nothing stood in for it here.
+
+*Closed:* `readableList` (in `read-access.ts`, next to `readableProject` and `readableTask`) states the guard's rule for a list: in the named workspace, the caller a member, the container rule, the private-list rule. The meeting checks its destination with it BEFORE any model is asked, so a refusal costs nothing and reads the same with or without a model: not found for a list the caller may not open or one elsewhere, 403 for a guest. A meeting links only to a task its maker may open (`readableTask`).
+
+The new suite `meeting-access`, 4/4 on lane 1 both with the model stub and without one (the twins make a task where a model answers, and reach "AI features are not configured" where none does); 0/4 on lane 2 before the fix. With a model it also reads the stub's request log to show that no call was made for a refusal. A unit test in `meeting-task-provenance.test.ts` holds the order: a refused list asks the model nothing (the check sits behind a seam, `assertCanMakeTasksIn`, as the fake database there answers every read). `mtg-1..4`, each compiled; `mtg-5` is a unit claim, shown to fail that test. API unit tests for meetings 16/16. Regression on lane 1, 13/13: the new suite, every suite that touches meetings (`a61-meeting-record`, `syncup-live`, `planner-upcoming-meeting`, `video1-acceptance`, `object-key-boundaries`), the other `read-access.ts` readers (`goal-access`, `custom-field-access`, `dependency-read-access`, `lookup-read-access`, `workspace-read-access`), `person-panel` and `malformed-ids`. In CI.
+
+*Not changed:* whether task creation should also respect a space whose default permission is "view only". `moveTask` applies the space's create gate (`assertCanCreateInSpace`), and its comment says that gate is on the create path, but `createTask` does not call it: a member may make tasks in a view-only space through `POST /tasks` too. Not measured yet; it is `found-24-sep/tasks-created-in-view-only-spaces` below.
+
+### `found-24-sep/tasks-created-in-view-only-spaces` — open, medium (security; found fixing meeting action items; code read, NOT YET MEASURED)
+
+**The space's create gate is on moving a task in, and not on making one**
+
+*Evidence (code read):* `tasks.service.ts` `moveTask` calls `assertCanCreateInSpace(... kind: 'task')`, and its comment calls that gate "the door … put on the create path to shut". `createTask` never calls it, and neither does `POST /tasks`, whose only check is `ResourceMemberGuard` (membership and visibility). So a member of a space whose default permission is "view only" or "comment" can probably make tasks in it, though they could not move one in. ClickUp's view-only permission does not allow creating tasks.
+
+*To close:* measure it first (a member, a view-only space, `POST /tasks`). If it is open, put the create gate on `createTask` for callers with an actor, with a suite whose twin is a space set to edit.
 
 ### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — open, small (visible bug; found fixing goal access)
 
