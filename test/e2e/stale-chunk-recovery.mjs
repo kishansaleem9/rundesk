@@ -130,6 +130,25 @@ function buildRelease(dest, marker) {
   }
 }
 
+/*
+ * COPIES LEFT BY A RUN THAT DIED BEFORE ITS `finally`. A SIGKILL skips it —
+ * a container restart did, on 24 September — and the copy's package.json is
+ * @rundesk/web again, so turbo refused every lint and typecheck in the repo
+ * until it was found. `pnpm-workspace.yaml` now leaves hidden directories out
+ * of the workspace; this removes the copy itself, when the process whose pid
+ * its name carries is gone.
+ */
+for (const name of fs.readdirSync(path.join(REPO, 'apps'))) {
+  const owner = /^\.web-release-(\d+)-/.exec(name)?.[1]
+  if (!owner || Number(owner) === process.pid) continue
+  let alive = true
+  try { process.kill(Number(owner), 0) } catch (e) { alive = e?.code === 'EPERM' }
+  if (!alive) {
+    fs.rmSync(path.join(REPO, 'apps', name), { recursive: true, force: true })
+    console.log(`removed apps/${name}, left by a run that is gone`)
+  }
+}
+
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rundesk-stale-'))
 let distA = argOf('--dist-a')
 let distB = argOf('--dist-b')

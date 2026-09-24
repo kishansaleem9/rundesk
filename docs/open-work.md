@@ -1018,6 +1018,14 @@ The people service now reads every task as the requester may see it (`viewerFilt
 
 *Closed:* `lane_api_down` (lane-env.sh) is the one stop path of `fleet-up.sh` and `fleet-restart.sh`, and it now removes the lane's stamp first, whether or not anything was listening. `fleet-sync.sh` stops every API with `pkill`, so it removes every stamp. `wt-break.sh` stops its own API without that function and, as before, rewrites the stamp once its restart is up. `check-lane-api-down.sh` now requires the stamp to be gone after the polite, stubborn and empty cases, and it catches a mutation that keeps the stamp (4 of 4 mutations caught). The next `build-api.sh "1 2 3 4"` removed all three stale stamps.
 
+### `found-24-sep/killed-suite-left-a-second-web-package` — **closed** (found by preflight after a container restart)
+
+**A `stale-chunk-recovery` run killed mid-build left a copy of apps/web inside `apps/`, and every lint and typecheck in the repo then refused to start**
+
+*Evidence:* after the container restarted during a sweep, preflight's lint and typecheck both failed with turbo's `Failed to add workspace "@rundesk/web" from "apps/.web-release-17764-a/package.json", it already exists`. The suite builds each release from a copy beside apps/web (so the config's relative paths resolve), named `apps/.web-release-<pid>-<marker>`, and removes it in a `finally`. A SIGKILL skips `finally`; pid 17764 was gone. `pnpm-workspace.yaml`'s `apps/*` includes hidden directories as far as turbo is concerned. Reproduced with `turbo run typecheck --dry=json`: exit 1, that message.
+
+*Closed:* `pnpm-workspace.yaml` leaves hidden directories under apps/ out (`!apps/.*`). The same dry run with the copy still present exits 0 and lists each package once. And the suite now removes, at its start, any such copy whose pid is no longer alive, saying so. The next run on lane 1 passed 27/27 and left `apps/` without the copy.
+
 ### `found-24-sep/one-suite-two-lanes-share-a-results-file` — **closed** (found planning the `wra-8..40` runs)
 
 **Two break sets of the same suite on two lanes write, and truncate, one results file; neither the runner nor the dispatcher stops it**

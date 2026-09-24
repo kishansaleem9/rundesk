@@ -1,3 +1,8 @@
 packages:
   - "apps/*"
   - "packages/*"
+  # Not a hidden directory under apps/: `stale-chunk-recovery` builds a copy of
+  # apps/web beside it as `apps/.web-release-<pid>-<marker>`, and a run killed
+  # before its cleanup left one behind — whose package.json is @rundesk/web
+  # again, so turbo refused every lint and typecheck in the repo.
+  - "!apps/.*"
