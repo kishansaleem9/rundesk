@@ -1364,6 +1364,48 @@ The new suite `guest-create-menu`, 6 checks. A guest first passes through one sp
 - The API still makes a guest a dashboard (a preset of their own; no route asks the role). The menus no longer offer one, as ClickUp offers guests none.
 - A project's page still offers a guest Statuses, Members and Suggest tasks, where they only pass through. Recorded as `found-24-sep/project-page-offers-guests-its-managers-buttons`, below.
 
+### `found-24-sep/patches-that-measured-nothing` — **closed** (test tooling; found judging the second and third drifted plans)
+
+**Six break patches stayed green or never built, each for its own reason**
+
+*Evidence, from the plans' own records:*
+
+- `sti-7-redirect-to-nowhere` (stable-images): green twice. It sent the picture's redirect to `${url}-gone`, which only lengthens the signature's value. The lanes' storage stub answers a key whatever its signature says, so the picture still loaded.
+- `sti-8-logos-not-served` (stable-images): BUILD FAILED twice. It dropped `'workspace-logos/'` from the `as const` tuple, which narrowed the tuple's type, and the workspace service's typed call no longer compiled.
+- `search-sources-4-the-notice-names-no-way-out`: BUILD FAILED twice. The palette's Connect button has since been wrapped in a condition, and deleting the button alone left an empty `&& ( )`.
+- `mtg-2-list-of-any-workspace` (meeting-access): green twice. A meeting keeps its own check that the list is its workspace's, so the list rule's workspace, which the patch removed, is the second of two there.
+- `ars-3-any-project-by-id` (ai-read-access): green. The member had one candidate project, so a private project's name leaking into the plan had nothing to reorder, and the answer was the same as naming none. The positive twin passed for a reason of its own: naming the open project removes it from the candidates.
+- `plr-16-the-prompts-stop-at-the-project` (private-list-reach): green in plan 3, on a lane with no model. Its header said in prose that only a model's prompts can show the leak. The runner reads a model need from one line (`# Reddens only where a model answers`, `patches_needing_model`), which this patch lacked, so no model was started for it.
+
+*Closed, 24 September:*
+
+- `sti-7` damages the object's path instead, which the stub answers 404 for.
+- `sti-8` refuses logos at the serving route, which compiles.
+- `search-sources-4` fails the condition.
+- `mtg-2` is now `fma-11`, claiming a new `form-access` check: a form made in another organisation's workspace and aimed at this workspace's list is not found, made or changed, and a form aimed at their own list is made. There, the list rule's workspace is the only defence, because the space's create gate has no level to read for someone who is not a member of the space's workspace and lets them through.
+- `ai-read-access` gains a second open project named like nothing there, so a leaked name keeps only the project it matches.
+- `plr-16` carries the line the runner reads. It was the only patch that described a model need in prose and lacked the line; `wra-11` and `wra-12` have it.
+
+Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on the current build.
+
+*Recorded:* the create gate passing non-members (`assertSpaceLevel` returns when `resolveSpaceLevel` has no membership to read) is deliberate, so that a super-admin and internal callers pass. It makes every caller's own workspace check load-bearing. That is a hardening question, not a defect today.
+
+### `found-24-sep/personal-calendar-connect-needs-integrations-manage` — open, behaviour, medium (found reading `custom-role-permissions-unread-by-web`)
+
+**A member cannot connect their own calendar: the planner's Connect asks for the workspace's integration key**
+
+*Evidence, read not run:* the planner's calendar connect (onboarding and the Accounts page) posts `…/integrations/connections/{gcal|outlook}/oauth/start`, which requires `integrations.manage`, an admin's key unless a custom role grants it. Its buttons gate only on whether the provider is configured, so a member is offered Connect and refused. The callback records the grant as the connecting person's own account (`user_calendar_accounts`, §V2-14: a person manages their OWN accounts), and also as the workspace's connection. ClickUp separates the two: workspace connections are the admins', and a member connects a personal account when their role allows Personal Integrations.
+
+*To close:* measure a member's connect. Then decide, with ClickUp's model, whether a calendar is a personal connection (asked of the person, not of `integrations.manage`) and what the workspace row then means.
+
+### `found-24-sep/meetings-connect-calendar-goes-to-settings` — open, visible bug, small (found reading `custom-role-permissions-unread-by-web`)
+
+**"Connect Calendar" on the Meetings page opens Settings → Integrations, which connects no calendar**
+
+*Evidence, read not run:* `workspace-meetings-page.tsx` links the empty "Upcoming" state to `settings?tab=integrations`. That tab holds webhooks, Slack, the importer and data export. Calendars connect in the planner's Accounts page, a tab of the planner's settings dialog, which has no address. A member is sent back to `/app` by the settings route.
+
+*To close:* give the Accounts page an address, aim the link there, and read where it lands.
+
 ### `found-24-sep/view-only-space-offers-members-what-it-refuses` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
 
 **A view-only space's "+" offers a member a list, a task, a folder and the rest, and the API refuses each**

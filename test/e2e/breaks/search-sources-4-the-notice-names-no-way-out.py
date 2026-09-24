@@ -14,22 +14,15 @@
 # says so" stays green — which is what separates this patch from the one that
 # removes the notice entirely, and what makes the two checks two checks.
 #
+# RE-AIMED 24 September: the button now sits inside a condition (only a person who
+# may connect is offered it), so deleting the button alone left an empty `&& ( )`
+# and the patch never built (BUILD FAILED twice). The condition is what fails now.
+#
 # Reddens: search-sources: "and offers the way to connect it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/command-palette.tsx'
-a = """          <button
-            type="button"
-            data-testid="palette-source-connect"
-            className="text-accent underline underline-offset-2"
-            onClick={() => {
-              setOpen(false)
-              navigate({ to: '/app/$workspaceId/settings', params: { workspaceId: workspaceId! } })
-            }}
-          >
-            {t('palette.sourceConnect')}
-          </button>
-"""
-b = ""
+a = "          {isAdmin && activeSource.heldBy !== 'someone-else' && (\n"
+b = "          {isAdmin && activeSource.heldBy !== 'someone-else' && workspaceId === '' && (\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

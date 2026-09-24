@@ -12,6 +12,11 @@
  * so a form, or an anonymous submission to one, filed tasks into a private
  * list its maker was refused, and a guest, who may not make tasks, made them.
  *
+ * And the other way round: a form made in another organisation's workspace,
+ * aimed at a list of this one. Only the list rule's own workspace stands in the
+ * way there — the space's create gate lets through anyone who is not a member
+ * of the space's workspace, since it has no level to read for them.
+ *
  * Two organisations; forms and fields made through the API as the admin,
  * submissions through the public route; every refusal read back by SQL beside
  * the same call succeeding for someone it is theirs to make.
@@ -27,7 +32,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -216,6 +221,24 @@ try {
     gList.status === 200 && !JSON.stringify(gList.data ?? null).includes(`${TAG} the form`) && gMade.status === 403 && gRows === 0 && refused(gRead.status),
     'a guest is listed no form, makes none (403, none made), and reads no form’s submissions',
     `the list ${gList.status}, naming the form ${JSON.stringify(gList.data ?? null).includes(`${TAG} the form`)}; made ${gMade.status} (${gRows}); submissions ${gRead.status}`,
+  )
+
+  // ══ 7. ANOTHER ORGANISATION'S FORM, AIMED HERE ════════════════════════════
+  console.log('\n▶ a form the outsider makes in their own workspace, aimed at a list of this one')
+  const oSpace = await O('/spaces', { method: 'POST', body: { workspaceId: THEIRS, name: `${TAG} their space` } })
+  const oProject = await O('/projects', { method: 'POST', body: { spaceId: oSpace.data?.id, name: `${TAG} their project` } })
+  const [ownList] = await sql`insert into lists (project_id, name) values (${oProject.data?.id}, ${`${TAG} their list`}) returning id`
+  const aimedHere = await O(`/workspaces/${THEIRS}/forms`, { method: 'POST', body: { title: `${TAG} aimed here`, targetListId: OPEN, isPublic: true } })
+  const aimedHome = await O(`/workspaces/${THEIRS}/forms`, { method: 'POST', body: { title: `${TAG} aimed home`, targetListId: ownList.id, isPublic: true } })
+  const turned = aimedHome.data?.id
+    ? await O(`/workspaces/${THEIRS}/forms/${aimedHome.data.id}`, { method: 'PATCH', body: { targetListId: OPEN } })
+    : { status: 0 }
+  const pointedHere = (await sql`select count(*)::int as n from forms where workspace_id = ${THEIRS} and target_list_id = ${OPEN}`)[0].n
+  const homeRow = (await sql`select target_list_id from forms where title = ${`${TAG} aimed home`}`)[0] ?? null
+  chk(
+    refused(aimedHere.status) && refused(turned.status) && pointedHere === 0 && aimedHome.status < 300 && homeRow?.target_list_id === ownList.id,
+    'a form made in another organisation’s workspace files nothing here: aimed at this workspace’s list, made or changed to it, it is not found and none points at it — aimed at their own list, it is made',
+    `made aimed here ${aimedHere.status}; changed to aim here ${turned.status}; their forms aimed here ${pointedHere}; made aimed at their own list ${aimedHome.status}, aimed at ${homeRow?.target_list_id === ownList.id ? 'their list' : JSON.stringify(homeRow?.target_list_id ?? null)}`,
   )
 } catch (e) {
   failed += 1

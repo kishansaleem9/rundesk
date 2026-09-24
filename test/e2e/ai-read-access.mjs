@@ -99,6 +99,11 @@ try {
   // The open space: the member's own project, with a PRIVATE list of the admin's in it.
   const OS = await make('/spaces', { workspaceId: WS, name: `${TAG} open space` }, 'the open space')
   const OP = await make('/projects', { spaceId: OS, name: 'Website launch' }, 'the open project')
+  // And a second open project, named like nothing here. With one candidate there
+  // is nothing to rank, so a private project's name leaking into the plan changed
+  // nothing and `ars-3` measured nothing (green in two plans); with two, a leaked
+  // "Website launch …" keeps only the project it matches, where naming none keeps both.
+  await make('/projects', { spaceId: OS, name: `Garden shed ${TAG}` }, 'the second open project')
   const OL = await make('/lists', { projectId: OP, name: `${TAG} open list` }, 'the open list')
   const PL = await make('/lists', { projectId: OP, name: `${WORD} private list`, visibility: 'private' }, 'the private list')
   for (let i = 0; i < 3; i++) await make('/tasks', { listId: PL, title: `${WORD} private-list task ${i}`, assigneeIds: [adminId], dueDate: tomorrow }, 'a private-list task')
