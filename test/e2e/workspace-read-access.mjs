@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 30
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -532,6 +532,159 @@ try {
     whileIn.status === 200 && whileIn.text.includes(`${TAG} in the open space`) && removedLeaver.status < 300 && afterLeaving.status === 404,
     'and once somebody is removed from the workspace, their calendar feed answers nothing',
     `while a member the feed answered ${whileIn.status}; removing them answered ${said(removedLeaver)}; afterwards the feed answered ${afterLeaving.status}`,
+  )
+
+  // ══ 7. DOCS ══════════════════════════════════════════════════════════════
+  console.log('\n▶ a doc is read where it lives: its space, the doc above it, or a share')
+
+  /*
+   * A doc filed in a space follows that space, and a page follows the doc it
+   * lives in (ClickUp: a Doc in a location inherits the location's
+   * permissions; pages inherit the Doc's). A share on a doc opens it, and the
+   * pages under it. Measured on lane 1 before the fix: the doc read was
+   * workspace membership alone, so the member opened, listed and counted the
+   * private space's doc and its page, edited them, and joined their room.
+   *
+   * The page under the private doc is made with NO space of its own — as the
+   * docs hub makes one — so only the doc above it can say where it lives.
+   */
+  const makeDoc = (body, what) => make(`/workspaces/${WS}/docs`, body, what)
+  const OPEN_DOC = await makeDoc({ title: `${TAG} open doc`, spaceId: spaceOf.open }, 'the open doc')
+  const PRIV_DOC = await makeDoc({ title: `${TAG} private doc`, spaceId: spaceOf.private }, 'the private doc')
+  const SUB_DOC = await makeDoc({ title: `${TAG} private doc's page`, parentDocId: PRIV_DOC }, 'the private doc’s page')
+  const SHARED_DOC = await makeDoc({ title: `${TAG} shared doc`, spaceId: spaceOf.private }, 'the shared doc')
+  const SHARED_SUB = await makeDoc({ title: `${TAG} shared doc's page`, parentDocId: SHARED_DOC }, 'the shared doc’s page')
+  await sql`
+    insert into object_shares (workspace_id, object_type, object_id, user_id, level)
+    values (${WS}, 'doc', ${SHARED_DOC}, ${M.id}, 'view')`
+  const REFUSED_DOCS = [PRIV_DOC, SUB_DOC]
+  const OPENED_DOCS = [OPEN_DOC, SHARED_DOC, SHARED_SUB]
+  const ALL_DOCS = [...OPENED_DOCS, ...REFUSED_DOCS]
+  const docName = (id) => ['open', 'shared', 'shared page', 'private', 'private page'][ALL_DOCS.indexOf(id)] ?? id
+
+  const statusOf = async (C, id) => (await C(`/docs/${id}`)).status
+  const memberOpens = Object.fromEntries(await Promise.all(ALL_DOCS.map(async (id) => [id, await statusOf(M, id)])))
+  const adminOpens = Object.fromEntries(await Promise.all(ALL_DOCS.map(async (id) => [id, await statusOf(A, id)])))
+  chk(
+    REFUSED_DOCS.every((id) => memberOpens[id] === 404) && OPENED_DOCS.every((id) => memberOpens[id] === 200) &&
+      ALL_DOCS.every((id) => adminOpens[id] === 200),
+    'a member cannot open a doc of a space they are refused, nor the page under it (404) — while they open an open doc, and a doc and page shared with them; the admin opens all five',
+    `the member: ${ALL_DOCS.map((id) => `${docName(id)} ${memberOpens[id]}`).join(', ')}; the admin: ${ALL_DOCS.map((id) => `${docName(id)} ${adminOpens[id]}`).join(', ')}`,
+  )
+
+  const hubIds = (res) => (res.data ?? []).map((d) => d.id)
+  const memberHub = await M(`/workspaces/${WS}/docs`)
+  const adminHub = await A(`/workspaces/${WS}/docs`)
+  const memberCounts = (await M(`/workspaces/${WS}/docs/scope-counts`)).data
+  const adminCounts = (await A(`/workspaces/${WS}/docs/scope-counts`)).data
+  chk(
+    memberHub.status === 200 && REFUSED_DOCS.every((id) => !hubIds(memberHub).includes(id)) &&
+      OPENED_DOCS.every((id) => hubIds(memberHub).includes(id)) && ALL_DOCS.every((id) => hubIds(adminHub).includes(id)) &&
+      memberCounts?.all === hubIds(memberHub).length && adminCounts?.all - memberCounts?.all === REFUSED_DOCS.length,
+    'the docs hub lists and counts only what the member may open — the admin’s lists and counts all of it',
+    `the member's hub has ${JSON.stringify(ALL_DOCS.filter((id) => hubIds(memberHub).includes(id)).map(docName))} and counts ${memberCounts?.all} of ${hubIds(memberHub).length} listed; ` +
+      `the admin's has ${JSON.stringify(ALL_DOCS.filter((id) => hubIds(adminHub).includes(id)).map(docName))} and counts ${adminCounts?.all}`,
+  )
+
+  // Writes go through the same door as the read.
+  const renamed = await M(`/docs/${PRIV_DOC}`, { method: 'PATCH', body: { title: `${TAG} renamed by the member` } })
+  const commented = await M(`/docs/${PRIV_DOC}/comments`, { method: 'POST', body: { body: `${TAG} a comment from outside` } })
+  const exported = await M(`/docs/${PRIV_DOC}/export`)
+  const templated = await M(`/workspaces/${WS}/doc-templates`, { method: 'POST', body: { docId: PRIV_DOC, name: `${TAG} lifted` } })
+  const [{ title: privTitle }] = await sql`select title from docs where id = ${PRIV_DOC}`
+  const [{ n: strayRows }] = await sql`
+    select (select count(*) from doc_comments where doc_id = ${PRIV_DOC})
+         + (select count(*) from doc_templates where workspace_id = ${WS} and name = ${`${TAG} lifted`}) as n`
+  const renamedOpen = await M(`/docs/${OPEN_DOC}`, { method: 'PATCH', body: { title: `${TAG} open doc` } })
+  chk(
+    [renamed, commented, exported, templated].every((r) => r.status === 404) && privTitle === `${TAG} private doc` && Number(strayRows) === 0 &&
+      renamedOpen.status === 200,
+    'a member cannot edit, comment on, export or template a doc they may not open (404 each, the doc unchanged, nothing made) — while they edit an open one',
+    `rename ${renamed.status}, comment ${commented.status}, export ${exported.status}, template ${templated.status}; the title is now "${privTitle}", rows made ${strayRows}; renaming the open doc ${said(renamedOpen)}`,
+  )
+
+  // Nor file something of their own under it, which would hide it from themselves and name its parent.
+  const pageUnder = await M(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: `${TAG} the member's page`, parentDocId: PRIV_DOC } })
+  const own = await M(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: `${TAG} the member's doc`, spaceId: spaceOf.open } })
+  const movedUnder = own.data?.id ? await M(`/docs/${own.data.id}`, { method: 'PATCH', body: { parentDocId: PRIV_DOC } }) : { status: 0 }
+  const pageUnderOpen = await M(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: `${TAG} the member's open page`, parentDocId: OPEN_DOC } })
+  const [{ n: underPriv }] = await sql`select count(*)::int as n from docs where parent_doc_id = ${PRIV_DOC}`
+  chk(
+    pageUnder.status === 404 && movedUnder.status === 404 && underPriv === 1 && own.status < 300 && pageUnderOpen.status < 300,
+    'and a member cannot hang a page under a doc they may not open, nor move one there (404) — while they add one under an open doc',
+    `a new page there answered ${pageUnder.status}, a move there ${movedUnder.status}; the private doc now has ${underPriv} page(s); under the open doc ${said(pageUnderOpen)}`,
+  )
+
+  // Its room carries every edit, whole.
+  const docSockets = []
+  const docSocketFor = async (token) => {
+    const s = io(`http://127.0.0.1:${API_PORT}/realtime`, { auth: { token }, transports: ['websocket'], reconnection: false })
+    docSockets.push(s)
+    s.heard = []
+    s.on('event', (e) => s.heard.push(e))
+    const up = await new Promise((resolve) => {
+      s.on('connect', () => resolve(true))
+      s.on('connect_error', () => resolve(false))
+      setTimeout(() => resolve(false), 8000)
+    })
+    return up ? s : null
+  }
+  const docJoin = (s, rooms) =>
+    new Promise((resolve) => {
+      s.emit('subscribe', { rooms }, (ack) => resolve(ack))
+      setTimeout(() => resolve(null), 5000)
+    })
+  const memberDocSock = await docSocketFor(M.token)
+  const adminDocSock = await docSocketFor(auth.accessToken)
+  const memberDocAck = memberDocSock ? await docJoin(memberDocSock, [`doc:${PRIV_DOC}`, `doc:${SUB_DOC}`, `doc:${OPEN_DOC}`]) : null
+  const adminDocAck = adminDocSock ? await docJoin(adminDocSock, [`doc:${PRIV_DOC}`]) : null
+  await A(`/docs/${PRIV_DOC}`, { method: 'PATCH', body: { title: `${TAG} private doc, SECRET edit` } })
+  await A(`/docs/${OPEN_DOC}`, { method: 'PATCH', body: { title: `${TAG} open doc, edited in the open` } })
+  const heardDoc = (s, words) => (s?.heard ?? []).some((e) => JSON.stringify(e).includes(words))
+  await waitFor(() => heardDoc(memberDocSock, 'edited in the open') && heardDoc(adminDocSock, 'SECRET edit'), 6000)
+  chk(
+    Boolean(memberDocSock && adminDocSock) && !(memberDocAck?.joined ?? []).includes(`doc:${PRIV_DOC}`) &&
+      !(memberDocAck?.joined ?? []).includes(`doc:${SUB_DOC}`) && !heardDoc(memberDocSock, 'SECRET edit') &&
+      (memberDocAck?.joined ?? []).includes(`doc:${OPEN_DOC}`) && heardDoc(memberDocSock, 'edited in the open') &&
+      (adminDocAck?.joined ?? []).includes(`doc:${PRIV_DOC}`) && heardDoc(adminDocSock, 'SECRET edit'),
+    'a member cannot join the realtime room of a doc they may not open, nor hear its edits — while they join an open doc’s and hear it, and the admin hears the private one',
+    `the member joined ${JSON.stringify((memberDocAck?.joined ?? []).map((r) => docName(r.slice(4))))} and heard the secret edit: ${heardDoc(memberDocSock, 'SECRET edit')}, ` +
+      `the open edit: ${heardDoc(memberDocSock, 'edited in the open')}; the admin joined ${JSON.stringify((adminDocAck?.joined ?? []).map((r) => docName(r.slice(4))))} ` +
+      `and heard the secret edit: ${heardDoc(adminDocSock, 'SECRET edit')}`,
+  )
+  for (const s of docSockets) s.close()
+
+  // A task's linked docs name the doc: they list, and link, what may be opened.
+  // The member's own task, since listing a task's docs asks for write access.
+  const minePosted = await M('/tasks', { method: 'POST', body: { listId: OPEN_LIST, title: `${TAG} the member's task` } })
+  const MINE = minePosted.data?.id
+  if (!MINE) throw new Error(`the member could not make a task: ${said(minePosted)}`)
+  await sql`insert into task_doc_links (task_id, doc_id) values (${MINE}, ${PRIV_DOC}), (${MINE}, ${OPEN_DOC})`
+  const linkedIds = (res) => (res.data ?? []).map((l) => l.docId)
+  const memberLinked = await M(`/tasks/${MINE}/linked-docs`)
+  const adminLinked = await A(`/tasks/${MINE}/linked-docs`)
+  const memberLinks = await M(`/tasks/${MINE}/linked-docs`, { method: 'POST', body: { docId: SUB_DOC } })
+  const [{ n: subLinks }] = await sql`select count(*)::int as n from task_doc_links where doc_id = ${SUB_DOC}`
+  chk(
+    memberLinked.status === 200 && !linkedIds(memberLinked).includes(PRIV_DOC) && linkedIds(memberLinked).includes(OPEN_DOC) &&
+      linkedIds(adminLinked).includes(PRIV_DOC) && memberLinks.status === 404 && subLinks === 0,
+    'a task’s linked docs name none the member may not open, and linking one is refused (404, no link) — the admin’s name it',
+    `the member's list has ${JSON.stringify(linkedIds(memberLinked).map(docName))} (${memberLinked.status}); the admin's ${JSON.stringify(linkedIds(adminLinked).map(docName))}; ` +
+      `linking the private page answered ${said(memberLinks)}, links made ${subLinks}`,
+  )
+
+  // The knowledge answer cites docs by title. No model is needed: without one
+  // it returns its sources as they are, which is what is read here.
+  const reindexed = await A(`/workspaces/${WS}/knowledge/reindex`, { method: 'POST', body: {} })
+  const askAs = (C) => C('/ai/knowledge', { method: 'POST', body: { workspaceId: WS, question: `${TAG} private doc's page` } })
+  const memberAsks = await askAs(M)
+  const adminAsks = await askAs(A)
+  const cited = (res) => (res.data?.sources ?? []).filter((s) => s.type === 'doc').map((s) => s.id)
+  chk(
+    reindexed.status < 300 && memberAsks.status < 300 && REFUSED_DOCS.every((id) => !cited(memberAsks).includes(id)) &&
+      cited(memberAsks).includes(SHARED_SUB) && cited(adminAsks).includes(SUB_DOC),
+    'the knowledge answer cites no doc the member may not open, nor the page under one — while it cites the page shared with them, and the admin’s cites the private page',
+    `reindex ${said(reindexed)}; the member's (${memberAsks.status}) cites ${JSON.stringify(cited(memberAsks).map(docName))}; the admin's ${JSON.stringify(cited(adminAsks).map(docName))}`,
   )
 } catch (e) {
   failed += 1

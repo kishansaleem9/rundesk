@@ -17,6 +17,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole } from '../../common/permissions/item-visibility'
+import { canReadDoc } from '../../common/permissions/doc-access'
 import { PresenceService } from '../presence/presence.service'
 import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
 
@@ -185,10 +186,20 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
      * anyone in: measured on lane 1, a member refused a private space's list
      * and task (403 on each) joined both rooms and heard a task created there
      * and a comment posted on it. The rules the reads apply apply here.
-     * A doc's and a canvas's rooms follow their own read rule, which is
-     * membership today.
+     * A doc's room carries every edit whole, so it takes the doc's read rule
+     * (`doc-access.ts`): measured, a member refused a private space joined its
+     * doc's room and heard an edit. A canvas's room follows the canvas's own
+     * read rule, which is membership today.
      */
     if (kind === 'list' || kind === 'task') return this.canReadListOrTask(kind, id, userId, membership.role as string)
+    if (kind === 'doc') {
+      const [doc] = await this.db
+        .select({ id: docs.id, workspaceId: docs.workspaceId, spaceId: docs.spaceId, parentDocId: docs.parentDocId })
+        .from(docs)
+        .where(eq(docs.id, id))
+        .limit(1)
+      return !!doc && canReadDoc(this.db, doc, userId, isManagerRole(membership.role as string))
+    }
     return true
   }
 

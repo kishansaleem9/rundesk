@@ -1,6 +1,6 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { eq, and, or, asc, desc, ilike, inArray, isNull, sql, type SQL } from 'drizzle-orm'
+import { eq, and, or, asc, desc, ilike, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
   tasks,
@@ -76,6 +76,7 @@ import {
   isManagerRole,
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
+import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -1088,7 +1089,11 @@ export class TasksService {
 
   /** Docs linked to a task, most-recent first. Requires task read access. */
   async listLinkedDocs(taskId: string, userId: string) {
-    await this.assertTaskWriteAccess(taskId, userId)
+    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    // Each link names its doc, so it lists only docs the reader may open
+    // (`doc-access.ts`); measured, a member read the title of a doc in a space
+    // they were refused off a task in an open one.
+    const hidden = await hiddenDocIds(this.db, ctx.workspaceId, userId, await resolveIsManager(this.db, ctx.workspaceId, userId))
     return this.db
       .select({
         id: taskDocLinks.id,
@@ -1100,16 +1105,25 @@ export class TasksService {
       })
       .from(taskDocLinks)
       .innerJoin(docs, eq(docs.id, taskDocLinks.docId))
-      .where(eq(taskDocLinks.taskId, taskId))
+      .where(and(eq(taskDocLinks.taskId, taskId), hidden.length ? notInArray(docs.id, hidden) : undefined))
       .orderBy(desc(taskDocLinks.createdAt))
   }
 
-  /** Link a doc to a task. Both must live in the same workspace. */
+  /** Link a doc to a task. Both must live in the same workspace, and the doc must be one the linker may open. */
   async linkDoc(taskId: string, docId: string, userId: string) {
     const ctx = await this.assertTaskWriteAccess(taskId, userId)
-    const [doc] = await this.db.select({ workspaceId: docs.workspaceId }).from(docs).where(eq(docs.id, docId)).limit(1)
+    const [doc] = await this.db
+      .select({ id: docs.id, workspaceId: docs.workspaceId, spaceId: docs.spaceId, parentDocId: docs.parentDocId })
+      .from(docs)
+      .where(eq(docs.id, docId))
+      .limit(1)
     if (!doc) throw new NotFoundException('Doc not found')
     if (doc.workspaceId !== ctx.workspaceId) throw new BadRequestException('Doc belongs to a different workspace')
+    // Not found, as for a doc that does not exist: linking one you may not open
+    // was a way to read its title back off the task.
+    if (!(await canReadDoc(this.db, doc, userId, await resolveIsManager(this.db, ctx.workspaceId, userId)))) {
+      throw new NotFoundException('Doc not found')
+    }
     const [row] = await this.db
       .insert(taskDocLinks)
       .values({ taskId, docId, createdById: userId })

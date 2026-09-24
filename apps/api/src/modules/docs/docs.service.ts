@@ -1,12 +1,14 @@
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, asc, isNull, desc, inArray, isNotNull, sql } from 'drizzle-orm'
+import { eq, and, asc, isNull, desc, inArray, isNotNull, notInArray, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { docs, docComments, docRevisions, docTemplates, users, objectShares, spaces, workspaces, taskDocLinks, tasks } from '@rundesk/db'
 import { workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { resolveIsManager, taskVisibilityFilter, isManagerRole } from '../../common/permissions/item-visibility'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
+import { isUuid } from '../../common/validation/uuid'
 import { pickDocUpdatable } from './doc-update-fields'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -81,9 +83,13 @@ export class DocsService {
     // A share grant on a doc nobody has shared means an empty bucket, not the
     // whole workspace — bail before the `inArray` would degenerate.
     if (sharedIds && sharedIds.length === 0) return []
+    // Only what the reader may open: see `doc-access.ts`. No reader, no docs.
+    if (!opts.userId) return []
+    const hidden = await this.docsHiddenFrom(workspaceId, opts.userId)
 
     const where = and(
       eq(docs.workspaceId, workspaceId),
+      hidden.length ? notInArray(docs.id, hidden) : undefined,
       eq(docs.isArchived, scope === 'archived'),
       scope === 'mine' && opts.userId ? eq(docs.createdById, opts.userId) : undefined,
       sharedIds ? inArray(docs.id, sharedIds) : undefined,
@@ -141,11 +147,14 @@ export class DocsService {
    */
   async scopeCounts(workspaceId: string, userId: string) {
     const sharedIds = await this.docIdsSharedWith(workspaceId, userId)
+    // Counted as listed: a count that includes what the list leaves out is a
+    // number the reader can see move when somebody writes a doc they cannot.
+    const hidden = await this.docsHiddenFrom(workspaceId, userId)
     const count = async (extra?: ReturnType<typeof and>) => {
       const [row] = await this.db
         .select({ n: sql<number>`count(*)::int` })
         .from(docs)
-        .where(and(eq(docs.workspaceId, workspaceId), extra))
+        .where(and(eq(docs.workspaceId, workspaceId), hidden.length ? notInArray(docs.id, hidden) : undefined, extra))
       return row?.n ?? 0
     }
     const [all, mine, shared, archived] = await Promise.all([
@@ -181,14 +190,29 @@ export class DocsService {
     return row
   }
 
+  /** The docs of this workspace the person may not open (`doc-access.ts`). */
+  private async docsHiddenFrom(workspaceId: string, userId: string) {
+    return hiddenDocIds(this.db, workspaceId, userId, await resolveIsManager(this.db, workspaceId, userId))
+  }
+
+  /**
+   * THE ONE DOOR to a doc for a person: every read, edit, comment, export,
+   * share and revision passes it. Workspace membership, then where the doc
+   * lives (`doc-access.ts`) — membership alone let a member refused a private
+   * space open, edit and export its docs. Not found either way, so a probe
+   * cannot tell "not yours to read" from "does not exist".
+   */
   private async assertDocAccess(docId: string, userId: string) {
     const [row] = await this.db.select().from(docs).where(eq(docs.id, docId))
     if (!row) throw new NotFoundException('Doc not found')
     const [membership] = await this.db
-      .select({ userId: workspaceMembers.userId })
+      .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(workspaceMembers.userId, userId)))
     if (!membership) throw new NotFoundException('Doc not found')
+    if (!(await canReadDoc(this.db, row, userId, isManagerRole(membership.role as string)))) {
+      throw new NotFoundException('Doc not found')
+    }
     return row
   }
 
@@ -233,13 +257,20 @@ export class DocsService {
    * The descendant half is older and quieter: hanging a doc under its own
    * child made a loop, and a tree walk over it never ends.
    */
-  private async assertDocParent(parentDocId: string, workspaceId: string, movingDocId?: string) {
+  private async assertDocParent(parentDocId: string, workspaceId: string, actorId: string, movingDocId?: string) {
     const [parent] = await this.db
-      .select({ workspaceId: docs.workspaceId })
+      .select({ id: docs.id, workspaceId: docs.workspaceId, spaceId: docs.spaceId, parentDocId: docs.parentDocId })
       .from(docs)
       .where(eq(docs.id, parentDocId))
       .limit(1)
     if (!parent || parent.workspaceId !== workspaceId) throw new NotFoundException('Parent doc not found')
+    // And one the actor may open. A page lives where the doc above it lives,
+    // so filing one under a doc you cannot read hid it from you and named the
+    // doc (measured: 201 for a new page, 200 for a move, under a doc of a
+    // space the member was refused).
+    if (!(await canReadDoc(this.db, parent, actorId, await resolveIsManager(this.db, workspaceId, actorId)))) {
+      throw new NotFoundException('Parent doc not found')
+    }
     if (!movingDocId) return
     // Walk up from the new parent. Reaching the doc being moved means the
     // parent is inside it. Bounded, so a loop already in the data cannot hang
@@ -298,7 +329,7 @@ export class DocsService {
     createdById: string
   }) {
     if (data.spaceId) await this.assertDocSpace(data.spaceId, data.workspaceId, data.createdById)
-    if (data.parentDocId) await this.assertDocParent(data.parentDocId, data.workspaceId)
+    if (data.parentDocId) await this.assertDocParent(data.parentDocId, data.workspaceId, data.createdById)
     const [row] = await this.db
       .insert(docs)
       .values({
@@ -430,8 +461,13 @@ export class DocsService {
     // Coerce non-string name/description so `.trim()` can't throw a 500.
     const name = (typeof data.name === 'string' ? data.name : '').trim()
     if (!name) throw new ForbiddenException('Template name is required')
-    const [doc] = await this.db.select().from(docs).where(eq(docs.id, data.docId)).limit(1)
-    if (!doc || doc.workspaceId !== workspaceId) throw new NotFoundException('Doc not found in this workspace')
+    // Through the door every read uses: a template is the doc's whole body,
+    // copied where every member can read it (measured: 201 from a member
+    // refused the doc's space).
+    const docId = typeof data.docId === 'string' ? data.docId : ''
+    if (!isUuid(docId)) throw new NotFoundException('Doc not found in this workspace')
+    const doc = await this.assertDocAccess(docId, userId)
+    if (doc.workspaceId !== workspaceId) throw new NotFoundException('Doc not found in this workspace')
     const [row] = await this.db
       .insert(docTemplates)
       .values({
@@ -507,7 +543,7 @@ export class DocsService {
     // the rule for its other callers (revision restore).
     const writable = pickDocUpdatable(patch)
     if (writable.spaceId) await this.assertDocSpace(writable.spaceId, doc.workspaceId, userId)
-    if (writable.parentDocId) await this.assertDocParent(writable.parentDocId, doc.workspaceId, docId)
+    if (writable.parentDocId) await this.assertDocParent(writable.parentDocId, doc.workspaceId, userId, docId)
     if (patch.expectedUpdatedAt) {
       const [current] = await this.db
         .select({ updatedAt: docs.updatedAt })

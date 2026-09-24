@@ -49,6 +49,7 @@ import {
 } from '../../common/permissions/container-access.guard-helper'
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
+import { hiddenDocIds } from '../../common/permissions/doc-access'
 import {
   assembleKnowledgeContext,
   deterministicKnowledgeAnswer,
@@ -2709,19 +2710,18 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
             .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskComments.id, commentIds), spaceOk, projectOk))
         : Promise.resolve([] as Array<{ id: string }>),
       docIds.length
-        ? this.db
-            .select({ id: docs.id })
-            .from(docs)
-            // The doc's own workspace's space only: a doc filed under another
-            // tenant's space is judged by nothing of theirs, and so excluded.
-            .leftJoin(spaces, and(eq(spaces.id, docs.spaceId), eq(spaces.workspaceId, docs.workspaceId)))
-            .where(
-              and(
-                eq(docs.workspaceId, workspaceId),
-                inArray(docs.id, docIds),
-                or(isNull(docs.spaceId), ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)),
-              ),
-            )
+        ? (async () => {
+            // The doc rule itself (`doc-access.ts`), not a space-only copy of
+            // it: that copy passed a page with no space of its own under a
+            // private doc, and the answer cited it to a member refused the doc
+            // (measured on lane 1). Past the manager return, so not a manager.
+            const hidden = new Set(await hiddenDocIds(this.db, workspaceId, userId, false))
+            const inWorkspace = await this.db
+              .select({ id: docs.id })
+              .from(docs)
+              .where(and(eq(docs.workspaceId, workspaceId), inArray(docs.id, docIds)))
+            return inWorkspace.filter((d) => !hidden.has(d.id))
+          })()
         : Promise.resolve([] as Array<{ id: string }>),
       // An attachment inherits its parent task's container access: gate it by
       // the SAME space/project visibility as the task it hangs off (join

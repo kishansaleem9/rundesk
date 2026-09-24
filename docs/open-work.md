@@ -526,11 +526,40 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 - the member's own iCal feed carried it, title and description (private-item rule only);
 - a member removed from the workspace kept a working feed, which went on serving tasks made after the removal: the token was checked for revocation alone.
 
-The people service now reads every task as the requester may see it (`viewerFilter`: the container rule and the private-item rule, in SQL). That covers the profile's assigned, finished, handed-over and on-nobody buckets, activity, the calendar (and so the planner's team-schedule columns, which read it), every standup bucket (the blocked one writes the private rule out over its alias), and priorities; a typed line is always shown, and pinning answers 404 for a task the person may not open. The DM Tasks tab, the list catalogue and the feed apply the container rule too, and a feed token resolves only while its owner is still a member. Found by the suite's admin half on the way: the first draft wrote the priorities rule as `or(isNull(taskId), viewer)`. For a manager the viewer is no condition, drizzle drops the undefined, and the list read "typed lines only", so the admin's own pinned tasks vanished; `wra-31` is that draft. `workspace-read-access` §6, 23/23 on lane 1: each read by the member holds nothing of the private space nor the private task, and the admin's own holds it, bucket by bucket on the profile. `wra-23..40`, each compiled. Unit tests of the five modules, 80/80. Regression on four lanes, 25/25: the person panel, teams, every planner suite, calendar accounts, priorities, quick create and the folder, list and space dialogs that read the catalogue, the DM tabs.
+The people service now reads every task as the requester may see it (`viewerFilter`: the container rule and the private-item rule, in SQL). That covers the profile's assigned, finished, handed-over and on-nobody buckets, activity, the calendar (and so the planner's team-schedule columns, which read it: `wra-36` removes the calendar's rule, and its run at `e580317` shows the member's calendar and team-schedule column both carrying the private space's task), every standup bucket (the blocked one writes the private rule out over its alias), and priorities; a typed line is always shown, and pinning answers 404 for a task the person may not open. The DM Tasks tab, the list catalogue and the feed apply the container rule too, and a feed token resolves only while its owner is still a member. Found by the suite's admin half on the way: the first draft wrote the priorities rule as `or(isNull(taskId), viewer)`. For a manager the viewer is no condition, drizzle drops the undefined, and the list read "typed lines only", so the admin's own pinned tasks vanished; `wra-31` is that draft. `workspace-read-access` §6, 23/23 on lane 1: each read by the member holds nothing of the private space nor the private task, and the admin's own holds it, bucket by bucket on the profile. `wra-23..40`, each compiled. Unit tests of the five modules, 80/80. Regression on four lanes, 25/25: the person panel, teams, every planner suite, calendar accounts, priorities, quick create and the folder, list and space dialogs that read the catalogue, the DM tabs.
 
-*Still open, measured (24 September, lane 1, as a member refused a private space; a probe, `measure-reads-2`):* search returns the private space's items; `GET /docs/:id` returns a doc of that space, and `GET /workspaces/:ws/docs` lists it. Read in code, not yet measured branch by branch: search's task and comment branches apply the private-item rule only, its doc branch and its space-name branch no rule at all. The doc read rule (`assertDocAccess`) is membership only, and doc edits go through it too. Move targets' projects and lists read clean in the same probe.
+*Fixed next: docs.* Measured on lane 1 before the fix, as a member refused a private space; all 7 of §7's checks failed:
+- the member opened the space's doc and the page under it (200 each), and the hub listed and counted all five docs;
+- they renamed the private doc (200), commented on it (201), exported it (200), and made a template of it (201), which copies its whole body where every member can read it;
+- they filed a new page under it (201) and moved their own doc there (200);
+- they joined its realtime room and heard an edit;
+- they read its title off a task's linked docs, and linked its page to a task (201);
+- the knowledge answer cited the page, because its space-only filter passed a page with no space of its own.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* custom-field search; task custom-field values (GET and PUT); sprint tasks; the dependency graph (6 hops); blocker titles in a PATCH error; id-to-title lookups through favourites, planner blocks (reported cross-tenant), sprint task add and AI refs; several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: search and docs next, then the cross-tenant lookup (planner blocks), then the rest.
+The doc read was workspace membership alone. A doc has no privacy flag; it is read where it lives, as in ClickUp (a Doc inherits its location's permissions, pages inherit the Doc, a share opens it). A doc is out of reach when it, or a doc above it, is in a private space the reader is not in, unless it or a doc above it is shared with them; managers read all.
+
+`common/permissions/doc-access.ts` states that once. `canReadDoc` judges one doc (a bounded parent walk, with a fast path for anybody in every private space), and `hiddenDocIds` serves the lists (one query in the common case). It stands behind:
+- the one door every doc route passes (`assertDocAccess`: read, edit, comment, export, share, revisions);
+- the hub's list and counts, and save-as-template;
+- the parent a page is filed under (create and move);
+- the doc's realtime room;
+- a task's linked docs, and linking one;
+- the knowledge answer's doc filter.
+
+`workspace-read-access` §7, 30/30 on lane 1:
+- the member opens an open doc, and a doc and page shared with them, but not the private doc or its page;
+- the hub's list and counts agree, and differ from the admin's by exactly those two;
+- each write is refused with the doc unchanged and nothing made, while an open doc is renamed;
+- filing a page there is refused, while one is filed under an open doc;
+- the room is refused, while an open doc's room carries its edit;
+- linked docs and linking are refused;
+- the knowledge answer cites the shared page and not the private one, while the admin's cites the private one.
+
+`wra-41..51`, each compiled. `doc-access.test.ts` 6/6 (the chain, shares, a page filed in a refused space under an open doc, parent loops, a parent from elsewhere), with `dac-1..3` shown to fail it. The first draft of the loop case let the doc a walk started from decide for the whole loop; `dac-2` is that draft. API unit tests 1621/1621. Regression on four lanes, 18/18: every doc suite (boundaries, import, task links), the template centre, the command palette, and the suites that read docs in passing (addressability, loading states, panel collapse, the stale-chunk recovery, the task AI bar, meeting records, chat message actions, `video-regression`). `addressability-live` first failed on a check made stale by an earlier commit of mine, below.
+
+*Still open, measured (24 September, lane 1, as a member refused a private space; a probe, `measure-reads-2`):* search returns the private space's items. Read in code, not yet measured branch by branch: search's task and comment branches apply the private-item rule only, and its doc branch and space-name branch apply no rule at all. Move targets' projects and lists read clean in the same probe.
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* custom-field search; task custom-field values (GET and PUT); sprint tasks; the dependency graph (6 hops); blocker titles in a PATCH error; id-to-title lookups through favourites, planner blocks (reported cross-tenant), sprint task add and AI refs; several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: search next, then favourites (every type is resolved by id with at most the private-item rule, so a favourite is a title lookup), then the cross-tenant lookup (planner blocks), then the rest.
 
 ### `found-24-sep/assignee-me-compared-with-a-narrowed-endpoint` — **closed** (a regression of mine, found by the docs sweep)
 
@@ -540,6 +569,29 @@ The people service now reads every task as the requester may see it (`viewerFilt
 
 *Closed:* the check compares on open work, row by row: every open task the listing holds is in the member endpoint. It makes an open task assigned to the admin first (and removes it after), so it is never two empty lists; a fresh database assigns the admin nothing. It passes on lane 1 in the docs sweep.
 
+### `found-24-sep/doc-writes-are-the-read-rule` — open, medium (security; found fixing docs)
+
+**Anybody who may read a doc may edit, delete and share it: a view-only share, and a guest, included**
+
+*Evidence, read not run:* every doc write (`update`, `deleteForUser`, `enablePublicShare`, `restoreRevision`, comments) passes `assertDocAccess` and nothing more, which is now the read rule and was membership before it. `object_shares.level` (`view`, `comment`, `edit`, `admin`) is written by the share dialog and read by no doc route. In ClickUp, a Doc shared with view permission cannot be edited, and a guest edits only with edit permission. Here a member given a `view` share on a doc in a private space can rewrite it, and a guest can edit any doc of an open space.
+
+*To close:* measure both (a view share, a guest), research ClickUp's default Doc permission for members of the location, and give the writes a level check: the share's level where the access is a share, and the role's otherwise.
+
+### `found-24-sep/linked-docs-read-needs-write-access` — open, low (visible bug; found fixing docs)
+
+**A task's linked docs can be listed only by someone who can edit the task, though the code says read access**
+
+*Evidence, read not run:* `tasks.service.listLinkedDocs` calls `assertTaskWriteAccess` (creator, assignee or manager) under a comment that reads "Requires task read access". A member who can open the task sees its Docs section fail with 403. `workspace-read-access` §7 reads it from the member's own task for that reason.
+
+*To close:* `assertTaskReadAccess` for the list (the doc rule already filters what it names), with a check that a member who is neither creator nor assignee sees the open doc linked.
+
+### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — open, low (duplicated list; found fixing docs)
+
+**The knowledge answer's access filter writes the container rule out a third time, and its copy differs**
+
+*Evidence, read not run:* `ai.service.filterAccessibleHits` builds `spaceOk` and `projectOk` itself for task, comment and attachment hits ("Predicates matching common/permissions/container-access"). Its project half leaves out the space-admin grant that `containerVisibilityFilter` has, so a space admin is denied a private project's hits that every other read gives them. The doc branch was a fourth copy and now uses `doc-access.ts`.
+
+*To close:* `containerVisibilityFilter` for the three branches, with a knowledge check for a space admin and a private project.
 
 ## Verification-harness defects — 27
 
