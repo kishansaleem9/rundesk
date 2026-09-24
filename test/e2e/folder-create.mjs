@@ -23,6 +23,13 @@
  *      two folder paths disagreed about whether a failure was even mentioned,
  *      and in a headless browser `alert` is no surface at all.
  *
+ * AND THEN THE SIDEBAR HAD A DIALOG OF ITS OWN, which asked for a name and
+ * posted only that: no description, no Make private, no statuses, all of which
+ * the Create menu's Folder form sends (`commit-log/log-a0b4108-1`). ClickUp's
+ * sidebar opens its one Create Folder dialog. The sidebar's "New folder" now
+ * opens the Create menu's Folder form with the space chosen, so there is one
+ * folder form, and path 2 below drives it from the sidebar.
+ *
  * WHERE THE RULE LIVES: migration 0157, a partial case-insensitive unique index
  * on `(space_id, lower(name)) where is_archived = false` — 0147's index for the
  * other container. The service check on top exists ONLY so the answer carries
@@ -55,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a branch that skipped is a failure. */
-const EXPECTED_CHECKS = 20
+const EXPECTED_CHECKS = 22
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
@@ -351,13 +358,23 @@ try {
       `${box ? Math.round(box.y + box.height / 2) : '?'}) of ${viewport?.width}×${viewport?.height}`,
   )
 
-  // ── path 2: the sidebar's "New folder" (the window.prompt / window.alert one) ──
+  // ── path 2: the sidebar's "New folder", which opens the same Folder form ──
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.getByTestId(`space-toggle-${SPACE_A}`).click({ timeout: 25_000 })
   await page.getByTestId(`space-new-folder-${SPACE_A}`).click({ timeout: 20_000 })
-  await page.getByTestId('sidebar-folder-name').fill(NAME, { timeout: 8000 }).catch(() => {})
+  const folderTab = page.getByTestId('create-tab-folder')
+  await folderTab.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
+  const tabPressed = await folderTab.getAttribute('aria-pressed', { timeout: 3000 }).catch(() => null)
+  const spaceChosen = await page.getByTestId('quick-create-folder-space').inputValue({ timeout: 3000 }).catch(() => null)
+  chk(
+    tabPressed === 'true' && spaceChosen === SPACE_A,
+    'the sidebar’s New folder opens the Create menu’s Folder form, with this space chosen',
+    `the Folder tab pressed: ${JSON.stringify(tabPressed)}; the space chosen: ${spaceChosen === SPACE_A ? 'this one' : JSON.stringify(spaceChosen)}. ` +
+      'A dialog of the sidebar’s own asks for a name and sends nothing else',
+  )
+  await page.getByTestId('quick-create-folder-name').fill(NAME, { timeout: 8000 }).catch(() => {})
   const sidebarPostsBefore = folderPosts.length
-  await page.getByTestId('sidebar-folder-submit').click({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-submit').click({ timeout: 8000 }).catch(() => {})
 
   chk(
     await waitUntil(() => folderPosts.length > sidebarPostsBefore, { timeoutMs: 15_000 }),
@@ -380,8 +397,8 @@ try {
    * the reason this path does not reuse `ContainerEditDialog`.
    */
   chk(
-    await page.getByTestId('sidebar-folder-dialog').isVisible().catch(() => false) &&
-      (await page.getByTestId('sidebar-folder-name').inputValue().catch(() => '')) === NAME,
+    (await page.getByTestId('quick-create-folder-name').isVisible().catch(() => false)) &&
+      (await page.getByTestId('quick-create-folder-name').inputValue().catch(() => '')) === NAME,
     'and the dialog stays open with the rejected name still in the box',
     'the dialog closed on a refusal, so the name has to be retyped to try again',
   )
@@ -392,32 +409,50 @@ try {
    * exists rather than after a sleep.
    */
   const FRESH = `Fresh ${TAG}`
-  // Both, not just the fill. `folder-create-11-dialog-closes-on-error` closes
-  // the dialog on the refusal above — which the check above reports — so
-  // neither the box nor the submit is there for this success path, and the
+  const WORDS = `What goes in here ${TAG}`
+  // Every step bounded. `folder-create-11-dialog-closes-on-error` closes the
+  // dialog on the refusal above — which the check above reports — so neither
+  // the box nor the submit is there for this success path, and an unbounded
   // press spent thirty seconds where the fill had been spared.
   //
   // Rule four does not cover this and should not be widened to: it pairs the
-  // SAME locator guarded then bare, and these are two different testids in one
+  // SAME locator guarded then bare, and these are different testids in one
   // sequence — the shape that can only be stated by reading formatting, left to
   // measurement on purpose. Measurement found it, in one set, at one line.
-  await page.getByTestId('sidebar-folder-name').fill(FRESH, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('sidebar-folder-submit').click({ timeout: 8000 }).catch(() => {})
+  // Open before, or "it closed" says nothing: a dialog that never opened is
+  // not open afterwards either, and this check passed on exactly that.
+  const openBefore = await page.getByTestId('quick-create-folder-name').isVisible().catch(() => false)
+  await page.getByTestId('quick-create-folder-name').fill(FRESH, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-description').fill(WORDS, { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-private').check({ timeout: 8000 }).catch(() => {})
+  await page.getByTestId('quick-create-folder-submit').click({ timeout: 8000 }).catch(() => {})
   chk(
-    await waitUntil(
-      async () => !(await page.getByTestId('sidebar-folder-dialog').isVisible().catch(() => false)),
-      { timeoutMs: 15_000 },
-    ),
+    openBefore &&
+      await waitUntil(
+        async () => !(await page.getByTestId('quick-create-folder-name').isVisible().catch(() => false)),
+        { timeoutMs: 15_000 },
+      ),
     'a name that is free closes the dialog',
-    'the dialog stayed open on a create that should have succeeded',
+    openBefore ? 'the dialog stayed open on a create that should have succeeded' : 'the dialog was not open to be closed',
   )
+  // The private flag is a second write, after the create (`FolderForm`).
+  await waitUntil(async () => (await sql`
+    select 1 from folders
+    where space_id = ${SPACE_A} and name = ${FRESH} and is_archived = false and visibility = 'private'`).length > 0,
+  { timeoutMs: 10_000 })
   const rowsAfter = await sql`
-    select id from folders
+    select id, description, visibility from folders
     where space_id = ${SPACE_A} and name = ${FRESH} and is_archived = false`
   chk(
     rowsAfter.length === 1,
     'and exactly one folder with that name now exists in the space',
     `the database holds ${rowsAfter.length} folders called "${FRESH}" in this space`,
+  )
+  chk(
+    rowsAfter.length === 1 && rowsAfter[0].description === WORDS && rowsAfter[0].visibility === 'private',
+    'and it holds what the dialog was given from the sidebar — its description, and private',
+    `the folder's description is ${JSON.stringify(rowsAfter[0]?.description ?? null)} and its visibility ` +
+      `${JSON.stringify(rowsAfter[0]?.visibility ?? null)}: a sidebar form that posts only a name drops both`,
   )
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)

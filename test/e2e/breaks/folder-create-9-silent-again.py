@@ -4,6 +4,9 @@
 # sits there with the button looking un-pressed.
 # Reddens: folder-create: "the refusal reaches the person as a toast" /
 #          "and it reads \"Folder name taken\"" / "and it sits bottom-left"
+#   or "the sidebar path reports the refusal with the same words"
+#   (the sidebar opens this form since `commit-log/log-a0b4108-1`, so its
+#   refusal is this onError's too)
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.folderFailed')),\n"

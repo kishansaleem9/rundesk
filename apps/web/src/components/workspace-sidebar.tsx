@@ -455,22 +455,6 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const [savingWs, setSavingWs] = useState(false)
 
   /*
-   * §V2-S10 frames `08:25` / `08:55`.
-   *
-   * This was `window.prompt` + `window.alert`, so the two folder-creation paths
-   * disagreed about whether a failure was even mentioned, and neither could
-   * produce the frame's toast. `window.alert` is also a modal the person has to
-   * dismiss before they can look at what went wrong, and in a headless browser
-   * it is nothing at all — the refusal had no surface anybody could read.
-   *
-   * Now the same dialog the rename path already uses, and the same bottom-left
-   * toast the List tab raises, so "Folder name taken" lands in one place
-   * whichever door was used.
-   */
-  const [folderDialog, setFolderDialog] = useState<{ spaceId: string; name: string } | null>(null)
-  const [savingFolder, setSavingFolder] = useState(false)
-
-  /*
    * §V2-S12 `[08:23]` — *"[Kuch] cheezein folder mein MOVE kar sakti hoon —
    * DRAG AND DROP ka option hai."* Named outright, and frames `08:35` / `08:55`
    * are the result: the tree and the breadcrumb both read
@@ -742,24 +726,6 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
     },
     'data-dragging': dragItem?.id === item.id ? 'true' : undefined,
   })
-
-  const submitCreateFolder = async () => {
-    if (!folderDialog) return
-    const name = folderDialog.name.trim()
-    if (!name) return
-    setSavingFolder(true)
-    try {
-      await api(`/spaces/${folderDialog.spaceId}/folders`, { method: 'POST', body: { name } })
-      setExpandedSpaces((prev) => ({ ...prev, [folderDialog.spaceId]: true }))
-      await qc.invalidateQueries({ queryKey: ['space-tree', workspaceId] })
-      setFolderDialog(null)
-    } catch (err) {
-      // The refusal reaches the person, in the API's words when it has any.
-      toast.error(err instanceof Error && err.message ? err.message : t('nav.createFolderError'))
-    } finally {
-      setSavingFolder(false)
-    }
-  }
 
   /*
    * §2.4's `createProject` stood here: a `window.prompt` behind the "+" on a
@@ -2806,7 +2772,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     <button
                       className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
                       data-testid={`space-new-folder-${space.id}`}
-                      onClick={() => setFolderDialog({ spaceId: space.id, name: '' })}
+                      onClick={() => setSpaceCreate({ spaceId: space.id, kind: 'folder' })}
                     >
                       <FolderPlus className="h-3.5 w-3.5 shrink-0" />
                       {t('nav.newFolder')}
@@ -3045,59 +3011,14 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
       )}
 
       {/*
-        §V2-S10 frames `08:25` / `08:55` — the sidebar's own "New folder".
-
-        Its own dialog rather than `ContainerEditDialog` for one reason: the
-        shared dialog closes on submit, and this path has to STAY OPEN when the
-        server refuses, with the name still in the box, so "Folder name taken"
-        is something you can act on rather than something you have to retype
-        your way back to.
+        §V2-S10 frames `08:25` / `08:55` — the sidebar's "New folder" opens the
+        Create menu's Folder form, on this space (`spaceCreate`, below). It had
+        a dialog of its own, which asked for a name and posted only that: no
+        description, no Make private, no statuses, all of which that form sends
+        (`commit-log/log-a0b4108-1`). ClickUp's sidebar opens its one Create
+        Folder dialog. The form keeps a refused name in its box and says why,
+        which is what the sidebar's own dialog was kept for.
       */}
-      <Dialog
-        open={folderDialog !== null}
-        onOpenChange={(next) => {
-          if (!next) setFolderDialog(null)
-        }}
-      >
-        <DialogContent className="sm:max-w-md" data-testid="sidebar-folder-dialog">
-          <DialogHeader>
-            <DialogTitle>{t('nav.newFolder')}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-1.5 py-1">
-            <Label htmlFor="sidebar-folder-name">{t('container.nameLabel')}</Label>
-            <Input
-              id="sidebar-folder-name"
-              autoFocus
-              data-testid="sidebar-folder-name"
-              value={folderDialog?.name ?? ''}
-              placeholder={t('nav.newFolderPrompt')}
-              onChange={(e) =>
-                setFolderDialog((prev) => (prev ? { ...prev, name: e.target.value } : prev))
-              }
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  void submitCreateFolder()
-                }
-              }}
-            />
-          </div>
-          <DialogFooter>
-            <Button variant="outline" size="sm" onClick={() => setFolderDialog(null)}>
-              {t('common.cancel')}
-            </Button>
-            <Button
-              size="sm"
-              data-testid="sidebar-folder-submit"
-              disabled={!folderDialog?.name.trim() || savingFolder}
-              onClick={() => void submitCreateFolder()}
-            >
-              {t('quickCreate.createFolder')}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       <ContainerEditDialog
         open={treeEdit !== null}
         onOpenChange={(next) => {
