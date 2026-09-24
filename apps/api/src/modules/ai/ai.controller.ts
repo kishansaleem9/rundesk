@@ -9,6 +9,7 @@ import type { PlanAction } from './ai-command'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { NotGuestGuard } from '../../common/guards/not-guest.guard'
 import { PlanFeatureGuard } from '../plans/plan-feature.guard'
+import { NamedWorkspaceMemberGuard } from '../auth/guards/named-workspace-member.guard'
 import { RequirePlan } from '../plans/require-plan.decorator'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { HELP_TOPICS } from './knowledge'
@@ -20,7 +21,9 @@ import { HELP_TOPICS } from './knowledge'
 // gated request carries a workspaceId whose plan lacks AI it 403s, otherwise it's
 // a no-op — and always a no-op for enterprise (every existing workspace).
 @RequirePlan('ai')
-@UseGuards(JwtAuthGuard, NotGuestGuard, PlanFeatureGuard)
+// NamedWorkspaceMemberGuard: every route here takes the workspace in its body
+// or query, and nothing checked the caller belonged to it (see the guard).
+@UseGuards(JwtAuthGuard, NotGuestGuard, NamedWorkspaceMemberGuard, PlanFeatureGuard)
 @Controller('ai')
 export class AiController {
   constructor(

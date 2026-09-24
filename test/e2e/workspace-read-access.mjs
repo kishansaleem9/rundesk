@@ -15,6 +15,10 @@
  *     the space's and the list's names.
  *   · `GET /tasks/workspace/:ws/timeline` applied only the private-item rule.
  *     The private space's dated task was on the member's timeline.
+ *   · The AI routes took the workspace from the body and checked nothing: a
+ *     user of ANOTHER organisation had AI chat and command build their prompts
+ *     from it, and a member's prompts named a private space they were refused
+ *     (read in the model stub's request log). §3.
  *
  * Each read is made three times: by a member refused the private space, by a
  * guest, and by the admin, who may open everything and must still see it all.
@@ -30,7 +34,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 10
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -162,6 +166,88 @@ try {
     'while the admin’s timeline has all three',
     `it answered ${adminTimeline.status} with ${shown(adminTimeline)}`,
   )
+
+  // ══ 3. THE AI ════════════════════════════════════════════════════════════
+  console.log('\n▶ the AI reads a workspace as the caller may, and only a workspace the caller is in')
+
+  /*
+   * The AI routes take the workspace in the body, and nothing checked the
+   * caller belonged to it: measured with the model stub, a user of another
+   * organisation (404 on the workspace itself) had AI chat and AI command
+   * build their prompts from it. The new guard runs BEFORE the model check,
+   * so the refusal is measurable with no model at all: a stranger gets 404
+   * where a member gets past the guard (201 with a model, 503 without one).
+   */
+  const outsider = await signUpApi(API, {
+    fullName: 'Reads outsider', email: `${TAG}-outsider@rundesk.invalid`, password: PERSON_PASSWORD,
+    organizationName: `Reads outsider ${stamp}`, organizationSlug: `reads-outsider-${stamp}`,
+  })
+  const O = apiAs(outsider.accessToken)
+  const chatBody = { workspaceId: WS, messages: [{ role: 'user', content: 'What spaces are there?' }] }
+  const outsiderChat = await O('/ai/chat', { method: 'POST', body: chatBody })
+  const outsiderCommand = await O('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'what lists are there' } })
+  const memberCommand = await M('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'what lists are there' } })
+  chk(
+    outsiderChat.status === 404 && outsiderCommand.status === 404 && memberCommand.status !== 404,
+    'a user outside the workspace is refused AI chat and AI command on it, before any model is asked — while a member is not',
+    `the outsider's chat answered ${said(outsiderChat)} and command ${said(outsiderCommand)}; the member's command ${said(memberCommand)}`,
+  )
+  // The AI is not for guests, and the account-wide check could only refuse an
+  // account whose GLOBAL role is guest; this guest's account is a member's.
+  const guestCommand = await G('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'what lists are there' } })
+  chk(
+    guestCommand.status === 403,
+    'and a guest of the workspace is refused them too',
+    `the guest's command answered ${said(guestCommand)}`,
+  )
+
+  // The breakdown behind a status answer; no model needed.
+  const totalOf = (res) => res.data?.total ?? null
+  const memberStatus = await M(`/ai/project-status?workspaceId=${WS}`)
+  const adminStatus = await A(`/ai/project-status?workspaceId=${WS}`)
+  chk(
+    memberStatus.status === 200 && adminStatus.status === 200 && totalOf(adminStatus) === 3 && totalOf(memberStatus) === 1,
+    'the AI’s status breakdown counts, for a member, nothing from a space they are refused nor a private task — the admin’s counts all three',
+    `the member's total is ${totalOf(memberStatus)} (${memberStatus.status}), the admin's ${totalOf(adminStatus)} (${adminStatus.status})`,
+  )
+
+  /*
+   * THE PROMPT ITSELF, where a model answers. On a lane with
+   * RUNDESK_LANE_MODEL the API talks to `model-stub.mjs`, which records every
+   * prompt it is sent; with no model (CI), no prompt is ever built, and the
+   * member is refused with 503 before it would be.
+   */
+  const modelOn = (await A('/ai/status')).data?.available === true
+  const MODEL = `http://127.0.0.1:${argOf('--model', process.env.E2E_MODEL_PORT ?? String(9200 + (API_PORT - 3020)))}`
+  const seen = async () => (await fetch(`${MODEL}/__control/seen`).then((r) => r.json()).catch(() => null))?.calls ?? null
+  if (modelOn) {
+    // Chat and command build their contexts separately, and both named it.
+    const before = (await seen())?.length ?? null
+    await M('/ai/chat', { method: 'POST', body: chatBody })
+    await M('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'list every space and list' } })
+    const memberPrompts = ((await seen()) ?? []).slice(before ?? 0)
+    const mid = (await seen())?.length ?? null
+    await A('/ai/chat', { method: 'POST', body: chatBody })
+    await A('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'list every space and list' } })
+    const adminPrompts = ((await seen()) ?? []).slice(mid ?? 0)
+    const names = (calls) => calls.some((c) => JSON.stringify(c).includes(`${TAG} private`))
+    const namesInEach = (calls) => calls.length >= 2 && calls.every((c) => JSON.stringify(c).includes(`${TAG} private`))
+    chk(
+      before !== null && memberPrompts.length >= 2 && !names(memberPrompts) && namesInEach(adminPrompts),
+      'the prompt a model is sent names, for a member, no space they are refused — the admin’s names it',
+      before === null
+        ? `a model is configured but its stub could not be read at ${MODEL}`
+        : `the member's ${memberPrompts.length} prompt(s) ${names(memberPrompts) ? 'NAME' : 'do not name'} the private space; ` +
+          `the admin's ${adminPrompts.length} ${names(adminPrompts) ? 'name' : 'do not name'} it`,
+    )
+  } else {
+    const memberChat = await M('/ai/chat', { method: 'POST', body: chatBody })
+    chk(
+      memberChat.status === 503,
+      'the prompt a model is sent names, for a member, no space they are refused — the admin’s names it',
+      `no model is configured here, so no prompt is built; the member's chat answered ${said(memberChat)}, not the 503 that says so`,
+    )
+  }
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)

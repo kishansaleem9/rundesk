@@ -74,6 +74,21 @@ export async function checkContainerAccess(
 }
 
 /**
+ * The SPACE half of the rule below, for a query that reads spaces without
+ * their projects: a private space is its members' (managers see all). Unaliased
+ * `spaces`; `undefined` for a manager.
+ *
+ * It exists because the AI context listed every space by name, private ones
+ * included, to a member refused them, and a space-only query had no filter
+ * that did not need `projects` joined.
+ */
+export function spaceVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
+  if (isManager) return undefined
+  const memberSpaces = db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId))
+  return or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces))
+}
+
+/**
  * `checkContainerAccess` as a WHERE fragment, for a query that lists rows from
  * many containers at once — the same rule, row for row: a manager sees every
  * container; a private space needs space membership; a private project needs
@@ -85,14 +100,13 @@ export async function checkContainerAccess(
  */
 export function containerVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
   if (isManager) return undefined
-  const memberSpaces = db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId))
   const adminSpaces = db
     .select({ id: spaceMembers.spaceId })
     .from(spaceMembers)
     .where(and(eq(spaceMembers.userId, actorId), eq(spaceMembers.role, 'admin')))
   const memberProjects = db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actorId))
   return and(
-    or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)),
+    spaceVisibilityFilter(db, actorId, false),
     or(
       isNull(projects.visibility),
       ne(projects.visibility, 'private'),

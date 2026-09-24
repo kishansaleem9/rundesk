@@ -41,7 +41,12 @@ import { EmbeddingService } from './embedding.service'
 import { embedText, cosineSimilarity } from './embedding'
 import { ATTACHMENT_TEXT_CAP, extractAttachmentText, isExtractableAttachment } from './attachment-text'
 import { isLinkAttachmentKey } from '../tasks/task-object-keys'
-import { checkContainerAccess, isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import {
+  checkContainerAccess,
+  containerVisibilityFilter,
+  isWorkspaceManager,
+  spaceVisibilityFilter,
+} from '../../common/permissions/container-access.guard-helper'
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import {
@@ -1915,6 +1920,16 @@ Current date: ${new Date().toISOString().split('T')[0]}`
   ): Promise<string> {
     try {
       const cutoff = new Date(Date.now() - 90 * 24 * 60 * 60 * 1000)
+      /*
+       * WHAT THE CALLER MAY SEE, AND NOTHING ELSE, goes into the prompt. Every
+       * query below read the whole workspace: measured on lane 1, a member
+       * refused a private space got a prompt naming it, and its project, under
+       * "Workspace structure", and the totals and the breakdown counted its
+       * tasks. The container rule and the private-item rule now apply to each.
+       */
+      const isManager = await resolveIsManager(this.db, workspaceId, userId)
+      const inView = containerVisibilityFilter(this.db, userId, isManager)
+      const taskInView = taskVisibilityFilter(this.db, userId, isManager)
       const [[wsRow], [roleRow], [counts], spaceRows, projectRows, openTasks, history, statusBreakdown] = await Promise.all([
         this.db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1),
         this.db
@@ -1927,24 +1942,24 @@ Current date: ${new Date().toISOString().split('T')[0]}`
             spaces: sql<number>`count(distinct ${spaces.id})::int`,
             projects: sql<number>`count(distinct ${projects.id})::int`,
             lists: sql<number>`count(distinct ${lists.id})::int`,
-            openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false then ${tasks.id} end)::int`,
+            openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false and (${taskInView ?? sql`true`}) then ${tasks.id} end)::int`,
           })
           .from(spaces)
           .leftJoin(projects, eq(projects.spaceId, spaces.id))
           .leftJoin(lists, eq(lists.projectId, projects.id))
           .leftJoin(tasks, eq(tasks.listId, lists.id))
-          .where(eq(spaces.workspaceId, workspaceId)),
+          .where(and(eq(spaces.workspaceId, workspaceId), inView)),
         this.db
           .select({ id: spaces.id, name: spaces.name })
           .from(spaces)
-          .where(eq(spaces.workspaceId, workspaceId))
+          .where(and(eq(spaces.workspaceId, workspaceId), spaceVisibilityFilter(this.db, userId, isManager)))
           .orderBy(asc(spaces.name))
           .limit(20),
         this.db
           .select({ id: projects.id, name: projects.name, spaceId: projects.spaceId })
           .from(projects)
           .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-          .where(eq(spaces.workspaceId, workspaceId))
+          .where(and(eq(spaces.workspaceId, workspaceId), inView))
           .orderBy(asc(projects.name))
           .limit(60),
         this.db
@@ -1960,6 +1975,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               eq(taskAssignees.userId, userId),
               eq(tasks.isArchived, false),
               ne(tasks.statusCategory, 'closed'),
+              inView,
             ),
           )
           .orderBy(asc(tasks.dueDate))
@@ -1976,6 +1992,8 @@ Current date: ${new Date().toISOString().split('T')[0]}`
             and(
               eq(spaces.workspaceId, workspaceId),
               gte(tasks.updatedAt, cutoff),
+              inView,
+              taskInView,
               or(
                 eq(tasks.createdById, userId),
                 sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id} and ${taskAssignees.userId} = ${userId})`,
@@ -2059,6 +2077,8 @@ Current date: ${new Date().toISOString().split('T')[0]}`
         and(
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
+          // Both rules: this counted tasks in private spaces the actor is refused.
+          containerVisibilityFilter(this.db, actorId, isManager),
           taskVisibilityFilter(this.db, actorId, isManager),
         ),
       )
@@ -3231,7 +3251,14 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false), listVisibilityFilter(actorId, isManager)))
+        .where(
+          and(
+            eq(spaces.workspaceId, workspaceId),
+            eq(lists.isArchived, false),
+            containerVisibilityFilter(this.db, actorId, isManager),
+            listVisibilityFilter(actorId, isManager),
+          ),
+        )
         .orderBy(asc(spaces.name), asc(projects.name), asc(lists.name))
         .limit(100),
       this.db
@@ -3252,22 +3279,29 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), taskVisibilityFilter(this.db, actorId, isManager)))
+        .where(
+          and(
+            eq(spaces.workspaceId, workspaceId),
+            eq(tasks.isArchived, false),
+            containerVisibilityFilter(this.db, actorId, isManager),
+            taskVisibilityFilter(this.db, actorId, isManager),
+          ),
+        )
         .orderBy(asc(tasks.dueDate))
         .limit(300),
       /*
        * §V2-S16 `[17:44]` — the spaces a container may be created in.
        *
-       * A private space a non-manager is not a member of is NOT filtered out
-       * here — `checkContainerAccess` in the executor is what refuses it, and
-       * doing it in one place rather than two is what stops the catalog and the
-       * gate drifting apart. What this list is for is resolving "rundesk" to an
-       * id; being in it is not permission to write into it.
+       * `checkContainerAccess` in the executor is still what refuses a WRITE
+       * into a space. But this list goes into the prompt by name, and it named
+       * private spaces to members refused them (measured on lane 1), so the
+       * read rule applies here too: a space the caller cannot open is not one
+       * the assistant can resolve, which is the same answer as not existing.
        */
       this.db
         .select({ id: spaces.id, name: spaces.name, visibility: spaces.visibility })
         .from(spaces)
-        .where(eq(spaces.workspaceId, workspaceId))
+        .where(and(eq(spaces.workspaceId, workspaceId), spaceVisibilityFilter(this.db, actorId, isManager)))
         .orderBy(asc(spaces.name))
         .limit(100),
     ])

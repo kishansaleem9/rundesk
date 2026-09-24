@@ -3,20 +3,14 @@
 # Reddens: ai-create-containers: "and the breakdown moves by exactly one, in the in-progress bucket"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.service.ts'
-a = """          eq(spaces.workspaceId, workspaceId),
-          eq(tasks.isArchived, false),
-          taskVisibilityFilter(this.db, actorId, isManager),
-        ),
-      )
-      .groupBy(tasks.status, tasks.statusCategory)
+# (Re-anchored 24 September: the breakdown gained the container rule, under
+# the comment this anchor now names.)
+a = """          eq(tasks.isArchived, false),
+          // Both rules: this counted tasks in private spaces the actor is refused.
 """
-b = """          eq(spaces.workspaceId, workspaceId),
-          eq(tasks.isArchived, false),
+b = """          eq(tasks.isArchived, false),
           eq(tasks.statusCategory, 'open'),
-          taskVisibilityFilter(this.db, actorId, isManager),
-        ),
-      )
-      .groupBy(tasks.status, tasks.statusCategory)
+          // Both rules: this counted tasks in private spaces the actor is refused.
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

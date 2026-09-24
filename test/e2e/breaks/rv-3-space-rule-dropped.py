@@ -2,7 +2,9 @@
 # Reddens: read-visibility: "but not a task in a private space the member is not in"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.guard-helper.ts'
-a = "    or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)),\n"
+# (Re-anchored 24 September: the space half of the rule is its own function now,
+# `spaceVisibilityFilter`, and this drops the container filter's use of it.)
+a = "    spaceVisibilityFilter(db, actorId, false),\n"
 b = ''
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
