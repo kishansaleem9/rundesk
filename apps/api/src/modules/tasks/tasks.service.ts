@@ -93,7 +93,7 @@ import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
-import { checkContainerAccess, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
@@ -827,37 +827,14 @@ export class TasksService {
       .limit(1)
     if (!membership) throw new NotFoundException('Workspace not found')
 
-    // Managers/admins/super_admins bypass private-container membership.
+    // The shared rule (`containerRefusal`), answered in the words of whichever
+    // container refused; managers pass it. This restated the rule to keep its
+    // messages, and missed a private folder the day the rule learnt one.
     const withRole = { ...ctx, workspaceRole: membership.role as string }
-    if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return withRole
-
-    // A private space requires the actor to be a member of it.
-    if (ctx.spaceVisibility === 'private') {
-      const [sm] = await this.db
-        .select({ userId: spaceMembers.userId })
-        .from(spaceMembers)
-        .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
-        .limit(1)
-      if (!sm) throw new ForbiddenException('This space is private')
-    }
-
-    // An explicitly-private project requires project membership (or admin of the
-    // owning space). A project that inherits (null) is covered by the space check.
-    if (ctx.projectVisibility === 'private' && ctx.projectId) {
-      const [pm] = await this.db
-        .select({ userId: projectMembers.userId })
-        .from(projectMembers)
-        .where(and(eq(projectMembers.projectId, ctx.projectId), eq(projectMembers.userId, actorId)))
-        .limit(1)
-      if (!pm) {
-        const [sadm] = await this.db
-          .select({ role: spaceMembers.role })
-          .from(spaceMembers)
-          .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
-          .limit(1)
-        if (sadm?.role !== 'admin') throw new ForbiddenException('This project is private')
-      }
-    }
+    const refusal = await containerRefusal(this.db, ctx, { userId: actorId, workspaceRole: membership.role as string })
+    if (refusal === 'space') throw new ForbiddenException('This space is private')
+    if (refusal === 'folder') throw new ForbiddenException('This folder is private')
+    if (refusal === 'project') throw new ForbiddenException('This project is private')
 
     return withRole
   }

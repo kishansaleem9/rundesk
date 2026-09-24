@@ -470,7 +470,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Break run (lane 2, 7f37f7b):* `rta-1` and `rta-2` reddened; `rta-3` reddened nothing (3 passed). It changed `updateTask`'s last line, a `return` reached only when the list has no workspace, which no edit reaches; the edit's answer is the read inside the workspace branch. Re-aimed there; its re-run is pending.
 
-### `found-23-sep/container-read-rule-twice` — open, small
+### `found-23-sep/container-read-rule-twice` — **closed** (with `found-24-sep/private-folders-unenforced`)
 
 **The container read rule exists in THREE forms: `assertContainerReadAccess` in tasks.service inline, `checkContainerAccess` used by the guard (and its WHERE-fragment twin `containerVisibilityFilter`, written beside it on purpose), and an SQL predicate in ai.service that omits the space-admin case**
 
@@ -479,6 +479,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 *To close:* make `assertContainerReadAccess` call `checkContainerAccess` (keeping its two distinct messages by asking which half failed), and replace ai.service's predicate with `containerVisibilityFilter` — which also gives space admins the private-project access the guard gives them.
 
 *Progress:* the ai.service predicate named here is gone, replaced by the shared filters in `filterAccessibleHits` (`found-24-sep/ai-knowledge-filter-copies-the-container-rule`, above). What remains is `assertContainerReadAccess` in tasks.service, which still restates `checkContainerAccess` to keep its two messages.
+
+*Closed:* the rule learnt a private folder, and the copy would have missed it. `containerRefusal` states the rule once and says which container refused. `checkContainerAccess` is its yes-or-no, and `assertContainerReadAccess` answers with its three messages from it. A third copy, `getProjectsBySpace`'s, asks the shared rule too (`found-24-sep/private-folders-unenforced`, below).
 
 ### `found-23-sep/labels-editable-by-any-member` — **closed** (security, small; the policy confirmed from ClickUp's help)
 
@@ -951,7 +953,7 @@ Where the task is aliased (the standup's "held up by"), the list rule is written
 
 The new suite `private-list-reach`, 13 checks: one private list, made by the admin, its tasks dated, commented on, blocking the member's task, in a sprint and one of them assigned to the member. The member and the admin read each surface above side by side. The thirteenth reads the prompts a model is sent when a model is configured, and the 503 when not. Measured on lane 1, the fix set aside and the API rebuilt, with the lane given the model stub: 0 of 13. Before the fix the member's command prompt named the private list. With the fix, 13 of 13 on the model lane and 12 of 12 without the prompt check. API unit tests: the workspace list's tests now read the query it asks rather than rows it drops, and search's Meili test reads the reach; `sst-2` re-anchored and `sst-3` new, both unit claims. `sst-3` (the reach without the list's rule) first left the test green: the test took the first lists query carrying the list rule, which was the list-name search's own. It now reads the reach itself, the lists query that asks no words, and `sst-3` reddens it. `plr-1..16`, each compiled, `plr-16` to be run on a model lane. Fifteen older patches that took the container rule out at these sites are re-anchored to the new line with the same edit: `dra-1`, `lra-10`, `lra-11`, `sra-1`, `sra-3`, `sra-4`, `wra-1`, `wra-4`, `wra-5`, `wra-7`, `wra-10`, `wra-23`, `wra-24`, `wra-26` and `wra-40`. Regression on lane 1, 21/21: the new suite, `workspace-read-access`, `search-read-access`, `ai-read-access`, `knowledge-read-access`, `lookup-read-access`, `report-read-access`, `dependency-read-access`, `related-task-access`, `sprint-access`, `home-my-work`, `task-pickers-search`, `addressability-live`, `person-panel`, `a39-dm-tabs`, `meeting-access`, `read-visibility`, `task-depth`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
-### `found-24-sep/private-folders-unenforced` — open (security, HIGH; found reading the container rule, then measured)
+### `found-24-sep/private-folders-unenforced` — **closed** (security, HIGH; found reading the container rule, then measured)
 
 **A folder's privacy is read by the folder listing and by nothing that reads what is inside it**
 
@@ -960,6 +962,10 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 *Measured on lane 1 (probe `probe-private-folder`):* the admin made a folder in an open space private (200) and a project, list and task inside it. A member it refuses was kept out of the folder listing only. The project (200), the list's tasks (200), the task (200), the workspace list and search each named what was inside.
 
 *To close:* add the folder to the container rule once. `checkContainerAccess` looks up a project's folder, a private folder being its maker's and the managers', as `folderVisibilityFilter` has it. `containerVisibilityFilter`, which `taskInReachFilter` builds on, asks the same of `projects.folderId`. A suite: the member refused a private folder reads nothing inside it by any route, beside an open folder's project that they read.
+
+*Closed:* the container rule asks a project's folder, in both forms. `containerRefusal` (`container-access.guard-helper.ts`) looks it up and refuses a private folder to anybody but its maker, with the managers let in before. `checkContainerAccess` is now `containerRefusal(...) === null`, so every guard and per-row check has the folder. `containerVisibilityFilter`, which `taskInReachFilter` is built on, keeps projects out of private folders not the reader's, so every list and search does too. Found on the way and closed with it: two private copies of the project rule. The task service's `assertContainerReadAccess` now asks `containerRefusal` and answers in the words of whichever container refused (`found-23-sep/container-read-rule-twice`, above). `getProjectsBySpace` never learnt the folder and listed a private folder's project; it now asks the shared rule. The new suite `private-folder-reach`, 6/6 on lane 1 (0/6 before, the fix set aside): a private folder and an open one, each with a project, a list and a task, read by the member and the admin through the project list, the project, the list catalogue and the list's tasks, the task, the workspace list and search. API unit tests 1633/1633; one attachments test queues the folder lookup's answer. `pfr-1..3`, each compiled. Regression on lane 1, 19/19: the new suite, `private-list-reach`, `workspace-read-access`, `search-read-access`, `read-visibility`, `folder-create`, `folder-dialog`, `sidebar-sections`, `sidebar-reorder`, `space-default-permission`, `space-create-menu`, `list-under-space`, `request-access`, `malformed-ids`, `task-boundaries`, `addressability-live`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+*Not measured by a check:* the task service's own read check sits behind the route guard on every route that reaches it, so no HTTP check can see it alone, and no patch is aimed at it.
 
 ### `found-24-sep/workspace-settings-mass-assign` — open (security, HIGH; found reading the workspace logo's path for `avatar-and-logo-accept-any-url`)
 

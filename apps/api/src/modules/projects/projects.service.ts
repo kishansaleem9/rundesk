@@ -1,10 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { eq, and, or, inArray, sql } from 'drizzle-orm'
-import { projects, spaces, projectMembers, spaceMembers, folders } from '@rundesk/db'
+import { eq, and, or, getTableColumns } from 'drizzle-orm'
+import { projects, spaces, projectMembers, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
-import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { containerVisibilityFilter, isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { PlansService } from '../plans/plans.service'
@@ -131,38 +131,21 @@ export class ProjectsService {
       eq(projects.isArchived, false),
       eq(projects.isDefaultContainer, false),
     )
-    if (!actorId || (await this.canSeeAllProjects(spaceId, actorId))) {
-      return this.db.select().from(projects).where(base)
-    }
-    // Otherwise: non-private projects (public/inherit) plus the private ones the
-    // caller is a member of.
-    return this.db
-      .select()
-      .from(projects)
-      .where(
-        and(
-          base,
-          or(
-            sql`${projects.visibility} is distinct from 'private'`,
-            inArray(
-              projects.id,
-              this.db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actorId)),
-            ),
-          ),
-        ),
-      )
-  }
-
-  /** Managers and admins of the owning space see every project in it. */
-  private async canSeeAllProjects(spaceId: string, actorId: string): Promise<boolean> {
+    if (!actorId) return this.db.select().from(projects).where(base)
+    /*
+     * THE SHARED CONTAINER RULE, not a copy of its project half: a private
+     * project is its members' and its space's admins', and a private FOLDER is
+     * its maker's. This kept its own copy, which never learnt the folder, so a
+     * member refused a private folder was listed its projects
+     * (`found-24-sep/private-folders-unenforced`).
+     */
     const [sp] = await this.db.select({ workspaceId: spaces.workspaceId }).from(spaces).where(eq(spaces.id, spaceId)).limit(1)
-    if (sp && (await isWorkspaceManager(this.db, sp.workspaceId, actorId))) return true
-    const [sm] = await this.db
-      .select({ role: spaceMembers.role })
-      .from(spaceMembers)
-      .where(and(eq(spaceMembers.spaceId, spaceId), eq(spaceMembers.userId, actorId)))
-      .limit(1)
-    return sm?.role === 'admin'
+    const isManager = sp ? await isWorkspaceManager(this.db, sp.workspaceId, actorId) : false
+    return this.db
+      .select(getTableColumns(projects))
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(base, containerVisibilityFilter(this.db, actorId, isManager)))
   }
 
   async getProject(projectId: string) {

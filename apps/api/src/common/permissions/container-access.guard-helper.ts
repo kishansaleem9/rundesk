@@ -1,5 +1,5 @@
-import { and, eq, inArray, isNull, ne, or, type SQL } from 'drizzle-orm'
-import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks } from '@rundesk/db'
+import { and, eq, inArray, isNull, ne, notInArray, or, type SQL } from 'drizzle-orm'
+import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole, listVisibilityFilter } from './item-visibility'
 
@@ -41,7 +41,24 @@ export async function checkContainerAccess(
   ctx: ContainerAccessContext,
   actor: { userId: string; workspaceRole?: string },
 ): Promise<boolean> {
-  if (isManagerRole(actor.workspaceRole)) return true
+  return (await containerRefusal(db, ctx, actor)) === null
+}
+
+/** Which container refuses the actor — its space, its folder or its project — or null when none does. */
+export type ContainerRefusal = 'space' | 'folder' | 'project'
+
+/**
+ * `checkContainerAccess`, saying WHICH container refused: the one statement of
+ * the rule, for the callers that answer each refusal in its own words (the
+ * task service's read check). That check kept a copy of the rule to keep its
+ * messages, and a copy is the rule twice (`found-23-sep/container-read-rule-twice`).
+ */
+export async function containerRefusal(
+  db: Db,
+  ctx: ContainerAccessContext,
+  actor: { userId: string; workspaceRole?: string },
+): Promise<ContainerRefusal | null> {
+  if (isManagerRole(actor.workspaceRole)) return null
 
   const spacePrivate = ctx.spaceVisibility === 'private'
   if (spacePrivate) {
@@ -50,7 +67,23 @@ export async function checkContainerAccess(
       .from(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actor.userId)))
       .limit(1)
-    if (!sm) return false
+    if (!sm) return 'space'
+  }
+
+  /*
+   * A PRIVATE FOLDER IS ITS MAKER'S (and the managers', who returned above), as
+   * `folderVisibilityFilter` keeps it from the folder listing. Nothing below a
+   * folder asked it, so a member it refused read its projects, their lists and
+   * tasks, the workspace list and search (`found-24-sep/private-folders-unenforced`).
+   */
+  if (ctx.projectId) {
+    const [folder] = await db
+      .select({ visibility: folders.visibility, createdById: folders.createdById })
+      .from(projects)
+      .innerJoin(folders, eq(folders.id, projects.folderId))
+      .where(eq(projects.id, ctx.projectId))
+      .limit(1)
+    if (folder?.visibility === 'private' && folder.createdById !== actor.userId) return 'folder'
   }
 
   const projectPrivate = ctx.projectVisibility === 'private'
@@ -60,17 +93,17 @@ export async function checkContainerAccess(
       .from(projectMembers)
       .where(and(eq(projectMembers.projectId, ctx.projectId), eq(projectMembers.userId, actor.userId)))
       .limit(1)
-    if (pm) return true
+    if (pm) return null
     // An admin of the owning space can reach the space's private projects.
     const [sadm] = await db
       .select({ role: spaceMembers.role })
       .from(spaceMembers)
       .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actor.userId)))
       .limit(1)
-    return sadm?.role === 'admin'
+    return sadm?.role === 'admin' ? null : 'project'
   }
 
-  return true
+  return null
 }
 
 /**
@@ -110,8 +143,14 @@ export function containerVisibilityFilter(db: Db, actorId: string, isManager: bo
     .from(spaceMembers)
     .where(and(eq(spaceMembers.userId, actorId), eq(spaceMembers.role, 'admin')))
   const memberProjects = db.select({ id: projectMembers.projectId }).from(projectMembers).where(eq(projectMembers.userId, actorId))
+  // A private folder is its maker's: no project in it is reached (`containerRefusal`).
+  const hiddenFolders = db
+    .select({ id: folders.id })
+    .from(folders)
+    .where(and(eq(folders.visibility, 'private'), or(isNull(folders.createdById), ne(folders.createdById, actorId))))
   return and(
     spaceVisibilityFilter(db, actorId, false),
+    or(isNull(projects.folderId), notInArray(projects.folderId, hiddenFolders)),
     or(
       isNull(projects.visibility),
       ne(projects.visibility, 'private'),

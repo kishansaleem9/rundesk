@@ -89,7 +89,8 @@ describe('TasksService.listAttachments — read-access gate (IDOR)', () => {
   }]
 
   it('accepts a plain workspace member on a public container and returns rows', async () => {
-    const { db } = makeDb([CTX(), [{ role: 'member' }], ATT])
+    // The container rule asks the project's folder too: `[]`, in none.
+    const { db } = makeDb([CTX(), [{ role: 'member' }], [], ATT])
     const svc = makeService(db)
     const out = await svc.listAttachments('t1', 'member-1')
     assert.equal(out.length, 1)
