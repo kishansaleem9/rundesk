@@ -99,7 +99,15 @@ async function main() {
     const got = await fetch(getUrl)
     out.signedGetStatus = got.status
     out.signedGetBytes = Buffer.from(await got.arrayBuffer()).equals(BYTES)
-    out.listed = ((await r2.listObjects('tasks/probe/')).Contents ?? []).map((c) => c.Key)
+    out.listed = (await r2.listAllObjects('tasks/probe/')).map((c) => c.Key)
+    // IN KEY ORDER, AND IN PAGES: five keys written out of order, read two at
+    // a time, which is three requests if the stub pages as S3 does.
+    for (const k of ['e', 'b', 'd', 'a', 'c']) await r2.putObject('tasks/pages/' + k + '.txt', Buffer.from(k), 'text/plain')
+    const pagesFrom = (await (await fetch('http://127.0.0.1:${PORT}/__control/requests')).json()).seq
+    out.paged = (await r2.listAllObjects('tasks/pages/', 2)).map((c) => c.Key)
+    const pageLog = await (await fetch('http://127.0.0.1:${PORT}/__control/requests')).json()
+    out.pageRequests = (pageLog.requests as Array<{ n: number; method: string; key: string }>)
+      .filter((r) => r.n > pagesFrom && r.method === 'GET' && !r.key).length
     // The arranged failure, which is what keeps "a failed upload says so" measurable.
     await fetch('http://127.0.0.1:${PORT}/__control/fail-next-put', { method: 'POST' })
     const refusedUrl = await r2.presignPutObject('tasks/probe/second.png', 'image/png')
@@ -205,6 +213,16 @@ if (out.none !== undefined) {
   chk(out.roundTrip === true, 'getObject returns the bytes that were PUT, unchanged', 'the bytes came back different')
   chk(out.signedGetStatus === 200 && out.signedGetBytes === true, 'and a signed getObjectUrl serves those same bytes — the path a cover renders through', `the signed GET answered ${out.signedGetStatus}`)
   chk(Array.isArray(out.listed) && out.listed.length === 1 && out.listed[0] === 'tasks/probe/cover.png', 'ListObjectsV2 finds the object under its prefix', `it listed ${JSON.stringify(out.listed)}`)
+  chk(
+    JSON.stringify(out.paged) === JSON.stringify(['a', 'b', 'c', 'd', 'e'].map((k) => `tasks/pages/${k}.txt`)),
+    'ListObjectsV2 answers in key order, not the order objects were written, and a continuation token goes on from where a page stopped — every key once',
+    `read two at a time, the listing gave ${JSON.stringify(out.paged)}`,
+  )
+  chk(
+    out.pageRequests === 3,
+    'and it answers in pages: five keys two at a time is three requests, the last one not truncated',
+    `the listing took ${out.pageRequests} request(s)`,
+  )
   chk(out.arrangedFailStatus === 500, 'an arranged failure refuses the next PUT — so "a failed upload says so" stays measurable', `the arranged failure answered ${out.arrangedFailStatus}`)
   chk(out.afterArrangedFail === 200, 'and it does NOT latch — the PUT after it succeeds, so the failure cannot leak into the next suite', `the PUT after the arranged failure answered ${out.afterArrangedFail}`)
   chk(out.unsignedPut === 403, 'an UNSIGNED PUT is refused — a product that stopped signing would be caught, not quietly served', `an unsigned PUT answered ${out.unsignedPut}`)
@@ -302,7 +320,10 @@ if (process.argv.includes('--mutate')) {
      * reading there. The faithful corruption is same length, different byte.
      */
     ['HEAD answers for an object that was never written', "res.writeHead(404)\n      return res.end()", "res.writeHead(200, { 'content-length': 0 })\n      return res.end()"],
-    ['the list is empty whatever is in the bucket', 'const hits = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).slice(0, max)', 'const hits = []'],
+    ['the list is empty whatever is in the bucket', '.filter(([k]) => k.startsWith(prefix) && (after === null', ".filter(([k]) => k === '\\u0000' && (after === null"],
+    ['the list answers in the order objects were written, not key order', '      .sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)))\n', ''],
+    ['the list never says it stopped short', 'const truncated = matching.length > hits.length', 'const truncated = false'],
+    ['a continuation token is ignored, so every page is the first', "const after = token ? Buffer.from(token, 'base64url').toString('utf8') : null", 'const after = null'],
     ['a stored object comes back with a byte changed', 'return res.end(found.body)', "return res.end(Buffer.concat([Buffer.from('X'), found.body.subarray(1)]))"],
     ['the request log records nothing', 'requests.push(logged)', 'void logged'],
     ['the request log forgets which key', 'const logged = { n: requestSeq, method: req.method, bucket, key }', "const logged = { n: requestSeq, method: req.method, bucket, key: '' }"],

@@ -221,15 +221,34 @@ const server = createServer(async (req, res) => {
 
   if (bucket !== BUCKET) return s3Error(res, 404, 'NoSuchBucket', `no bucket named ${bucket}`)
 
-  // ListObjectsV2 — bucket-scoped, no key.
+  /*
+   * ListObjectsV2 — bucket-scoped, no key.
+   *
+   * IN KEY ORDER, AND IN PAGES, as S3 answers it. This listed in the order
+   * objects were written, and said `IsTruncated` false whatever it had left
+   * out, so a product that read only the first page, or trusted the write
+   * order, was never shown to be wrong (`found-23-sep/clip-library-lists-the-
+   * oldest-200`). S3 sorts keys by their bytes, answers at most `max-keys`
+   * (1000 at most) and says where to continue; the token is opaque, and here
+   * it is the last key answered.
+   */
   if (req.method === 'GET' && !key && url.searchParams.get('list-type') === '2') {
     const prefix = url.searchParams.get('prefix') ?? ''
-    const max = Number(url.searchParams.get('max-keys') ?? 1000)
-    const hits = [...objects.entries()].filter(([k]) => k.startsWith(prefix)).slice(0, max)
+    const max = Math.min(Number(url.searchParams.get('max-keys') ?? 1000), 1000)
+    const token = url.searchParams.get('continuation-token')
+    const after = token ? Buffer.from(token, 'base64url').toString('utf8') : null
+    const matching = [...objects.entries()]
+      .filter(([k]) => k.startsWith(prefix) && (after === null || Buffer.compare(Buffer.from(k), Buffer.from(after)) > 0))
+      .sort(([a], [b]) => Buffer.compare(Buffer.from(a), Buffer.from(b)))
+    const hits = matching.slice(0, max)
+    const truncated = matching.length > hits.length
+    const next = truncated ? Buffer.from(hits[hits.length - 1][0]).toString('base64url') : null
     const body =
       `<?xml version="1.0" encoding="UTF-8"?><ListBucketResult><Name>${xmlEscape(BUCKET)}</Name>` +
       `<Prefix>${xmlEscape(prefix)}</Prefix><KeyCount>${hits.length}</KeyCount>` +
-      `<MaxKeys>${max}</MaxKeys><IsTruncated>false</IsTruncated>` +
+      `<MaxKeys>${max}</MaxKeys><IsTruncated>${truncated}</IsTruncated>` +
+      (token ? `<ContinuationToken>${xmlEscape(token)}</ContinuationToken>` : '') +
+      (next ? `<NextContinuationToken>${xmlEscape(next)}</NextContinuationToken>` : '') +
       hits
         .map(
           ([k, o]) =>

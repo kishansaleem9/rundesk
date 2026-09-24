@@ -23,20 +23,18 @@ function createR2Mock() {
   return {
     configured: true,
     presignPutObject: mock.fn(async (key: string) => `https://upload.example/${encodeURIComponent(key)}`),
-    listObjects: mock.fn(async () => ({
-      Contents: [
-        {
-          Key: 'workspaces/ws-1/clips/200-second.webm',
-          Size: 200,
-          LastModified: new Date('2026-05-08T10:00:00Z'),
-        },
-        {
-          Key: 'workspaces/ws-1/clips/100-first.webm',
-          Size: 100,
-          LastModified: new Date('2026-05-08T09:00:00Z'),
-        },
-      ],
-    })),
+    listAllObjects: mock.fn(async () => [
+      {
+        Key: 'workspaces/ws-1/clips/200-second.webm',
+        Size: 200,
+        LastModified: new Date('2026-05-08T10:00:00Z'),
+      },
+      {
+        Key: 'workspaces/ws-1/clips/100-first.webm',
+        Size: 100,
+        LastModified: new Date('2026-05-08T09:00:00Z'),
+      },
+    ]),
     headObject: mock.fn(async (key: string) => ({
       Metadata: {
         title: key.includes('second') ? 'Second clip' : 'First clip',
@@ -80,6 +78,22 @@ describe('ClipsService', () => {
     assert.equal(clips.length, 2)
     assert.equal(clips[0].title, 'Second clip')
     assert.equal(clips[1].title, 'First clip')
+  })
+
+  it('lists the newest 200 of a workspace with more, and looks up only those', async () => {
+    const r2 = createR2Mock()
+    // Oldest first, as a listing answers: key order is the order they were made.
+    const all = Array.from({ length: 250 }, (_, i) => ({
+      Key: `workspaces/ws-1/clips/${1000 + i}-clip.webm`,
+      Size: 1,
+      LastModified: new Date(Date.UTC(2026, 4, 8, 9, 0, i)),
+    }))
+    r2.listAllObjects = mock.fn(async () => all)
+    const clips = await new ClipsService(r2, createEmailMock(), createDbMock()).list('ws-1')
+    assert.equal(clips.length, 200)
+    assert.equal(clips[0].storageKey, 'workspaces/ws-1/clips/1249-clip.webm')
+    assert.equal(clips[199].storageKey, 'workspaces/ws-1/clips/1050-clip.webm')
+    assert.equal(r2.headObject.mock.calls.length, 200)
   })
 
   it('deletes clip with workspace-bound key', async () => {

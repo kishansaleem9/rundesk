@@ -542,13 +542,19 @@ After, 4/4. `mtg-1..4`, each compiled. Regression on lane 1, 17 suites: `meeting
 
 *Closed:* one pure rule, `modules/clips/clip-keys.ts`: a workspace's clip is its prefix plus exactly one safe segment (`isKeyDirectlyUnder`), used by share and remove, and by the task attach below. `object-key-boundaries` §5, 19/19 on lane 1: the walk is not shared and no link comes back; deleting it is refused and B's file is still there, each beside the workspace's own clip being shared (its link serves the clip) and deleted (it leaves the library). Against the old API the two refusals failed ("the link served workspace B's file", "B's file is GONE — the walk deleted it") and the two twins passed. Unit tests: `clip-keys.test.ts` (3) and two in `clips.service.test.ts` (nothing deleted, nothing signed). Break patches: `okb-17..21`, each compiled, run pending (lanes 2 to 4 are in plan-4). `clk-1` and `clk-2` are unit claims, each shown to fail its named test. Regression on lane 1, 4/4: object-key-boundaries, clip-created-card, settings-depth, video-regression.
 
-### `found-23-sep/clip-library-lists-the-oldest-200` — open, small (found reading `ClipsService.list` for the item above)
+### `found-23-sep/clip-library-lists-the-oldest-200` — **closed** (found reading `ClipsService.list` for the item above)
 
 **The clip library shows a workspace's 200 OLDEST clips, so from the 201st on, a new clip never appears in it**
 
 *Evidence:* `clips.service.ts` `list` asks `listObjects(prefix, 200)`. ListObjectsV2 returns keys in ascending order, and every clip key starts with `Date.now()`, so the 200 keys it returns are the oldest 200. They are then sorted newest-first for display, which makes the page look current. There is no paging or cursor, and nothing on the page says the list was cut off. Read, not yet measured: the lane store lists in the order objects were written, which is also oldest first, so it can be measured by uploading 201 clips.
 
 *To close:* page through the listing (continuation token) and show the newest, or, as `s4-clip-link` proposes, read a clips table. Check: after 201 uploads the newest is listed.
+
+*Closed:* `R2Service.listAllObjects` reads every page of a listing and follows the continuation token; a token that comes round again ends the walk. The library keeps the newest 200, and only those are looked up one by one. Search's clip branch had the same first page of 200 (`searchClips`). It reads every clip now, newest first. `listObjects`, which read one page, had no other caller and is gone.
+
+The lane store could not have shown any of this: it listed in write order and always said it was not truncated. It now lists in key order, as S3 does, and pages with `max-keys` (1000 at most) and a continuation token. `check-s3-stub` has two new cases for it (five keys written out of order, read two at a time: all five in key order, over three requests). It has three new mutations (write order, never truncated, the token ignored) and one re-anchored. That makes 25/25 cases and 22 of 22 mutations.
+
+The new suite `clip-library` uploads 1001 clips the way the app does, presign then PUT, so the newest is on a second page. On lane 1 before, 0 of 2: the library listed clips 1–200, its first entry clip 200, the newest missing and the oldest present; search found nothing for the newest clip's name. After, 2/2. `clb-1..3` (the oldest kept, the first page only, search's 200), each compiled. The clips unit test's fake store lists through `listAllObjects` now. A new unit test holds the newest 200 of 250, and only those looked up. API unit tests 1635/1635. Regression on lane 1, 12/12, with the new store: `clip-library`, `clip-created-card`, `attach-on-create`, `task-attachments`, `task-cover`, `object-key-boundaries`, `settings-depth`, `search-sources`, `search-read-access`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `found-23-sep/workspace-reads-skip-the-container-rule` — **closed** (security, LARGE; found fixing `home-today-overdue-includes-closed`)
 

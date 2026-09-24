@@ -1537,8 +1537,11 @@ export class SearchService implements OnModuleInit {
     if (!needle || !r2 || !r2.configured) return []
     const hits: Array<{ id: string; entityType: string; title: string; content: string; url: string }> = []
     try {
-      const listed = await r2.listObjects(`workspaces/${workspaceId}/clips/`, 200)
-      for (const obj of listed.Contents ?? []) {
+      // Every clip, newest first: one page of 200 was the workspace's OLDEST
+      // 200, so a clip made after them was never found
+      // (`found-23-sep/clip-library-lists-the-oldest-200`).
+      const listed = (await r2.listAllObjects(`workspaces/${workspaceId}/clips/`)).reverse()
+      for (const obj of listed) {
         if (!obj.Key) continue
         const fileName = obj.Key.split('/').pop() ?? ''
         // Keys are `<timestamp>-<sanitizedFileName>`; drop the timestamp prefix

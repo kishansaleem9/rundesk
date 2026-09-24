@@ -8,6 +8,9 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { EmailService } from '../email/email.service'
 import { clipPrefix, isWorkspaceClipKey } from './clip-keys'
 
+/** How many clips the library lists: the newest, whatever the workspace holds. */
+const CLIPS_LISTED = 200
+
 @Injectable()
 export class ClipsService {
   constructor(
@@ -44,8 +47,17 @@ export class ClipsService {
   async list(workspaceId: string) {
     if (!this.r2.configured) return []
     const prefix = clipPrefix(workspaceId)
-    const listed = await this.r2.listObjects(prefix, 200)
-    const objects = (listed.Contents ?? []).filter((o) => !!o.Key)
+    /*
+     * THE NEWEST 200. A listing answers in key order, and a clip's key starts
+     * with the moment it was made, so its first page of 200 was the
+     * workspace's 200 OLDEST clips: from the 201st on, a new clip never
+     * appeared here (`found-23-sep/clip-library-lists-the-oldest-200`). Every
+     * page is read, and the newest kept; only those are looked up one by one.
+     */
+    const objects = (await this.r2.listAllObjects(prefix))
+      .filter((o) => !!o.Key)
+      .sort((a, b) => (b.LastModified?.getTime() ?? 0) - (a.LastModified?.getTime() ?? 0) || (a.Key! < b.Key! ? 1 : a.Key! > b.Key! ? -1 : 0))
+      .slice(0, CLIPS_LISTED)
     const results = await Promise.all(objects.map(async (obj) => {
       const key = obj.Key!
       const head = await this.r2.headObject(key)

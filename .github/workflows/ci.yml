@@ -437,11 +437,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND FIFTY-EIGHT — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND FIFTY-NINE — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 174 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158.
+    # that is about 175 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159.
     #
     # The limit is 210, raised from 180 when the job reached 153 suites: about
     # 168 minutes plus setup against 180 left a margin under five percent. That
@@ -2043,6 +2043,15 @@ jobs:
       - name: A cleared block prefix goes back to "Work on"
         if: '!cancelled()'
         run: node test/e2e/planner-prefix.mjs --api 3011 --dist apps/web/dist
+
+      # The clip library and search read one listing page of 200, which is a
+      # workspace's OLDEST 200 clips. Against the store above, in pages.
+      - name: The clip library shows the newest clips, and search finds them, however many there are
+        if: '!cancelled()'
+        run: node test/e2e/clip-library.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
 
       # Home's "Assigned to me" and "Today & overdue" hold open work only,
       # soonest due first, counted honestly (500+ when cut), and a failed read

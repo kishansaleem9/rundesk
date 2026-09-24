@@ -6,6 +6,7 @@ import {
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  type ListObjectsV2CommandOutput,
   PutObjectCommand,
   S3Client,
 } from '@aws-sdk/client-s3'
@@ -201,15 +202,34 @@ export class R2Service {
     return this.client!.send(new HeadObjectCommand({ Bucket: this.bucketName!, Key: key }))
   }
 
-  async listObjects(prefix: string, maxKeys = 1000) {
+  /**
+   * EVERY object under a prefix, in key order. A listing answers one page, of
+   * `pageSize` at most (1000 is the most S3 gives), and says when it stopped
+   * short. Reading one page and trusting it is how the clip library came to
+   * show a workspace's 200 OLDEST clips, since clip keys start with the moment
+   * they were made (`found-23-sep/clip-library-lists-the-oldest-200`). A
+   * continuation token that comes round again ends the walk instead of looping.
+   */
+  async listAllObjects(prefix: string, pageSize = 1000) {
     this.requireConfigured()
-    return this.client!.send(
-      new ListObjectsV2Command({
-        Bucket: this.bucketName!,
-        Prefix: prefix,
-        MaxKeys: maxKeys,
-      }),
-    )
+    const all: NonNullable<ListObjectsV2CommandOutput['Contents']> = []
+    const seen = new Set<string>()
+    let token: string | undefined
+    for (;;) {
+      const page = await this.client!.send(
+        new ListObjectsV2Command({
+          Bucket: this.bucketName!,
+          Prefix: prefix,
+          MaxKeys: pageSize,
+          ContinuationToken: token,
+        }),
+      )
+      all.push(...(page.Contents ?? []))
+      const next = page.IsTruncated ? page.NextContinuationToken : undefined
+      if (!next || seen.has(next)) return all
+      seen.add(next)
+      token = next
+    }
   }
 }
 
