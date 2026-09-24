@@ -4882,7 +4882,15 @@ function TableView({
           </Button>
         </div>
       )}
-      <div className="overflow-x-auto">
+      {/*
+        ONE BOUNDED PANE, in both modes, which scrolls the rows under the
+        header. The header was `sticky top-0` inside an `overflow-x-auto` box
+        with no height: that box was its scrollport and never scrolled, so the
+        header went with the page (`resume-defects/resume-6-list-table`). The
+        virtualised mode had a rows scroller of its own below the header; the
+        virtualiser now scrolls this pane, so there is one scroller, not two.
+      */}
+      <div ref={tableParentRef} className="max-h-[70vh] overflow-auto">
         <div className="min-w-[980px]">
           {/* Header — click a label to sort, funnel to filter (Plan §5.1/§5.5) */}
           <div
@@ -4950,10 +4958,7 @@ function TableView({
           </div>
 
           {/* Rows */}
-          <div
-            ref={useTableVirtualization ? tableParentRef : undefined}
-            className={cn(useTableVirtualization && 'max-h-[70vh] overflow-auto')}
-          >
+          <div>
           <div className="divide-y divide-border">
             {useTableVirtualization && tableTopPadding > 0 ? (
               <div style={{ height: tableTopPadding }} aria-hidden="true" />

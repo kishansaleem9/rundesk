@@ -245,11 +245,18 @@ export function WorkloadPage() {
       )}
 
       {/* Heat map */}
+      {/*
+        The heat map scrolls in a bounded pane, so its header can stick: it was
+        `sticky top-0` inside an `overflow-x-auto` box with no height, which was
+        its scrollport and never scrolled (`resume-defects/resume-6-workload`).
+        The pane is the header's scrollport now, so the card's own overflow
+        does not decide it.
+      */}
       <Card variant="glass" className="overflow-hidden p-0">
-        <div className="overflow-x-auto">
+        <div className="max-h-[70vh] overflow-auto">
           <div className="min-w-max">
             {/* Header row */}
-            <div className="flex border-b border-border/60 sticky top-0 bg-card/95 backdrop-blur-sm z-10">
+            <div className="flex border-b border-border/60 sticky top-0 bg-card/95 backdrop-blur-sm z-10" data-testid="workload-heat-head">
               <div className="w-[200px] shrink-0 px-4 py-3 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground border-r border-border/60">
                 {t('workload.teammate')}
               </div>

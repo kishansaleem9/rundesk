@@ -240,9 +240,12 @@ These are the ones still standing:
    claims the `Today` control, which did not exist until this session. The row
    needs re-reading against what is now there.
 6. **Sticky headers inside `overflow-hidden`** — fixed by bounding the panes,
-   but the fix has not been observed green. `.card-glass` carries
-   `@apply overflow-hidden` in `packages/ui`, which is why the obvious fix
-   does not work.
+   and observed green: `gantt-controls` 29/29, and its three sticky patches
+   (`-15` the pane unbounded, `-16` not sticky, `-17` the panes unsynced)
+   redden, 18 of 18 in the set on 24 September at `3a0630f`. `.card-glass`
+   carries `@apply overflow-hidden` in `packages/ui`, which is why the obvious
+   fix does not work. The same shape on the list's Table view and the Workload
+   heat map is fixed the same way (`sticky-headers`).
 7. **A clip's "Copy link" yields a link that expires in 24 hours and says
    nothing about it.** One of three share paths states the expiry, and it is
    not the one people use.
