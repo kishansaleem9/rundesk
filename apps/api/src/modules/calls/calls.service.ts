@@ -208,7 +208,7 @@ export class CallsService {
       .values({ callId: row.id, userId })
       .onConflictDoNothing()
 
-    this.realtime.emitToWorkspace(workspaceId, {
+    await this.emitCallEvent(workspaceId, row.channelId, {
       type: 'call.started',
       workspaceId,
       callId: row.id,
@@ -234,6 +234,29 @@ export class CallsService {
     }
 
     return { ...row, participants: await this.participantsOf(row.id) }
+  }
+
+  /**
+   * A CALL'S EVENTS GO WHERE ITS CHANNEL'S MESSAGES GO: to the channel's
+   * readers (`channelReaders`), or the workspace for a public channel.
+   *
+   * They all went to the workspace's room. They carry ids only — the call,
+   * its channel, who joined — and that is still who is on a call in a DM, told
+   * to every member (`found-24-sep/call-events-broadcast-to-the-workspace`).
+   * The web reads them only to refresh the channel they name, which a person
+   * who cannot read the channel has no copy of. A call in no channel still
+   * goes to the workspace: there is no channel to ask.
+   */
+  private async emitCallEvent(workspaceId: string, channelId: string | null | undefined, event: never) {
+    if (!channelId) return this.realtime.emitToWorkspace(workspaceId, event)
+    const [channel] = await this.db
+      .select({ id: chatChannels.id, workspaceId: chatChannels.workspaceId, spaceId: chatChannels.spaceId, isPrivate: chatChannels.isPrivate, isDm: chatChannels.isDm })
+      .from(chatChannels)
+      .where(eq(chatChannels.id, channelId))
+      .limit(1)
+    const readers = channel ? await channelReaders(this.db, channel) : []
+    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
+    else for (const userId of readers) this.realtime.emitToUser(userId, event)
   }
 
   /**
@@ -276,14 +299,7 @@ export class CallsService {
       channelId,
       message: { ...message, authorName: who, reactions: [] },
     } as never
-    const [cardChannel] = await this.db
-      .select({ id: chatChannels.id, workspaceId: chatChannels.workspaceId, spaceId: chatChannels.spaceId, isPrivate: chatChannels.isPrivate, isDm: chatChannels.isDm })
-      .from(chatChannels)
-      .where(eq(chatChannels.id, channelId))
-      .limit(1)
-    const readers = cardChannel ? await channelReaders(this.db, cardChannel) : []
-    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
-    else for (const userId of readers) this.realtime.emitToUser(userId, event)
+    await this.emitCallEvent(workspaceId, channelId, event)
 
     /*
      * The notification, to the channel's members — not the workspace's. Being
@@ -369,7 +385,7 @@ export class CallsService {
         set: { leftAt: null, wasRecorded: sql`${callParticipants.wasRecorded} or ${call.recording}` },
       })
 
-    this.realtime.emitToWorkspace(call.workspaceId, {
+    await this.emitCallEvent(call.workspaceId, call.channelId, {
       type: 'call.participant.joined',
       workspaceId: call.workspaceId,
       // The client scopes its refetch by this; without it every join
@@ -389,7 +405,7 @@ export class CallsService {
       .set({ leftAt: new Date() })
       .where(and(eq(callParticipants.callId, callId), eq(callParticipants.userId, userId)))
 
-    this.realtime.emitToWorkspace(call.workspaceId, {
+    await this.emitCallEvent(call.workspaceId, call.channelId, {
       type: 'call.participant.left',
       workspaceId: call.workspaceId,
       channelId: call.channelId,
@@ -531,7 +547,7 @@ export class CallsService {
         .catch(() => undefined)
     }
 
-    this.realtime.emitToWorkspace(call.workspaceId, {
+    await this.emitCallEvent(call.workspaceId, call.channelId, {
       type: 'call.ended',
       workspaceId: call.workspaceId,
       channelId: call.channelId,
@@ -598,7 +614,7 @@ export class CallsService {
         .where(and(eq(callParticipants.callId, callId), isNull(callParticipants.leftAt)))
     }
 
-    this.realtime.emitToWorkspace(call.workspaceId, {
+    await this.emitCallEvent(call.workspaceId, call.channelId, {
       type: 'call.recording',
       workspaceId: call.workspaceId,
       channelId: call.channelId,

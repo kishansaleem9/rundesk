@@ -448,7 +448,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (cdf5fbc):* an assignee must be able to see the task (and for `createTask`, the list, checked before anything is written); a label must be the workspace's own; a dependency obeys the parent rule, now one helper `assertTaskReference`; a dependency is removed only through a task it touches; the read check includes item privacy. `getTask` shows parent, subtasks, dependencies and labels only from its own workspace, and the dependency graph stops at the workspace's edge — the read-side twin for rows written before the writes checked. `task-boundaries` §7–§10, 17 checks, the read side against rows poisoned by SQL, each paired with a neighbour that belongs; tb-27..44. API unit tests 1561/1561.
 
-### `found-23-sep/assign-someone-who-cannot-see` — open, medium (feature, ClickUp behaviour to confirm)
+### `found-23-sep/assign-someone-who-cannot-see` — **closed** (the ClickUp behaviour confirmed; no change)
 
 **Assigning a member who cannot see the task is now refused with a reason; ClickUp, as understood, shares the task with them instead**
 
@@ -456,13 +456,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* confirm ClickUp's rule from its docs; if it shares, add task-level access for assignees to `assertTaskReadAccess` and the guard's item rule, and the list/home reads that filter by container — with checks that the assignee sees exactly that task and nothing else in the container.
 
-### `found-23-sep/related-tasks-ignore-private-containers` — open, small
+*Closed, by research:* ClickUp does not share a task with an assignee who cannot open it. You share the Folder or List with them first, and "assign tasks to any user regardless of Folder/List permissions" is an open feature request on ClickUp's own board (feedback.clickup.com, "Assign Tasks to Any User Regardless of Folder/List Permissions"). A private task shared with someone makes them request access, approved from the Inbox (help.clickup.com "Make Spaces, Folders, Subfolders, Lists, and tasks private"). So the refusal already built, with its reason, is ClickUp's behaviour, and sharing-on-assign would be a feature ClickUp does not have. Held by `task-boundaries` (`tb-45-private-task-assignment-refused`).
 
-**Within one workspace, `getTask`'s dependency rows and the dependency graph show related tasks from private spaces/projects the reader cannot see**
+### `found-23-sep/related-tasks-ignore-private-containers` — **closed** (security, small)
 
-*Evidence:* the new read filters stop at the WORKSPACE; a dependency created by somebody who can see both ends still shows the private end's title and status to a reader who can see only the other. `addDependency` now requires the creator to read both ends, so this needs two people with different access.
+**A task handed its reader each related task's whole row, a private space's title and description included**
 
-*To close:* decide the policy (hide, or show as a restricted placeholder — check what ClickUp draws), then filter related tasks by the reader's access in `getTask` and `getDependencyGraph`.
+*Evidence, measured on lane 1 (probe `measure-related-tasks`):* a member opening their own task, which the admin had tied to a task in a private space (403 to the member), got two dependency rows. Each carried that task's whole row, its DESCRIPTION too, because `getTask` joined `related: tasks` with no reader. The same task came back from every write that answers with the task. The dependency graph and the blocked notice were fixed this morning (`dependency-read-access`), and `getTask`'s own list was not.
+
+*Closed:* `getTask` takes its reader. It keeps only the related tasks they may open (`readableTaskIds`) and counts the rest (`hiddenDependencies`), so a dependency they cannot see is still known to be there, as the graph reports it. The route passes its caller. Creating, editing, moving, assigning, labelling and following a task answer as their actor sees it, and internal callers pass none. The new suite `related-task-access`, 3/3 (0/3 before), with dependencies planted by SQL: the member's task names nothing of the private one and keeps the open one, counts two left out (the admin, none), and the answer to the member's own edit is as clean. `rta-1..3`, each compiled. API unit tests 1628/1628. Regression: the sweep above, 12/12. In CI.
 
 ### `found-23-sep/container-read-rule-twice` — open, small
 
@@ -731,13 +733,13 @@ The new suite `ai-read-access`, 5/5 on lane 1. Every answer in it is the determi
 
 *Closed:* `ensureShared` finds the meeting by its title AND its two attendees, and creates one for this pair otherwise. The shared task is assigned to both people on every run, not only when it is made. `a39-dm-tabs` 19/19 on lane 1, with the DM still Zoya's. No break patch: which meeting a title-only lookup finds depends on what earlier runs left, so a revert would redden it only sometimes. That is the defect this closes, not a check it could hold.
 
-### `found-24-sep/call-events-broadcast-to-the-workspace` — open, small (security; found fixing chat events)
+### `found-24-sep/call-events-broadcast-to-the-workspace` — **closed** (security, small; found fixing chat events)
 
-**Who is in a call, and in which channel, is told to the whole workspace**
+**Who was in a call, and in which channel, was told to the whole workspace**
 
-*Evidence (code read):* `calls.service.ts` emits `call.started`, `call.participant.joined`, `call.participant.left`, `call.ended` and `call.recording` with `emitToWorkspace`, carrying the call's id, its channel's id and the people's ids. For a call in a DM or a private channel, members outside it learn that it is happening and who joined. No names or content.
+*Evidence, measured on lane 1 (the suite against the build before the fix, 1 of 2; the public twin passed):* a member outside a DM heard a SyncUp in it start, the other person join, and the call end. `calls.service.ts` emitted `call.started`, `call.participant.joined`, `call.participant.left`, `call.ended` and `call.recording` with `emitToWorkspace`, carrying the call's, its channel's and the people's ids.
 
-*To close:* deliver them as chat events now are (`channelReaders`), after checking what the web's call UI needs from them outside the channel (the call-in-progress bar); a suite that listens as an outsider and as a participant.
+*Closed:* `emitCallEvent` sends a call's events where its channel's messages go, to `channelReaders` (the workspace for a public channel, each reader's `user:` room otherwise). The call card goes through it too. The web reads call events only to refresh the channel they name, which somebody who cannot read the channel has no copy of. A call in no channel still goes to the workspace, since there is no channel to ask. The new suite `call-realtime-access`, 2/2: the outsider hears nothing of a DM's call while the person in it hears the start, the join and the end, and a public channel's call reaches everyone. `cev-1..2`, each compiled. Regression on lane 1, 12/12 (one sweep for this item and the next): `call-realtime-access`, `related-task-access`, `chat-realtime-access`, `syncup-live`, `call-survives-navigation`, `a61-meeting-record`, `dependency-read-access`, `task-boundaries`, `task-depth`, `video1-acceptance`, `ui-sweep` and `video-regression`. In CI.
 
 ### `found-24-sep/tasks-created-in-view-only-spaces` — **closed** (security, medium; found fixing meeting action items) — with `found-24-sep/task-makers-skip-the-list-rule` below
 

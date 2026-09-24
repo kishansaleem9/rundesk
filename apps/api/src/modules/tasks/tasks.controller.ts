@@ -265,8 +265,8 @@ export class TasksController {
 
   @Get(':taskId')
   @UseGuards(ResourceMemberGuard)
-  async getOne(@Param('taskId') taskId: string) {
-    return this.tasks.getTask(taskId)
+  async getOne(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.getTask(taskId, { id: user.id, role: user.role })
   }
 
   @Get(':taskId/subtasks')

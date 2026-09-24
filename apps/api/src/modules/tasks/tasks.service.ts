@@ -2150,7 +2150,7 @@ export class TasksService {
       void this.notifySubtaskCreated(data.parentTaskId, task.id, task.title, data.createdById)
     }
 
-    const hydrated = await this.getTask(task.id)
+    const hydrated = await this.getTask(task.id, { id: data.createdById })
     this.realtime.emitToList(data.listId, { type: 'task.created', listId: data.listId, task: hydrated })
     void this.indexTaskInSearch(task.id)
 
@@ -3201,7 +3201,7 @@ export class TasksService {
       .sort((a, b) => (a.id === '__none__' ? 1 : b.id === '__none__' ? -1 : b.total - a.total))
   }
 
-  async getTask(taskId: string) {
+  async getTask(taskId: string, reader?: { id: string; role?: string | null }) {
     const row = await this.db.query.tasks.findFirst({
       where: eq(tasks.id, taskId),
       with: {
@@ -3265,6 +3265,20 @@ export class TasksService {
       this.db.select().from(taskAttachments).where(eq(taskAttachments.taskId, taskId)),
     ])
 
+    /*
+     * A related task is shown only to a reader who may open it. The row joined
+     * here is the related task's WHOLE row, and it went to whoever read this
+     * task: measured, a member's own task handed them the title and the
+     * description of a task in a space they are refused, in each dependency
+     * that named it (`found-23-sep/related-tasks-ignore-private-containers`).
+     * The ones left out are counted, so a dependency they cannot see is still
+     * known to be there. No reader — an internal caller — keeps them all.
+     */
+    const readableRelated = reader
+      ? await readableTaskIds(this.db, homeWorkspaceId, reader.id, dependencyRows.map((d) => d.related.id), reader.role)
+      : null
+    const visibleDependencies = readableRelated ? dependencyRows.filter((d) => readableRelated.has(d.related.id)) : dependencyRows
+
     // "Subtask of <parent>" needs a name to show, and getTask only carries the id.
     const [parent] = row.parentTaskId
       ? await this.db
@@ -3313,7 +3327,8 @@ export class TasksService {
       labels: labelRows.map((l) => l.label),
       watchers: watcherRows.map((w) => ({ ...w.watcher, user: w.user })),
       checklists: checklistRows,
-      dependencies: dependencyRows,
+      dependencies: visibleDependencies,
+      hiddenDependencies: dependencyRows.length - visibleDependencies.length,
       attachments: attachmentRows,
     }
   }
@@ -3799,7 +3814,7 @@ export class TasksService {
     // Fire automation/webhook events
     const ctx = await this.resolveWorkspaceForList(after.listId)
     if (ctx) {
-      const hydrated = await this.getTask(taskId)
+      const hydrated = await this.getTask(taskId, { id: actorId })
       if (!hydrated) throw new NotFoundException('Task not found')
       if (patch.status && patch.status !== before.status) {
         void this.fireTaskEvent('task.status_changed', ctx.workspaceId, {
@@ -3854,7 +3869,7 @@ export class TasksService {
       return hydrated
     }
 
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   async bulkUpdateTasks(
@@ -4365,7 +4380,7 @@ export class TasksService {
     })
     this.realtime.emitToList(before.listId,  { type: 'task.moved', listId: before.listId,  taskId, toListId: targetListId })
     this.realtime.emitToList(targetListId,   { type: 'task.moved', listId: targetListId,   taskId, toListId: targetListId })
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   // --- Assignees -----------------------------------------------------------
@@ -4380,7 +4395,7 @@ export class TasksService {
 
     await this.announceAssignment({ taskId, assigneeId: userId, actorId })
 
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   /**
@@ -4555,7 +4570,7 @@ export class TasksService {
     // §G10-6 — outside the `userId !== actorId` guard above: taking YOURSELF
     // off a task is still news to whoever is watching it.
     void this.notifyWatchersOfAssigneeChange({ taskId, actorId, subjectId: userId, added: false })
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   // --- Labels --------------------------------------------------------------
@@ -4568,7 +4583,7 @@ export class TasksService {
     if (!label || label.workspaceId !== access.workspaceId) throw new NotFoundException('Label not found')
     await this.db.insert(taskLabelAssignments).values({ taskId, labelId }).onConflictDoNothing()
     await this.logActivity({ taskId, actorId, action: 'label_added', meta: { labelId } })
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   async removeLabel(taskId: string, labelId: string, actorId: string) {
@@ -4577,7 +4592,7 @@ export class TasksService {
       .delete(taskLabelAssignments)
       .where(and(eq(taskLabelAssignments.taskId, taskId), eq(taskLabelAssignments.labelId, labelId)))
     await this.logActivity({ taskId, actorId, action: 'label_removed', meta: { labelId } })
-    return this.getTask(taskId)
+    return this.getTask(taskId, { id: actorId })
   }
 
   // --- Watchers ------------------------------------------------------------
@@ -4590,7 +4605,7 @@ export class TasksService {
     // ho." Told to the people already on the task: it is their task whose
     // roster changed.
     await this.notifyFollowerChanged(taskId, userId, actorId).catch(() => undefined)
-    return this.getTask(taskId)
+    return this.getTask(taskId, actorId ? { id: actorId } : undefined)
   }
 
   /**
@@ -4642,7 +4657,7 @@ export class TasksService {
     // leaving is the same change to the same roster, and she named the event
     // "FOLLOWER CHANGE".
     await this.notifyFollowerChanged(taskId, userId, actorId).catch(() => undefined)
-    return this.getTask(taskId)
+    return this.getTask(taskId, actorId ? { id: actorId } : undefined)
   }
 
   // --- Comments ------------------------------------------------------------
