@@ -94,6 +94,11 @@ try {
     return res.data.id
   }
   const SPACE = await make('/spaces', { workspaceId: WS, name: `${TAG} space`, defaultPermission: 'edit' }, 'the space')
+  // A guest reads only what is shared with them (`found-24-sep/guests-read-every-open-space`):
+  // the space is shared with this one to VIEW, so what is asked below is what a
+  // guest who may read the list sees of its hooks and portals — never a hook's
+  // address, never a portal.
+  await sql`insert into space_members (space_id, user_id, role) values (${SPACE}, ${guest.id}, 'view')`
   const PROJECT = await make('/projects', { spaceId: SPACE, name: `${TAG} project` }, 'the project')
   const LIST = await make('/lists', { projectId: PROJECT, name: `${TAG} list` }, 'the list')
   const HOOKS = `/lists/${LIST}/inbound-webhooks`

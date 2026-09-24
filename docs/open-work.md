@@ -1134,6 +1134,8 @@ The new suite `guest-space-level` has 5 checks. Every refusal is read back by SQ
 - before, with the fix stashed: 1 of 5. The guest made a list and commented in an open space nothing was shared from, the Move picker offered them that space, and a task beside the ones shared with them took their comment. Only the reads-unchanged check passed;
 - after: 5/5.
 
+Its reads check, that the guest still read the open space, went when a guest's reads narrowed too (`found-24-sep/guests-read-every-open-space`, below): what a guest reads is `guest-read-scope`'s. The suite has 4 checks now.
+
 Four unit tests, in `space-default-permission.test.ts`: a guest with nothing shared, a member's default, a guest's grant on the space, and the most specific share first.
 
 `gsl-1..6`, each compiled; `gsl-6` claims the unit test, since no suite shares one guest two levels on one chain. Re-aimed at the moved code, and compiled: `dwl-3`, `dwl-5`, `sdp-5`, `sdp-7`, `sdp-19` and `tsl-5`. The 51 other patches on the changed files compile too.
@@ -1145,7 +1147,7 @@ Regression on lane 1, 28/28: `guest-space-level`, `doc-write-levels`, `space-def
 - the read side. A guest here reads every open space, as `workspace-read-access` asserts, where ClickUp's guest sees only what is shared with them. That is `found-24-sep/guests-read-every-open-space`, below;
 - a MEMBER's level. The task gates read a member's level on the space alone, so a share on a task or list does not change it; ClickUp's most-specific rule is everybody's. Recorded, not changed.
 
-### `found-24-sep/guests-read-every-open-space` — open, security, large (found closing `guest-makes-lists-where-nothing-is-shared`)
+### `found-24-sep/guests-read-every-open-space` — **closed** (security, large; found closing `guest-makes-lists-where-nothing-is-shared`)
 
 **A guest reads every open space: its tasks, lists, docs and comments**
 
@@ -1154,6 +1156,88 @@ Regression on lane 1, 28/28: `guest-space-level`, `doc-write-levels`, `space-def
 *ClickUp's rule* (help.clickup.com "Use ClickUp as a guest or limited member"; search snippets): "A guest sees only the tasks, lists, or folders they have been invited to."
 
 *To close:* one read rule for a guest: a container, doc or task is theirs to read only through a share on it or above it, or a grant on its space. It has to hold across the whole container rule (`containerRefusal`, `containerVisibilityFilter`, `taskInReachFilter`, `spaceVisibilityFilter`), docs, search and the realtime rooms. Measure it through every read a guest can reach, and change the suites that assert a guest reads the open space along with it.
+
+*ClickUp's rule* (help.clickup.com "Share Spaces, Folders, Subfolders, Lists, and tasks" and "Use ClickUp as a guest or limited member"; search snippets): what is inside a shared item comes with it, a shared task's subtasks included. A guest's sidebar is a "Shared with Me" section of their own.
+
+*Closed, 24 September.* The rule lives in one file, `common/permissions/guest-reach.ts`, and answers two questions for a guest of a workspace:
+
+- REACH is what they read. That is everything under a grant on its space (a space membership or a share of the space), its folder, or its project (a project membership or a share of it); a list shared with them; and a task shared with them, with its subtasks.
+- PATH is the containers above anything in reach. They are listed, so the tree can be walked to what is shared, and nothing else in them is.
+
+Each predicate is self-contained SQL over its own table. It lets every row through unless its reader is a guest of the row's workspace, so it drops into any query without a role being passed. The per-row check (`guestMayRead`) asks the same SQL of one row. Where it is asked:
+
+- the SQL twins of the container rule: spaces and projects by path, tasks by reach, both in `taskInReachFilter` and in the private-task filter every task listing asks;
+- the list and folder listings;
+- the spaces listing, which had its own copy of the space rule. It asks `spaceVisibilityFilter` now;
+- `ResourceMemberGuard`: a task by reach; a space, project, list or view by path;
+- the task service's own read check, and `readableProject`, `readableList` and `readableTask`;
+- the realtime rooms: a task by reach, and a list only when the whole list is in reach, since its room carries every task in it;
+- the doc rule. For a guest, `refusedSpaceIds` is every space not granted them, plus the workspace's own docs: a chain of docs located in no space at all.
+
+The new suite `guest-read-scope`, 12 checks, planted by SQL. The workspace has an open space nothing is shared from, a space shared with the guest whole, and a space holding a shared project, a shared list beside an unshared one, a shared task (with a subtask) beside an unshared one, and a project nothing in is shared. Each read is asked beside a member. The checks cover: by id; the spaces, projects and lists listings; the tasks of a list; the workspace's task listing and search; docs by id and in the hub; the realtime rooms and what is heard in them; and in the browser, the sidebar, and the list the guest only passes through, which opens on their one task with no request on the page failing.
+
+- Before, with the change stashed, on lane 1: 1 of 12. Only the granted space's reads passed.
+- After: 12/12.
+
+Unit tests: the doc walk's guest case (`doc-access.test.ts`), and two test mocks taught to read the query that ran rather than a subquery a read rule built on the same table (`search.service.test.ts`, `tasks-security.test.ts`). API unit tests 1642/1642.
+
+`grs-1..15`, each compiled, at least one per check. Re-aimed at the moved lines: `rra-2` and `wra-25`.
+
+`dwl-3` is retired. Its mutation (a guest holds the space's default) became `gsl-1`'s line, and no doc check can see it now: a guest reaches no unshared doc's write level, because the read refuses first.
+
+*Regression:* the full sweep, 172 suites on lanes 1–4: 162 passed at first. Six asserted the old rule, and each is changed to the new one:
+
+- `doc-write-levels`' guest is refused as not found;
+- `guest-space-level` drops its reads check, which is this suite's subject now;
+- `hook-portal-access`, `meeting-access`, `task-creation-access` and `workspace-read-access` share their guest what their checks read, so each still asks what it asked: hooks without addresses, "guests may not make tasks", hidden things beside visible ones.
+
+The other four, taken in turn:
+
+- `local-dates` was a defect of mine, `found-24-sep/local-dates-expected-the-day-of-now` below;
+- `addressability-live`, `request-access` and `task-menu` passed alone (28/28, 9/9, 37/37), `found-24-sep/three-suites-fail-under-a-full-sweep` below.
+
+The eight changed suites then passed together, 8/8. In CI.
+
+*Not changed, and each its own item:* `found-24-sep/guests-read-every-open-channel` and `found-24-sep/guests-list-every-whiteboard`, below. A guest's sidebar is still the tree, cut down to the way to what is shared, not ClickUp's "Shared with Me" section. And a guest assigned a task nothing shares with them no longer reads it; ClickUp asks to share it when assigning. Recorded, not built.
+
+### `found-24-sep/guests-read-every-open-channel` — open, security, medium (found closing `guests-read-every-open-space`)
+
+**A guest reads every public chat channel of the workspace**
+
+*Evidence, read not run:* `readableChannelsFilter` (`modules/chat/channel-read-filter.ts`) keeps a private space's channels for its members, and a private channel or a DM for its own members. Every other channel is every workspace member's, a guest's included. `workspace-read-access`'s activity check asserts that the guest reads the admin's message in a public channel. ClickUp's guests see the channels they are added to.
+
+*To close:* a guest reads a channel they are a member of, one shared with them, or one of a space granted them. Measure it through the channel list, messages, search, activity and the realtime rooms.
+
+### `found-24-sep/guests-list-every-whiteboard` — open, security, small (found closing `guests-read-every-open-space`)
+
+**Whiteboards are listed and opened by any member of the workspace, a guest included**
+
+*Evidence, read not run:* `CanvasesService.list(workspaceId, type)` reads every canvas of the workspace with no reader. The realtime gateway says a canvas's room "follows the canvas's own read rule, which is membership today".
+
+*To close:* a guest reads a whiteboard shared with them, and nothing else. Research whether a member's access to a whiteboard follows its location in ClickUp.
+
+### `found-24-sep/local-dates-expected-the-day-of-now` — **closed** (test tooling; a defect of mine, found by the full sweep)
+
+**`local-dates` expected the meeting on Karachi's date of NOW, and failed every evening**
+
+*Evidence:* the meeting is made at 10:00 UTC on today's UTC date, and the expected wall time was `${todayIn('Asia/Karachi')}T15:00`. From 19:00 UTC, Karachi is already on the next day, so the check said the card was a day out while the card was right (it showed 2026-09-24T15:00 for 2026-09-24T10:00Z, and expected 2026-09-25T15:00).
+
+*Closed:* the expected day is the meeting instant's own day in the zone (`todayIn(ZONE, at)`). 3/3 at 20:40 UTC, the hour it failed.
+
+### `found-24-sep/three-suites-fail-under-a-full-sweep` — open, test tooling, small (found by the full sweep)
+
+**`addressability-live`, `request-access` and `task-menu` failed during a four-lane full sweep and passed on their own**
+
+*Evidence:*
+
+- `addressability-live`: the palette showed no result for a word in a task's description, 2.5 fixed seconds after typing it.
+- `request-access`: no request-access card on the locked-out task.
+- `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
+
+Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
+
+*To close:* make each wait for what it reads (the search's answer, the task's refusal, the menu's full render), not a fixed time, and prove it under a full sweep's load.
+
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
 

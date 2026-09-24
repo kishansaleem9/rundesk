@@ -2,6 +2,7 @@ import { and, eq, inArray, isNull, ne, notInArray, or, type SQL } from 'drizzle-
 import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole, listVisibilityFilter } from './item-visibility'
+import { guestProjectFilter, guestSpaceFilter, guestTaskFilter } from './guest-reach'
 
 /** True if the user holds a manager-tier role in the workspace. */
 export async function isWorkspaceManager(db: Db, workspaceId: string, userId: string): Promise<boolean> {
@@ -118,7 +119,8 @@ export async function containerRefusal(
 export function spaceVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
   if (isManager) return undefined
   const memberSpaces = db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, actorId))
-  return or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces))
+  // A guest sees a space granted them, or one on the way to what is (`guest-reach.ts`).
+  return and(or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces)), guestSpaceFilter(db, actorId))
 }
 
 /**
@@ -157,6 +159,9 @@ export function containerVisibilityFilter(db: Db, actorId: string, isManager: bo
       inArray(projects.id, memberProjects),
       inArray(projects.spaceId, adminSpaces),
     ),
+    // A guest sees a project in reach, or on the way to what is (`guest-reach.ts`).
+    // That is the WAY, not the content: a read of tasks takes `taskInReachFilter`.
+    guestProjectFilter(db, actorId),
   )
 }
 
@@ -182,5 +187,6 @@ export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, 
     .innerJoin(projects, eq(projects.id, lists.projectId))
     .innerJoin(spaces, eq(spaces.id, projects.spaceId))
     .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false), listVisibilityFilter(actorId, false)))
-  return inArray(tasks.listId, reachable)
+  // The container rule lists a guest the way to what is shared; of the tasks, only those in reach.
+  return and(inArray(tasks.listId, reachable), guestTaskFilter(db, actorId))
 }

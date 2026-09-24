@@ -246,22 +246,32 @@ describe('TasksService.getTasksForWorkspace — who may see which rows', () => {
   const dialect = new PgDialect()
   /** A stand-in that answers each table's rows and keeps every WHERE with its table. */
   function recordingDb(rowsByTable: Record<string, unknown[]>) {
-    const wheres: Array<{ table: string; condition: unknown }> = []
+    const wheres: Array<{ table: string; condition: unknown; executed?: boolean }> = []
     const chain = (): any => {
       let rows: unknown[] = []
       let table = '?'
+      // Marked when the query is awaited: the read rules' subqueries never are,
+      // and the guest rule builds some on the very tables it constrains.
+      const own: Array<{ table: string; condition: unknown; executed?: boolean }> = []
       const c: any = {
         from: (t: unknown) => { table = getTableName(t as never); rows = rowsByTable[table] ?? []; return c },
-        where: (condition: unknown) => { wheres.push({ table, condition }); return c },
+        where: (condition: unknown) => { const entry = { table, condition, executed: false }; wheres.push(entry); own.push(entry); return c },
         innerJoin: () => c, leftJoin: () => c, orderBy: () => c, limit: () => c, groupBy: () => c,
-        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve(rows).then(resolve, reject),
+        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+          for (const entry of own) entry.executed = true
+          return Promise.resolve(rows).then(resolve, reject)
+        },
       }
       return c
     }
     return { db: { select: mock.fn(() => chain()) } as any, wheres }
   }
-  const rendered = (wheres: Array<{ table: string; condition: unknown }>, table: string) =>
-    wheres.filter((w) => w.table === table && w.condition != null).map((w) => dialect.sqlToQuery(w.condition as never).sql)
+  /** Every predicate on a table, the queries that ran first and the subqueries built for them after. */
+  const rendered = (wheres: Array<{ table: string; condition: unknown; executed?: boolean }>, table: string) =>
+    wheres
+      .filter((w) => w.table === table && w.condition != null)
+      .sort((a, b) => Number(!!b.executed) - Number(!!a.executed))
+      .map((w) => dialect.sqlToQuery(w.condition as never).sql)
   const TASK = { id: 't1', title: 'A task' }
 
   it('asks the database for a member’s rows by their reach — space, project and list — and the private-item rule', async () => {

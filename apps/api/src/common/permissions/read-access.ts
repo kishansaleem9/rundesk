@@ -4,6 +4,7 @@ import type { Db } from '@rundesk/db'
 import { isUuid } from '../validation/uuid'
 import { checkContainerAccess, spaceVisibilityFilter, taskInReachFilter } from './container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole, resolveIsManager, taskVisibilityFilter } from './item-visibility'
+import { guestMayRead } from './guest-reach'
 
 /*
  * MAY THIS PERSON OPEN THIS PROJECT, THIS TASK — for a service whose route
@@ -61,7 +62,10 @@ export async function readableProject(
     { spaceId: row.spaceId, spaceVisibility: row.spaceVisibility, projectId: row.id, projectVisibility: row.projectVisibility },
     { userId: actor.id, workspaceRole: role },
   )
-  return ok ? { id: row.id, spaceId: row.spaceId, createdById: row.createdById } : null
+  if (!ok) return null
+  // A guest sees a project in reach, or on the way to what is (`guest-reach.ts`).
+  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'project', row.id))) return null
+  return { id: row.id, spaceId: row.spaceId, createdById: row.createdById }
 }
 
 /**
@@ -104,6 +108,8 @@ export async function readableList(
   )
   if (!inContainer) return null
   if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager: isManagerRole(role) })) return null
+  // A guest sees a list in reach, or one holding a task shared with them (`guest-reach.ts`).
+  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'list', row.listId))) return null
   return { listId: row.listId, spaceId: row.spaceId, role }
 }
 
@@ -144,6 +150,8 @@ export async function readableTask(
     { userId: actor.id, workspaceRole: role },
   )
   if (!inContainer) return null
+  // A guest reads only the tasks in their reach (`guest-reach.ts`).
+  if (role === 'guest' && !(await guestMayRead(db, actor.id, 'task', row.taskId))) return null
   const isManager = isManagerRole(role)
   if (!canSeePrivateItem({ visibility: row.listVisibility, createdById: row.listCreatedById }, { userId: actor.id, isManager })) return null
   if (row.taskVisibility === 'private' && !isManager && row.taskCreatedById !== actor.id) {

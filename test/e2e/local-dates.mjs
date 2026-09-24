@@ -66,8 +66,8 @@ let sql = null
 let WS = null
 let token = null
 
-/** Today's date in the zone, as YYYY-MM-DD. */
-const todayIn = (zone) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+/** An instant's date in the zone, as YYYY-MM-DD — today's when none is given. */
+const todayIn = (zone, at = new Date()) => new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(at)
 
 try {
   sql = await openDb()
@@ -86,7 +86,9 @@ try {
   at.setUTCHours(10, 0, 0, 0)
   const meeting = await call(`/workspaces/${WS}/meetings`, { method: 'POST', body: { title: `${TAG} the meeting`, startsAt: at.toISOString() } })
   if (meeting.status >= 300 || !meeting.data?.id) throw new Error(`could not make the meeting: ${meeting.status}`)
-  const expectedWall = `${todayIn(ZONE)}T15:00`
+  // The MEETING's day in Karachi, not today's: from 19:00 UTC Karachi is already
+  // on tomorrow, and the card was right while this said it was a day out.
+  const expectedWall = `${todayIn(ZONE, at)}T15:00`
 
   browser = await chromium.launch(launchOptions())
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, timezoneId: ZONE, acceptDownloads: true })

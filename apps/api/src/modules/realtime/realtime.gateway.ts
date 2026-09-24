@@ -20,6 +20,7 @@ import { canSeePrivateItem, isManagerRole } from '../../common/permissions/item-
 import { canReadDoc } from '../../common/permissions/doc-access'
 import { PresenceService } from '../presence/presence.service'
 import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
+import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
 
 /**
  * Extract the access_token from a raw Cookie header. Browser sessions no longer
@@ -241,6 +242,12 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     if (!chain) return false
     if (!canSeePrivateItem({ visibility: chain.listVisibility, createdById: chain.listCreatedById }, { userId, isManager: false })) {
       return false
+    }
+    // A guest hears only what is theirs to read: a task in reach, or a list whose
+    // every task is (`guest-reach.ts`) — not a list they only pass through.
+    if (workspaceRole === 'guest') {
+      const theirs = kind === 'task' ? await guestMayRead(this.db, userId, 'task', id) : await guestReachesList(this.db, userId, listId)
+      if (!theirs) return false
     }
     return checkContainerAccess(
       this.db,

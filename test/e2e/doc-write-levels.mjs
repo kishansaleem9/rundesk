@@ -136,9 +136,11 @@ try {
   const openShared = await doc(OPEN, `${TAG} open doc, shared with the guest`)
   await shareDoc(openShared, guest.id, 'edit')
   const gShared = await rename(G, openShared, `${TAG} renamed by the guest it was shared with`)
+  // Refused as not found since a guest reads only what is shared with them
+  // (`found-24-sep/guests-read-every-open-space`): the doc is not theirs to see.
   chk(
-    gRename.status === 403 && gAfter.title === `${TAG} open doc` && gShared.status === 200,
-    'a guest does not rename an open space’s doc (403, unchanged) — a doc shared with them to edit, they do',
+    (gRename.status === 403 || gRename.status === 404) && gAfter.title === `${TAG} open doc` && gShared.status === 200,
+    'a guest does not rename an open space’s doc (refused, unchanged) — a doc shared with them to edit, they do',
     `unshared ${said(gRename)}; shared to edit ${said(gShared)}`,
   )
 

@@ -122,6 +122,10 @@ try {
     return make('/lists', { projectId: project, name: `${TAG} ${what} list` }, `the ${what} list`)
   }
   const OPEN_LIST = await listIn({ name: `${TAG} open` }, 'open')
+  // A guest reads only what is shared with them (`found-24-sep/guests-read-every-open-space`):
+  // the open space is shared with this one to VIEW, so each read below still
+  // asks whether a guest sees what is hidden beside what they may see.
+  await sql`insert into space_members (space_id, user_id, role) values (${spaceOf.open}, ${G.id}, 'view')`
   const PRIVATE_LIST = await listIn({ name: `${TAG} private`, visibility: 'private' }, 'private')
   // Dated, so the timeline has them; assigned to the admin, whose list is read.
   const adminTask = (listId, title) =>

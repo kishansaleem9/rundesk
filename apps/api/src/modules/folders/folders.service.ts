@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { resolveIsManager, folderVisibilityFilter } from '../../common/permissions/item-visibility'
+import { guestFolderFilter } from '../../common/permissions/guest-reach'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 
 @Injectable()
@@ -25,7 +26,8 @@ export class FoldersService {
         .limit(1)
       if (ctx) {
         const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
-        visFilter = folderVisibilityFilter(actor.id, isManager)
+        // A guest is listed the folders in reach, and those on the way to what is.
+        visFilter = and(folderVisibilityFilter(actor.id, isManager), isManager ? undefined : guestFolderFilter(this.db, actor.id))
       }
     }
     return this.db

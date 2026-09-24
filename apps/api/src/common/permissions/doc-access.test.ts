@@ -22,6 +22,16 @@ describe('docsOutOfReach — where a doc lives decides who reads it', () => {
     assert.deepEqual(docsOutOfReach(rows, new Set([REFUSED]), new Set(['shared'])).sort(), ['root', 'sibling'])
   })
 
+  /*
+   * A GUEST'S refused set holds every space not granted them and `''`: a chain
+   * located in no space at all is the workspace's, not theirs
+   * (`guest-reach.ts`, `found-24-sep/guests-read-every-open-space`).
+   */
+  it('for a guest, hides a doc located nowhere — and not a page whose doc above is in a granted space', () => {
+    const rows = [doc('loose', null), doc('loose-page', null, 'loose'), doc('granted', 'space-granted'), doc('granted-page', null, 'granted'), doc('shared-loose', null)]
+    assert.deepEqual(docsOutOfReach(rows, new Set([REFUSED, '']), new Set(['shared-loose'])).sort(), ['loose', 'loose-page'])
+  })
+
   it('hides a page filed in a refused space even under an open doc', () => {
     const rows = [doc('open', 'space-open'), doc('filed-away', REFUSED, 'open')]
     assert.deepEqual(docsOutOfReach(rows, new Set([REFUSED]), new Set()), ['filed-away'])

@@ -98,6 +98,7 @@ import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKe
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
 import { CustomFieldsService } from '../custom-fields/custom-fields.service'
+import { guestMayRead } from '../../common/permissions/guest-reach'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -781,6 +782,10 @@ export class TasksService {
       .limit(1)
     if (!ctx) throw new NotFoundException('Task not found')
     const access = await this.assertContainerReadAccess(ctx, actorId)
+    // A guest reads only the tasks in their reach (`guest-reach.ts`), assigned or not.
+    if (access.workspaceRole === 'guest' && !(await guestMayRead(this.db, actorId, 'task', taskId))) {
+      throw new ForbiddenException('This task is not shared with you')
+    }
     /*
      * PER-ITEM PRIVACY, as `ResourceMemberGuard` enforces it on the routes that
      * carry it: a private list is its creator's and the managers'; a private

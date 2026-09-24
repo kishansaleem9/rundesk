@@ -21,7 +21,7 @@ function makeDb(tableRows: Record<string, unknown[]>) {
   // Every WHERE predicate, paired with the table it was built against, so a
   // test can render one to SQL and assert what it actually constrains. Recording
   // only table names cannot tell a scoped query from an unscoped one.
-  const wheres: Array<{ table: string; condition: unknown }> = []
+  const wheres: Array<{ table: string; condition: unknown; executed?: boolean }> = []
   // Tables reached via a join. Recorded separately from `fromTables` so a test
   // can assert an access-scoping join chain (e.g. task_attachments → tasks →
   // list → project → space) that hangs off a single `.from(...)`.
@@ -32,6 +32,10 @@ function makeDb(tableRows: Record<string, unknown[]>) {
     // build a subquery on another table before this query's `.where` runs
     // (the read rules do), and that credited the predicate to the subquery.
     let table = '?'
+    // This query's own predicates, marked when it is awaited: a subquery built
+    // for a read rule is never awaited, so `sqlFor` can tell the query from them
+    // (the guest rule builds its subqueries on the very tables it constrains).
+    const own: Array<{ table: string; condition: unknown; executed?: boolean }> = []
     const c: any = {
       from: (t: unknown) => {
         const name = getTableName(t as never)
@@ -41,7 +45,9 @@ function makeDb(tableRows: Record<string, unknown[]>) {
         return c
       },
       where: (condition: unknown) => {
-        wheres.push({ table, condition })
+        const entry = { table, condition, executed: false }
+        wheres.push(entry)
+        own.push(entry)
         return c
       },
       innerJoin: (t: unknown) => {
@@ -54,8 +60,10 @@ function makeDb(tableRows: Record<string, unknown[]>) {
       },
       orderBy: () => c,
       limit: () => c,
-      then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) =>
-        Promise.resolve(rows).then(resolve, reject),
+      then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => {
+        for (const entry of own) entry.executed = true
+        return Promise.resolve(rows).then(resolve, reject)
+      },
     }
     return c
   }
@@ -66,10 +74,11 @@ function makeDb(tableRows: Record<string, unknown[]>) {
 /** Render a captured predicate to real SQL, so assertions read the query. */
 const dialect = new PgDialect()
 function sqlFor(
-  wheres: Array<{ table: string; condition: unknown }>,
+  wheres: Array<{ table: string; condition: unknown; executed?: boolean }>,
   table: string,
 ): { sql: string; params: unknown[] } | null {
-  const hit = wheres.find((w) => w.table === table)
+  // The query that ran on this table, not a subquery a read rule built on it.
+  const hit = wheres.find((w) => w.table === table && w.executed) ?? wheres.find((w) => w.table === table)
   if (!hit || hit.condition == null) return null
   const q = dialect.sqlToQuery(hit.condition as never)
   return { sql: q.sql, params: q.params as unknown[] }
@@ -718,10 +727,13 @@ describe('SearchService holds Meili hits to the read rules', () => {
     // rule alone left out (`found-24-sep/private-lists-skipped-by-task-reads`).
     // The list-name search is its own read and asks the list rule itself; the
     // reach is the lists query that asks no words.
+    // The guest rule's own subqueries on lists ask only what is shared with the
+    // reader (`guest-reach.ts`) and hold no visibility rule; every query that
+    // does hold one must hold all three.
     const reaches = wheres
       .filter((w) => w.table === 'lists' && w.condition != null)
       .map((w) => dialect.sqlToQuery(w.condition as never).sql)
-      .filter((sql) => !/ilike/i.test(sql))
+      .filter((sql) => !/ilike/i.test(sql) && /"visibility"/.test(sql))
     assert.ok(reaches.length > 0, 'no reach was built for the task hits')
     for (const reach of reaches) {
       assert.match(reach, /"lists"\."visibility"/, `the reach has no list rule: ${reach}`)

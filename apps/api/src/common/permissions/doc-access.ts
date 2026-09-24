@@ -3,6 +3,7 @@ import { docs, objectShares, spaces, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole } from './item-visibility'
 import { resolveSpaceLevel } from './space-default-permission'
+import { spacesRefusedToGuest } from './guest-reach'
 
 /*
  * WHO MAY READ A DOC.
@@ -31,8 +32,20 @@ import { resolveSpaceLevel } from './space-default-permission'
 /** Depth bound for a parent walk: a loop already in the data must not hang a read. */
 const MAX_DEPTH = 256
 
-/** The private spaces of this workspace the person is not a member of. */
+/**
+ * What a doc of NO location is refused under: a chain with no space anywhere on
+ * it is the workspace's, its members' to read and not a guest's.
+ */
+const NO_SPACE = ''
+
+/**
+ * The private spaces of this workspace the person is not a member of. For a
+ * GUEST, every space not granted them, and the workspace's own docs
+ * (`NO_SPACE`): a guest reads what is shared with them (`guest-reach.ts`).
+ */
 async function refusedSpaceIds(db: Db, workspaceId: string, userId: string): Promise<Set<string>> {
+  const toGuest = await spacesRefusedToGuest(db, workspaceId, userId)
+  if (toGuest) return new Set([...toGuest, NO_SPACE])
   const memberSpaces = db.select({ id: spaceMembers.spaceId }).from(spaceMembers).where(eq(spaceMembers.userId, userId))
   const rows = await db
     .select({ id: spaces.id })
@@ -76,6 +89,7 @@ export async function canReadDoc(
   if (refused.size === 0) return true
   const chain: string[] = [doc.id]
   let outside = doc.spaceId != null && refused.has(doc.spaceId)
+  let located = doc.spaceId != null
   let cursor = doc.parentDocId
   const seen = new Set<string>([doc.id])
   for (let depth = 0; cursor && !seen.has(cursor) && depth < MAX_DEPTH; depth += 1) {
@@ -88,8 +102,10 @@ export async function canReadDoc(
     if (!up) break
     chain.push(up.id)
     if (up.spaceId != null && refused.has(up.spaceId)) outside = true
+    if (up.spaceId != null) located = true
     cursor = up.parentDocId
   }
+  if (!located && refused.has(NO_SPACE)) outside = true
   if (!outside) return true
   return (await sharedDocIds(db, doc.workspaceId, userId, chain)).size > 0
 }
@@ -123,12 +139,13 @@ export function docsOutOfReach(
   shared: Set<string>,
 ): string[] {
   const byId = new Map(rows.map((r) => [r.id, r]))
-  type Reach = { outside: boolean; shared: boolean }
+  type Reach = { outside: boolean; shared: boolean; located: boolean }
   const own = (row: { id: string; spaceId: string | null }): Reach => ({
     outside: row.spaceId != null && refused.has(row.spaceId),
     shared: shared.has(row.id),
+    located: row.spaceId != null,
   })
-  const join = (a: Reach, b: Reach): Reach => ({ outside: a.outside || b.outside, shared: a.shared || b.shared })
+  const join = (a: Reach, b: Reach): Reach => ({ outside: a.outside || b.outside, shared: a.shared || b.shared, located: a.located || b.located })
   // Per doc: does its chain touch a refused space, and does it hold a share.
   const memo = new Map<string, Reach>()
   const walk = (id: string): Reach => {
@@ -137,7 +154,7 @@ export function docsOutOfReach(
     const path: string[] = []
     const onPath = new Map<string, number>()
     let cursor: string | null = id
-    let tail: Reach = { outside: false, shared: false }
+    let tail: Reach = { outside: false, shared: false, located: false }
     // Up to the first doc already decided, the top, a loop, or the bound.
     while (cursor && path.length < MAX_DEPTH) {
       const decided = memo.get(cursor)
@@ -166,9 +183,11 @@ export function docsOutOfReach(
     }
     return memo.get(id) ?? tail
   }
+  // A chain located nowhere is the workspace's: out of reach where that is refused (a guest's).
+  const unlocatedRefused = refused.has(NO_SPACE)
   return rows.filter((r) => {
     const at = walk(r.id)
-    return at.outside && !at.shared
+    return (at.outside || (unlocatedRefused && !at.located)) && !at.shared
   }).map((r) => r.id)
 }
 

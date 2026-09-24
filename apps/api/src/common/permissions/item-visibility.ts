@@ -1,6 +1,7 @@
 import { and, or, eq, ne, inArray, type SQL } from 'drizzle-orm'
 import { tasks, lists, folders, taskAssignees, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+import { guestTaskFilter } from './guest-reach'
 
 /**
  * Per-item privacy (§2) for tasks / lists / folders. A row whose `visibility`
@@ -54,13 +55,18 @@ export async function resolveIsManager(
  */
 export function taskVisibilityFilter(db: Db, actorId: string, isManager: boolean): SQL | undefined {
   if (isManager) return undefined
-  return or(
-    ne(tasks.visibility, 'private'),
-    eq(tasks.createdById, actorId),
-    inArray(
-      tasks.id,
-      db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, actorId)),
+  return and(
+    or(
+      ne(tasks.visibility, 'private'),
+      eq(tasks.createdById, actorId),
+      inArray(
+        tasks.id,
+        db.select({ id: taskAssignees.taskId }).from(taskAssignees).where(eq(taskAssignees.userId, actorId)),
+      ),
     ),
+    // A guest reads only the tasks in their reach (`guest-reach.ts`): a list of
+    // tasks, any list, is filtered to them wherever this rule is asked.
+    guestTaskFilter(db, actorId),
   )
 }
 

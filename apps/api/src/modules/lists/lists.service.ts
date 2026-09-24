@@ -14,6 +14,7 @@ import { resolveIsManager, listVisibilityFilter } from '../../common/permissions
 import { SecurityService } from '../security/security.service'
 import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
 import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { guestListFilter } from '../../common/permissions/guest-reach'
 
 /*
  * The pipeline moved to `./list-statuses.defaults.ts`. It lived here, private,
@@ -238,7 +239,8 @@ export class ListsService {
         .limit(1)
       if (ctx) {
         const isManager = await resolveIsManager(this.db, ctx.workspaceId, actor.id, actor.role)
-        visFilter = listVisibilityFilter(actor.id, isManager)
+        // A guest is listed the lists in reach, and those holding a task shared with them.
+        visFilter = and(listVisibilityFilter(actor.id, isManager), isManager ? undefined : guestListFilter(this.db, actor.id))
       }
     }
     return this.db
@@ -270,7 +272,11 @@ export class ListsService {
     let visFilter: SQL | undefined
     if (actor) {
       const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-      visFilter = and(containerVisibilityFilter(this.db, actor.id, isManager), listVisibilityFilter(actor.id, isManager))
+      visFilter = and(
+        containerVisibilityFilter(this.db, actor.id, isManager),
+        listVisibilityFilter(actor.id, isManager),
+        isManager ? undefined : guestListFilter(this.db, actor.id),
+      )
     }
     return this.db
       .select({ id: lists.id, name: lists.name, projectId: lists.projectId, spaceId: projects.spaceId })

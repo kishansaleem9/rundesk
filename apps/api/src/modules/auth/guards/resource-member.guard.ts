@@ -16,6 +16,7 @@ import {
   type ContainerAccessContext,
 } from '../../../common/permissions/container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole } from '../../../common/permissions/item-visibility'
+import { guestMayRead } from '../../../common/permissions/guest-reach'
 import { isUuid } from '../../../common/validation/uuid'
 
 // Per-item (list/task) privacy resolved alongside the container chain so the
@@ -27,7 +28,9 @@ type ResolvedItem = {
   taskCreatedById?: string | null
   taskIsAssignee?: boolean
 }
-type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext; item?: ResolvedItem }
+/** What a guest must be able to read for the route to be theirs (`guestMayRead`): a task in reach, a container on the way. */
+type GuestTarget = { kind: 'space' | 'project' | 'list' | 'task'; id: string }
+type ResolvedResource = { workspaceId: string; container?: ContainerAccessContext; item?: ResolvedItem; guestTarget?: GuestTarget }
 
 
 /**
@@ -77,6 +80,13 @@ export class ResourceMemberGuard implements CanActivate {
         workspaceRole: member.role as string,
       })
       if (!ok) throw new ForbiddenException('This space or project is private')
+    }
+
+    // A guest reads what is shared with them, and sees the containers on the
+    // way to it (`guest-reach.ts`): nothing else in the workspace is theirs.
+    if (member.role === 'guest' && resolved.guestTarget) {
+      const { kind, id } = resolved.guestTarget
+      if (!(await guestMayRead(this.db, user.id, kind, id))) throw new ForbiddenException('This is not shared with you')
     }
 
     // Per-item privacy (§2): a private list, or a private/foreign task, is only
@@ -181,7 +191,7 @@ export class ResourceMemberGuard implements CanActivate {
         .where(eq(spaces.id, id))
         .limit(1)
       return r
-        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv } }
+        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv }, guestTarget: { kind: 'space', id } }
         : null
     }
     if (kind === 'project') {
@@ -192,7 +202,11 @@ export class ResourceMemberGuard implements CanActivate {
         .where(eq(projects.id, id))
         .limit(1)
       return r
-        ? { workspaceId: r.w, container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv } }
+        ? {
+            workspaceId: r.w,
+            container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
+            guestTarget: { kind: 'project', id },
+          }
         : null
     }
     if (kind === 'list') {
@@ -208,6 +222,7 @@ export class ResourceMemberGuard implements CanActivate {
             workspaceId: r.w,
             container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
             item: { listVisibility: r.lv, listCreatedById: r.lc },
+            guestTarget: { kind: 'list', id },
           }
         : null
     }
@@ -235,12 +250,13 @@ export class ResourceMemberGuard implements CanActivate {
               taskCreatedById: r.tc,
               taskIsAssignee: Boolean(r.isAssignee),
             },
+            guestTarget: { kind: 'task', id },
           }
         : null
     }
     if (kind === 'view') {
       const [r] = await this.db
-        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById })
+        .select({ w: spaces.workspaceId, spaceId: spaces.id, sv: spaces.visibility, projectId: projects.id, pv: projects.visibility, lv: lists.visibility, lc: lists.createdById, listId: lists.id })
         .from(taskViews)
         .innerJoin(lists, eq(lists.id, taskViews.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -252,6 +268,7 @@ export class ResourceMemberGuard implements CanActivate {
             workspaceId: r.w,
             container: { spaceId: r.spaceId, spaceVisibility: r.sv, projectId: r.projectId, projectVisibility: r.pv },
             item: { listVisibility: r.lv, listCreatedById: r.lc },
+            guestTarget: { kind: 'list', id: r.listId },
           }
         : null
     }

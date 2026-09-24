@@ -10,12 +10,10 @@
  *
  * ClickUp's rule (help.clickup.com "Use ClickUp as a guest or limited
  * member", "Permissions in detail", search snippets): a guest sees and changes
- * only what is shared with them, at the level it was shared at. This product
- * lets a guest READ an open space (`workspace-read-access` says so), so only
- * writes are asked here, and the reads are checked to stay as they were. Each
- * refusal is read back by SQL beside a member doing the same, and beside the
- * guest doing it where a grant allows. Lists, tasks and grants are planted by
- * SQL.
+ * only what is shared with them, at the level it was shared at. Writes are
+ * asked here; what a guest READS is `guest-read-scope`'s. Each refusal is read
+ * back by SQL beside a member doing the same, and beside the guest doing it
+ * where a grant allows. Lists, tasks and grants are planted by SQL.
  *
  *   node test/e2e/guest-space-level.mjs --api 3021
  */
@@ -28,7 +26,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 4
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -153,18 +151,7 @@ try {
     `the guest ${gTargets.status}: open ${gTargets.ids.includes(OPEN.id)}, shared to edit ${gTargets.ids.includes(EDIT.id)}, shared to comment ${gTargets.ids.includes(COMMENT.id)}; the member ${mTargets.status}: open ${mTargets.ids.includes(OPEN.id)}`,
   )
 
-  // ══ 4. READING, AS BEFORE ════════════════════════════════════════════════
-  console.log('\n▶ the guest still reads the open space’s task and what the member said on it')
-  const gTask = await G(`/tasks/${OPEN.task}`)
-  const gComments = await G(`/tasks/${OPEN.task}/comments`)
-  const heard = (Array.isArray(gComments.data) ? gComments.data : []).some((c) => c.body === `${TAG} the member says`)
-  chk(
-    gTask.status === 200 && gTask.data?.id === OPEN.task && gComments.status === 200 && heard,
-    'the guest still reads the open space’s task and its comments — only what they may change is narrowed',
-    `the task ${said(gTask)}; the comments ${said(gComments)}, the member's among them: ${heard}`,
-  )
-
-  // ══ 5. AN ITEM SHARED, NOT ITS SPACE ═════════════════════════════════════
+  // ══ 4. AN ITEM SHARED, NOT ITS SPACE ═════════════════════════════════════
   console.log('\n▶ in the open space, a task shared with the guest to comment, a list likewise, and a project to edit')
   const [sharedTask] = await sql`insert into tasks (list_id, title, created_by_id) values (${OPEN.list}, ${`${TAG} a task shared with the guest`}, ${adminId}) returning id`
   const [sharedList] = await sql`insert into lists (project_id, name) values (${OPEN.project}, ${`${TAG} a list shared with the guest`}) returning id`

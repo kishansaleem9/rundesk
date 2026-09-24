@@ -1,10 +1,10 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common'
-import { eq, and, or, ne, inArray } from 'drizzle-orm'
+import { eq, and, inArray } from 'drizzle-orm'
 import { spaces, spaceMembers, spaceStatuses, folders, projects, lists, workspaces } from '@rundesk/db'
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
-import { isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
+import { isWorkspaceManager, spaceVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import {
   resolveSpaceLevels,
   spaceLevelReaches,
@@ -379,25 +379,10 @@ export class SpacesService {
     const rows =
       !actorId || (await isWorkspaceManager(this.db, workspaceId, actorId))
         ? await this.db.select().from(spaces).where(base)
-        : // Everyone else sees public spaces plus the private ones they belong to.
-          await this.db
-            .select()
-            .from(spaces)
-            .where(
-              and(
-                base,
-                or(
-                  ne(spaces.visibility, 'private'),
-                  inArray(
-                    spaces.id,
-                    this.db
-                      .select({ id: spaceMembers.spaceId })
-                      .from(spaceMembers)
-                      .where(eq(spaceMembers.userId, actorId)),
-                  ),
-                ),
-              ),
-            )
+        : // Everyone else: public spaces and the private ones they belong to — and a
+          // guest, those granted them or on the way to what is (`spaceVisibilityFilter`,
+          // which this restated without the guest's half).
+          await this.db.select().from(spaces).where(and(base, spaceVisibilityFilter(this.db, actorId, false)))
     /*
      * THE READ SITE THAT MAKES THE GATE REAL. `useSpaceFeatures` reads exactly
      * these rows, so narrowing here means a downgrade takes the ClickApp away
