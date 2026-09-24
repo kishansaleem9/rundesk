@@ -472,13 +472,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* make `assertContainerReadAccess` call `checkContainerAccess` (keeping its two distinct messages by asking which half failed), and replace ai.service's predicate with `containerVisibilityFilter` — which also gives space admins the private-project access the guard gives them.
 
-### `found-23-sep/labels-editable-by-any-member` — open, small (policy to confirm)
+### `found-23-sep/labels-editable-by-any-member` — **closed** (security, small; the policy confirmed from ClickUp's help)
 
-**`PATCH /labels/:id` and `DELETE /labels/:id` need only workspace membership: any member renames or deletes the workspace's labels**
+**`PATCH /labels/:id` and `DELETE /labels/:id` needed only workspace membership: any member, and any GUEST, renamed or deleted the workspace's labels**
 
-*Evidence:* labels.controller.ts, class-level `ResourceMemberGuard` resolves `:labelId` to its workspace and checks membership; the service checks nothing else.
+*Evidence:* labels.controller.ts, class-level `ResourceMemberGuard` resolves `:labelId` to its workspace and checks membership; the service checks nothing else. Measured on lane 1 before the fix: a guest created a tag (201), renamed the admin's (200) and deleted it (200).
 
-*To close:* check ClickUp's rule for who may edit and delete tags; enforce it in the service.
+*The policy, from ClickUp's help (search snippets: "Default user role permissions", "Manage task tags"):* members may create, edit and delete tags, and "permissions for tags" is a standing feature request there because nothing narrows that. Guests "can't create, edit, or delete tags", though they may add and remove tags on tasks. So a member doing it is ClickUp's behaviour, and a guest doing it was the defect.
+
+*Closed:* the labels service refuses a guest's create, rename and delete (403, "Guests cannot create, rename or delete tags"). Typing an existing tag's name still FINDS it, which a guest may do, since that is how a tag is added to a task. The new suite `label-access`, 3/3 on lane 1 (0/3 before). Tags are planted by SQL and every refusal is read back beside a member doing the same. `lac-1..3`, each compiled. API unit tests 1628/1628. Regression on lane 1, 8/8: the new suite, `task-boundaries` (its label routes), `task-depth`, `space-features`, `template-center`, `clickapps-plan-gating`, `ai-action-categories`, `video1-acceptance`. In CI.
 
 ### `found-23-sep/call-meeting-record-lost` — **closed** (a regression introduced and fixed the same day)
 
