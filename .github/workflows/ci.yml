@@ -372,6 +372,11 @@ jobs:
       - name: One suite's break sets never run at once
         run: bash scripts/check-run-plan.sh --mutate
 
+      # A patch that only a model can redden ran on lanes with none, and read
+      # as a patch that reddened nothing. Its set now runs with a model.
+      - name: A break set that needs a model runs with one
+        run: bash scripts/check-model-lanes.sh --mutate
+
       # Every checker stops through bail(). It returned whenever output was
       # still queued — i.e. whenever piped, as here — and the checker ran on.
       - name: bail stops the checker and loses no output

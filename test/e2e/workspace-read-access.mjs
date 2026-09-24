@@ -260,9 +260,15 @@ try {
     )
   } else {
     const memberChat = await M('/ai/chat', { method: 'POST', body: chatBody })
+    /*
+     * ITS OWN SENTENCE. This branch printed the prompt's, having read no
+     * prompt: a run with no model reported the prompt rule as measured, and the
+     * two patches aimed at it (`wra-11`, `wra-12`) read as having reddened
+     * nothing when they had not been measured at all.
+     */
     chk(
       memberChat.status === 503,
-      'the prompt a model is sent names, for a member, no space they are refused — the admin’s names it',
+      'with no model configured, a member’s chat is refused with 503 before any prompt is built — the prompt rule is measured only where a model answers',
       `no model is configured here, so no prompt is built; the member's chat answered ${said(memberChat)}, not the 503 that says so`,
     )
   }

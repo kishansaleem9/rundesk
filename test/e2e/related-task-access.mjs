@@ -12,6 +12,11 @@
  * it left out (`hiddenDependencies`), so a dependency they cannot see is
  * still known to be there — as `dependency-read-access` has the graph do.
  *
+ * The bulk editor answered with each task read as nobody in particular: a
+ * relationship-only change (an assignee, a label, a dependency) re-read the
+ * task with no reader, so every related task came back whole
+ * (`found-24-sep/bulk-edit-answers-unfiltered`).
+ *
  *   node test/e2e/related-task-access.mjs --api 3021
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
@@ -23,7 +28,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 3
+const EXPECTED_CHECKS = 4
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -77,6 +82,7 @@ try {
   if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const memberId = signed.user?.id
+  const adminId = auth.user?.id
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
@@ -124,6 +130,16 @@ try {
     renamed.status === 200 && !renamed.text.includes(WORD) && relatedIds(renamed).includes(NEAR),
     'the answer to the member’s own edit names no related task they may not open either — the open one is there',
     `${said(renamed)} ${renamed.text.includes(WORD) ? 'CARRIES the private task' : 'clean'}`,
+  )
+
+  // ══ 3. THE BULK EDITOR ═══════════════════════════════════════════════════
+  console.log('\n▶ the member assigns the admin to their task through the bulk editor, and reads the answer')
+  const bulk = await M('/tasks/bulk/update', { method: 'PATCH', body: { taskIds: [MINE], patch: { assigneeIdsAdd: [adminId] } } })
+  const bulkTask = bulk.data?.updated?.[0]
+  chk(
+    bulk.status === 200 && bulk.data?.updatedCount === 1 && !bulk.text.includes(WORD) && relatedIds({ data: bulkTask }).includes(NEAR),
+    'the bulk editor’s answer names no related task the member may not open — the open one is there',
+    `${said(bulk)} updated ${JSON.stringify(bulk.data?.updatedCount)}, failed ${JSON.stringify(bulk.data?.failed ?? null)}; ${bulk.text.includes(WORD) ? 'CARRIES the private task' : 'clean'}, related ${JSON.stringify(relatedIds({ data: bulkTask }).map((id) => (id === NEAR ? 'open' : id === HIDDEN ? 'PRIVATE' : id)))}`,
   )
 } catch (e) {
   failed += 1

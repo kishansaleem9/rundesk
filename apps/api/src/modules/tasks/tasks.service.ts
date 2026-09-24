@@ -3934,8 +3934,15 @@ export class TasksService {
             next = await this.moveTask(taskId, actorId, moveListId, movePosition++)
           }
         }
+        /*
+         * READ AS THE CALLER. This re-read had no reader, which is how an
+         * internal caller reads a task, so every related task came back whole:
+         * measured on lane 1, a member assigning the admin to their own task
+         * was answered with a private space's task, its title and its
+         * description (`found-24-sep/bulk-edit-answers-unfiltered`).
+         */
         if (!next || hasRelationshipOps) {
-          next = await this.getTask(taskId)
+          next = await this.getTask(taskId, { id: actorId })
         }
         updated.push(next)
       } catch (err) {

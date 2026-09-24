@@ -143,6 +143,12 @@ trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; break_locks_drop "$LANE" "$SUITE"' EXIT
 # run that legitimately holds it.
 : > "$OUT"
 
+# A SET WITH A PATCH ONLY A MODEL CAN REDDEN RUNS WITH ONE, baseline and all
+# (`patches_needing_model`, lane-env.sh). Said in the log, on a line that is
+# not a `== ` header, so every reader of these logs passes over it.
+NEEDS_MODEL=$(patches_needing_model "$REPO/test/e2e/breaks" "$@" | tr '\n' ' ' | sed 's/ *$//')
+[ -n "$NEEDS_MODEL" ] && lane_model_add "$LANE"
+
 # ── AND THE WORKTREE HAS TO RESOLVE ITS OWN WORKSPACE PACKAGES. ───────────
 #
 # A PATCH TO `packages/**` WAS APPLIED IN THE WORKTREE AND BUILT FROM THE REPO.
@@ -237,6 +243,7 @@ REV=$(git -C /home/user/rundesk rev-parse HEAD)
 # same chance of finding the worktree already synced, and the chain would stop
 # on "no progress" against sets that were running perfectly.
 echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
+echo "-- model: $(lane_has_model "$LANE" && echo on || echo off)${NEEDS_MODEL:+ — needed by $NEEDS_MODEL}" >> "$OUT"
 # WHAT THE LANE IS SERVING, NOT WHAT THE WORKTREE HOLDS. The sync used to run
 # only when the worktree's checkout differed from HEAD, and assumed the API
 # serving the lane had been built from it. A run killed between the checkout
@@ -247,7 +254,10 @@ echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
 # is written only once an unpatched build of REV is up, and cleared before any
 # patched restart, so a missing or different stamp forces the sync.
 STAMP="/tmp/claude-0/wt$LANE.serving"
-if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$REV" ]; then
+# And whether it was started with a model (`lane_serving_id`): the same binary
+# with and without one answers the AI's routes differently.
+SERVING="$(lane_serving_id "$REV" "$LANE")"
+if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$SERVING" ]; then
   rm -f "$STAMP"
   git -C "$WT" checkout -- . 2>/dev/null
   if ! git -C "$WT" checkout --detach "$REV" > /dev/null 2>&1; then
@@ -277,7 +287,7 @@ if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ] || [ "$(cat "$STAMP" 2>/dev/nu
     echo "== THE API DID NOT COME UP on $PORT after the sync — refusing, the baseline would measure nothing" >> "$OUT"
     exit 4
   fi
-  echo "$REV" > "$STAMP"
+  echo "$SERVING" > "$STAMP"
 fi
 
 # A worktree that was never built, or whose build was interrupted before this
@@ -523,5 +533,5 @@ pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
 # nobody described.
 pnpm -C apps/web exec vite build > /dev/null 2>&1
 pnpm -C apps/web exec vite build > /dev/null 2>&1
-restart && echo "$REV" > "$STAMP"
+restart && echo "$SERVING" > "$STAMP"
 echo "DONE $SUITE" >> "$OUT"

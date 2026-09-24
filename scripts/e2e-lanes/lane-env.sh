@@ -139,8 +139,12 @@ lane_store_up () {
 # them. What they need is a lane without a model, which is what the per-lane
 # shape of this flag already allows: `RUNDESK_LANE_MODEL=1` is read per lane at
 # launch, so a fleet can run some lanes with a model and some without, and each
-# suite goes to the lane whose configuration is its subject. Wiring that choice
-# into the dispatcher is the next piece of this work and is NOT done.
+# suite goes to the lane whose configuration is its subject. Half of that is
+# wired: a break set whose patch says it needs a model gets one, and the
+# runner's stamp re-syncs a lane whose model differs from what the set asked
+# for (`patches_needing_model`, `lane_serving_id`, below). Routing a SUITE by
+# its need — the dispatcher sending `create-menu-ai` only to a lane without one
+# — is NOT done (`harness/model-lane-routing-unbuilt`).
 #
 # The two stale header sentences on `ai-assign` and `clip-created-card` were
 # fixed at the same time; neither is a check, so neither blocks anything.
@@ -176,6 +180,42 @@ lane_has_model () {
   local n
   for n in $want; do [ "$n" = "$k" ] && return 0; done
   return 1
+}
+
+# A PATCH THAT CAN REDDEN ONLY WHERE A MODEL ANSWERS says so in its header,
+#
+#     # Reddens only where a model answers: run it on a lane with ...
+#
+# and the break runner asks it of every patch in a set (`wt-break.sh`), so the
+# set runs with a model — its baseline too, or the two would measure different
+# configurations. It used to be up to whoever started the run: the second
+# drifted plan ran `wra-11` and `wra-12` on lanes 3 and 4 with none, the suite
+# built no prompt, and both read as patches that reddened nothing
+# (`found-24-sep/model-patches-measured-without-a-model`). Prints the names
+# that need one, one per line; a patch that is not there needs nothing.
+patches_needing_model () {
+  local dir="$1" p
+  shift
+  for p in "$@"; do
+    grep -q '^# Reddens only where a model answers' "$dir/$p.py" 2>/dev/null && echo "$p"
+  done
+  return 0
+}
+
+# This lane, added to the lanes with a model, for this process and its children.
+lane_model_add () {
+  local k="$1"
+  lane_has_model "$k" && return 0
+  export RUNDESK_LANE_MODEL="${RUNDESK_LANE_MODEL:+$RUNDESK_LANE_MODEL }$k"
+}
+
+# WHAT A LANE IS SERVING, for the break runner's stamp: the revision, and
+# whether the API was started with a model. A lane serving the right revision
+# WITHOUT one is not serving what a set that needs one asked for, and the
+# revision alone could not tell the two apart.
+lane_serving_id () {
+  local rev="$1" k="$2"
+  if lane_has_model "$k"; then echo "$rev +model"; else echo "$rev"; fi
 }
 
 lane_model_env () {

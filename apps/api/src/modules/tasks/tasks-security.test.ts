@@ -20,6 +20,8 @@ import { TasksService } from './tasks.service'
  *   4. Private-container leak — `getTasksForWorkspace` must ask the database
  *      for a member's rows by their reach (space, project and list) and the
  *      private-item rule, before its limit.
+ *   5. A task's dependencies are its own workspace's rows, read with no reader
+ *      as with one.
  *
  * Uses the repo's queued-thenable Drizzle stand-in: every db.select() pops the
  * next planned rows; insert captures its `.values()` payload.
@@ -304,5 +306,51 @@ describe('TasksService.getTasksForWorkspace — who may see which rows', () => {
     assert.equal(out.length, 1)
     const [taskWhere] = rendered(wheres, 'tasks')
     assert.ok(taskWhere && !/visibility/.test(taskWhere), `an internal read was filtered: ${taskWhere}`)
+  })
+})
+
+// --- 5. getTask: what a task shows from elsewhere --------------------------
+
+/**
+ * A dependency hands back the related task's WHOLE row. For a reader, the
+ * reader rule (`readableTaskIds`, in the task's own workspace) leaves out a
+ * task they may not open, and a task in another workspace with it, so no
+ * route can show that this query's own workspace condition is there: remove
+ * it and every reader's answer is the same (`tb-41` reddened nothing). It is
+ * the only rule an internal caller has, which reads with no reader, so this
+ * reads the query it asks.
+ */
+describe('TasksService.getTask — what a task shows from elsewhere', () => {
+  const dialect = new PgDialect()
+  it('reads a task’s dependencies from its own workspace only, with no reader as with one', async () => {
+    const wheres: Array<{ table: string; condition: unknown }> = []
+    const rowsByTable: Record<string, unknown[]> = {
+      lists: [{ workspaceId: 'w1', spaceId: 's1', projectId: 'p1' }],
+    }
+    const chain = (): any => {
+      let rows: unknown[] = []
+      let table = '?'
+      const c: any = {
+        from: (t: unknown) => { table = getTableName(t as never); rows = rowsByTable[table] ?? []; return c },
+        where: (condition: unknown) => { wheres.push({ table, condition }); return c },
+        innerJoin: () => c, leftJoin: () => c, orderBy: () => c, limit: () => c, groupBy: () => c,
+        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve(rows).then(resolve, reject),
+      }
+      return c
+    }
+    const db = {
+      select: mock.fn(() => chain()),
+      query: {
+        tasks: { findFirst: mock.fn(async () => ({ id: 't1', listId: 'l1', subtasks: [], assignees: [], parentTaskId: null, taskTypeId: null })) },
+        taskChecklists: { findMany: mock.fn(async () => []) },
+      },
+    } as any
+    const out = await makeService(db).getTask('t1')
+    assert.ok(out, 'the task was not read')
+    const [depWhere] = wheres
+      .filter((w) => w.table === 'task_dependencies' && w.condition != null)
+      .map((w) => dialect.sqlToQuery(w.condition as never).sql)
+    assert.ok(depWhere, 'the dependencies were never read')
+    assert.match(depWhere, /"spaces"\."workspace_id" = /, `the dependencies are not bound to the task's workspace: ${depWhere}`)
   })
 })
