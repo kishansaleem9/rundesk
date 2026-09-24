@@ -737,13 +737,39 @@ The new suite `ai-read-access`, 5/5 on lane 1. Every answer in it is the determi
 
 *To close:* deliver them as chat events now are (`channelReaders`), after checking what the web's call UI needs from them outside the channel (the call-in-progress bar); a suite that listens as an outsider and as a participant.
 
-### `found-24-sep/tasks-created-in-view-only-spaces` — open, medium (security; found fixing meeting action items; code read, NOT YET MEASURED)
+### `found-24-sep/tasks-created-in-view-only-spaces` — **closed** (security, medium; found fixing meeting action items) — with `found-24-sep/task-makers-skip-the-list-rule` below
 
-**The space's create gate is on moving a task in, and not on making one**
+**The space's create gate was on moving a task in, and not on making one**
 
-*Evidence (code read):* `tasks.service.ts` `moveTask` calls `assertCanCreateInSpace(... kind: 'task')`, and its comment calls that gate "the door … put on the create path to shut". `createTask` never calls it, and neither does `POST /tasks`, whose only check is `ResourceMemberGuard` (membership and visibility). So a member of a space whose default permission is "view only" or "comment" can probably make tasks in it, though they could not move one in. ClickUp's view-only permission does not allow creating tasks.
+*Evidence, measured on lane 1 (probe `measure-view-only`) as a plain member:* in a space whose default permission is "view only", and in one set to "comment", `POST /tasks` made a task (201 each). ClickUp's view and comment permissions make none (help.clickup.com "Permissions in detail", search snippets): view only cannot comment or edit, comment may comment and, on a task assigned to them, change its status.
 
-*To close:* measure it first (a member, a view-only space, `POST /tasks`). If it is open, put the create gate on `createTask` for callers with an actor, with a suite whose twin is a space set to edit.
+*Closed with the item below,* whose one rule includes the space's create gate. `task-creation-access` §5: a member makes no task in a "view only" or "comment" space (403 each, none made), and makes one in an "edit" space. `tcm-5` removes the gate.
+
+*Still open, measured beside it:* the same member, in a "view only" space, COMMENTED on a task (201) and changed the status of a task assigned to them (200). The space level is asked of containers and now of new tasks, but not of comments or task edits. That is `found-24-sep/view-only-spaces-take-comments-and-edits` below.
+
+### `found-24-sep/task-makers-skip-the-list-rule` — **closed** (security, HIGH; found fixing meeting action items)
+
+**Only `POST /tasks` asked who may make a task in a list: from a chat message, an AI plan or `/task`, anybody could, a user of another organisation included**
+
+*Evidence, measured on lane 1 (probe `measure-task-makers`) before the fix, as a member refused a private list:*
+- "create task" on a chat message (`POST /chat/messages/:id/create-task`, whose `listId` comes from the body) made a task in the private list (201). The route has no list guard, and `createTask` asked only whether the maker was a guest;
+- an AI plan sent straight to the executor (`POST /ai/command/execute`, `create_task`) made one there too (201, "succeeded"), since the executor asks membership and nothing more;
+- a user of ANOTHER organisation made a task in this workspace's list from a message in their own workspace (201). Not a member, so not a guest, so `createTask` let them;
+- `/task` in a channel filed the task in the workspace's oldest list whoever asked, and "create task from this" on an AI answer did the same through a second copy of that picker.
+
+Each maker had added its own piece of the rule: the meeting items `readableList`, an inbound webhook the container rule, the executor membership, the chat message nothing. Four statements of one rule, none of them whole.
+
+*Closed:* `TasksService.assertCanCreateTaskIn`, asked by `createTask` itself for the person the task is made by, so every route that makes a task asks it. The maker must be a member of the list's workspace who may open the list (`readableList`: the container rule and the private-list rule), otherwise not found. They must not be a guest (403, as before). The space must let them add to it (`assertCanCreateInSpace`, which `moveTask` already asked of a destination), otherwise 403. A super-admin passes where they are not a member, as every guard lets them. The meeting items delegate to it (and keep their own-workspace check). The two default-list pickers are one, `defaultListFor`: the oldest list the person may make a task in.
+
+The new suite `task-creation-access`, 6/6 on lane 1 (1 of 6 before: the guest was already refused). §1 a message into a private list, §2 the other organisation, §3 an AI plan, §4 `/task` (the workspace's own oldest list made private by SQL, so the member's goes elsewhere and the admin's to it), §5 the space gate, §6 a guest; each refusal read back from the list by SQL beside a twin that makes one. `tcm-1..6`, each compiled; `mtg-3` re-anchored to where the guest rule now lives. API unit tests for every caller of `createTask` (tasks, meetings, chat, AI, templates, webhooks) 623/623. Regression on lane 1, 14/14: the new suite, `meeting-access`, `space-default-permission`, `chat-message-actions`, `task-boundaries`, `task-provenance`, `template-center`, `clip-created-card`, `create-menu-ai`, `workspace-read-access`, both video-1 suites, `ui-sweep` and `video-regression`. In CI.
+
+### `found-24-sep/view-only-spaces-take-comments-and-edits` — open, medium (security; found closing the create gate)
+
+**In a "view only" space a member still comments, and changes the status of a task assigned to them**
+
+*Evidence, measured on lane 1 (probe `measure-view-only`):* in a "view only" space a plain member's `POST /tasks/:id/comments` answered 201, and a PATCH of a task assigned to them (status) answered 200. The same held in a "comment" space, where ClickUp allows both (comment, and status on an assigned task). Renaming or deleting somebody else's task was refused everywhere (403), by the older creator-or-assignee rule, not by the space.
+
+*To close:* a comment needs the space's "comment" level; a task edit needs "edit", except status and assignees on a task assigned to the editor, which "comment" allows (ClickUp's "comment with task assigned"). A suite with the three levels side by side.
 
 ### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — open, small (visible bug; found fixing goal access)
 

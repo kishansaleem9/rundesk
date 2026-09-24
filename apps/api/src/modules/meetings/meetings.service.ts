@@ -6,7 +6,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
-import { readableList, readableTask } from '../../common/permissions/read-access'
+import { readableTask } from '../../common/permissions/read-access'
 import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { AiService } from '../ai/ai.service'
 import { R2Service } from '../../common/storage/r2.service'
@@ -399,9 +399,10 @@ export class MeetingsService {
 
   /** The destination of a meeting's action items: see extractActionItems. A seam, so a unit test can stand in for it. */
   protected async assertCanMakeTasksIn(workspaceId: string, listId: string, userId: string) {
-    const list = await readableList(this.db, workspaceId, listId, { id: userId })
-    if (!list) throw new NotFoundException('List not found')
-    if (list.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
+    // The one rule for making a task (`TasksService.assertCanCreateTaskIn`),
+    // and a list of THIS meeting's workspace.
+    const home = await this.tasksService.assertCanCreateTaskIn(listId, userId)
+    if (home.workspaceId !== workspaceId) throw new NotFoundException('List not found')
   }
 
   /**

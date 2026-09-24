@@ -2163,20 +2163,6 @@ export class ChatService {
     return task
   }
 
-  /** First usable (non-archived) list in a workspace — the default target for a
-   *  slash command's task/reminder. Null when the workspace has no list yet. */
-  private async resolveDefaultList(workspaceId: string): Promise<string | null> {
-    const [row] = await this.db
-      .select({ id: lists.id })
-      .from(lists)
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
-      .orderBy(asc(lists.createdAt))
-      .limit(1)
-    return row?.id ?? null
-  }
-
   /**
    * Parse the "<when> <what>" tail of a `/remind` command into an absolute time
    * plus the reminder note (Plan §6.3). Understands a leading "me", relative
@@ -2247,7 +2233,7 @@ export class ChatService {
 
     if (cmd === 'task') {
       if (!trimmed) throw new BadRequestException('Usage: /task <description>')
-      const listId = await this.resolveDefaultList(channel.workspaceId)
+      const listId = await this.tasks.defaultListFor(channel.workspaceId, userId)
       if (!listId) throw new BadRequestException('No list is available to create a task in yet — create a space, project and list first.')
       const title = trimmed.split('\n')[0].slice(0, 200)
       const task = await this.tasks.createTask({ listId, title, description: trimmed, createdById: userId })

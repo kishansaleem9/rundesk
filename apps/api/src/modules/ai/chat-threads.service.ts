@@ -167,23 +167,10 @@ export class ChatThreadsService {
     return row
   }
 
-  /** The oldest live list in the workspace — the same rule `/task` in chat uses. */
-  private async defaultList(workspaceId: string): Promise<string | null> {
-    const [row] = await this.db
-      .select({ id: lists.id })
-      .from(lists)
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(lists.isArchived, false)))
-      .orderBy(asc(lists.createdAt))
-      .limit(1)
-    return row?.id ?? null
-  }
-
   /** "Create task from this" — the second icon. */
   async createTaskFrom(workspaceId: string, userId: string, threadId: string, messageId: string) {
     const message = await this.ownMessage(workspaceId, userId, threadId, messageId)
-    const listId = await this.defaultList(workspaceId)
+    const listId = await this.tasks.defaultListFor(workspaceId, userId)
     if (!listId) {
       throw new BadRequestException(
         'No list is available to create a task in yet — create a space, project and list first.',
