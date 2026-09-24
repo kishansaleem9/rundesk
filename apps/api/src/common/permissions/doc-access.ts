@@ -1,6 +1,8 @@
 import { and, eq, inArray, notInArray } from 'drizzle-orm'
 import { docs, objectShares, spaces, spaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
+import { isManagerRole } from './item-visibility'
+import { resolveSpaceLevel } from './space-default-permission'
 
 /*
  * WHO MAY READ A DOC.
@@ -168,4 +170,80 @@ export function docsOutOfReach(
     const at = walk(r.id)
     return at.outside && !at.shared
   }).map((r) => r.id)
+}
+
+/*
+ * WHAT A PERSON MAY DO TO A DOC THEY MAY READ.
+ *
+ * Every doc write (edit, delete, the public link, revisions, comments) asked
+ * the read rule and nothing more. Measured on lane 1: a member whose only
+ * access to a private space's doc was a VIEW share renamed it, commented on it
+ * and made it public; a guest renamed a doc of an open space; a member in a
+ * space whose default is "view only" made, renamed and deleted docs there
+ * (`found-24-sep/doc-writes-are-the-read-rule`).
+ *
+ * ClickUp's rule (help.clickup.com "Share Docs", "Permissions in detail",
+ * search snippets): a doc added to a location inherits that location's
+ * permission — view, comment, edit, full edit — and a share on the doc itself
+ * overrides it; a guest edits only where they have been given edit.
+ *
+ * So, most specific first:
+ *   - a workspace manager, or the doc's own maker: full edit;
+ *   - a share on the doc, or on the nearest doc above it that has one: its level;
+ *   - the space it lives in (its own, or the nearest one above it): the level
+ *     `resolveSpaceLevel` gives — the space's default, or a grant on it; for a
+ *     GUEST, a grant only, since a location's default is its members';
+ *   - a doc of no space: the workspace's, a member's to edit and a guest's to read.
+ */
+export type DocLevel = 'view' | 'comment' | 'edit' | 'admin'
+const DOC_LEVEL_RANK: Record<DocLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
+export const docLevelReaches = (have: DocLevel, need: DocLevel): boolean => DOC_LEVEL_RANK[have] >= DOC_LEVEL_RANK[need]
+
+export async function docLevel(
+  db: Db,
+  doc: { id: string; workspaceId: string; spaceId: string | null; parentDocId: string | null; createdById?: string | null },
+  actor: { id: string; workspaceRole: string | null | undefined },
+): Promise<DocLevel> {
+  if (isManagerRole(actor.workspaceRole)) return 'admin'
+  if (doc.createdById && doc.createdById === actor.id) return 'admin'
+
+  // The doc and the docs above it, nearest first, and the first space among them.
+  const chain: string[] = [doc.id]
+  let spaceId: string | null = doc.spaceId
+  let cursor: string | null = doc.parentDocId
+  const seen = new Set<string>([doc.id])
+  for (let depth = 0; cursor && !seen.has(cursor) && depth < MAX_DEPTH; depth += 1) {
+    seen.add(cursor)
+    chain.push(cursor)
+    const [up] = await db.select({ parentDocId: docs.parentDocId, spaceId: docs.spaceId }).from(docs).where(eq(docs.id, cursor)).limit(1)
+    if (!up) break
+    spaceId = spaceId ?? up.spaceId
+    cursor = up.parentDocId
+  }
+
+  const shares = await db
+    .select({ objectId: objectShares.objectId, level: objectShares.level })
+    .from(objectShares)
+    .where(
+      and(
+        eq(objectShares.workspaceId, doc.workspaceId),
+        eq(objectShares.objectType, 'doc'),
+        eq(objectShares.userId, actor.id),
+        inArray(objectShares.objectId, chain),
+      ),
+    )
+  const byDoc = new Map(shares.map((s) => [s.objectId, s.level as DocLevel]))
+  for (const id of chain) {
+    const level = byDoc.get(id)
+    if (level) return level
+  }
+
+  const guest = actor.workspaceRole === 'guest'
+  if (spaceId) {
+    const resolved = await resolveSpaceLevel(db, { spaceId, actorId: actor.id })
+    if (!resolved) return 'view'
+    if (guest && resolved.source === 'space-default') return 'view'
+    return resolved.level as DocLevel
+  }
+  return guest ? 'view' : 'edit'
 }

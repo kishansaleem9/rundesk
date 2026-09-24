@@ -7,7 +7,9 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter, isManagerRole } from '../../common/permissions/item-visibility'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
-import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
+import { canReadDoc, docLevel, docLevelReaches, type DocLevel, hiddenDocIds } from '../../common/permissions/doc-access'
+import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { isUuid } from '../../common/validation/uuid'
 import { pickDocUpdatable } from './doc-update-fields'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -221,6 +223,55 @@ export class DocsService {
   }
 
   /**
+   * The read rule, and then the LEVEL the write needs (`docLevel`): "edit" to
+   * change or delete a doc, "comment" to comment. A doc the caller may read
+   * but not write this way is refused with 403 — they can see it, so saying
+   * so hides nothing.
+   */
+  private async assertDocLevel(docId: string, userId: string, need: DocLevel) {
+    const doc = await this.assertDocAccess(docId, userId)
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, doc.workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    const level = await docLevel(this.db, doc, { id: userId, workspaceRole: membership?.role as string | undefined })
+    if (!docLevelReaches(level, need)) {
+      throw new ForbiddenException(
+        need === 'comment' ? 'Your access to this doc does not allow commenting' : 'Your access to this doc does not allow changing it',
+      )
+    }
+    return { doc, level, role: membership?.role as string | undefined }
+  }
+
+  /**
+   * MAKING A DOC is adding to where it goes: "edit" on its space (the create
+   * gate lists and projects face, `assertCanCreateInSpace`); for a GUEST, a
+   * grant of it, since a space's default is its members'; and a doc of no
+   * space is the workspace's, a member's to make and not a guest's.
+   */
+  private async assertMayMakeDocIn(workspaceId: string, spaceId: string | null | undefined, actorId: string) {
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    const guest = membership?.role === 'guest'
+    if (!spaceId) {
+      if (guest) throw new ForbiddenException('Guests cannot create docs here')
+      return
+    }
+    if (guest) {
+      const resolved = await resolveSpaceLevel(this.db, { spaceId, actorId })
+      if (!resolved || resolved.source === 'space-default' || !spaceLevelReaches(resolved.level, 'edit')) {
+        throw new ForbiddenException('Guests cannot create docs here')
+      }
+      return
+    }
+    await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'doc' })
+  }
+
+  /**
    * A doc's SPACE is where it lives: in the doc's own workspace, and one the
    * caller can reach. Every path that sets it — create, import, from a
    * template, PATCH — took any id. A doc in workspace A filed under workspace
@@ -329,7 +380,13 @@ export class DocsService {
     createdById: string
   }) {
     if (data.spaceId) await this.assertDocSpace(data.spaceId, data.workspaceId, data.createdById)
-    if (data.parentDocId) await this.assertDocParent(data.parentDocId, data.workspaceId, data.createdById)
+    if (data.parentDocId) {
+      await this.assertDocParent(data.parentDocId, data.workspaceId, data.createdById)
+      // A page is part of the doc above it: adding one is editing that doc.
+      await this.assertDocLevel(data.parentDocId, data.createdById, 'edit')
+    } else {
+      await this.assertMayMakeDocIn(data.workspaceId, data.spaceId, data.createdById)
+    }
     const [row] = await this.db
       .insert(docs)
       .values({
@@ -391,6 +448,7 @@ export class DocsService {
     // the unit test exercises the rule this uses rather than a copy of it.
     const { title, content } = splitTitleFromMarkdown(raw, opts.fileName ?? '')
     if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
+    await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
 
     const [row] = await this.db
       .insert(docs)
@@ -493,6 +551,7 @@ export class DocsService {
     const [template] = await this.db.select().from(docTemplates).where(eq(docTemplates.id, templateId)).limit(1)
     if (!template || template.workspaceId !== workspaceId) throw new NotFoundException('Template not found in this workspace')
     if (opts.spaceId) await this.assertDocSpace(opts.spaceId, workspaceId, userId)
+    await this.assertMayMakeDocIn(workspaceId, opts.spaceId, userId)
 
     const [row] = await this.db
       .insert(docs)
@@ -537,7 +596,7 @@ export class DocsService {
       expectedUpdatedAt?: string
     },
   ) {
-    const doc = await this.assertDocAccess(docId, userId)
+    const { doc } = await this.assertDocLevel(docId, userId, 'edit')
     // Only the columns this route may write — see doc-update-fields.ts. The
     // route refuses anything else by name; this is the service's own copy of
     // the rule for its other callers (revision restore).
@@ -647,7 +706,7 @@ export class DocsService {
   }
 
   async deleteForUser(docId: string, userId: string) {
-    await this.assertDocAccess(docId, userId)
+    await this.assertDocLevel(docId, userId, 'edit')
     const [row] = await this.db
       .update(docs)
       .set({ isArchived: true, archivedAt: new Date(), archivedById: userId, updatedAt: new Date() })
@@ -665,7 +724,8 @@ export class DocsService {
    * /d/<slug> route. Idempotent: returns the existing slug if already shared.
    */
   async enablePublicShare(docId: string, userId: string) {
-    const doc = await this.assertDocAccess(docId, userId)
+    const { doc, role } = await this.assertDocLevel(docId, userId, 'edit')
+    if (role === 'guest') throw new ForbiddenException('Guests cannot share docs')
     if (doc.publicShareId) {
       return { publicShareId: doc.publicShareId, publicShareEnabledAt: doc.publicShareEnabledAt }
     }
@@ -696,7 +756,8 @@ export class DocsService {
   }
 
   async disablePublicShare(docId: string, userId: string) {
-    const doc = await this.assertDocAccess(docId, userId)
+    const { doc, role } = await this.assertDocLevel(docId, userId, 'edit')
+    if (role === 'guest') throw new ForbiddenException('Guests cannot share docs')
     if (!doc.publicShareId) return { ok: true }
     await this.db
       .update(docs)
@@ -777,7 +838,7 @@ export class DocsService {
     userId: string,
     body: { body: string; parentCommentId?: string | null; selection?: { from: number; to: number; quote?: string } | null },
   ) {
-    const doc = await this.assertDocAccess(docId, userId)
+    const { doc } = await this.assertDocLevel(docId, userId, 'comment')
     const trimmed = body.body?.trim()
     if (!trimmed) throw new ConflictException('Comment body is required')
     if (body.parentCommentId) {
@@ -927,7 +988,7 @@ export class DocsService {
   async updateComment(commentId: string, userId: string, patch: { body?: string }) {
     const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
     if (!existing) throw new NotFoundException('Comment not found')
-    await this.assertDocAccess(existing.docId, userId)
+    await this.assertDocLevel(existing.docId, userId, 'comment')
     if (existing.authorId && existing.authorId !== userId) {
       throw new ForbiddenException('Only the author can edit this comment')
     }
@@ -949,7 +1010,7 @@ export class DocsService {
   async setCommentResolution(commentId: string, userId: string, resolved: boolean) {
     const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
     if (!existing) throw new NotFoundException('Comment not found')
-    await this.assertDocAccess(existing.docId, userId)
+    await this.assertDocLevel(existing.docId, userId, 'comment')
     const [updated] = await this.db
       .update(docComments)
       .set({
@@ -1024,7 +1085,7 @@ export class DocsService {
   async deleteComment(commentId: string, userId: string) {
     const [existing] = await this.db.select().from(docComments).where(eq(docComments.id, commentId)).limit(1)
     if (!existing) throw new NotFoundException('Comment not found')
-    await this.assertDocAccess(existing.docId, userId)
+    await this.assertDocLevel(existing.docId, userId, 'comment')
     if (existing.authorId && existing.authorId !== userId) {
       throw new ForbiddenException('Only the author can delete this comment')
     }

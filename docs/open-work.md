@@ -815,13 +815,17 @@ The global `ResponseInterceptor` wraps every return value as `{ data, meta, erro
 
 *To close:* let the envelope pass a `StreamableFile`, and a body whose handler declared a non-JSON content type, through unwrapped. Then a suite that downloads each export and reads a CSV header row and a `%PDF` prefix.
 
-### `found-24-sep/doc-writes-are-the-read-rule` — open, medium (security; found fixing docs)
+### `found-24-sep/doc-writes-are-the-read-rule` — **closed** (security, medium; found fixing docs)
 
-**Anybody who may read a doc may edit, delete and share it: a view-only share, and a guest, included**
+**Anybody who may read a doc could edit, delete and share it: a view-only share, and a guest, included**
 
-*Evidence, read not run:* every doc write (`update`, `deleteForUser`, `enablePublicShare`, `restoreRevision`, comments) passes `assertDocAccess` and nothing more, which is now the read rule and was membership before it. `object_shares.level` (`view`, `comment`, `edit`, `admin`) is written by the share dialog and read by no doc route. In ClickUp, a Doc shared with view permission cannot be edited, and a guest edits only with edit permission. Here a member given a `view` share on a doc in a private space can rewrite it, and a guest can edit any doc of an open space.
+*Evidence, measured on lane 1 (probe `measure-doc-writes`):* every doc write (`update`, `deleteForUser`, `enablePublicShare`, `restoreRevision`, comments) passed `assertDocAccess` and nothing more. That is the read rule now, and was membership before it. `object_shares.level` was written by the share dialog and read by no doc route. Measured: a member whose only access to a private space's doc was a VIEW share renamed it (200), commented (201) and made it PUBLIC (201). A guest renamed an open space's doc (200). A member in a "view only" space made (201), renamed (200) and deleted (200) docs there.
 
-*To close:* measure both (a view share, a guest), research ClickUp's default Doc permission for members of the location, and give the writes a level check: the share's level where the access is a share, and the role's otherwise.
+*The rule, ClickUp's* (help.clickup.com "Share Docs", "Permissions in detail", search snippets): a doc added to a location inherits the location's permission (view, comment, edit, full edit), a share on the doc overrides it, and a guest edits only where given edit.
+
+*Closed:* `docLevel` (doc-access.ts), most specific first. A workspace manager, or the doc's maker, has full edit. Otherwise a share on the doc, or on the nearest doc above it that has one, gives its level. Otherwise the space it lives in (its own, or the nearest above) gives what `resolveSpaceLevel` gives, and for a guest only a grant counts, not the default. A doc of no space is a member's to edit and a guest's to read. Changing, deleting or restoring a doc needs "edit". Its public link needs "edit" and is never a guest's (as `SharesService.canShare`). Commenting, and editing, resolving or deleting one's comment, needs "comment". Making a doc needs "edit" on its space (`assertCanCreateInSpace`); for a guest, a grant; and a doc of no space is not a guest's to make. A page needs "edit" on the doc above it.
+
+The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and edit shares side by side, a guest with and without an edit share, a view-only space beside an open one, and a doc of no space. Docs and shares are planted by SQL and every refusal is read back from the row. `dwl-1..7`, each compiled. API unit tests 1628/1628. Regression on lane 1, 15/15: the new suite, `doc-boundaries`, `doc-import`, `doc-task-links`, `workspace-read-access`, `search-read-access`, `ai-answer-rendering`, `template-center`, `comment-slash-commands`, `chat-message-actions`, `panel-collapse`, `addressability-live`, `video1-acceptance`, `ui-sweep` and `video-regression`. In CI.
 
 ### `found-24-sep/linked-docs-read-needs-write-access` — open, low (visible bug; found fixing docs)
 
