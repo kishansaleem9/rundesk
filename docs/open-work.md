@@ -624,7 +624,7 @@ The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the mem
 
 *Fixed next: chat events,* a HIGH item of their own below (`found-24-sep/chat-events-broadcast-to-the-workspace`).
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked). Next, measured first.
+*Fixed next: the AI's suggestions and counts,* their own item below (`found-24-sep/ai-suggestions-read-the-whole-workspace`), with a gap in the reports fix above found beside them (`found-24-sep/reach-skipped-private-lists`). That is the last of the audit's list.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
@@ -698,6 +698,28 @@ The new suite `meeting-access`, 4/4 on lane 1 both with the model stub and witho
 The new suite `chat-realtime-access`, 6/6 on lane 1, and 5 of 6 failed against the build before the fix (lane 2 at 377acf7; the public twin passed both times). Three sockets listen (an outsider, the admin's DM partner, the admin), and every "hears nothing" has, on the same event, somebody entitled who hears it: the DM and its edit; a private channel's message, edit, pin, reaction and deletion; a private space's channel; a new private channel's name; the call card. A public channel still reaches everyone. `crr-1..7`, each compiled. API unit tests for chat and calls 176/176. Regression on lane 1: 12/13 at first — the new suite, `workspace-read-access`, `call-survives-navigation`, `chat-history`, `chat-message-actions`, `sidebar-dms`, `syncup-live`, `a61-meeting-record`, `replies-inline-thread`, `task-mentions`, `video1-acceptance`, `video-regression` — with `a39-dm-tabs` failing "the meeting both attended is listed". That failure was the suite's own, not this change: it failed the same way on lane 1 with the change taken out, and passed on lane 2. It is `found-24-sep/a39-shared-meeting-keyed-by-title` below, fixed, after which `a39-dm-tabs` is 19/19 on lane 1 with this change in. In CI.
 
 *Not changed:* `call.*` events (started, joined, left, ended, recording) still go to the workspace. They carry ids only (the call, the channel, who), but "these two are in a call in this DM" is still something a member outside it now learns. The web draws call cards and invalidates channel messages from them, so moving them is a change to the call UI, not only to delivery; it is `found-24-sep/call-events-broadcast-to-the-workspace` below.
+
+### `found-24-sep/ai-suggestions-read-the-whole-workspace` — **closed** (security, medium; found measuring the audit's "AI suggest-tasks and workload-balance")
+
+**"Suggest tasks" handed a member a private space's task titles; "workload balance" and "Assign with AI" counted everybody's work in it**
+
+*Evidence, measured on lane 1 (probe `measure-ai-suggest`) before the fix, as a member refused a private space holding a project named like the one being planned, with six tasks:*
+- `POST /ai/suggest-tasks` gave the member those six task titles word for word as its suggestions, and the project's name in the "learned from" line. No model is needed for that: the heuristic answer is made of titles from similar projects, and the candidates were every project in the workspace;
+- a project named by id was read wherever it was, so its name steered the plan;
+- `POST /ai/workload-balance` gave the member exactly the admin's answer: the admin's load counting the private tasks, and two of their ids offered for moving;
+- `GET /ai/assignee-suggestion` ("Assign with AI") counts each colleague's open and overdue work across the workspace. Its comment says it deliberately shares the workload panel's read, so it shared the leak.
+
+*Closed:* the candidate projects and their titles are the ones the reader may open (the container rule, the private-list and private-task rules). A project named by id counts only if it is one of those. The workload loads take an optional reader (`readerTaskFilter`: `taskInReachFilter` with the private-task rule): the balance route passes its caller, and Assign with AI passes its asker for all three of its counts. The daily alert to managers passes none, since a manager sees everything anyway.
+
+The new suite `ai-read-access`, 5/5 on lane 1. Every answer in it is the deterministic one a server with no model gives, so it runs as it is in CI. `ars-1..7`, each compiled. The unit test of the heuristic (`suggest-tasks.test.ts`) answers its two reads in order from a fake database, so it now asks as a reader who may open everything and adds no read. API unit tests for AI, permissions and reports 351/351. The new suite also ran 0/5 against the build before the fix (lane 2 at d85a0e2). Regression on lane 1, 12/12: the new suite, the other report and goal suites, `ai-assign`, `ai-answer-rendering`, `person-panel`, `assignee-picker`, `addressability-live`, `workspace-read-access`, `app-catalogue`, `ui-sweep` and `video-regression`. In CI.
+
+### `found-24-sep/reach-skipped-private-lists` — **closed** (security, medium; a gap in this morning's reports fix, found fixing the AI's counts)
+
+**The rule the reports were fixed with stopped at the space and the project, so a private list's tasks were still counted and named**
+
+*Evidence, measured on lane 1 (probe `measure-private-list`):* a member refused a private list in an OPEN space (403 on it). The overview and completion counted its three tasks (total 4, where the member may open 1), and the activity feed named them. `taskInReachFilter`, written for `found-23-sep/workspace-reads-skip-the-container-rule`'s reports, joined lists to projects and spaces and applied the container rule, but not the list's own privacy, which `ResourceMemberGuard` applies to a list. `report-read-access` had no private list in it, so it could not see this.
+
+*Closed:* "reach" includes `listVisibilityFilter`: a private list is its maker's, and a manager's. Every report built on it, and the AI's counts above, follow. `ai-read-access` §4 holds it (the member's overview counts none of the private list's tasks and the feed names none; the admin's count and name them), and `ars-6` removes it again.
 
 ### `found-24-sep/a39-shared-meeting-keyed-by-title` — **closed** (test tooling; found by the chat sweep)
 

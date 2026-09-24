@@ -2,7 +2,10 @@
 # Reddens: report-read-access: "a member’s overview and completion count only the task they may open — the admin’s count all four"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.guard-helper.ts'
-a = '    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false)))\n  return inArray(tasks.listId, reachable)\n'
+# Re-anchored when reach took the list's own privacy too
+# (found-24-sep/reach-skipped-private-lists); the edit is the same: nothing
+# but the workspace is asked.
+a = '    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false), listVisibilityFilter(actorId, false)))\n  return inArray(tasks.listId, reachable)\n'
 b = '    .where(eq(spaces.workspaceId, workspaceId))\n  return inArray(tasks.listId, reachable)\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

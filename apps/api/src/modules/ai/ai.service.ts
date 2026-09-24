@@ -46,6 +46,7 @@ import {
   containerVisibilityFilter,
   isWorkspaceManager,
   spaceVisibilityFilter,
+  taskInReachFilter,
 } from '../../common/permissions/container-access.guard-helper'
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
@@ -3079,6 +3080,10 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
 
     const actorRole = await this.memberRole(row.workspaceId, actorId)
     if (!actorRole || actorRole === 'guest') return refuseAssign('no_permission')
+    // Every count below is of the tasks the ASKER may open, as the workload
+    // panel's are: a colleague's load in a space the asker is refused is not
+    // theirs to read, as a number or otherwise.
+    const actorSees = await this.readerTaskFilter(row.workspaceId, { id: actorId })
 
     const [members, loads, alreadyOn, inListRows, overdueRows] = await Promise.all([
       this.db
@@ -3091,13 +3096,13 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
         .from(workspaceMembers)
         .innerJoin(users, eq(users.id, workspaceMembers.userId))
         .where(eq(workspaceMembers.workspaceId, row.workspaceId)),
-      this.collectWorkloadLoads(row.workspaceId),
+      this.collectWorkloadLoads(row.workspaceId, { id: actorId }),
       this.db.select({ userId: taskAssignees.userId }).from(taskAssignees).where(eq(taskAssignees.taskId, taskId)),
       this.db
         .select({ userId: taskAssignees.userId, count: sql<number>`count(distinct ${tasks.id})::int` })
         .from(taskAssignees)
         .innerJoin(tasks, eq(tasks.id, taskAssignees.taskId))
-        .where(and(eq(tasks.listId, row.listId), eq(tasks.isArchived, false), ne(tasks.statusCategory, 'closed')))
+        .where(and(eq(tasks.listId, row.listId), eq(tasks.isArchived, false), ne(tasks.statusCategory, 'closed'), actorSees))
         .groupBy(taskAssignees.userId),
       this.db
         .select({ userId: taskAssignees.userId, count: sql<number>`count(distinct ${tasks.id})::int` })
@@ -3113,6 +3118,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
             ne(tasks.statusCategory, 'closed'),
             // The same boundary the starter cards use. See `overdueBefore`.
             lt(tasks.dueDate, overdueBefore()),
+            actorSees,
           ),
         )
         .groupBy(taskAssignees.userId),
@@ -4279,10 +4285,11 @@ Respond ONLY with valid JSON: { "score": 0-100 integer (0 very negative, 50 neut
   async suggestTasks(
     input: { workspaceId: string; projectId?: string; projectName?: string; description?: string },
     ctx: AiCtx = {},
+    reader: { id: string; role?: string | null },
   ): Promise<{ source: 'ai' | 'heuristic'; suggestions: TaskSuggestion[]; basis: string }> {
     const target =
-      (input.projectName ?? '').trim() || (await this.resolveProjectName(input.projectId)) || 'this project'
-    const candidates = await this.collectCandidateProjects(input.workspaceId, input.projectId)
+      (input.projectName ?? '').trim() || (await this.resolveProjectName(input.workspaceId, input.projectId, reader)) || 'this project'
+    const candidates = await this.collectCandidateProjects(input.workspaceId, input.projectId, reader)
     const similar = rankSimilarProjects(target, candidates)
     const basis = summarizeSuggestionBasis(similar)
     const fallback = deterministicTaskSuggestions(similar)
@@ -4319,22 +4326,41 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
     }
   }
 
-  private async resolveProjectName(projectId?: string): Promise<string | null> {
-    if (!projectId) return null
-    const [row] = await this.db.select({ name: projects.name }).from(projects).where(eq(projects.id, projectId)).limit(1)
+  /** The project's name, when it is one of this workspace's that the reader may open. */
+  private async resolveProjectName(
+    workspaceId: string,
+    projectId: string | undefined,
+    reader: { id: string; role?: string | null },
+  ): Promise<string | null> {
+    if (!projectId || !isUuid(projectId)) return null
+    const isManager = await resolveIsManager(this.db, workspaceId, reader.id, reader.role)
+    const [row] = await this.db
+      .select({ name: projects.name })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(projects.id, projectId), eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(this.db, reader.id, isManager)))
+      .limit(1)
     return row?.name ?? null
   }
 
-  /** Workspace projects (excluding the target) with their bounded top-level task titles. */
+  /**
+   * Workspace projects (excluding the target) with their bounded top-level task
+   * titles — the ones the READER may open. The suggestions are those titles,
+   * handed back as they are: measured, a member refused a private space was
+   * given its project's six task titles word for word, and its name in the
+   * "learned from" line (`found-24-sep/ai-suggestions-read-the-whole-workspace`).
+   */
   private async collectCandidateProjects(
     workspaceId: string,
-    excludeProjectId?: string,
+    excludeProjectId: string | undefined,
+    reader: { id: string; role?: string | null },
   ): Promise<Array<{ id: string; name: string; taskTitles: string[] }>> {
+    const isManager = await resolveIsManager(this.db, workspaceId, reader.id, reader.role)
     const projectRows = await this.db
       .select({ id: projects.id, name: projects.name })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(this.db, reader.id, isManager)))
       .orderBy(desc(projects.createdAt))
       .limit(60)
     const ids = projectRows.map((p) => p.id).filter((id) => id !== excludeProjectId)
@@ -4343,7 +4369,15 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
       .select({ projectId: lists.projectId, title: tasks.title })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
-      .where(and(inArray(lists.projectId, ids), eq(tasks.isArchived, false), isNull(tasks.parentTaskId)))
+      .where(
+        and(
+          inArray(lists.projectId, ids),
+          eq(tasks.isArchived, false),
+          isNull(tasks.parentTaskId),
+          listVisibilityFilter(reader.id, isManager),
+          taskVisibilityFilter(this.db, reader.id, isManager),
+        ),
+      )
       .limit(3000)
     const byProject = new Map<string, string[]>()
     for (const r of taskRows) {
@@ -4356,6 +4390,16 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
       .map((p) => ({ id: p.id, name: p.name, taskTitles: byProject.get(p.id) ?? [] }))
   }
 
+  /**
+   * The tasks a reader may open in a workspace, as one WHERE fragment over
+   * `tasks`: the container rule with the list's own privacy
+   * (`taskInReachFilter`) and the private-task rule. `undefined` for a manager.
+   */
+  private async readerTaskFilter(workspaceId: string, reader: { id: string; role?: string | null }): Promise<SQL | undefined> {
+    const isManager = await resolveIsManager(this.db, workspaceId, reader.id, reader.role)
+    return and(taskInReachFilter(this.db, workspaceId, reader.id, isManager), taskVisibilityFilter(this.db, reader.id, isManager))
+  }
+
   // ─── Smart workload balancing (Plan §7.12) ────────────────────────────────
 
   /**
@@ -4363,7 +4407,13 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
    * with each member's task ids ordered least-urgent-first so the tasks handed
    * off first are the safest to move. Reuses the workload report's join shape.
    */
-  async collectWorkloadLoads(workspaceId: string): Promise<WorkloadLoad[]> {
+  async collectWorkloadLoads(workspaceId: string, reader?: { id: string; role?: string | null }): Promise<WorkloadLoad[]> {
+    // As the reader sees it, when there is one: only tasks they may open are
+    // counted, and only their ids handed out. Measured, a member was given the
+    // admin's answer, counts of a private space's tasks and two of their ids
+    // (`found-24-sep/ai-suggestions-read-the-whole-workspace`). The daily alert
+    // to managers passes none; a manager sees everything anyway.
+    const seen = reader ? await this.readerTaskFilter(workspaceId, reader) : undefined
     const members = await this.db
       .select({
         userId: users.id,
@@ -4381,7 +4431,7 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(
-        and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`),
+        and(eq(spaces.workspaceId, workspaceId), eq(tasks.isArchived, false), sql`${tasks.statusCategory} <> 'closed'`, seen),
       )
 
     const prioRank: Record<string, number> = { urgent: 0, high: 1, normal: 2, low: 3 }
@@ -4411,8 +4461,12 @@ Prefer titles/patterns seen in the similar projects and adapt them to the new pr
    * Deterministic heuristic always available; refined by the model (haiku) when
    * configured, with task ids resolved server-side from the real loads.
    */
-  async workloadBalance(workspaceId: string, ctx: AiCtx = {}): Promise<WorkloadBalanceResult> {
-    const loads = await this.collectWorkloadLoads(workspaceId)
+  async workloadBalance(
+    workspaceId: string,
+    ctx: AiCtx = {},
+    reader?: { id: string; role?: string | null },
+  ): Promise<WorkloadBalanceResult> {
+    const loads = await this.collectWorkloadLoads(workspaceId, reader)
     const heuristic = computeWorkloadBalance(loads, { source: 'heuristic' })
     if (!this.isAvailable() || heuristic.suggestions.length === 0) return heuristic
     try {

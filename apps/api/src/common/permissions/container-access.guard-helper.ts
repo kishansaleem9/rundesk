@@ -1,7 +1,7 @@
 import { and, eq, inArray, isNull, ne, or, type SQL } from 'drizzle-orm'
 import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { isManagerRole } from './item-visibility'
+import { isManagerRole, listVisibilityFilter } from './item-visibility'
 
 /** True if the user holds a manager-tier role in the workspace. */
 export async function isWorkspaceManager(db: Db, workspaceId: string, userId: string): Promise<boolean> {
@@ -123,6 +123,12 @@ export function containerVisibilityFilter(db: Db, actorId: string, isManager: bo
  * spaces, so it works in a left join's ON clause, before the outer joins, and
  * where the outer query never joins them at all (a report of time entries or
  * sprint tasks). `undefined` for a manager.
+ *
+ * "Reach" includes the LIST's own privacy — a private list is its maker's —
+ * as `ResourceMemberGuard` has it for a list. It first stopped at the space
+ * and the project, and a member refused a private list in an open space had
+ * its tasks counted in the overview and named in the activity feed (measured;
+ * `found-24-sep/reach-skipped-private-lists`).
  */
 export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, isManager: boolean): SQL | undefined {
   if (isManager) return undefined
@@ -131,6 +137,6 @@ export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, 
     .from(lists)
     .innerJoin(projects, eq(projects.id, lists.projectId))
     .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false)))
+    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false), listVisibilityFilter(actorId, false)))
   return inArray(tasks.listId, reachable)
 }

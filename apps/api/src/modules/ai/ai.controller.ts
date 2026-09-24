@@ -622,6 +622,7 @@ export class AiController {
         description: body.description,
       },
       { userId: user.id, workspaceId: body.workspaceId },
+      { id: user.id, role: user.role },
     )
   }
 
@@ -632,7 +633,7 @@ export class AiController {
       throw new HttpException('workspaceId is required', HttpStatus.BAD_REQUEST)
     }
     await this.ai.assertWorkspaceMember(body.workspaceId, user.id)
-    return this.ai.workloadBalance(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId })
+    return this.ai.workloadBalance(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId }, { id: user.id, role: user.role })
   }
 
   @Post('workload-balance/execute')

@@ -77,7 +77,9 @@ export type AssigneeCandidate = {
   email: string
   displayName: string | null
   /**
-   * Open tasks assigned to them ANYWHERE in this workspace. Capacity.
+   * Open tasks assigned to them anywhere in this workspace that the ASKER may
+   * open. Capacity, as far as the asker may see it: a colleague's load in a
+   * space the asker is refused is not theirs to read, as a number or otherwise.
    */
   openTasks: number
   /**

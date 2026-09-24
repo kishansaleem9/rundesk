@@ -140,7 +140,9 @@ describe('AiService.suggestTasks fallback (§7.10, best-effort)', () => {
     }
     const db: any = { select: () => chain(results[i++] ?? []) }
     const svc = new AiService(config, db, {} as any)
-    const res = await svc.suggestTasks({ workspaceId: 'w1', projectName: 'Marketing Launch' }, { workspaceId: 'w1' })
+    // A reader who may open everything, so the read rule adds no query to the
+    // two this fake answers in order; who may read what is `ai-read-access`'s.
+    const res = await svc.suggestTasks({ workspaceId: 'w1', projectName: 'Marketing Launch' }, { workspaceId: 'w1' }, { id: 'u1', role: 'super_admin' })
     assert.equal(res.source, 'heuristic')
     assert.ok(res.suggestions.length >= 1)
     assert.equal(res.suggestions[0].title, 'Draft copy') // most frequent
