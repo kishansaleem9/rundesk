@@ -13,6 +13,7 @@ import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } fr
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 
 /*
  * The pipeline moved to `./list-statuses.defaults.ts`. It lived here, private,
@@ -259,10 +260,15 @@ export class ListsService {
    * open must not be offerable as the place your tasks land.
    */
   async getListsByWorkspace(workspaceId: string, actor?: { id: string; role?: string }) {
+    /*
+     * The container rule as well as the private-list rule. Only the second
+     * applied, so a member refused a private space was sent its lists' names
+     * (measured on lane 1, `found-23-sep/workspace-reads-skip-the-container-rule`).
+     */
     let visFilter: SQL | undefined
     if (actor) {
       const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-      visFilter = listVisibilityFilter(actor.id, isManager)
+      visFilter = and(containerVisibilityFilter(this.db, actor.id, isManager), listVisibilityFilter(actor.id, isManager))
     }
     return this.db
       .select({ id: lists.id, name: lists.name, projectId: lists.projectId, spaceId: projects.spaceId })

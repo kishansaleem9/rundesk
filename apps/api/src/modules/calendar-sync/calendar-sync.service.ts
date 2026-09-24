@@ -12,8 +12,10 @@ import {
   userIcalTokens,
   workspaceIntegrationConnections,
   taskAssignees,
+  workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 
 /**
  * Bidirectional calendar sync for Google Calendar + Outlook.
@@ -280,6 +282,18 @@ export class CalendarSyncService {
       .where(eq(userIcalTokens.token, token))
       .limit(1)
     if (!row || row.revokedAt) return null
+    /*
+     * THE OWNER MUST STILL BELONG TO THE WORKSPACE, read at every fetch. The
+     * token was checked for revocation only: measured on lane 1, a member
+     * removed from the workspace (404 on it) kept a working feed, which went
+     * on serving tasks made after the removal.
+     */
+    const [member] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(workspaceMembers.userId, row.userId)))
+      .limit(1)
+    if (!member) return null
     // Best-effort lastUsedAt; failure here doesn't block the feed.
     void this.db
       .update(userIcalTokens)
@@ -299,7 +313,10 @@ export class CalendarSyncService {
     // §2 per-item privacy: the token identifies one user — only surface private
     // tasks they may see (creator/assignee/manager); exclude everyone else's.
     const isManager = await resolveIsManager(this.db, workspaceId, userId)
-    const visFilter = taskVisibilityFilter(this.db, userId, isManager)
+    // And the container rule: only the private-item rule applied, so the feed
+    // carried the dated tasks of private spaces its owner is refused (measured
+    // on lane 1, title and description).
+    const visFilter = and(containerVisibilityFilter(this.db, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))
     const rows = await this.db
       .select({
         id: tasks.id,

@@ -5,6 +5,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { PUBLIC_USER_COLUMNS } from '../../common/permissions/public-user'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { AiService } from '../ai/ai.service'
 import { R2Service } from '../../common/storage/r2.service'
@@ -556,9 +557,12 @@ export class MeetingsService {
       : []
 
     // Open tasks either of us is assigned to, scoped to this workspace and to
-    // what the caller is allowed to see.
+    // what the caller is allowed to see: the container rule as well as the
+    // private-item rule. Only the second applied, so a DM's Tasks tab listed
+    // the colleague's task in a private space the caller is refused (measured,
+    // `found-23-sep/workspace-reads-skip-the-container-rule`).
     const isManager = await resolveIsManager(this.db, workspaceId, userId)
-    const visible = await taskVisibilityFilter(this.db, userId, isManager)
+    const visible = and(containerVisibilityFilter(this.db, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))
     const sharedTasks = await this.db
       .selectDistinctOn([tasks.id], {
         id: tasks.id,

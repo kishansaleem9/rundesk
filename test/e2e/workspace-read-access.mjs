@@ -36,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 23
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -376,6 +376,163 @@ try {
       `the admin joined ${JSON.stringify(adminAck?.joined ?? [])} and heard the private one: ${heardIn(adminSock, 'made where the member may not look')}`,
   )
   for (const sock of sockets) sock.close()
+
+  // ══ 6. PEOPLE, THE LIST CATALOGUE, THE ICAL FEED ═════════════════════════
+  console.log('\n▶ a colleague’s pages, the list catalogue and a calendar feed hold only what the reader may open')
+
+  /*
+   * Measured on the build before the fix, as the member refused the private
+   * space: the admin's profile, their activity (and its search) and their
+   * calendar all carried the private space's task, and so did the member's
+   * DM Tasks tab with the admin (lane 1); their standup listed it,
+   * and the private task, as what they did and what held them up; their
+   * priorities showed its title, and the member could pin it and the private
+   * task (201) to read both titles back; the workspace's list catalogue named
+   * its list; the member's own iCal feed carried it, title and description;
+   * and a member removed from the workspace kept a working feed of it.
+   */
+  const text = (res) => JSON.stringify(res.data ?? null)
+  const hiddenIn = (res) => text(res).includes(HIDDEN) || text(res).includes(`${TAG} in the private space`)
+  // The profile reads each bucket with its own query, so each needs a task of
+  // the private space in it: the assigned one above, and one finished, one
+  // handed to somebody else and one on nobody. Their state is set by SQL.
+  const HIDDEN_DONE = await make('/tasks', { listId: PRIVATE_LIST, title: `${TAG} in the private space, finished`, assigneeIds: [adminId] }, 'the finished task')
+  await sql`update tasks set status_category = 'closed', completed_at = now() where id = ${HIDDEN_DONE}`
+  const HIDDEN_HANDED = await make('/tasks', { listId: PRIVATE_LIST, title: `${TAG} in the private space, handed over` }, 'the handed-over task')
+  await sql`insert into task_assignees (task_id, user_id) values (${HIDDEN_HANDED}, ${G.id})`
+  const HIDDEN_NOBODY = await make('/tasks', { listId: PRIVATE_LIST, title: `${TAG} in the private space, on nobody` }, 'the unassigned task')
+  const BUCKETED = { assignedTasks: HIDDEN, done: HIDDEN_DONE, delegated: HIDDEN_HANDED, createdUnassigned: HIDDEN_NOBODY }
+  const profileIds = (res, name) =>
+    ((name === 'assignedTasks' ? res.data?.assignedTasks : res.data?.taskBuckets?.[name]) ?? []).map((t) => t.id)
+  const pages = async (C) => [
+    await C(`/workspaces/${WS}/people/${adminId}`),
+    await C(`/workspaces/${WS}/people/${adminId}/activity?q=${encodeURIComponent(TAG)}`),
+    await C(`/workspaces/${WS}/people/${adminId}/calendar`),
+    // The planner's team grid reads each column through the same calendar.
+    await C(`/planner/${WS}/team-schedules?userIds=${adminId}`),
+  ]
+  const memberPages = await pages(M)
+  const adminPages = await pages(A)
+  const bucketsShown = Object.entries(BUCKETED).filter(([name, id]) => profileIds(adminPages[0], name).includes(id)).map(([name]) => name)
+  chk(
+    memberPages.every((r) => r.status === 200 && !hiddenIn(r) && !text(r).includes(PRIVATE)) &&
+      Object.values(BUCKETED).every((id) => !text(memberPages[0]).includes(id)) &&
+      memberPages.some((r) => text(r).includes(OPEN)) && adminPages.every((r) => r.status === 200 && hiddenIn(r)) &&
+      bucketsShown.length === Object.keys(BUCKETED).length,
+    'a colleague’s profile (every bucket), activity, calendar and team-schedule column show a member nothing from a space they are refused — the admin’s own show it',
+    `the member's four answered ${memberPages.map((r) => `${r.status}${hiddenIn(r) ? ' with the hidden task' : ''}`).join(', ')}; ` +
+      `the admin's ${adminPages.map((r) => `${r.status}${hiddenIn(r) ? '' : ' WITHOUT it'}`).join(', ')}, ` +
+      `with the private space's task in ${bucketsShown.join(', ') || 'no bucket'} of ${Object.keys(BUCKETED).join(', ')}`,
+  )
+
+  // A DM's Tasks tab: the open tasks either of two people is on.
+  const sharedIds = (res) => (res.data?.tasks ?? []).map((t) => t.id)
+  const memberShared = await M(`/workspaces/${WS}/people/${adminId}/shared`)
+  const adminShared = await A(`/workspaces/${WS}/people/${M.id}/shared`)
+  chk(
+    memberShared.status === 200 && !sharedIds(memberShared).includes(HIDDEN) && !sharedIds(memberShared).includes(PRIVATE) &&
+      sharedIds(memberShared).includes(OPEN) && sharedIds(adminShared).includes(HIDDEN),
+    'what a member and a colleague are both on (a DM’s Tasks tab) lists nothing of a space the member is refused, nor a private task — the admin’s lists it',
+    `the member's answered ${memberShared.status} with ${JSON.stringify(sharedIds(memberShared).map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))} ` +
+      `(0 open, 1 private space, 2 private task); the admin's ${JSON.stringify(sharedIds(adminShared).map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))}`,
+  )
+
+  /*
+   * The panel's other two reads about a person: their standup (what they did,
+   * what holds them up) and their priorities. Each task below is held up by one
+   * open task; the dependencies and the admin's pins are written by SQL, so the
+   * routes read here are the only ones under test.
+   */
+  const BLOCKER = await make('/tasks', { listId: OPEN_LIST, title: `${TAG} the blocker` }, 'the blocker')
+  await sql`
+    insert into task_dependencies (task_id, related_task_id, type)
+    values (${OPEN}, ${BLOCKER}, 'blocked_by'), (${HIDDEN}, ${BLOCKER}, 'blocked_by'), (${PRIVATE}, ${BLOCKER}, 'blocked_by')`
+  const standupOf = (C) => C(`/workspaces/${WS}/people/${adminId}/standup`, { method: 'POST', body: {} })
+  const memberStandup = await standupOf(M)
+  const adminStandup = await standupOf(A)
+  const bucket = (res, name) => (res.data?.data?.[name] ?? []).map((t) => t.id)
+  const everyBucket = (res) => ['done', 'active', 'overdue', 'blocked'].flatMap((name) => bucket(res, name))
+  const memberHeard = everyBucket(memberStandup)
+  chk(
+    memberStandup.status < 300 && !memberHeard.includes(HIDDEN) && !memberHeard.includes(PRIVATE) &&
+      !text(memberStandup).includes(`${TAG} in the private space`) && !text(memberStandup).includes(`${TAG} a private task`) &&
+      bucket(memberStandup, 'active').includes(OPEN) && bucket(memberStandup, 'blocked').includes(OPEN) &&
+      bucket(adminStandup, 'active').includes(HIDDEN) && bucket(adminStandup, 'blocked').includes(HIDDEN) &&
+      bucket(adminStandup, 'blocked').includes(PRIVATE),
+    'a colleague’s standup, what they did and what holds them up, tells a member nothing of a space they are refused nor of a private task — the admin’s own tells it',
+    `the member's answered ${said(memberStandup)}: active ${JSON.stringify(bucket(memberStandup, 'active').map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))}, ` +
+      `blocked ${JSON.stringify(bucket(memberStandup, 'blocked').map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))} (0 open, 1 private space, 2 private task); ` +
+      `the admin's active ${JSON.stringify(bucket(adminStandup, 'active').map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))}, ` +
+      `blocked ${JSON.stringify(bucket(adminStandup, 'blocked').map((id) => [OPEN, HIDDEN, PRIVATE].indexOf(id)))}`,
+  )
+
+  await sql`
+    insert into user_priorities (user_id, workspace_id, task_id, title, position)
+    values (${adminId}, ${WS}, ${OPEN}, null, 0), (${adminId}, ${WS}, ${HIDDEN}, null, 1), (${adminId}, ${WS}, null, ${`${TAG} a typed line`}, 2)`
+  const pinnedTitles = (res) => (res.data ?? []).map((p) => p.title)
+  const memberReadsPins = await M(`/workspaces/${WS}/people/${adminId}/priorities`)
+  const adminReadsPins = await A(`/workspaces/${WS}/priorities`)
+  chk(
+    memberReadsPins.status === 200 && !pinnedTitles(memberReadsPins).includes(`${TAG} in the private space`) &&
+      pinnedTitles(memberReadsPins).includes(`${TAG} in the open space`) && pinnedTitles(memberReadsPins).includes(`${TAG} a typed line`) &&
+      pinnedTitles(adminReadsPins).includes(`${TAG} in the private space`),
+    'a colleague’s priorities show a member the typed ones and the tasks they may open, and no title from a space they are refused — the admin’s own show it',
+    `the member's answered ${memberReadsPins.status} with ${JSON.stringify(pinnedTitles(memberReadsPins).map((t) => String(t).replace(`${TAG} `, '')))}; ` +
+      `the admin's own ${JSON.stringify(pinnedTitles(adminReadsPins).map((t) => String(t).replace(`${TAG} `, '')))}`,
+  )
+
+  // Pinning is a way to read a title back, so pinning is refused what reading is.
+  const pinAs = (taskId) => M(`/workspaces/${WS}/priorities`, { method: 'POST', body: { taskId } })
+  const pinHidden = await pinAs(HIDDEN)
+  const pinPrivate = await pinAs(PRIVATE)
+  const pinOpen = await pinAs(OPEN)
+  const [{ n: refusedRows }] = await sql`
+    select count(*)::int as n from user_priorities where user_id = ${M.id} and task_id in (${HIDDEN}, ${PRIVATE})`
+  chk(
+    pinHidden.status === 404 && pinPrivate.status === 404 && refusedRows === 0 && pinOpen.status < 300 && pinOpen.data?.taskId === OPEN,
+    'and a member cannot pin a task they may not open to read its title back (404 and no row, for a refused space and a private task) — while they pin an open one',
+    `pinning the private space's task answered ${said(pinHidden)}, the private task ${said(pinPrivate)}, rows made ${refusedRows}; the open one ${said(pinOpen)}`,
+  )
+
+  const listNames = (res) => (res.data ?? []).map((l) => l.id)
+  const memberLists = await M(`/lists/workspace/${WS}`)
+  const adminLists = await A(`/lists/workspace/${WS}`)
+  chk(
+    memberLists.status === 200 && !listNames(memberLists).includes(PRIVATE_LIST) && listNames(memberLists).includes(OPEN_LIST) &&
+      listNames(adminLists).includes(PRIVATE_LIST),
+    'the workspace’s list catalogue names no list of a space the member is refused — the admin’s names it',
+    `the member's catalogue ${listNames(memberLists).includes(PRIVATE_LIST) ? 'HAS' : 'lacks'} the private list; the admin's ${listNames(adminLists).includes(PRIVATE_LIST) ? 'has' : 'lacks'} it`,
+  )
+
+  const feedOf = async (C) => {
+    const minted = await C(`/workspaces/${WS}/calendar-sync/ical-token`, { method: 'POST', body: {} })
+    const token = minted.data?.token
+    const read = async () =>
+      typeof token === 'string'
+        ? fetch(`${API}/ical/${token}.ics`).then(async (r) => ({ status: r.status, text: await r.text() }), () => ({ status: 0, text: '' }))
+        : { status: 0, text: `no token: ${said(minted)}` }
+    return read
+  }
+  const memberFeed = await (await feedOf(M))()
+  chk(
+    memberFeed.status === 200 && memberFeed.text.includes(`${TAG} in the open space`) &&
+      !memberFeed.text.includes(`${TAG} in the private space`) && !memberFeed.text.includes(`${TAG} a private task`),
+    'a member’s calendar feed carries no task of a space they are refused, nor a private task — while it carries the open space’s',
+    `the feed answered ${memberFeed.status}; open task in it: ${memberFeed.text.includes(`${TAG} in the open space`)}, ` +
+      `the private space's: ${memberFeed.text.includes(`${TAG} in the private space`)}, the private task: ${memberFeed.text.includes(`${TAG} a private task`)}`,
+  )
+
+  // Somebody who leaves: a person of their own, so the member keeps their seat.
+  const leaver = await person('leaver', 'member')
+  const leaverFeed = await feedOf(leaver)
+  const whileIn = await leaverFeed()
+  const removedLeaver = await A(`/workspaces/${WS}/members/${leaver.id}`, { method: 'DELETE' })
+  const afterLeaving = await leaverFeed()
+  chk(
+    whileIn.status === 200 && whileIn.text.includes(`${TAG} in the open space`) && removedLeaver.status < 300 && afterLeaving.status === 404,
+    'and once somebody is removed from the workspace, their calendar feed answers nothing',
+    `while a member the feed answered ${whileIn.status}; removing them answered ${said(removedLeaver)}; afterwards the feed answered ${afterLeaving.status}`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)

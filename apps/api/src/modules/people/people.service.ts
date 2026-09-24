@@ -1,5 +1,5 @@
 import { Injectable, Inject, ForbiddenException, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, ilike } from 'drizzle-orm'
+import { and, asc, desc, eq, gte, inArray, isNull, lt, lte, ne, or, sql, ilike, type SQL } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import {
   users,
@@ -20,6 +20,8 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 import type { StandupData } from './standup'
@@ -102,6 +104,25 @@ export class PeopleService {
     const found = new Set(rows.map((r) => r.userId))
     if (!found.has(requesterId)) throw new ForbiddenException('Workspace membership required')
     if (!found.has(userId)) throw new NotFoundException('That person is not in this workspace')
+  }
+
+  /**
+   * What the REQUESTER may see of a task: the container rule and the
+   * private-item rule, over unaliased tasks, projects and spaces.
+   *
+   * Every task this service reads is somebody's, read by somebody else, and no
+   * read here applied either rule: measured on lane 1, a member refused a
+   * private space (403 on its list) read a colleague's task there on the
+   * colleague's profile, in their activity and its search, and on their
+   * calendar. Being allowed to open a person is not being allowed to open
+   * everything they work on.
+   */
+  private async viewerFilter(workspaceId: string, requesterId: string): Promise<{ where: SQL | undefined; isManager: boolean }> {
+    const isManager = await resolveIsManager(this.db, workspaceId, requesterId)
+    return {
+      where: and(containerVisibilityFilter(this.db, requesterId, isManager), taskVisibilityFilter(this.db, requesterId, isManager)),
+      isManager,
+    }
   }
 
   /**
@@ -202,11 +223,13 @@ export class PeopleService {
      * as due today, with no way to get rid of it. The createdUnassigned query
      * below always excluded archived rows; these did not.
      */
+    const viewer = (await this.viewerFilter(workspaceId, requesterId)).where
     const mine = and(
       eq(taskAssignees.userId, userId),
       eq(spaces.workspaceId, workspaceId),
       ne(tasks.status, 'done'),
       eq(tasks.isArchived, false),
+      viewer,
     )
 
     const assignedColumns = {
@@ -321,6 +344,7 @@ export class PeopleService {
             eq(spaces.workspaceId, workspaceId),
             eq(tasks.statusCategory, 'closed'),
             eq(tasks.isArchived, false),
+            viewer,
           ),
         )
         // Nulls last: a closed task with no completedAt is older bookkeeping,
@@ -339,6 +363,7 @@ export class PeopleService {
             eq(spaces.workspaceId, workspaceId),
             ne(tasks.status, 'done'),
             eq(tasks.isArchived, false),
+            viewer,
             // Somebody is on it, and it is not you — "I handed this over".
             // A task you created and kept is simply your own work.
             sql`exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
@@ -376,6 +401,7 @@ export class PeopleService {
           eq(spaces.workspaceId, workspaceId),
           ne(tasks.status, 'done'),
           eq(tasks.isArchived, false),
+          viewer,
           // Nobody on it at all — one assignee is enough to make it somebody's.
           sql`not exists (select 1 from ${taskAssignees} where ${taskAssignees.taskId} = ${tasks.id})`,
         ),
@@ -426,9 +452,10 @@ export class PeopleService {
     const limit = Math.min(Math.max(opts.limit ?? 40, 1), 100)
     const q = opts.q?.trim()
 
-    const conditions = [
+    const conditions: Array<SQL | undefined> = [
       eq(taskActivity.actorId, userId),
       eq(spaces.workspaceId, workspaceId),
+      (await this.viewerFilter(workspaceId, requesterId)).where,
     ]
     // The search icon on the frame's feed header. Matched against the task
     // title, which is the only text on an activity row a person would search.
@@ -494,7 +521,8 @@ export class PeopleService {
     // Every bucket is a task in THIS workspace assigned to this person. The
     // join chain is the same one the activity feed uses; tasks reach a
     // workspace only through their list's project's space.
-    const inWorkspace = and(eq(taskAssignees.userId, userId), eq(spaces.workspaceId, workspaceId))
+    const { where: viewer, isManager } = await this.viewerFilter(workspaceId, requesterId)
+    const inWorkspace = and(eq(taskAssignees.userId, userId), eq(spaces.workspaceId, workspaceId), viewer)
 
     const columns = {
       id: tasks.id,
@@ -535,6 +563,7 @@ export class PeopleService {
           gte(taskActivity.createdAt, since),
           eq(tasks.isArchived, false),
           ne(tasks.statusCategory, 'closed'),
+          viewer,
         ),
       )
       .limit(CAP)
@@ -563,7 +592,7 @@ export class PeopleService {
       done,
       active,
       overdue,
-      blocked: await this.blockedTasks(workspaceId, userId, CAP),
+      blocked: await this.blockedTasks(workspaceId, userId, CAP, requesterId, isManager),
     }
   }
 
@@ -576,7 +605,13 @@ export class PeopleService {
    * the blocker depends on the row's type; getting that backwards produces a
    * list that looks entirely plausible and is exactly inverted.
    */
-  private async blockedTasks(workspaceId: string, userId: string, cap: number): Promise<StandupData['blocked']> {
+  private async blockedTasks(
+    workspaceId: string,
+    userId: string,
+    cap: number,
+    requesterId: string,
+    isManager: boolean,
+  ): Promise<StandupData['blocked']> {
     const blocker = alias(tasks, 'standup_blocker')
     const blocked = alias(tasks, 'standup_blocked')
     const rows = await this.db
@@ -608,6 +643,16 @@ export class PeopleService {
           // Still open, or it is not blocking anything any more.
           ne(blocker.statusCategory, 'closed'),
           eq(blocker.isArchived, false),
+          // As the requester may see the blocked task: its containers, and,
+          // since the task is aliased here, the private-item rule written out.
+          containerVisibilityFilter(this.db, requesterId, isManager),
+          isManager
+            ? undefined
+            : or(
+                ne(blocked.visibility, 'private'),
+                eq(blocked.createdById, requesterId),
+                sql`exists (select 1 from task_assignees ta where ta.task_id = ${blocked.id} and ta.user_id = ${requesterId})`,
+              ),
         ),
       )
       .limit(cap)
@@ -658,6 +703,7 @@ export class PeopleService {
         and(
           eq(taskAssignees.userId, userId),
           eq(spaces.workspaceId, workspaceId),
+          (await this.viewerFilter(workspaceId, requesterId)).where,
           // A task counts as inside the window if either end of it is.
           or(
             and(gte(tasks.dueDate, from), lte(tasks.dueDate, to)),
@@ -735,6 +781,7 @@ export class PeopleService {
    */
   async listPriorities(workspaceId: string, requesterId: string, userId: string) {
     await this.assertBothMembers(workspaceId, requesterId, userId)
+    const viewer = (await this.viewerFilter(workspaceId, requesterId)).where
     return this.db
       .select({
         id: userPriorities.id,
@@ -750,7 +797,22 @@ export class PeopleService {
       })
       .from(userPriorities)
       .leftJoin(tasks, eq(tasks.id, userPriorities.taskId))
-      .where(and(eq(userPriorities.userId, userId), eq(userPriorities.workspaceId, workspaceId)))
+      .leftJoin(lists, eq(lists.id, tasks.listId))
+      .leftJoin(projects, eq(projects.id, lists.projectId))
+      .leftJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          eq(userPriorities.userId, userId),
+          eq(userPriorities.workspaceId, workspaceId),
+          // A typed priority is always shown. One that points at a task shows
+          // only if the READER may see the task; showing its live title was a
+          // lookup of any task's title by pinning its id. NO RULE MEANS NO
+          // CONDITION, not `or(isNull(taskId), undefined)`: drizzle drops the
+          // undefined and that reads "typed lines only", which is what a
+          // manager was shown until the suite's admin half caught it.
+          viewer ? or(isNull(userPriorities.taskId), viewer) : undefined,
+        ),
+      )
       .orderBy(asc(userPriorities.position), asc(userPriorities.createdAt))
   }
 
@@ -781,8 +843,9 @@ export class PeopleService {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(tasks.id, taskId), eq(spaces.workspaceId, workspaceId)))
+        .where(and(eq(tasks.id, taskId), eq(spaces.workspaceId, workspaceId), (await this.viewerFilter(workspaceId, userId)).where))
         .limit(1)
+      // Not found either way: a task the person may not see does not exist to them.
       if (!found) throw new NotFoundException('That task is not in this workspace')
     }
 
