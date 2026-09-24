@@ -1,8 +1,11 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { and, asc, eq, gte, lt } from 'drizzle-orm'
-import { taskTimeBlocks, tasks, users, lists, workspaces } from '@rundesk/db'
+import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
+import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { isUuid } from '../../common/validation/uuid'
 import { PeopleService } from '../people/people.service'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
 
@@ -296,11 +299,51 @@ export class PlannerService {
       .orderBy(asc(taskTimeBlocks.startsAt))
 
     /*
+     * A TASK THE OWNER MAY OPEN, IN THIS WORKSPACE, or none of it: a block
+     * made before `createBlock` checked could point at another workspace's
+     * task or a refused space's, and rendered its title (measured on lane 1).
+     * Such a block keeps its place on the grid and loses the task's fields.
+     */
+    const readable = await this.readableTaskIds(
+      workspaceId,
+      userId,
+      rows.map((r) => r.taskId).filter((id): id is string => !!id),
+    )
+    const shown = rows.map((r) =>
+      r.taskId && !readable.has(r.taskId)
+        ? { ...r, taskTitle: null, taskStatus: null, taskPriority: null, taskListId: null, taskRecurrence: null }
+        : r,
+    )
+    /*
      * `label` is resolved here rather than stored, so renaming a task renames
      * every block that points at it. A stored copy would leave last week's
      * grid describing a task by a name it no longer has.
      */
-    return rows.map((r) => ({ ...r, label: r.title ?? r.taskTitle ?? null }))
+    return shown.map((r) => ({ ...r, label: r.title ?? r.taskTitle ?? null }))
+  }
+
+  /**
+   * Of these task ids, the ones in this workspace that this person may open:
+   * the container rule and the private-item rule, as every task read applies.
+   */
+  private async readableTaskIds(workspaceId: string, userId: string, taskIds: string[]): Promise<Set<string>> {
+    if (taskIds.length === 0) return new Set()
+    const isManager = await resolveIsManager(this.db, workspaceId, userId)
+    const rows = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(
+        and(
+          inArray(tasks.id, [...new Set(taskIds)]),
+          eq(spaces.workspaceId, workspaceId),
+          containerVisibilityFilter(this.db, userId, isManager),
+          taskVisibilityFilter(this.db, userId, isManager),
+        ),
+      )
+    return new Set(rows.map((r) => r.id))
   }
 
   /**
@@ -488,15 +531,14 @@ export class PlannerService {
       throw new BadRequestException('A block needs a task or a title')
     }
     if (body.taskId) {
-      // The task must exist and be in this workspace — a block pointing across
-      // workspaces would render a title its owner is not allowed to read.
-      const [task] = await this.db
-        .select({ id: tasks.id })
-        .from(tasks)
-        .innerJoin(lists, eq(lists.id, tasks.listId))
-        .where(eq(tasks.id, body.taskId))
-        .limit(1)
-      if (!task) throw new NotFoundException('Task not found')
+      // The task must exist, be in this workspace, and be one its owner may
+      // open — a block renders its task's title. The comment said so and the
+      // query asked only that the task exist: measured on lane 1, a member of
+      // one workspace (404 on another) put a block on the other's task, and on
+      // a refused space's, and read both titles back off the grid.
+      if (typeof body.taskId !== 'string' || !isUuid(body.taskId)) throw new NotFoundException('Task not found')
+      const readable = await this.readableTaskIds(workspaceId, userId, [body.taskId])
+      if (!readable.has(body.taskId)) throw new NotFoundException('Task not found')
     }
 
     const [row] = await this.db

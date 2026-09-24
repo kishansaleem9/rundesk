@@ -574,7 +574,46 @@ The Meilisearch path runs on no lane. Its post-filter held task hits to the priv
 
 The checks are a suite of their own, `search-read-access` (4/4 on lane 1; all 4 failed before, measured inside `workspace-read-access` as its §8, then moved so that suite's running break measurements stay current). `sra-1..11`, each compiled; `sst-1..2` are unit claims shown to fail their tests. API unit tests 1624/1624. Regression 17/17: the palette, search sources, trending, addressability, mentions, the planner's command bar, the app catalogue, doc import, lists, loading states, meeting records, task covers, `workspace-read-access`, both video-1 suites, `video-regression` and `ui-sweep`. In CI.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* custom-field search; task custom-field values (GET and PUT); sprint tasks; the dependency graph (6 hops); blocker titles in a PATCH error; id-to-title lookups through favourites, planner blocks (reported cross-tenant), sprint task add and AI refs; several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: favourites next (every type is resolved by id with at most the private-item rule, so a favourite is a title lookup), then the cross-tenant lookup (planner blocks), then the rest.
+*Fixed next: lookups by id, two of them across workspaces.* A route that takes an item's id and answers with its name is a way to read the name. Measured on lane 1 before the fix, as a member refused a private space:
+- favourites: the member favourited that space, its list, task and doc, a channel of it, and a private channel they were not in (201 each), and their list named every one. `resolveBatch` gave spaces, docs and channels no rule, and lists and tasks only their private flag. `toggle` checks through the same function, so both reads and adds were open.
+- planner blocks, CROSS-TENANT: a member of one workspace (404 on another) put a block on the other's task, and on the refused space's, and read both titles back off the grid. The create path's comment said the task "must be in this workspace"; its query asked only that the task exist.
+- sprints, CROSS-TENANT: the same member added both tasks to a sprint of their own (201 each). The sprint listed both titles and counted both: `addTask` took any id, and the listing applied only the private-item rule, never asking which workspace a task was in.
+- an AI answer's `[[task:id]]` and `[[list:id]]` chips resolved the refused space's task and list, under a comment that said ids the caller may not see "simply do not come back".
+
+Each now takes the rule the item's own reads take:
+- favourites resolve (and so refuse to add) with the space rule, the container rule plus the private flags, the doc rule, and chat's channel rule;
+- a block's task must be in the workspace and one its owner may open (404 otherwise), and the grid drops the task's fields from a block made before the check;
+- a sprint takes only such a task, and lists and counts its own workspace's tasks with the container rule;
+- AI references apply the container rule.
+
+`lookup-read-access`, 8/8 on lane 1 (7 of 8 failed before; the admin's favourites passed both times). `lra-1..12`, each compiled. API unit tests 1624/1624. Regression on three lanes, 20/20:
+- every planner suite, focus pill, tab-title countdown, team schedules, calendar accounts;
+- the favourite menu, the AI answer and container suites;
+- task depth, panel collapse, addressability;
+- the three read-access suites.
+
+One of those twenty, `ai-answer-rendering`, first threw "fetch failed" at 42 of 51 with lane 1's API up and logging nothing wrong. Run alone straight after, it passed 51/51. That is recorded here as a flake under four busy lanes, not as a pass. In CI.
+
+*Still open, measured (24 September, lane 1):* the custom-field routes, a HIGH item of their own below.
+
+*Still open, read in code, not yet measured:* the dependency graph (`GET /tasks/:id/dependencies/graph` takes no reader and walks up to six hops); a status change refused for open blockers names each blocker by title and id, whoever asks; and the "is blocked" notification names the blocker to every assignee and watcher.
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the custom fields (writes and deletes in refused spaces), then dependencies, then the reports (the unattended scheduled one first), then the rest.
+
+### `found-24-sep/custom-fields-open-to-any-member` — open, HIGH (security; found measuring the audit's "custom-field values")
+
+**Every custom-field route checks workspace membership and nothing else: a member refused a private space reads, overwrites, defines, renames and deletes its fields**
+
+*Evidence, measured on lane 1 (probe `measure-custom-fields`), as a member refused a private space (403 on its list and its task):*
+- `GET /workspaces/:ws/projects/:projectId/custom-fields` listed the project's field by name (200);
+- `GET /workspaces/:ws/tasks/:taskId/custom-fields` returned the task's values with their definitions (200);
+- `PUT .../tasks/:taskId/custom-fields/:fieldId` overwrote a value (200);
+- `POST .../projects/:projectId/custom-fields` and `POST .../tasks/:taskId/custom-fields` each defined a new field there (201);
+- `PATCH .../custom-fields/:fieldId` renamed the field (200), and `DELETE` deleted it, with every task's value in it (200).
+
+The controller has `JwtAuthGuard` and `WorkspaceMemberGuard` only. The service checks that the task or project is in the workspace, and nothing about the space it is in, or about who may edit.
+
+*To close:* reads take the container rule (the project's space and project); value writes take the rule task edits take; definition writes take the project's manage rule. Research ClickUp's permission for managing Custom Fields first. A suite that measures each route as a refused member, with a positive twin.
 
 ### `found-24-sep/assignee-me-compared-with-a-narrowed-endpoint` — **closed** (a regression of mine, found by the docs sweep)
 

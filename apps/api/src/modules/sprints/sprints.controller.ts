@@ -80,9 +80,10 @@ export class SprintsController {
   @Post('sprints/:sprintId/tasks')
   addTask(
     @Param('sprintId') sprintId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() body: { taskId: string; storyPoints?: number },
   ) {
-    return this.sprints.addTask(sprintId, body.taskId, body.storyPoints)
+    return this.sprints.addTask(sprintId, body.taskId, body.storyPoints, { id: user.id, role: user.role })
   }
 
   @Delete('sprints/:sprintId/tasks/:taskId')

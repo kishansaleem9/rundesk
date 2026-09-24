@@ -1,10 +1,12 @@
 import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and, desc, asc, inArray, type SQL } from 'drizzle-orm'
-import { sprints, sprintTasks, tasks } from '@rundesk/db'
+import { sprints, sprintTasks, tasks, lists, projects, spaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import type { SprintStatus } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { isUuid } from '../../common/validation/uuid'
 
 function isTaskDone(status: string, statusCategory: string) {
   return statusCategory === 'closed' || status === 'done'
@@ -37,7 +39,12 @@ function eachDayInclusive(start: Date, end: Date) {
 export class SprintsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
-  private async loadSprintTaskRows(sprintIds: string[], visFilter?: SQL) {
+  /**
+   * A sprint's tasks: only its own workspace's (a row made before `addTask`
+   * checked could point anywhere, and the join showed another workspace's
+   * title), as `visFilter` lets the reader see them.
+   */
+  private async loadSprintTaskRows(sprintIds: string[], workspaceId: string, visFilter?: SQL) {
     if (sprintIds.length === 0) return []
     return this.db
       .select({
@@ -53,12 +60,17 @@ export class SprintsService {
       })
       .from(sprintTasks)
       .innerJoin(tasks, eq(tasks.id, sprintTasks.taskId))
-      .where(and(inArray(sprintTasks.sprintId, sprintIds), visFilter))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(inArray(sprintTasks.sprintId, sprintIds), eq(spaces.workspaceId, workspaceId), visFilter))
       .orderBy(asc(sprintTasks.addedAt))
   }
 
   /**
-   * §2 per-item task-visibility WHERE fragment for a sprint's workspace.
+   * What of a sprint's workspace the actor may see: the container rule and the
+   * §2 private-item rule (only the second applied, and a refused space's task
+   * was listed by title). Over `tasks`, `projects` and `spaces` unaliased.
    * undefined = no restriction (no actor, or the actor is a manager).
    */
   private async sprintTaskVisFilter(
@@ -67,7 +79,7 @@ export class SprintsService {
   ): Promise<SQL | undefined> {
     if (!actor) return undefined
     const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-    return taskVisibilityFilter(this.db, actor.id, isManager)
+    return and(containerVisibilityFilter(this.db, actor.id, isManager), taskVisibilityFilter(this.db, actor.id, isManager))
   }
 
   private aggregateStats(
@@ -139,7 +151,7 @@ export class SprintsService {
       .orderBy(desc(sprints.startDate))
 
     const visFilter = await this.sprintTaskVisFilter(workspaceId, actor)
-    const taskRows = await this.loadSprintTaskRows(rows.map((s) => s.id), visFilter)
+    const taskRows = await this.loadSprintTaskRows(rows.map((s) => s.id), workspaceId, visFilter)
     const statsMap = this.aggregateStats(taskRows)
 
     return rows.map((s) => {
@@ -156,7 +168,7 @@ export class SprintsService {
   async getDetail(sprintId: string, actor?: { id: string; role?: string }) {
     const sprint = await this.get(sprintId)
     const visFilter = await this.sprintTaskVisFilter(sprint.workspaceId, actor)
-    const taskRows = await this.loadSprintTaskRows([sprintId], visFilter)
+    const taskRows = await this.loadSprintTaskRows([sprintId], sprint.workspaceId, visFilter)
     const stats = this.aggregateStats(taskRows).get(sprintId) ?? {
       taskCount: 0,
       completedTasks: 0,
@@ -235,7 +247,7 @@ export class SprintsService {
   async listTasks(sprintId: string, actor?: { id: string; role?: string }) {
     const sprint = await this.get(sprintId)
     const visFilter = await this.sprintTaskVisFilter(sprint.workspaceId, actor)
-    const rows = await this.loadSprintTaskRows([sprintId], visFilter)
+    const rows = await this.loadSprintTaskRows([sprintId], sprint.workspaceId, visFilter)
     return rows.map((r) => ({
       id: r.taskId,
       title: r.title,
@@ -248,7 +260,21 @@ export class SprintsService {
     }))
   }
 
-  async addTask(sprintId: string, taskId: string, storyPoints?: number) {
+  async addTask(sprintId: string, taskId: string, storyPoints: number | undefined, actor: { id: string; role?: string }) {
+    // A task of the sprint's own workspace that the actor may open, or not
+    // found: adding took any id, and the sprint then listed the task's title
+    // (measured, another workspace's task and a refused space's, 201 each).
+    const sprint = await this.get(sprintId)
+    if (typeof taskId !== 'string' || !isUuid(taskId)) throw new NotFoundException('Task not found')
+    const [task] = await this.db
+      .select({ id: tasks.id })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(tasks.id, taskId), eq(spaces.workspaceId, sprint.workspaceId), await this.sprintTaskVisFilter(sprint.workspaceId, actor)))
+      .limit(1)
+    if (!task) throw new NotFoundException('Task not found')
     // When storyPoints is omitted (the common case) the conflict `set` would be
     // empty, which drizzle rejects ("No values to set") — so only update on
     // conflict when there's actually a value to write.

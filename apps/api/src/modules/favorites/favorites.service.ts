@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { and, eq, inArray } from 'drizzle-orm'
+import { and, eq, inArray, notInArray } from 'drizzle-orm'
 import {
   favorites,
   spaces,
@@ -12,6 +12,9 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter, spaceVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { hiddenDocIds } from '../../common/permissions/doc-access'
+import { readableChannelsFilter } from '../chat/channel-read-filter'
 
 export type FavoriteEntityType = 'space' | 'list' | 'task' | 'doc' | 'channel'
 const ENTITY_TYPES: FavoriteEntityType[] = ['space', 'list', 'task', 'doc', 'channel']
@@ -35,8 +38,15 @@ export class FavoritesService {
 
   /**
    * Resolve display metadata for a batch of entity ids of one type, scoped to
-   * the workspace. Ids that don't exist (or moved out of the workspace) are
-   * simply absent from the returned map, which drives dangling-row pruning.
+   * the workspace AND to what the actor may open. Ids that don't exist, moved
+   * out of the workspace, or are out of the actor's reach are absent from the
+   * returned map, which drives dangling-row pruning — and refuses `toggle`.
+   *
+   * Each type takes the rule its own reads take. A space, a doc and a channel
+   * took none and a list or a task only its private flag, so a favourite was a
+   * way to read the name of anything by id: measured on lane 1, a member
+   * refused a private space favourited its space, list, task, doc and channel,
+   * and a private channel they were not in, and the list named every one.
    */
   private async resolveBatch(
     workspaceId: string,
@@ -51,7 +61,7 @@ export class FavoritesService {
       const rows = await this.db
         .select({ id: spaces.id, name: spaces.name })
         .from(spaces)
-        .where(and(eq(spaces.workspaceId, workspaceId), inArray(spaces.id, ids)))
+        .where(and(eq(spaces.workspaceId, workspaceId), inArray(spaces.id, ids), spaceVisibilityFilter(this.db, actor.id, actor.isManager)))
       for (const r of rows) {
         out.set(r.id, { entityType, entityId: r.id, label: r.name, url: `/app/${workspaceId}/${r.id}` })
       }
@@ -61,7 +71,14 @@ export class FavoritesService {
         .from(lists)
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), inArray(lists.id, ids), listVisibilityFilter(actor.id, actor.isManager)))
+        .where(
+          and(
+            eq(spaces.workspaceId, workspaceId),
+            inArray(lists.id, ids),
+            containerVisibilityFilter(this.db, actor.id, actor.isManager),
+            listVisibilityFilter(actor.id, actor.isManager),
+          ),
+        )
       for (const r of rows) {
         out.set(r.id, {
           entityType,
@@ -77,7 +94,14 @@ export class FavoritesService {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), inArray(tasks.id, ids), taskVisibilityFilter(this.db, actor.id, actor.isManager)))
+        .where(
+          and(
+            eq(spaces.workspaceId, workspaceId),
+            inArray(tasks.id, ids),
+            containerVisibilityFilter(this.db, actor.id, actor.isManager),
+            taskVisibilityFilter(this.db, actor.id, actor.isManager),
+          ),
+        )
       for (const r of rows) {
         out.set(r.id, {
           entityType,
@@ -87,10 +111,11 @@ export class FavoritesService {
         })
       }
     } else if (entityType === 'doc') {
+      const hidden = await hiddenDocIds(this.db, workspaceId, actor.id, actor.isManager)
       const rows = await this.db
         .select({ id: docs.id, title: docs.title })
         .from(docs)
-        .where(and(eq(docs.workspaceId, workspaceId), inArray(docs.id, ids)))
+        .where(and(eq(docs.workspaceId, workspaceId), inArray(docs.id, ids), hidden.length ? notInArray(docs.id, hidden) : undefined))
       for (const r of rows) {
         out.set(r.id, { entityType, entityId: r.id, label: r.title, url: `/app/${workspaceId}/docs?doc=${r.id}` })
       }
@@ -98,7 +123,7 @@ export class FavoritesService {
       const rows = await this.db
         .select({ id: chatChannels.id, name: chatChannels.name })
         .from(chatChannels)
-        .where(and(eq(chatChannels.workspaceId, workspaceId), inArray(chatChannels.id, ids)))
+        .where(and(eq(chatChannels.workspaceId, workspaceId), inArray(chatChannels.id, ids), readableChannelsFilter(this.db, actor.id, workspaceId)))
       for (const r of rows) {
         out.set(r.id, { entityType, entityId: r.id, label: `#${r.name}`, url: `/app/${workspaceId}/chat?channel=${r.id}` })
       }

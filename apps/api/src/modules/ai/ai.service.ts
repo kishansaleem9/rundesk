@@ -2117,7 +2117,9 @@ Current date: ${new Date().toISOString().split('T')[0]}`
    * Ids the caller may not see simply do not come back. The panel then renders
    * the reference as plain text, which is the honest answer: better an
    * unresolved reference than a chip claiming a title the reader has no access
-   * to.
+   * to. "May not see" includes the container rule: only the private-item and
+   * private-list rules applied, and a refused space's task and list came back
+   * by name (measured on lane 1).
    */
   async resolveRefs(
     workspaceId: string,
@@ -2159,6 +2161,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               and(
                 eq(spaces.workspaceId, workspaceId),
                 inArray(tasks.id, taskIds),
+                containerVisibilityFilter(this.db, actorId, isManager),
                 taskVisibilityFilter(this.db, actorId, isManager),
               ),
             )
@@ -2181,6 +2184,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               and(
                 eq(spaces.workspaceId, workspaceId),
                 inArray(lists.id, listIds),
+                containerVisibilityFilter(this.db, actorId, isManager),
                 listVisibilityFilter(actorId, isManager),
               ),
             )
