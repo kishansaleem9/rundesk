@@ -9,6 +9,7 @@ import {
   Put,
   Query,
   UseGuards,
+  Req,
 } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { FormsService } from './forms.service'
@@ -20,6 +21,7 @@ import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { FormInWorkspaceGuard } from './form-in-workspace.guard'
 
 // ─── Workspace-scoped routes (JWT-protected) ──────────────────────────────────
 // FeatureFlagGuard enforces the Forms ClickApp: if a workspace turns Forms off
@@ -28,7 +30,7 @@ import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
 // stays open so already-shared forms keep working.)
 @ApiTags('forms')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, FeatureFlagGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, FeatureFlagGuard, FormInWorkspaceGuard)
 @FeatureFlag(FLAGS.FORMS)
 @Controller('workspaces/:workspaceId/forms')
 export class WorkspaceFormsController {
@@ -38,9 +40,12 @@ export class WorkspaceFormsController {
   @ApiOperation({ summary: 'List all forms in a workspace' })
   list(
     @Param('workspaceId') workspaceId: string,
+    @Req() req: { workspaceMember?: { role?: string } },
     @Query('archived') archived?: string,
     @Query('listId') listId?: string,
   ) {
+    // A guest has no form: none can be shared with them (`FormInWorkspaceGuard`).
+    if (req.workspaceMember?.role === 'guest') return []
     return this.formsService.listForms(workspaceId, archived === 'true', listId)
   }
 
@@ -63,7 +68,9 @@ export class WorkspaceFormsController {
   @Patch(':formId')
   @ApiOperation({ summary: 'Update form settings' })
   update(
+    @Param('workspaceId') workspaceId: string,
     @Param('formId') formId: string,
+    @CurrentUser() user: any,
     @Body()
     body: {
       title?: string
@@ -75,7 +82,7 @@ export class WorkspaceFormsController {
       coverImageUrl?: string | null
     },
   ) {
-    return this.formsService.updateForm(formId, body)
+    return this.formsService.updateForm(formId, { workspaceId, id: user.id }, body)
   }
 
   @Post(':formId/duplicate')
@@ -100,14 +107,15 @@ export class WorkspaceFormsController {
   @Post(':formId/fields')
   addField(
     @Param('formId') formId: string,
+    @CurrentUser() user: any,
     @Body() body: AddFormFieldDto,
   ) {
-    return this.formsService.addField(formId, body)
+    return this.formsService.addField(formId, user.id, body)
   }
 
   @Patch(':formId/fields/:fieldId')
-  updateField(@Param('fieldId') fieldId: string, @Body() body: any) {
-    return this.formsService.updateField(fieldId, body)
+  updateField(@Param('fieldId') fieldId: string, @CurrentUser() user: any, @Body() body: any) {
+    return this.formsService.updateField(fieldId, user.id, body)
   }
 
   @Delete(':formId/fields/:fieldId')

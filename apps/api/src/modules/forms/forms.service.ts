@@ -7,6 +7,9 @@ import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
 import { WebhooksService } from '../webhooks/webhooks.service'
+import { readableList } from '../../common/permissions/read-access'
+import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { isUuid } from '../../common/validation/uuid'
 
 /** Hard cap on a single form-upload file (public intake). */
 export const MAX_FORM_UPLOAD_BYTES = 25 * 1024 * 1024 // 25 MB
@@ -498,6 +501,41 @@ export class FormsService {
   }
 
   // ─── Create form ──────────────────────────────────────────────────────────
+  /**
+   * A FORM FILES TASKS WHERE ITS MAKER COULD MAKE ONE: a list of the form's
+   * workspace they may open and add to (the list rule and the space's create
+   * gate). The target list and every list a routing field offers were taken as
+   * sent, so a member refused a private list routed a public form's
+   * submissions into it (`found-24-sep/forms-open-across-workspaces`).
+   */
+  private async assertMayFileInto(workspaceId: string, listId: string, actorId: string) {
+    const list = isUuid(listId) ? await readableList(this.db, workspaceId, listId, { id: actorId }) : null
+    if (!list) throw new NotFoundException('List not found')
+    await assertCanCreateInSpace(this.db, { spaceId: list.spaceId, actorId, kind: 'task', within: [{ type: 'list', id: listId }] })
+  }
+
+  /**
+   * A ROUTING FIELD offers lists, each one its maker may file into, and is a
+   * dropdown or a multi-select — as the builder offers it — so the answer a
+   * submitter gives is always one of them (the submission checks a choice
+   * against its options).
+   */
+  private async assertRoutingField(
+    workspaceId: string,
+    field: { type?: string | null; taskField?: string | null; options?: { label: string; value: string }[] | null },
+    actorId: string,
+  ) {
+    if (field.taskField !== 'targetListId') return
+    if (field.type !== 'dropdown' && field.type !== 'multi_select') {
+      throw new BadRequestException('A routing field is a dropdown or a multi-select of lists')
+    }
+    for (const option of field.options ?? []) {
+      const listId = this.extractTargetListId(option.value)
+      if (!listId) continue
+      await this.assertMayFileInto(workspaceId, listId, actorId)
+    }
+  }
+
   async createForm(
     workspaceId: string,
     userId: string,
@@ -509,6 +547,7 @@ export class FormsService {
       confirmationMsg?: string
     },
   ) {
+    if (dto.targetListId) await this.assertMayFileInto(workspaceId, dto.targetListId, userId)
     const slug = await uniqueSlug(this.db, slugify(dto.title))
     const [form] = await this.db
       .insert(forms)
@@ -529,6 +568,7 @@ export class FormsService {
   // ─── Update form ──────────────────────────────────────────────────────────
   async updateForm(
     formId: string,
+    actor: { workspaceId: string; id: string },
     patch: {
       title?: string
       description?: string
@@ -546,6 +586,7 @@ export class FormsService {
     if (patch.targetListId !== undefined && patch.targetListId !== null && typeof patch.targetListId !== 'string') {
       throw new BadRequestException('targetListId must be a string or null')
     }
+    if (typeof patch.targetListId === 'string') await this.assertMayFileInto(actor.workspaceId, patch.targetListId, actor.id)
     const set: Record<string, unknown> = { updatedAt: new Date() }
     for (const key of ['title', 'description', 'targetListId', 'isPublic', 'isEnabled', 'confirmationMsg', 'coverImageUrl'] as const) {
       if (patch[key] !== undefined) set[key] = patch[key]
@@ -573,6 +614,11 @@ export class FormsService {
   // ─── Duplicate form ───────────────────────────────────────────────────────
   async duplicateForm(formId: string, userId: string) {
     const { fields: origFields, ...orig } = await this.getForm(formId)
+    // The copy is the duplicator's: it files where they could, as a form of their own would.
+    if (orig.targetListId) await this.assertMayFileInto(orig.workspaceId, orig.targetListId, userId)
+    for (const f of origFields) {
+      await this.assertRoutingField(orig.workspaceId, f as unknown as { type: string; taskField: string | null; options?: { label: string; value: string }[] }, userId)
+    }
     const slug = await uniqueSlug(this.db, slugify(orig.title + '-copy'))
     const [newForm] = await this.db
       .insert(forms)
@@ -612,6 +658,7 @@ export class FormsService {
   // ─── Fields CRUD ──────────────────────────────────────────────────────────
   async addField(
     formId: string,
+    actorId: string,
     dto: {
       type: string
       label: string
@@ -625,6 +672,9 @@ export class FormsService {
       taskField?: string
     },
   ) {
+    const [form] = await this.db.select({ workspaceId: forms.workspaceId }).from(forms).where(eq(forms.id, formId)).limit(1)
+    if (!form) throw new NotFoundException('Form not found')
+    await this.assertRoutingField(form.workspaceId, dto, actorId)
     const [maxPos] = await this.db
       .select({ max: sql<number>`coalesce(max(position), -1)` })
       .from(formFields)
@@ -650,6 +700,7 @@ export class FormsService {
 
   async updateField(
     fieldId: string,
+    actorId: string,
     patch: Partial<{
       type: string
       label: string
@@ -663,18 +714,38 @@ export class FormsService {
       taskField: string | null
     }>,
   ) {
-    const next: Record<string, unknown> = { ...patch }
+    /*
+     * NAMED COLUMNS, NOT THE BODY. `{ ...patch }` set whatever a request sent —
+     * a field's `formId` among it, moving the field onto any form.
+     */
+    const next: Record<string, unknown> = {}
+    for (const key of ['type', 'label', 'placeholder', 'helpText', 'isRequired', 'position', 'taskField'] as const) {
+      if (patch[key] !== undefined) next[key] = patch[key]
+    }
+    const [existing] = await this.db
+      .select({ field: formFields, workspaceId: forms.workspaceId })
+      .from(formFields)
+      .innerJoin(forms, eq(forms.id, formFields.formId))
+      .where(eq(formFields.id, fieldId))
+      .limit(1)
+    if (!existing) throw new NotFoundException('Field not found')
+    const was = this.unpackFieldOptions(existing.field.options)
+    await this.assertRoutingField(
+      existing.workspaceId,
+      {
+        type: patch.type ?? existing.field.type,
+        taskField: patch.taskField !== undefined ? patch.taskField : existing.field.taskField,
+        options: patch.options ?? was.choices,
+      },
+      actorId,
+    )
     if ('options' in patch || 'visibilityRules' in patch || 'visibilityMode' in patch) {
-      const [existing] = await this.db.select().from(formFields).where(eq(formFields.id, fieldId)).limit(1)
-      if (!existing) throw new NotFoundException('Field not found')
-      const current = this.unpackFieldOptions(existing.options)
+      const current = was
       next.options = this.packFieldOptions(
         'options' in patch ? patch.options : current.choices,
         'visibilityMode' in patch ? patch.visibilityMode : current.visibilityMode,
         'visibilityRules' in patch ? patch.visibilityRules : current.visibilityRules,
       )
-      delete next.visibilityRules
-      delete next.visibilityMode
     }
     const [field] = await this.db.update(formFields).set(next).where(eq(formFields.id, fieldId)).returning()
     if (!field) throw new NotFoundException('Field not found')

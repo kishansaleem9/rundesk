@@ -1269,6 +1269,39 @@ The new suite `guest-canvas-scope`, 5 checks, planted by SQL and read back besid
 
 *Not changed:* a member's access to a canvas is still membership. ClickUp files whiteboards in locations and reads them by the location's rule, and a canvas here has no location. That is a feature (location and sharing for canvases), not built.
 
+### `found-24-sep/forms-open-across-workspaces` — **closed** (security, HIGH; found closing `create-menu-offers-guests-what-they-cannot-make`)
+
+**A form by id was anybody's, through a workspace of their own; and a form filed tasks into lists its maker was refused**
+
+*Evidence, measured on lane 1:*
+
+- Every route of `WorkspaceFormsController` that names a form (read, update, duplicate, archive, delete, fields, submissions and their files, retry) took the id alone. `WorkspaceMemberGuard` checked membership of the workspace in the path, and the service acted on whatever form the id named. A user of another organisation, through a workspace of their own, read a form and the submissions strangers had typed into it, renamed it, gave it a field, copied it and archived it (200 and 201 on each).
+- A field was changed or deleted by its own id, under any form. Its update spread the request body into the row, so a `formId` in the body moved it onto another form.
+- A form's target list, and the lists a routing field offers, were never checked against the form's maker. A member refused a private list routed a public form into it, so every anonymous submission filed a task there. A guest, who may not make tasks, made forms and read their submissions.
+
+*Closed, 24 September:*
+
+- `FormInWorkspaceGuard` stands after the membership guard on the whole controller. A form must be the path workspace's, and a field its form's: not found otherwise, since whether another workspace's form exists is not the caller's to learn. A submission's routes (retry, its history, its files) already find it under its form, so the guard does not ask that twice.
+- A guest has no form, since none can be shared with them. They are listed none and refused every other route.
+- A form files tasks only where its maker could make one: `readableList` and the space's create gate, asked of the target list on create, update and duplicate, and of every list a routing field offers.
+- A routing field is a dropdown or a multi-select, as the builder offers it, so an answer is always one of its options. The submission already checks a choice against them.
+- A field update sets named columns only.
+
+The new suite `form-access`, 6 checks, across two organisations. Every refusal is read back by SQL beside the same call succeeding for someone it is theirs to make.
+
+- Before, on lane 1: 1 of 6. The one that passed is the submission's own check that an answer is one of the field's options.
+- After: 6/6.
+
+`fma-1..10`, each compiled, at least one per check. Regression on lane 1, 10/10: `form-access`, `task-provenance`, `space-create-menu`, `object-key-boundaries`, `request-access`, `space-default-permission`, `checklists`, `video-regression`, `ui-sweep` and `video1-acceptance`. In CI.
+
+*Not changed, recorded:*
+
+- The forms list names each form's target list, a private one included, to any member. ClickUp's forms are views of their list.
+- A form keeps filing into its list after its maker loses access to it.
+- An anonymous submitter may name a task's assignee by email (`assigneeEmail`).
+
+Each is its own question.
+
 ### `found-24-sep/local-dates-expected-the-day-of-now` — **closed** (test tooling; a defect of mine, found by the full sweep)
 
 **`local-dates` expected the meeting on Karachi's date of NOW, and failed every evening**
