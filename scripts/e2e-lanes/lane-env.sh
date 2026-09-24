@@ -308,3 +308,34 @@ lock_take () {
 }
 
 lock_drop () { rm -rf "$1"; }
+
+# ── A BREAK RUN HOLDS ITS LANE AND ITS SUITE ────────────────────────────────
+#
+#   break_locks_take <lane> <suite>   0 when this shell now holds both; 3 when
+#                                     either is held by a live run — holding
+#                                     neither, and saying which
+#   break_locks_drop <lane> <suite>
+#
+# The lane lock alone let two sets of ONE suite run at once on two lanes, and a
+# set's results go to `break-<suite>.txt`, one file per SUITE: the second run
+# truncated the first's results mid-run, and both archived the mixture
+# (`found-24-sep/one-suite-two-lanes-share-a-results-file`). The suite lock is
+# taken after the lane's and given back with it, so a refusal of either leaves
+# the other run and its file alone. BREAK_LOCK_DIR moves both for a self-check.
+break_locks_take () {
+  local lane="$1" suite="$2" dir="${BREAK_LOCK_DIR:-/tmp/claude-0}"
+  if ! lock_take "$dir/wt$lane.lock"; then
+    echo "lane $lane is already break-testing (PID $(cat "$dir/wt$lane.lock/pid" 2>/dev/null || echo 'unsigned')) — refusing to interleave" >&2
+    return 3
+  fi
+  if ! lock_take "$dir/break-$suite.lock"; then
+    echo "$suite is already being break-tested (PID $(cat "$dir/break-$suite.lock/pid" 2>/dev/null || echo 'unsigned')) — refusing to share its results file" >&2
+    lock_drop "$dir/wt$lane.lock"
+    return 3
+  fi
+}
+break_locks_drop () {
+  local dir="${BREAK_LOCK_DIR:-/tmp/claude-0}"
+  lock_drop "$dir/break-$2.lock"
+  lock_drop "$dir/wt$1.lock"
+}

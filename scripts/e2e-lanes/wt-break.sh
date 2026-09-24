@@ -133,12 +133,12 @@ cd "$WT" || exit 1
 # SIGNED WITH THIS PROCESS'S PID (`lock_take`, lane-env.sh), because the EXIT
 # trap below is skipped by SIGKILL and a reaped run left a bare directory that
 # held the lane for ever. A lock whose holder is gone is now taken, and said.
-LOCK="/tmp/claude-0/wt$LANE.lock"
-if ! lock_take "$LOCK"; then
-  echo "lane $LANE is already break-testing (PID $(cat "$LOCK/pid" 2>/dev/null || echo 'unsigned')) — refusing to interleave" >&2
-  exit 3
-fi
-trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; lock_drop "$LOCK"' EXIT
+#
+# AND THE SUITE, because `$OUT` is one file per suite: a second set of the same
+# suite on another lane truncated this one's results mid-run
+# (`break_locks_take`, lane-env.sh, says why and which lock refused).
+break_locks_take "$LANE" "$SUITE" || exit 3
+trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; break_locks_drop "$LANE" "$SUITE"' EXIT
 # Only now that the lane is ours. A refusal must not touch the results of the
 # run that legitimately holds it.
 : > "$OUT"

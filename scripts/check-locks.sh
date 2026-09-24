@@ -10,6 +10,10 @@
 #   unsigned, old  not held; taken
 #   absent         not held
 #
+# and a break run's pair (`break_locks_take`): both taken when both are free;
+# refused on a busy lane without touching the suite; refused on a busy suite
+# with the lane given back and the holder left alone.
+#
 # --mutate runs the cases against broken copies of the helpers.
 #
 #   bash scripts/check-locks.sh [--mutate]
@@ -45,6 +49,26 @@ cases () {
   bash -c ". '$env'; lock_take '$d'" 2>/dev/null || fail 'unsigned, old: not taken'
 
   bash -c ". '$env'; lock_held '$TMP/absent'" && fail 'absent: held'
+
+  # A break run's pair: its lane and its suite (`break_locks_take`).
+  local B="$TMP/break" rc
+  rm -rf "$B"; mkdir -p "$B"
+  BREAK_LOCK_DIR="$B" bash -c ". '$env'; break_locks_take 7 s" 2>/dev/null; rc=$?
+  [ "$rc" = 0 ] && [ -d "$B/wt7.lock" ] && [ -d "$B/break-s.lock" ] || fail "pair, both free: returned $rc, lane $( [ -d "$B/wt7.lock" ] && echo held || echo free ), suite $( [ -d "$B/break-s.lock" ] && echo held || echo free )"
+  BREAK_LOCK_DIR="$B" bash -c ". '$env'; break_locks_drop 7 s"
+  [ -d "$B/wt7.lock" ] || [ -d "$B/break-s.lock" ] && fail 'pair: a drop left a lock behind'
+
+  rm -rf "$B"; mkdir -p "$B/wt7.lock"; echo "$LIVE" > "$B/wt7.lock/pid"
+  BREAK_LOCK_DIR="$B" bash -c ". '$env'; break_locks_take 7 s" 2>/dev/null; rc=$?
+  [ "$rc" = 3 ] && [ ! -d "$B/break-s.lock" ] || fail "pair, lane busy: returned $rc, suite $( [ -d "$B/break-s.lock" ] && echo 'taken anyway' || echo free )"
+
+  # The suite busy on another lane: refused, and THIS lane given back, or it
+  # would sit locked with nothing running on it.
+  rm -rf "$B"; mkdir -p "$B/break-s.lock"; echo "$LIVE" > "$B/break-s.lock/pid"
+  out=$(BREAK_LOCK_DIR="$B" bash -c ". '$env'; break_locks_take 8 s" 2>&1); rc=$?
+  [ "$rc" = 3 ] && [ ! -d "$B/wt8.lock" ] || fail "pair, suite busy: returned $rc, lane 8 $( [ -d "$B/wt8.lock" ] && echo 'LEFT HELD' || echo free )"
+  case "$out" in *"s is already being break-tested"*) ;; *) fail "pair, suite busy: said '$out'";; esac
+  [ "$(cat "$B/break-s.lock/pid" 2>/dev/null)" = "$LIVE" ] || fail 'pair, suite busy: the holder lost its lock'
   return $bad
 }
 
@@ -64,6 +88,10 @@ MUTANTS=(
   '0,/^    echo "\$\$" > "\$dir\/pid"$/s//    :/'
   # Never cleared: a stale lock is waited on for ever.
   's/^  lock_held "\$dir" && return 1$/  return 1/'
+  # The lane lock alone, as it was: a second set of one suite runs beside the first.
+  's/^  if ! lock_take "\$dir\/break-\$suite.lock"; then$/  if false; then/'
+  # Refused on the suite, and the lane kept: locked, with nothing running on it.
+  '/refusing to share its results file/{n;s/^    lock_drop "\$dir\/wt\$lane.lock"$/    :/}'
 )
 caught=0
 for i in "${!MUTANTS[@]}"; do
