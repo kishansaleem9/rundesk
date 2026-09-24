@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, or, type SQL } from 'drizzle-orm'
 import { goals, lists, projects, spaces, sprints, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isUuid } from '../validation/uuid'
-import { checkContainerAccess, containerVisibilityFilter, spaceVisibilityFilter } from './container-access.guard-helper'
+import { checkContainerAccess, spaceVisibilityFilter, taskInReachFilter } from './container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole, resolveIsManager, taskVisibilityFilter } from './item-visibility'
 
 /*
@@ -184,7 +184,7 @@ export async function readableTaskIds(
       and(
         inArray(tasks.id, [...new Set(taskIds)]),
         eq(spaces.workspaceId, workspaceId),
-        containerVisibilityFilter(db, userId, isManager),
+        taskInReachFilter(db, workspaceId, userId, isManager),
         taskVisibilityFilter(db, userId, isManager),
       ),
     )

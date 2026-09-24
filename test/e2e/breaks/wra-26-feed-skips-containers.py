@@ -1,8 +1,11 @@
 # THE CALENDAR FEED WITH ONLY THE PRIVATE-ITEM RULE, as it was: a private space's dated tasks, title and description.
+# Re-anchored when the task reads took the list's own privacy with the
+# container rule (`taskInReachFilter`; `found-24-sep/private-lists-skipped-by-task-reads`);
+# the edit is the same: the rule it names is taken out.
 # Reddens: workspace-read-access: "a member’s calendar feed carries no task of a space they are refused, nor a private task — while it carries the open space’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/calendar-sync/calendar-sync.service.ts'
-a = '    const visFilter = and(containerVisibilityFilter(this.db, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))\n'
+a = '    const visFilter = and(taskInReachFilter(this.db, workspaceId, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))\n'
 b = '    const visFilter = taskVisibilityFilter(this.db, userId, isManager)\n'
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

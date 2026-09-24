@@ -1931,7 +1931,10 @@ Current date: ${new Date().toISOString().split('T')[0]}`
        */
       const isManager = await resolveIsManager(this.db, workspaceId, userId)
       const inView = containerVisibilityFilter(this.db, userId, isManager)
-      const taskInView = taskVisibilityFilter(this.db, userId, isManager)
+      // A task's reach is its list's too (`found-24-sep/private-lists-skipped-by-task-reads`).
+      const taskInReach = taskInReachFilter(this.db, workspaceId, userId, isManager)
+      const listInView = listVisibilityFilter(userId, isManager)
+      const taskInView = and(taskInReach, taskVisibilityFilter(this.db, userId, isManager))
       const [[wsRow], [roleRow], [counts], spaceRows, projectRows, openTasks, history, statusBreakdown] = await Promise.all([
         this.db.select({ name: workspaces.name }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1),
         this.db
@@ -1943,7 +1946,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           .select({
             spaces: sql<number>`count(distinct ${spaces.id})::int`,
             projects: sql<number>`count(distinct ${projects.id})::int`,
-            lists: sql<number>`count(distinct ${lists.id})::int`,
+            lists: sql<number>`count(distinct case when (${listInView ?? sql`true`}) then ${lists.id} end)::int`,
             openTasks: sql<number>`count(distinct case when ${tasks.statusCategory} <> 'closed' and ${tasks.isArchived} = false and (${taskInView ?? sql`true`}) then ${tasks.id} end)::int`,
           })
           .from(spaces)
@@ -1978,6 +1981,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               eq(tasks.isArchived, false),
               ne(tasks.statusCategory, 'closed'),
               inView,
+              taskInReach,
             ),
           )
           .orderBy(asc(tasks.dueDate))
@@ -2080,7 +2084,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
           // Both rules: this counted tasks in private spaces the actor is refused.
-          containerVisibilityFilter(this.db, actorId, isManager),
+          taskInReachFilter(this.db, workspaceId, actorId, isManager),
           taskVisibilityFilter(this.db, actorId, isManager),
         ),
       )
@@ -2162,7 +2166,7 @@ Current date: ${new Date().toISOString().split('T')[0]}`
               and(
                 eq(spaces.workspaceId, workspaceId),
                 inArray(tasks.id, taskIds),
-                containerVisibilityFilter(this.db, actorId, isManager),
+                taskInReachFilter(this.db, workspaceId, actorId, isManager),
                 taskVisibilityFilter(this.db, actorId, isManager),
               ),
             )
@@ -3291,7 +3295,7 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
           and(
             eq(spaces.workspaceId, workspaceId),
             eq(tasks.isArchived, false),
-            containerVisibilityFilter(this.db, actorId, isManager),
+            taskInReachFilter(this.db, workspaceId, actorId, isManager),
             taskVisibilityFilter(this.db, actorId, isManager),
           ),
         )

@@ -514,7 +514,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* page through the listing (continuation token) and show the newest, or, as `s4-clip-link` proposes, read a clips table. Check: after 201 uploads the newest is listed.
 
-### `found-23-sep/workspace-reads-skip-the-container-rule` — partly-fixed, LARGE (security; found fixing `home-today-overdue-includes-closed`)
+### `found-23-sep/workspace-reads-skip-the-container-rule` — **closed** (security, LARGE; found fixing `home-today-overdue-includes-closed`)
 
 **Routes that read across a workspace are guarded by membership alone, and most do not apply the caller's container access, so a member (and often a guest) reads private spaces they are refused**
 
@@ -635,6 +635,8 @@ The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the mem
 *Fixed next: chat events,* a HIGH item of their own below (`found-24-sep/chat-events-broadcast-to-the-workspace`).
 
 *Fixed next: the AI's suggestions and counts,* their own item below (`found-24-sep/ai-suggestions-read-the-whole-workspace`), with a gap in the reports fix above found beside them (`found-24-sep/reach-skipped-private-lists`). That is the last of the audit's list.
+
+*Closed with the last of it.* The JavaScript filter noted in the first fix, which hid a private task from its assignees, is gone. The workspace list asks the database, with the list's own privacy that every task read lacked (`found-24-sep/private-lists-skipped-by-task-reads`, below). What the item leaves open is a folder's privacy, which no read asks: `found-24-sep/private-folders-unenforced`, below, to measure.
 
 *Measured last: the four reports left unmeasured above,* with data in the private space (probe `probe-reports-private`, lane 1). The productivity trend counted 1 completion to the admin's 2, status durations 1 sample to 2, and time and time by project showed only the member's own open-space hour. They are clean. The sprint report was not: it named the private space's sprint, as the sprints module did everywhere. That is `found-24-sep/sprints-open-to-any-member` below, fixed.
 
@@ -925,7 +927,7 @@ The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and 
 
 *Closed:* a sprint is read as a goal is (`read-access.ts`). The reach is `goalReach`: a guest none, a manager all, a member a sprint of no space and those of the spaces they may open. `readableSprint` judges one sprint and `sprintVisibilityFilter` the lists. The sprints list, the sprint report, a sprint's detail and its tasks all take it, and a sprint the reader may not open is not found. Making, renaming, deleting and moving tasks in or out ask it first. Then they need a member, not a guest, and "edit" on the sprint's space (`assertSpaceLevel`). A new sprint's space must be one of its own workspace that the maker may open and make things in (`assertCanPlaceIn`). A rename takes a sprint's own fields and no others. The new suite `sprint-access`, 7/7 on lane 1, 0/6 before. The seventh check, a rename that also names a space and a workspace, was added from the probe that measured both moves. A guest's rename is not found rather than forbidden, since a guest is given no sprint. `spa-1..11`, each compiled. Regression on lane 1, 9/9: the new suite, `lookup-read-access` (its member's sprint of no space), `report-read-access`, `goal-access` (the read rule's file), `addressability-live` and `task-depth` (the sprints page), `workspace-read-access`, `ai-read-access` and `video1-acceptance`. In CI.
 
-### `found-24-sep/private-lists-skipped-by-task-reads` — open (security, HIGH; found closing `workspace-reads-skip-the-container-rule`)
+### `found-24-sep/private-lists-skipped-by-task-reads` — **closed** (security, HIGH; found closing `workspace-reads-skip-the-container-rule`)
 
 **The task reads that apply the container rule stop at the space and the project, so a private list's tasks are listed, searched and named to members it refuses; and the workspace list hides a private task from its own assignees**
 
@@ -938,13 +940,34 @@ The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and 
 
 *To close:* one rule for a task's reach, used by every task read: `taskInReachFilter` (or a list-aware twin where `lists` is joined) in place of `containerVisibilityFilter` wherever a task, a list or a list's name is read, and the private-item rule where a task is. `getTasksForWorkspace` filters in SQL before its limit, and its JavaScript copy goes. Measure each read before and after with one private list and one private task assigned to the member.
 
-### `found-24-sep/private-folders-unenforced` — open, to measure (security; found reading the container rule)
+*Closed:* every task read takes a task's reach, `taskInReachFilter`: the space, the project and the list's own privacy. It replaces the space-and-project half, `containerVisibilityFilter`, which now says it is for spaces and projects only. The reads:
+- tasks: the workspace list, the timeline, a member's tasks and the dependency graph;
+- "may this person open these tasks" (`readableTaskIds`), which the related tasks, the planner and the dependency notices use;
+- a person's pages (profile, activity, calendar, standup, priorities) and the tasks two people share;
+- search's task, comment and file branches, on both the Postgres path and Meilisearch's;
+- a sprint's tasks and the calendar feed;
+- the AI's status count, an answer's chips, the command assistant's tasks, and chat's context: its own tasks, its history, its list count and open-task count.
+Where the task is aliased (the standup's "held up by"), the list rule is written beside the container rule. `getTasksForWorkspace` asks the database, before its limit, and its JavaScript copy of the rule is gone; the private-item rule there is the canonical one, so a private task is listed to its assignee.
+
+The new suite `private-list-reach`, 13 checks: one private list, made by the admin, its tasks dated, commented on, blocking the member's task, in a sprint and one of them assigned to the member. The member and the admin read each surface above side by side. The thirteenth reads the prompts a model is sent when a model is configured, and the 503 when not. Measured on lane 1, the fix set aside and the API rebuilt, with the lane given the model stub: 0 of 13. Before the fix the member's command prompt named the private list. With the fix, 13 of 13 on the model lane and 12 of 12 without the prompt check. API unit tests: the workspace list's tests now read the query it asks rather than rows it drops, and search's Meili test reads the reach; `sst-2` re-anchored and `sst-3` new, both unit claims. `sst-3` (the reach without the list's rule) first left the test green: the test took the first lists query carrying the list rule, which was the list-name search's own. It now reads the reach itself, the lists query that asks no words, and `sst-3` reddens it. `plr-1..16`, each compiled, `plr-16` to be run on a model lane. Fifteen older patches that took the container rule out at these sites are re-anchored to the new line with the same edit: `dra-1`, `lra-10`, `lra-11`, `sra-1`, `sra-3`, `sra-4`, `wra-1`, `wra-4`, `wra-5`, `wra-7`, `wra-10`, `wra-23`, `wra-24`, `wra-26` and `wra-40`. Regression on lane 1, 21/21: the new suite, `workspace-read-access`, `search-read-access`, `ai-read-access`, `knowledge-read-access`, `lookup-read-access`, `report-read-access`, `dependency-read-access`, `related-task-access`, `sprint-access`, `home-my-work`, `task-pickers-search`, `addressability-live`, `person-panel`, `a39-dm-tabs`, `meeting-access`, `read-visibility`, `task-depth`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+### `found-24-sep/private-folders-unenforced` — open (security, HIGH; found reading the container rule, then measured)
 
 **A folder's privacy is read by the folder listing and by nothing that reads what is inside it**
 
 *Evidence (code read):* folders sit between a space and its projects (`projects.folderId`), and `folderVisibilityFilter` keeps a private folder from the folder listing. `checkContainerAccess`, `containerVisibilityFilter`, `taskInReachFilter` and `ResourceMemberGuard` never mention a folder. So if a folder can be made private, its projects, lists and tasks are read as if it were open. ClickUp hides a private folder's lists and tasks from those it is not shared with.
 
-*To close:* measure first (make a private folder through the API, then read a project, list and task inside it as a member it is not shared with), then add the folder to the container rule once, in `checkContainerAccess` and its SQL twins.
+*Measured on lane 1 (probe `probe-private-folder`):* the admin made a folder in an open space private (200) and a project, list and task inside it. A member it refuses was kept out of the folder listing only. The project (200), the list's tasks (200), the task (200), the workspace list and search each named what was inside.
+
+*To close:* add the folder to the container rule once. `checkContainerAccess` looks up a project's folder, a private folder being its maker's and the managers', as `folderVisibilityFilter` has it. `containerVisibilityFilter`, which `taskInReachFilter` builds on, asks the same of `projects.folderId`. A suite: the member refused a private folder reads nothing inside it by any route, beside an open folder's project that they read.
+
+### `found-24-sep/workspace-settings-mass-assign` — open (security, HIGH; found reading the workspace logo's path for `avatar-and-logo-accept-any-url`)
+
+**A workspace admin's settings save writes whatever columns its body names: the plan, its limits, and a custom domain's verification**
+
+*Evidence, measured on lane 1 (probe `probe-workspace-mass-assign`), as the admin of their own workspace (not a platform admin):* `PATCH /workspaces/:id` declares seven fields in an inline type, which nothing enforces at runtime, and `update` spreads the body into the row. One PATCH set `plan: "free"`, `planLimits: { seats: 99999 }`, `customDomainVerified: true` and `customDomainToken` to a value the caller chose (200 each, read back from the row). The plan belongs to the platform-admin route (`setWorkspacePlan`, super-admin only). Verification belongs to the DNS check. A verified custom domain is what `resolveByCustomDomain` serves a branded sign-in page for, and what `/public/tls/authorize` tells the proxy to get a certificate for. The first verified match wins, so a workspace could claim a domain it does not own, another customer's included.
+
+*To close:* the service writes the fields a settings save may change and no others (name, logo, colours, custom domain, the two sharing policies). The verified flag and the token change only through the domain's own paths. A suite: the admin's save that names the plan, the limits, the flag and the token changes none of them, beside the name it does change.
 
 ### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — **closed** (security, medium; a duplicated rule, found fixing docs, measured leaking)
 

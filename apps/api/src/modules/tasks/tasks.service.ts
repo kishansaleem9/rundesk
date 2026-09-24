@@ -93,7 +93,7 @@ import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
-import { checkContainerAccess, containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { checkContainerAccess, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
@@ -2204,7 +2204,7 @@ export class TasksService {
       : true
     const visFilter = opts.actor
       ? and(
-          containerVisibilityFilter(this.db, opts.actor.id, isManager),
+          taskInReachFilter(this.db, workspaceId, opts.actor.id, isManager),
           taskVisibilityFilter(this.db, opts.actor.id, isManager),
         )
       : undefined
@@ -2304,7 +2304,7 @@ export class TasksService {
           eq(tasks.isArchived, false),
           isNull(tasks.deletedAt),
           or(isNull(tasks.statusCategory), sql`${tasks.statusCategory} <> 'closed'`),
-          containerVisibilityFilter(this.db, actor.id, isManager),
+          taskInReachFilter(this.db, workspaceId, actor.id, isManager),
           taskVisibilityFilter(this.db, actor.id, isManager),
         ),
       )
@@ -2324,63 +2324,6 @@ export class TasksService {
    * keyed on the returned task ids — so the client can filter
    * "tasks assigned to me" without another round trip.
    */
-  /**
-   * Filter denormalised workspace-task rows down to those the actor may see,
-   * enforcing private-container membership. Mirrors `checkContainerAccess`'s rule
-   * but batched (two membership queries, not one per row): a manager-tier actor
-   * (or super_admin) sees everything; a private space requires space membership;
-   * an explicitly-private project requires project membership or admin of the
-   * owning space. Rows must carry spaceId/spaceVisibility/projectId/projectVisibility.
-   */
-  private async filterTasksByContainerAccess<
-    T extends {
-      spaceId: string
-      spaceVisibility: string | null
-      projectId: string
-      projectVisibility: string | null
-      visibility?: string | null
-      createdById?: string | null
-    },
-  >(rows: T[], workspaceId: string, actor: { id: string; role?: string }): Promise<T[]> {
-    if (rows.length === 0) return rows
-    // Platform super_admins bypass the guard without a workspace_members row.
-    if (actor.role === 'super_admin') return rows
-
-    const [wm] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
-      .limit(1)
-    if (!wm) return [] // not a member — surface nothing (fail closed; the route guard already blocks)
-    if (['workspace_admin', 'manager', 'super_admin'].includes(wm.role)) return rows
-
-    const spaceRows = await this.db
-      .select({ spaceId: spaceMembers.spaceId, role: spaceMembers.role })
-      .from(spaceMembers)
-      .where(eq(spaceMembers.userId, actor.id))
-    const projectRows = await this.db
-      .select({ projectId: projectMembers.projectId })
-      .from(projectMembers)
-      .where(eq(projectMembers.userId, actor.id))
-    const spaceRoleById = new Map(spaceRows.map((s) => [s.spaceId, s.role]))
-    const memberProjects = new Set(projectRows.map((p) => p.projectId))
-
-    return rows.filter((r) => {
-      // §2 per-item privacy: a private task is hidden from a regular member who
-      // isn't its creator. (Managers/super_admins already returned above; the
-      // creator/assignee still reach it via the list + by-id paths.)
-      if (r.visibility === 'private' && r.createdById !== actor.id) return false
-      // Private space → must be a space member.
-      if (r.spaceVisibility === 'private' && !spaceRoleById.has(r.spaceId)) return false
-      // Explicitly-private project → project member, or admin of the owning space.
-      if (r.projectVisibility === 'private') {
-        if (memberProjects.has(r.projectId)) return true
-        return spaceRoleById.get(r.spaceId) === 'admin'
-      }
-      return true
-    })
-  }
-
   async getTasksForWorkspace(
     workspaceId: string,
     limit = 500,
@@ -2414,6 +2357,28 @@ export class TasksService {
   ) {
     const { includeAssignees = true, actorId, actorRole, assigneeId } = opts
     const safeLimit = Math.min(Math.max(limit, 1), 1000)
+    /*
+     * WHO MAY SEE WHICH ROWS, IN SQL AND BEFORE THE LIMIT: a task's reach — its
+     * space, project and list (`taskInReachFilter`) — and the private-item rule
+     * (`taskVisibilityFilter`), the rules the task's own GET applies. This read
+     * filtered in JavaScript with its own copy of them, which had no private-list
+     * rule and hid a private task from the member it was assigned to
+     * (`found-24-sep/private-lists-skipped-by-task-reads`), after a limit it
+     * over-fetched to allow for. The route asks only for membership. No actor is
+     * an internal caller: every row.
+     */
+    let readable: SQL | undefined
+    if (actorId && actorRole !== 'super_admin') {
+      const [member] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+        .limit(1)
+      if (!member) return [] // not in the workspace: nothing (the route guard refuses first)
+      if (!isManagerRole(member.role as string)) {
+        readable = and(taskInReachFilter(this.db, workspaceId, actorId, false), taskVisibilityFilter(this.db, actorId, false))
+      }
+    }
     const words = (opts.q ?? '').trim().slice(0, 200)
     // `%`, `_` and `\` are LIKE's own syntax; a title containing them is text.
     const like = words ? `%${words.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null
@@ -2440,12 +2405,6 @@ export class TasksService {
         completedAt:       tasks.completedAt,
         createdAt:         tasks.createdAt,
         updatedAt:         tasks.updatedAt,
-        // Selected only to scope private containers + private items; stripped
-        // from the response.
-        spaceVisibility:   spaces.visibility,
-        projectVisibility: projects.visibility,
-        visibility:        tasks.visibility,
-        createdById:       tasks.createdById,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -2461,33 +2420,14 @@ export class TasksService {
           like
             ? or(ilike(tasks.title, like), ilike(lists.name, like), ilike(projects.name, like))
             : undefined,
+          readable,
         ),
       )
       .orderBy(desc(tasks.updatedAt))
-      /*
-       * Over-fetched when the caller is scoped, because the container filter
-       * below runs AFTER this limit and only removes rows. Asking for exactly
-       * `safeLimit` therefore returned fewer than asked for whenever any of the
-       * top rows sat in a private space — the same shape as the search bug
-       * where hits were dropped after Meilisearch had already applied its own
-       * limit. Bounded at the same 1000 ceiling the parameter is clamped to.
-       */
-      .limit(actorId ? Math.min(safeLimit * 2, 1000) : safeLimit)
-
-    // The workspace listing is guarded only by workspace membership, so without
-    // this it would leak tasks in private spaces/projects the caller can't reach.
-    // Scope to accessible containers when the caller is known; unknown-actor
-    // (internal) callers stay unfiltered to preserve existing behavior.
-    const scopedRows = actorId
-      ? (await this.filterTasksByContainerAccess(rawRows, workspaceId, { id: actorId, role: actorRole })).slice(
-          0,
-          safeLimit,
-        )
-      : rawRows
-    // Drop the visibility helper columns so the response shape is unchanged.
-    const rows = scopedRows.map(
-      ({ spaceVisibility: _sv, projectVisibility: _pv, visibility: _v, createdById: _c, ...rest }) => rest,
-    )
+      // The rule is in the WHERE, so the limit counts only rows the caller may
+      // see; the JavaScript copy ran after it, and over-fetched to make up.
+      .limit(safeLimit)
+    const rows = rawRows
 
     type AssigneeRef = {
       userId: string
@@ -5803,7 +5743,7 @@ export class TasksService {
         and(
           inArray(tasks.id, nodeIds),
           eq(spaces.workspaceId, root.workspaceId),
-          reader ? containerVisibilityFilter(this.db, reader.id, isManager) : undefined,
+          reader ? taskInReachFilter(this.db, root.workspaceId, reader.id, isManager) : undefined,
           reader ? taskVisibilityFilter(this.db, reader.id, isManager) : undefined,
         ),
       )

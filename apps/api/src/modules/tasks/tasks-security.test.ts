@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { getTableName } from 'drizzle-orm'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { TasksService } from './tasks.service'
 
 /**
@@ -15,8 +17,9 @@ import { TasksService } from './tasks.service'
  *      workspace OAuth token to a host derived from the pasted URL unless it's on
  *      the operator allowlist; off-allowlist hosts are skipped, and even
  *      allowlisted targets go through safeFetch (private/reserved IPs blocked).
- *   4. Private-container leak — `getTasksForWorkspace` must not return tasks in
- *      private spaces/projects the caller isn't a member of.
+ *   4. Private-container leak — `getTasksForWorkspace` must ask the database
+ *      for a member's rows by their reach (space, project and list) and the
+ *      private-item rule, before its limit.
  *
  * Uses the repo's queued-thenable Drizzle stand-in: every db.select() pops the
  * next planned rows; insert captures its `.values()` payload.
@@ -225,63 +228,80 @@ describe('TasksService.fetchGitlabState — GitLab host allowlist (SSRF)', () =>
   })
 })
 
-// --- 4. getTasksForWorkspace private-container scoping ----------------------
+// --- 4. getTasksForWorkspace: who may see which rows -----------------------
 
-describe('TasksService.getTasksForWorkspace — private-container scoping', () => {
-  const ROWS = () => [
-    { id: 't-pub',        title: 'Public',       spaceId: 's-pub',    spaceVisibility: 'public',  projectId: 'p-pub',    projectVisibility: null },
-    { id: 't-priv-space', title: 'Secret space', spaceId: 's-secret', spaceVisibility: 'private', projectId: 'p2',       projectVisibility: null },
-    { id: 't-priv-proj',  title: 'Secret proj',  spaceId: 's-pub',    spaceVisibility: 'public',  projectId: 'p-secret', projectVisibility: 'private' },
-  ]
+/**
+ * The workspace list chooses its rows IN SQL now, before its limit: the reach
+ * (space, project and the list's own privacy) and the private-item rule. It
+ * filtered in JavaScript with a copy of the rule that had no private list and
+ * left out assignees (`found-24-sep/private-lists-skipped-by-task-reads`), so
+ * these read the query it asks, rendered, rather than rows it throws away.
+ * The rows themselves are the database's to choose; `private-list-reach`
+ * measures them on a lane.
+ */
+describe('TasksService.getTasksForWorkspace — who may see which rows', () => {
+  const dialect = new PgDialect()
+  /** A stand-in that answers each table's rows and keeps every WHERE with its table. */
+  function recordingDb(rowsByTable: Record<string, unknown[]>) {
+    const wheres: Array<{ table: string; condition: unknown }> = []
+    const chain = (): any => {
+      let rows: unknown[] = []
+      let table = '?'
+      const c: any = {
+        from: (t: unknown) => { table = getTableName(t as never); rows = rowsByTable[table] ?? []; return c },
+        where: (condition: unknown) => { wheres.push({ table, condition }); return c },
+        innerJoin: () => c, leftJoin: () => c, orderBy: () => c, limit: () => c, groupBy: () => c,
+        then: (resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) => Promise.resolve(rows).then(resolve, reject),
+      }
+      return c
+    }
+    return { db: { select: mock.fn(() => chain()) } as any, wheres }
+  }
+  const rendered = (wheres: Array<{ table: string; condition: unknown }>, table: string) =>
+    wheres.filter((w) => w.table === table && w.condition != null).map((w) => dialect.sqlToQuery(w.condition as never).sql)
+  const TASK = { id: 't1', title: 'A task' }
 
-  it('hides private-space/project tasks from a plain member who is not a container member', async () => {
-    const { db } = makeDb([
-      ROWS(),               // base task select
-      [{ role: 'member' }], // workspace membership
-      [],                   // actor's space memberships (none)
-      [],                   // actor's project memberships (none)
-    ])
-    const svc = makeService(db)
-    const out = await svc.getTasksForWorkspace('w1', 500, { actorId: 'u-member', actorRole: 'member', includeAssignees: false })
-    assert.deepEqual(out.map((r: any) => r.id), ['t-pub'])
-    // Visibility helper columns are stripped from the response.
-    assert.equal('spaceVisibility' in out[0], false)
-    assert.equal('projectVisibility' in out[0], false)
+  it('asks the database for a member’s rows by their reach — space, project and list — and the private-item rule', async () => {
+    const { db, wheres } = recordingDb({ workspace_members: [{ role: 'member' }], tasks: [TASK] })
+    const out = await makeService(db).getTasksForWorkspace('w1', 500, { actorId: 'u-member', actorRole: 'member', includeAssignees: false })
+    assert.deepEqual(out.map((r: any) => r.id), ['t1'])
+    const [taskWhere] = rendered(wheres, 'tasks')
+    assert.ok(taskWhere, 'the tasks were never read')
+    assert.match(taskWhere, /"tasks"\."list_id" in/, `no reach on the member's rows: ${taskWhere}`)
+    assert.match(taskWhere, /"tasks"\."visibility"/, `no private-item rule on the member's rows: ${taskWhere}`)
+    const reach = rendered(wheres, 'lists').find((q) => /"lists"\."visibility"/.test(q))
+    assert.ok(reach, 'the reach has no private-list rule')
+    assert.match(reach, /"spaces"\."visibility"/, `the reach has no space rule: ${reach}`)
+    assert.match(reach, /"projects"\."visibility"/, `the reach has no project rule: ${reach}`)
   })
 
-  it('includes private containers the member actually belongs to', async () => {
-    const { db } = makeDb([
-      ROWS(),
-      [{ role: 'member' }],
-      [{ spaceId: 's-secret', role: 'member' }], // member of the private space
-      [{ projectId: 'p-secret' }],               // member of the private project
-    ])
-    const svc = makeService(db)
-    const out = await svc.getTasksForWorkspace('w1', 500, { actorId: 'u-member', actorRole: 'member', includeAssignees: false })
-    assert.deepEqual(out.map((r: any) => r.id).sort(), ['t-priv-proj', 't-priv-space', 't-pub'])
+  it('asks neither rule of a manager, who may see every row', async () => {
+    const { db, wheres } = recordingDb({ workspace_members: [{ role: 'workspace_admin' }], tasks: [TASK] })
+    const out = await makeService(db).getTasksForWorkspace('w1', 500, { actorId: 'u-admin', actorRole: 'member', includeAssignees: false })
+    assert.equal(out.length, 1)
+    const [taskWhere] = rendered(wheres, 'tasks')
+    assert.ok(taskWhere && !/visibility|"list_id" in/.test(taskWhere), `a manager's rows were filtered: ${taskWhere}`)
   })
 
-  it('a manager sees everything with no container-membership lookups', async () => {
-    const { db } = makeDb([ROWS(), [{ role: 'workspace_admin' }]])
-    const svc = makeService(db)
-    const out = await svc.getTasksForWorkspace('w1', 500, { actorId: 'u-admin', actorRole: 'member', includeAssignees: false })
-    assert.equal(out.length, 3)
-    assert.equal(db.select.mock.callCount(), 2, 'base select + membership only')
+  it('gives a platform super_admin every row without a membership lookup', async () => {
+    const { db, wheres } = recordingDb({ tasks: [TASK] })
+    const out = await makeService(db).getTasksForWorkspace('w1', 500, { actorId: 'root', actorRole: 'super_admin', includeAssignees: false })
+    assert.equal(out.length, 1)
+    assert.equal(rendered(wheres, 'workspace_members').length, 0, 'a super_admin was looked up')
   })
 
-  it('a platform super_admin bypasses filtering without a membership row', async () => {
-    const { db } = makeDb([ROWS()]) // only the base select is issued
-    const svc = makeService(db)
-    const out = await svc.getTasksForWorkspace('w1', 500, { actorId: 'root', actorRole: 'super_admin', includeAssignees: false })
-    assert.equal(out.length, 3)
-    assert.equal(db.select.mock.callCount(), 1, 'no membership lookups for super_admin')
+  it('gives somebody outside the workspace nothing, and never reads its tasks', async () => {
+    const { db, wheres } = recordingDb({ workspace_members: [], tasks: [TASK] })
+    const out = await makeService(db).getTasksForWorkspace('w1', 500, { actorId: 'u-stranger', actorRole: 'member', includeAssignees: false })
+    assert.deepEqual(out, [])
+    assert.equal(rendered(wheres, 'tasks').length, 0, 'the tasks were read for a stranger')
   })
 
   it('stays unfiltered when no actor is supplied (internal callers)', async () => {
-    const { db } = makeDb([ROWS()])
-    const svc = makeService(db)
-    const out = await svc.getTasksForWorkspace('w1', 500, { includeAssignees: false })
-    assert.equal(out.length, 3)
-    assert.equal(db.select.mock.callCount(), 1)
+    const { db, wheres } = recordingDb({ tasks: [TASK] })
+    const out = await makeService(db).getTasksForWorkspace('w1', 500, { includeAssignees: false })
+    assert.equal(out.length, 1)
+    const [taskWhere] = rendered(wheres, 'tasks')
+    assert.ok(taskWhere && !/visibility/.test(taskWhere), `an internal read was filtered: ${taskWhere}`)
   })
 })

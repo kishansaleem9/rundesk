@@ -20,8 +20,8 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
-import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 import type { StandupData } from './standup'
@@ -120,7 +120,7 @@ export class PeopleService {
   private async viewerFilter(workspaceId: string, requesterId: string): Promise<{ where: SQL | undefined; isManager: boolean }> {
     const isManager = await resolveIsManager(this.db, workspaceId, requesterId)
     return {
-      where: and(containerVisibilityFilter(this.db, requesterId, isManager), taskVisibilityFilter(this.db, requesterId, isManager)),
+      where: and(taskInReachFilter(this.db, workspaceId, requesterId, isManager), taskVisibilityFilter(this.db, requesterId, isManager)),
       isManager,
     }
   }
@@ -643,9 +643,11 @@ export class PeopleService {
           // Still open, or it is not blocking anything any more.
           ne(blocker.statusCategory, 'closed'),
           eq(blocker.isArchived, false),
-          // As the requester may see the blocked task: its containers, and,
-          // since the task is aliased here, the private-item rule written out.
+          // As the requester may see the blocked task: its containers and its
+          // list (`lists` is the blocked task's, unaliased), and, since the task
+          // is aliased here, the private-item rule written out.
           containerVisibilityFilter(this.db, requesterId, isManager),
+          listVisibilityFilter(requesterId, isManager),
           isManager
             ? undefined
             : or(

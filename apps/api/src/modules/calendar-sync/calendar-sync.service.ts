@@ -15,7 +15,7 @@ import {
   workspaceMembers,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 
 /**
  * Bidirectional calendar sync for Google Calendar + Outlook.
@@ -316,7 +316,7 @@ export class CalendarSyncService {
     // And the container rule: only the private-item rule applied, so the feed
     // carried the dated tasks of private spaces its owner is refused (measured
     // on lane 1, title and description).
-    const visFilter = and(containerVisibilityFilter(this.db, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))
+    const visFilter = and(taskInReachFilter(this.db, workspaceId, userId, isManager), taskVisibilityFilter(this.db, userId, isManager))
     const rows = await this.db
       .select({
         id: tasks.id,

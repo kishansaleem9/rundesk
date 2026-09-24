@@ -5,7 +5,7 @@ import type { Db } from '@rundesk/db'
 import type { SprintStatus } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
-import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { goalReach, readableSprint, sprintVisibilityFilter, type ReadActor } from '../../common/permissions/read-access'
 import { assertCanPlaceIn } from '../../common/permissions/container-access'
 import { assertSpaceLevel } from '../../common/permissions/space-default-permission'
@@ -82,7 +82,7 @@ export class SprintsService {
   ): Promise<SQL | undefined> {
     if (!actor) return undefined
     const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-    return and(containerVisibilityFilter(this.db, actor.id, isManager), taskVisibilityFilter(this.db, actor.id, isManager))
+    return and(taskInReachFilter(this.db, workspaceId, actor.id, isManager), taskVisibilityFilter(this.db, actor.id, isManager))
   }
 
   private aggregateStats(

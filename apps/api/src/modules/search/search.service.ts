@@ -26,7 +26,7 @@ import {
   listVisibilityFilter,
   folderVisibilityFilter,
 } from '../../common/permissions/item-visibility'
-import { containerVisibilityFilter, spaceVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { containerVisibilityFilter, spaceVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { hiddenDocIds } from '../../common/permissions/doc-access'
 import { readableChannelsFilter } from '../chat/channel-read-filter'
 
@@ -506,7 +506,7 @@ export class SearchService implements OnModuleInit {
             // The container rule and the private-item rule. Only the second
             // applied: measured, a member's search returned the task of a
             // private space they were refused (`workspace-read-access` §8).
-            containerVisibilityFilter(this.db, userId, isManager),
+            taskInReachFilter(this.db, workspaceId, userId, isManager),
             taskVisibilityFilter(this.db, userId, isManager),
           ]
           if (like) conds.push(or(ilike(tasks.title, like), ilike(tasks.description, like)))
@@ -937,7 +937,7 @@ export class SearchService implements OnModuleInit {
     const conds: Array<SQL | undefined> = [inArray(tasks.id, taskHits.map((h) => rawId(h.id)))]
     if (!includeArchived) conds.push(eq(tasks.isArchived, false))
     if (!isManager) {
-      conds.push(containerVisibilityFilter(this.db, userId, false))
+      conds.push(taskInReachFilter(this.db, workspaceId, userId, false))
       conds.push(taskVisibilityFilter(this.db, userId, false))
     }
 
@@ -1332,7 +1332,7 @@ export class SearchService implements OnModuleInit {
           and(
             eq(spaces.workspaceId, workspaceId),
             ilike(taskComments.body, like),
-            containerVisibilityFilter(this.db, userId, isManager),
+            taskInReachFilter(this.db, workspaceId, userId, isManager),
             taskVisibilityFilter(this.db, userId, isManager),
           ),
         )
@@ -1488,7 +1488,7 @@ export class SearchService implements OnModuleInit {
       eq(spaces.workspaceId, workspaceId),
       // The container rule too: the join reached the space but nothing asked
       // whether the caller may open it (measured, a private space's file).
-      containerVisibilityFilter(this.db, userId, isManager),
+      taskInReachFilter(this.db, workspaceId, userId, isManager),
       taskVisibilityFilter(this.db, userId, isManager),
     ]
     if (like) conds.push(or(ilike(taskAttachments.fileName, like), ilike(taskAttachments.contentType, like)))

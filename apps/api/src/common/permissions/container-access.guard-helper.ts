@@ -95,6 +95,11 @@ export function spaceVisibilityFilter(db: Db, actorId: string, isManager: boolea
  * project membership or admin of its space. Joins `spaces` and `projects`
  * unaliased. `undefined` for a manager, so `and(...)` drops it.
  *
+ * FOR SPACES AND PROJECTS ONLY. A read of TASKS takes `taskInReachFilter`
+ * below, which adds a private list's own rule: every task read that took this
+ * one named a private list's tasks to members it refuses
+ * (`found-24-sep/private-lists-skipped-by-task-reads`).
+ *
  * Written beside the per-row check on purpose: two statements of one rule are
  * only safe while they sit where a change to one is seen next to the other.
  */

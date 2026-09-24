@@ -706,14 +706,28 @@ describe('SearchService holds Meili hits to the read rules', () => {
     assert.deepEqual(res.filter((h) => h.entityType === 'doc').map((h) => h.id), ['doc-d-open'])
   })
 
-  it('holds a task hit to the container rule as well as the private-item rule', async () => {
+  it('holds a task hit to its reach — space, project and list — as well as the private-item rule', async () => {
     const { svc, wheres } = svcWith(indexOf([{ id: 'task-t1', entityType: 'task' }]), { tasks: [{ id: 't1' }] })
     await svc.search('w1', 'u1', 'probe', 10, {})
     const q = sqlFor(wheres, 'tasks')
     assert.ok(q, 'the task hits were never checked against the database')
-    assert.match(q.sql, /"spaces"\."visibility"/, `no space rule on the task hits: ${q.sql}`)
-    assert.match(q.sql, /"projects"\."visibility"/, `no project rule on the task hits: ${q.sql}`)
+    assert.match(q.sql, /"tasks"\."list_id" in/, `no reach rule on the task hits: ${q.sql}`)
     assert.match(q.sql, /"tasks"\."visibility"/, `no private-item rule on the task hits: ${q.sql}`)
+    // The reach is a subquery of the lists the searcher may open: the space and
+    // project rules, and the list's own privacy, which the space and project
+    // rule alone left out (`found-24-sep/private-lists-skipped-by-task-reads`).
+    // The list-name search is its own read and asks the list rule itself; the
+    // reach is the lists query that asks no words.
+    const reaches = wheres
+      .filter((w) => w.table === 'lists' && w.condition != null)
+      .map((w) => dialect.sqlToQuery(w.condition as never).sql)
+      .filter((sql) => !/ilike/i.test(sql))
+    assert.ok(reaches.length > 0, 'no reach was built for the task hits')
+    for (const reach of reaches) {
+      assert.match(reach, /"lists"\."visibility"/, `the reach has no list rule: ${reach}`)
+      assert.match(reach, /"spaces"\."visibility"/, `the reach has no space rule: ${reach}`)
+      assert.match(reach, /"projects"\."visibility"/, `the reach has no project rule: ${reach}`)
+    }
   })
 
   it('asks neither rule of a manager, who may open everything', async () => {
