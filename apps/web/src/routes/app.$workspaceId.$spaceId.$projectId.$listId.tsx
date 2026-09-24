@@ -1821,18 +1821,29 @@ function ListDetail() {
   useEffect(() => {
     const socket = getRealtimeSocket()
     socket.emit('subscribe', { rooms: [`list:${listId}`] })
+    /*
+     * The list refetches once a burst: one edit sends `task.updated` to this
+     * list's room and to the task's, and a page in both gets it twice.
+     *
+     * A task's own queries are MARKED stale here, never refetched. An open
+     * sheet refetches them itself, once a burst; this refetched them as well,
+     * with comments and activity a second time, for every event
+     * (`product-siblings/task-sheet-refetch-storm`). Marked, a sheet opened
+     * later reads them afresh instead of from a cache that is 30 seconds fresh.
+     */
+    let timer: ReturnType<typeof setTimeout> | null = null
     const onEvent = (event: { type: string; listId?: string; taskId?: string }) => {
       if (event.listId === listId || event.type.startsWith('task.')) {
-        void qc.invalidateQueries({ queryKey: ['tasks', listId] })
-        if (event.taskId) {
-          void qc.invalidateQueries({ queryKey: ['task', event.taskId] })
-          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'comments'] })
-          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'activity'] })
-        }
+        timer ??= setTimeout(() => {
+          timer = null
+          void qc.invalidateQueries({ queryKey: ['tasks', listId] })
+        }, 150)
+        if (event.taskId) void qc.invalidateQueries({ queryKey: ['task', event.taskId], refetchType: 'none' })
       }
     }
     socket.on('event', onEvent)
     return () => {
+      if (timer) clearTimeout(timer)
       socket.off('event', onEvent)
       socket.emit('unsubscribe', { rooms: [`list:${listId}`] })
     }

@@ -1203,16 +1203,36 @@ export function TaskDetailSheet({
     if (!enabled || !taskId) return
     const socket = getRealtimeSocket()
     socket.emit('subscribe', { rooms: [`task:${taskId}`] })
+    /*
+     * ONE PASS PER BURST. One edit arrives as several events: `task.updated`,
+     * sent to the list's room and the task's (a page in both gets it twice),
+     * and `activity.created`. Each invalidated the whole `['task', id]` prefix,
+     * refetching everything the sheet has open, and comments and activity were
+     * invalidated again after it, which cancels and restarts them. With the
+     * list page doing the same beside it, one priority change fetched the task
+     * six times and its attachments six
+     * (`product-siblings/task-sheet-refetch-storm`). A burst now waits a moment
+     * and makes one pass: the whole prefix when anything but an activity entry
+     * arrived, since a task's fields show in any panel; the activity alone when
+     * that is all that did.
+     */
+    let pending: 'all' | 'activity' | null = null
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      timer = null
+      const scope = pending
+      pending = null
+      if (scope === 'all') void qc.invalidateQueries({ queryKey: ['task', taskId] })
+      else if (scope === 'activity') void qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+    }
     const onEvent = (event: { type: string; taskId?: string }) => {
       if (event.taskId !== taskId) return
-      void qc.invalidateQueries({ queryKey: ['task', taskId] })
-      if (event.type.startsWith('comment.') || event.type === 'activity.created') {
-        void qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
-        void qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
-      }
+      pending = event.type === 'activity.created' && pending !== 'all' ? 'activity' : 'all'
+      timer ??= setTimeout(flush, 150)
     }
     socket.on('event', onEvent)
     return () => {
+      if (timer) clearTimeout(timer)
       socket.off('event', onEvent)
       socket.emit('unsubscribe', { rooms: [`task:${taskId}`] })
     }

@@ -25,30 +25,25 @@
 # you are on. It does mean this check can only be reddened by removing the live
 # refresh for this task entirely, which is a coherent state: a build with the
 # realtime wiring gone.
+#
+# RE-AIMED 24 September. The list route's handler now only MARKS a task's
+# queries stale and refetches nothing, and the sheet's handler makes one pass
+# per burst (`product-siblings/task-sheet-refetch-storm`). So the live refresh
+# is two places now, the panel's own and the sheet's pass, and this takes both.
 # Reddens: comment-thread: "it appears in the thread without leaving it"
 import io
 tds = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
-lst = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 
 s = io.open(tds, encoding='utf-8').read()
 a = "      setBody('')\n      await qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })\n    },\n  })\n\n  return (\n    <div className=\"space-y-3\" data-testid=\"comment-thread-panel\""
 b = "      setBody('')\n    },\n  })\n\n  return (\n    <div className=\"space-y-3\" data-testid=\"comment-thread-panel\""
 assert s.count(a) == 1, f'panel anchor appears {s.count(a)} times in {tds}, expected exactly 1'
 
-c = """      if (event.taskId !== taskId) return
-      void qc.invalidateQueries({ queryKey: ['task', taskId] })
-      if (event.type.startsWith('comment.') || event.type === 'activity.created') {
-        void qc.invalidateQueries({ queryKey: ['task', taskId, 'comments'] })
-        void qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
-      }"""
-d = "      if (event.taskId !== taskId) return"
+c = """      if (scope === 'all') void qc.invalidateQueries({ queryKey: ['task', taskId] })
+      else if (scope === 'activity') void qc.invalidateQueries({ queryKey: ['task', taskId, 'activity'] })
+"""
+d = "      void scope\n"
 assert s.count(c) == 1, f'task socket anchor appears {s.count(c)} times in {tds}, expected exactly 1'
 io.open(tds, 'w', encoding='utf-8').write(s.replace(a, b).replace(c, d))
 
-t = io.open(lst, encoding='utf-8').read()
-e = "        if (event.taskId) {\n          void qc.invalidateQueries({ queryKey: ['task', event.taskId] })\n          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'comments'] })\n          void qc.invalidateQueries({ queryKey: ['task', event.taskId, 'activity'] })\n        }"
-f = "        if (false) {\n          void qc.invalidateQueries({ queryKey: ['task', event.taskId ?? ''] })\n        }"
-assert t.count(e) == 1, f'list-route anchor appears {t.count(e)} times in {lst}, expected exactly 1'
-io.open(lst, 'w', encoding='utf-8').write(t.replace(e, f))
-
-print('task-detail-sheet.tsx + $listId.tsx: nothing left refreshes this task\'s comments.')
+print('task-detail-sheet.tsx: nothing left refreshes this task\'s comments.')
