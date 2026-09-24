@@ -155,6 +155,26 @@ lane_store_up () {
 # Lane k gets port 92<k>, beside storage on 91<k>.
 lane_model_port () { echo $((9200 + $1)); }
 
+# WHAT PROVES A LANE'S DATABASE IS CURRENT: the newest migration that leaves
+# something to look for, as `<file> <table> [<column>]`. A column it adds
+# (`ALTER TABLE "t" ADD COLUMN IF NOT EXISTS "c"`), or a table it creates
+# (`CREATE TABLE IF NOT EXISTS "t"`). The restart script looked for columns
+# only, so a migration that creates a table (0162, `outbound_email_messages`)
+# left the check on an older column, and a lane without the table passed it and
+# then 500'd on its first write to it. A data-only migration names nothing to
+# look for and is walked past. Prints nothing when no migration does.
+newest_schema_witness () {
+  local dir="$1" f col tbl created
+  for f in $(ls "$dir"/*.sql 2>/dev/null | sort -r); do
+    col=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
+    tbl=$(grep -oiE 'ALTER TABLE "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
+    if [ -n "$col" ] && [ -n "$tbl" ]; then echo "$f $tbl $col"; return 0; fi
+    created=$(grep -oiE 'CREATE TABLE IF NOT EXISTS "[a-z0-9_]+"' "$f" | head -1 | grep -oE '"[a-z0-9_]+"' | tr -d '"')
+    if [ -n "$created" ]; then echo "$f $created"; return 0; fi
+  done
+  return 0
+}
+
 # A LANE LIST, IN THE ONE SPELLING EVERY SCRIPT TAKES: "9" is lane nine, "9 10"
 # is lanes nine and ten, and a range is spelled with `seq`. `fleet-up.sh` read a
 # bare number as a COUNT, and it drops and restores the database of every lane

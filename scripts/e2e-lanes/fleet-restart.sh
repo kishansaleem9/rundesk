@@ -79,12 +79,11 @@ pg_isready >/dev/null || { echo "POSTGRES DOWN"; exit 1; }
 # restart for as long as such a file stayed newest — it printed "schema NOT
 # verified" and started the API anyway. Walking back to the newest file with a
 # column keeps the witness.
-LATEST_SQL=""; NEWEST_COL=""; NEWEST_TBL=""
-for f in $(ls "$R/packages/db/src/migrations"/*.sql | sort -r); do
-  col=$(grep -oiE 'ADD COLUMN IF NOT EXISTS "[a-z_]+"' "$f" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
-  tbl=$(grep -oiE 'ALTER TABLE "[a-z_]+"' "$f" | head -1 | grep -oE '"[a-z_]+"' | tr -d '"')
-  if [ -n "$col" ] && [ -n "$tbl" ]; then LATEST_SQL="$f"; NEWEST_COL="$col"; NEWEST_TBL="$tbl"; break; fi
-done
+#
+# AND A TABLE IT CREATES counts too (`newest_schema_witness`, lane-env.sh): 0162
+# creates one and adds no column, and reading columns only left the check on
+# 0160's while a lane without the new table came up and 500'd writing to it.
+read -r LATEST_SQL NEWEST_TBL NEWEST_COL <<< "$(newest_schema_witness "$R/packages/db/src/migrations")"
 
 # The lanes this run REFUSED to restart. The count at the end has to leave them
 # out: a refused lane still has its old API listening, which answers health, so
@@ -105,18 +104,23 @@ for k in "${LANES[@]}"; do
   # The schema check, per lane, when the newest migration is one this can read.
   # A migration shape it cannot parse is skipped rather than guessed at — and
   # says so, because a check that silently passes is worse than none.
-  if [ -n "$NEWEST_COL" ] && [ -n "$NEWEST_TBL" ]; then
-    HAS=$(psql -h 127.0.0.1 -U rundesk -d "$DB" -tAc \
-      "select count(*) from information_schema.columns where table_name='$NEWEST_TBL' and column_name='$NEWEST_COL'" 2>/dev/null | tr -d ' ')
+  if [ -n "$NEWEST_TBL" ]; then
+    if [ -n "$NEWEST_COL" ]; then
+      HAS=$(psql -h 127.0.0.1 -U rundesk -d "$DB" -tAc \
+        "select count(*) from information_schema.columns where table_name='$NEWEST_TBL' and column_name='$NEWEST_COL'" 2>/dev/null | tr -d ' ')
+    else
+      HAS=$(psql -h 127.0.0.1 -U rundesk -d "$DB" -tAc \
+        "select count(*) from information_schema.tables where table_name='$NEWEST_TBL'" 2>/dev/null | tr -d ' ')
+    fi
     if [ "$HAS" != "1" ]; then
-      echo "lane $k: $DB is behind — $NEWEST_TBL.$NEWEST_COL is missing ($(basename "$LATEST_SQL"))"
+      echo "lane $k: $DB is behind — $NEWEST_TBL${NEWEST_COL:+.$NEWEST_COL} is missing ($(basename "$LATEST_SQL"))"
       echo "         apply it:  psql -h 127.0.0.1 -U rundesk -d $DB -f $LATEST_SQL"
       echo "         REFUSING to start an API that would 500 on its first write"
       REFUSED[$k]=1
       continue
     fi
   else
-    echo "lane $k: no migration names a column to check — schema NOT verified"
+    echo "lane $k: no migration names a column or a table to check — schema NOT verified"
   fi
   # Kill by PORT, never by `pkill -f` on an environment variable: PORTMARK is
   # not in any command line, so that pattern matches nothing (and a looser one

@@ -1,6 +1,14 @@
 import { Injectable, Inject, Logger, BadRequestException } from '@nestjs/common'
 import { eq, and, isNull, isNotNull, or, desc, sql, inArray, gte, gt, lte } from 'drizzle-orm'
-import { notifications, notificationTypeEnum, users, webPushSubscriptions } from '@rundesk/db'
+import {
+  listEmailAliases,
+  notifications,
+  notificationTypeEnum,
+  outboundEmailMessages,
+  tasks,
+  users,
+  webPushSubscriptions,
+} from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -8,6 +16,8 @@ import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import webpush from 'web-push'
 import { extractMentionUserIds, formatMentionsInText } from '../../common/utils/mentions'
+import { inboundDomain, taskReplyAddress } from '../email-to-task/task-address'
+import { randomUUID } from 'node:crypto'
 
 // --- Reminder lead time (§10.4) --------------------------------------------
 // Per-user "remind me N days before a task is due" offsets. Stored on the
@@ -1235,6 +1245,29 @@ export class NotificationsService {
   // Private — email dispatch
   // ---------------------------------------------------------------------------
 
+  /**
+   * WHAT A REPLY TO A COMMENT NOTIFICATION FINDS ITS TASK BY. The mail gets a
+   * Message-ID of its own, kept with the task (`outbound_email_messages`), so
+   * a reply's `In-Reply-To` names it; and, where the task's list takes email,
+   * a Reply-To of the task's own address. Neither was set, and the inbound
+   * handler, which says replies route by header, matched only inbound mail
+   * (`resume-defects/resume-8-reply-routing`). The id is random, so knowing a
+   * task does not let anybody guess one.
+   */
+  private async replyThread(taskId: string, recipient: string): Promise<{ messageId: string; replyTo: string | null } | null> {
+    const [task] = await this.db.select({ listId: tasks.listId }).from(tasks).where(eq(tasks.id, taskId)).limit(1)
+    if (!task) return null
+    const [alias] = await this.db
+      .select({ localPart: listEmailAliases.localPart })
+      .from(listEmailAliases)
+      .where(and(eq(listEmailAliases.listId, task.listId), isNull(listEmailAliases.revokedAt)))
+      .limit(1)
+    const replyTo = alias ? taskReplyAddress(alias.localPart, taskId) : null
+    const messageId = `<notify.${randomUUID()}@${inboundDomain()}>`
+    await this.db.insert(outboundEmailMessages).values({ messageId, taskId, listId: task.listId, recipient, replyTo })
+    return { messageId, replyTo }
+  }
+
   private async sendEmail(data: Parameters<typeof this.create>[0]) {
     // Resolve recipient user
     const [recipient] = await this.db
@@ -1299,6 +1332,9 @@ export class NotificationsService {
             workspaceName,
           })
         } else {
+          const thread = data.target?.entityType === 'task'
+            ? await this.replyThread(data.target.entityId, recipient.email)
+            : null
           await this.email.sendComment({
             to: recipient.email,
             recipientName: recipient.displayName,
@@ -1307,6 +1343,8 @@ export class NotificationsService {
             taskUrl,
             commentSnippet: ctx.commentSnippet ?? '(view in app)',
             workspaceName,
+            messageId: thread?.messageId,
+            replyTo: thread?.replyTo ?? undefined,
           })
         }
         break

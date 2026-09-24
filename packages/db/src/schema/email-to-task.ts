@@ -73,3 +73,27 @@ export const inboundEmailMessagesRelations = relations(inboundEmailMessages, ({ 
   list: one(lists, { fields: [inboundEmailMessages.listId], references: [lists.id] }),
   task: one(tasks, { fields: [inboundEmailMessages.taskId], references: [tasks.id] }),
 }))
+
+/**
+ * The notification mail this server sent about a task, by Message-ID, so a
+ * reply's `In-Reply-To` / `References` find the task it answers. Only inbound
+ * Message-IDs were ever kept, and a reply to a notification named an outbound
+ * one, so it matched nothing (`resume-defects/resume-8-reply-routing`).
+ * `reply_to` is the task's own address when its list takes email.
+ */
+export const outboundEmailMessages = pgTable(
+  'outbound_email_messages',
+  {
+    id:        uuid('id').primaryKey().defaultRandom(),
+    messageId: text('message_id').notNull(),
+    taskId:    uuid('task_id').notNull().references(() => tasks.id, { onDelete: 'cascade' }),
+    listId:    uuid('list_id').notNull().references(() => lists.id, { onDelete: 'cascade' }),
+    recipient: text('recipient').notNull(),
+    replyTo:   text('reply_to'),
+    sentAt:    timestamp('sent_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    unique('uq_outbound_email_messages_message_id').on(t.messageId),
+    index('idx_outbound_email_messages_task').on(t.taskId),
+  ],
+)

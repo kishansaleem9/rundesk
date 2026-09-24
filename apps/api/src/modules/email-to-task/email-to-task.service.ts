@@ -11,6 +11,7 @@ import type { Db } from '@rundesk/db'
 import {
   listEmailAliases,
   inboundEmailMessages,
+  outboundEmailMessages,
   lists,
   tasks,
   taskComments,
@@ -24,6 +25,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskReplyAddress } from './task-address'
 
 /**
  * Email-to-task: convert inbound emails into rundesk tasks or comments.
@@ -33,7 +35,11 @@ import { assertCanManageContainer } from '../../common/permissions/container-acc
  *   list-${localPart}+task-${taskId}@${INBOUND_EMAIL_DOMAIN}  -> appends comment
  *
  * Replies to notification emails are also routed by `In-Reply-To` /
- * `References` headers, since most mail clients drop sub-addressing.
+ * `References` headers, since most mail clients drop sub-addressing: a comment
+ * notification's Message-ID is kept with its task (`outbound_email_messages`),
+ * and a reply names it. Until that was kept, this sentence was untrue: only
+ * inbound Message-IDs were, and a reply names an outbound one
+ * (`resume-defects/resume-8-reply-routing`).
  *
  * Idempotency: every accepted message inserts a row in
  * `inbound_email_messages` keyed by RFC 822 Message-Id. Duplicate
@@ -77,8 +83,6 @@ export type InboundOutcome =
 const MAX_EMAIL_BYTES = 25 * 1024 * 1024 // 25 MB total payload
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024 // 15 MB per attachment
 const MAX_ATTACHMENTS = 10
-const LOCAL_PART_PREFIX = 'list-'
-const TASK_TAG = '+task-'
 
 @Injectable()
 export class EmailToTaskService {
@@ -351,6 +355,13 @@ export class EmailToTaskService {
 
     for (const ref of candidates) {
       if (!ref) continue
+      // A notification this server sent about a task: what a reply answers.
+      const [sent] = await this.db
+        .select({ taskId: outboundEmailMessages.taskId, listId: outboundEmailMessages.listId })
+        .from(outboundEmailMessages)
+        .where(eq(outboundEmailMessages.messageId, ref))
+        .limit(1)
+      if (sent) return { taskId: sent.taskId, listId: sent.listId }
       const [row] = await this.db
         .select({ taskId: inboundEmailMessages.taskId, listId: inboundEmailMessages.listId })
         .from(inboundEmailMessages)
@@ -564,11 +575,7 @@ export class EmailToTaskService {
     if (!row) throw new NotFoundException('Task not found')
     const alias = await this.getAlias(row.listId)
     if (!alias || alias.revokedAt) return { address: null, listId: row.listId }
-    const domain = process.env.INBOUND_EMAIL_DOMAIN ?? 'inbound.rundesk.local'
-    return {
-      address: `${LOCAL_PART_PREFIX}${alias.localPart}${TASK_TAG}${taskId}@${domain}`,
-      listId: row.listId,
-    }
+    return { address: taskReplyAddress(alias.localPart, taskId), listId: row.listId }
   }
 
   private aliasView(row: {
@@ -580,12 +587,11 @@ export class EmailToTaskService {
     lastUsedAt: Date | null
     createdAt: Date
   }): AliasView {
-    const domain = process.env.INBOUND_EMAIL_DOMAIN ?? 'inbound.rundesk.local'
     return {
       id: row.id,
       listId: row.listId,
       localPart: row.localPart,
-      address: `${LOCAL_PART_PREFIX}${row.localPart}@${domain}`,
+      address: `${LOCAL_PART_PREFIX}${row.localPart}@${inboundDomain()}`,
       defaultPriority: row.defaultPriority,
       revokedAt: row.revokedAt,
       lastUsedAt: row.lastUsedAt,

@@ -76,13 +76,27 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* the same fix as `ledger-rows/defect-mention-picker-200-cap`, which carries the evidence and the numbers.
 
-### `resume-defects/resume-8-reply-routing` — open, medium
+### `resume-defects/resume-8-reply-routing` — **closed**
 
 **The claim that replies to notification emails route by header is false: only inbound Message-IDs are ever recorded**
 
 *Evidence:* apps/api/src/modules/email-to-task/email-to-task.service.ts:35-36 says 'Replies to notification emails are also routed by `In-Reply-To` / `References` headers'. But resolveReplyContext (345-362) matches those headers only against inbound_email_messages.messageId. The only insert into that table is for accepted inbound mail (line 524). Outbound notification mail (notifications.service.ts:1213 sendComment, going through email.service.ts:596-603) sets no Message-ID, records none, and sets no Reply-To, so a reply to a notification goes to `this.from` and cannot match. Header routing works only for replies to mail that was itself inbound.
 
 *To close:* This closes with resume-8. Have send() set and return a Message-ID, and record outbound IDs with their taskId and listId, either in the same table with a direction column or in an outbound table. Make resolveReplyContext consult them. Set Reply-To on notification mail to the task's +task- address. Add an API-level test: send a comment notification, post a synthetic inbound reply whose In-Reply-To is that Message-ID, and assert a comment lands on the task. A patch that stops recording the outbound ID should redden it. Until then, correct the comment at :35-36.
+
+*Closed:*
+- A comment notification now gets a Message-ID of its own (`<notify.<random uuid>@<inbound domain>>`), kept with its task, list and recipient in a new table, `outbound_email_messages` (migration 0162). The id is random, so knowing a task does not let anybody guess one.
+- Where the task's list takes email, the notification's Reply-To is the task's own address. `send()` hands both to the transport.
+- `resolveReplyContext` looks in the new table before the inbound one. The header comment's claim, which was untrue, is true now and says so.
+- The address format lives in one place, `task-address.ts`, read by the inbound handler, the task sheet's address and the Reply-To.
+
+The new suite `email-reply-routing` uses no mail server. It reads the kept id and posts a reply to the inbound webhook, as a provider would. On lane 1 before, 1 of 4: nothing was kept, the reply was `rejected_no_alias`, and there was no Reply-To (the twin passed). After, 4/4:
+- the id is kept;
+- a reply naming it lands as the watcher's comment;
+- a reply naming an id this server never sent lands nowhere;
+- the Reply-To is the task's address once its list takes email.
+
+The transport half is a unit test, `email.service.test.ts`, with a recording transport: the Message-ID and Reply-To reach `sendMail`, and neither is set when not given. Patches: `err-1` (nothing kept), `err-2` (replies match inbound mail only), `err-3` (no Reply-To) and `err-4`, a unit claim (the transport is never told); each compiled. Resolved-comment and mention notifications do not carry a thread yet. `err-4` reddens its unit test (`check-unit-claims`). Regression on lane 1, 13/13: `email-reply-routing`, `credential-reads`, `task-boundaries`, `task-menu`, `inbox-scope`, `notification-gaps`, `comment-thread`, `replies-inline-thread`, `activity-rail`, `task-depth`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `product-siblings/standalone-reminders-invisible` — **closed** (the row had stayed open after its fix)
 
@@ -431,7 +445,7 @@ After, 4/4. `mtg-1..4`, each compiled, 4 of 4 reddened on lane 2. Regression on 
 
 Measured with the new suite `task-sheet-fetches` on lane 1 (two sheets open on one task, one changing its priority): the editing sheet fetched the task and its attachments 6 times each, and the watching sheet 5. Comments, activity and time are not mounted until their tabs open, so the suite counts what the sheet has open.
 
-Now the sheet makes one pass per burst, 150 ms after its first event. That pass invalidates the whole prefix, except when only an activity entry arrived, which refreshes just the activity. Narrowing further per event type was left out, because a task's fields show in any panel and a stale panel is worse than one extra fetch. The list page refreshes its list once a burst. It MARKS a task's queries stale (`refetchType: 'none'`) and no longer refetches them, so a sheet opened later still reads them afresh from a cache that would otherwise be 30 seconds fresh. After: the editing sheet fetched each twice (its save, and the burst) and the watching sheet once. It still showed the new priority. `tsf-1` (every event refetches), `tsf-2` (the list page refetches the sheet) and `tsf-3` (a burst refreshes nothing), each compiled. `ct-8` (comment-thread: nothing refreshes a task's comments) is re-aimed: the list route refetches nothing now, so it takes the two refreshes left, the panel's own and the sheet's pass. Regression on lane 1, 12/12: `task-sheet-fetches`, `activity-rail`, `addressability-live`, `task-depth`, `list-view-controls`, `list-customize`, `task-cover`, `task-attachments`, `sticky-headers`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+Now the sheet makes one pass per burst, 150 ms after its first event. That pass invalidates the whole prefix, except when only an activity entry arrived, which refreshes just the activity. Narrowing further per event type was left out, because a task's fields show in any panel and a stale panel is worse than one extra fetch. The list page refreshes its list once a burst. It MARKS a task's queries stale (`refetchType: 'none'`) and no longer refetches them, so a sheet opened later still reads them afresh from a cache that would otherwise be 30 seconds fresh. After: the editing sheet fetched each twice (its save, and the burst) and the watching sheet once. It still showed the new priority. `tsf-1` (every event refetches), `tsf-2` (the list page refetches the sheet) and `tsf-3` (a burst refreshes nothing), each compiled, 3 of 3 reddened on lane 2. `ct-8` (comment-thread: nothing refreshes a task's comments) is re-aimed: the list route refetches nothing now, so it takes the two refreshes left, the panel's own and the sheet's pass. Regression on lane 1, 12/12: `task-sheet-fetches`, `activity-rail`, `addressability-live`, `task-depth`, `list-view-controls`, `list-customize`, `task-cover`, `task-attachments`, `sticky-headers`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `product-siblings/teams-work-preview-ignores-privacy` — **closed**
 
@@ -1057,6 +1071,14 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 *The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
 
 *To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
+
+### `found-24-sep/restart-witness-blind-to-new-tables` — **closed** (test tooling; found adding migration 0162)
+
+**A lane restart proved a database current by the newest migration that adds a column, so a migration that creates a table was never checked**
+
+*Evidence, read not run:* `fleet-restart.sh` walks back to the newest migration with `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, and checks the lane has that column. 0162 creates `outbound_email_messages` and adds no column, so the check stayed on 0160's `folders.description`. A lane without the new table would have been started, and 500'd on its first write to it. The patterns matched `[a-z_]+` too, so a table or column with a digit in its name could never be a witness.
+
+*Closed:* `newest_schema_witness` (lane-env.sh) names the newest migration that adds a column OR creates a table, walking past data-only ones. `fleet-restart.sh` checks a table's existence when that is the witness. The patterns take digits. The new `check-schema-witness.sh` holds four cases (a table, a column past a data-only migration, nothing, and the script's wiring) and catches 4 of 4 mutations. In preflight and CI. 0162 was applied by hand to the pristine database and lanes 1 to 4.
 
 ### `suite-hygiene/branch-checker-confident-zero` — open, medium
 
@@ -1832,13 +1854,15 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Research ClickUp's AI fields, Relationship field and Button field. Build the AI fields against the model-stub lane. Replace the stale reason on row 719 now, whatever is built.
 
-### `resume-defects/resume-8` — open, large
+### `resume-defects/resume-8` — partly-fixed, large
 
 **email.service send() still has no replyTo, cc or messageId, and task_comments still has no channel column**
 
 *Evidence:* apps/api/src/modules/email/email.service.ts:584-611: send(opts: {to, subject, html, attachments}) calls transport.sendMail({from, to, subject, html, attachments}). There is no replyTo, cc, bcc, messageId, inReplyTo or headers. packages/db/src/schema/comments.ts:16-29: task_comments has id, taskId, authorId, assignedToUserId, resolvedByUserId, resolvedAt, parentCommentId, body, mentions, editedAt and createdAt, with no channel column and no email metadata. The migrations end at 0160_folder_description.sql, and the only ALTER of task_comments is 0006. Inbound mail becomes a comment with no channel marker (email-to-task.service.ts:284-316, appendComment inserts {taskId, authorId, body}), so today the thread cannot distinguish a comment that arrived by email either. I searched apps/api/src for an outbound composed-body route (`@Post(...email...)`, `this.email.send*` callers in task and comment modules): the only senders are notification templates (notifications.service.ts:1179, 1203, 1213).
 
 *To close:* Extend send() with replyTo, cc, bcc and messageId/headers, and return the Message-ID. Add migration 0161: task_comments.channel ('comment'|'email', default 'comment') plus email metadata (to, cc, subject, message_id). Record outbound Message-IDs where resolveReplyContext can find them (see resume-8-reply-routing). Set the Reply-To to the task's `list-<alias>+task-<id>@domain` address; mint the list alias if none exists, because GET /tasks/:id/email-address (tasks.controller.ts:482-485) is the existing source of that address. Mark inbound appendComment rows channel='email' and render the channel in the thread. That is the mirror-defect guard: a stored channel must have a reader.
+
+*Partly fixed, 24 September (with `resume-8-reply-routing`):* `send()` takes a Message-ID and a Reply-To and hands both to the transport. A comment notification's Message-ID is kept where `resolveReplyContext` finds it. Its Reply-To is the task's address when the list has an alias; none is minted. Left: cc and bcc; the comment's channel column and its reader; email metadata on a comment; minting an alias; and carrying a thread on the other notifications.
 
 ### `ledger-rows/row-719` — open, large
 

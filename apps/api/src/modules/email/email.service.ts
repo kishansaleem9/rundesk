@@ -330,9 +330,18 @@ export class EmailService {
     taskUrl: string
     commentSnippet: string
     workspaceName: string
+    /**
+     * A reply finds its task by this, in its `In-Reply-To` (the notifications
+     * service keeps it with the task), and by `replyTo` where the task has an
+     * address of its own (`resume-defects/resume-8-reply-routing`).
+     */
+    messageId?: string
+    replyTo?: string
   }) {
     return this.send({
       to: opts.to,
+      messageId: opts.messageId,
+      replyTo: opts.replyTo,
       subject: `[Rundesk] ${opts.actorName} commented on "${opts.taskTitle}"`,
       html: this.layout({
         heading: `New comment on "${opts.taskTitle}"`,
@@ -586,10 +595,14 @@ export class EmailService {
     subject: string
     html: string
     attachments?: Array<{ filename: string; content: string | Buffer; contentType?: string }>
+    /** Set when a reply to this mail must find its way back: see `sendComment`. */
+    messageId?: string
+    replyTo?: string
   }) {
     if (!this.transport) {
       const attach = opts.attachments?.length ? ` | Attachments: ${opts.attachments.map((a) => a.filename).join(', ')}` : ''
-      this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}${attach}`)
+      const thread = opts.messageId ? ` | Message-ID: ${opts.messageId}${opts.replyTo ? ` | Reply-To: ${opts.replyTo}` : ''}` : ''
+      this.logger.log(`[DEV EMAIL] To: ${opts.to} | Subject: ${opts.subject}${attach}${thread}`)
       return
     }
 
@@ -600,6 +613,8 @@ export class EmailService {
         subject: opts.subject,
         html: opts.html,
         attachments: opts.attachments,
+        ...(opts.messageId ? { messageId: opts.messageId } : {}),
+        ...(opts.replyTo ? { replyTo: opts.replyTo } : {}),
       })
       this.logger.log(`[EMAIL SENT] To: ${opts.to} | Subject: ${opts.subject}`)
     } catch (err) {
