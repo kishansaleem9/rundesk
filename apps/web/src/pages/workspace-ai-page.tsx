@@ -28,6 +28,7 @@ import { api } from '../lib/api'
 import { AiPanel } from '../components/ai-panel'
 import { useSkill, useAiChatActions } from '../lib/skills-api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { localDateTimeValue } from '../lib/local-date'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
@@ -1101,8 +1102,10 @@ function MeetingRecordPanel({
     setMeetingId(m?.id ?? null)
     onMeetingChange(m ? { id: m.id, title: m.title } : null)
     setTitle(m?.title ?? '')
-    // datetime-local wants a local wall-clock string, not an ISO instant.
-    setStartsAt(m?.startsAt ? new Date(m.startsAt).toISOString().slice(0, 16) : '')
+    // datetime-local wants the LOCAL wall clock: this took the UTC one, which
+    // the save then read as local, so each open-and-save moved the meeting by
+    // the reader's offset.
+    setStartsAt(m?.startsAt ? localDateTimeValue(new Date(m.startsAt)) : '')
     setRecordingUrl(m?.recordingUrl ?? '')
     setAttendeeIds((m?.attendees ?? []).map((a) => a.user?.id).filter((x): x is string => Boolean(x)))
     if (m) onLoadNotes(m.notes ?? '')

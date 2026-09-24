@@ -69,6 +69,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { localDateTimeValue } from '../lib/local-date'
 import type { TranslationKey } from '../lib/i18n/catalogs'
 import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
@@ -259,13 +260,10 @@ const MAX_CHAT_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
  *
  * `datetime-local` wants "YYYY-MM-DDTHH:mm" with no zone and no seconds, in
  * the reader's own clock — so `toISOString()` is exactly wrong here, and quietly
- * so: it renders, it just shows a time in UTC. Subtracting the offset first
- * makes the slice come out local.
+ * so: it renders, it just shows a time in UTC.
  */
 function defaultReminderWhen(from: Date = new Date()): string {
-  const inAnHour = new Date(from.getTime() + 60 * 60 * 1000)
-  const local = new Date(inAnHour.getTime() - inAnHour.getTimezoneOffset() * 60 * 1000)
-  return local.toISOString().slice(0, 16)
+  return localDateTimeValue(new Date(from.getTime() + 60 * 60 * 1000))
 }
 
 type CustomEmoji = { id: string; shortcode: string; imageUrl: string; createdById?: string | null }

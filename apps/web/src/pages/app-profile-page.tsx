@@ -11,6 +11,7 @@ import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { PasswordInput } from '../components/password-input'
 import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { localDayKey } from '../lib/local-date'
 import { encodeQr } from '../lib/qr'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import {
@@ -719,7 +720,7 @@ function PrivacyDataCard() {
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = `rundesk-my-data-${new Date().toISOString().slice(0, 10)}.json`
+      a.download = `rundesk-my-data-${localDayKey(new Date())}.json`
       document.body.appendChild(a)
       a.click()
       a.remove()

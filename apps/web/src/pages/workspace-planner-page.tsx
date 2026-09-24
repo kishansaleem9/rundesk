@@ -5,6 +5,7 @@ import { Button, cn, toast } from '@rundesk/ui'
 import { CalendarDays, ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { localDayKey } from '../lib/local-date'
 import { useAuthStore } from '../store/auth'
 import {
   PlannerSettingsDialog,
@@ -222,20 +223,12 @@ const addDays = (d: Date, n: number) => {
 const sameDay = (a: Date, b: Date) =>
   a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 
-/**
- * A day, as `YYYY-MM-DD`, IN LOCAL TIME.
- *
- * DEFECT FOUND WHILE BUILDING §V2-02e. The day column's `data-day` was
- * `d.toISOString().slice(0, 10)`, and `d` is a local midnight — so east of
- * Greenwich `toISOString` moves it back into the previous day and every column
- * was labelled with the date before the one it drew. In Asia/Karachi (the
- * frame's own zone, `14:10`) Monday the 3rd carried `data-day="2026-08-02"`.
- * Nothing in the product read the attribute, so it was invisible; the moment a
- * check compares a column to a calendar date it is off by one for half the
- * world. The same slice would have been wrong for the holiday comparison below.
+/*
+ * A day as `YYYY-MM-DD` in LOCAL time: `localDayKey`, from lib/local-date.ts.
+ * The day column's `data-day` was `d.toISOString().slice(0, 10)` of a local
+ * midnight, so east of Greenwich every column was labelled with the day before
+ * it (Monday the 3rd carried `2026-08-02` in Asia/Karachi, the frame's own zone).
  */
-const localDayKey = (d: Date) =>
-  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
 /**
  * §V2-02e — the ISO-8601 week number, for "Show week numbers".
@@ -963,21 +956,24 @@ export function PlannerPage() {
    * the rail is a reading list, so it takes anything due by the end of today,
    * scheduled or not. Two rules, two expressions — collapsing them into one
    * "shared" helper would silently change one of the two surfaces.
+   *
+   * FINISHED WORK IS LEFT OUT BY THE SERVER, not here. The member endpoint
+   * returns open tasks only (`getTasksForMember`, in SQL, before its limit),
+   * as Home and the Backlog already trust. This page filtered closed tasks out
+   * a second time, so neither copy of the rule could be tested: a break that
+   * removed either one left the other doing its work (`prail-3` reddened
+   * nothing, aimed first at this filter, then at the server's).
    */
-  const openAssigned = useMemo(
-    () => assigned.filter((task) => task.statusCategory !== 'closed'),
-    [assigned],
-  )
   const todayOverdue = useMemo(() => {
     const endOfToday = startOfDay(addDays(new Date(), 1)).getTime()
-    return openAssigned
+    return assigned
       .filter((task) => {
         if (!task.dueDate) return false
         const due = new Date(task.dueDate).getTime()
         return Number.isFinite(due) && due < endOfToday
       })
       .slice(0, 25)
-  }, [openAssigned])
+  }, [assigned])
 
   /*
    * §V2-02 frame `14:45` — dragging task `dbgdh` on makes a block called
@@ -1510,11 +1506,11 @@ export function PlannerPage() {
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.assignedToMe')}
           </h2>
-          {openAssigned.length === 0 ? (
+          {assigned.length === 0 ? (
             <p className="px-1 text-[11px] text-muted-foreground">{t('planner.assignedToMeEmpty')}</p>
           ) : (
             <ul className="space-y-1">
-              {openAssigned.slice(0, 25).map((task) => (
+              {assigned.slice(0, 25).map((task) => (
                 <li
                   key={task.id}
                   data-testid="planner-assigned-item"

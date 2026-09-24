@@ -20,6 +20,7 @@ import { ListSkeleton } from '../components/loading-skeletons'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { localDayKey } from '../lib/local-date'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -90,7 +91,9 @@ export function WorkloadPage() {
 
   const exportCsv = () => {
     if (people.length === 0) return
-    const fmtDate = (d: Date) => d.toISOString().slice(0, 10)
+    // The reader's own day: the columns are local midnights, and the UTC date
+    // of one is the day before, east of Greenwich.
+    const fmtDate = localDayKey
     const header = [t('workload.csvMember'), t('workload.csvRole'), t('workload.csvDailyCapacity'), t('workload.csvWeeklyCapacity'), ...dates.map(fmtDate), t('workload.csvTotal')]
     const rows = people.map((p) => [
       p.name,
@@ -109,7 +112,7 @@ export function WorkloadPage() {
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `workload-${days}d-${new Date().toISOString().slice(0, 10)}.csv`
+    a.download = `workload-${days}d-${localDayKey(new Date())}.csv`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)

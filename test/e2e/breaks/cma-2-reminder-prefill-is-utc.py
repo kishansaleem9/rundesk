@@ -39,17 +39,18 @@
 # in the suite — a pre-fill somebody would have to notice and correct by hand
 # before the control would work at all.
 #
+# RE-AIMED 24 September. The offset arithmetic is now `localDateTimeValue`
+# (lib/local-date.ts), one helper for every `datetime-local` box. This puts the
+# UTC slice back in its place.
+#
 # Reddens: chat-message-actions: "the time field is pre-filled and local" and
 #   "the dialog closes once the reminder is set" and
 #   "the reminder is stored against the message"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
-a = """  const inAnHour = new Date(from.getTime() + 60 * 60 * 1000)
-  const local = new Date(inAnHour.getTime() - inAnHour.getTimezoneOffset() * 60 * 1000)
-  return local.toISOString().slice(0, 16)
+a = """  return localDateTimeValue(new Date(from.getTime() + 60 * 60 * 1000))
 """
-b = """  const inAnHour = new Date(from.getTime() + 60 * 60 * 1000)
-  return inAnHour.toISOString().slice(0, 16)
+b = """  return new Date(from.getTime() + 60 * 60 * 1000).toISOString().slice(0, 16)
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

@@ -27,6 +27,7 @@ import {
 } from 'lucide-react'
 import { toast } from '@rundesk/ui'
 import { useTranslation } from '../lib/i18n'
+import { localDateTimeValue } from '../lib/local-date'
 import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { SUPPORT_EMAIL } from '../lib/support'
@@ -35,7 +36,7 @@ import { SUPPORT_EMAIL } from '../lib/support'
 function defaultSlot(offsetHours: number): string {
   const at = new Date(Date.now() + offsetHours * 60 * 60 * 1000)
   at.setMinutes(0, 0, 0)
-  return new Date(at.getTime() - at.getTimezoneOffset() * 60 * 1000).toISOString().slice(0, 16)
+  return localDateTimeValue(at)
 }
 
 /**

@@ -5,6 +5,11 @@
 # endpoint the rail reads has returned open work only since `ecd6bb0`
 # (`home-today-overdue-includes-closed`), so that filter restates the server's
 # rule. This takes the rule out where it lives.
+#
+# AND THEN IT REDDENED NOTHING AGAIN, measured on lane 2: with the server's
+# rule gone, the page's copy still left the closed task out. Each copy covered
+# for the other, so neither could be tested. The page's copy is gone now; the
+# server's is the only statement of the rule.
 # Reddens: planner-rail: "and leaves out what is already finished"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'

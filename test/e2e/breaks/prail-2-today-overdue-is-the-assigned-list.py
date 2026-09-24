@@ -23,10 +23,13 @@
 # comparison, which is exactly the kind of quiet wrongness this section's own
 # comment is about.
 #
+# RE-AIMED 24 September: the section reads `assigned` itself now. The page's
+# own open-work filter (`openAssigned`) restated the server's and is gone.
+#
 # Reddens: planner-rail: "and leaves out work that is not due yet"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
-a = """    return openAssigned
+a = """    return assigned
       .filter((task) => {
         if (!task.dueDate) return false
         const due = new Date(task.dueDate).getTime()
@@ -34,7 +37,7 @@ a = """    return openAssigned
       })
       .slice(0, 25)
 """
-b = """    return openAssigned.slice(0, 25)
+b = """    return assigned.slice(0, 25)
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

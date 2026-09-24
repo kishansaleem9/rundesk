@@ -8,6 +8,7 @@ import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, type CreateKind } from '../lib/create-types'
 
@@ -2138,10 +2139,7 @@ function ReminderForm({ workspaceId, onClose }: { workspaceId: string; onClose: 
   const [note, setNote] = useState('')
   // An hour out, in the reader's own clock: `datetime-local` takes wall time
   // with no zone, so `toISOString()` here would silently show UTC.
-  const [when, setWhen] = useState(() => {
-    const soon = new Date(Date.now() + 60 * 60 * 1000)
-    return new Date(soon.getTime() - soon.getTimezoneOffset() * 60 * 1000).toISOString().slice(0, 16)
-  })
+  const [when, setWhen] = useState(() => localDateTimeValue(new Date(Date.now() + 60 * 60 * 1000)))
 
   const create = useMutation({
     mutationFn: () =>

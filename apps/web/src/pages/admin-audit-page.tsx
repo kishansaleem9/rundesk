@@ -5,6 +5,7 @@ import { Shield, Search, Download } from 'lucide-react'
 import { api, downloadFile } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
+import { localDayKey } from '../lib/local-date'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
@@ -184,7 +185,7 @@ export function AuditLogPage() {
     // Its failure is said: this was `void`, so a failed export did nothing at all.
     downloadFile(
       `/workspaces/${workspaceId}/audit-logs/export${qs ? `?${qs}` : ''}`,
-      `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
+      `audit-log-${localDayKey(new Date())}.csv`,
     ).catch(() => toast.error(t('adminAudit.exportFailed')))
   }
 
