@@ -725,7 +725,7 @@ export class TasksService {
   /** A comment needs the space's "comment" level: "view only" means view (see assertSpaceAllowsTaskWrite). */
   private async assertSpaceAllowsComments(taskId: string, actorId: string) {
     const [row] = await this.db
-      .select({ spaceId: spaces.id })
+      .select({ spaceId: spaces.id, listId: lists.id, projectId: projects.id, folderId: projects.folderId })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -733,7 +733,19 @@ export class TasksService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (!row) throw new NotFoundException('Task not found')
-    await assertSpaceLevel(this.db, { spaceId: row.spaceId, actorId, required: 'comment', kind: 'comments' })
+    await assertSpaceLevel(this.db, {
+      spaceId: row.spaceId,
+      actorId,
+      required: 'comment',
+      kind: 'comments',
+      // A guest comments where the task, or a container above it, is shared with them to comment.
+      within: [
+        { type: 'task', id: taskId },
+        { type: 'list', id: row.listId },
+        { type: 'project', id: row.projectId },
+        ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
+      ],
+    })
   }
 
   /**

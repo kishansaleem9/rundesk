@@ -192,7 +192,8 @@ export function docsOutOfReach(
  *   - a share on the doc, or on the nearest doc above it that has one: its level;
  *   - the space it lives in (its own, or the nearest one above it): the level
  *     `resolveSpaceLevel` gives — the space's default, or a grant on it; for a
- *     GUEST, a grant only, since a location's default is its members';
+ *     GUEST, a grant only ("view" without one), since a location's default is
+ *     its members' — the resolver's own rule now, for every gate that asks it;
  *   - a doc of no space: the workspace's, a member's to edit and a guest's to read.
  */
 export type DocLevel = 'view' | 'comment' | 'edit' | 'admin'
@@ -242,7 +243,6 @@ export async function docLevel(
   if (spaceId) {
     const resolved = await resolveSpaceLevel(db, { spaceId, actorId: actor.id })
     if (!resolved) return 'view'
-    if (guest && resolved.source === 'space-default') return 'view'
     return resolved.level as DocLevel
   }
   return guest ? 'view' : 'edit'

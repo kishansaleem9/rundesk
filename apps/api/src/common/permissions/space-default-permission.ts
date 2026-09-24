@@ -75,8 +75,19 @@ export const SPACE_LEVEL_RANK: Record<SpaceDefaultPermission, number> = {
  */
 const WS_UNRESTRICTED = new Set(['super_admin', 'workspace_admin', 'manager'])
 
-/** Where an actor's level on a space came from. */
-export type SpaceLevelSource = 'workspace-role' | 'space-member' | 'object-share' | 'space-default'
+/**
+ * Where an actor's level on a space came from. `item-share` is a guest's share
+ * on something inside the space (see `within`); `guest-default` is a guest with
+ * nothing shared, who holds "view" whatever the space's default says.
+ */
+export type SpaceLevelSource = 'workspace-role' | 'space-member' | 'object-share' | 'item-share' | 'space-default' | 'guest-default'
+
+/**
+ * What a guest's level is asked ABOUT, below the space: the item and the
+ * containers above it, most specific first (a task, its list, its project, the
+ * project's folder). A share on any of them is a guest's grant there.
+ */
+export type WithinStep = { type: 'task' | 'list' | 'project' | 'folder'; id: string }
 
 export type ResolvedSpaceLevel = {
   level: SpaceDefaultPermission
@@ -112,7 +123,7 @@ function strongest(
  */
 export async function resolveSpaceLevel(
   db: Db,
-  params: { spaceId: string; actorId: string },
+  params: { spaceId: string; actorId: string; within?: WithinStep[] },
 ): Promise<ResolvedSpaceLevel | null> {
   const [space] = await db
     .select({ workspaceId: spaces.workspaceId, defaultPermission: spaces.defaultPermission })
@@ -134,6 +145,31 @@ export async function resolveSpaceLevel(
   if (!membership) return null
   if (WS_UNRESTRICTED.has(membership.role as string)) {
     return { level: 'admin', source: 'workspace-role' }
+  }
+  const guest = membership.role === 'guest'
+
+  /*
+   * A GUEST HOLDS WHAT IS SHARED WITH THEM, AND NOTHING BY DEFAULT.
+   *
+   * The space's default permission is "what a workspace MEMBER gets without an
+   * explicit grant" (the column's own contract, above). It was read for a
+   * guest too, so a guest with nothing shared made lists in any open space and
+   * commented on its tasks (`found-24-sep/guest-makes-lists-where-nothing-is-shared`);
+   * docs alone refused to count it. ClickUp's rule: a guest sees and changes
+   * only what is shared with them, at the level it was shared at, and the most
+   * specific share decides — so a share on the item or a container above it
+   * (`within`) comes first, then a grant on the space, and with neither a
+   * guest holds "view": they read an open space here, and change nothing in it.
+   */
+  if (guest && params.within?.length) {
+    const rows = await db
+      .select({ objectType: objectShares.objectType, objectId: objectShares.objectId, level: objectShares.level })
+      .from(objectShares)
+      .where(and(eq(objectShares.userId, params.actorId), inArray(objectShares.objectId, params.within.map((step) => step.id))))
+    for (const step of params.within) {
+      const hit = rows.find((r) => r.objectType === step.type && r.objectId === step.id)
+      if (hit) return { level: hit.level as SpaceDefaultPermission, source: 'item-share' }
+    }
   }
 
   const [member] = await db
@@ -159,6 +195,7 @@ export async function resolveSpaceLevel(
   if (explicit) {
     return { level: explicit, source: explicit === memberLevel ? 'space-member' : 'object-share' }
   }
+  if (guest) return { level: 'view', source: 'guest-default' }
   return { level: space.defaultPermission, source: 'space-default' }
 }
 
@@ -193,6 +230,8 @@ export async function resolveSpaceLevels(
     for (const id of params.spaceIds) out.set(id, { level: 'admin', source: 'workspace-role' })
     return out
   }
+  // A guest holds what is shared with them: see `resolveSpaceLevel`.
+  const guest = membership.role === 'guest'
 
   const [rows, memberRows, shareRows] = await Promise.all([
     db
@@ -225,7 +264,9 @@ export async function resolveSpaceLevels(
       row.id,
       explicit
         ? { level: explicit, source: explicit === memberLevel ? 'space-member' : 'object-share' }
-        : { level: row.defaultPermission, source: 'space-default' },
+        : guest
+          ? { level: 'view', source: 'guest-default' }
+          : { level: row.defaultPermission, source: 'space-default' },
     )
   }
   return out
@@ -254,14 +295,20 @@ export async function assertSpaceLevel(
     required: SpaceDefaultPermission
     /** What is being acted on, for the message: 'list', 'project', 'space'… */
     kind: string
+    /** The item and the containers above it, for a guest's own shares (`WithinStep`). */
+    within?: WithinStep[]
   },
 ): Promise<void> {
   const resolved = await resolveSpaceLevel(db, params)
   if (!resolved) return
   if (spaceLevelReaches(resolved.level, params.required)) return
   throw new ForbiddenException(
-    resolved.source === 'space-default'
-      ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-      : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
+    resolved.source === 'guest-default'
+      ? `Nothing here is shared with you, and a guest changes only what is shared with them`
+      : resolved.source === 'item-share'
+        ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+        : resolved.source === 'space-default'
+          ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+          : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
   )
 }

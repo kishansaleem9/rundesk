@@ -1,14 +1,20 @@
 # The 403 stops saying why. A refusal that does not name the space's Default
 # permission is indistinguishable from every other Forbidden in the product,
 # and the person who set the space to View only has no way to connect the two.
+# RE-AIMED 24 September: the refusal has a sentence for a guest with nothing shared,
+# and for a guest's share below the space.
 # Reddens: space-default-permission:
 #   "and the refusal says WHY — the space's default permission, not a generic denial"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/space-default-permission.ts'
 a = """  throw new ForbiddenException(
-    resolved.source === 'space-default'
-      ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-      : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
+    resolved.source === 'guest-default'
+      ? `Nothing here is shared with you, and a guest changes only what is shared with them`
+      : resolved.source === 'item-share'
+        ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+        : resolved.source === 'space-default'
+          ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+          : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
   )
 """
 b = """  throw new ForbiddenException('Forbidden')

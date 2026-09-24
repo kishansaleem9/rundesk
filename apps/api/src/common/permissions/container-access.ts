@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { workspaceMembers, spaceMembers, spaces, projects } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { assertSpaceLevel } from './space-default-permission'
+import { assertSpaceLevel, type WithinStep } from './space-default-permission'
 import { checkContainerAccess } from './container-access.guard-helper'
 
 const ADMIN_ROLES = new Set(['super_admin', 'workspace_admin'])
@@ -148,7 +148,13 @@ export async function assertCanManageContainer(
  */
 export async function assertCanCreateInSpace(
   db: Db,
-  params: { spaceId: string | null | undefined; actorId: string | null | undefined; kind: string },
+  params: {
+    spaceId: string | null | undefined
+    actorId: string | null | undefined
+    kind: string
+    /** Where inside the space it is made (a project, its folder), for a guest's own shares there. */
+    within?: WithinStep[]
+  },
 ): Promise<void> {
   if (!params.spaceId || !params.actorId) return
   await assertSpaceLevel(db, {
@@ -156,6 +162,7 @@ export async function assertCanCreateInSpace(
     actorId: params.actorId,
     required: 'edit',
     kind: params.kind,
+    within: params.within,
   })
 }
 

@@ -2,6 +2,7 @@
 # narrows workspace admins and managers as well. Set your own workspace's space
 # to "View only" and you have locked yourself out of it — a permission column
 # that can do that is a foot-gun, not a permission.
+# RE-AIMED 24 September: the guest rule now follows the role check in the resolver.
 # Reddens: space-default-permission:
 #   "a workspace admin is not narrowed by a space setting, with no explicit grant to lean on"
 import io
@@ -10,12 +11,10 @@ a = """  if (!membership) return null
   if (WS_UNRESTRICTED.has(membership.role as string)) {
     return { level: 'admin', source: 'workspace-role' }
   }
-
-  const [member] = await db
+  const guest = membership.role === 'guest'
 """
 b = """  if (!membership) return null
-
-  const [member] = await db
+  const guest = membership.role === 'guest'
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

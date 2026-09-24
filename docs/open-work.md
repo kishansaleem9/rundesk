@@ -1110,7 +1110,7 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 
 *What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
-### `found-24-sep/guest-makes-lists-where-nothing-is-shared` — open, security, medium (found closing `custom-role-permissions-unread-by-web`)
+### `found-24-sep/guest-makes-lists-where-nothing-is-shared` — **closed** (security, medium; found closing `custom-role-permissions-unread-by-web`)
 
 **A guest with no grant on a space makes a list in it**
 
@@ -1119,6 +1119,41 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 `lists.service` asks `assertCanCreateInSpace`, which reads the space's level through `resolveSpaceLevel`. For somebody with no grant, that level is the space's DEFAULT, which is the members'. Docs refuse to count the default for a guest ("for a GUEST, a grant of it, since a space's default is its members'"), and a guest is by definition somebody things are shared with.
 
 *To close:* one rule for a guest making anything in a space: a grant of edit there, never the default. Ask it where the create gate is asked, so it covers lists and everything else that takes `assertCanCreateInSpace` for a guest. Measure every creator a guest can reach. Research ClickUp's rule for guests before settling it: their guests create in what is shared with them at edit or full.
+
+*ClickUp's rule* (help.clickup.com "Use ClickUp as a guest or limited member", "Permissions in detail"; search snippets, since the pages cannot be fetched here): a guest sees and changes only what is shared with them, at the level it was shared at — view, comment, edit or full edit — set per item, and the most specific share decides.
+
+*Closed, 24 September.* The rule now lives in the resolver every gate asks: `resolveSpaceLevel`, and `resolveSpaceLevels` for the Move picker. A guest holds what is shared with them, and "view" when nothing is. What counts, most specific first:
+
+1. a share on the item or on a container above it (`within`);
+2. a grant on the space.
+
+The create gate passes a list's project and folder, and the comment gate a task's list, project and folder, so a guest invited to one of those works there. The refusal says so: "Nothing here is shared with you, and a guest changes only what is shared with them". Docs kept two copies of the guest rule of their own; both are gone, since the resolver now states it.
+
+The new suite `guest-space-level` has 5 checks. Every refusal is read back by SQL beside a member doing the same, and beside the guest doing it where a grant allows. Measured on lane 1:
+
+- before, with the fix stashed: 1 of 5. The guest made a list and commented in an open space nothing was shared from, the Move picker offered them that space, and a task beside the ones shared with them took their comment. Only the reads-unchanged check passed;
+- after: 5/5.
+
+Four unit tests, in `space-default-permission.test.ts`: a guest with nothing shared, a member's default, a guest's grant on the space, and the most specific share first.
+
+`gsl-1..6`, each compiled; `gsl-6` claims the unit test, since no suite shares one guest two levels on one chain. Re-aimed at the moved code, and compiled: `dwl-3`, `dwl-5`, `sdp-5`, `sdp-7`, `sdp-19` and `tsl-5`. The 51 other patches on the changed files compile too.
+
+Regression on lane 1, 28/28: `guest-space-level`, `doc-write-levels`, `space-default-permission`, `task-space-levels`, `workspace-read-access`, `task-creation-access`, `label-access`, `goal-access`, `sprint-access`, `meeting-access`, `task-boundaries`, `view-visibility`, `credential-reads`, `hook-portal-access`, `task-pickers-search`, `space-presets`, `video1-fast-items`, `goals-page`, `comment-plus-menu`, `comment-thread`, `save-comment`, `doc-boundaries`, `doc-task-links`, `private-folder-reach`, `private-list-reach`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+*Not changed:*
+
+- the read side. A guest here reads every open space, as `workspace-read-access` asserts, where ClickUp's guest sees only what is shared with them. That is `found-24-sep/guests-read-every-open-space`, below;
+- a MEMBER's level. The task gates read a member's level on the space alone, so a share on a task or list does not change it; ClickUp's most-specific rule is everybody's. Recorded, not changed.
+
+### `found-24-sep/guests-read-every-open-space` — open, security, large (found closing `guest-makes-lists-where-nothing-is-shared`)
+
+**A guest reads every open space: its tasks, lists, docs and comments**
+
+*Evidence, read not run:* the container rule treats a guest as a member. `containerRefusal` passes every public container, and `workspace-read-access` asserts that "the member and the guest get the open space's task". Docs give a guest "view" on an open space's docs. Goals and sprints are the exception: they give a guest none, because "in ClickUp a guest sees only what has been shared with them" (`read-access.ts`). So a guest invited to one list reads every other open space in the workspace.
+
+*ClickUp's rule* (help.clickup.com "Use ClickUp as a guest or limited member"; search snippets): "A guest sees only the tasks, lists, or folders they have been invited to."
+
+*To close:* one read rule for a guest: a container, doc or task is theirs to read only through a share on it or above it, or a grant on its space. It has to hold across the whole container rule (`containerRefusal`, `containerVisibilityFilter`, `taskInReachFilter`, `spaceVisibilityFilter`), docs, search and the realtime rooms. Measure it through every read a guest can reach, and change the suites that assert a guest reads the open space along with it.
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
 
@@ -1130,7 +1165,7 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 - a doc of no space: 403;
 - a doc in a space granted to them at edit: 201;
 - a whiteboard: 201;
-- a list: 201, which is itself the item above.
+- a list: 201 at the time. That was the item above, now closed: a list needs a grant of edit.
 
 Reminder, dashboard and form answered 400 to the probe's thin bodies, so they are unmeasured.
 

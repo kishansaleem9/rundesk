@@ -151,7 +151,7 @@ export class ListsService {
      * before it can be consulted; every other container already knows its own.
      */
     const [owning] = await this.db
-      .select({ spaceId: projects.spaceId })
+      .select({ spaceId: projects.spaceId, folderId: projects.folderId })
       .from(projects)
       .where(eq(projects.id, projectId))
       .limit(1)
@@ -159,6 +159,8 @@ export class ListsService {
       spaceId: owning?.spaceId,
       actorId,
       kind: 'list',
+      // A guest makes a list where the project, or its folder, is shared with them to edit.
+      within: [{ type: 'project', id: projectId }, ...(owning?.folderId ? [{ type: 'folder' as const, id: owning.folderId }] : [])],
     })
     await this.assertListNameFree(projectId, data.name)
 

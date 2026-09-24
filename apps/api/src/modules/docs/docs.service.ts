@@ -9,7 +9,6 @@ import { resolveIsManager, taskVisibilityFilter, isManagerRole } from '../../com
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 import { canReadDoc, docLevel, docLevelReaches, type DocLevel, hiddenDocIds } from '../../common/permissions/doc-access'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
-import { resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { isUuid } from '../../common/validation/uuid'
 import { pickDocUpdatable } from './doc-update-fields'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -246,26 +245,19 @@ export class DocsService {
 
   /**
    * MAKING A DOC is adding to where it goes: "edit" on its space (the create
-   * gate lists and projects face, `assertCanCreateInSpace`); for a GUEST, a
-   * grant of it, since a space's default is its members'; and a doc of no
-   * space is the workspace's, a member's to make and not a guest's.
+   * gate lists and projects face, `assertCanCreateInSpace`), where a GUEST
+   * holds only what is granted them, since a space's default is its members'
+   * (`resolveSpaceLevel`'s rule); and a doc of no space is the workspace's, a
+   * member's to make and not a guest's.
    */
   private async assertMayMakeDocIn(workspaceId: string, spaceId: string | null | undefined, actorId: string) {
-    const [membership] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
-      .limit(1)
-    const guest = membership?.role === 'guest'
     if (!spaceId) {
-      if (guest) throw new ForbiddenException('Guests cannot create docs here')
-      return
-    }
-    if (guest) {
-      const resolved = await resolveSpaceLevel(this.db, { spaceId, actorId })
-      if (!resolved || resolved.source === 'space-default' || !spaceLevelReaches(resolved.level, 'edit')) {
-        throw new ForbiddenException('Guests cannot create docs here')
-      }
+      const [membership] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+        .limit(1)
+      if (membership?.role === 'guest') throw new ForbiddenException('Guests cannot create docs here')
       return
     }
     await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'doc' })

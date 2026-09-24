@@ -2,6 +2,7 @@
 # hole, restored. A member in a "View only" space cannot rename a list, cannot
 # delete one, and can freely make a new one.
 #
+# RE-AIMED 24 September: the gate passes a guest's chain through (`within`).
 # Reddens: space-default-permission:
 #   "creating a list in a view-only space is refused with 403"
 #   "and it says WHY, in the same words the rename refusal uses"
@@ -15,6 +16,7 @@ a = """  if (!params.spaceId || !params.actorId) return
     actorId: params.actorId,
     required: 'edit',
     kind: params.kind,
+    within: params.within,
   })"""
 b = """  void db
   void params
