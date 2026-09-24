@@ -266,7 +266,7 @@ export class ChatController {
   createTaskFromMessage(
     @Param('messageId') messageId: string,
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { listId: string; title?: string; assigneeId?: string | null; dueAt?: string | null },
+    @Body() body: { listId?: string; title?: string; assigneeId?: string | null; dueAt?: string | null },
   ) {
     return this.chat.createTaskFromMessage(messageId, user.id, body.listId, body.title, {
       assigneeId: body.assigneeId,

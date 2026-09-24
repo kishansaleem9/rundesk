@@ -1976,6 +1976,23 @@ export class TasksService {
    * making it is checked, refused). One picker, asking the rule above.
    */
   async defaultListFor(workspaceId: string, actorId: string): Promise<string | null> {
+    /*
+     * FIRST, THE LIST THE PERSON CHOSE: the planner's "Default list for new
+     * tasks" (frame `14:20`), when it is in this workspace and they may still
+     * add to it. It was saved and read by nothing, so `/task` and the AI's
+     * "Create task from this" took the oldest list whatever it said
+     * (`found-24-sep/planner-default-list-read-by-nothing`).
+     */
+    const [person] = await this.db
+      .select({ settings: users.plannerSettings })
+      .from(users)
+      .where(eq(users.id, actorId))
+      .limit(1)
+    const chosen = (person?.settings as { defaultListId?: string | null } | null)?.defaultListId ?? null
+    if (chosen) {
+      const home = await this.resolveWorkspaceForList(chosen)
+      if (home?.workspaceId === workspaceId && (await this.canCreateTaskIn(chosen, actorId))) return chosen
+    }
     const candidates = await this.db
       .select({ id: lists.id })
       .from(lists)

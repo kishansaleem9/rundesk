@@ -2135,14 +2135,23 @@ export class ChatService {
   async createTaskFromMessage(
     messageId: string,
     userId: string,
-    listId: string,
+    requestedListId: string | undefined,
     title?: string,
     opts: { assigneeId?: string | null; dueAt?: string | null } = {},
   ) {
     const [message] = await this.db.select().from(chatMessages).where(eq(chatMessages.id, messageId))
     if (!message) throw new NotFoundException('Message not found')
-    await this.assertChannelAccess(message.channelId, userId)
-    if (!listId) throw new ForbiddenException('listId is required')
+    const channel = await this.assertChannelAccess(message.channelId, userId)
+    /*
+     * A list named by the caller, else the person's default for new tasks,
+     * as `/task` chooses. The chat page chose the first list of the first
+     * project of the first space itself and always named it, so the default
+     * never applied (`found-24-sep/planner-default-list-read-by-nothing`).
+     */
+    const listId = requestedListId || (await this.tasks.defaultListFor(channel.workspaceId, userId))
+    if (!listId) {
+      throw new BadRequestException('No list is available to create a task in yet — create a space, project and list first.')
+    }
 
     const firstLine = message.body.split('\n')[0].trim()
     const resolvedTitle = (title?.trim() || firstLine || 'Task from chat').slice(0, 200)

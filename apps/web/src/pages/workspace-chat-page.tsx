@@ -1242,19 +1242,14 @@ export function ChatPage() {
       messageId,
       assigneeId,
       dueAt,
-    }: { messageId: string; assigneeId?: string; dueAt?: string }) => {
-      // Resolve a target list (first space → first project → first list).
-      const spaces = await api<Array<{ id: string }>>(`/spaces/workspace/${workspaceId}`)
-      if (!spaces[0]) throw new Error(t('chat.needSpaceAndList'))
-      const projects = await api<Array<{ id: string }>>(`/projects/space/${spaces[0].id}`)
-      if (!projects[0]) throw new Error(t('chat.needProjectAndList'))
-      const lists = await api<Array<{ id: string }>>(`/lists/project/${projects[0].id}`)
-      if (!lists[0]) throw new Error(t('chat.needList'))
-      return api(`/chat/messages/${messageId}/create-task`, {
+    }: { messageId: string; assigneeId?: string; dueAt?: string }) =>
+      // The server chooses the list: the person's default for new tasks, as
+      // `/task` does. This picked the first list of the first project of the
+      // first space itself, so that default never applied.
+      api(`/chat/messages/${messageId}/create-task`, {
         method: 'POST',
-        body: { listId: lists[0].id, assigneeId: assigneeId || undefined, dueAt: dueAt || undefined },
-      })
-    },
+        body: { assigneeId: assigneeId || undefined, dueAt: dueAt || undefined },
+      }),
     onSuccess: () => {
       setTaskDraft(null)
       toast.success(t('chat.taskCreatedFromMessage'))
