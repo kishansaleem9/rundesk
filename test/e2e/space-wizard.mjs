@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { readText, waitUntil } from './lib/wait.mjs'
+import { ALL_PERMISSIONS } from './lib/permissions.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -159,6 +160,8 @@ try {
     calls.push({ method: req.method(), url, body: req.postData() ?? '' })
     const reply = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: envelope(data) })
     if (url.includes('/users/me')) return reply(USER)
+    // What the Create menu reads before it offers Space (an empty stub offers none).
+    if (url.includes('/roles/me/permissions')) return reply({ permissions: ALL_PERMISSIONS })
     if (url.includes('/space-presets')) return reply(PRESETS)
     if (req.method() === 'POST' && /\/spaces(\?|$)/.test(url)) {
       return reply({ id: 'new-space-1', name: 'Rundex' })

@@ -8,6 +8,7 @@ import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 import { localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, type CreateKind } from '../lib/create-types'
@@ -84,16 +85,23 @@ export function QuickCreateModal({
    * smallest, and the copy that drifts would be the one deciding whether to say
    * "nothing matched" over a strip that is showing something.
    */
+  // The types this person may make: a type the API asks a permission for is
+  // offered once the permission is known to be held.
+  const { granted, loaded } = usePermissions(workspaceId)
+  const offered = useMemo(
+    () => CREATE_TYPES.filter((ty) => !ty.requires || (loaded && granted.has(ty.requires))),
+    [granted, loaded],
+  )
   const { shown: shownTypes, matched: typeMatchCount } = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return { shown: CREATE_TYPES, matched: CREATE_TYPES.length }
-    const hits = CREATE_TYPES.filter(
+    if (!q) return { shown: offered, matched: offered.length }
+    const hits = offered.filter(
       (ty) => t(ty.labelKey).toLowerCase().includes(q) || t(ty.blurbKey).toLowerCase().includes(q),
     )
     const keep = new Set(hits.map((ty) => ty.value))
     keep.add(mode)
-    return { shown: CREATE_TYPES.filter((ty) => keep.has(ty.value)), matched: hits.length }
-  }, [query, mode, t])
+    return { shown: offered.filter((ty) => keep.has(ty.value)), matched: hits.length }
+  }, [query, mode, t, offered])
 
   if (!workspaceId) {
     return (

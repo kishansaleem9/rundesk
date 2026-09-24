@@ -19,6 +19,7 @@ import { FileText, Pencil, Play, Plus, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from './loading-skeletons'
+import { usePermissions } from '../hooks/use-permissions'
 
 /**
  * Maps a stored priority identifier to its display label key. The raw value is
@@ -67,6 +68,8 @@ type ListRow = { id: string; name: string }
 export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
+  // Renaming and deleting are `template.manage`; applying one is anybody's.
+  const mayManage = usePermissions(workspaceId).can('template.manage') === true
   const [editing, setEditing] = useState<TaskTemplate | null>(null)
   const [applyTarget, setApplyTarget] = useState<TaskTemplate | null>(null)
 
@@ -155,20 +158,24 @@ export function TaskTemplatesSection({ workspaceId }: { workspaceId: string }) {
                   <Play className="h-3.5 w-3.5 mr-1.5" />
                   {t('taskTemplates.apply')}
                 </Button>
-                <Button size="sm" variant="ghost" onClick={() => setEditing(tpl)} title={t('taskTemplates.rename')}>
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => {
-                    if (window.confirm(t('taskTemplates.confirmDelete', { name: tpl.name }))) remove.mutate(tpl.id)
-                  }}
-                  className="text-destructive hover:bg-destructive/10"
-                  title={t('common.delete')}
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                {mayManage && (
+                  <>
+                    <Button size="sm" variant="ghost" onClick={() => setEditing(tpl)} title={t('taskTemplates.rename')}>
+                      <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        if (window.confirm(t('taskTemplates.confirmDelete', { name: tpl.name }))) remove.mutate(tpl.id)
+                      }}
+                      className="text-destructive hover:bg-destructive/10"
+                      title={t('common.delete')}
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </>
+                )}
               </div>
             </Card>
           ))}
@@ -539,7 +546,10 @@ export function SaveAsTemplateButton({
 }) {
   const { t } = useTranslation()
   const [open, setOpen] = useState(false)
-  if (!workspaceId) return null
+  // Saving a template is `template.manage`, a manager's unless a custom role
+  // grants it; offered to anybody, it was a 403 for a member.
+  const { can } = usePermissions(workspaceId)
+  if (!workspaceId || can('template.manage') !== true) return null
   return (
     <>
       <Button size="sm" variant="ghost" onClick={() => setOpen(true)} title={t('taskTemplates.saveAsTemplate')}>

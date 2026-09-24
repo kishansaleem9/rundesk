@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router'
-import { Fragment, useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSidebarStore } from '../store/sidebar'
 import {
@@ -89,6 +89,7 @@ import { lastWorkspaceId, rememberWorkspace } from '../lib/last-workspace'
 import { useAiChatThreads } from '../lib/skills-api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { CreateSpaceWizard } from './create-space-wizard'
@@ -201,6 +202,7 @@ function railEntries(
   workspaceId: string,
   featureEnabled: (flag?: FlagKey) => boolean,
   isAdmin: boolean,
+  mayViewReports: boolean,
 ): Array<{ path: string; label: string; icon: typeof Home; exact?: boolean }> {
   const base = `/app/${workspaceId}`
   const all: Array<{
@@ -240,7 +242,11 @@ function railEntries(
     { path: `${base}/mindmaps`, label: 'Mind maps', icon: Frame },
     { path: `${base}/clips`, label: 'Clips', icon: MessageCircle },
   ]
-  const visible = all.filter((entry) => !entry.flag || featureEnabled(entry.flag))
+  // Reports are `report.view.basic`, which a guest's role does not hold: offered
+  // to them, every request on the page was a 403.
+  const visible = all.filter(
+    (entry) => (!entry.flag || featureEnabled(entry.flag)) && (entry.path !== `${base}/reports` || mayViewReports),
+  )
   if (isAdmin) visible.push({ path: `${base}/settings`, label: 'Settings', icon: Settings })
   return visible.map(({ flag: _flag, ...entry }) => entry)
 }
@@ -331,6 +337,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
   const { isAdmin, canCreateWorkspace } = useWorkspaceRole(workspaceId)
+  // A space's own "+" offers what this person may make there: a type the API
+  // asks a permission for, once it is known to be held.
+  const permissions = usePermissions(workspaceId)
+  const spaceCreateTypes = useMemo(
+    () => SPACE_CREATE_TYPES.filter((type) => !type.requires || (permissions.loaded && permissions.granted.has(type.requires))),
+    [permissions.granted, permissions.loaded],
+  )
   // §5 ClickApps — hide nav entries for features a workspace admin turned off.
   const { featureEnabled } = useResolvedFlags(workspaceId)
   // Whatever the user chose to move — drives the shared Move picker below.
@@ -1463,7 +1476,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
           style={{ paddingBottom: listPadBottom + 8 }}
         >
           {workspaceId
-            ? railEntries(workspaceId, featureEnabled, isAdmin).map((entry) => {
+            ? railEntries(workspaceId, featureEnabled, isAdmin, permissions.can('report.view.basic') === true).map((entry) => {
                   const Icon = entry.icon
                   const active = isNavPathActive(pathname, entry.path, entry.exact)
                   return (
@@ -1965,7 +1978,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                 {featureEnabled(FLAGS.SPRINTS) && (
                   <NavLink to={"/app/$workspaceId/sprints" as any} params={{ workspaceId }} icon={Play} label={t('nav.sprints')} compact favorite={favoriteProps('Sprints', `/app/${workspaceId}/sprints`)} />
                 )}
-                {featureEnabled(FLAGS.REPORTING) && (
+                {featureEnabled(FLAGS.REPORTING) && permissions.can('report.view.basic') === true && (
                   <NavLink to={"/app/$workspaceId/reports" as any} params={{ workspaceId }} icon={BarChart3} label={t('nav.reports')} compact favorite={favoriteProps('Reports', `/app/${workspaceId}/reports`)} />
                 )}
                 {featureEnabled(FLAGS.TIME_TRACKING) && (
@@ -2429,7 +2442,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-60" data-testid="space-create-menu">
                       <DropdownMenuLabel data-testid="space-create-menu-title">{t('createMenu.title')}</DropdownMenuLabel>
-                      {SPACE_CREATE_TYPES.map((type, i) => (
+                      {spaceCreateTypes.map((type, i) => (
                         // A Fragment, not a <div>: a plain element between
                         // role="menu" and its items is not a menu any more.
                         <Fragment key={type.value}>
@@ -2454,7 +2467,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                             `space-create-container-rule` was counted as a
                             tenth menu item the first time this ran.
                           */}
-                          {i > 0 && type.isContainer && !SPACE_CREATE_TYPES[i - 1].isContainer && (
+                          {i > 0 && type.isContainer && !spaceCreateTypes[i - 1].isContainer && (
                             <DropdownMenuSeparator data-testid="create-menu-container-rule" />
                           )}
                           <DropdownMenuItem
@@ -2769,14 +2782,17 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     {space.projects.length === 0 && (space.spaceLists ?? []).length === 0 && (
                       <div className="px-2 py-1 text-[11px] text-muted-foreground">{t('nav.noProjects')}</div>
                     )}
-                    <button
-                      className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-                      data-testid={`space-new-folder-${space.id}`}
-                      onClick={() => setSpaceCreate({ spaceId: space.id, kind: 'folder' })}
-                    >
-                      <FolderPlus className="h-3.5 w-3.5 shrink-0" />
-                      {t('nav.newFolder')}
-                    </button>
+                    {/* A folder is `space.create`'s, as the API files it: a guest's is a 403. */}
+                    {permissions.can('space.create') === true && (
+                      <button
+                        className="w-full flex items-center gap-2 rounded-md px-2 py-1 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                        data-testid={`space-new-folder-${space.id}`}
+                        onClick={() => setSpaceCreate({ spaceId: space.id, kind: 'folder' })}
+                      >
+                        <FolderPlus className="h-3.5 w-3.5 shrink-0" />
+                        {t('nav.newFolder')}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -2792,14 +2808,17 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             {!spaceTreeQuery.isLoading && (spacesQuery.data?.length ?? 0) === 0 && (
               <p className="px-2 py-1 text-xs text-muted-foreground">{t('nav.noSpaces')}</p>
             )}
-            <button
-              className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
-              data-testid="nav-new-space"
-              onClick={() => setSpaceDialog({ mode: 'create', name: '' })}
-            >
-              <Plus className="h-3.5 w-3.5 shrink-0" />
-              {t('nav.newSpace')}
-            </button>
+            {/* `space.create`'s, as the API files it: a guest's is a 403. */}
+            {permissions.can('space.create') === true && (
+              <button
+                className="w-full flex items-center gap-2 rounded-md px-2 py-1.5 text-[12px] text-left text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                data-testid="nav-new-space"
+                onClick={() => setSpaceDialog({ mode: 'create', name: '' })}
+              >
+                <Plus className="h-3.5 w-3.5 shrink-0" />
+                {t('nav.newSpace')}
+              </button>
+            )}
             </div>
           )}
         </div>

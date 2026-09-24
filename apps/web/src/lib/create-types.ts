@@ -12,6 +12,7 @@ import {
   PenTool,
 } from 'lucide-react'
 import type { TranslationKey } from './i18n'
+import type { WorkspacePermission } from '../hooks/use-permissions'
 
 /**
  * §V2-06 `[07:56]` — everything Rundesk can create, written down once.
@@ -89,6 +90,13 @@ export type CreateType = {
    * when the array does.
    */
   isContainer: boolean
+  /**
+   * The permission the API asks before making one (`@RequirePermissions`).
+   * Offered only to somebody who holds it, by role or by a custom role: the
+   * menus offered Project to a member and Space to a guest, each a 403
+   * (`product-siblings/custom-role-permissions-unread-by-web`).
+   */
+  requires?: WorkspacePermission
 }
 
 /**
@@ -115,9 +123,9 @@ export const CREATE_TYPES: readonly CreateType[] = [
    */
   { value: 'form', icon: ClipboardType, labelKey: 'quickCreate.tab.form', blurbKey: 'createMenu.blurbForm', inSpace: true, scopedToSpace: true, isContainer: false },
   { value: 'list', icon: ClipboardList, labelKey: 'quickCreate.tab.list', blurbKey: 'createMenu.blurbList', inSpace: true, scopedToSpace: true, isContainer: true },
-  { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder', blurbKey: 'createMenu.blurbFolder', inSpace: true, scopedToSpace: true, isContainer: true },
-  { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project', blurbKey: 'createMenu.blurbProject', inSpace: true, scopedToSpace: true, isContainer: true },
-  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space', blurbKey: 'createMenu.blurbSpace', inSpace: false, scopedToSpace: false, isContainer: true },
+  { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder', blurbKey: 'createMenu.blurbFolder', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'space.create' },
+  { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project', blurbKey: 'createMenu.blurbProject', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'project.create' },
+  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space', blurbKey: 'createMenu.blurbSpace', inSpace: false, scopedToSpace: false, isContainer: true, requires: 'space.create' },
 ]
 
 /**

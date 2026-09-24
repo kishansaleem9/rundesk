@@ -38,13 +38,41 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (e419039):* a channel pages back 100 at a time by an `(created_at, id)` cursor to its first message, a thread opens on its newest replies with the rest on request, and a link to an old message pages back to it. `chat-history` 14/14; `chx-1..16` 16 of 16 reddened their claims, each run full-length (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `product-siblings/custom-role-permissions-unread-by-web` — open, medium
+### `product-siblings/custom-role-permissions-unread-by-web` — partly-fixed, medium
 
 **GET /workspaces/:ws/roles/me/permissions has no caller; web gating ignores custom-role permissions the server enforces**
 
 *Evidence:* custom-roles.controller.ts:37-47 returns the effective permission set. Searches of apps/web/src for 'me/permissions', 'roles/me' and 'permissions' found no caller. use-workspace-role.ts:5-22 gates on the base role only. The server enforces custom permissions, e.g. task-templates.controller.ts:51 @RequirePermissions('template.manage') and reports.controller.ts:19 'report.view.basic'. Failure: a custom role that revokes report.view.basic from a manager still gets the Reports UI, and every request 403s.
 
 *To close:* Load me/permissions into the role hook and gate the permission-backed controls on it.
+
+*A correction to the evidence:* a custom role cannot revoke. `effectiveCascade` gives a role its tier's keys and custom roles add to them — `GET /roles/me/permissions` is the union — so "a custom role that revokes report.view.basic from a manager" cannot happen. What did, measured on lane 1: the web offered a member Project (a 403) and a guest Space, Folder and Reports (403s), "Save as template" to anybody, and a key a custom role granted went unused.
+
+*Partly fixed, 24 September.* The web reads the answer. `hooks/use-permissions.ts` fetches `GET /roles/me/permissions` (the role's keys and whatever custom roles add), and `can()` is null until it has loaded, so nothing is offered on a guess. What the API files under a key is offered only to somebody holding it:
+
+- `project.create`: Project, in the Create menu and on a space's own "+" menu;
+- `space.create`: Space and Folder in those menus, the sidebar's New space, and a space's New folder row. `requires` on each row of `lib/create-types.ts` is the one list both menus draw from;
+- `template.manage`: "Save as template", and a template's rename and delete;
+- `report.view.basic`: Reports, as the sidebar link and as the rail's entry.
+
+The new suite `role-permissions-web` has 5 checks: a member; a guest; the member once custom roles grant `project.create` and `template.manage`; and Folder, with a guest who can see the space. That last check also reads the API's 403 for the guest's folder and the member's 201.
+
+- Before, against the committed web code on lane 1: 1 of 5 passed. The Project grant passed only because everybody was offered Project.
+- After: 5/5.
+- The New space condition was added last and measured separately: it failed on the build without its gate.
+
+`rpw-1..9`, each compiled. `rpw-2` was re-aimed within the day, because the Folder row made its anchor ambiguous. `form-2-rule-by-index` was re-aimed because the space's menu now draws the filtered list.
+
+`space-wizard` stubs the whole API, and its catch-all answered the permissions read with `[]`. The Create menu then offered no Space, and the wizard could not be opened: 1 of 8, then a thrown fill. The stub now answers with every catalog key, read from `permission-catalog.ts` by `test/e2e/lib/permissions.mjs` so it cannot drift from the catalog: 23/23. None of the other fifteen suites that stub the API wholesale draws a gated control.
+
+Regression on lanes 1 and 2: 29 of 30 at first (`space-wizard`, as above). Then 13/13 on the final build: `role-permissions-web`, `space-wizard`, `clickapps-plan-gating`, `sidebar-sections`, `space-create-menu`, `folder-create`, `create-menu-ai`, `space-wizard-views`, `ui-sweep`, `video-regression`, `video1-acceptance`, `no-dead-ends` and `command-palette`. In CI.
+
+*Still open:*
+
+- `webhook.manage` (Integrations → Webhooks) and `sso.manage` (SSO). Workspace settings is admin-only in the router, so the API honours a custom role granting either key and the web never reaches it.
+- `integrations.manage`. Slack's routes ask for a workspace admin, not the key the catalog says covers Slack. The App Center offers every member a Connect switch that `POST …/oauth/start` refuses without the key.
+
+*Found beside it:* `found-24-sep/guest-makes-lists-where-nothing-is-shared` (security) and `found-24-sep/create-menu-offers-guests-what-they-cannot-make`, both below.
 
 ### `ledger-rows/defect-mention-picker-200-cap` — **closed**, break run pending
 
@@ -1078,9 +1106,35 @@ The new suite `planner-default-list`, 6 checks. On lane 1 before, 1 of 4 (the fi
 - a list chosen in another workspace is not used here (a message's words would have crossed into the other workspace);
 - a member's chosen list in a private space they are not in is passed over, not refused.
 
-`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled.
+`pdl-1..4` (the choice ignored, the page picking the list, any workspace, no create rule), each compiled, 4 of 4 reddened on lane 2.
 
 *What is left:* the frame's default, "your personal list". This product's personal tasks are a separate table, not a list, so there is no personal list to default to. The empty choice was labelled "My personal list" over a behaviour that is the oldest list the person can add to. It says so now ("The first list I can add to", in the four locales). A personal list per person, as ClickUp has, is unbuilt. Regression on lane 1, 12/12: `planner-default-list`, `chat-message-actions`, `chat-history`, `replies-inline-thread`, `task-creation-access`, `lookup-read-access`, `ai-answer-rendering`, `planner-settings`, `task-mentions`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+### `found-24-sep/guest-makes-lists-where-nothing-is-shared` — open, security, medium (found closing `custom-role-permissions-unread-by-web`)
+
+**A guest with no grant on a space makes a list in it**
+
+*Evidence, measured on lane 2 (a probe, deleted after):* a guest of the workspace with no grant on the space posted `POST /lists` into a project there, and was answered 201. The same guest is refused a task ("Guests cannot create tasks"), a doc with no space ("Guests cannot create docs here"; a doc in a space granted to them at edit is 201) and a folder (`space.create`).
+
+`lists.service` asks `assertCanCreateInSpace`, which reads the space's level through `resolveSpaceLevel`. For somebody with no grant, that level is the space's DEFAULT, which is the members'. Docs refuse to count the default for a guest ("for a GUEST, a grant of it, since a space's default is its members'"), and a guest is by definition somebody things are shared with.
+
+*To close:* one rule for a guest making anything in a space: a grant of edit there, never the default. Ask it where the create gate is asked, so it covers lists and everything else that takes `assertCanCreateInSpace` for a guest. Measure every creator a guest can reach. Research ClickUp's rule for guests before settling it: their guests create in what is shared with them at edit or full.
+
+### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
+
+**The Create menu offers a guest Task, which is always a 403, and a workspace Doc, also a 403**
+
+*Evidence, measured on lane 2 (the same probe):* a guest's Create menu offers task, doc, reminder, whiteboard, dashboard, form and list (`role-permissions-web`'s own output). What the API answers a guest for each:
+
+- task: 403, "Guests cannot create tasks", whatever is shared with them;
+- a doc of no space: 403;
+- a doc in a space granted to them at edit: 201;
+- a whiteboard: 201;
+- a list: 201, which is itself the item above.
+
+Reminder, dashboard and form answered 400 to the probe's thin bodies, so they are unmeasured.
+
+*To close:* settle the guest rule above first. Then offer a guest only what they may make: a task never, as the rule stands (ClickUp lets a guest make tasks where they have edit, which is `found-24-sep/task-edits-narrower-than-clickup`'s question), and a doc only into a space granted to them. Measure each type.
 
 ### `found-24-sep/restart-witness-blind-to-new-tables` — **closed** (test tooling; found adding migration 0162)
 
