@@ -12,9 +12,11 @@ import { Logger, Inject } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { and, eq } from 'drizzle-orm'
-import { workspaceMembers, lists, projects, spaces, tasks, docs, workspaceCanvases } from '@rundesk/db'
+import { workspaceMembers, lists, projects, spaces, tasks, taskAssignees, docs, workspaceCanvases } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
+import { canSeePrivateItem, isManagerRole } from '../../common/permissions/item-visibility'
 import { PresenceService } from '../presence/presence.service'
 import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
 
@@ -172,11 +174,68 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
     const workspaceId = await this.resolveWorkspaceForRoom(kind, id)
     if (!workspaceId) return false
     const [membership] = await this.db
-      .select({ userId: workspaceMembers.userId })
+      .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
-    return !!membership
+    if (!membership) return false
+    /*
+     * A LIST'S OR A TASK'S ROOM CARRIES WHAT THE LIST OR THE TASK SHOWS: the
+     * new task whole, every change, every comment. Membership alone let
+     * anyone in: measured on lane 1, a member refused a private space's list
+     * and task (403 on each) joined both rooms and heard a task created there
+     * and a comment posted on it. The rules the reads apply apply here.
+     * A doc's and a canvas's rooms follow their own read rule, which is
+     * membership today.
+     */
+    if (kind === 'list' || kind === 'task') return this.canReadListOrTask(kind, id, userId, membership.role as string)
+    return true
+  }
+
+  /** The container rule, the private-list rule and, for a task, the private-task rule. */
+  private async canReadListOrTask(kind: 'list' | 'task', id: string, userId: string, workspaceRole: string): Promise<boolean> {
+    if (isManagerRole(workspaceRole)) return true
+    let listId = id
+    if (kind === 'task') {
+      const [task] = await this.db
+        .select({ listId: tasks.listId, visibility: tasks.visibility, createdById: tasks.createdById })
+        .from(tasks)
+        .where(eq(tasks.id, id))
+        .limit(1)
+      if (!task) return false
+      if (task.visibility === 'private' && task.createdById !== userId) {
+        const [assigned] = await this.db
+          .select({ userId: taskAssignees.userId })
+          .from(taskAssignees)
+          .where(and(eq(taskAssignees.taskId, id), eq(taskAssignees.userId, userId)))
+          .limit(1)
+        if (!canSeePrivateItem(task, { userId, isManager: false, isAssignee: !!assigned })) return false
+      }
+      listId = task.listId
+    }
+    const [chain] = await this.db
+      .select({
+        listVisibility: lists.visibility,
+        listCreatedById: lists.createdById,
+        spaceId: spaces.id,
+        spaceVisibility: spaces.visibility,
+        projectId: projects.id,
+        projectVisibility: projects.visibility,
+      })
+      .from(lists)
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(lists.id, listId))
+      .limit(1)
+    if (!chain) return false
+    if (!canSeePrivateItem({ visibility: chain.listVisibility, createdById: chain.listCreatedById }, { userId, isManager: false })) {
+      return false
+    }
+    return checkContainerAccess(
+      this.db,
+      { spaceId: chain.spaceId, spaceVisibility: chain.spaceVisibility, projectId: chain.projectId, projectVisibility: chain.projectVisibility },
+      { userId, workspaceRole },
+    )
   }
 
   async handleConnection(client: Socket) {

@@ -31,6 +31,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
+import { readableChannelsFilter } from './channel-read-filter'
 import { isKeyDirectlyUnder } from '../../common/storage/object-key-shape'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -372,6 +373,7 @@ export class ChatService {
     return targets
   }
 
+  /** The one channel read rule, per channel; `readableChannelsFilter` is its SQL twin. */
   private async assertChannelAccess(channelId: string, userId: string) {
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, channelId)).limit(1)
     if (!channel) throw new NotFoundException('Channel not found')
@@ -462,7 +464,20 @@ export class ChatService {
         createdAt: chatChannels.createdAt,
       })
       .from(chatChannels)
-      .where(and(eq(chatChannels.workspaceId, workspaceId), isNull(chatChannels.archivedAt)))
+      /*
+       * The channels this user can READ, by the one rule. This filtered in
+       * the browser's image of it (`!isPrivate || member || grant`) and left
+       * out the private-space half: measured on lane 1, a member not in a
+       * private space was listed its channel, by name, though opening it
+       * answered 403.
+       */
+      .where(
+        and(
+          eq(chatChannels.workspaceId, workspaceId),
+          isNull(chatChannels.archivedAt),
+          readableChannelsFilter(this.db, userId, workspaceId),
+        ),
+      )
       .orderBy(asc(chatChannels.createdAt))
 
     const memberships = await this.db
@@ -506,8 +521,9 @@ export class ChatService {
       .groupBy(chatMessages.channelId)
     const unreadMap = new Map(unreadRows.map((r) => [r.channelId, r.count]))
 
+    // Already only what the user can read (the query's own rule); the grant
+    // map still says at what level.
     const visible = rows
-      .filter((c) => !c.isPrivate || memberSet.has(c.id) || grantMap.has(c.id))
       .map((c) => ({
         ...c,
         joined: memberSet.has(c.id),
@@ -1680,6 +1696,13 @@ export class ChatService {
       .limit(1)
     if (!memberMembership) return []
 
+    /*
+     * ONLY FROM CHANNELS THE REQUESTER CAN READ. This returned everything the
+     * member wrote anywhere in the workspace: measured on lane 1, a member
+     * refused a DM and a private channel (403 on each) read both through
+     * another member's activity, "DM SECRET" included. The requester's own
+     * channel rule applies now, the SQL twin of `assertChannelAccess`.
+     */
     return this.db
       .select({
         id: chatMessages.id,
@@ -1691,7 +1714,13 @@ export class ChatService {
       })
       .from(chatMessages)
       .innerJoin(chatChannels, eq(chatChannels.id, chatMessages.channelId))
-      .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatMessages.authorId, memberUserId)))
+      .where(
+        and(
+          eq(chatChannels.workspaceId, workspaceId),
+          eq(chatMessages.authorId, memberUserId),
+          readableChannelsFilter(this.db, requesterId, workspaceId),
+        ),
+      )
       .orderBy(desc(chatMessages.createdAt))
       .limit(Math.min(Math.max(limit, 1), 100))
   }

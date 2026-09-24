@@ -25,6 +25,8 @@
  *
  *   node test/e2e/workspace-read-access.mjs --api 3021
  */
+import { createRequire } from 'node:module'
+import path from 'node:path'
 import { signInApi, signUpApi } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 
@@ -34,7 +36,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 15
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -43,6 +45,8 @@ const ADMIN = {
   password: process.env.E2E_PASSWORD ?? 'Admin@123!',
 }
 const PERSON_PASSWORD = 'Member@12345!'
+// The web app's own realtime client, from its own dependencies.
+const { io } = createRequire(path.resolve(import.meta.dirname, '../../apps/web/package.json'))('socket.io-client')
 
 let passed = 0
 let failed = 0
@@ -62,6 +66,15 @@ const apiAs = (token) => async (route, init = {}) => {
   return { status: res.status, data: json?.data, error: json?.error }
 }
 const said = (res) => `${res.status} ${JSON.stringify(res.error ?? null).slice(0, 120)}`
+/** Poll `ok` until it holds or `ms` pass; never throws. */
+const waitFor = async (ok, ms) => {
+  const until = Date.now() + ms
+  while (Date.now() < until) {
+    if (ok()) return true
+    await new Promise((r) => setTimeout(r, 200))
+  }
+  return ok()
+}
 
 const stamp = Date.now()
 const TAG = `wra-${stamp}`
@@ -88,7 +101,10 @@ try {
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
     if (added.status >= 300) throw new Error(`could not add the ${label}: ${said(added)}`)
-    return apiAs(data.accessToken)
+    const client = apiAs(data.accessToken)
+    client.id = data.user?.id
+    client.token = data.accessToken
+    return client
   }
   const M = await person('member', 'member')
   const G = await person('guest', 'guest')
@@ -98,8 +114,10 @@ try {
     if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
+  const spaceOf = {}
   const listIn = async (spaceBody, what) => {
     const space = await make('/spaces', { workspaceId: WS, ...spaceBody }, `the ${what} space`)
+    spaceOf[what] = space
     const project = await make('/projects', { spaceId: space, name: `${TAG} ${what}` }, `the ${what} project`)
     return make('/lists', { projectId: project, name: `${TAG} ${what} list` }, `the ${what} list`)
   }
@@ -248,6 +266,116 @@ try {
       `no model is configured here, so no prompt is built; the member's chat answered ${said(memberChat)}, not the 503 that says so`,
     )
   }
+
+  // ══ 4. CHAT ══════════════════════════════════════════════════════════════
+  console.log('\n▶ chat: a member’s activity and the channel list hold only what the reader can open')
+
+  /*
+   * `GET /workspaces/:ws/chat/members/:id/activity` returned everything the
+   * member wrote anywhere: measured on lane 1, a member refused a DM and a
+   * private channel (403 on each) read both through another member's
+   * activity. And the channel list left out the private-space half of the
+   * rule, so a space's channel was listed, by name, to a member refused it.
+   * The admin writes in a DM with the member, a private channel with the
+   * member, a public channel, and a channel of the private space; the guest is
+   * in none of the three private ones, and the member is not in the space.
+   */
+  const post = async (channelId, body) => {
+    const res = await A(`/chat/channels/${channelId}/messages`, { method: 'POST', body: { body } })
+    if (res.status >= 300) throw new Error(`could not post in the channel: ${said(res)}`)
+  }
+  const channel = async (route, body, what) => {
+    const res = await A(route, { method: 'POST', body })
+    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    return res.data.id
+  }
+  const DM = await channel(`/workspaces/${WS}/chat/dms`, { peerUserId: M.id }, 'the DM')
+  const PRIV_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-private`, isPrivate: true, memberIds: [M.id] }, 'the private channel')
+  const PUB_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-public` }, 'the public channel')
+  const SPACE_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-in-the-private-space`, spaceId: spaceOf.private }, 'the private space’s channel')
+  await post(DM, `${TAG} said in the DM`)
+  await post(PRIV_CH, `${TAG} said in the private channel`)
+  await post(PUB_CH, `${TAG} said in public`)
+  await post(SPACE_CH, `${TAG} said in the private space`)
+  const bodies = (res) => (res.data ?? []).map((m) => m.body)
+  const has = (res, where) => bodies(res).includes(`${TAG} said ${where}`)
+
+  const guestActivity = await G(`/workspaces/${WS}/chat/members/${adminId}/activity`)
+  chk(
+    guestActivity.status === 200 && has(guestActivity, 'in public') && !has(guestActivity, 'in the DM') &&
+      !has(guestActivity, 'in the private channel') && !has(guestActivity, 'in the private space'),
+    'a member’s chat activity, read by someone outside their DM and private channels, holds none of them — only what the reader can open',
+    `it answered ${guestActivity.status} with ${JSON.stringify(bodies(guestActivity)).slice(0, 220)}`,
+  )
+  const memberActivity = await M(`/workspaces/${WS}/chat/members/${adminId}/activity`)
+  chk(
+    memberActivity.status === 200 && has(memberActivity, 'in the DM') && has(memberActivity, 'in the private channel') &&
+      has(memberActivity, 'in public') && !has(memberActivity, 'in the private space'),
+    'while someone in the DM and the private channel reads both — and still not a channel of a space they are refused',
+    `it answered ${memberActivity.status} with ${JSON.stringify(bodies(memberActivity)).slice(0, 220)}`,
+  )
+  const names = (res) => (res.data ?? []).map((c) => c.name)
+  const memberChannels = await M(`/workspaces/${WS}/chat/channels`)
+  const adminChannels = await A(`/workspaces/${WS}/chat/channels`)
+  chk(
+    memberChannels.status === 200 && !names(memberChannels).includes(`${TAG}-in-the-private-space`) &&
+      names(memberChannels).includes(`${TAG}-public`) && names(adminChannels).includes(`${TAG}-in-the-private-space`),
+    'the channel list names no channel of a private space the member is not in — the admin’s names it',
+    `the member's list: ${JSON.stringify(names(memberChannels)).slice(0, 200)}; the admin's has it: ${names(adminChannels).includes(`${TAG}-in-the-private-space`)}`,
+  )
+
+  // ══ 5. REALTIME ROOMS ════════════════════════════════════════════════════
+  console.log('\n▶ realtime: a list’s or a task’s room is for whoever may read the list or the task')
+
+  /*
+   * A room carries what its list or task shows: the new task whole, every
+   * change, every comment. Joining needed workspace membership alone:
+   * measured on lane 1, a member refused a private space's list and task
+   * (403 on each) joined both rooms and heard a task created and a comment
+   * posted there.
+   */
+  const sockets = []
+  const connect = async (token) => {
+    const sock = io(`http://127.0.0.1:${API_PORT}/realtime`, { auth: { token }, transports: ['websocket'], reconnection: false })
+    sockets.push(sock)
+    const up = await new Promise((res) => {
+      sock.on('connect', () => res(true))
+      sock.on('connect_error', () => res(false))
+      setTimeout(() => res(false), 10_000)
+    })
+    const heard = []
+    sock.on('event', (e) => heard.push(e))
+    const join = (rooms) =>
+      new Promise((res) => {
+        sock.timeout(10_000).emit('subscribe', { rooms }, (err, ack) => res(err ? null : ack))
+      })
+    return { up, heard, join }
+  }
+  const memberSock = await connect(M.token)
+  const adminSock = await connect(auth.accessToken)
+  const refusedRooms = [`list:${PRIVATE_LIST}`, `task:${HIDDEN}`, `task:${PRIVATE}`]
+  const memberAck = await memberSock.join([...refusedRooms, `list:${OPEN_LIST}`])
+  const adminAck = await adminSock.join([`list:${PRIVATE_LIST}`])
+  await A('/tasks', { method: 'POST', body: { listId: PRIVATE_LIST, title: `${TAG} made where the member may not look` } })
+  await A(`/tasks/${HIDDEN}/comments`, { method: 'POST', body: { body: `${TAG} said on the hidden task` } })
+  await A('/tasks', { method: 'POST', body: { listId: OPEN_LIST, title: `${TAG} made in the open` } })
+  const heardIn = (sock, what) => sock.heard.some((e) => JSON.stringify(e).includes(`${TAG} ${what}`))
+  await waitFor(() => heardIn(memberSock, 'made in the open') && heardIn(adminSock, 'made where the member may not look'), 10_000)
+  chk(
+    memberSock.up && refusedRooms.every((r) => (memberAck?.denied ?? []).includes(r)) &&
+      !heardIn(memberSock, 'made where the member may not look') && !heardIn(memberSock, 'said on the hidden task'),
+    'a member cannot join the realtime room of a list or a task they may not read, and hears nothing from it',
+    `the member ${memberSock.up ? 'connected' : 'never connected'}; subscribing answered ${JSON.stringify(memberAck).slice(0, 220)}; ` +
+      `heard from the private list: ${heardIn(memberSock, 'made where the member may not look')}, from the hidden task: ${heardIn(memberSock, 'said on the hidden task')}`,
+  )
+  chk(
+    (memberAck?.joined ?? []).includes(`list:${OPEN_LIST}`) && heardIn(memberSock, 'made in the open') &&
+      (adminAck?.joined ?? []).includes(`list:${PRIVATE_LIST}`) && heardIn(adminSock, 'made where the member may not look'),
+    'while they join an open list’s room and hear a task made there — and the admin joins the private list’s room and hears it',
+    `the member joined ${JSON.stringify(memberAck?.joined ?? [])} and heard the open task: ${heardIn(memberSock, 'made in the open')}; ` +
+      `the admin joined ${JSON.stringify(adminAck?.joined ?? [])} and heard the private one: ${heardIn(adminSock, 'made where the member may not look')}`,
+  )
+  for (const sock of sockets) sock.close()
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)

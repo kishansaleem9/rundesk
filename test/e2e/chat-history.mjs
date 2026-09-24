@@ -173,7 +173,9 @@ try {
   console.log('\n▶ the channel pages back as you scroll up, and keeps your place')
 
   browser = await chromium.launch(launchOptions())
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // Service workers blocked: the held first page below is a ROUTE, and a route
+  // never sees a request the worker answers (routes-bypassed-by-the-service-worker).
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'block' })
   const tab = await ctx.newPage()
   await tab.goto(`${B}/login`, { waitUntil: 'domcontentloaded' })
   await tab.fill('input[type=email]', EMAIL)
@@ -188,23 +190,32 @@ try {
   let release
   const gate = new Promise((r) => { release = r })
   const MESSAGES = `**/chat/channels/${CH}/messages**`
+  /*
+   * The handler catches its own error, and the route is taken down only once
+   * the rows have arrived: taking it down straight after `release()` let
+   * Playwright settle the held request first, and the handler's late
+   * `continue()` threw "Route is already handled!", killing the run.
+   */
+  let held = false
   await tab.route(MESSAGES, async (route) => {
+    held = true
     await gate
-    await route.continue()
+    await route.continue().catch(() => {})
   })
   await tab.goto(`${B}/app/${WS}/chat?channel=${CH}`, { waitUntil: 'domcontentloaded' })
   await waitUntil(async () => (await tab.getByTestId('chat-messages-loading').count()) > 0, { timeoutMs: 30_000 })
   const welcomeWhileLoading = await tab.getByText('This is the start of', { exact: false }).count().catch(() => 0)
   chk(
-    (await tab.getByTestId('chat-messages-loading').count()) > 0 && welcomeWhileLoading === 0,
+    held && (await tab.getByTestId('chat-messages-loading').count()) > 0 && welcomeWhileLoading === 0,
     'while the first page loads the list is shapes — not "the start of the conversation"',
-    `loading shapes ${await tab.getByTestId('chat-messages-loading').count()}, welcome text ${welcomeWhileLoading}`,
+    `${held ? 'the first page was held' : 'the route never held the first page'}; loading shapes ` +
+      `${await tab.getByTestId('chat-messages-loading').count()}, welcome text ${welcomeWhileLoading}`,
   )
   release()
-  await tab.unroute(MESSAGES).catch(() => {})
 
   const rows = tab.locator('[data-testid^="message-row-"]')
   await waitUntil(async () => (await rows.count()) >= 100, { timeoutMs: 20_000 })
+  await tab.unroute(MESSAGES).catch(() => {})
   await tab.waitForTimeout(800)
   const firstCount = await rows.count()
   const newestVisible = await tab.getByTestId(`message-row-${newest[0]}`).isVisible().catch(() => false)
