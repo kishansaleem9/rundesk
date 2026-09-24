@@ -136,8 +136,11 @@ export class ReportsController {
 
   @Get('goals')
   @ApiOperation({ summary: 'Goals progress report' })
-  goals(@Param('workspaceId') workspaceId: string) {
-    return this.reports.getGoalsProgress(workspaceId)
+  goals(
+    @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string },
+  ) {
+    return this.reports.getGoalsProgress(workspaceId, { id: user.id, role: user.role })
   }
 
   @Get('workload')

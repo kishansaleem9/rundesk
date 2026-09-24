@@ -618,7 +618,9 @@ Every report's task set now takes the container rule, not only the private-item 
 
 The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the member's own report passed both times). The mailer's half is two unit tests in `scheduled-reports.service.test.ts`, because lanes log a sent email's subject and not its body: it runs a report as its owner, and sends nothing for a departed or deleted one. `rra-1..5`, each compiled; `rra-6..7` are unit claims shown to fail their tests. API unit tests 1627/1627. Five reports still answer a member as the admin in the probe (productivity trend, status durations, time by project, sprints, goals). The first four go through the same filter and had nothing of the space to count (no completions, status changes, time or sprints). Goals take no reader at all and are not measured. Regression on lane 1, 16/16: the new suite, the suites that read reports or the workload (`addressability-live`, `person-panel`, `ai-assign`, `ai-answer-rendering`, `create-menu-ai`), the ones built on the container rule's helper (`request-access`, `space-create-menu`, `space-wizard-views`, `doc-task-links`, `task-depth`, `malformed-ids`, `panel-collapse`), `video1-fast-items`, `video-regression` and `ui-sweep`. In CI.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* goals (the report takes no reader); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
+*Fixed next: goals,* a HIGH item of their own below (`found-24-sep/goals-open-across-workspaces`): measured, they were open across organisations as well.
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
@@ -644,6 +646,31 @@ The new suite `custom-field-access`, 4/4 on lane 1 (all 4 failed before; the mem
 - rename and delete refused with the field untouched, while an open one is renamed.
 
 `cfa-1..7`, each compiled. API unit tests 1624/1624. Regression on lane 1, 14/14: every custom-field suite, including field types, progress, creating a field from a task, and the list export that reads values without a reader; plus the space wizard and features, list view controls, the pickers, the planner's command bar, the task AI bar, and search. In CI.
+
+### `found-24-sep/goals-open-across-workspaces` — **closed** (security, HIGH; found measuring the audit's "goals")
+
+**Goals took no reader: a member read and edited a private space's goals, a guest created and deleted goals, and a user of another organisation edited any workspace's key results**
+
+*Evidence, measured on lane 1 (probe `measure-goals`) before the fix:*
+- a member refused a private space listed its goal, opened it, read its history and key results (200 each), and the goals report counted it; the member renamed it, filed new goals in the space and under the goal (201 each), moved an open goal into the space, and deleted the goal's key result;
+- a guest listed every goal, created one (201) and deleted one (200);
+- a user of ANOTHER organisation, with a workspace and a goal of their own, renamed and deleted this workspace's key results through their own goal's id (200 each). The route carried both ids, `ResourceMemberGuard` checked the goal (theirs), and the service read only the key result's id. The same user filed goals in this workspace's space and under its goal, made a user outside their workspace the owner, and moved their own goal INTO this workspace by patching `workspaceId`: `update` spread the request body into the row, and the body is not a DTO class, so nothing stripped it.
+
+*The rule, from ClickUp's help (search snippets; the pages cannot be fetched here):* goals and goal folders are public to the whole workspace by default, with full permissions for members; a private one is open only to those invited, whatever their role; a guest sees only the goals shared with them. Goals have no sharing here, so a goal filed in a space is read by that space's rule, a goal in no space by every member, and a guest reads none. Whoever may read a goal may edit it.
+
+*Closed:* `read-access.ts` states the rule twice, side by side: `readableGoal`/`mayReadGoalAt` for one goal, and `goalVisibilityFilter` for a list, with `goalReach` (all for a manager, by space for a member, none for a guest or stranger). Every goal route takes its caller. A goal the caller may not read is not found. A key result is found only under the goal the route names. `update` takes each field it may change by name, and so do the key-result writes. A new goal's space must be of the workspace and readable, its parent too, and a sub-goal naming no space is filed in its parent's, so a goal made under a private space's goal is not the whole workspace's. An owner must be someone who can read the goal. Guests get an empty list, not-found by id, and 403 on create. The goals report counts only what its reader may read.
+
+The new suite `goal-access`, 13/13 on lane 1, 0/13 against the build before the fix (lane 4 at 6474be4). Goals and key results are planted by SQL, and every refusal is read back from its row beside a positive twin. `gac-1..13`, each compiled. The API keeps the whitelist in one place, the service, so that the break patch that spreads the body again (`gac-6`) has one layer to break. Regression on lane 1, 12/12: the new suite, `report-read-access` (the goals report), the suites of the other `read-access.ts` readers (`workspace-read-access`, `custom-field-access`, `dependency-read-access`, `lookup-read-access`, `planner-blocks`, `planner-priorities`), `malformed-ids`, `addressability-live`, and `video-regression` and `ui-sweep`, which open the Goals page. In CI.
+
+*Not changed:* ClickUp's goal folders and per-goal sharing are not built, so a guest cannot be given a goal. When a private space is deleted, `goals.space_id` is set to null, and its goals become the whole workspace's. The goals page's own defects, found beside this, are `found-24-sep/goals-page-reads-fields-the-api-never-sends`.
+
+### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — open, small (visible bug; found fixing goal access)
+
+**Every goal card shows 0% and an empty bar, and a guest is offered a "New goal" that fails silently**
+
+*Evidence (code read):* `workspace-goals-page.tsx` types a goal as `{ progress, targetType, … }` and draws each card's bar and percentage from `goal.progress`. The API returns `currentValue`, `targetValue` and `kind`, and no `progress`, so `clampPct(undefined)` makes every card 0% (a confident zero). Creating sends `targetType`, `status` and `progress`, which the API ignores. And since goals are not a guest's (above), a guest's page lists nothing and still offers "New goal" and "Create your first goal": the POST answers 403, and the mutation has no `onError`, so nothing is said.
+
+*To close:* compute the card's progress from `currentValue / targetValue` as the detail page and the report do; hide the create buttons for a guest (`useWorkspaceRole`); give the create mutation an error toast. Check in the browser: a goal at 40 of 100 shows 40% on its card, and a guest's page offers no create.
 
 ### `found-24-sep/inbox-chip-read-while-loading` — **closed** (a flake, found by the dependency sweep)
 

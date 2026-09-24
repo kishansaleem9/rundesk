@@ -1,7 +1,8 @@
-import { and, eq, inArray } from 'drizzle-orm'
-import { lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
+import { and, eq, inArray, isNull, or, type SQL } from 'drizzle-orm'
+import { goals, lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { checkContainerAccess, containerVisibilityFilter } from './container-access.guard-helper'
+import { isUuid } from '../validation/uuid'
+import { checkContainerAccess, containerVisibilityFilter, spaceVisibilityFilter } from './container-access.guard-helper'
 import { canSeePrivateItem, isManagerRole, resolveIsManager, taskVisibilityFilter } from './item-visibility'
 
 /*
@@ -145,4 +146,64 @@ export async function readableTaskIds(
       ),
     )
   return new Set(rows.map((r) => r.id))
+}
+
+/*
+ * A GOAL IS READ BY THE RULE OF THE SPACE IT IS FILED IN, and by every member
+ * of its workspace when it is filed in none. That is ClickUp's rule: goals are
+ * public to the workspace unless their location is private, and a private
+ * location is its members'. A guest reads none — in ClickUp a guest sees only
+ * the goals shared with them, and goals are not shared here.
+ *
+ * Nothing applied it: every member read, edited and deleted the goals of a
+ * private space, a guest did too, and a user of another organisation edited and
+ * deleted any workspace's key results through a goal of their own
+ * (`found-24-sep/goals-open-across-workspaces`).
+ */
+
+/** How `actor` reads the goals of `workspaceId`: all of them, by the space rule, or none (a stranger, a guest). */
+export async function goalReach(db: Db, workspaceId: string, actor: ReadActor): Promise<'all' | 'spaces' | 'none'> {
+  if (actor.role === 'super_admin') return 'all'
+  const role = await workspaceRole(db, workspaceId, actor.id)
+  if (!role || role === 'guest') return 'none'
+  return isManagerRole(role) ? 'all' : 'spaces'
+}
+
+/** Whether `actor` may read a goal filed at `at` — its workspace, and its space if it has one. */
+export async function mayReadGoalAt(
+  db: Db,
+  at: { workspaceId: string; spaceId: string | null; spaceVisibility: string | null },
+  actor: ReadActor,
+): Promise<boolean> {
+  const reach = await goalReach(db, at.workspaceId, actor)
+  if (reach === 'none') return false
+  if (reach === 'all' || !at.spaceId) return true
+  return checkContainerAccess(db, { spaceId: at.spaceId, spaceVisibility: at.spaceVisibility }, { userId: actor.id })
+}
+
+/** The goal's workspace and space when `actor` may read it, else null. */
+export async function readableGoal(
+  db: Db,
+  goalId: string,
+  actor: ReadActor,
+): Promise<{ id: string; workspaceId: string; spaceId: string | null; spaceVisibility: string | null } | null> {
+  if (!isUuid(goalId)) return null
+  const [row] = await db
+    .select({ id: goals.id, workspaceId: goals.workspaceId, spaceId: goals.spaceId, spaceVisibility: spaces.visibility })
+    .from(goals)
+    .leftJoin(spaces, eq(spaces.id, goals.spaceId))
+    .where(eq(goals.id, goalId))
+    .limit(1)
+  if (!row) return null
+  return (await mayReadGoalAt(db, row, actor)) ? row : null
+}
+
+/**
+ * `mayReadGoalAt` for a list, as a WHERE fragment over `goals`, for a reader
+ * whose reach is `'spaces'`: goals filed in no space, and goals of the spaces
+ * they may read. The same rule twice, kept side by side on purpose.
+ */
+export function goalVisibilityFilter(db: Db, actorId: string): SQL | undefined {
+  const readableSpaces = db.select({ id: spaces.id }).from(spaces).where(spaceVisibilityFilter(db, actorId, false))
+  return or(isNull(goals.spaceId), inArray(goals.spaceId, readableSpaces))
 }

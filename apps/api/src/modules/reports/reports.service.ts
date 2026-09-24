@@ -29,6 +29,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { goalReach, goalVisibilityFilter } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
@@ -862,12 +863,18 @@ export class ReportsService {
   }
 
   // ─── Goals progress ────────────────────────────────────────────────────────
-  async getGoalsProgress(workspaceId: string) {
-    const rows = await this.db
-      .select()
-      .from(goals)
-      .where(eq(goals.workspaceId, workspaceId))
-      .orderBy(desc(goals.createdAt))
+  async getGoalsProgress(workspaceId: string, actor: { id: string; role?: string | null }) {
+    // The goals the reader may read (`read-access.ts`): a goal filed in a
+    // private space is its members' — the goals list's own rule, not a copy.
+    const reach = await goalReach(this.db, workspaceId, actor)
+    const rows =
+      reach === 'none'
+        ? []
+        : await this.db
+            .select()
+            .from(goals)
+            .where(and(eq(goals.workspaceId, workspaceId), reach === 'spaces' ? goalVisibilityFilter(this.db, actor.id) : undefined))
+            .orderBy(desc(goals.createdAt))
 
     const byStatus = {
       on_track: 0,

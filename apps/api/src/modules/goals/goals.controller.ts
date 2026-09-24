@@ -25,13 +25,18 @@ export class GoalsController {
   @UseGuards(WorkspaceMemberGuard)
   list(
     @Param('workspaceId') workspaceId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Query('spaceId') spaceId?: string,
     @Query('parentGoalId') parentGoalId?: string,
   ) {
-    return this.goals.list(workspaceId, {
-      spaceId: spaceId === 'null' ? null : spaceId,
-      parentGoalId: parentGoalId === 'null' ? null : parentGoalId,
-    })
+    return this.goals.list(
+      workspaceId,
+      {
+        spaceId: spaceId === 'null' ? null : spaceId,
+        parentGoalId: parentGoalId === 'null' ? null : parentGoalId,
+      },
+      reader(user),
+    )
   }
 
   @Post('workspaces/:workspaceId/goals')
@@ -52,19 +57,22 @@ export class GoalsController {
       ownerId?: string
     },
   ) {
-    return this.goals.create({
-      workspaceId,
-      title: body.title,
-      description: body.description,
-      spaceId: body.spaceId,
-      parentGoalId: body.parentGoalId,
-      kind: body.kind,
-      targetValue: body.targetValue,
-      unit: body.unit,
-      startDate: body.startDate ? new Date(body.startDate) : null,
-      dueDate: body.dueDate ? new Date(body.dueDate) : null,
-      ownerId: body.ownerId ?? user.id,
-    })
+    return this.goals.create(
+      {
+        workspaceId,
+        title: body.title,
+        description: body.description,
+        spaceId: body.spaceId,
+        parentGoalId: body.parentGoalId,
+        kind: body.kind,
+        targetValue: body.targetValue,
+        unit: body.unit,
+        startDate: body.startDate ? new Date(body.startDate) : null,
+        dueDate: body.dueDate ? new Date(body.dueDate) : null,
+        ownerId: body.ownerId ?? user.id,
+      },
+      reader(user),
+    )
   }
 
   @Patch('goals/:goalId')
@@ -82,57 +90,67 @@ export class GoalsController {
       dueDate?: string | null
     },
   ) {
+    // The body is not a DTO class, so nothing strips what it does not declare:
+    // the service takes each field it may change by name, and nothing else.
     return this.goals.update(
       goalId,
       {
         ...body,
-        startDate: body.startDate ? new Date(body.startDate) : body.startDate as null | undefined,
-        dueDate: body.dueDate ? new Date(body.dueDate) : body.dueDate as null | undefined,
+        startDate: body?.startDate ? new Date(body.startDate) : body?.startDate as null | undefined,
+        dueDate: body?.dueDate ? new Date(body.dueDate) : body?.dueDate as null | undefined,
       },
-      user.id,
+      reader(user),
     )
   }
 
   @Get('goals/:goalId')
-  getOne(@Param('goalId') goalId: string) {
-    return this.goals.getOne(goalId)
+  getOne(@Param('goalId') goalId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.getOne(goalId, reader(user))
   }
 
   @Delete('goals/:goalId')
-  remove(@Param('goalId') goalId: string) {
-    return this.goals.delete(goalId)
+  remove(@Param('goalId') goalId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.delete(goalId, reader(user))
   }
 
   @Get('goals/:goalId/history')
-  history(@Param('goalId') goalId: string) {
-    return this.goals.history(goalId)
+  history(@Param('goalId') goalId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.history(goalId, reader(user))
   }
 
   // ─── Key results ───────────────────────────────────────────────────────────
 
   @Get('goals/:goalId/key-results')
-  listKeyResults(@Param('goalId') goalId: string) {
-    return this.goals.listKeyResults(goalId)
+  listKeyResults(@Param('goalId') goalId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.listKeyResults(goalId, reader(user))
   }
 
   @Post('goals/:goalId/key-results')
   createKeyResult(
     @Param('goalId') goalId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() body: { title: string; unit?: string; targetValue?: number; currentValue?: number; ownerId?: string | null },
   ) {
-    return this.goals.createKeyResult(goalId, body)
+    return this.goals.createKeyResult(goalId, body ?? { title: '' }, reader(user))
   }
 
   @Patch('goals/:goalId/key-results/:krId')
   updateKeyResult(
+    @Param('goalId') goalId: string,
     @Param('krId') krId: string,
+    @CurrentUser() user: CurrentUserPayload,
     @Body() body: { title?: string; unit?: string | null; targetValue?: number; currentValue?: number; status?: GoalStatus; ownerId?: string | null },
   ) {
-    return this.goals.updateKeyResult(krId, body)
+    return this.goals.updateKeyResult(goalId, krId, body ?? {}, reader(user))
   }
 
   @Delete('goals/:goalId/key-results/:krId')
-  deleteKeyResult(@Param('krId') krId: string) {
-    return this.goals.deleteKeyResult(krId)
+  deleteKeyResult(@Param('goalId') goalId: string, @Param('krId') krId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.goals.deleteKeyResult(goalId, krId, reader(user))
   }
+}
+
+/** The caller as the goal rules read them: their id, and their account-wide role (a super_admin passes). */
+function reader(user: CurrentUserPayload) {
+  return { id: user.id, role: user.role }
 }
