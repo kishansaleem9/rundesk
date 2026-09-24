@@ -155,6 +155,27 @@ lane_store_up () {
 # Lane k gets port 92<k>, beside storage on 91<k>.
 lane_model_port () { echo $((9200 + $1)); }
 
+# A LANE LIST, IN THE ONE SPELLING EVERY SCRIPT TAKES: "9" is lane nine, "9 10"
+# is lanes nine and ten, and a range is spelled with `seq`. `fleet-up.sh` read a
+# bare number as a COUNT, and it drops and restores the database of every lane
+# it is given, so `sweep-until-clean.sh`, healing one down lane with
+# `fleet-up.sh "3"`, would have dropped lanes 1 and 2 with it
+# (`commit-log/log-8ac33d9-1`). `fleet-restart.sh` had made the same mistake
+# and fixed it for itself; this is its rule, for both. Prints the lanes one per
+# line; anything that is not a lane from 1 to 10 is refused with exit 2.
+lane_list () {
+  local k out=()
+  for k in $*; do
+    case "$k" in
+      ''|*[!0-9]*) echo "not a lane number: '$k'" >&2; return 2 ;;
+    esac
+    if [ "$k" -lt 1 ] || [ "$k" -gt 10 ]; then echo "lane out of range: $k" >&2; return 2; fi
+    out+=("$k")
+  done
+  [ ${#out[@]} -gt 0 ] || { echo "no lanes given" >&2; return 2; }
+  printf '%s\n' "${out[@]}"
+}
+
 # WHICH LANES GET A MODEL, AND IT IS A LIST BECAUSE IT HAS TO BE.
 #
 #   RUNDESK_LANE_MODEL=all     every lane

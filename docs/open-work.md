@@ -376,7 +376,7 @@ After, 4/4. `mtg-1..4`, each compiled. Regression on lane 1, 17 suites: `meeting
 
 *To close:* Call assertCanCreateInSpace(db, {spaceId, actorId: userId, kind}) in apply for targetType 'folder' (the target space) and 'list' (the project's space) before any insert. Add a check to space-default-permission.mjs: a member in a view-only space is refused a template apply there, while the same member in an edit space succeeds. Add a break patch that removes the call.
 
-### `resume-defects/resume-6-list-table` — open, small
+### `resume-defects/resume-6-list-table` — **closed**
 
 **The list Table view's sticky header is the same sticky-in-name-only facade**
 
@@ -384,13 +384,17 @@ After, 4/4. `mtg-1..4`, each compiled. Regression on lane 1, 17 suites: `meeting
 
 *To close:* Bound the table pane (max-height plus overflow-auto on the element that also scrolls horizontally) in both modes, with overflow-clip rather than overflow-hidden on the wrapper. Add a check in list-view-controls that scrolls a list of about 30 rows and measures list-table-head holding offset 0, plus a break patch that removes the bound.
 
-### `resume-defects/resume-6-workload` — open, small
+*Closed:* one bounded pane (`max-h-[70vh] overflow-auto`) in both modes, the element that also scrolls sideways. It holds the header, so the header sticks. It is the virtualiser's scroll element too, so the virtualised mode has one scroller where it had two. The wrapper keeps `overflow-hidden`: `overflow-clip` was written first and taken out, because with the pane bounded the header resolves against the pane, and no check could tell the wrapper's overflow apart. The new suite `sticky-headers` scrolls whatever really scrolls under each header and reads where the header is afterwards. On lane 1 before, 0 of 2 for the table: scrolling the page moved the header from 261 to −139 with 30 rows. With 150 (virtualised), it moved from 261 to 94, and the last task was never drawn. After, both held at their pane's top, and the pane reached the 150th row. `sth-1` (the pane unbounded) and `sth-2` (the virtualiser watching no scroller), each compiled. Regression on lane 1, 10/10: `sticky-headers`, `list-view-controls`, `custom-field-types`, `list-export`, `list-customize`, `local-dates`, `ai-assign`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+### `resume-defects/resume-6-workload` — **closed**
 
 **The sticky-in-name-only header survives on the Workload heat map**
 
 *Evidence:* apps/web/src/pages/workspace-workload-page.tsx:245-249: `<Card variant="glass" className="overflow-hidden p-0">` > `<div className="overflow-x-auto">` (no height bound) > `<div className="flex border-b ... sticky top-0 ...">`. This is the exact shape the timeline page's comment at 787-807 diagnoses: overflow-x:auto forces overflow-y to auto, making that div the header's scrollport, and an unbounded element never scrolls vertically, so the header can never stick. I scanned every .tsx file that uses variant="glass" or card-glass together with `sticky`. The only other hits are dashboard-widget-builder.tsx:266 (the card itself is xl:sticky, which is not this shape), docs-panel.tsx:1251-1253 (an overflow-auto wrapper whose height I did not confirm) and landing-page.
 
 *To close:* Apply the timeline technique. Bound the heat-map pane with a max-height and overflow-auto, and use overflow-clip on the card if the rounded corner is still wanted. Add a check that scrolls the pane and measures that the header stays at offset 0, plus a break patch that removes the bound.
+
+*Closed:* the heat map scrolls in a bounded pane (`max-h-[70vh] overflow-auto`), and its header sticks to it. The card keeps `overflow-hidden`, for the reason given under the list table: the pane decides it. The header row has a testid now (`workload-heat-head`). "Teammate" also heads the time-reporting table above it, and the suite's first reading measured that table by mistake. `sticky-headers`' heat-map check plants 30 teammates, more than the pane holds (15 fitted inside it, so nothing scrolled under the header). On lane 1 before: scrolling the page moved the header from 1542 to 1242. After, it held. `sth-3` (the pane unbounded), compiled. Regression on lane 1, 10/10: `sticky-headers`, `list-view-controls`, `custom-field-types`, `list-export`, `list-customize`, `local-dates`, `ai-assign`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `product-siblings/sanitize-filename-deref-before-fallback` — **closed**, break run pending
 
@@ -1061,13 +1065,15 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *To close:* Give the lanes a search stub or a real Meilisearch the way s3-stub and model-stub work. Then aim doc-import-2 at indexing again and check indexDocInSearch across docs, tasks and the rest.
 
-### `commit-log/log-ad00a7c-1` — open, medium
+### `commit-log/log-ad00a7c-1` — partly-fixed, medium (the same work as `harness/model-lane-routing-unbuilt`)
 
 **The model stub is wired but off by default, and nothing routes each suite to a lane with or without a model**
 
 *Evidence:* Commits ad00a7c ('still the open piece') and b5a52bc ('the next piece and is not done') record this. lane-env.sh:131-132 still says: 'Wiring that choice into the dispatcher is the next piece of this work and is NOT done.' run-plan.sh:50-74 gives any set to whichever lane is free and never considers the model. Consequences: create-menu-ai and task-ai-bar can only run where no lane has a model. Only ai-create-containers and ai-answer-rendering have been converted. No sweep exercises any AI happy path through the real API with a model, because no lane has one by default (4cb50d3: 'the rewrite is the next piece of work').
 
 *To close:* Give the plan a per-suite requirement: model, no-model, or either. Have run-plan.sh and sweep-until-clean.sh start a mixed fleet (for example RUNDESK_LANE_MODEL='3 4') and send each set to a matching lane. Then write model-lane checks and break patches for the AI surfaces that today are measured only by their refusal.
+
+*Partly fixed, 24 September:* a break set whose patch needs a model now gets one, and the runner's stamp re-syncs a lane whose model differs from what the set asked for. See `harness/model-lane-routing-unbuilt`, which records what is left: routing by suite.
 
 ### `harness/section-enders-blind-to-check-spelling` — **closed** (with its duplicate `suite-hygiene/section-enders-blind-to-check-suites`)
 
@@ -1137,7 +1143,7 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *To close:* `[ "$ok" = "${#LANES[@]}" ] || exit 1` at the end of both scripts. In fleet-restart, wait for health to go down before relaunching, as wt-break's restart() does.
 
-### `commit-log/log-8ac33d9-1` — partly-fixed, small
+### `commit-log/log-8ac33d9-1` — **closed**
 
 **A bare lane number means a count in fleet-up.sh, which drops databases, but a single lane in the other scripts**
 
@@ -1145,13 +1151,17 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *To close:* Make fleet-up.sh take lists only, as fleet-restart.sh now does (a count must be spelled with seq), so one spelling means one thing everywhere.
 
-### `commit-log/log-a5b6b69-1` — open, small
+*Closed:* one reading for a lane argument, `lane_list` (lane-env.sh): "3" is lane three, "9 10" is lanes nine and ten, and anything but a lane from 1 to 10 is refused with exit 2. `fleet-up.sh` and `fleet-restart.sh` both read their lanes through it; `fleet-restart.sh` had its own copy of the rule. Found closing it: `sweep-until-clean.sh` heals its down lanes with `fleet-up.sh "${down[*]}"`. With one lane down, say 3, that was a count: lanes 1 to 3 dropped and restored, including lane 1. The README's `fleet-up.sh 4` is `fleet-up.sh "1 2 3 4"`. The new `check-lane-lists.sh` holds the readings and the two scripts' wiring, and catches 5 of 5 mutations. Against the scripts before the change it failed on every one. In preflight and CI.
+
+### `commit-log/log-a5b6b69-1` — partly-fixed, small
 
 **The long CI e2e job is still not split, and the suite count in its comment is stale**
 
 *Evidence:* Commit a5b6b69 raised the limit to 180 and deferred the split to 'whoever has a working pipeline'. ci.yml:393-396 says 'ONE HUNDRED AND SEVEN', but the job now has 109 `node test/e2e/` steps (about 120 minutes at 1.1 minutes each, under the 180 limit at :428). A leftover paragraph at :421-423 still argues for 120.
 
 *To close:* When CI can run again (1 October), split the job and validate it. Until then, correct the count and delete the leftover paragraph.
+
+*Partly fixed, 24 September:* the count is kept with each suite added (160 in the long job, `grep` over it agrees). The leftover paragraph arguing for 120 is gone, as is a second copy of the paragraph on splitting. The limit is 210. The split waits for a working pipeline.
 
 ### `commit-log/log-c592545-1` — **closed**
 
@@ -1163,13 +1173,15 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *To close:* Add doc-import.mjs to postgres-harnesses. Add a checker, run in preflight and CI, that fails when a suite file has no ci.yml step.
 
-### `commit-log/log-d840b55-1` — open, small
+### `commit-log/log-d840b55-1` — **closed** (already fixed; this row was not updated)
 
 **sweep.sh and drain.sh still run copies of scripts from /tmp instead of the committed ones**
 
 *Evidence:* Commit d840b55 deleted break-queue.sh because 'the copy without the guard is the one that would eventually be used by mistake'. Commit 4a43a1d fixed batch.sh calling a verifier in /tmp. sweep.sh:14 still runs `bash /tmp/claude-0/verify.sh`, which skips the committed verify.sh and its stale-build refusals. drain.sh runs /tmp/claude-0/wt-break.sh, reads patches from /tmp/claude-0/breaks, and carries a hard-coded queue from 21 September. docs/video2-resume.md:185 and :285 still tell the next session to use drain.sh.
 
 *To close:* Delete drain.sh and sweep.sh, or point them at scripts/e2e-lanes/*.sh and test/e2e/breaks. Update the resume doc to name run-plan.sh and sweep-until-clean.sh.
+
+*Closed, found already done on 24 September:* `scripts/e2e-lanes/sweep.sh` runs the committed `verify.sh` (`bash "$HERE/verify.sh"`, since `5985ce7`), and its header records the old `/tmp` call as history. `drain.sh` is in no committed directory; a copy remains only in `/tmp` on this machine. `video2-resume.md` names `run-plan.sh` and `never-run-plan.mjs`, and mentions `drain.sh` only as deleted on 23 September.
 
 ### `commit-log/log-d92d58f-1` — open, small
 
@@ -2341,13 +2353,15 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Mark item 4 closed-by-decision in docs/video2-resume.md with the check's name (gantt-controls, the 'really narrows on projectId' check) and its break gantt-29. Either remove the unread from/to from the opts type or wire them to a query param with a check.
 
-### `resume-defects/resume-6` — open, small
+### `resume-defects/resume-6` — **closed**
 
 **Item 6 (sticky headers inside overflow-hidden) is fixed and has been observed green; the handoff doc's 'not observed' is stale**
 
 *Evidence:* workspace-timeline-page.tsx:696 has Card glass with overflow-clip, and :804-811 is timeline-chart-viewport with maxHeight PANE_MAX_H and overflow-auto, holding the sticky header at :816-820. /tmp/claude-0/break-gantt-controls-20260922-090756.txt shows the baseline at bfe705d6 at 29/0, and the three sticky breaks redden: gantt-controls-15-sticky-unbounded 27/2, -16-sticky-notsticky 28/1, -17-panes-unsynced 28/1. /tmp/claude-0/break-gantt-controls.txt shows a baseline of 29/0 at 8083f883. docs/video2-resume.md:240-243 still says 'the fix has not been observed green'.
 
 *To close:* Update docs/video2-resume.md item 6 to fixed-and-observed, citing the three reddening breaks. Keep the Workload page instance (resume-6-workload) and the list Table view instance below as the open residue of the same class.
+
+*Closed:* `video2-resume.md` item 6 says fixed and observed green now. It cites `gantt-controls` 29/29, with its three sticky patches reddening, 18 of 18 in the set on 24 September at `3a0630f`. The two residues are closed beside it (`resume-6-list-table`, `resume-6-workload`).
 
 ## Other — 5
 

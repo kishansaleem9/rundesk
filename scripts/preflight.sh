@@ -50,6 +50,7 @@ step "and the round loop ends as it says"  bash scripts/check-rounds.sh --mutate
 step "a dead holder's lock is taken, a live one kept" bash scripts/check-locks.sh --mutate
 step "one suite's break sets never run at once" bash scripts/check-run-plan.sh --mutate
 step "a break set that needs a model runs with one" bash scripts/check-model-lanes.sh --mutate
+step "a lane number is one lane, never a count" bash scripts/check-lane-lists.sh --mutate
 step "bail stops the file and loses nothing" node scripts/check-bail.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate

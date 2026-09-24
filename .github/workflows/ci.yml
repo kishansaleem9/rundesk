@@ -377,6 +377,11 @@ jobs:
       - name: A break set that needs a model runs with one
         run: bash scripts/check-model-lanes.sh --mutate
 
+      # `fleet-up.sh` read a bare number as a count and drops every lane it is
+      # given: healing lane 3 alone would have dropped lanes 1 and 2.
+      - name: A lane number is one lane, never a count
+        run: bash scripts/check-lane-lists.sh --mutate
+
       # Every checker stops through bail(). It returned whenever output was
       # still queued — i.e. whenever piped, as here — and the checker ran on.
       - name: bail stops the checker and loses no output
@@ -437,11 +442,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND FIFTY-NINE — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND SIXTY — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 175 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159.
+    # that is about 176 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160.
     #
     # The limit is 210, raised from 180 when the job reached 153 suites: about
     # 168 minutes plus setup against 180 left a margin under five percent. That
@@ -469,13 +474,9 @@ jobs:
     # A limit that is merely old reads as a flaky pipeline, and a flaky pipeline
     # is one nobody looks at.
     #
-    # 120 costs nothing when the job finishes sooner: GitHub bills the runtime,
-    # not the limit. The limit only decides whether a slow run is allowed to
-    # finish or is killed with the answer half-written.
-    #
-    # Splitting across parallel jobs shortens the WALL CLOCK and not the bill —
-    # the minutes are the same either way, plus a second setup — so it is worth
-    # doing when somebody is waiting on the result, not to save the budget.
+    # A generous limit costs nothing when the job finishes sooner: GitHub bills
+    # the runtime, not the limit. The limit only decides whether a slow run is
+    # allowed to finish or is killed with the answer half-written.
     timeout-minutes: 210
 
     services:
@@ -2049,6 +2050,15 @@ jobs:
       - name: The clip library shows the newest clips, and search finds them, however many there are
         if: '!cancelled()'
         run: node test/e2e/clip-library.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Two headers declared sticky inside boxes with no height, which never
+      # scroll, so both went with the page.
+      - name: A sticky header stays at the top of what scrolls under it
+        if: '!cancelled()'
+        run: node test/e2e/sticky-headers.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

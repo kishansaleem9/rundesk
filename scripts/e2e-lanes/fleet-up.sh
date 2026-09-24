@@ -1,5 +1,5 @@
 #!/bin/bash
-# Bring up N independent verification lanes.
+# Bring up independent verification lanes, from a LIST.
 #
 # Verification was the bottleneck: one Postgres, one API, one dist meant one
 # suite at a time. Each lane here gets its OWN database (restored from a dump
@@ -11,14 +11,15 @@
 # worktree per lane — see wt-break.sh — and a lane's private bundle is built by
 # refresh-dists.sh into the /tmp/claude-0/dist-<lane> that verify.sh prefers.
 # (This used to point at break-fleet.sh, which never existed.)
-#   fleet-up.sh 4          lanes 1 2 3 4
-#   fleet-up.sh "9 10"     lanes 9 and 10, LEAVING 1..8 ALONE
+#   fleet-up.sh "1 2 3 4"          lanes 1 to 4 (also what no argument means)
+#   fleet-up.sh "9 10"             lanes 9 and 10, leaving the rest alone
+#   fleet-up.sh "$(seq 1 6)"       a range, spelled out
 #
-# The second form exists because the first is destructive across a RANGE: it
-# `DROP DATABASE`s every lane from 1 to N. Adding two lanes to a running fleet
-# by calling `fleet-up.sh 10` would therefore wipe the eight lanes other agents
-# were working in, which is a mistake you get to make once. A list is the same
-# shape `sweep.sh` takes for its lanes.
+# A LIST, NEVER A COUNT. This read a bare number as a count, `4` as lanes 1 to
+# 4, and it `DROP DATABASE`s every lane it is given. So `fleet-up.sh "3"`,
+# which is how `sweep-until-clean.sh` heals one lane that went down, dropped
+# lanes 1 and 2 as well (`commit-log/log-8ac33d9-1`). `lane_list` (lane-env.sh)
+# is the one reading of a lane argument, shared with `fleet-restart.sh`.
 set -u
 R=/home/user/rundesk
 export PGPASSWORD=rundesk
@@ -26,12 +27,8 @@ TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
 # Storage, in one place — see lane-env.sh for why it is not inlined here.
 . "$R/scripts/e2e-lanes/lane-env.sh"
 
-ARG=${1:-4}
-case "$ARG" in
-  *[!0-9]*) LANES=($ARG) ;;            # a list: "9 10"
-  *)        LANES=($(seq 1 "$ARG")) ;; # a count: 4  →  1 2 3 4
-esac
-echo "lanes: ${LANES[*]}"
+LANES=($(lane_list ${*:-1 2 3 4})) || exit 2
+echo "lanes: ${LANES[*]}  (a LIST — '3' means lane three, not three lanes)"
 
 sudo pg_ctlcluster 16 main start 2>/dev/null
 for i in $(seq 1 20); do pg_isready -q && break; sleep 1; done

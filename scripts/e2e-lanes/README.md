@@ -9,7 +9,7 @@ from a dump of `rundesk_pristine`, so every lane starts from the same seed and
 no lane can see another's rows.
 
 ```bash
-bash scripts/e2e-lanes/fleet-up.sh 4        # create 4 lanes from the pristine dump
+bash scripts/e2e-lanes/fleet-up.sh "1 2 3 4"   # create lanes 1-4 from the pristine dump (a list, never a count)
 bash scripts/e2e-lanes/fleet-sync.sh 4      # push the CURRENT schema, restart lanes
 bash scripts/e2e-lanes/verify.sh <suite> 2  # run one suite in lane 2
 ```

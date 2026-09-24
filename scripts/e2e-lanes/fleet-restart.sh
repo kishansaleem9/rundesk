@@ -38,14 +38,8 @@ export PGPASSWORD=rundesk
 # So this script takes a list and only a list. `10` restarts lane ten, not ten
 # lanes; `"1 2 3"` restarts three. For every lane, say so — `$(seq 1 10)` is
 # three characters longer than `10` and cannot be misread.
-ARG=${*:-1 2 3 4 5 6 7 8 9 10}
-LANES=($ARG)
-for k in "${LANES[@]}"; do
-  case "$k" in
-    ''|*[!0-9]*) echo "not a lane number: '$k'"; exit 2 ;;
-  esac
-  if [ "$k" -lt 1 ] || [ "$k" -gt 10 ]; then echo "lane out of range: $k"; exit 2; fi
-done
+# `lane_list` (lane-env.sh) is that rule, and `fleet-up.sh` reads it too.
+LANES=($(lane_list ${*:-1 2 3 4 5 6 7 8 9 10})) || exit 2
 echo "restarting lanes: ${LANES[*]}  (a LIST — '9' means lane nine, not nine lanes)"
 
 pg_ctlcluster 16 main start 2>/dev/null
