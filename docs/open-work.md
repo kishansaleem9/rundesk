@@ -625,6 +625,14 @@ The new suite `custom-field-access`, 4/4 on lane 1 (all 4 failed before; the mem
 
 `cfa-1..7`, each compiled. API unit tests 1624/1624. Regression on lane 1, 14/14: every custom-field suite, including field types, progress, creating a field from a task, and the list export that reads values without a reader; plus the space wizard and features, list view controls, the pickers, the planner's command bar, the task AI bar, and search. In CI.
 
+### `found-24-sep/inbox-chip-read-while-loading` — **closed** (a flake, found by the dependency sweep)
+
+**`inbox-scope` waited for one chip's count and then asserted two, so it failed when the second arrived a moment later**
+
+*Evidence:* on lane 3, `the chips count what the server holds — 60 and 59` failed with its own message reading `All reads "60", Primary "59"`, the expected numbers. The check waits until the All chip reads 60, reads both chips for the condition, and reads them again for the message. The Primary count lands separately, so the condition read it still loading, and the message read it a moment later. Nothing in that run touched notifications (the fixture is assignments, comments and test notices).
+
+*Closed:* the wait now holds for both chips. The suite passed in the next sweep.
+
 ### `found-24-sep/assignee-me-compared-with-a-narrowed-endpoint` — **closed** (a regression of mine, found by the docs sweep)
 
 **`addressability-live` compared the whole `assigneeId=me` listing with the member endpoint after that endpoint became open work only**

@@ -305,7 +305,14 @@ try {
     'the first page is fifty rows, with "Load older" under them',
     `${firstPage} rows, ${await page.getByTestId('inbox-load-more').count()} load button(s)`,
   )
-  await waitUntil(async () => (await text('inbox-chip-count-all')) === String(IN_A), { timeoutMs: 10_000 })
+  // BOTH chips, as the check below reads both. Waiting on "All" alone raced
+  // "Primary", whose count lands a moment later: on 24 September this failed
+  // with the right numbers in its own message ("All reads 60, Primary 59"),
+  // read a moment after the condition had read Primary still loading.
+  await waitUntil(
+    async () => (await text('inbox-chip-count-all')) === String(IN_A) && (await text('inbox-chip-count-primary')) === String(IN_A - 1),
+    { timeoutMs: 10_000 },
+  )
   chk(
     (await text('inbox-chip-count-all')) === String(IN_A) && (await text('inbox-chip-count-primary')) === String(IN_A - 1),
     'the chips count what the server holds — 60 and 59 — not the fifty loaded',
