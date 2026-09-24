@@ -572,7 +572,7 @@ Each branch now applies the rule its reads apply: the container rule and the pri
 
 The Meilisearch path runs on no lane. Its post-filter held task hits to the private-item rule only and let every doc hit through, so it now applies the container rule (joining each task's project and space) and the doc rule. `search.service.test.ts` measures that half with its fake index: a refused space's doc hit dropped and an open one kept, the container rule in the task hits' query, and neither rule for a manager. Adding those tests exposed a flaw in the file's fake database: it credited a WHERE to the table named last, so a condition that builds a subquery (the read rules do) was filed under the subquery's table. Two existing tests then failed to find their predicate. Each chain now keeps its own table.
 
-The checks are a suite of their own, `search-read-access` (4/4 on lane 1; all 4 failed before, measured inside `workspace-read-access` as its §8, then moved so that suite's running break measurements stay current). `sra-1..11`, each compiled; `sst-1..2` are unit claims shown to fail their tests. API unit tests 1624/1624. Regression 17/17: the palette, search sources, trending, addressability, mentions, the planner's command bar, the app catalogue, doc import, lists, loading states, meeting records, task covers, `workspace-read-access`, both video-1 suites, `video-regression` and `ui-sweep`. In CI.
+The checks are a suite of their own, `search-read-access` (4/4 on lane 1; all 4 failed before, measured inside `workspace-read-access` as its §8, then moved so that suite's running break measurements stay current). `sra-1..11` each reddened the check it names at `7314929` (baseline 4/4); `sst-1..2` are unit claims shown to fail their tests. API unit tests 1624/1624. Regression 17/17: the palette, search sources, trending, addressability, mentions, the planner's command bar, the app catalogue, doc import, lists, loading states, meeting records, task covers, `workspace-read-access`, both video-1 suites, `video-regression` and `ui-sweep`. In CI.
 
 *Fixed next: lookups by id, two of them across workspaces.* A route that takes an item's id and answers with its name is a way to read the name. Measured on lane 1 before the fix, as a member refused a private space:
 - favourites: the member favourited that space, its list, task and doc, a channel of it, and a private channel they were not in (201 each), and their list named every one. `resolveBatch` gave spaces, docs and channels no rule, and lists and tasks only their private flag. `toggle` checks through the same function, so both reads and adds were open.
@@ -586,7 +586,7 @@ Each now takes the rule the item's own reads take:
 - a sprint takes only such a task, and lists and counts its own workspace's tasks with the container rule;
 - AI references apply the container rule.
 
-`lookup-read-access`, 8/8 on lane 1 (7 of 8 failed before; the admin's favourites passed both times). `lra-1..12`, each compiled. API unit tests 1624/1624. Regression on three lanes, 20/20:
+`lookup-read-access`, 8/8 on lane 1 (7 of 8 failed before; the admin's favourites passed both times). `lra-1..12` each reddened the check it names at `7314929` (baseline 8/8). API unit tests 1624/1624. Regression on three lanes, 20/20:
 - every planner suite, focus pill, tab-title countdown, team schedules, calendar accounts;
 - the favourite menu, the AI answer and container suites;
 - task depth, panel collapse, addressability;
@@ -594,13 +594,13 @@ Each now takes the rule the item's own reads take:
 
 One of those twenty, `ai-answer-rendering`, first threw "fetch failed" at 42 of 51 with lane 1's API up and logging nothing wrong. Run alone straight after, it passed 51/51. That is recorded here as a flake under four busy lanes, not as a pass. In CI.
 
-*Still open, measured (24 September, lane 1):* the custom-field routes, a HIGH item of their own below.
+*Fixed next: custom fields,* a HIGH item of their own below (`found-24-sep/custom-fields-open-to-any-member`).
 
 *Still open, read in code, not yet measured:* the dependency graph (`GET /tasks/:id/dependencies/graph` takes no reader and walks up to six hops); a status change refused for open blockers names each blocker by title and id, whoever asks; and the "is blocked" notification names the blocker to every assignee and watcher.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the custom fields (writes and deletes in refused spaces), then dependencies, then the reports (the unattended scheduled one first), then the rest.
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: dependencies next (the graph, the refusal that names blockers, the blocked notification), then the reports (the unattended scheduled one first), then the rest.
 
-### `found-24-sep/custom-fields-open-to-any-member` — open, HIGH (security; found measuring the audit's "custom-field values")
+### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
 **Every custom-field route checks workspace membership and nothing else: a member refused a private space reads, overwrites, defines, renames and deletes its fields**
 
@@ -613,7 +613,17 @@ One of those twenty, `ai-answer-rendering`, first threw "fetch failed" at 42 of 
 
 The controller has `JwtAuthGuard` and `WorkspaceMemberGuard` only. The service checks that the task or project is in the workspace, and nothing about the space it is in, or about who may edit.
 
-*To close:* reads take the container rule (the project's space and project); value writes take the rule task edits take; definition writes take the project's manage rule. Research ClickUp's permission for managing Custom Fields first. A suite that measures each route as a refused member, with a positive twin.
+*Closed:* every route now holds the project or task to what the caller may open, not merely to the workspace. `ResourceMemberGuard` could not do it here: it takes the first id a route carries, and on `workspaces/:workspaceId/...` that is the workspace. So `common/permissions/read-access.ts` states the guard's rule for a service to call: `readableProject` (membership and the container rule) and `readableTask` (the same, plus the private-list and private-task rules), each also requiring the named workspace. The service takes the reader on all seven routes and answers not-found otherwise, as for a foreign id. The rename and delete routes, which carry only a field id, check the field's own project. The task export still reads values without a reader, for rows its own route has checked.
+
+Not changed, and why: who may *manage* fields where they may open the project. ClickUp's help (search snippets only; the pages cannot be fetched here) says guests cannot create fields, and that members' default is set by role and custom-role permissions. That is a product rule to research against the real pages, not a leak, so field definitions stay writable by anybody who may open the project, as before. Guests and "view only" spaces are part of that same question, `found-24-sep/doc-writes-are-the-read-rule`'s twin.
+
+The new suite `custom-field-access`, 4/4 on lane 1 (all 4 failed before; the member's delete had removed the field):
+- reads refused (404) while an open project's and the admin's go through;
+- a value write refused with the value unchanged, while an open task's goes through;
+- both ways of defining a field refused with none made, while an open project takes one;
+- rename and delete refused with the field untouched, while an open one is renamed.
+
+`cfa-1..7`, each compiled. API unit tests 1624/1624. Regression on lane 1, 14/14: every custom-field suite, including field types, progress, creating a field from a task, and the list export that reads values without a reader; plus the space wizard and features, list view controls, the pickers, the planner's command bar, the task AI bar, and search. In CI.
 
 ### `found-24-sep/assignee-me-compared-with-a-narrowed-endpoint` — **closed** (a regression of mine, found by the docs sweep)
 

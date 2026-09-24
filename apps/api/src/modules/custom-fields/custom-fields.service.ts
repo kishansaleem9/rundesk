@@ -16,6 +16,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { readableProject, readableTask, type ReadActor } from '../../common/permissions/read-access'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 import {
   evaluateFormula,
@@ -101,6 +102,25 @@ function assertSignature(value: unknown): asserts value is string {
 export class CustomFieldsService {
   constructor(@Inject(DB_TOKEN) private db: Db) {}
 
+  // ── Who may open the project or task a route names ──────────────────────────
+  /*
+   * WITH A READER, the project or task must be one they may open, not merely one
+   * in the workspace: every route here sat behind workspace membership alone, and
+   * a member refused a private space read, overwrote, defined, renamed and
+   * deleted its fields (`found-24-sep/custom-fields-open-to-any-member`). Not
+   * found either way, as a foreign id is. The controller always passes the
+   * reader; the task export reads values for rows its own route has checked.
+   */
+  private async assertProjectOpenTo(workspaceId: string, projectId: string, reader?: ReadActor) {
+    if (!reader) return this.assertProjectInWorkspace(workspaceId, projectId)
+    if (!(await readableProject(this.db, workspaceId, projectId, reader))) throw new NotFoundException('Project not found in this workspace')
+  }
+
+  private async assertTaskOpenTo(workspaceId: string, taskId: string, reader?: ReadActor) {
+    if (reader && !(await readableTask(this.db, workspaceId, taskId, reader))) throw new NotFoundException('Task not found in this workspace')
+    return this.assertTaskInWorkspace(workspaceId, taskId)
+  }
+
   // ── Definition ownership guard ──────────────────────────────────────────────
   private async assertProjectInWorkspace(workspaceId: string, projectId: string) {
     const [row] = await this.db
@@ -126,8 +146,8 @@ export class CustomFieldsService {
   }
 
   // ── Definitions ─────────────────────────────────────────────────────────────
-  async listForProject(workspaceId: string, projectId: string) {
-    await this.assertProjectInWorkspace(workspaceId, projectId)
+  async listForProject(workspaceId: string, projectId: string, reader?: ReadActor) {
+    await this.assertProjectOpenTo(workspaceId, projectId, reader)
     return this.db
       .select()
       .from(customFieldDefinitions)
@@ -146,8 +166,9 @@ export class CustomFieldsService {
       options?: Array<{ label: string; value: string; color?: string }>
       config?: unknown
     },
+    reader?: ReadActor,
   ) {
-    await this.assertProjectInWorkspace(workspaceId, projectId)
+    await this.assertProjectOpenTo(workspaceId, projectId, reader)
     /*
      * The TYPE is validated here, and it was not before.
      *
@@ -244,8 +265,9 @@ export class CustomFieldsService {
       options?: Array<{ label: string; value: string; color?: string }>
       config?: unknown
     },
+    reader?: ReadActor,
   ) {
-    const task = await this.assertTaskInWorkspace(workspaceId, taskId)
+    const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
     if (dto.scope !== undefined && dto.scope !== 'project' && dto.scope !== 'list') {
       throw new BadRequestException('scope must be "project" or "list"')
     }
@@ -253,7 +275,7 @@ export class CustomFieldsService {
     return this.createDefinition(workspaceId, task.projectId, {
       ...rest,
       listId: scope === 'list' ? task.listId : undefined,
-    })
+    }, reader)
   }
 
   /**
@@ -328,8 +350,10 @@ export class CustomFieldsService {
       position?: number
       config?: unknown
     },
+    reader?: ReadActor,
   ) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
     if (patch.options != null && !Array.isArray(patch.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
@@ -390,8 +414,9 @@ export class CustomFieldsService {
     return row
   }
 
-  async deleteDefinition(workspaceId: string, fieldId: string) {
+  async deleteDefinition(workspaceId: string, fieldId: string, reader?: ReadActor) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
     // Cascade deletes the values automatically via FK.
     await this.db.delete(customFieldDefinitions).where(eq(customFieldDefinitions.id, def.id))
     return { ok: true }
@@ -417,8 +442,8 @@ export class CustomFieldsService {
   }
 
   // ── Values ──────────────────────────────────────────────────────────────────
-  async getValuesForTask(workspaceId: string, taskId: string) {
-    const task = await this.assertTaskInWorkspace(workspaceId, taskId)
+  async getValuesForTask(workspaceId: string, taskId: string, reader?: ReadActor) {
+    const task = await this.assertTaskOpenTo(workspaceId, taskId, reader)
     /*
      * §V2-S01c — `listId` NARROWS THE FIELD, and until now it did not.
      *
@@ -577,8 +602,9 @@ export class CustomFieldsService {
     fieldId: string,
     value: FieldValue,
     actorId?: string,
+    reader?: ReadActor,
   ) {
-    await this.assertTaskInWorkspace(workspaceId, taskId)
+    await this.assertTaskOpenTo(workspaceId, taskId, reader)
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
 
     /*

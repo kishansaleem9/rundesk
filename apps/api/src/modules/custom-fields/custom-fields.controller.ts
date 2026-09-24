@@ -1,6 +1,7 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, Put, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { CustomFieldsService, type CustomFieldType } from './custom-fields.service'
+import type { ReadActor } from '../../common/permissions/read-access'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -11,6 +12,9 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
  * shipped, and a typed caller could not ask for `voting` or `people`. One list
  * now, derived from the enum the column is declared with.
  */
+
+/** Who is asking: the service holds every route to what this person may open. */
+const reader = (user: { id: string; role?: string }): ReadActor => ({ id: user.id, role: user.role })
 
 @ApiTags('custom-fields')
 @ApiBearerAuth()
@@ -23,15 +27,17 @@ export class CustomFieldsController {
   @Get('projects/:projectId/custom-fields')
   @ApiOperation({ summary: 'List custom field definitions for a project' })
   list(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
   ) {
-    return this.svc.listForProject(workspaceId, projectId)
+    return this.svc.listForProject(workspaceId, projectId, reader(user))
   }
 
   @Post('projects/:projectId/custom-fields')
   @ApiOperation({ summary: 'Create a custom field definition' })
   create(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('projectId') projectId: string,
     @Body()
@@ -47,34 +53,37 @@ export class CustomFieldsController {
       config?: unknown
     },
   ) {
-    return this.svc.createDefinition(workspaceId, projectId, body)
+    return this.svc.createDefinition(workspaceId, projectId, body, reader(user))
   }
 
   @Patch('custom-fields/:fieldId')
   update(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('fieldId') fieldId: string,
     @Body() body: any,
   ) {
-    return this.svc.updateDefinition(workspaceId, fieldId, body)
+    return this.svc.updateDefinition(workspaceId, fieldId, body, reader(user))
   }
 
   @Delete('custom-fields/:fieldId')
   remove(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('fieldId') fieldId: string,
   ) {
-    return this.svc.deleteDefinition(workspaceId, fieldId)
+    return this.svc.deleteDefinition(workspaceId, fieldId, reader(user))
   }
 
   // ── Values (task-scoped) ──────────────────────────────────────────────────
   @Get('tasks/:taskId/custom-fields')
   @ApiOperation({ summary: 'Get all custom field values for a task' })
   getValues(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
   ) {
-    return this.svc.getValuesForTask(workspaceId, taskId)
+    return this.svc.getValuesForTask(workspaceId, taskId, reader(user))
   }
 
   /**
@@ -84,6 +93,7 @@ export class CustomFieldsController {
   @Post('tasks/:taskId/custom-fields')
   @ApiOperation({ summary: 'Create a custom field definition from an open task' })
   createFromTask(
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
     @Body()
@@ -97,13 +107,13 @@ export class CustomFieldsController {
       config?: unknown
     },
   ) {
-    return this.svc.createDefinitionForTask(workspaceId, taskId, body)
+    return this.svc.createDefinitionForTask(workspaceId, taskId, body, reader(user))
   }
 
   @Put('tasks/:taskId/custom-fields/:fieldId')
   @ApiOperation({ summary: 'Set a custom field value on a task' })
   setValue(
-    @CurrentUser() user: { id: string },
+    @CurrentUser() user: { id: string; role?: string },
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
     @Param('fieldId') fieldId: string,
@@ -112,6 +122,6 @@ export class CustomFieldsController {
   ) {
     // The actor is passed for `voting` only, which ignores `body.value` and
     // toggles this person's own vote — see the service.
-    return this.svc.setValue(workspaceId, taskId, fieldId, body.value, user.id)
+    return this.svc.setValue(workspaceId, taskId, fieldId, body.value, user.id, reader(user))
   }
 }
