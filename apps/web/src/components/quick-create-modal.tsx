@@ -8,7 +8,7 @@ import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { usePermissions } from '../hooks/use-permissions'
+import { useCreatable } from '../hooks/use-creatable'
 import { localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
 import { CREATE_TYPES, type CreateKind } from '../lib/create-types'
@@ -85,13 +85,10 @@ export function QuickCreateModal({
    * smallest, and the copy that drifts would be the one deciding whether to say
    * "nothing matched" over a strip that is showing something.
    */
-  // The types this person may make: a type the API asks a permission for is
-  // offered once the permission is known to be held.
-  const { granted, loaded } = usePermissions(workspaceId)
-  const offered = useMemo(
-    () => CREATE_TYPES.filter((ty) => !ty.requires || (loaded && granted.has(ty.requires))),
-    [granted, loaded],
-  )
+  // The types this person may make (`useCreatable`, the space menu's own
+  // answer): a permission key once held, and for a guest what their row allows.
+  const creatable = useCreatable(workspaceId)
+  const offered = useMemo(() => CREATE_TYPES.filter((ty) => creatable(ty)), [creatable])
   const { shown: shownTypes, matched: typeMatchCount } = useMemo(() => {
     const q = query.trim().toLowerCase()
     if (!q) return { shown: offered, matched: offered.length }
@@ -1640,10 +1637,14 @@ function ListForm({
   const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
   const [projectId, setProjectId] = useState('')
 
-  const spaces = useQuery({
+  // The spaces a list may be made in (`useCreatable`, the menus' own answer):
+  // for a guest, only those shared with them to edit. The picker listed every
+  // space they could see, and one they only pass through refused the list.
+  const creatable = useCreatable(workspaceId)
+  const spaces = (useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
-  }).data ?? []
+  }).data ?? []).filter((s) => CREATE_TYPES.some((ty) => ty.value === 'list' && creatable(ty, s.id)))
   const projects = useQuery({
     queryKey: ['projects', spaceId],
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),

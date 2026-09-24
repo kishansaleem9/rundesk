@@ -1,0 +1,13 @@
+# A GUEST IS OFFERED WHAT A MEMBER IS AGAIN: the hook answers every guest
+# as it answers a member, so the menus offer tasks, docs, whiteboards and
+# lists that the API refuses them.
+# Reddens: guest-create-menu: "a guest who may add to no space is offered a reminder and nothing else — a member is offered a task, a doc, a whiteboard and a list"
+#   or "given a space to edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task"
+import io
+p = '/home/user/rundesk/apps/web/src/hooks/use-creatable.ts'
+a = '      if (!guest) return true\n'
+b = '      if (!guest || workspaceId !== undefined) return true\n'
+s = io.open(p, encoding='utf-8').read()
+assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
+io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))
+print('gcm-1-guests-offered-everything: every guest is answered as a member')

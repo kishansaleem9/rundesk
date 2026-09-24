@@ -97,6 +97,15 @@ export type CreateType = {
    * (`product-siblings/custom-role-permissions-unread-by-web`).
    */
   requires?: WorkspacePermission
+  /**
+   * What a GUEST may do with it, as the API has it: `yes` (a reminder is their
+   * own), `no` (a task, a doc of the workspace — the form makes no other —
+   * a whiteboard, a dashboard, a form, and the containers the permission keys
+   * already withhold), or `where-writable`, a list, only in a space shared
+   * with them to edit. Offered otherwise, each was a 403
+   * (`found-24-sep/create-menu-offers-guests-what-they-cannot-make`).
+   */
+  guests: 'yes' | 'no' | 'where-writable'
 }
 
 /**
@@ -105,11 +114,11 @@ export type CreateType = {
  * then the containers, largest last.
  */
 export const CREATE_TYPES: readonly CreateType[] = [
-  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task', blurbKey: 'createMenu.blurbTask', inSpace: true, scopedToSpace: true, isContainer: false },
-  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc', blurbKey: 'createMenu.blurbDoc', inSpace: true, scopedToSpace: false, isContainer: false },
-  { value: 'reminder', icon: Clock, labelKey: 'quickCreate.tab.reminder', blurbKey: 'createMenu.blurbReminder', inSpace: true, scopedToSpace: false, isContainer: false },
-  { value: 'whiteboard', icon: PenTool, labelKey: 'quickCreate.tab.whiteboard', blurbKey: 'createMenu.blurbWhiteboard', inSpace: true, scopedToSpace: false, isContainer: false },
-  { value: 'dashboard', icon: LayoutDashboard, labelKey: 'quickCreate.tab.dashboard', blurbKey: 'createMenu.blurbDashboard', inSpace: true, scopedToSpace: false, isContainer: false },
+  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task', blurbKey: 'createMenu.blurbTask', inSpace: true, scopedToSpace: true, isContainer: false, guests: 'no' },
+  { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc', blurbKey: 'createMenu.blurbDoc', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'no' },
+  { value: 'reminder', icon: Clock, labelKey: 'quickCreate.tab.reminder', blurbKey: 'createMenu.blurbReminder', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'yes' },
+  { value: 'whiteboard', icon: PenTool, labelKey: 'quickCreate.tab.whiteboard', blurbKey: 'createMenu.blurbWhiteboard', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'no' },
+  { value: 'dashboard', icon: LayoutDashboard, labelKey: 'quickCreate.tab.dashboard', blurbKey: 'createMenu.blurbDashboard', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'no' },
   /*
    * §V2-06 frame `08:00` — Form, beside Doc · Dashboard · Whiteboard in the
    * frame's middle group, and absent from this list until now.
@@ -121,11 +130,11 @@ export const CREATE_TYPES: readonly CreateType[] = [
    * confident zero, on a surface where nobody would go looking for it. The
    * creator therefore asks which space and which list, and refuses without.
    */
-  { value: 'form', icon: ClipboardType, labelKey: 'quickCreate.tab.form', blurbKey: 'createMenu.blurbForm', inSpace: true, scopedToSpace: true, isContainer: false },
-  { value: 'list', icon: ClipboardList, labelKey: 'quickCreate.tab.list', blurbKey: 'createMenu.blurbList', inSpace: true, scopedToSpace: true, isContainer: true },
-  { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder', blurbKey: 'createMenu.blurbFolder', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'space.create' },
-  { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project', blurbKey: 'createMenu.blurbProject', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'project.create' },
-  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space', blurbKey: 'createMenu.blurbSpace', inSpace: false, scopedToSpace: false, isContainer: true, requires: 'space.create' },
+  { value: 'form', icon: ClipboardType, labelKey: 'quickCreate.tab.form', blurbKey: 'createMenu.blurbForm', inSpace: true, scopedToSpace: true, isContainer: false, guests: 'no' },
+  { value: 'list', icon: ClipboardList, labelKey: 'quickCreate.tab.list', blurbKey: 'createMenu.blurbList', inSpace: true, scopedToSpace: true, isContainer: true, guests: 'where-writable' },
+  { value: 'folder', icon: Folder, labelKey: 'quickCreate.tab.folder', blurbKey: 'createMenu.blurbFolder', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'space.create', guests: 'no' },
+  { value: 'project', icon: FolderOpen, labelKey: 'quickCreate.tab.project', blurbKey: 'createMenu.blurbProject', inSpace: true, scopedToSpace: true, isContainer: true, requires: 'project.create', guests: 'no' },
+  { value: 'space', icon: Layers, labelKey: 'quickCreate.tab.space', blurbKey: 'createMenu.blurbSpace', inSpace: false, scopedToSpace: false, isContainer: true, requires: 'space.create', guests: 'no' },
 ]
 
 /**

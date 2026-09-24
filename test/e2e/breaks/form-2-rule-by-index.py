@@ -3,10 +3,12 @@
 # instead of Form from List. This is the regression that shipped unnoticed.
 # RE-AIMED 24 September: the menu now draws the types a person's permissions
 # allow (`spaceCreateTypes`), so the rule reads the filtered list's previous item.
+# RE-AIMED 24 September: each create type now declares what a guest may do with it
+# (`guests`), and both menus ask one hook (`useCreatable`); the mistake is the same.
 # Reddens: space-create-menu: "the rule falls where the containers begin"
 import io
 p = "/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx"
-a = "                          {i > 0 && type.isContainer && !spaceCreateTypes[i - 1].isContainer && (\n                            <DropdownMenuSeparator data-testid=\"create-menu-container-rule\" />\n                          )}"
+a = "                          {i > 0 && type.isContainer && !shown[i - 1].isContainer && (\n                            <DropdownMenuSeparator data-testid=\"create-menu-container-rule\" />\n                          )}"
 b = "                          {i === 5 && <DropdownMenuSeparator data-testid=\"create-menu-container-rule\" />}"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

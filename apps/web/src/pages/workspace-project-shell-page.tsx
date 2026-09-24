@@ -30,6 +30,8 @@ import { ContainerEditDialog, type ContainerEditValues } from '../components/con
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { useCreatable } from '../hooks/use-creatable'
+import { CREATE_TYPES } from '../lib/create-types'
 
 type List = {
   id: string
@@ -65,6 +67,10 @@ function ProjectHome() {
   const [editOpen, setEditOpen] = useState(false)
   const [dragListId, setDragListId] = useState<string | null>(null)
   const [showSuggest, setShowSuggest] = useState(false)
+  // A new list, offered where one may be made (`useCreatable`, the menus' own
+  // answer): not to a guest who only passes through this space.
+  const creatable = useCreatable(workspaceId)
+  const mayAddList = CREATE_TYPES.some((ty) => ty.value === 'list' && creatable(ty, spaceId))
 
   const { data: projects = [] } = useQuery({
     queryKey: ['projects', spaceId],
@@ -171,6 +177,9 @@ function ProjectHome() {
       // ListForm. The bare prefix covers all of them.
       qc.invalidateQueries({ queryKey: ['lists'] })
     },
+    // Refused ("List name taken", a space that is not theirs to add to), it
+    // said nothing: the card sat there with its button looking un-pressed.
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.listFailed')),
   })
 
   return (
@@ -192,14 +201,16 @@ function ProjectHome() {
             <Sparkles className="h-3.5 w-3.5 mr-1.5" />
             {t('projectShell.suggestTasks')}
           </Button>
-          <Button
-            size="sm"
-            className="bg-violet-600 hover:bg-violet-700 text-white"
-            onClick={() => setShowCreateList((v) => !v)}
-          >
-            <Plus className="h-3.5 w-3.5 mr-1.5" />
-            {showCreateList ? t('common.cancel') : t('projectShell.addList')}
-          </Button>
+          {mayAddList && (
+            <Button
+              size="sm"
+              className="bg-violet-600 hover:bg-violet-700 text-white"
+              onClick={() => setShowCreateList((v) => !v)}
+            >
+              <Plus className="h-3.5 w-3.5 mr-1.5" />
+              {showCreateList ? t('common.cancel') : t('projectShell.addList')}
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button
@@ -244,7 +255,7 @@ function ProjectHome() {
           {t('projectShell.lists')}
         </WorkSectionTitle>
 
-        {showCreateList && (
+        {showCreateList && mayAddList && (
           <WorkCreateCard onCancel={() => setShowCreateList(false)}>
             <Input
               autoFocus
@@ -291,12 +302,14 @@ function ProjectHome() {
             title={t('projectShell.noListsTitle')}
             description={t('projectShell.noListsBody')}
             action={
-              <Button
-                className="bg-violet-600 hover:bg-violet-700 text-white"
-                onClick={() => setShowCreateList(true)}
-              >
-                <Plus className="h-4 w-4 mr-1.5" /> {t('projectShell.addList')}
-              </Button>
+              mayAddList ? (
+                <Button
+                  className="bg-violet-600 hover:bg-violet-700 text-white"
+                  onClick={() => setShowCreateList(true)}
+                >
+                  <Plus className="h-4 w-4 mr-1.5" /> {t('projectShell.addList')}
+                </Button>
+              ) : undefined
             }
           />
         ) : (

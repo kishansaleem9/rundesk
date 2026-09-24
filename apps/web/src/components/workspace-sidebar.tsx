@@ -1,5 +1,5 @@
 import { Link, useNavigate, useParams, useRouterState, useSearch } from '@tanstack/react-router'
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useSidebarStore } from '../store/sidebar'
 import {
@@ -90,6 +90,7 @@ import { useAiChatThreads } from '../lib/skills-api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
+import { useCreatable } from '../hooks/use-creatable'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { CreateSpaceWizard } from './create-space-wizard'
@@ -336,14 +337,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
-  const { isAdmin, canCreateWorkspace } = useWorkspaceRole(workspaceId)
-  // A space's own "+" offers what this person may make there: a type the API
-  // asks a permission for, once it is known to be held.
+  const { isAdmin, canCreateWorkspace, role: workspaceRole } = useWorkspaceRole(workspaceId)
+  // A space's own "+" offers what this person may make THERE (`useCreatable`,
+  // the Create menu's own answer): a permission key once held, and for a guest
+  // a list only in a space they may add to.
   const permissions = usePermissions(workspaceId)
-  const spaceCreateTypes = useMemo(
-    () => SPACE_CREATE_TYPES.filter((type) => !type.requires || (permissions.loaded && permissions.granted.has(type.requires))),
-    [permissions.granted, permissions.loaded],
-  )
+  const creatable = useCreatable(workspaceId)
+  const typesForSpace = (spaceId: string) => SPACE_CREATE_TYPES.filter((type) => creatable(type, spaceId))
   // §5 ClickApps — hide nav entries for features a workspace admin turned off.
   const { featureEnabled } = useResolvedFlags(workspaceId)
   // Whatever the user chose to move — drives the shared Move picker below.
@@ -2442,7 +2442,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="start" className="w-60" data-testid="space-create-menu">
                       <DropdownMenuLabel data-testid="space-create-menu-title">{t('createMenu.title')}</DropdownMenuLabel>
-                      {spaceCreateTypes.map((type, i) => (
+                      {typesForSpace(space.id).map((type, i, shown) => (
                         // A Fragment, not a <div>: a plain element between
                         // role="menu" and its items is not a menu any more.
                         <Fragment key={type.value}>
@@ -2467,7 +2467,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                             `space-create-container-rule` was counted as a
                             tenth menu item the first time this ran.
                           */}
-                          {i > 0 && type.isContainer && !spaceCreateTypes[i - 1].isContainer && (
+                          {i > 0 && type.isContainer && !shown[i - 1].isContainer && (
                             <DropdownMenuSeparator data-testid="create-menu-container-rule" />
                           )}
                           <DropdownMenuItem
@@ -2508,25 +2508,30 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         them being offered HERE, at the point where somebody has
                         already decided to put something in this space.
                       */}
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        data-testid="space-create-imports"
-                        onClick={() =>
-                          navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
-                        }
-                      >
-                        <Import className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{t('createMenu.imports')}</span>
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        data-testid="space-create-templates"
-                        onClick={() =>
-                          navigate({ to: '/app/$workspaceId/templates', params: { workspaceId } })
-                        }
-                      >
-                        <LayoutTemplate className="h-3.5 w-3.5 shrink-0" />
-                        <span className="truncate">{t('createMenu.templates')}</span>
-                      </DropdownMenuItem>
+                      {/* Both make tasks, which a guest may not: not theirs to be offered. */}
+                      {workspaceRole !== 'guest' && (
+                        <>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            data-testid="space-create-imports"
+                            onClick={() =>
+                              navigate({ to: '/app/$workspaceId/import', params: { workspaceId } })
+                            }
+                          >
+                            <Import className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{t('createMenu.imports')}</span>
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            data-testid="space-create-templates"
+                            onClick={() =>
+                              navigate({ to: '/app/$workspaceId/templates', params: { workspaceId } })
+                            }
+                          >
+                            <LayoutTemplate className="h-3.5 w-3.5 shrink-0" />
+                            <span className="truncate">{t('createMenu.templates')}</span>
+                          </DropdownMenuItem>
+                        </>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                   <DropdownMenu>

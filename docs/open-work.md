@@ -1325,7 +1325,7 @@ Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing ch
 *To close:* make each wait for what it reads (the search's answer, the task's refusal, the menu's full render), not a fixed time, and prove it under a full sweep's load.
 
 
-### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
+### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)
 
 **The Create menu offers a guest Task, which is always a 403, and a workspace Doc, also a 403**
 
@@ -1340,6 +1340,45 @@ Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing ch
 Reminder, dashboard and form answered 400 to the probe's thin bodies, so they are unmeasured.
 
 *To close:* settle the guest rule above first. Then offer a guest only what they may make: a task never, as the rule stands (ClickUp lets a guest make tasks where they have edit, which is `found-24-sep/task-edits-narrower-than-clickup`'s question), and a doc only into a space granted to them. Measure each type.
+
+*Measured again once the guest rules above had closed, lane 1:* the Create menu offered a guest task, doc, reminder, whiteboard, dashboard, form and list. A space's "+" offered the same, plus Imports and Templates, on a space the guest only passes through (a list in it shared with them to view). The List form's space picker named that space. A project's page there offered "Add list", and so did an empty project's own empty state. The API refused each of them: a task (403), a doc of the workspace (403; the Doc form makes no other), a whiteboard and a form (403, since `guests-list-every-whiteboard` and `forms-open-across-workspaces`), and a list where they pass through (403).
+
+*Closed, 24 September:*
+
+- Each create type says what a guest may do with it (`guests`, `create-types.ts`). A reminder, yes: it is their own. A list, only in a space shared with them to edit. Everything else, never: a task, a doc, a whiteboard, a dashboard, a form, and the containers the permission keys already withhold.
+- One hook, `useCreatable`, answers the Create menu, a space's "+", the List form's space picker and a project's "Add list" (the header's and the empty state's). The spaces a guest may add to are the Move picker's own answer (`move-targets`: the spaces the API lets them write, by the same resolver), under the same query key, so the menus cannot disagree with the API or with each other.
+- A space's "+" does not offer a guest Imports or Templates; both make tasks.
+- A refused "Add list" on a project's page said nothing: the card sat there with its button looking un-pressed. It says why now, as the List form does.
+
+The new suite `guest-create-menu`, 6 checks. A guest first passes through one space and may add to none, then is given another space to edit. Each menu is read beside a member's, each read of the guest's waits for the answer about their spaces, and the API is asked the same things the menus answer.
+
+- Before, on lane 1 (HEAD's bundle): 1 of 6. The one that passed is the API's own.
+- After: 6/6.
+
+`gcm-1..11`, each compiled, at least one per check: the hook's guest branch, the task and reminder rows, a list in any space and with no space, Imports and Templates, the picker, the project page's two buttons, the question never asked, and the API's guest default. `form-1`, `form-2`, `rpw-1`, `rpw-2`, `rpw-3`, `rpw-7` and `sidebar-sections-8` were re-aimed at the new rows and hook. Regression on lane 1, 28/28: `guest-create-menu`, `role-permissions-web`, `space-create-menu`, `create-menu-ai`, `folder-create`, `folder-dialog`, `sidebar-sections`, `space-wizard`, `space-wizard-views`, `list-name-taken`, `attach-on-create`, `comment-plus-menu`, `create-ai-results`, `custom-field-progress`, `custom-field-types`, `home-reminders`, `task-depth`, `time-estimate`, `ai-create-containers`, `guest-space-level`, `guest-read-scope`, `guest-chat-scope`, `guest-canvas-scope`, `form-access`, `clickapps-plan-gating`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+
+*Not changed, recorded:*
+
+- A guest given edit on a folder or a project, rather than its space, may make a list there (the create gate reads their share on the way, `within`), but no menu offers it: the menus read grants on spaces. That offers less than the API allows, not more.
+- A member is offered the same things on a view-only space's "+", and refused each of them. Recorded as `found-24-sep/view-only-space-offers-members-what-it-refuses`, below.
+- The API still makes a guest a dashboard (a preset of their own; no route asks the role). The menus no longer offer one, as ClickUp offers guests none.
+- A project's page still offers a guest Statuses, Members and Suggest tasks, where they only pass through. Recorded as `found-24-sep/project-page-offers-guests-its-managers-buttons`, below.
+
+### `found-24-sep/view-only-space-offers-members-what-it-refuses` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
+
+**A view-only space's "+" offers a member a list, a task, a folder and the rest, and the API refuses each**
+
+*Evidence, read not run:* `useCreatable` asks a space only for a guest. A member's answer is the permission keys alone. The API's create gate (`assertCanCreateInSpace`) needs edit on the space, and a space whose default is view or comment gives a member neither. The Move picker already answers which spaces a member may write (`move-targets`); the menus do not ask it for a member.
+
+*To close:* measure a member's menus on a view-only space. Then have `useCreatable` ask every person's writable spaces for the types a space holds (task, list, folder, project, form). ClickUp's own rule for a view-only location is to research first: whether it hides "+" or offers only what the level allows.
+
+### `found-24-sep/project-page-offers-guests-its-managers-buttons` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
+
+**A project's page offers a guest who only passes through Statuses, Members and Suggest tasks**
+
+*Evidence, read not run:* the header draws all three for anyone who can open the page. A guest reaches a project's page when a list in it is shared with them. Each of the three writes to the project or its tasks, and whether the API refuses each is unmeasured.
+
+*To close:* measure what the API answers a guest for each, then offer each only where it is answered.
 
 ### `found-24-sep/restart-witness-blind-to-new-tables` — **closed** (test tooling; found adding migration 0162)
 
