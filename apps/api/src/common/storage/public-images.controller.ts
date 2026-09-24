@@ -17,6 +17,19 @@ export function publicImagePath(key: string): string {
 }
 
 /**
+ * Whether `url` is the address of a picture we store under `prefix`, as
+ * `publicImagePath` names an upload: one safe segment under it, so no `..`
+ * walks to another object. A picture was saved as whatever string arrived, so
+ * it could point at any host, and every viewer's browser would ask that host
+ * for it (`found-23-sep/avatar-and-logo-accept-any-url`). ClickUp takes an
+ * upload and nothing else.
+ */
+export function isPublicImagePath(url: unknown, prefix: (typeof PUBLIC_IMAGE_PREFIXES)[number]): boolean {
+  const base = publicImagePath('')
+  return typeof url === 'string' && url.startsWith(base) && isKeyDirectlyUnder(url.slice(base.length), prefix)
+}
+
+/**
  * AN AVATAR OR LOGO AT AN ADDRESS THAT DOES NOT EXPIRE.
  *
  * Uploads saved `getObjectUrl(key)` as the picture's URL — and without a public

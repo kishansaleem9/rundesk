@@ -8,7 +8,11 @@
 # `withoutDomainToken` (credential-reads), so the query is followed by a
 # `return rows.map(` rather than the closing brace. Same break: no ORDER BY.
 #
+# With no ORDER BY the database answers in whatever order it holds the rows,
+# so WHICH order-dependent check falls is the database's choice: on 24
+# September it was the token's binding, not the rename. Both are claimed.
 # Reddens: login-workspace-binding: "renaming the older workspace does not move it behind the newer one"
+#   or "the access token is bound to the workspace the switcher lists first"
 import io, sys
 p = '/home/user/rundesk/apps/api/src/modules/workspaces/workspaces.service.ts'
 s = io.open(p, encoding='utf-8').read()

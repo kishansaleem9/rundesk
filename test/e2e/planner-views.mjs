@@ -206,15 +206,27 @@ try {
   // The header's month name is the thing that must change; `planner-month` is
   // that label (the grid is `planner-month-grid` — they used to share a testid,
   // which is how this check first failed against working code).
-  const before = await readText(page.getByTestId('planner-month'))
+  // TWO presses, three different months. One press is not enough: late in a
+  // month a week's step also lands in the next month, and this passed with the
+  // arrow moving a week (`pv-2`, on 24 September). Two week-long steps can
+  // never cross two month boundaries; two month-long steps always do.
+  const monthLabel = () => readText(page.getByTestId('planner-month'))
+  const before = await monthLabel()
   await page.getByTestId('planner-next').click()
+  const movedOnce = await waitUntil(async () => (await monthLabel()) !== before, { timeoutMs: 10_000 })
+  const first = await monthLabel()
+  await page.getByTestId('planner-next').click()
+  const movedTwice = await waitUntil(async () => {
+    const now = await monthLabel()
+    return now !== first && now !== before
+  }, { timeoutMs: 10_000 })
+  const second = await monthLabel()
   chk(
-    await waitUntil(async () => (await readText(page.getByTestId('planner-month'))) !== before, {
-      timeoutMs: 10_000,
-    }),
+    movedOnce && movedTwice,
     'next in Month view moves to a different month',
-    'the arrow moved a week inside a month view, so it shows the same fortnight twice',
+    `two presses read ${JSON.stringify([before, first, second])}: the arrow moved less than a month, so a month view walks a week at a time`,
   )
+  await page.getByTestId('planner-prev').click()
   await page.getByTestId('planner-prev').click()
 
   // -------------------------------------------------------------------------

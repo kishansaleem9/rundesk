@@ -15,7 +15,7 @@ import { SecurityService } from '../security/security.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
 import { PlansService } from '../plans/plans.service'
 import { seedListStatuses } from '../lists/list-statuses.defaults'
-import { publicImagePath } from '../../common/storage/public-images.controller'
+import { isPublicImagePath, publicImagePath } from '../../common/storage/public-images.controller'
 
 const BASE_SLUG_FALLBACK = 'workspace'
 
@@ -365,7 +365,24 @@ export class WorkspacesService {
     },
     actor?: AuditActor,
   ) {
-    const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    /*
+     * THE FIELDS A SETTINGS SAVE MAY CHANGE, AND NO OTHERS. The body was spread
+     * into the row — its type is a declaration nothing enforces — so a workspace
+     * admin's save set the plan, its limits, and a custom domain's verification
+     * and token (`found-24-sep/workspace-settings-mass-assign`). The plan is the
+     * platform admin's (`setWorkspacePlan`); verification is the DNS check's.
+     */
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['name', 'logoUrl', 'primaryColor', 'accentColor'] as const) {
+      if (patch[key] !== undefined) set[key] = patch[key]
+    }
+    // A logo is one we store, or none — or the one already saved.
+    if (patch.logoUrl !== undefined && patch.logoUrl !== null && !isPublicImagePath(patch.logoUrl, 'workspace-logos/')) {
+      const [current] = await this.db.select({ logoUrl: workspaces.logoUrl }).from(workspaces).where(eq(workspaces.id, workspaceId)).limit(1)
+      if (patch.logoUrl !== current?.logoUrl) {
+        throw new BadRequestException('A workspace logo must be an image uploaded here')
+      }
+    }
     // §A4.2 — a policy switch decides who can see client work, so a truthy-ish
     // body value ("false", 0) must never be read as "on".
     if (patch.defaultSpacePrivate !== undefined) set.defaultSpacePrivate = patch.defaultSpacePrivate === true

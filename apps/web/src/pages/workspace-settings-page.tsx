@@ -786,12 +786,14 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
         <p className="text-xs text-muted-foreground mt-1">{t('settings.accentColorHint')}</p>
       </div>
       <div>
-        <Label htmlFor="logo">{t('settings.logoUrl')}</Label>
-        <div className="flex items-center gap-2">
+        {/* An upload, or none: the API keeps a logo to images stored here
+            (`found-23-sep/avatar-and-logo-accept-any-url`), so there is no
+            address to type. */}
+        <Label>{t('settings.logo')}</Label>
+        <div className="flex items-center gap-2" data-testid="settings-logo">
           {logoUrl ? (
             <img src={logoUrl} alt={t('settings.logoAlt')} className="h-9 w-9 rounded object-contain border border-border" />
           ) : null}
-          <Input id="logo" value={logoUrl} onChange={(e) => setLogoUrl(e.target.value)} placeholder="https://…/logo.png" />
           <input
             ref={logoInputRef}
             type="file"
@@ -809,6 +811,11 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
             <Upload className="h-3.5 w-3.5" />
             {logoUploading ? t('settings.logoUploading') : t('settings.logoUpload')}
           </Button>
+          {logoUrl ? (
+            <Button variant="ghost" size="sm" className="shrink-0" onClick={() => setLogoUrl('')}>
+              {t('settings.logoRemove')}
+            </Button>
+          ) : null}
         </div>
         <p className="text-xs text-muted-foreground mt-1">{t('settings.logoUploadHint')}</p>
         {logoError && <p className="text-xs text-destructive mt-1">{logoError}</p>}

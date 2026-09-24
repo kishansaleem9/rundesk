@@ -21,7 +21,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { isValidTimeZone } from '../../common/time/zone'
 import { R2Service } from '../../common/storage/r2.service'
-import { publicImagePath } from '../../common/storage/public-images.controller'
+import { isPublicImagePath, publicImagePath } from '../../common/storage/public-images.controller'
 
 /** Locales the web app ships translations for (Plan §13). */
 export const SUPPORTED_LOCALES = ['en', 'es', 'ar', 'ur'] as const
@@ -262,6 +262,18 @@ export class UsersService {
       throw new BadRequestException(
         `"${String(patch.timezone)}" is not a timezone this system recognises`,
       )
+    }
+
+    /*
+     * A PICTURE IS ONE WE STORE, OR NONE: an upload's own address
+     * (`isPublicImagePath`), or the picture already saved, which a sign-in
+     * provider writes directly and a save sends back unchanged.
+     */
+    if (patch.avatarUrl !== undefined && patch.avatarUrl !== null && !isPublicImagePath(patch.avatarUrl, 'avatars/')) {
+      const [current] = await this.db.select({ avatarUrl: users.avatarUrl }).from(users).where(eq(users.id, userId)).limit(1)
+      if (patch.avatarUrl !== current?.avatarUrl) {
+        throw new BadRequestException('A profile picture must be an image uploaded here')
+      }
     }
 
     const set: Record<string, unknown> = { updatedAt: new Date() }

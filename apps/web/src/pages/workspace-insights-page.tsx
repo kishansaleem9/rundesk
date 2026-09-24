@@ -95,6 +95,9 @@ export function InsightsPage() {
   // was offered either (`found-24-sep/workspace-store-never-filled`).
   const { isManagerOrAbove: canManage } = useWorkspaceRole(workspaceId)
   const [contribPeriod, setContribPeriod] = useState<ContributionPeriod>('this-month')
+  // The sprint the Sprint period reports on: the one picked, else the active
+  // one that started last (the server's own default).
+  const [contribSprintId, setContribSprintId] = useState('')
   const hour = new Date().getHours()
   const greeting =
     hour < 12 ? t('insights.greetingMorning') : hour < 18 ? t('insights.greetingAfternoon') : t('insights.greetingEvening')
@@ -142,6 +145,7 @@ export function InsightsPage() {
           id: string
           name: string
           status: string
+          startDate?: string | null
           totalPoints: number
           completedPoints: number
         }>
@@ -182,11 +186,23 @@ export function InsightsPage() {
       >(`/tasks/workspace/${workspaceId}?limit=500`),
   })
 
-  // §7.14 — real per-member contribution factors + AI narrative for the period.
+  /*
+   * §7.14 — real per-member contribution factors + AI narrative for the period.
+   * The Sprint period names its sprint: the chip offered no way to choose one,
+   * so with two sprints running it always reported whichever started last
+   * (`product-siblings/contribution-sprint-unselectable`).
+   */
+  const sprintChoices = sprintsQ.data ?? []
+  const defaultSprint = sprintChoices
+    .filter((s) => s.status === 'active')
+    .sort((a, b) => String(b.startDate ?? '').localeCompare(String(a.startDate ?? '')))[0]
+  const chosenSprintId = contribPeriod === 'sprint' ? contribSprintId || defaultSprint?.id || '' : ''
   const contribQ = useQuery({
-    queryKey: ['contribution', workspaceId, contribPeriod],
+    queryKey: ['contribution', workspaceId, contribPeriod, chosenSprintId],
     queryFn: () =>
-      api<ContributionReport>(`/workspaces/${workspaceId}/reports/contribution?period=${contribPeriod}`),
+      api<ContributionReport>(
+        `/workspaces/${workspaceId}/reports/contribution?period=${contribPeriod}${chosenSprintId ? `&sprintId=${chosenSprintId}` : ''}`,
+      ),
   })
 
   // §7.12 — AI (with deterministic fallback) workload redistribution from real load.
@@ -219,7 +235,7 @@ export function InsightsPage() {
     try {
       await downloadFilePost(
         `/workspaces/${workspaceId}/reports/contribution.pdf`,
-        { period: contribPeriod },
+        { period: contribPeriod, ...(chosenSprintId ? { sprintId: chosenSprintId } : {}) },
         'rundesk-contribution.pdf',
       )
     } catch {
@@ -514,6 +530,21 @@ export function InsightsPage() {
                 </button>
               ))}
             </div>
+            {contribPeriod === 'sprint' && sprintChoices.length > 0 && (
+              <select
+                data-testid="contribution-sprint"
+                aria-label={t('insights.periodSprint')}
+                value={chosenSprintId}
+                onChange={(e) => setContribSprintId(e.target.value)}
+                className="h-7 rounded-md border border-border bg-card px-2 text-xs"
+              >
+                {sprintChoices.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name}
+                  </option>
+                ))}
+              </select>
+            )}
             {canManage && (
               <Button variant="outline" size="sm" onClick={downloadContributionPdf}>
                 <Download className="h-3.5 w-3.5" /> {t('insights.downloadPdf')}

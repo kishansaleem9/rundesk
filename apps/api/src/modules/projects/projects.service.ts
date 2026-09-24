@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
-import { eq, and, or, getTableColumns } from 'drizzle-orm'
+import { eq, and, or, asc, getTableColumns } from 'drizzle-orm'
 import { projects, spaces, projectMembers, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -131,7 +131,12 @@ export class ProjectsService {
       eq(projects.isArchived, false),
       eq(projects.isDefaultContainer, false),
     )
-    if (!actorId) return this.db.select().from(projects).where(base)
+    // In the order they were put in (`position`, then age), for every reader:
+    // the sidebar sorted for itself, and the fourteen other surfaces that read
+    // this took whatever order the database answered in
+    // (`ledger-rows/defect-projects-position-unordered`).
+    const order = [asc(projects.position), asc(projects.createdAt)] as const
+    if (!actorId) return this.db.select().from(projects).where(base).orderBy(...order)
     /*
      * THE SHARED CONTAINER RULE, not a copy of its project half: a private
      * project is its members' and its space's admins', and a private FOLDER is
@@ -146,6 +151,7 @@ export class ProjectsService {
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(and(base, containerVisibilityFilter(this.db, actorId, isManager)))
+      .orderBy(...order)
   }
 
   async getProject(projectId: string) {

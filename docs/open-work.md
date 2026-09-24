@@ -128,13 +128,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Measured, lane 1:* `clip-created-card` 26/26. It asserted the defect as the spec (a check that the description held the stub's link); that check is gone and six took its place, run against the real store: no link in the description; one attachment under the task's prefix with the recording's type and size; the store's own log shows the copy made from the clip the card uploaded and no second upload; the task's attachment URL serves the recording; the clip is in the library; and a failed attach (the clip deleted from the library between the upload and the press, which the API answers 404) is reported as such. Against the old build: the first five failed, the description holding `http://127.0.0.1:9101/…/clips/…webm?X-Amz-…`, and the library twin passed. (The first version of the failure check armed the store's fail-next-put for the copy; the AWS SDK retried the 500, and the attach went through. That is correct behaviour, so the check uses a failure that is not retried.) `object-key-boundaries` §5 gained the attach route's pair: a key that walks out of the clips is refused with nothing attached, and the workspace's own clip is attached as the task's copy and serves the clip (21/21). `check-s3-stub` 23/23 cases, 19/19 mutations. Break patches, each compiled: `ccc-1`/`ccc-2` re-anchored, `ccc-4` re-aimed (it claimed the removed check), `ccc-5..9` new, `okb-22`/`okb-23` new.
 
-### `product-siblings/contribution-sprint-unselectable` — open, small
+### `product-siblings/contribution-sprint-unselectable` — **closed**
 
 **The contribution report's 'Sprint' period cannot choose a sprint; ?sprintId has no client**
 
 *Evidence:* reports.controller.ts:204-205 accepts sprintId. reports.service.ts:1666-1678 falls back, when it is absent, to the most recently started ACTIVE sprint in the whole workspace. workspace-insights-page.tsx:186-190 sends only period, and :498 offers the 'sprint' chip with no picker. The PDF download at :218-224 does the same. Failure: two spaces run concurrent sprints and the chip always reports whichever started last. A finished sprint can never be reported. ClickUp sprint reports let you pick the sprint.
 
 *To close:* Add a sprint picker that sends sprintId to both the JSON and the PDF endpoints.
+
+*Closed:* the Sprint period offers the workspace's sprints in a picker. Its default is the active sprint begun last, the server's own default. The report and its PDF both ask for the one chosen. Found fixing it: the server resolved a sprint id with no read rule, so a member asking for a private space's sprint was given its name as the period's label. It now reads sprints as the sprints list does (`goalReach`, `sprintVisibilityFilter`), for an id and for the default alike. The new suite `contribution-sprint`, 0 of 3 before on lane 1, 3/3 after: the member's label for a private sprint's id, beside the admin's; the picker, its default and a choice, read from the page's label; and the PDF request's body. `csp-1..4`, each compiled. Regression: the settings sweep, above. In CI.
 
 ### `product-siblings/cover-dangles-after-attachment-delete` — **closed**, break run pending
 
@@ -182,13 +184,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Apply the same availability check to connectCalendar (client side, as the ledger says the server-side fix breaks app-catalogue).
 
-### `ledger-rows/defect-projects-position-unordered` — open, small
+### `ledger-rows/defect-projects-position-unordered` — **closed**
 
 **getProjectsBySpace has no ORDER BY, so a dragged order holds only in the sidebar**
 
 *Evidence:* reaudit.md:2658-2665 ('Not fixed'). projects.service.ts:129-153: both selects have no orderBy on position.
 
 *To close:* orderBy(projects.position, projects.createdAt) in both branches, with a check through a non-sidebar surface.
+
+*Closed:* `getProjectsBySpace` orders by position, then age, in both branches. It had just been rewritten for `found-24-sep/private-folders-unenforced`, so it now has one query per branch. The new suite `project-order`: positions planted by SQL in the reverse of the order the projects were made, two sharing a place. `GET /projects/space/:id`, which every non-sidebar surface reads, came back in the database's order before (lane 1: fourth, first, second, third) and in the dragged order after. `por-1`, compiled. Regression: the settings sweep, above. In CI.
 
 ### `product-siblings/docs-patch-mass-assign-public-share` — **closed**
 
@@ -264,13 +268,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Point the sidebar entry at the same folder dialog, so there is one create surface, or send the same fields. Add a check.
 
-### `commit-log/log-ea0b946-1` — open, small
+### `commit-log/log-ea0b946-1` — **closed** (66f518a; this row was not updated then)
 
 **Doc create, import and create-from-template accept a spaceId, and a parentDocId, from another workspace**
 
 *Evidence:* Commit ea0b946: 'neither create nor the import validates that spaceId belongs to the workspace ... could show another tenant's space NAME. Pre-existing, recorded here rather than folded into this change'. It is still true. docs.controller.ts:64-79 passes body.spaceId and body.parentDocId straight through. docs.service.ts:241-244 (create), :300-305 (import) and :399-400 (from template) insert them without checking. The list query at docs.service.ts:111 and :127 left-joins spaces and returns spaceName. Commit a866d86 fixed workspace membership only. Grep of docs/*.md finds no record of this defect, so the commit message is the only place it is written down.
 
 *To close:* In all three writers, refuse a spaceId whose space is not in the path's workspace, and a parentDocId whose doc is not in it. Add an e2e check that uses a second workspace, and a break patch that removes the check.
+
+*Closed (66f518a, 23 September), found still marked open on 24 September while reading the visible-bug list:* every doc writer guards its space and its parent. Create, import and create-from-template call `assertDocSpace`, a space of the path's own workspace that the writer may reach, and `assertDocParent`, a doc of the same workspace, reachable and never a descendant. PATCH writes only the fields in `doc-update-fields.ts` and refuses the rest by name. The evidence is recorded under `product-siblings/docs-patch-mass-assign-public-share` above: `doc-boundaries` 17/17, `db-1..17`. Read again today in docs.service: create at `assertDocSpace` and `assertDocParent`, import and template at `assertDocSpace`, update through `writable` and both guards.
 
 ### `product-siblings/meeting-record-panel-overwrites-key-with-signed-url` — **closed**
 
@@ -308,13 +314,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Send tag to the server (and include it in the query key). Compare case-insensitively on both sides.
 
-### `commit-log/missed-docs-patch-1` — open, small
+### `commit-log/missed-docs-patch-1` — **closed** (66f518a; this row was not updated then)
 
 **PATCH /docs/:docId is a fourth unchecked writer of spaceId and parentDocId, and it also writes undeclared columns**
 
 *Evidence:* docs.controller.ts:190-206 declares the body as an inline type literal. The global ValidationPipe (main.ts:38-46, whitelist:true) does not validate or strip a body whose metatype is plain Object, so every key reaches the service. docs.service.ts:452 then does `const set = { ...patch, updatedAt: new Date() }` and :455 writes it with db.update(docs).set(set). Consequences: (1) spaceId and parentDocId from another workspace are written with no check, the same defect ea0b946 recorded for create and import, through a route the finder did not list. (2) Columns the body never declares, including workspaceId, createdById, publicShareId (docs.ts:27) and plaintext, are also written. (3) There is no cycle check, so a doc can be made its own parent or its descendant's child (searching the docs module for 'cycle' or 'descendant' finds nothing). assertDocAccess (:179-188) checks only membership of the doc's CURRENT workspace, not a role. Reasoned from the code, not run against a live API.
 
 *To close:* Whitelist the patchable fields explicitly, rather than spreading the body. Refuse a spaceId or parentDocId outside the doc's workspace, and refuse a parent that is the doc itself or one of its descendants. Add an edit-permission check. Cover it with an e2e check that uses a second workspace, plus a break patch that restores the spread.
+
+*Closed (66f518a, 23 September), found still marked open on 24 September while reading the visible-bug list:* every doc writer guards its space and its parent. Create, import and create-from-template call `assertDocSpace`, a space of the path's own workspace that the writer may reach, and `assertDocParent`, a doc of the same workspace, reachable and never a descendant. PATCH writes only the fields in `doc-update-fields.ts` and refuses the rest by name. The evidence is recorded under `product-siblings/docs-patch-mass-assign-public-share` above: `doc-boundaries` 17/17, `db-1..17`. Read again today in docs.service: create at `assertDocSpace` and `assertDocParent`, import and template at `assertDocSpace`, update through `writable` and both guards.
 
 ### `product-siblings/planner-block-prefix-cannot-clear` — open, small
 
@@ -967,13 +975,15 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *Not measured by a check:* the task service's own read check sits behind the route guard on every route that reaches it, so no HTTP check can see it alone, and no patch is aimed at it.
 
-### `found-24-sep/workspace-settings-mass-assign` — open (security, HIGH; found reading the workspace logo's path for `avatar-and-logo-accept-any-url`)
+### `found-24-sep/workspace-settings-mass-assign` — **closed** (security, HIGH; found reading the workspace logo's path for `avatar-and-logo-accept-any-url`)
 
 **A workspace admin's settings save writes whatever columns its body names: the plan, its limits, and a custom domain's verification**
 
 *Evidence, measured on lane 1 (probe `probe-workspace-mass-assign`), as the admin of their own workspace (not a platform admin):* `PATCH /workspaces/:id` declares seven fields in an inline type, which nothing enforces at runtime, and `update` spreads the body into the row. One PATCH set `plan: "free"`, `planLimits: { seats: 99999 }`, `customDomainVerified: true` and `customDomainToken` to a value the caller chose (200 each, read back from the row). The plan belongs to the platform-admin route (`setWorkspacePlan`, super-admin only). Verification belongs to the DNS check. A verified custom domain is what `resolveByCustomDomain` serves a branded sign-in page for, and what `/public/tls/authorize` tells the proxy to get a certificate for. The first verified match wins, so a workspace could claim a domain it does not own, another customer's included.
 
 *To close:* the service writes the fields a settings save may change and no others (name, logo, colours, custom domain, the two sharing policies). The verified flag and the token change only through the domain's own paths. A suite: the admin's save that names the plan, the limits, the flag and the token changes none of them, beside the name it does change.
+
+*Closed:* `update` writes the name, logo and colours, and the custom domain and the two sharing policies by their own branches, and nothing else. The plan, its limits, the verified flag and the token are no longer a settings save's to write. The new suite `settings-writes`, with the picture item below. Its first check: a workspace admin who is not a platform admin names the plan, the limits, the flag and the token in the same save that renames the workspace. Only the name changes, read back from the row. `stw-1`, compiled. Regression on lane 1, 19/19, one sweep for this batch (settings, pictures, the contribution sprint and project order): `settings-writes`, `contribution-sprint`, `project-order`, `credential-reads`, `stable-images`, `settings-depth`, `file-exports`, `workspace-role-controls`, `person-panel`, `sprint-access`, `sidebar-reorder`, `sidebar-sections`, `space-create-menu`, `list-under-space`, `planner-settings`, `space-wizard`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — **closed** (security, medium; a duplicated rule, found fixing docs, measured leaking)
 
@@ -1419,13 +1429,15 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 
 *Closed:* the proxy's retry covers the sign-up POST on the same budget (a 429 is refused before the handler, so a retry makes no second account), and `signUpApi` in `signin.mjs` does the same for the two suites that sign up against the API directly (`search-sources`, `view-visibility`). Measured through the proxy: twelve sign-ups in a burst — 12 × 201 after waiting 48 seconds for the window, where the old proxy handed back 429 to the last four. search-sources, view-visibility, credential-reads, permission-guards 4/4. `pgd-5` is re-run in the next plan.
 
-### `found-23-sep/avatar-and-logo-accept-any-url` — open, small (found closing the expiring-avatar item)
+### `found-23-sep/avatar-and-logo-accept-any-url` — **closed** (security, small; found closing the expiring-avatar item)
 
 **`avatarUrl` and `logoUrl` are saved as whatever string arrives**
 
 *Evidence:* `PATCH /users/me` takes `avatarUrl?: string | null` with no validation (users.controller.ts:24, an inline type, no DTO), and `PATCH /workspaces/:id` the same for `logoUrl`. So a picture can point at any host — every viewer's browser then asks that host for it, handing over the viewer's address and when they looked — or at a string that is no image at all.
 
 *To close:* accept only our own `/api/v1/public/images/…` address and the OAuth providers' avatar hosts (whatever the sign-in flows store), refuse the rest with a 400 in the service, and a suite pairing a refused foreign URL with an accepted upload. Research what ClickUp allows (it takes uploads only).
+
+*Closed:* a picture is one we store, or none. `isPublicImagePath` (`public-images.controller.ts`, beside `publicImagePath`) accepts an upload's own address, one safe key segment under `avatars/` or `workspace-logos/`, so no `..` walks to another object. The sign-in provider writes its picture directly, not through the profile save. A save that sends back the picture already saved keeps it, so a profile form's round trip is not refused, and anything else is a 400. The settings page's logo is an upload with a Remove button; its address box, placeholder "https://…/logo.png", invited what the save now refuses. `settings-writes`: 0 of 4 before on lane 1, 5/5 after. Its checks: the admin's save; a logo at another host refused and not saved, beside the workspace's own upload; a profile picture the same, and none removing it; a provider's picture sent back kept, and a `..` walk refused; and the page offering the logo as an upload only. The page check was added after the first measurement; `stw-6` restores the box it guards. `stw-2..6`, each compiled. Regression: the sweep above. In CI.
 
 ### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
 
@@ -1502,6 +1514,18 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *Closed:* a signature in either place counts, and an unsigned PUT is still refused. The stub also serves CopyObject (the source's bytes, the requested type under `REPLACE`, `NoSuchKey` for a missing source, the source noted in the request log), which `check-s3-stub` drives through the real `R2Service`: 23/23 cases, 19/19 mutations.
 
 ## Test-suite defects (chains, catches, fingerprints, branches) — 21
+
+### `found-24-sep/drifted-plan-three-patches-unaimed` — **closed**, re-runs pending (test tooling; found judging today's drifted break plan)
+
+**The plan that re-measured today's drift (106 sets, 580 patches, lanes 3 and 4) left three patches that prove nothing, and one check that could not fail on this date**
+
+*Evidence (the plan's logs, read by `check-break-reddened`):*
+- `prail-3-finished-work-is-still-assigned` reddened nothing (0 failed). It removed the planner rail's own "open work" filter, and the member endpoint the rail reads has returned open work only since `ecd6bb0`. So the client filter restates the server's rule, and removing it changes nothing.
+- `pv-2-the-arrows-always-move-a-week` reddened nothing. Its check, "next in Month view moves to a different month", pressed next once and compared labels. On 24 September a week's step also lands in October, so the check passed with the arrow moving a week. It could only fail in the first three weeks of a month.
+- `lwb-1-noorder` was unproven: a check failed, not the one it claimed. Without an ORDER BY the database answers in whatever order it holds the rows, so which order-dependent check falls is the database's choice. On 23 September it was the rename check, today the token's binding.
+- The plan's other 103 sets ran; `task-cover`'s and `calendar-accounts`' baselines were refused, the second a real defect (`found-24-sep/zoom-row-not-connected-while-loading`, closed) and the first a run under load (42/42 on lanes 1 and 2 since, 20 of 20 patches reddened).
+
+*Closed:* `prail-3` takes the rule out where it lives, the member endpoint's closed filter. `planner-views` presses next twice and needs three different months: two week-long steps cannot cross two month boundaries, and two month-long steps always do. `lwb-1` claims both order-dependent checks. The re-runs are on lane 2, with `calendar-accounts`' own set in the second drifted plan (76 sets, 657 patches, started on lanes 3 and 4 after today's fixes drifted them).
 
 ### `suite-hygiene/hand-rolled-chains` — open, large
 

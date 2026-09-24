@@ -1712,18 +1712,23 @@ export class ReportsService {
     period: ContributionPeriodType,
     sprintId: string | undefined,
     now: Date,
+    actor?: { id: string; role?: string | null },
   ): Promise<{ from: Date; to: Date; meta: ContributionPeriod }> {
     if (period === 'sprint') {
+      // Only a sprint the reader may read (`read-access.ts`): an id named a
+      // private space's sprint, and its name came back as the period's label.
+      const reach = actor ? await goalReach(this.db, workspaceId, actor) : 'all'
+      const readable = reach === 'none' ? sql`false` : reach === 'spaces' && actor ? sprintVisibilityFilter(this.db, actor.id) : undefined
       const rows = sprintId
         ? await this.db
             .select()
             .from(sprints)
-            .where(and(eq(sprints.id, sprintId), eq(sprints.workspaceId, workspaceId)))
+            .where(and(eq(sprints.id, sprintId), eq(sprints.workspaceId, workspaceId), readable))
             .limit(1)
         : await this.db
             .select()
             .from(sprints)
-            .where(and(eq(sprints.workspaceId, workspaceId), eq(sprints.status, 'active')))
+            .where(and(eq(sprints.workspaceId, workspaceId), eq(sprints.status, 'active'), readable))
             .orderBy(desc(sprints.startDate))
             .limit(1)
       const s = rows[0]
@@ -1768,7 +1773,13 @@ export class ReportsService {
     const now = new Date()
     const period = opts.period ?? 'this-month'
     const viewer = opts.viewer ?? { kind: 'all' }
-    const { from, to, meta } = await this.resolveContributionPeriod(workspaceId, period, opts.sprintId, now)
+    const { from, to, meta } = await this.resolveContributionPeriod(
+      workspaceId,
+      period,
+      opts.sprintId,
+      now,
+      ctx.userId ? { id: ctx.userId, role: ctx.role } : undefined,
+    )
 
     // §2 per-item privacy: exclude private tasks the caller can't see from the
     // per-assignee completion and per-actor activity aggregates below.
