@@ -2,7 +2,7 @@ import { Injectable, Inject, Logger, NotFoundException } from '@nestjs/common'
 import { Cron, CronExpression } from '@nestjs/schedule'
 import { ConfigService } from '@nestjs/config'
 import { and, eq, sql } from 'drizzle-orm'
-import { customReports, users } from '@rundesk/db'
+import { customReports, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { ReportsService, reportResultToCsv, type ReportDefinition } from './reports.service'
@@ -79,6 +79,9 @@ type ScheduledReportRow = {
   scheduleRecipients: string[]
   lastSentAt: Date | string | null
   ownerEmail: string | null
+  /** Who the report is run as: its owner, whose view of the workspace it is. */
+  createdById: string | null
+  ownerRole: string | null
 }
 
 /**
@@ -152,6 +155,8 @@ export class ScheduledReportsService {
         scheduleRecipients: customReports.scheduleRecipients,
         lastSentAt: customReports.lastSentAt,
         ownerEmail: users.email,
+        createdById: customReports.createdById,
+        ownerRole: users.role,
       })
       .from(customReports)
       .leftJoin(users, eq(users.id, customReports.createdById))
@@ -165,6 +170,20 @@ export class ScheduledReportsService {
    * when the schedule list is empty. Returns the resolved recipient list.
    */
   private async deliver(report: ScheduledReportRow, now: Date): Promise<string[]> {
+    /*
+     * RUN AS ITS OWNER, not as nobody. With no actor the report covered the
+     * whole workspace, private spaces a member was refused included, and went
+     * to whatever addresses that member typed — any member could save one and
+     * press "send now" (`found-23-sep/workspace-reads-skip-the-container-rule`).
+     * As its owner it carries what the owner could run and export themselves.
+     * An owner gone from the workspace, or deleted, sends nothing: stamped, so
+     * it is not reconsidered every hour.
+     */
+    if (!report.createdById || !(await this.ownerStillMember(report.workspaceId, report.createdById))) {
+      this.logger.warn(`Scheduled report ${report.id} has no owner in its workspace; not sending it`)
+      await this.stamp(report.id, now)
+      return []
+    }
     const recipients = this.resolveRecipients(report)
     if (recipients.length === 0) {
       this.logger.warn(`Scheduled report ${report.id} has no recipients (and no owner email); skipping`)
@@ -173,7 +192,10 @@ export class ScheduledReportsService {
       return []
     }
 
-    const result = await this.reports.runCustomReport(report.workspaceId, report.definition ?? {})
+    const result = await this.reports.runCustomReport(report.workspaceId, report.definition ?? {}, {
+      id: report.createdById,
+      role: report.ownerRole,
+    })
     const csv = reportResultToCsv(result)
     const columns = [humanize(result.dimension), ...result.metrics.map(humanize)]
     const tableRows = result.rows.map((r) => [r.label, ...result.metrics.map((m) => r.values[m] ?? 0)])
@@ -203,6 +225,16 @@ export class ScheduledReportsService {
     await this.stamp(report.id, now)
     this.logger.log(`Report "${report.name}" (${report.id}) sent to ${delivered}/${recipients.length} recipient(s)`)
     return recipients
+  }
+
+  /** Whether the report's owner is still in its workspace; a seam its tests answer. */
+  protected async ownerStillMember(workspaceId: string, userId: string): Promise<boolean> {
+    const [m] = await this.db
+      .select({ userId: workspaceMembers.userId })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return !!m
   }
 
   /** Recipients from the schedule list, or the owner email as the default. */

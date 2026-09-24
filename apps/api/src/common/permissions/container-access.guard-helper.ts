@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, ne, or, type SQL } from 'drizzle-orm'
-import { spaceMembers, projectMembers, workspaceMembers, spaces, projects } from '@rundesk/db'
+import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole } from './item-visibility'
 
@@ -114,4 +114,23 @@ export function containerVisibilityFilter(db: Db, actorId: string, isManager: bo
       inArray(projects.spaceId, adminSpaces),
     ),
   )
+}
+
+/**
+ * The container rule for a query that has `tasks` in scope and NOT its project
+ * and space: `tasks.list_id` in the lists this person may reach in this
+ * workspace. Self-contained — its subquery joins its own lists, projects and
+ * spaces, so it works in a left join's ON clause, before the outer joins, and
+ * where the outer query never joins them at all (a report of time entries or
+ * sprint tasks). `undefined` for a manager.
+ */
+export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, isManager: boolean): SQL | undefined {
+  if (isManager) return undefined
+  const reachable = db
+    .select({ id: lists.id })
+    .from(lists)
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false)))
+  return inArray(tasks.listId, reachable)
 }

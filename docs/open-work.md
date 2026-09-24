@@ -609,7 +609,16 @@ The graph now takes its reader. It keeps only tasks they may open, then only wha
 
 The new suite `dependency-read-access`, 3/3 on lane 1 (3 of 3 failed before). Its graph check also plants a task reached only through the hidden one. `dra-1..4`, each compiled (`dra-2` removes only the pruning). The unit test of the notice had its fake database answer every query in order, so the new visibility query drained it. A seam, `canUserSeeTask`, now answers it there, and a new unit test holds the notice to naming the blocker only for the recipient who may open it. API unit tests 1625/1625. Regression on four lanes, 22/22: the planner and lookup suites (for the delegation), task boundaries, merge and depth, notifications and the inbox, doc links, replies, access requests, settings, the pickers, chat actions, loading states, panel collapse, `workspace-read-access`, both video-1 suites and `video-regression`. One, `inbox-scope`, failed first on a race of its own, below, and passed once that was fixed. In CI.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the reports next (the unattended scheduled one first), then the rest.
+*Fixed next: reports, and the mailer that ran them as nobody.* Measured on lane 1 before the fix, as a member refused a private space holding three tasks:
+- the overview, completion, workload, status durations, time by project and the custom report answered the member exactly as they answered the admin, the refused space's tasks counted in (the overview's total 4 for both, where the member may open 1);
+- project health listed the refused space's project, the activity feed and a day's workload named its tasks, and a custom report by project named the project;
+- any member could rename, re-address, send and delete another person's saved report (200, 201, 200). The mailer ran every report with no actor, the whole workspace, to whatever addresses were typed. So any member could save a report, or take somebody else's, and mail the workspace out.
+
+Every report's task set now takes the container rule, not only the private-item rule. `taskInReachFilter` (next to `containerVisibilityFilter`) states it as a predicate over `tasks.list_id` alone, because three of the report queries apply their filter in a left join's ON clause, or never join a project at all. Project health lists only projects the reader may open. A saved report is its owner's (or a manager's) to edit, send and delete; anyone else gets not-found. The mailer runs each report as its owner, and sends nothing, stamped, for an owner who has left or been deleted.
+
+The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the member's own report passed both times). The mailer's half is two unit tests in `scheduled-reports.service.test.ts`, because lanes log a sent email's subject and not its body: it runs a report as its owner, and sends nothing for a departed or deleted one. `rra-1..5`, each compiled; `rra-6..7` are unit claims shown to fail their tests. API unit tests 1627/1627. Five reports still answer a member as the admin in the probe (productivity trend, status durations, time by project, sprints, goals). The first four go through the same filter and had nothing of the space to count (no completions, status changes, time or sprints). Goals take no reader at all and are not measured. Regression on lane 1, 16/16: the new suite, the suites that read reports or the workload (`addressability-live`, `person-panel`, `ai-assign`, `ai-answer-rendering`, `create-menu-ai`), the ones built on the container rule's helper (`request-access`, `space-create-menu`, `space-wizard-views`, `doc-task-links`, `task-depth`, `malformed-ids`, `panel-collapse`), `video1-fast-items`, `video-regression` and `ui-sweep`. In CI.
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* goals (the report takes no reader); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
@@ -651,6 +660,18 @@ The new suite `custom-field-access`, 4/4 on lane 1 (all 4 failed before; the mem
 *Evidence:* `assigneeId=me agrees with the member endpoint (13 <= 9)` failed on lane 1. Read row by row in the admin's Main Workspace, the listing held 13 and the member endpoint 9, and the four extra rows were all closed; nothing was in the member endpoint that the listing lacked. `ecd6bb0` (`home-today-overdue-includes-closed`) made that endpoint Home's open work, and its regression sweep did not include this suite. So the suite's premise went stale with the change, not the product.
 
 *Closed:* the check compares on open work, row by row: every open task the listing holds is in the member endpoint. It makes an open task assigned to the admin first (and removes it after), so it is never two empty lists; a fresh database assigns the admin nothing. It passes on lane 1 in the docs sweep.
+
+### `found-24-sep/report-exports-wrapped-in-the-envelope` — open, medium (visible bug; found measuring reports)
+
+**Exporting a custom report fails for everyone: the CSV answers 500, and the PDF downloads as JSON**
+
+*Evidence, measured on lane 1 as the admin:*
+- `POST /workspaces/:ws/reports/custom/export` answered 500, and the log says `Attempted to send payload of invalid type 'object'. Expected a string or Buffer.`
+- `POST .../custom/export.pdf` answered 201 with `application/json` and a body beginning `{"data":{"options":{"type":"application/pdf"...`, a description of the file rather than the file.
+
+The global `ResponseInterceptor` wraps every return value as `{ data, meta, error }`. That includes a `StreamableFile`, and a string returned by a handler that declared `Content-Type: text/csv`. The security audit-log export is written the same way (a `text/csv` header over a returned string) and is likely broken too, not yet measured (the probe had its path wrong).
+
+*To close:* let the envelope pass a `StreamableFile`, and a body whose handler declared a non-JSON content type, through unwrapped. Then a suite that downloads each export and reads a CSV header row and a `%PDF` prefix.
 
 ### `found-24-sep/doc-writes-are-the-read-rule` — open, medium (security; found fixing docs)
 

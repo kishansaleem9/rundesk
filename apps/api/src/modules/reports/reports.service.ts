@@ -28,6 +28,8 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { isUuid } from '../../common/validation/uuid'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
 
@@ -449,7 +451,15 @@ export class ReportsService {
   ): Promise<SQL | undefined> {
     if (!actor) return undefined
     const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-    return taskVisibilityFilter(this.db, actor.id, isManager)
+    /*
+     * The container rule too, which no report applied: measured on lane 1, a
+     * member refused a private space was answered by the overview, completion,
+     * workload and the custom report exactly as the admin was, its tasks
+     * counted, and project health, activity and a day's workload named them.
+     * `taskInReachFilter` needs only `tasks` in scope, so it holds in the left
+     * joins and the time and sprint queries that never join a project.
+     */
+    return and(taskInReachFilter(this.db, workspaceId, actor.id, isManager), taskVisibilityFilter(this.db, actor.id, isManager))
   }
 
   async getProductivity(
@@ -1189,11 +1199,16 @@ export class ReportsService {
     // persisted snapshots stay workspace-wide.
     const visFilter = await this.taskVisibilityFilterForWorkspace(workspaceId, actor)
 
+    // The projects themselves are named, so they take the container rule as
+    // well as their tasks: a refused space's project was listed by name.
+    const projectsInReach = actor
+      ? containerVisibilityFilter(this.db, actor.id, await resolveIsManager(this.db, workspaceId, actor.id, actor.role))
+      : undefined
     const projectRows = await this.db
       .select({ id: projects.id, name: projects.name, color: projects.color })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), eq(projects.isArchived, false)))
+      .where(and(eq(spaces.workspaceId, workspaceId), eq(projects.isArchived, false), projectsInReach))
       .orderBy(asc(projects.name))
 
     const taskRows = await this.db
@@ -1616,11 +1631,34 @@ export class ReportsService {
     return row
   }
 
+  /**
+   * A saved report is its owner's to change, delete and send — or a manager's.
+   * Any member could do all three to anybody's (measured on lane 1: another
+   * member's report renamed, pointed at an outside address, sent and deleted,
+   * 200/201/200). A report is sent AS its owner, so that was a way to mail out
+   * a manager's view of the workspace. Not found for anybody else, as for a
+   * report of another workspace.
+   */
+  async assertSavedReportOwner(workspaceId: string, reportId: string, actor: { id: string; role?: string | null }) {
+    if (!isUuid(reportId)) throw new NotFoundException('Report not found')
+    const [row] = await this.db
+      .select({ createdById: customReports.createdById })
+      .from(customReports)
+      .where(and(eq(customReports.id, reportId), eq(customReports.workspaceId, workspaceId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Report not found')
+    if (row.createdById === actor.id) return
+    if (await resolveIsManager(this.db, workspaceId, actor.id, actor.role)) return
+    throw new NotFoundException('Report not found')
+  }
+
   async updateSavedReport(
     workspaceId: string,
     id: string,
     patch: { name?: string; definition?: ReportDefinition; schedule?: ReportScheduleInput },
+    actor: { id: string; role?: string | null },
   ) {
+    await this.assertSavedReportOwner(workspaceId, id, actor)
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.name !== undefined) set.name = patch.name.trim() || 'Untitled report'
     if (patch.definition !== undefined) {
@@ -1645,7 +1683,8 @@ export class ReportsService {
     return row
   }
 
-  async deleteSavedReport(workspaceId: string, id: string) {
+  async deleteSavedReport(workspaceId: string, id: string, actor: { id: string; role?: string | null }) {
+    await this.assertSavedReportOwner(workspaceId, id, actor)
     const [row] = await this.db
       .delete(customReports)
       .where(and(eq(customReports.id, id), eq(customReports.workspaceId, workspaceId)))

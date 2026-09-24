@@ -105,6 +105,8 @@ type FakeRow = {
   scheduleRecipients: string[]
   lastSentAt: Date | string | null
   ownerEmail: string | null
+  createdById: string | null
+  ownerRole: string | null
 }
 
 /** Minimal Drizzle stand-in: select() yields the report rows; update() records stamps. */
@@ -130,12 +132,14 @@ function makeDb(rows: FakeRow[]) {
   return { db, stamped }
 }
 
-function makeService(rows: FakeRow[]) {
+function makeService(rows: FakeRow[], owners: { stillMember?: (userId: string) => boolean } = {}) {
   const { db, stamped } = makeDb(rows)
   const runCalls: string[] = []
+  const runAs: Array<{ id: string; role?: string | null } | undefined> = []
   const reports: any = {
-    runCustomReport: async (_workspaceId: string, _def: unknown) => {
+    runCustomReport: async (_workspaceId: string, _def: unknown, actor?: { id: string; role?: string | null }) => {
       runCalls.push(_workspaceId)
+      runAs.push(actor)
       return {
         dimension: 'assignee',
         metrics: ['tasks-count'],
@@ -152,7 +156,9 @@ function makeService(rows: FakeRow[]) {
   }
   const config: any = { get: () => 'http://app.test' }
   const svc = new ScheduledReportsService(db, reports, email, config)
-  return { svc, stamped, emailCalls, runCalls }
+  // The owner's membership, answered here rather than by the fake database.
+  ;(svc as any).ownerStillMember = async (_ws: string, userId: string) => (owners.stillMember ?? (() => true))(userId)
+  return { svc, stamped, emailCalls, runCalls, runAs }
 }
 
 const row = (over: Partial<FakeRow> = {}): FakeRow => ({
@@ -166,6 +172,8 @@ const row = (over: Partial<FakeRow> = {}): FakeRow => ({
   scheduleRecipients: ['team@x.com'],
   lastSentAt: null,
   ownerEmail: 'owner@x.com',
+  createdById: 'owner-1',
+  ownerRole: 'member',
   ...over,
 })
 
@@ -212,6 +220,27 @@ describe('ScheduledReportsService.dispatch', () => {
       emailCalls.map((c) => c.to),
       ['owner@x.com'],
     )
+  })
+
+  it('runs each report as its owner, not as nobody', async () => {
+    // With no actor a report covered the whole workspace, private spaces its
+    // owner was refused included, and went to any address they typed.
+    const { svc, runAs, emailCalls } = makeService([row({ id: 'mine', scheduleHour: 8, createdById: 'owner-1', ownerRole: 'member' })])
+    await svc.dispatch(now)
+    assert.equal(emailCalls.length, 1)
+    assert.deepEqual(runAs, [{ id: 'owner-1', role: 'member' }])
+  })
+
+  it('sends nothing for a report whose owner has left the workspace, or was deleted, and stamps it', async () => {
+    const { svc, emailCalls, runCalls, stamped } = makeService(
+      [row({ id: 'left', scheduleHour: 8, createdById: 'gone-1' }), row({ id: 'deleted', scheduleHour: 8, createdById: null })],
+      { stillMember: (userId) => userId !== 'gone-1' },
+    )
+    const res = await svc.dispatch(now)
+    assert.equal(emailCalls.length, 0)
+    assert.equal(runCalls.length, 0, 'a report with no owner in the workspace was still run')
+    assert.equal(stamped.length, 2)
+    assert.equal(res.due, 2)
   })
 
   it('delivers each recipient and keeps one report failure from blocking others', async () => {

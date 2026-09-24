@@ -295,17 +295,21 @@ export class ReportsController {
   updateSaved(
     @Param('workspaceId') workspaceId: string,
     @Param('reportId') reportId: string,
+    @CurrentUser() user: { id: string; role?: string },
     @Body() body: { name?: string; definition?: ReportDefinition; schedule?: ReportScheduleInput },
   ) {
-    return this.reports.updateSavedReport(workspaceId, reportId, body ?? {})
+    return this.reports.updateSavedReport(workspaceId, reportId, body ?? {}, user)
   }
 
   @Post('custom/:reportId/send-now')
   @ApiOperation({ summary: 'Send a saved custom report immediately to its recipients (§9.5)' })
-  sendNow(
+  async sendNow(
     @Param('workspaceId') workspaceId: string,
     @Param('reportId') reportId: string,
+    @CurrentUser() user: { id: string; role?: string },
   ) {
+    // Its owner's to send, or a manager's; it is then run as its owner.
+    await this.reports.assertSavedReportOwner(workspaceId, reportId, user)
     return this.scheduledReports.sendReportNow(workspaceId, reportId)
   }
 
@@ -314,7 +318,8 @@ export class ReportsController {
   deleteSaved(
     @Param('workspaceId') workspaceId: string,
     @Param('reportId') reportId: string,
+    @CurrentUser() user: { id: string; role?: string },
   ) {
-    return this.reports.deleteSavedReport(workspaceId, reportId)
+    return this.reports.deleteSavedReport(workspaceId, reportId, user)
   }
 }
