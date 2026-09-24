@@ -452,6 +452,17 @@ export class PlannerService {
         throw new BadRequestException(`Colour tasks by must be one of ${allowed.join(', ')}`)
       }
     }
+    /*
+     * The block prefix: a word or two, or null to go back to "Work on" (both
+     * readers fall back on null). The box sent `undefined` when emptied, which
+     * JSON drops, so the merge below kept the old prefix and it could never be
+     * cleared (`product-siblings/planner-block-prefix-cannot-clear`).
+     */
+    if (patch.blockPrefix !== undefined && patch.blockPrefix !== null) {
+      if (typeof patch.blockPrefix !== 'string' || patch.blockPrefix.trim().length > 40) {
+        throw new BadRequestException('The block prefix must be text, 40 characters at most')
+      }
+    }
     if (patch.defaultDurationMinutes !== undefined) {
       const n = patch.defaultDurationMinutes
       if (!Number.isInteger(n) || n < 5 || n > 24 * 60) {

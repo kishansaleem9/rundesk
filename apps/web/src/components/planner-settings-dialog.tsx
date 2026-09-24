@@ -112,7 +112,7 @@ type Settings = {
   alwaysOpenAtStartOfWeek?: boolean
   darkenNonWorkingHours?: boolean
   savePersonalEventsQuickly?: boolean
-  blockPrefix?: string
+  blockPrefix?: string | null
   showAssigned?: boolean
   showRecurring?: boolean
   showOverdue?: boolean
@@ -640,7 +640,9 @@ export function PlannerSettingsDialog({
                 <Row label={t('plannerSettings.blockPrefix')} hint={t('plannerSettings.blockPrefixHint')}>
                   <input
                     defaultValue={settings?.blockPrefix ?? t('planner.workOn')}
-                    onBlur={(e) => set({ blockPrefix: e.target.value.trim() || undefined })}
+                    // An empty box is null, "back to Work on": `undefined` is dropped by
+                    // JSON, so the old prefix stayed and could never be cleared.
+                    onBlur={(e) => set({ blockPrefix: e.target.value.trim() || null })}
                     data-testid="planner-block-prefix"
                     className="h-8 w-40 rounded-md border border-border bg-background px-2 text-[12px]"
                   />

@@ -59,6 +59,12 @@ export class MeetingsController {
     return this.meetings.ask(workspaceId, user.id, body?.question ?? '')
   }
 
+  @Get('workspaces/:workspaceId/meetings/tags')
+  @ApiOperation({ summary: '§A6 — the tags in use on the workspace’s meetings, one per word whatever its case' })
+  tags(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string }) {
+    return this.meetings.tags(workspaceId, user.id)
+  }
+
   @Get('workspaces/:workspaceId/meetings/upcoming')
   @ApiOperation({ summary: '§2.8 — meetings still to come, soonest first' })
   upcoming(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string }) {

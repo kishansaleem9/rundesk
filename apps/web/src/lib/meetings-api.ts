@@ -46,10 +46,24 @@ export interface Meeting {
 
 const base = (workspaceId: string) => `/workspaces/${workspaceId}/meetings`
 
-export function useMeetings(workspaceId: string) {
+/**
+ * The meetings, or those carrying `tag`, which the SERVER chooses: the list is
+ * its newest 200, so a tag filtered here in the browser could never reach an
+ * older meeting (`product-siblings/meetings-tag-filter-client-side`).
+ */
+export function useMeetings(workspaceId: string, tag?: string | null) {
   return useQuery({
-    queryKey: ['meetings', workspaceId],
-    queryFn: () => api<Meeting[]>(base(workspaceId)),
+    queryKey: ['meetings', workspaceId, { tag: tag ?? null }],
+    queryFn: () => api<Meeting[]>(tag ? `${base(workspaceId)}?tag=${encodeURIComponent(tag)}` : base(workspaceId)),
+    enabled: !!workspaceId,
+  })
+}
+
+/** The tags in use on every meeting, one per word whatever its case. */
+export function useMeetingTags(workspaceId: string) {
+  return useQuery({
+    queryKey: ['meetings', workspaceId, 'tag-list'],
+    queryFn: () => api<string[]>(`${base(workspaceId)}/tags`),
     enabled: !!workspaceId,
   })
 }

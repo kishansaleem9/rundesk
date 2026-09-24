@@ -180,7 +180,7 @@ export type PlannerSettings = {
    * The Time-blocking page. `blockPrefix` is the "Work on" of frame `14:45` —
    * dragging task `dbgdh` onto the grid makes a block called "Work on dbgdh".
    */
-  blockPrefix?: string
+  blockPrefix?: string | null
   showAssigned?: boolean
   /** Future occurrences of a block whose task recurs, projected onto the grid.
    *  Reader: `workspace-planner-page.tsx`, `planner-recurring-block`. */

@@ -245,7 +245,15 @@ export class MeetingsService {
         and(
           eq(meetings.workspaceId, workspaceId),
           opts.taskId ? eq(meetings.taskId, opts.taskId) : undefined,
-          tag ? sql`${meetings.tags} @> ARRAY[${tag}]::text[]` : undefined,
+          /*
+           * WHATEVER ITS CASE. A meeting's own tags are one per word whatever
+           * the case (`normalizeMeetingTags`), and so are the chips; this
+           * compared exact case, so "Standup" did not find "standup"
+           * (`product-siblings/meetings-tag-filter-client-side`).
+           */
+          tag
+            ? sql`exists (select 1 from unnest(${meetings.tags}) as t where lower(t) = lower(${tag}))`
+            : undefined,
         ),
       )
       // Newest first, and meetings with no start time fall back to when the
@@ -276,6 +284,24 @@ export class MeetingsService {
    * nothing to say it had, and the person would simply not be told about a call
    * that is about to start.
    */
+  /**
+   * §A6 [19:16–19:20] — the tags in use, for the "Tags:" chips: from EVERY
+   * meeting, one per word whatever its case, in alphabetical order. The chips
+   * were built from the list the page had loaded, its newest 200, so a tag
+   * only an older meeting carried had no chip and could not be reached
+   * (`product-siblings/meetings-tag-filter-client-side`).
+   */
+  async tags(workspaceId: string, userId: string): Promise<string[]> {
+    await this.assertMember(workspaceId, userId)
+    const found = await this.db.execute(sql`
+      select distinct on (lower(t)) t as tag
+      from ${meetings}, unnest(${meetings.tags}) as t
+      where ${meetings.workspaceId} = ${workspaceId}
+      order by lower(t), t`)
+    const rows = (Array.isArray(found) ? found : (found as { rows?: unknown[] }).rows ?? []) as Array<{ tag: string }>
+    return rows.map((r) => r.tag)
+  }
+
   async upcoming(workspaceId: string, userId: string, now: Date = new Date()) {
     await this.assertMember(workspaceId, userId)
     const rows = await this.db

@@ -22,6 +22,7 @@ import {
   untilLabel,
   useAskMeetings,
   useMeetings,
+  useMeetingTags,
   useUpcomingMeetings,
   type Meeting,
 } from '../lib/meetings-api'
@@ -48,33 +49,27 @@ export function MeetingsPage() {
   const { t } = useTranslation()
   const me = useAuthStore((s) => s.user)
 
-  const meetingsQuery = useMeetings(workspaceId)
-  const { data: upcoming = [] } = useUpcomingMeetings(workspaceId)
-
   const [query, setQuery] = useState('')
   const [mineOnly, setMineOnly] = useState(false)
   const [tag, setTag] = useState<string | null>(null)
 
-  const all = meetingsQuery.data
+  // The server chooses the meetings for a tag, whatever its case.
+  const meetingsQuery = useMeetings(workspaceId, tag)
+  const { data: upcoming = [] } = useUpcomingMeetings(workspaceId)
   /*
-   * The chips are the tags in use, sorted, de-duplicated case-insensitively so
-   * "Standup" and "standup" are one chip rather than two that look identical.
+   * The chips are the tags in use on EVERY meeting, one per word whatever its
+   * case, so "Standup" and "standup" are one chip rather than two that look
+   * identical. They were built from the list this page had loaded, its newest
+   * 200, so a tag only an older meeting carried had no chip.
    */
-  const allTags = useMemo(() => {
-    const seen = new Map<string, string>()
-    for (const m of all ?? []) for (const raw of m.tags ?? []) {
-      const key = raw.toLowerCase()
-      if (!seen.has(key)) seen.set(key, raw)
-    }
-    return [...seen.values()].sort((a, b) => a.localeCompare(b))
-  }, [all])
+  const { data: allTags = [] } = useMeetingTags(workspaceId)
 
+  const all = meetingsQuery.data
   const filtered = useMemo(() => {
     const rows = all ?? []
     const needle = query.trim().toLowerCase()
     return rows.filter((m) => {
       if (mineOnly && m.createdById !== me?.id) return false
-      if (tag && !(m.tags ?? []).includes(tag)) return false
       if (!needle) return true
       return (
         m.title.toLowerCase().includes(needle) ||
@@ -82,7 +77,7 @@ export function MeetingsPage() {
         m.attendees.some((a) => (a.name ?? a.email ?? '').toLowerCase().includes(needle))
       )
     })
-  }, [all, query, mineOnly, tag, me?.id])
+  }, [all, query, mineOnly, me?.id])
 
   return (
     <div className="p-6 space-y-6" data-testid="meetings-page">

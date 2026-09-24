@@ -278,7 +278,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Point the sidebar entry at the same folder dialog, so there is one create surface, or send the same fields. Add a check.
 
-*Closed:* the sidebar's "New folder" opens the Create menu's Folder form on its space, the way its "+" menu opens the other seven types (`spaceCreate`). There is one folder form, and the sidebar's own dialog is gone, with its two strings. The form was already the one the sidebar dialog was kept apart from: it keeps a refused name in its box and says why. `folder-create`'s sidebar path drives that form now, 22 checks: 15 of 22 before on lane 1 (the sidebar opened its own dialog, with no Folder tab and no space chosen), 22/22 after. Two new checks: the form opens on the Folder tab with this space chosen, and the folder saved from the sidebar holds the description and privacy typed into it, read back by SQL. One check passed without testing anything: "a name that is free closes the dialog" held for a dialog that never opened. It now requires the dialog to have been open. Patches: `folder-create-9` claims the sidebar path's refusal too, since it is that form's `onError`; `-10` (the button does nothing) and `-11` (the form closes on a refusal) are re-aimed; `-13..-16` are new (another tab, no space chosen, the description dropped, Make private not applied). Each compiled. Regression on lane 1, 9/9: `folder-create`, `folder-dialog`, `space-create-menu`, `sidebar-reorder`, `sidebar-sections`, `private-folder-reach`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+*Closed:* the sidebar's "New folder" opens the Create menu's Folder form on its space, the way its "+" menu opens the other seven types (`spaceCreate`). There is one folder form, and the sidebar's own dialog is gone, with its two strings. The form was already the one the sidebar dialog was kept apart from: it keeps a refused name in its box and says why. `folder-create`'s sidebar path drives that form now, 22 checks: 15 of 22 before on lane 1 (the sidebar opened its own dialog, with no Folder tab and no space chosen), 22/22 after. Two new checks: the form opens on the Folder tab with this space chosen, and the folder saved from the sidebar holds the description and privacy typed into it, read back by SQL. One check passed without testing anything: "a name that is free closes the dialog" held for a dialog that never opened. It now requires the dialog to have been open. Patches: `folder-create-9` claims the sidebar path's refusal too, since it is that form's `onError`; `-10` (the button does nothing) and `-11` (the form closes on a refusal) are re-aimed; `-13..-16` are new (another tab, no space chosen, the description dropped, Make private not applied). Each compiled, and the seven reddened on lane 2, 7 of 7. Regression on lane 1, 9/9: `folder-create`, `folder-dialog`, `space-create-menu`, `sidebar-reorder`, `sidebar-sections`, `private-folder-reach`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `commit-log/log-ea0b946-1` — **closed** (66f518a; this row was not updated then)
 
@@ -320,13 +320,21 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* From clients, accept only http(s) URLs for recordingUrl. Keys should be written only by the server (calls.service.ts:848), or accepted only under `calls/${workspaceId}/`.
 
-### `product-siblings/meetings-tag-filter-client-side` — open, small
+### `product-siblings/meetings-tag-filter-client-side` — **closed**
 
 **The meetings page filters tags in the browser over a 200-row list, which the server comment says must not happen**
 
 *Evidence:* meetings.service.ts:180-187 says to filter in SQL, 'not after the limit… would make a tag on the 201st meeting unreachable'. The SQL filter is at :196 and the cap at :202. meetings-api.ts:48-54 never sends ?tag. workspace-meetings-page.tsx:51-85 filters client-side. The chips are de-duplicated case-insensitively (:62-70), but the filter compares exact case (:77), so meetings tagged 'standup' vanish under the chip 'Standup'.
 
 *To close:* Send tag to the server (and include it in the query key). Compare case-insensitively on both sides.
+
+*Closed:* the page asks the server for a tag's meetings (`?tag=`, in the query key), and the server matches the tag whatever its case. The chips come from a new endpoint, `GET /workspaces/:ws/meetings/tags`: the tags on every meeting, one per word whatever its case. The page had built them from the list it loaded, its newest 200, so a tag only an older meeting carried had no chip. The new suite `meeting-tags` plants 200 newer meetings by SQL behind an old one carrying its own tag, and four meetings through the API. On lane 1 before, 0 of 4:
+- "standup" found only the lower-case meeting, and "STANDUP" found none;
+- the tag list did not exist (400);
+- the old tag had no chip;
+- the Standup chip showed "Standup" and hid "standup".
+
+After, 4/4. `mtg-1..4`, each compiled. Regression on lane 1, 17 suites: `meeting-tags`, `planner-prefix`, `a61-meeting-record`, `meeting-access`, `object-key-boundaries`, `planner-upcoming-meeting`, `planner-settings`, `planner-appearance-toggles`, `focus-pill`, `tab-title-countdown`, `planner-rail`, `planner-views`, `planner-gates`, `local-dates`, `ui-sweep`, `video1-acceptance` and `video-regression`. 16 passed in the sweep. `planner-upcoming-meeting` threw: its stub answered every `/meetings` URL with meetings, the new tags route included, and the page cannot draw an object as a chip. Its stub answers the tags route now, and it passed 8/8 through `verify.sh` on lane 1. In CI.
 
 ### `commit-log/missed-docs-patch-1` — **closed** (66f518a; this row was not updated then)
 
@@ -338,13 +346,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (66f518a, 23 September), found still marked open on 24 September while reading the visible-bug list:* every doc writer guards its space and its parent. Create, import and create-from-template call `assertDocSpace`, a space of the path's own workspace that the writer may reach, and `assertDocParent`, a doc of the same workspace, reachable and never a descendant. PATCH writes only the fields in `doc-update-fields.ts` and refuses the rest by name. The evidence is recorded under `product-siblings/docs-patch-mass-assign-public-share` above: `doc-boundaries` 17/17, `db-1..17`. Read again today in docs.service: create at `assertDocSpace` and `assertDocParent`, import and template at `assertDocSpace`, update through `writable` and both guards.
 
-### `product-siblings/planner-block-prefix-cannot-clear` — open, small
+### `product-siblings/planner-block-prefix-cannot-clear` — **closed**
 
 **The planner block-title prefix cannot be cleared back to the default**
 
 *Evidence:* planner-settings-dialog.tsx:643 sends `blockPrefix: value.trim() || undefined`, which JSON drops. planner.service.ts:442-452 merges `{...currentPlanner, ...plannerOnly}`, so the old value stays. Failure: set 'Deep work:', clear the field and blur, reload, and it is still 'Deep work:'. The two readers disagree on '' (workspace-planner-page.tsx:964 uses ??, use-focus-tab-title.ts:248 uses ?.trim() ||), so the fix should send null, not ''.
 
 *To close:* Send null. Server: on null, delete the key from the blob (or store null so both readers fall back).
+
+*Closed:* an emptied box sends `null`, and the server keeps null, which both readers fall back from. A loop deleting null keys was written first and taken out: no check could tell it from storing null. The server now validates the prefix: text of at most 40 characters, or null. The new suite `planner-prefix` signs up its own person, since planner settings are per person. On lane 1 before, 1 of 2: "Deep work:" saved, then cleared, and after a reload the server and the box both still said "Deep work:". After, 3/3, with a third check for the new cap (41 characters refused, the held prefix kept). `ppx-1..3`, each compiled. Regression on lane 1, 17 suites: `meeting-tags`, `planner-prefix`, `a61-meeting-record`, `meeting-access`, `object-key-boundaries`, `planner-upcoming-meeting`, `planner-settings`, `planner-appearance-toggles`, `focus-pill`, `tab-title-countdown`, `planner-rail`, `planner-views`, `planner-gates`, `local-dates`, `ui-sweep`, `video1-acceptance` and `video-regression`. 16 passed in the sweep. `planner-upcoming-meeting` threw: its stub answered every `/meetings` URL with meetings, the new tags route included, and the page cannot draw an object as a chip. Its stub answers the tags route now, and it passed 8/8 through `verify.sh` on lane 1. In CI.
 
 ### `resume-defects/resume-1-move` — **closed**
 
@@ -1018,6 +1028,16 @@ The new suite `private-list-reach`, 13 checks: one private list, made by the adm
 *Found by:* `tb-41` reddened nothing on lanes 3 and 4. It removes the dependency query's own workspace condition, and for any reader the reader rule (`readableTaskIds`, in the task's own workspace) leaves a foreign task out by itself. Looking for a route that reads a task with no reader, to aim it at, found this one.
 
 *Closed:* the re-read passes its caller (`{ id: actorId }`), as every other write's answer does. `related-task-access`, 4/4 after (3/3 before, the new check red). `rta-4` puts the readerless re-read back, and reddened on lane 2. `tb-41` now claims a unit test, `tasks-security.test.ts` "reads a task’s dependencies from its own workspace only, with no reader as with one": the condition is the only rule a readerless caller has, and no route can show it once every route reads with a reader. It reddens that test (`check-unit-claims`, 25 of 25). `tb-46` takes both rules, the condition and the reader rule, so `task-boundaries`' foreign-dependency check is shown to see a foreign task at all; it reddened on lane 2. `rta-4`, `tb-41` and `tb-46`, each compiled. API unit tests pass. No suite drives the list page's bulk bar in a browser; the route is measured directly. Regression on lane 1, 10/10: `related-task-access`, `task-boundaries`, `dependency-read-access`, `task-depth`, `workspace-read-access` (whose no-model branch has its own sentence now, with `found-24-sep/model-patches-measured-without-a-model`), `private-list-reach`, `private-folder-reach`, `ui-sweep`, `video1-acceptance` and `video-regression`.
+
+### `found-24-sep/planner-default-list-read-by-nothing` — open, small (dead control; found fixing the block prefix)
+
+**The planner's Time blocking "Default list" saves, and nothing reads it**
+
+*Evidence, read not run:* `planner-settings-dialog.tsx` draws a Default list picker (`planner-default-list`). Its comment calls it "the answer to the question video 1 left open: where a task made from a message, from /task, or by the AI should land". It writes `defaultListId` into the person's planner settings, and the server checks the list exists. A search of `apps/web/src` and `apps/api/src` finds no other reader. A task made from a chat message, from `/task` or by the AI lands wherever those flows put it, and the picker changes nothing. `planner-settings` checks only that the picker offers the workspace's lists.
+
+*The frame answers what it governs:* `14:20`, Time blocking, "**Default list for new tasks** — *Defaults to your personal list*" (`video2-frame-observations.md`). The gap audit reads it as the answer to video 1's open question: where a task made by `/task`, from a message, or by the AI lands. That is the person's Personal List unless they choose another.
+
+*To close:* have each of those flows read the setting when no list is named: `/task`, a message turned into a task, and the AI's task-making. Add a check per flow that the task lands in the chosen list, and in the personal list when none is chosen.
 
 ### `suite-hygiene/branch-checker-confident-zero` — open, medium
 

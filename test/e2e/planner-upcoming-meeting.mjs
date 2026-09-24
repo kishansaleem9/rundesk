@@ -167,6 +167,9 @@ try {
       return reply(settings)
     }
     if (url.includes('/meetings/upcoming')) return reply(UPCOMING)
+    // The tag chips' own list: strings, not meetings. Answered with meetings
+    // by the line below, the page drew objects as chips and did not render.
+    if (url.includes('/meetings/tags')) return reply([])
     if (url.includes('/meetings')) return reply(UPCOMING)
     if (url.includes('/planner/') && url.includes('/blocks')) return reply([])
     if (url.includes('/priorities')) return reply([])
