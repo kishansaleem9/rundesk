@@ -3855,6 +3855,7 @@ ${spaceCatalog || '(none)'}`
             humanLabel: action.humanLabel,
             status: 'skipped',
             reason: result.reason,
+            message: result.message,
           }
         }
         return {

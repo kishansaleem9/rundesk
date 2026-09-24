@@ -398,7 +398,7 @@ export function PlannerPage() {
   /* §V2-15b, frame `12:48` — the side-by-side grid's own people search. */
   const [teamQuery, setTeamQuery] = useState('')
 
-  const { data: settings } = useQuery({
+  const { data: settings, isError: settingsFailed } = useQuery({
     queryKey: ['planner-settings', workspaceId],
     queryFn: () => api<PlannerSettings>(`/planner/${workspaceId}/settings`),
     enabled: !!workspaceId,
@@ -442,8 +442,16 @@ export function PlannerPage() {
    * rendered last. One query, one condition, stated.
    */
   const hiddenCalendars = new Set(settings?.hiddenCalendarIds ?? [])
-  const holidayCalendarOn = !hiddenCalendars.has('workspace:holidays')
-  const timeOffCalendarOn = !hiddenCalendars.has('workspace:timeOff')
+  /*
+   * Neither calendar is on until the settings say so. Read before they arrive,
+   * the hidden list was empty, so a person who had hidden both had their
+   * holidays and time off asked for, and drawn, on every load
+   * (`ledger-rows/defect-calendar-toggles-before-settings`). Settings that
+   * failed to load fall back to the defaults, which show both.
+   */
+  const settingsKnown = settings !== undefined || settingsFailed
+  const holidayCalendarOn = settingsKnown && !hiddenCalendars.has('workspace:holidays')
+  const timeOffCalendarOn = settingsKnown && !hiddenCalendars.has('workspace:timeOff')
 
   /*
    * The account's own week start, not a hard-coded Monday. `users.weekStart`
@@ -820,6 +828,24 @@ export function PlannerPage() {
       await qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
     },
   })
+  /*
+   * Which calendars this server can connect: the Accounts page's own question
+   * (`providers/status`, under the key the Zoom row reads). The onboarding's
+   * buttons posted `oauth/start` whatever the answer, and without a client id
+   * the "consent" address was a provider page for no application at all
+   * (`ledger-rows/defect-planner-connect-empty-consent`).
+   */
+  const { data: providerStatus } = useQuery({
+    queryKey: ['integration-provider-status', workspaceId],
+    queryFn: () =>
+      api<Array<{ provider: string; available: boolean; missingEnvKeys?: string[] }>>(
+        `/workspaces/${workspaceId}/integrations/connections/providers/status`,
+      ),
+    enabled: !!workspaceId,
+  })
+  const canConnect = (provider: 'gcal' | 'outlook') =>
+    providerStatus === undefined ? null : (providerStatus.find((p) => p.provider === provider)?.available ?? false)
+
   const connectCalendar = useMutation({
     mutationFn: (provider: 'gcal' | 'outlook') =>
       api<{ authUrl: string }>(
@@ -1831,6 +1857,7 @@ export function PlannerPage() {
           <PlannerOnboarding
             onConnect={(p) => connectCalendar.mutate(p)}
             connecting={connectCalendar.isPending}
+            canConnect={canConnect}
             onDismiss={() => dismissOnboarding.mutate()}
             dismissing={dismissOnboarding.isPending}
           />
@@ -2369,11 +2396,14 @@ function MonthGrid({
 function PlannerOnboarding({
   onConnect,
   connecting,
+  canConnect,
   onDismiss,
   dismissing,
 }: {
   onConnect: (provider: 'gcal' | 'outlook') => void
   connecting: boolean
+  /** true / false once the server has said; null while it has not. */
+  canConnect: (provider: 'gcal' | 'outlook') => boolean | null
   onDismiss: () => void
   dismissing: boolean
 }) {
@@ -2418,7 +2448,8 @@ function PlannerOnboarding({
               variant="outline"
               className="h-8 text-[12px]"
               data-testid="planner-onboarding-connect-gcal"
-              disabled={connecting}
+              disabled={connecting || canConnect('gcal') !== true}
+              title={canConnect('gcal') === false ? t('planner.onboarding.notConfigured') : undefined}
               onClick={() => onConnect('gcal')}
             >
               {t('planner.onboarding.google')}
@@ -2428,12 +2459,18 @@ function PlannerOnboarding({
               variant="outline"
               className="h-8 text-[12px]"
               data-testid="planner-onboarding-connect-outlook"
-              disabled={connecting}
+              disabled={connecting || canConnect('outlook') !== true}
+              title={canConnect('outlook') === false ? t('planner.onboarding.notConfigured') : undefined}
               onClick={() => onConnect('outlook')}
             >
               {t('planner.onboarding.outlook')}
             </Button>
           </div>
+          {(canConnect('gcal') === false || canConnect('outlook') === false) && (
+            <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid="planner-onboarding-not-configured">
+              {t('planner.onboarding.notConfigured')}
+            </p>
+          )}
         </div>
 
         {/* The carousel. One card at a time, with the frame's own pager. */}

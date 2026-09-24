@@ -284,6 +284,8 @@ type AiActionResult = {
   humanLabel: string
   status: 'succeeded' | 'skipped' | 'failed'
   reason?: string
+  /** The server's sentence for a refusal; `reason` is its code. */
+  message?: string
   container?: { kind: 'list' | 'folder'; id: string; name: string; path: string; spaceId: string }
 }
 
@@ -362,6 +364,13 @@ function CreateWithAi({
       {plan && (
         <div className="mt-2 rounded-md border border-border/70 px-2.5 py-2">
           <p className="text-[12px]" data-testid="create-ai-summary">{plan.summary}</p>
+          {/* What the planner could not do, said beside what it will: the type
+              carried these and nothing drew them. */}
+          {(plan.warnings ?? []).map((warning, i) => (
+            <p key={i} className="mt-1 text-[11px] text-amber-700 dark:text-amber-400" data-testid={`create-ai-warning-${i}`}>
+              {warning}
+            </p>
+          ))}
           {plan.actions.length === 0 ? (
             <p className="mt-1.5 text-[11px] text-muted-foreground" data-testid="create-ai-nothing">
               {t('quickCreate.aiNothingToCreate')}
@@ -398,7 +407,11 @@ function CreateWithAi({
             {results.map((r, i) => (
               <li key={`${r.tool}-${i}`} className="text-[12px]" data-testid={`create-ai-result-${i}`} data-status={r.status}>
                 {r.container ? r.container.path : r.humanLabel} — {t(`quickCreate.aiStatus.${r.status}` as TranslationKey)}
-                {r.reason ? ` (${r.reason})` : ''}
+                {r.message ? (
+                  <span className="block text-[11px] text-muted-foreground">{r.message}</span>
+                ) : r.reason ? (
+                  ` (${r.reason})`
+                ) : null}
               </li>
             ))}
           </ul>

@@ -165,6 +165,10 @@ try {
       return reply({ authUrl: AUTH_URL })
     }
     if (url.includes('/calendar-sync/accounts')) return reply(accounts)
+    // A server that can connect both: the onboarding asks before it offers a
+    // connect button (`ledger-rows/defect-planner-connect-empty-consent`), and
+    // the catch-all's [] would read as neither being set up.
+    if (url.includes('/providers/status')) return reply([{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }])
     if (url.includes('/planner/') && url.includes('/settings')) {
       if (req.method() === 'PATCH') {
         settings = { ...settings, ...JSON.parse(req.postData() ?? '{}') }

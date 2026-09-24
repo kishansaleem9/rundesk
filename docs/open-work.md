@@ -160,7 +160,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* In updateTask, when coverStorageKey is non-null, require it to start with `workspaces/${ctx.workspaceId}/tasks/${taskId}/attachments/` (or to equal the storage_key of an attachment row on this task). Reject anything else with 400. Add a break to task-cover.mjs that sets a foreign key.
 
-### `ledger-rows/defect-ai-create-refusal-and-warnings` — open, small
+### `ledger-rows/defect-ai-create-refusal-and-warnings` — **closed** (with `commit-log/log-462ed70-1`, the same two defects under another id)
 
 **Create-with-AI shows a refusal key instead of the sentence, and never renders plan warnings**
 
@@ -168,7 +168,9 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Pass result.message through executeOne and render it. Render plan.warnings where the 'nothing to create' line is.
 
-### `ledger-rows/defect-calendar-toggles-before-settings` — open, small
+*Closed:* a refused step carries its sentence (`message`, the `CONTAINER_REFUSAL_TEXT` entry for its code) beside the code, and the menu draws the sentence beneath the step. The code is shown in brackets only when a step has no sentence. A plan's `warnings` are drawn under its summary. The new suite `create-ai-results`, 0 of 2 before on lane 1, 2/2 after. The planner's answer is served by route (no model needed): a warning, and a list in a space that is not there. The confirm is the real one and refuses the list. Before, the plan drew no warning and the step read "— skipped (unknown_space)". `car-1..3`, each compiled. In CI. The regression sweep on lane 1, 18 suites, all green: create-ai-results, planner-gates, planner-onboarding, create-menu-ai, ai-create-containers, planner-settings, planner-rail, planner-views, planner-grid, planner-appearance-toggles, planner-command-bar, planner-upcoming-meeting, calendar-accounts, sidebar-reorder, sidebar-sections, ui-sweep, video1-acceptance, video-regression.
+
+### `ledger-rows/defect-calendar-toggles-before-settings` — **closed**
 
 **Holidays/Time-off calendars read ON and fetch before planner settings arrive**
 
@@ -176,13 +178,17 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Gate both queries on settings having loaded, with a check that reddens on a reload with the calendars hidden.
 
-### `ledger-rows/defect-planner-connect-empty-consent` — partly-fixed, small
+*Closed:* neither calendar is on until the planner's settings have answered, or have failed, which falls back to the defaults. So the holidays and time-off queries wait, and nothing is drawn before them. The new suite `planner-gates`, with the row below. Its first check: with both calendars hidden, a fresh load asks for neither and draws neither. Its twin: the same person with both shown is asked for the holiday and has it drawn. Before, on lane 1, the hidden load asked for `work-schedule` and `time-off`. `pgt-1`, compiled. In CI. The regression sweep on lane 1, 18 suites, all green: create-ai-results, planner-gates, planner-onboarding, create-menu-ai, ai-create-containers, planner-settings, planner-rail, planner-views, planner-grid, planner-appearance-toggles, planner-command-bar, planner-upcoming-meeting, calendar-accounts, sidebar-reorder, sidebar-sections, ui-sweep, video1-acceptance, video-regression.
+
+### `ledger-rows/defect-planner-connect-empty-consent` — **closed**
 
 **Planner onboarding 'Connect Google/Outlook' still posts oauth/start with no readiness check (Zoom row now gated)**
 
 *Evidence:* reaudit.md:2617-2628 ('Not fixed'). Fixed half: planner-settings-dialog.tsx:965-972 derives `available` from provider availability, and :1043-1047 disables Connect when unavailable. Still open: workspace-planner-page.tsx:823-835 connectCalendar POSTs oauth/start and assigns window.location.href with no availability check. integration-connections.service.ts:201-214 builds client_id from cfg.clientId without consulting readiness.
 
 *To close:* Apply the same availability check to connectCalendar (client side, as the ledger says the server-side fix breaks app-catalogue).
+
+*Closed:* the onboarding asks `providers/status` (the key the Zoom row reads) before it offers a connect button. A calendar the server cannot connect is greyed out, with a sentence saying an admin can add it in the App Center, and pressing it starts nothing. `planner-gates`, 1 of 3 before on lane 1: the no-key server offered Google Calendar and pressing it started OAuth; its twin, a server that can connect it, passed both times. 3/3 after. `planner-onboarding`'s own fixture answers every API call. It now says both calendars can be connected, as its connect-flow checks need, and it passes 12/12. `pgt-2..4`, each compiled. In CI. The regression sweep on lane 1, 18 suites, all green: create-ai-results, planner-gates, planner-onboarding, create-menu-ai, ai-create-containers, planner-settings, planner-rail, planner-views, planner-grid, planner-appearance-toggles, planner-command-bar, planner-upcoming-meeting, calendar-accounts, sidebar-reorder, sidebar-sections, ui-sweep, video1-acceptance, video-regression.
 
 ### `ledger-rows/defect-projects-position-unordered` — **closed**
 
@@ -244,7 +250,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Give links their own column or kind (for example external_url) and pass http(s) through untouched, as covers do. Skip link rows in the indexers and in deleteObject.
 
-### `commit-log/log-462ed70-1` — open, small
+### `commit-log/log-462ed70-1` — **closed** (as `ledger-rows/defect-ai-create-refusal-and-warnings`)
 
 **The create menu's AI shows the key '(no_permission)' instead of the refusal sentence, and a plan's warnings are never shown**
 
@@ -252,13 +258,17 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* Return the message along with the reason, and render the sentence. Render plan.warnings in the create menu the way workspace-ai-page does. Add checks and break patches.
 
-### `commit-log/log-666f15f-1` — partly-fixed, small
+*Closed:* the same two defects as `ledger-rows/defect-ai-create-refusal-and-warnings` above: the refusal's sentence is carried and drawn, and the plan's warnings are drawn. The evidence is written there.
+
+### `commit-log/log-666f15f-1` — **closed** (with `ledger-rows/defect-projects-position-unordered`)
 
 **Only the sidebar honours projects.position; getProjectsBySpace still has no ORDER BY**
 
 *Evidence:* Commits 666f15f and 462ed70: 'honoured in one surface and contradicted by twenty'. A writer now exists (workspaces.service.ts:1060-1070), and the sidebar sorts in the browser (workspace-sidebar.tsx:1088-1104). projects.service.ts:118-152 getProjectsBySpace still returns rows with no orderBy, while its own comment says 'Fourteen surfaces ... every one of them reads this endpoint' (the Move dialog, pickers, the palette filter).
 
 *To close:* Add orderBy(asc(projects.position), asc(projects.createdAt)) to getProjectsBySpace, drop the sort the sidebar does in the browser, and add a check that reads a second surface.
+
+*Closed:* `getProjectsBySpace` orders by position, then age (`project-order`, with the ledger row named above). The sidebar's own sort is gone. Its comment said the server had no ORDER BY, which was no longer true, and the sort was a second statement of the server's order. `sidebar-reorder` 23/23 and `project-order` 1/1 after it. No patch is aimed at the sort's removal: putting it back draws the same order, and no check could tell. The regression sweep on lane 1, 18 suites, all green: create-ai-results, planner-gates, planner-onboarding, create-menu-ai, ai-create-containers, planner-settings, planner-rail, planner-views, planner-grid, planner-appearance-toggles, planner-command-bar, planner-upcoming-meeting, calendar-accounts, sidebar-reorder, sidebar-sections, ui-sweep, video1-acceptance, video-regression.
 
 ### `commit-log/log-a0b4108-1` — open, small
 

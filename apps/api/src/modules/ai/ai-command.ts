@@ -151,6 +151,12 @@ export type CommandActionResult = {
   humanLabel: string
   status: 'succeeded' | 'skipped' | 'failed'
   reason?: string
+  /**
+   * A refusal as a person reads it: one sentence that says what would change
+   * it. `reason` is its code, which the menu printed in brackets while the
+   * sentence stayed on the server (`ledger-rows/defect-ai-create-refusal-and-warnings`).
+   */
+  message?: string
   affectedTaskIds?: string[]
   /**
    * §V2-S16 — the container that now exists, so the caller can link to a row

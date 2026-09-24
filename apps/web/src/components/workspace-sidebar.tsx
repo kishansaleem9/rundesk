@@ -1086,26 +1086,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             }),
           )
           /*
-           * §V2-S13 — THE READER `projects.position` never had.
-           *
-           * The column has existed since the table did. Nothing wrote it
-           * (`updateProject` whitelists its updatable columns and leaves it
-           * out) and nothing read it — `getProjectsBySpace` has no `ORDER BY`
-           * at all, so the tree drew whatever order Postgres handed back, which
-           * changes as rows are updated and after a vacuum. Sorting here is
-           * what makes the drag-reorder write mean something; without it the
-           * new endpoint would be the mirror defect with a fresh coat on.
-           *
-           * The same tiebreak the server uses when it orders projects
-           * (`position` then `createdAt`), so the two cannot disagree about
-           * what "first" means for two projects that share a position.
+           * In the order the server keeps: `getProjectsBySpace` orders by
+           * `position`, then age. The sidebar sorted for itself while that had
+           * no ORDER BY, which made two statements of one order, and every
+           * other surface that reads the endpoint drew whatever Postgres
+           * answered (`commit-log/log-666f15f-1`).
            */
-          const ordered = [...projectsWithLists].sort(
-            (a, b) =>
-              (a.position ?? 0) - (b.position ?? 0) ||
-              String(a.createdAt ?? '').localeCompare(String(b.createdAt ?? '')),
-          )
-          return { ...space, projects: ordered, folders, spaceLists }
+          return { ...space, projects: projectsWithLists, folders, spaceLists }
         }),
       )
       return projectGroups
