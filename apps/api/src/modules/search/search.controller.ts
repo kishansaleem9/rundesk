@@ -131,13 +131,13 @@ export class SearchController {
   }
 
   @Get(':workspaceId/custom-fields')
-  customFields(@Param('workspaceId') workspaceId: string) {
-    return this.search.listWorkspaceCustomFields(workspaceId)
+  customFields(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string; role?: string }) {
+    return this.search.listWorkspaceCustomFields(workspaceId, user.id, user.role)
   }
 
   @Post(':workspaceId/reindex')
-  reindex(@Param('workspaceId') workspaceId: string) {
-    return this.search.reindexWorkspace(workspaceId)
+  reindex(@Param('workspaceId') workspaceId: string, @CurrentUser() user: { id: string; role?: string }) {
+    return this.search.reindexWorkspaceAs(workspaceId, user.id, user.role)
   }
 
   @Get(':workspaceId/saved')

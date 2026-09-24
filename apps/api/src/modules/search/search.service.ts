@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional, OnModuleInit, Logger } from '@nestjs/common'
+import { Injectable, Inject, Optional, OnModuleInit, Logger, ForbiddenException } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE, grantCoversWholeDrive } from './drive-scope'
 import {
   SEARCH_SOURCES,
@@ -9,10 +9,10 @@ import {
 } from './sources'
 import { ConfigService } from '@nestjs/config'
 import { MeiliSearch, type Index } from 'meilisearch'
-import { ilike, or, eq, and, asc, desc, inArray, gte, lte, sql, type SQL } from 'drizzle-orm'
+import { ilike, or, eq, and, asc, desc, inArray, notInArray, gte, lte, sql, type SQL } from 'drizzle-orm'
 import {
   tasks, taskAssignees, taskLabelAssignments, taskComments, taskAttachments, docs, lists, projects, spaces,
-  folders, savedSearches, users, workspaceMembers, chatChannels, chatChannelMembers, chatMessages,
+  folders, savedSearches, users, workspaceMembers, chatChannels, chatMessages,
   workspaceIntegrationConnections,
   customFieldDefinitions, customFieldValues, meetings, searchEngagement,
 } from '@rundesk/db'
@@ -26,6 +26,9 @@ import {
   listVisibilityFilter,
   folderVisibilityFilter,
 } from '../../common/permissions/item-visibility'
+import { containerVisibilityFilter, spaceVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
+import { hiddenDocIds } from '../../common/permissions/doc-access'
+import { readableChannelsFilter } from '../chat/channel-read-filter'
 
 // Every entity the search can return. The Postgres-only ones (user, comment,
 // channel, message) belong here too — leaving them out meant a filter naming
@@ -280,6 +283,18 @@ export class SearchService implements OnModuleInit {
     }])
   }
 
+  /**
+   * Rebuilding a workspace's index reads every task and doc in it and rewrites
+   * the index: a manager's action, as the knowledge reindex is. Any member
+   * could start it (measured, 201).
+   */
+  async reindexWorkspaceAs(workspaceId: string, actorId: string, actorRole?: string) {
+    if (!(await resolveIsManager(this.db, workspaceId, actorId, actorRole))) {
+      throw new ForbiddenException('Only a workspace manager can rebuild its search index')
+    }
+    return this.reindexWorkspace(workspaceId)
+  }
+
   async reindexWorkspace(workspaceId: string) {
     if (!this.enabled || !this.index) return
     const taskRows = await this.db
@@ -459,6 +474,7 @@ export class SearchService implements OnModuleInit {
         filterExpr,
         filters.sort,
         limit,
+        workspaceId,
         userId,
         isManager,
         Boolean(filters.includeArchived),
@@ -487,6 +503,10 @@ export class SearchService implements OnModuleInit {
           const conds: Array<SQL | undefined> = [
             eq(spaces.workspaceId, workspaceId),
             filters.includeArchived ? undefined : eq(tasks.isArchived, false),
+            // The container rule and the private-item rule. Only the second
+            // applied: measured, a member's search returned the task of a
+            // private space they were refused (`workspace-read-access` §8).
+            containerVisibilityFilter(this.db, userId, isManager),
             taskVisibilityFilter(this.db, userId, isManager),
           ]
           if (like) conds.push(or(ilike(tasks.title, like), ilike(tasks.description, like)))
@@ -547,6 +567,8 @@ export class SearchService implements OnModuleInit {
         })()
       : []
 
+    // The doc rule (`doc-access.ts`); this branch had none at all.
+    const hiddenDocs = wantDocs ? await hiddenDocIds(this.db, workspaceId, userId, isManager) : []
     const docHits = wantDocs
       ? await this.db
           .select()
@@ -554,6 +576,7 @@ export class SearchService implements OnModuleInit {
           .where(and(
             eq(docs.workspaceId, workspaceId),
             filters.includeArchived ? undefined : eq(docs.isArchived, false),
+            hiddenDocs.length ? notInArray(docs.id, hiddenDocs) : undefined,
             ...(like ? [or(ilike(docs.title, like), ilike(docs.plaintext, like))] : []),
           ))
           .orderBy(desc(docs.updatedAt))
@@ -570,7 +593,12 @@ export class SearchService implements OnModuleInit {
       : []
 
     // Extras only for a general text search (no type/task-specific filter).
-    const extras = like ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types) : []
+    // The code said so and did not do it: a search narrowed to open tasks
+    // came back with channels, messages, comments and containers, none of
+    // which has a status (measured, `workspace-read-access` §8).
+    const extras = like && !hasTaskFilter
+      ? await this.searchExtras(workspaceId, userId, like, limit, isManager, filters.types)
+      : []
 
     return this.merge(filters.sort, limit, [
       ...taskHits.map((t) => ({
@@ -801,6 +829,7 @@ export class SearchService implements OnModuleInit {
     filterExpr: string[],
     sort: SearchFilters['sort'],
     limit: number,
+    workspaceId: string,
     userId: string,
     isManager: boolean,
     includeArchived: boolean,
@@ -837,7 +866,7 @@ export class SearchService implements OnModuleInit {
             : null,
       })) as SearchHit[]
 
-      for (const hit of await this.dropUnsearchableTaskHits(mapped, userId, isManager, includeArchived)) {
+      for (const hit of await this.dropUnsearchableTaskHits(mapped, workspaceId, userId, isManager, includeArchived)) {
         // Meili paginates a live index; a document can shift between pages and
         // arrive twice. Deduped here so a search cannot show the same task
         // under two headings.
@@ -871,14 +900,25 @@ export class SearchService implements OnModuleInit {
    * find deleted work by searching, and the previous early return for managers
    * meant they skipped both checks at once.
    *
-   * Non-task hits pass through untouched.
+   * A doc hit is held to the doc rule (`doc-access.ts`), and a task hit to the
+   * container rule as well as the private-item rule: the index carries neither,
+   * and this let through every task and doc of a private space to a member
+   * refused it — on a deployment running Meilisearch, which no lane is, so
+   * `search.service.test.ts` holds this half. Other hits pass through
+   * untouched.
    */
   private async dropUnsearchableTaskHits<T extends { id: string; entityType: string }>(
     hits: T[],
+    workspaceId: string,
     userId: string,
     isManager: boolean,
     includeArchived: boolean,
   ): Promise<T[]> {
+    const docHits = hits.filter((h) => h.entityType === 'doc')
+    if (docHits.length > 0 && !isManager) {
+      const hidden = new Set(await hiddenDocIds(this.db, workspaceId, userId, false))
+      if (hidden.size > 0) hits = hits.filter((h) => h.entityType !== 'doc' || !hidden.has(h.id.replace(/^doc-/, '')))
+    }
     /*
      * A Meili hit's id is the DOCUMENT id, which `indexTask` writes as
      * `task-<uuid>` — not a uuid. Handing those straight to a uuid column is a
@@ -896,11 +936,18 @@ export class SearchService implements OnModuleInit {
 
     const conds: Array<SQL | undefined> = [inArray(tasks.id, taskHits.map((h) => rawId(h.id)))]
     if (!includeArchived) conds.push(eq(tasks.isArchived, false))
-    if (!isManager) conds.push(taskVisibilityFilter(this.db, userId, false))
+    if (!isManager) {
+      conds.push(containerVisibilityFilter(this.db, userId, false))
+      conds.push(taskVisibilityFilter(this.db, userId, false))
+    }
 
     const keep = await this.db
       .select({ id: tasks.id })
       .from(tasks)
+      // Joined for the container rule, which reads the task's project and space.
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(and(...conds))
     const ok = new Set(keep.map((r) => r.id))
     return hits.filter((h) => h.entityType !== 'task' || ok.has(rawId(h.id)))
@@ -1260,18 +1307,11 @@ export class SearchService implements OnModuleInit {
     const wants = (t: string) => !types || types.includes(t)
     const EXTRA_TYPES = ['user', 'comment', 'channel', 'message', 'folder', 'list', 'space', 'meeting']
     if (!EXTRA_TYPES.some(wants)) return []
-    // Chat search must respect channel access (Plan §6): a user may only see
-    // hits from public channels or channels they belong to — never from private
-    // channels or DMs they're not a member of. Compute their channels once and
-    // scope both the channel-name and message-body searches to accessible ones.
-    const memberRows = await this.db
-      .select({ channelId: chatChannelMembers.channelId })
-      .from(chatChannelMembers)
-      .where(eq(chatChannelMembers.userId, userId))
-    const memberChannelIds = memberRows.map((r) => r.channelId)
-    const publicChannel = and(eq(chatChannels.isPrivate, false), eq(chatChannels.isDm, false))
-    const accessibleChannel =
-      memberChannelIds.length > 0 ? or(publicChannel, inArray(chatChannels.id, memberChannelIds)) : publicChannel
+    // Chat search reads channels as chat itself does (`readableChannelsFilter`,
+    // the SQL twin of `assertChannelAccess`). Its own copy here knew public
+    // and joined channels but not the space: a channel of a private space, and
+    // every message in it, came back to a member refused the space (measured).
+    const accessibleChannel = readableChannelsFilter(this.db, userId, workspaceId)
 
     const [userHits, commentHits, channelHits, messageHits, folderHits, listHits, spaceHits, meetingHits] =
       await Promise.all([
@@ -1288,7 +1328,14 @@ export class SearchService implements OnModuleInit {
         .innerJoin(lists, eq(lists.id, tasks.listId))
         .innerJoin(projects, eq(projects.id, lists.projectId))
         .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-        .where(and(eq(spaces.workspaceId, workspaceId), ilike(taskComments.body, like), taskVisibilityFilter(this.db, userId, isManager)))
+        .where(
+          and(
+            eq(spaces.workspaceId, workspaceId),
+            ilike(taskComments.body, like),
+            containerVisibilityFilter(this.db, userId, isManager),
+            taskVisibilityFilter(this.db, userId, isManager),
+          ),
+        )
         .orderBy(desc(taskComments.createdAt))
         .limit(limit),
       this.db
@@ -1307,7 +1354,9 @@ export class SearchService implements OnModuleInit {
        * §2 [02:03] — the containers themselves. Scoped with the same visibility
        * filters every other read path uses, so a private folder or list stays
        * invisible here too; search must not become the one surface where a
-       * container you cannot open is still discoverable by name.
+       * container you cannot open is still discoverable by name. The SPACE half
+       * of that was missing, which made this comment untrue: a private space's
+       * folders, lists and its own name came back to a member refused it.
        */
       wants('folder')
         ? this.db
@@ -1319,6 +1368,7 @@ export class SearchService implements OnModuleInit {
                 eq(spaces.workspaceId, workspaceId),
                 ilike(folders.name, like),
                 eq(folders.isArchived, false),
+                spaceVisibilityFilter(this.db, userId, isManager),
                 folderVisibilityFilter(userId, isManager),
               ),
             )
@@ -1337,6 +1387,7 @@ export class SearchService implements OnModuleInit {
               and(
                 eq(spaces.workspaceId, workspaceId),
                 ilike(lists.name, like),
+                containerVisibilityFilter(this.db, userId, isManager),
                 listVisibilityFilter(userId, isManager),
               ),
             )
@@ -1346,7 +1397,7 @@ export class SearchService implements OnModuleInit {
         ? this.db
             .select({ id: spaces.id, name: spaces.name })
             .from(spaces)
-            .where(and(eq(spaces.workspaceId, workspaceId), ilike(spaces.name, like)))
+            .where(and(eq(spaces.workspaceId, workspaceId), ilike(spaces.name, like), spaceVisibilityFilter(this.db, userId, isManager)))
             .limit(limit)
         : Promise.resolve([]),
       /*
@@ -1435,6 +1486,9 @@ export class SearchService implements OnModuleInit {
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const conds: Array<SQL | undefined> = [
       eq(spaces.workspaceId, workspaceId),
+      // The container rule too: the join reached the space but nothing asked
+      // whether the caller may open it (measured, a private space's file).
+      containerVisibilityFilter(this.db, userId, isManager),
       taskVisibilityFilter(this.db, userId, isManager),
     ]
     if (like) conds.push(or(ilike(taskAttachments.fileName, like), ilike(taskAttachments.contentType, like)))
@@ -1513,7 +1567,10 @@ export class SearchService implements OnModuleInit {
    * spaces/projects) so the search UI can offer them as a filter. Workspace
    * ownership is enforced via the project → space → workspace join.
    */
-  async listWorkspaceCustomFields(workspaceId: string) {
+  async listWorkspaceCustomFields(workspaceId: string, userId: string, actorRole?: string) {
+    // Each field belongs to a project, and the list names the project: only
+    // those the caller may open (measured, a refused project's field listed).
+    const isManager = await resolveIsManager(this.db, workspaceId, userId, actorRole)
     return this.db
       .select({
         id: customFieldDefinitions.id,
@@ -1526,7 +1583,7 @@ export class SearchService implements OnModuleInit {
       .from(customFieldDefinitions)
       .innerJoin(projects, eq(projects.id, customFieldDefinitions.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(spaces.workspaceId, workspaceId))
+      .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(this.db, userId, isManager)))
       .orderBy(asc(projects.name), asc(customFieldDefinitions.position), asc(customFieldDefinitions.name))
   }
 

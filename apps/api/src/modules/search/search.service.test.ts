@@ -28,15 +28,20 @@ function makeDb(tableRows: Record<string, unknown[]>) {
   const joinTables: string[] = []
   const chain = (): any => {
     let rows: unknown[] = []
+    // This query's own table. Not "the table named last": a condition can
+    // build a subquery on another table before this query's `.where` runs
+    // (the read rules do), and that credited the predicate to the subquery.
+    let table = '?'
     const c: any = {
       from: (t: unknown) => {
         const name = getTableName(t as never)
         fromTables.push(name)
+        table = name
         rows = tableRows[name] ?? []
         return c
       },
       where: (condition: unknown) => {
-        wheres.push({ table: fromTables[fromTables.length - 1] ?? '?', condition })
+        wheres.push({ table, condition })
         return c
       },
       innerJoin: (t: unknown) => {
@@ -655,6 +660,73 @@ describe('SearchService pages Meili past hits the caller cannot see', () => {
     }
     const res = await svcWith(overlapping, [{ id: 't0' }]).search('w1', 'u1', 'probe', 5, {})
     assert.equal(res.length, 1, `a repeated document was returned twice: ${JSON.stringify(res)}`)
+  })
+})
+
+/**
+ * The Meilisearch path, held to the rules the Postgres path is: the index
+ * carries no space, no share and no privacy, so each hit is checked after.
+ * No lane runs Meilisearch, so `workspace-read-access` §8 measures the other
+ * path; this is where this one is measured. It let every task and doc of a
+ * private space through to a member refused it: task hits met only the
+ * private-item rule, and doc hits met nothing.
+ */
+describe('SearchService holds Meili hits to the read rules', () => {
+  /** An index whose only page is these hits. */
+  const indexOf = (hits: Array<{ id: string; entityType: string }>) => ({
+    search: async () => ({
+      hits: hits.map((h) => ({ ...h, title: h.id, content: '', url: `/${h.id}`, createdAt: 0, updatedAt: 0 })),
+    }),
+  })
+  const svcWith = (index: unknown, rows: Record<string, unknown[]>) => {
+    const made = makeDb({
+      tasks: [], docs: [], users: [], task_comments: [], chat_channels: [], chat_messages: [],
+      folders: [], lists: [], spaces: [], object_shares: [], workspace_members: [], meetings: [],
+      ...rows,
+    })
+    const svc = new SearchService(made.db as never, config)
+    Object.assign(svc as never, { enabled: true, index })
+    return { svc, ...made }
+  }
+
+  it('drops a doc hit filed in a space the searcher is refused, and keeps one filed elsewhere', async () => {
+    const { svc } = svcWith(
+      indexOf([{ id: 'doc-d-refused', entityType: 'doc' }, { id: 'doc-d-open', entityType: 'doc' }]),
+      {
+        // What the doc rule reads: the private spaces the searcher is outside
+        // of, the workspace's docs, and the docs shared with them (none).
+        spaces: [{ id: 'space-refused' }],
+        docs: [
+          { id: 'd-refused', spaceId: 'space-refused', parentDocId: null },
+          { id: 'd-open', spaceId: null, parentDocId: null },
+        ],
+      },
+    )
+    const res = await svc.search('w1', 'u1', 'probe', 10, {})
+    assert.deepEqual(res.filter((h) => h.entityType === 'doc').map((h) => h.id), ['doc-d-open'])
+  })
+
+  it('holds a task hit to the container rule as well as the private-item rule', async () => {
+    const { svc, wheres } = svcWith(indexOf([{ id: 'task-t1', entityType: 'task' }]), { tasks: [{ id: 't1' }] })
+    await svc.search('w1', 'u1', 'probe', 10, {})
+    const q = sqlFor(wheres, 'tasks')
+    assert.ok(q, 'the task hits were never checked against the database')
+    assert.match(q.sql, /"spaces"\."visibility"/, `no space rule on the task hits: ${q.sql}`)
+    assert.match(q.sql, /"projects"\."visibility"/, `no project rule on the task hits: ${q.sql}`)
+    assert.match(q.sql, /"tasks"\."visibility"/, `no private-item rule on the task hits: ${q.sql}`)
+  })
+
+  it('asks neither rule of a manager, who may open everything', async () => {
+    const { svc, wheres } = svcWith(indexOf([{ id: 'task-t1', entityType: 'task' }, { id: 'doc-d-refused', entityType: 'doc' }]), {
+      tasks: [{ id: 't1' }],
+      workspace_members: [{ role: 'workspace_admin' }],
+      spaces: [{ id: 'space-refused' }],
+      docs: [{ id: 'd-refused', spaceId: 'space-refused', parentDocId: null }],
+    })
+    const res = await svc.search('w1', 'u1', 'probe', 10, {})
+    const q = sqlFor(wheres, 'tasks')
+    assert.ok(q && !/"visibility"/.test(q.sql), `a manager's task hits were filtered: ${q?.sql}`)
+    assert.ok(res.some((h) => h.id === 'doc-d-refused'), 'a manager lost a doc hit')
   })
 })
 
