@@ -2669,19 +2669,19 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
       else if (type === 'attachment') attachmentIds.push(rawId)
     }
 
-    // Predicates matching common/permissions/container-access: a private space
-    // needs space membership; an explicitly-private project needs project
-    // membership. (Conservative — never surfaces content the caller can't see.)
-    const memberSpaces = this.db
-      .select({ id: spaceMembers.spaceId })
-      .from(spaceMembers)
-      .where(eq(spaceMembers.userId, userId))
-    const memberProjects = this.db
-      .select({ id: projectMembers.projectId })
-      .from(projectMembers)
-      .where(eq(projectMembers.userId, userId))
-    const spaceOk = or(ne(spaces.visibility, 'private'), inArray(spaces.id, memberSpaces))
-    const projectOk = or(isNull(projects.visibility), ne(projects.visibility, 'private'), inArray(projects.id, memberProjects))
+    /*
+     * The task a hit hangs off must be one the caller may open: the shared
+     * rules, not a copy. This stated "a private space needs membership, a
+     * private project needs membership" in its own words and stopped there —
+     * no private list, no private task, no space admin's reach into a private
+     * project — so a member refused a private list and a private task was cited
+     * the list's task and a comment on the task (measured;
+     * `found-24-sep/ai-knowledge-filter-copies-the-container-rule`).
+     * `taskInReachFilter` is the container rule with the list's own privacy;
+     * `taskVisibilityFilter` the private-task rule. Past the manager return, so
+     * neither is a manager's.
+     */
+    const taskOpen = and(taskInReachFilter(this.db, workspaceId, userId, false), taskVisibilityFilter(this.db, userId, false))
 
     const [okTasks, okComments, okDocs, okAttachments] = await Promise.all([
       taskIds.length
@@ -2698,9 +2698,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
               and(
                 eq(spaces.workspaceId, workspaceId),
                 inArray(tasks.id, taskIds),
-                spaceOk,
-                projectOk,
-                taskVisibilityFilter(this.db, userId, false),
+                taskOpen,
               ),
             )
         : Promise.resolve([] as Array<{ id: string }>),
@@ -2712,7 +2710,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
             .innerJoin(lists, eq(lists.id, tasks.listId))
             .innerJoin(projects, eq(projects.id, lists.projectId))
             .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskComments.id, commentIds), spaceOk, projectOk))
+            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskComments.id, commentIds), taskOpen))
         : Promise.resolve([] as Array<{ id: string }>),
       docIds.length
         ? (async () => {
@@ -2741,7 +2739,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
             .innerJoin(lists, eq(lists.id, tasks.listId))
             .innerJoin(projects, eq(projects.id, lists.projectId))
             .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskAttachments.id, attachmentIds), spaceOk, projectOk))
+            .where(and(eq(spaces.workspaceId, workspaceId), inArray(taskAttachments.id, attachmentIds), taskOpen))
         : Promise.resolve([] as Array<{ id: string }>),
     ])
 

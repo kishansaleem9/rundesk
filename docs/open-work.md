@@ -474,6 +474,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *To close:* make `assertContainerReadAccess` call `checkContainerAccess` (keeping its two distinct messages by asking which half failed), and replace ai.service's predicate with `containerVisibilityFilter` — which also gives space admins the private-project access the guard gives them.
 
+*Progress:* the ai.service predicate named here is gone, replaced by the shared filters in `filterAccessibleHits` (`found-24-sep/ai-knowledge-filter-copies-the-container-rule`, above). What remains is `assertContainerReadAccess` in tasks.service, which still restates `checkContainerAccess` to keep its two messages.
+
 ### `found-23-sep/labels-editable-by-any-member` — **closed** (security, small; the policy confirmed from ClickUp's help)
 
 **`PATCH /labels/:id` and `DELETE /labels/:id` needed only workspace membership: any member, and any GUEST, renamed or deleted the workspace's labels**
@@ -837,15 +839,13 @@ The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and 
 
 *To close:* `assertTaskReadAccess` for the list (the doc rule already filters what it names), with a check that a member who is neither creator nor assignee sees the open doc linked.
 
-### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — open, low (duplicated list; found fixing docs)
+### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — **closed** (security, medium; a duplicated rule, found fixing docs, measured leaking)
 
-**The knowledge answer's access filter writes the container rule out a third time, and its copy differs**
+**The AI knowledge answer's filter stated the container rule in its own words, and stopped at spaces and projects: a private list's task and a private task's comment were cited**
 
-*Evidence, read not run:* `ai.service.filterAccessibleHits` builds `spaceOk` and `projectOk` itself for task, comment and attachment hits ("Predicates matching common/permissions/container-access"). Its project half leaves out the space-admin grant that `containerVisibilityFilter` has, so a space admin is denied a private project's hits that every other read gives them. The doc branch was a fourth copy and now uses `doc-access.ts`.
+*Evidence, measured on lane 1 (probe `measure-knowledge`, then the suite against the build before the fix, 0 of 2):* the retrieval works without any provider, because the local embedder fills the index when an admin reindexes. A member refused a private list in an open space, and a private task (403 on each), asked about them. The answer cited the private list's task and "Comment on a private task", while the admin's cited both, as it should. `filterAccessibleHits` built its own `spaceOk`/`projectOk` predicates. They had no private-list rule, no private-task rule for comments and attachments, and no space admin's reach into a private project.
 
-*To close:* `containerVisibilityFilter` for the three branches, with a knowledge check for a space admin and a private project.
-
-## Verification-harness defects — 27
+*Closed:* one predicate, `taskOpen`: `taskInReachFilter` (the container rule with the list's own privacy) and `taskVisibilityFilter` (the private-task rule), for a task, a comment and an attachment alike. The new suite `knowledge-read-access`, 2/2 (0/2 before), with no model needed: the answer's sources are what it reads. `kra-1..2`, each compiled. API unit tests 1628/1628. Regression on lane 1, 8/8: the new suite, `ai-answer-rendering`, `ai-read-access`, `ai-assign`, `workspace-read-access`, `search-read-access`, `create-menu-ai` and `ui-sweep`. In CI.
 
 ### `suite-hygiene/branch-checker-confident-zero` — open, medium
 
