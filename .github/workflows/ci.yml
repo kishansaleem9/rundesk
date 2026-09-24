@@ -432,11 +432,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND THIRTY-SIX — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND THIRTY-SEVEN — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 150 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136.
+    # that is about 151 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137.
     #
     # The limit is 180 rather than 150, and that is a stopgap, not the fix.
     # Raising it costs nothing — GitHub bills the runtime, not the limit, and
@@ -1829,6 +1829,16 @@ jobs:
       - name: A task is made only in a list its maker may make one in
         if: '!cancelled()'
         run: node test/e2e/task-creation-access.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # A space's "view only" took comments and an assignee's status change;
+      # its "comment" let an assignee rename their task. ClickUp's levels, side
+      # by side, each refusal read back from the row.
+      - name: A space's permission reaches its tasks
+        if: '!cancelled()'
+        run: node test/e2e/task-space-levels.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

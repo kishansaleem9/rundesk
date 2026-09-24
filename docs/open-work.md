@@ -763,13 +763,19 @@ Each maker had added its own piece of the rule: the meeting items `readableList`
 
 The new suite `task-creation-access`, 6/6 on lane 1 (1 of 6 before: the guest was already refused). §1 a message into a private list, §2 the other organisation, §3 an AI plan, §4 `/task` (the workspace's own oldest list made private by SQL, so the member's goes elsewhere and the admin's to it), §5 the space gate, §6 a guest; each refusal read back from the list by SQL beside a twin that makes one. `tcm-1..6`, each compiled; `mtg-3` re-anchored to where the guest rule now lives. API unit tests for every caller of `createTask` (tasks, meetings, chat, AI, templates, webhooks) 623/623. Regression on lane 1, 14/14: the new suite, `meeting-access`, `space-default-permission`, `chat-message-actions`, `task-boundaries`, `task-provenance`, `template-center`, `clip-created-card`, `create-menu-ai`, `workspace-read-access`, both video-1 suites, `ui-sweep` and `video-regression`. In CI.
 
-### `found-24-sep/view-only-spaces-take-comments-and-edits` — open, medium (security; found closing the create gate)
+### `found-24-sep/view-only-spaces-take-comments-and-edits` — **closed** (security, medium; found closing the create gate)
 
-**In a "view only" space a member still comments, and changes the status of a task assigned to them**
+**In a "view only" space a member still commented, and changed the status of a task assigned to them; in a "comment" space an assignee renamed their task**
 
-*Evidence, measured on lane 1 (probe `measure-view-only`):* in a "view only" space a plain member's `POST /tasks/:id/comments` answered 201, and a PATCH of a task assigned to them (status) answered 200. The same held in a "comment" space, where ClickUp allows both (comment, and status on an assigned task). Renaming or deleting somebody else's task was refused everywhere (403), by the older creator-or-assignee rule, not by the space.
+*Evidence, measured on lane 1 (probe `measure-view-only`, then the suite against the build before the fix, 1 of 5):* in a "view only" space a plain member's `POST /tasks/:id/comments` answered 201, a status change of a task assigned to them 200, and adding a colleague to it 201. In a "comment" space the assignee renamed the task (200). The space's level was asked of containers and, since the item above, of new tasks; not of comments or task edits, which only asked "creator or assignee".
 
-*To close:* a comment needs the space's "comment" level; a task edit needs "edit", except status and assignees on a task assigned to the editor, which "comment" allows (ClickUp's "comment with task assigned"). A suite with the three levels side by side.
+*The rule, ClickUp's* (help.clickup.com "Permissions in detail", search snippets): view only cannot comment or edit; comment may comment and, on a task assigned to them, change its status or its assignees ("comment with task assigned"); edit may do what the item rule allows.
+
+*Closed:* `assertTaskWriteAccess` asks the space too (`assertSpaceAllowsTaskWrite`). "Edit" is needed for any write, except a status change (with the position a board drag carries) or a change of assignees on a task assigned to the editor, which "comment" allows. A comment, and editing one's own, needs "comment" (`assertSpaceAllowsComments`). Both read the level as `resolveSpaceLevel` does, so an explicit grant on the space wins over its default, and a manager is never narrowed.
+
+The new suite `task-space-levels`, 5/5 on lane 1 (1 of 5 before, the grant's twin). The three levels sit side by side, each refusal is read back from the row, and a grant of "edit" on the view-only space lifts it. `tsl-1..5`, each compiled. API unit tests 1628/1628. Regression on lane 1, 13/13: the new suite, `space-default-permission`, `task-creation-access`, `task-boundaries`, `comment-thread`, `replies-inline-thread`, `task-mentions`, `checklists`, `assignee-picker`, `task-header-status`, `video1-acceptance`, `ui-sweep` and `video-regression`. In CI.
+
+*Not changed:* ClickUp's comment level also lets an assignee tick their own checklist items; those go through the edit check here, so a "comment" space's assignee cannot. And deleting one's own comment asks nothing of the space.
 
 ### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — open, small (visible bug; found fixing goal access)
 

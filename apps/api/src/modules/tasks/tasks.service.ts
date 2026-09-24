@@ -92,6 +92,7 @@ import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
+import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { checkContainerAccess, containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
@@ -657,7 +658,7 @@ export class TasksService {
   private async assertTaskWriteAccess(
     taskId: string,
     actorId: string,
-    opts: { allowArchived?: boolean } = {},
+    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' } = {},
   ) {
     const [ctx] = await this.db
       .select({
@@ -666,6 +667,7 @@ export class TasksService {
         createdById: tasks.createdById,
         isArchived: tasks.isArchived,
         workspaceId: spaces.workspaceId,
+        spaceId: spaces.id,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -686,14 +688,52 @@ export class TasksService {
     if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
     if (membership.role === 'guest') throw new ForbiddenException('Guests cannot edit tasks')
 
-    if (ctx.createdById === actorId) return ctx
     const [assignee] = await this.db
       .select({ userId: taskAssignees.userId })
       .from(taskAssignees)
       .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
       .limit(1)
-    if (assignee) return ctx
-    throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
+    if (ctx.createdById !== actorId && !assignee) {
+      throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
+    }
+    await this.assertSpaceAllowsTaskWrite(ctx.spaceId, actorId, opts.level ?? 'edit', !!assignee)
+    return ctx
+  }
+
+  /**
+   * WHAT A SPACE LETS A MEMBER DO TO ITS TASKS — its default permission, or
+   * their own grant on it, read for tasks as it is read for containers. It was
+   * asked of lists, projects and folders (`assertCanManageContainer`) and, since
+   * `found-24-sep/task-makers-skip-the-list-rule`, of making a task; not of
+   * changing one. Measured: in a "view only" space a member changed the status
+   * of their assigned task (200) (`found-24-sep/view-only-spaces-take-comments-and-edits`).
+   *
+   * ClickUp's levels (help.clickup.com "Permissions in detail"):
+   *   - "edit" and above — whatever the item rule allows;
+   *   - "comment" — on a task ASSIGNED to them, a change of status or of
+   *     assignees ("comment with task assigned"); nothing else;
+   *   - "view" — nothing.
+   * A manager is never narrowed (`resolveSpaceLevel` answers "admin").
+   */
+  private async assertSpaceAllowsTaskWrite(spaceId: string, actorId: string, wanted: 'comment' | 'edit', isAssignee: boolean) {
+    const resolved = await resolveSpaceLevel(this.db, { spaceId, actorId })
+    if (!resolved) return
+    if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
+    await assertSpaceLevel(this.db, { spaceId, actorId, required: 'edit', kind: 'tasks' })
+  }
+
+  /** A comment needs the space's "comment" level: "view only" means view (see assertSpaceAllowsTaskWrite). */
+  private async assertSpaceAllowsComments(taskId: string, actorId: string) {
+    const [row] = await this.db
+      .select({ spaceId: spaces.id })
+      .from(tasks)
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    if (!row) throw new NotFoundException('Task not found')
+    await assertSpaceLevel(this.db, { spaceId: row.spaceId, actorId, required: 'comment', kind: 'comments' })
   }
 
   /**
@@ -3556,7 +3596,10 @@ export class TasksService {
     // See task-update-fields.ts. Everything below, including the activity log,
     // the webhook payload and the realtime event, now sees the filtered patch.
     patch = pickUpdatable(patch)
-    const access = await this.assertTaskWriteAccess(taskId, actorId)
+    // A change of status — with the position a board drag carries — is what a
+    // "comment" space lets an assignee make; anything else needs "edit".
+    const statusOnly = Object.keys(patch).every((k) => k === 'status' || k === 'position')
+    const access = await this.assertTaskWriteAccess(taskId, actorId, { level: statusOnly ? 'comment' : 'edit' })
 
     /*
      * §V2-09 — the cover fields are spread into the update unchecked, so they
@@ -4327,7 +4370,7 @@ export class TasksService {
 
   // --- Assignees -----------------------------------------------------------
   async addAssignee(taskId: string, userId: string, actorId: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })
     await this.assertPersonCanSeeTask(taskId, userId, 'assignee')
     await this.db.insert(taskAssignees).values({ taskId, userId }).onConflictDoNothing()
     if (await this.notifications.autoFollowEnabled(userId)) {
@@ -4486,7 +4529,7 @@ export class TasksService {
   }
 
   async removeAssignee(taskId: string, userId: string, actorId: string) {
-    await this.assertTaskWriteAccess(taskId, actorId)
+    await this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })
     await this.db.delete(taskAssignees).where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, userId)))
     await this.logActivity({ taskId, actorId, action: 'unassigned', meta: { userId } })
 
@@ -5156,6 +5199,7 @@ export class TasksService {
       .limit(1)
     if (!target) throw new NotFoundException('Task not found')
     this.assertNotInBin(target.isArchived)
+    await this.assertSpaceAllowsComments(taskId, authorId)
 
     /*
      * §V2-05 — a comment with no words is allowed IF it carries a file.
@@ -5317,6 +5361,7 @@ export class TasksService {
     const [existing] = await this.db.select().from(taskComments).where(eq(taskComments.id, commentId))
     if (!existing) throw new NotFoundException('Comment not found')
     if (existing.authorId !== authorId) throw new BadRequestException('Cannot edit another user\'s comment')
+    await this.assertSpaceAllowsComments(existing.taskId, authorId)
     const [updated] = await this.db
       .update(taskComments)
       .set({ body, editedAt: new Date() })
