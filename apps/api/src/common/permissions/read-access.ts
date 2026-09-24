@@ -1,8 +1,8 @@
-import { and, eq } from 'drizzle-orm'
+import { and, eq, inArray } from 'drizzle-orm'
 import { lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { checkContainerAccess } from './container-access.guard-helper'
-import { canSeePrivateItem, isManagerRole } from './item-visibility'
+import { checkContainerAccess, containerVisibilityFilter } from './container-access.guard-helper'
+import { canSeePrivateItem, isManagerRole, resolveIsManager, taskVisibilityFilter } from './item-visibility'
 
 /*
  * MAY THIS PERSON OPEN THIS PROJECT, THIS TASK — for a service whose route
@@ -114,4 +114,35 @@ export async function readableTask(
     )) return null
   }
   return found
+}
+
+/**
+ * Of these task ids, the ones in `workspaceId` that this person may open — the
+ * container rule and the private-item rule in one query, for a caller holding
+ * many ids at once (a planner grid, a list of blockers, a notice's recipients).
+ */
+export async function readableTaskIds(
+  db: Db,
+  workspaceId: string,
+  userId: string,
+  taskIds: string[],
+  role?: string | null,
+): Promise<Set<string>> {
+  if (taskIds.length === 0) return new Set()
+  const isManager = await resolveIsManager(db, workspaceId, userId, role)
+  const rows = await db
+    .select({ id: tasks.id })
+    .from(tasks)
+    .innerJoin(lists, eq(lists.id, tasks.listId))
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(
+      and(
+        inArray(tasks.id, [...new Set(taskIds)]),
+        eq(spaces.workspaceId, workspaceId),
+        containerVisibilityFilter(db, userId, isManager),
+        taskVisibilityFilter(db, userId, isManager),
+      ),
+    )
+  return new Set(rows.map((r) => r.id))
 }

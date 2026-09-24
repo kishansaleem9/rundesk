@@ -77,6 +77,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
+import { readableTaskIds } from '../../common/permissions/read-access'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { SearchService } from '../search/search.service'
@@ -461,6 +462,11 @@ export class TasksService {
     }
   }
 
+  /** Whether this person may open this task (`readableTaskIds`); a seam the notice's tests answer. */
+  private async canUserSeeTask(workspaceId: string, userId: string, taskId: string): Promise<boolean> {
+    return (await readableTaskIds(this.db, workspaceId, userId, [taskId])).has(taskId)
+  }
+
   /**
    * §4.4 — notify a task's assignees + watchers (minus the actor) when a newly
    * added blocking dependency leaves it blocked. Best-effort: swallows errors so
@@ -509,13 +515,17 @@ export class TasksService {
       if (recipientIds.length === 0) return
 
       for (const userId of recipientIds) {
+        // Named only to a recipient who may open the blocker: this said
+        // `Blocked by "<title>"` to every assignee and watcher, one of a space
+        // they were refused included (measured on lane 1).
+        const seesBlocker = await this.canUserSeeTask(ctx.workspaceId, userId, blockerTaskId)
         void this.notifications.create({
           userId,
           workspaceId: ctx.workspaceId,
           actorId,
           type: 'task_blocked',
           title: `"${blockedTask.title}" is blocked`,
-          body: `Blocked by "${blocker.title}".`,
+          body: seesBlocker ? `Blocked by "${blocker.title}".` : 'Blocked by a task you cannot open.',
           target: { entityType: 'task', entityId: blockedTaskId, url: taskUrl },
           emailContext: { taskTitle: blockedTask.title, workspaceName },
         })
@@ -3544,9 +3554,15 @@ export class TasksService {
       if (nextCategory !== 'open') {
         const blockers = await this.getOpenBlockers(taskId)
         if (blockers.length > 0) {
-          throw new BadRequestException(
-            `Task is blocked by open dependencies: ${blockers.map((b) => `${b.title} (${b.id})`).join(', ')}`,
-          )
+          // The task IS blocked, so the refusal stands whoever the blockers
+          // are; but it named each one by title and id, and for a member that
+          // was a way to read a task of a space they are refused (measured).
+          // Named where the actor may open them, counted where not.
+          const seen = await readableTaskIds(this.db, access.workspaceId, actorId, blockers.map((b) => b.id))
+          const named = blockers.filter((b) => seen.has(b.id)).map((b) => `${b.title} (${b.id})`)
+          const unseen = blockers.length - named.length
+          if (unseen > 0) named.push(`${unseen} ${unseen === 1 ? 'task' : 'tasks'} you cannot open`)
+          throw new BadRequestException(`Task is blocked by open dependencies: ${named.join(', ')}`)
         }
       }
     }
@@ -5577,7 +5593,7 @@ export class TasksService {
   }
 
   // --- Dependencies --------------------------------------------------------
-  async getDependencyGraph(taskId: string, depth = 2) {
+  async getDependencyGraph(taskId: string, depth = 2, reader?: { id: string; role?: string | null }) {
     const normalizedDepth = Math.min(Math.max(Math.floor(depth || 1), 1), 6)
     const visited = new Set<string>([taskId])
     const edges = new Map<string, { taskId: string; relatedTaskId: string; type: DependencyType }>()
@@ -5622,7 +5638,11 @@ export class TasksService {
       .limit(1)
     if (!root) throw new NotFoundException('Task not found')
     const nodeIds = [...visited]
-    const rows = await this.db
+    // And, for a reader, only tasks they may open: a node they may not is
+    // dropped the same way, edges and all. Measured on lane 1, the graph of a
+    // member's own task named a blocker in a space they were refused.
+    const isManager = reader ? await resolveIsManager(this.db, root.workspaceId, reader.id, reader.role) : true
+    const found = await this.db
       .select({
         id: tasks.id,
         title: tasks.title,
@@ -5635,12 +5655,37 @@ export class TasksService {
       .innerJoin(lists, eq(lists.id, tasks.listId))
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(inArray(tasks.id, nodeIds), eq(spaces.workspaceId, root.workspaceId)))
+      .where(
+        and(
+          inArray(tasks.id, nodeIds),
+          eq(spaces.workspaceId, root.workspaceId),
+          reader ? containerVisibilityFilter(this.db, reader.id, isManager) : undefined,
+          reader ? taskVisibilityFilter(this.db, reader.id, isManager) : undefined,
+        ),
+      )
 
-    const byId = new Map(rows.map((r) => [r.id, r]))
+    const kept = new Map(found.map((r) => [r.id, r]))
     for (const [key, edge] of edges) {
-      if (!byId.has(edge.taskId) || !byId.has(edge.relatedTaskId)) edges.delete(key)
+      if (!kept.has(edge.taskId) || !kept.has(edge.relatedTaskId)) edges.delete(key)
     }
+    // Then only what still joins the root: a task reached THROUGH a dropped
+    // one would stand alone in the graph and tell of the link it came by.
+    const reach = new Set<string>(kept.has(taskId) ? [taskId] : [])
+    for (let grew = true; grew; ) {
+      grew = false
+      for (const edge of edges.values()) {
+        if (reach.has(edge.taskId) !== reach.has(edge.relatedTaskId)) {
+          reach.add(edge.taskId)
+          reach.add(edge.relatedTaskId)
+          grew = true
+        }
+      }
+    }
+    for (const [key, edge] of edges) {
+      if (!reach.has(edge.taskId)) edges.delete(key)
+    }
+    const rows = found.filter((r) => reach.has(r.id))
+    const byId = new Map(rows.map((r) => [r.id, r]))
     const isOpen = (id: string) => {
       const node = byId.get(id)
       if (!node) return false

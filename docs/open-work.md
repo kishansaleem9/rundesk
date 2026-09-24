@@ -596,9 +596,20 @@ One of those twenty, `ai-answer-rendering`, first threw "fetch failed" at 42 of 
 
 *Fixed next: custom fields,* a HIGH item of their own below (`found-24-sep/custom-fields-open-to-any-member`).
 
-*Still open, read in code, not yet measured:* the dependency graph (`GET /tasks/:id/dependencies/graph` takes no reader and walks up to six hops); a status change refused for open blockers names each blocker by title and id, whoever asks; and the "is blocked" notification names the blocker to every assignee and watcher.
+*Fixed next: dependencies.* A dependency can join a task a member may open to one they may not. It stays real, since the member's task is still blocked, but it must not name the other task. Measured on lane 1 before the fix, as a member whose own task was blocked by a task of a space they were refused:
+- the task's dependency graph named the hidden blocker (title and id);
+- marking the task done was refused with "Task is blocked by open dependencies: <title> (<id>)";
+- the notice sent when the dependency was made said `Blocked by "<title>"`.
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: dependencies next (the graph, the refusal that names blockers, the blocked notification), then the reports (the unattended scheduled one first), then the rest.
+Linking a task to the hidden one by id was already refused (403).
+
+The graph now takes its reader. It keeps only tasks they may open, then only what still joins the root, so a task reached through a hidden one does not stand alone and tell of the link. The refusal still refuses: it names the blockers the actor may open and counts the rest ("and 2 tasks you cannot open"). The notice names the blocker to a recipient who may open it and says "Blocked by a task you cannot open" to one who may not.
+
+"May this person open these tasks" is now one function, `readableTaskIds` in `common/permissions/read-access.ts`, and the planner's private copy delegates to it. It was the second copy about to become a third.
+
+The new suite `dependency-read-access`, 3/3 on lane 1 (3 of 3 failed before). Its graph check also plants a task reached only through the hidden one. `dra-1..4`, each compiled (`dra-2` removes only the pruning). The unit test of the notice had its fake database answer every query in order, so the new visibility query drained it. A seam, `canUserSeeTask`, now answers it there, and a new unit test holds the notice to naming the blocker only for the recipient who may open it. API unit tests 1625/1625. Regression on four lanes, 22/22: the planner and lookup suites (for the delegation), task boundaries, merge and depth, notifications and the inbox, doc links, replies, access requests, settings, the pickers, chat actions, loading states, panel collapse, `workspace-read-access`, both video-1 suites and `video-regression`. One, `inbox-scope`, failed first on a race of its own, below, and passed once that was fixed. In CI.
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the reports next (the unattended scheduled one first), then the rest.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 

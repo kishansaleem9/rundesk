@@ -14,8 +14,9 @@ export class TaskDependenciesController {
   constructor(private tasks: TasksService) {}
 
   @Get('graph')
-  graph(@Param('taskId') taskId: string, @Query('depth') depth?: string) {
-    return this.tasks.getDependencyGraph(taskId, depth ? Number(depth) : 2)
+  graph(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload, @Query('depth') depth?: string) {
+    // As the reader may see it: the guard proves the root, not the tasks around it.
+    return this.tasks.getDependencyGraph(taskId, depth ? Number(depth) : 2, { id: user.id, role: user.role })
   }
 
   @Post()

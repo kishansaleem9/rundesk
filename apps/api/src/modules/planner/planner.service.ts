@@ -1,10 +1,9 @@
 import { Injectable, Inject, BadRequestException, NotFoundException, ForbiddenException } from '@nestjs/common'
-import { and, asc, eq, gte, inArray, lt } from 'drizzle-orm'
-import { taskTimeBlocks, tasks, users, lists, projects, spaces, workspaces } from '@rundesk/db'
+import { and, asc, eq, gte, lt } from 'drizzle-orm'
+import { taskTimeBlocks, tasks, users, lists, workspaces } from '@rundesk/db'
 import type { Db, PlannerSettings } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
-import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
-import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { readableTaskIds } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
 import { PeopleService } from '../people/people.service'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
@@ -327,23 +326,7 @@ export class PlannerService {
    * the container rule and the private-item rule, as every task read applies.
    */
   private async readableTaskIds(workspaceId: string, userId: string, taskIds: string[]): Promise<Set<string>> {
-    if (taskIds.length === 0) return new Set()
-    const isManager = await resolveIsManager(this.db, workspaceId, userId)
-    const rows = await this.db
-      .select({ id: tasks.id })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(
-        and(
-          inArray(tasks.id, [...new Set(taskIds)]),
-          eq(spaces.workspaceId, workspaceId),
-          containerVisibilityFilter(this.db, userId, isManager),
-          taskVisibilityFilter(this.db, userId, isManager),
-        ),
-      )
-    return new Set(rows.map((r) => r.id))
+    return readableTaskIds(this.db, workspaceId, userId, taskIds)
   }
 
   /**

@@ -68,6 +68,7 @@ describe('TasksService.notifyTaskBlocked', () => {
     ;(svc as any).getOpenBlockers = async () => [{ id: 'blocker-1', status: 'in_progress', title: 'Blocker Task' }]
     ;(svc as any).resolveWorkspaceForList = async () => WS
     ;(svc as any).resolveWorkspaceName = async () => 'Acme'
+    ;(svc as any).canUserSeeTask = async () => true
 
     await (svc as any).notifyTaskBlocked('blocked-1', 'blocker-1', 'actor')
 
@@ -84,6 +85,35 @@ describe('TasksService.notifyTaskBlocked', () => {
       assert.equal(payload.target.entityType, 'task')
       assert.equal(payload.target.entityId, 'blocked-1')
     }
+  })
+
+  it('names the blocker only to a recipient who may open it', async () => {
+    // A blocker in a space one recipient is refused: both are told their task
+    // is blocked, and only the other is told by what (measured on lane 1: the
+    // notice named a refused space's task to everyone).
+    const db = makeDb([
+      [{ id: 'blocked-1', title: 'Blocked Task', listId: 'l1' }],
+      [{ userId: 'u2' }, { userId: 'u3' }], // assignees
+      [],                                   // watchers
+    ])
+    const notifications = { create: mock.fn(async (_data: any) => ({})) }
+    const svc = makeService(db, notifications)
+    ;(svc as any).getOpenBlockers = async () => [{ id: 'blocker-1', status: 'in_progress', title: 'Blocker Task' }]
+    ;(svc as any).resolveWorkspaceForList = async () => WS
+    ;(svc as any).resolveWorkspaceName = async () => 'Acme'
+    const asked: string[] = []
+    ;(svc as any).canUserSeeTask = async (_ws: string, userId: string, taskId: string) => {
+      asked.push(`${userId}:${taskId}`)
+      return userId === 'u2'
+    }
+
+    await (svc as any).notifyTaskBlocked('blocked-1', 'blocker-1', 'actor')
+
+    const bodyOf = (userId: string) =>
+      (notifications.create.mock.calls.map((c) => c.arguments[0] as any).find((c) => c.userId === userId) ?? {}).body
+    assert.match(bodyOf('u2'), /Blocker Task/)
+    assert.equal(bodyOf('u3'), 'Blocked by a task you cannot open.')
+    assert.deepEqual(asked.sort(), ['u2:blocker-1', 'u3:blocker-1'])
   })
 
   it('does NOT notify when the blocker is not open (task not actually blocked)', async () => {

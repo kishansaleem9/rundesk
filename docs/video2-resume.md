@@ -316,11 +316,11 @@ evidence.
 **When the allowance resets**, do not wait for a push to coincide with it.
 `ci.yml` carries a `workflow_dispatch` trigger; fire a run at the branch head.
 Expect the first one to take a little over two hours — `postgres-harnesses`
-runs 129 suites (24 September; the other six are in `browser-suites`) at
-roughly 1.1 minutes each, about 142 minutes, and its `timeout-minutes` is 180
+runs 130 suites (24 September; the other six are in `browser-suites`) at
+roughly 1.1 minutes each, about 143 minutes, and its `timeout-minutes` is 180
 with that arithmetic written beside it. **If you add a suite, redo that
 arithmetic** in the job's comment; the count has gone 50 → 85 → … → 116 → 117
-→ 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129, and `check-suites-registered.mjs` now fails any suite without a step,
+→ 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130, and `check-suites-registered.mjs` now fails any suite without a step,
 so the count cannot quietly lag the directory. **The job should be split**:
 the comment above it says why that was not done without a working pipeline to
 prove the split on.
