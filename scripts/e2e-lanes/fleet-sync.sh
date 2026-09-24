@@ -39,6 +39,9 @@ for k in $(seq 1 "$N"); do
   pkill -f "PORTMARK=$k " 2>/dev/null
 done
 pkill -f 'dist/apps/api/src/main.js' 2>/dev/null
+# Every lane now serves the main tree, so no break worktree's stamp is true —
+# see `lane_api_down` in lane-env.sh, which clears it on the other stop path.
+rm -f /tmp/claude-0/wt*.serving
 sleep 2
 
 for k in $(seq 1 "$N"); do

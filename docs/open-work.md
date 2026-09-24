@@ -998,6 +998,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* `/tmp/claude-0/wtN.serving` holds the commit whose UNPATCHED build the lane is serving. It is written only after the sync's restart succeeds (a restart that fails now refuses the set) and after the final restore, and cleared before any patched restart. A missing or different stamp forces the sync. Found beside it: editing `wt-break.sh` while a run is executing it is itself a hazard, since bash reads a running script by byte offset, so the lane-2 run in progress was stopped and the main tree checked for patches (clean).
 
+### `found-24-sep/lane-restart-left-the-break-stamp` — **closed** (found closing `workspace-reads-skip-the-container-rule`)
+
+**A lane restarted onto the main tree's build kept the break runner's stamp, which went on saying the lane served its worktree's build**
+
+*Evidence:* at 01:00 on 24 September `/tmp/claude-0/wt2.serving`, `wt3` and `wt4` all read `aa239bc`, while lanes 2 to 4 had been restarted at 00:39 by `build-api.sh "1 2 3 4"` onto the main tree's `dist`. (`fleet-restart.sh` starts every lane from `apps/api`.) They were restarted again the same way minutes later, with this item's uncommitted work in the build, and the stamps stayed. `wt-break.sh` skips its sync when the stamp matches HEAD, so a break run at the stamped commit would have measured its baseline against the main tree's build. That did not happen only because HEAD had moved on.
+
+*Closed:* `lane_api_down` (lane-env.sh) is the one stop path of `fleet-up.sh` and `fleet-restart.sh`, and it now removes the lane's stamp first, whether or not anything was listening. `fleet-sync.sh` stops every API with `pkill`, so it removes every stamp. `wt-break.sh` stops its own API without that function and, as before, rewrites the stamp once its restart is up. `check-lane-api-down.sh` now requires the stamp to be gone after the polite, stubborn and empty cases, and it catches a mutation that keeps the stamp (4 of 4 mutations caught). The next `build-api.sh "1 2 3 4"` removed all three stale stamps.
+
 ### `found-23-sep/lane-store-refused-the-apis-own-uploads` — **closed** (found giving the store a copy for `clip-create-task-persists-24h-url`)
 
 **Under `--strict`, the lane store refused every PUT the API sends itself, as unsigned**

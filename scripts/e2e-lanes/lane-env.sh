@@ -236,6 +236,16 @@ lane_model_up () {
 # holds it to that, and proves it can tell when it does not.
 lane_api_down () {
   local port="$1" pids left
+  # THE BREAK RUNNER'S STAMP GOES FIRST, whether or not anything is listening.
+  # `wt-break.sh` trusts `/tmp/claude-0/wt<lane>.serving` to name the commit
+  # whose unpatched WORKTREE build the lane serves, and skips its sync when that
+  # matches HEAD. Every caller of this function goes on to start the MAIN
+  # tree's build on the port, and left the stamp claiming the worktree's: on
+  # 24 September lanes 2 to 4 were stamped `aa239bc` while serving a main-tree
+  # build with uncommitted work in it, so a break run at that commit would have
+  # measured its baseline against that. (`wt-break.sh` stops its own API
+  # without this function, and rewrites the stamp once its restart is up.)
+  rm -f "/tmp/claude-0/wt$((port - 3020)).serving"
   pids=$(lsof -t -i ":$port" -sTCP:LISTEN 2>/dev/null | sort -u)
   [ -z "$pids" ] && return 0
   kill $pids 2>/dev/null

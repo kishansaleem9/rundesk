@@ -9,6 +9,9 @@
 #   stubborn   a server that ignores SIGTERM     → 0, and the port is free
 #   empty      nothing listening                 → 0
 #
+# and in every case the break runner's stamp for the lane is gone afterwards,
+# because each caller then starts the main tree's build on that port.
+#
 # --mutate then runs the same cases against broken copies of the function and
 # requires every one to be caught: a check that cannot fail is not a check.
 #
@@ -30,18 +33,26 @@ serve () {  # serve <polite|stubborn>
   return 1
 }
 held () { [ -n "$(lsof -t -i ":$PORT" -sTCP:LISTEN 2>/dev/null)" ]; }
+# The break runner's stamp for this port's lane (19, which no fleet has): a
+# stop must clear it, since the caller then starts the main tree's build.
+STAMP="/tmp/claude-0/wt$((PORT - 3020)).serving"
+stamped () { mkdir -p /tmp/claude-0 && echo "some-commit" > "$STAMP"; }
 
 # run_cases <lane-env file> — prints one line per failing case, returns their count.
 run_cases () {
   local env="$1" bad=0 rc
   for kind in polite stubborn; do
     serve "$kind" || return 99
+    stamped
     local t0 ms
     t0=$(date +%s%N)
     bash -c ". '$env'; lane_api_down $PORT" > /dev/null 2>&1; rc=$?
     ms=$(( ($(date +%s%N) - t0) / 1000000 ))
     if [ "$rc" != 0 ] || held; then
       echo "  $kind: returned $rc with the port $(held && echo STILL HELD || echo free)"
+      bad=$((bad + 1))
+    elif [ -e "$STAMP" ]; then
+      echo "  $kind: the port is free, and the break runner's stamp still claims the lane"
       bad=$((bad + 1))
     elif [ "$kind" = polite ] && [ "$ms" -ge $((LANE_API_DOWN_GRACE * 1000)) ]; then
       # A kill that stops nothing still ends with a free port, because the
@@ -54,8 +65,12 @@ run_cases () {
     kill -9 $(lsof -t -i ":$PORT" -sTCP:LISTEN 2>/dev/null) 2>/dev/null
     wait 2>/dev/null
   done
+  stamped
   bash -c ". '$env'; lane_api_down $PORT" > /dev/null 2>&1; rc=$?
   [ "$rc" = 0 ] || { echo "  empty: returned $rc with nothing listening"; bad=$((bad + 1)); }
+  # Nothing listening is still a stop: the caller starts the main tree next.
+  [ -e "$STAMP" ] && { echo "  empty: the break runner's stamp still claims the lane"; bad=$((bad + 1)); }
+  rm -f "$STAMP"
   return $bad
 }
 
@@ -77,6 +92,8 @@ MUTANTS=(
   's/^  \[ -n "\$left" \] && kill -9 \$left 2>\/dev\/null$/  :/'
   # The fleet-up shape: a pattern that kills nothing.
   's/^  kill \$pids 2>\/dev\/null$/  pkill -f "PORTMARK=nobody " 2>\/dev\/null/'
+  # The stamp left behind, as it was until 24 September.
+  's/^  rm -f "\/tmp\/claude-0\/wt.*\.serving"$/  :/'
 )
 # Not mutated: the "still held after SIGKILL" refusal. SIGKILL cannot be
 # ignored, so no server a test can start reaches that branch, and a mutation
