@@ -237,7 +237,18 @@ REV=$(git -C /home/user/rundesk rev-parse HEAD)
 # same chance of finding the worktree already synced, and the chain would stop
 # on "no progress" against sets that were running perfectly.
 echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
-if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
+# WHAT THE LANE IS SERVING, NOT WHAT THE WORKTREE HOLDS. The sync used to run
+# only when the worktree's checkout differed from HEAD, and assumed the API
+# serving the lane had been built from it. A run killed between the checkout
+# and the restart (stopping plan-4 did exactly that on lane 3), or during a
+# patch, left the checkout at HEAD and the lane serving an older or a PATCHED
+# binary; every later run skipped the sync and measured that binary. The next
+# baseline on lane 3 failed 4 of 7 against code that had been fixed. This stamp
+# is written only once an unpatched build of REV is up, and cleared before any
+# patched restart, so a missing or different stamp forces the sync.
+STAMP="/tmp/claude-0/wt$LANE.serving"
+if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ] || [ "$(cat "$STAMP" 2>/dev/null)" != "$REV" ]; then
+  rm -f "$STAMP"
   git -C "$WT" checkout -- . 2>/dev/null
   if ! git -C "$WT" checkout --detach "$REV" > /dev/null 2>&1; then
     echo "== CANNOT SYNC WORKTREE — refusing to run, results would be about the wrong tree" >> "$OUT"
@@ -262,7 +273,11 @@ if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ]; then
       tail -5 "/tmp/claude-0/wt$LANE-web.log"; } >> "$OUT"
     exit 4
   fi
-  restart
+  if ! restart; then
+    echo "== THE API DID NOT COME UP on $PORT after the sync — refusing, the baseline would measure nothing" >> "$OUT"
+    exit 4
+  fi
+  echo "$REV" > "$STAMP"
 fi
 
 # A worktree that was never built, or whose build was interrupted before this
@@ -437,7 +452,7 @@ for b in "$@"; do
   if [ "$OK" = yes ]; then
     # Restart when this patch touched the API, or when the previous one did and
     # the lane is therefore still serving that patch's binary.
-    if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then restart; fi
+    if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then rm -f "$STAMP"; restart; fi
     API_DIRTY="$NEEDS_API"
     timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
       > "/tmp/claude-0/brk-$b.log" 2>&1
@@ -508,5 +523,5 @@ pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
 # nobody described.
 pnpm -C apps/web exec vite build > /dev/null 2>&1
 pnpm -C apps/web exec vite build > /dev/null 2>&1
-restart
+restart && echo "$REV" > "$STAMP"
 echo "DONE $SUITE" >> "$OUT"

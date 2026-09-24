@@ -984,6 +984,14 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* it walks back to the newest migration that adds a column (today 0160, `folders.description`) and checks that. The warning remains for a tree where no migration adds one. Lane 1 restarted with the check performed and no warning.
 
+### `found-24-sep/killed-break-run-left-a-stale-lane` — **closed** (found when lane 3's baseline failed on fixed code)
+
+**A break run killed mid-sync or mid-patch left its lane serving an old or a patched API, and every later run measured it**
+
+*Evidence:* `wt-break.sh` synced and rebuilt only when the worktree's checkout differed from HEAD, and assumed the API serving the lane had been built from that checkout. Stopping plan-4 killed lane 3's runner after its checkout had moved to d083c3e and before the build and restart. The next run found the checkout at HEAD, skipped the sync, and ran `home-my-work`'s baseline against the old binary: 3 passed, 4 failed, on code that had been fixed and measured 7/7 on lane 1, and the whole set was refused. A run killed during a patch would have left the lane serving the PATCHED build, with the same result, or a baseline that passes on a broken binary.
+
+*Closed:* `/tmp/claude-0/wtN.serving` holds the commit whose UNPATCHED build the lane is serving. It is written only after the sync's restart succeeds (a restart that fails now refuses the set) and after the final restore, and cleared before any patched restart. A missing or different stamp forces the sync. Found beside it: editing `wt-break.sh` while a run is executing it is itself a hazard, since bash reads a running script by byte offset, so the lane-2 run in progress was stopped and the main tree checked for patches (clean).
+
 ### `found-23-sep/lane-store-refused-the-apis-own-uploads` — **closed** (found giving the store a copy for `clip-create-task-persists-24h-url`)
 
 **Under `--strict`, the lane store refused every PUT the API sends itself, as unsigned**
