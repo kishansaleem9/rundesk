@@ -14,8 +14,8 @@ export class CanvasesController {
 
   @Get()
   @ApiOperation({ summary: 'List workspace canvases' })
-  list(@Param('workspaceId') workspaceId: string, @Query('type') type?: string) {
-    return this.svc.list(workspaceId, type)
+  list(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any, @Query('type') type?: string) {
+    return this.svc.list(workspaceId, type, user.id)
   }
 
   @Post()
@@ -30,8 +30,8 @@ export class CanvasesController {
 
   @Get(':canvasId')
   @ApiOperation({ summary: 'Get a workspace canvas' })
-  get(@Param('workspaceId') workspaceId: string, @Param('canvasId') canvasId: string) {
-    return this.svc.get(workspaceId, canvasId)
+  get(@Param('workspaceId') workspaceId: string, @Param('canvasId') canvasId: string, @CurrentUser() user: any) {
+    return this.svc.get(workspaceId, canvasId, user.id)
   }
 
   @Patch(':canvasId')

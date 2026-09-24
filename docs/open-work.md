@@ -1246,13 +1246,28 @@ Regression on lane 1, 25/25: `guest-chat-scope`, `chat-realtime-access`, `call-r
 - A member may make a channel scoped to a private space they are not in: `createChannel` checks the space's workspace, not the maker's reach.
 - Old member rows of guests on public channels stay in the table. They open nothing now.
 
-### `found-24-sep/guests-list-every-whiteboard` — open, security, small (found closing `guests-read-every-open-space`)
+### `found-24-sep/guests-list-every-whiteboard` — **closed** (security, small; found closing `guests-read-every-open-space`)
 
 **Whiteboards are listed and opened by any member of the workspace, a guest included**
 
 *Evidence, read not run:* `CanvasesService.list(workspaceId, type)` reads every canvas of the workspace with no reader. The realtime gateway says a canvas's room "follows the canvas's own read rule, which is membership today".
 
 *To close:* a guest reads a whiteboard shared with them, and nothing else. Research whether a member's access to a whiteboard follows its location in ClickUp.
+
+*Measured on lane 1, before, wider than the evidence:* a guest listed, opened, renamed and deleted any whiteboard or mind map, made their own, and joined any board's realtime room. Both pages offered them "New".
+
+*Closed, 24 September.* No share can name a canvas: a share names a space, folder, project, list, task, doc, channel, dashboard or view. So, as with goals, a guest has none. `CanvasesService` lists a guest none, finds them none by id, and refuses them making, changing or deleting one (403, "Guests have no whiteboards or mind maps"). The realtime gateway refuses them a canvas's room, as it now refuses them the workspace's. Both pages tell a guest that none is shared with them, in the four locales, and offer no "New board" or "New mind map".
+
+The new suite `guest-canvas-scope`, 5 checks, planted by SQL and read back beside a member: the listing, open/rename/delete, making, the room, and both pages.
+
+- Before, with the change stashed and lane 1's API and bundle rebuilt from it: 0 of 5.
+- After: 5/5.
+
+`gcv-1..8`, each compiled, at least one per check. Regression on lane 1, 14/14: `guest-canvas-scope`, `task-creation-access`, `ai-answer-rendering`, `comment-plus-menu`, `create-menu-ai`, `space-create-menu`, `task-depth`, `task-mentions`, `video1-fast-items`, `guest-chat-scope`, `chat-realtime-access`, `video1-acceptance`, `video-regression` and `ui-sweep`. In CI.
+
+*The same commit, from the chat rule's first break run:* `tcm-6` (a guest makes tasks) stayed green because `task-creation-access` planted the guest's message in a workspace channel nobody had shared with them, so the new channel rule refused first. The suite shares that channel with its guest, to view.
+
+*Not changed:* a member's access to a canvas is still membership. ClickUp files whiteboards in locations and reads them by the location's rule, and a canvas here has no location. That is a feature (location and sharing for canvases), not built.
 
 ### `found-24-sep/local-dates-expected-the-day-of-now` — **closed** (test tooling; a defect of mine, found by the full sweep)
 

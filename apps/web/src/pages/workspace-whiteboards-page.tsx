@@ -24,6 +24,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { useAuthStore } from '../store/auth'
 import { CursorLayer, useCanvasCursors } from '../lib/use-canvas-cursors'
 import { useTranslation } from '../lib/i18n'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type Whiteboard = {
@@ -71,6 +72,7 @@ export function WhiteboardsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/whiteboards' })
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
+  const { role } = useWorkspaceRole(workspaceId)
   const [query, setQuery] = useState('')
   const [activeBoardId, setActiveBoardId] = useState<string | null>(null)
   const [items, setItems] = useState<BoardItem[]>([])
@@ -314,6 +316,27 @@ export function WhiteboardsPage() {
     () => [...items].sort((a, b) => (a.z ?? 0) - (b.z ?? 0)),
     [items],
   )
+
+  /*
+   * A GUEST HAS NO WHITEBOARD: none can be shared here, and the API lists them
+   * none and refuses them one (`found-24-sep/guests-list-every-whiteboard`),
+   * so the page says so rather than offering a board to fail.
+   */
+  if (role === 'guest') {
+    return (
+      <div className="p-6 h-full flex flex-col gap-4">
+        <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
+            <Frame className="h-4 w-4" />
+          </span>
+          {t('nav.whiteboards')}
+        </h1>
+        <Card className="p-8 text-center text-sm text-muted-foreground" data-testid="whiteboards-none-shared">
+          {t('whiteboards.noneShared')}
+        </Card>
+      </div>
+    )
+  }
 
   return (
     <div className="p-6 h-full flex flex-col gap-4">

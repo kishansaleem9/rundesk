@@ -22,6 +22,7 @@ import {
   Trash2,
 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 type MindMap = {
@@ -56,6 +57,7 @@ export function MindMapsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/mindmaps' })
   const qc = useQueryClient()
   const me = useAuthStore((s) => s.user)
+  const { role } = useWorkspaceRole(workspaceId)
   /** Editor target; map row (incl. updatedAt) always comes from React Query so PATCH versioning stays correct. */
   const [activeMapId, setActiveMapId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
@@ -321,6 +323,23 @@ export function MindMapsPage() {
           setNodes((prev) => radialLayout(prev))
         }}
       />
+    )
+  }
+
+  // A guest has no mind map: none can be shared here (see the whiteboards page).
+  if (role === 'guest') {
+    return (
+      <div className="p-6 space-y-7 max-w-7xl mx-auto">
+        <h1 className="font-display text-3xl font-semibold flex items-center gap-2.5">
+          <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-gradient-soft text-white shadow-glow">
+            <Network className="h-4 w-4" />
+          </span>
+          {t('nav.mindMaps')}
+        </h1>
+        <Card className="p-8 text-center text-sm text-muted-foreground" data-testid="mindmaps-none-shared">
+          {t('mindmaps.noneShared')}
+        </Card>
+      </div>
     )
   }
 

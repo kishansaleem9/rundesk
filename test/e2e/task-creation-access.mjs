@@ -123,6 +123,10 @@ try {
   const gates = await Promise.all([M(`/tasks/list/${first.id}`), M(`/tasks/list/${PRIVATE}`)])
   if (!gates.every((g) => g.status === 403)) throw new Error(`the member was not refused the two private lists (${gates.map((g) => g.status).join(', ')})`)
   const channel = await make(A, `/workspaces/${WS}/chat/channels`, { name: `${TAG}-talk` }, 'the channel')
+  // A guest reads a public channel only when it is shared with them
+  // (`found-24-sep/guests-read-every-open-channel`): the guest's message below
+  // is in this one, so it is, and the refusal is task-making's, not the channel's.
+  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'channel', ${channel}, ${guest.id}, 'view')`
   const titled = async (list, title) => (await sql`select count(*)::int as n from tasks where list_id = ${list} and title = ${title}`)[0].n
   const message = async (C, ch, body) => make(C, `/chat/channels/${ch}/messages`, { body }, `the message "${body}"`)
 

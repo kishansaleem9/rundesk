@@ -188,6 +188,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
      * own room (`channelReaders`) — `found-24-sep/guests-read-every-open-channel`.
      */
     if (kind === 'workspace' && membership.role === 'guest') return false
+    // Nor a canvas's: a guest has no whiteboard or mind map (`CanvasesService`).
+    if (kind === 'canvas' && membership.role === 'guest') return false
     /*
      * A LIST'S OR A TASK'S ROOM CARRIES WHAT THE LIST OR THE TASK SHOWS: the
      * new task whole, every change, every comment. Membership alone let

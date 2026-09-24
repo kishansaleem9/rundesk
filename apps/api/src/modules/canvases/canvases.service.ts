@@ -1,6 +1,6 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { and, desc, eq } from 'drizzle-orm'
-import { workspaceCanvases } from '@rundesk/db'
+import { workspaceCanvases, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -12,8 +12,29 @@ export class CanvasesService {
     private readonly realtime: RealtimeGateway,
   ) {}
 
-  async list(workspaceId: string, type?: string) {
+  /*
+   * A GUEST HAS NO WHITEBOARD OR MIND MAP. A guest reads only what is shared
+   * with them, and a canvas cannot be shared here (a share names a space,
+   * folder, project, list, task, doc, channel, dashboard or view), so, as with
+   * goals, a guest lists none, opens none and makes none. Every one was theirs
+   * by membership alone (`found-24-sep/guests-list-every-whiteboard`).
+   */
+  private async isGuest(workspaceId: string, userId: string): Promise<boolean> {
+    const [m] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return m?.role === 'guest'
+  }
+
+  private async assertNotGuest(workspaceId: string, userId: string) {
+    if (await this.isGuest(workspaceId, userId)) throw new ForbiddenException('Guests have no whiteboards or mind maps')
+  }
+
+  async list(workspaceId: string, type?: string, actorId?: string) {
     if (type && !this.isSupportedType(type)) throw new BadRequestException('Unsupported canvas type')
+    if (actorId && (await this.isGuest(workspaceId, actorId))) return []
     const base = this.db.select().from(workspaceCanvases)
     const rows = type
       ? await base.where(and(eq(workspaceCanvases.workspaceId, workspaceId), eq(workspaceCanvases.type, type))).orderBy(desc(workspaceCanvases.updatedAt))
@@ -23,6 +44,7 @@ export class CanvasesService {
 
   async create(workspaceId: string, userId: string, body: { type: string; title: string; data?: unknown }) {
     if (!this.isSupportedType(body.type)) throw new BadRequestException('Unsupported canvas type')
+    await this.assertNotGuest(workspaceId, userId)
     const [row] = await this.db
       .insert(workspaceCanvases)
       .values({
@@ -42,7 +64,8 @@ export class CanvasesService {
     return row
   }
 
-  async get(workspaceId: string, canvasId: string) {
+  async get(workspaceId: string, canvasId: string, actorId?: string) {
+    if (actorId && (await this.isGuest(workspaceId, actorId))) throw new NotFoundException('Canvas not found')
     const [row] = await this.db
       .select()
       .from(workspaceCanvases)
@@ -59,6 +82,7 @@ export class CanvasesService {
     body: { title?: string; data?: unknown; type?: string; expectedUpdatedAt?: string },
   ) {
     if (body.type && !this.isSupportedType(body.type)) throw new BadRequestException('Unsupported canvas type')
+    await this.assertNotGuest(workspaceId, actorId)
     if (body.expectedUpdatedAt) {
       const [current] = await this.db
         .select({ updatedAt: workspaceCanvases.updatedAt })
@@ -99,6 +123,7 @@ export class CanvasesService {
   }
 
   async remove(workspaceId: string, canvasId: string, actorId: string) {
+    await this.assertNotGuest(workspaceId, actorId)
     await this.db
       .delete(workspaceCanvases)
       .where(and(eq(workspaceCanvases.id, canvasId), eq(workspaceCanvases.workspaceId, workspaceId)))
