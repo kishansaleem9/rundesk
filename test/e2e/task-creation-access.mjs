@@ -113,9 +113,11 @@ try {
   const PRIVATE = await place(A, WS, 'private', { visibility: 'private' })
   const OPEN = await place(A, WS, 'open')
   // A guest reads only what is shared with them (`found-24-sep/guests-read-every-open-space`):
-  // the open list is shared with this one to VIEW, so the refusal below is the
-  // one under test — a guest may not make tasks — and not that they cannot see the list.
-  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${OPEN}, ${guest.id}, 'view')`
+  // the open list is shared with this one to EDIT, so neither the read nor the
+  // list's level refuses them, and the refusal below is the one under test — a
+  // guest may not make tasks. (Shared to view, the level refused first, and a
+  // patch dropping the guest rule reddened nothing.)
+  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${OPEN}, ${guest.id}, 'edit')`
   const VIEW = await place(A, WS, 'view only', { defaultPermission: 'view' })
   const COMMENT = await place(A, WS, 'comment', { defaultPermission: 'comment' })
   const gates = await Promise.all([M(`/tasks/list/${first.id}`), M(`/tasks/list/${PRIVATE}`)])

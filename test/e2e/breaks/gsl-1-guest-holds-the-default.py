@@ -1,7 +1,9 @@
 # A GUEST WITH NOTHING SHARED HOLDS THE SPACE'S DEFAULT AGAIN — the members'
 # level — so they make lists in any open space and comment on its tasks.
-# Reddens: guest-space-level: "a guest makes no list in an open space not shared with them (403, none made) — a member does, and so does the guest where the space is shared with them to edit"
-#   or "a guest comments on no task of an open space not shared with them (403, none written) — a member does, and so does the guest where the space is shared with them to comment"
+# RE-AIMED 24 September: a guest reads only what is shared with them now, so the
+# guard refuses the open space before this rule is asked; the rule shows where the
+# guest reaches a space without a grant on it — passing through to a shared list.
+# Reddens: guest-space-level: "a guest who only passes through a space — a list in it shared with them — makes no list beside it, and the Move picker does not offer them the space"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/space-default-permission.ts'
 a = "  if (guest) return { level: 'view', source: 'guest-default' }\n  return { level: space.defaultPermission, source: 'space-default' }\n"

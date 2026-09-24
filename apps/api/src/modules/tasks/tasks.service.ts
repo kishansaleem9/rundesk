@@ -298,9 +298,10 @@ export class TasksService {
     workspaceId: string
     spaceId: string
     projectId: string
+    folderId: string | null
   } | null> {
     const [row] = await this.db
-      .select({ workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: lists.projectId })
+      .select({ workspaceId: spaces.workspaceId, spaceId: spaces.id, projectId: lists.projectId, folderId: projects.folderId })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -1968,7 +1969,17 @@ export class TasksService {
     const list = await readableList(this.db, home.workspaceId, listId, { id: actorId, role: account?.role })
     if (!list) throw new NotFoundException('List not found')
     if (list.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
-    await assertCanCreateInSpace(this.db, { spaceId: home.spaceId, actorId, kind: 'task' })
+    await assertCanCreateInSpace(this.db, {
+      spaceId: home.spaceId,
+      actorId,
+      kind: 'task',
+      // What is shared of the way to it counts for a guest, as it does for a list (`WithinStep`).
+      within: [
+        { type: 'list', id: listId },
+        { type: 'project', id: home.projectId },
+        ...(home.folderId ? [{ type: 'folder' as const, id: home.folderId }] : []),
+      ],
+    })
     return home
   }
 

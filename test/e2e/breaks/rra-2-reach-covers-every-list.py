@@ -5,8 +5,8 @@ p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.guard-h
 # Re-anchored when reach took the list's own privacy too
 # (found-24-sep/reach-skipped-private-lists); the edit is the same: nothing
 # but the workspace is asked.
-# RE-AIMED 24 September: the return line after it now adds the guest's task
-# rule, so the anchor is the member's reach alone.
+# RE-AIMED 24 September: anchored on the reach's own query alone, the line the
+# mistake is in.
 a = '    .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false), listVisibilityFilter(actorId, false)))\n'
 b = '    .where(eq(spaces.workspaceId, workspaceId))\n'
 s = io.open(p, encoding='utf-8').read()

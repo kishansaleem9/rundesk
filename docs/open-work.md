@@ -1198,6 +1198,14 @@ The other four, taken in turn:
 
 The eight changed suites then passed together, 8/8. In CI.
 
+*The break run, and what it found (plan-drifted-3, lanes 2–4):* `grs-1..15` reddened 14 of 15, `hook-portal-access` 11 of 11 and `doc-write-levels` 6 of 6. Five patches stayed green, and each showed a check that could no longer see its code:
+
+- `gsl-1` and `gsl-2` (the write rule's guest default, one space and many): the read rule now refuses a guest the open space before the write rule is asked. `guest-space-level` gains a fifth check where it IS asked: a guest who only passes through a space, to a list shared with them in it, makes no list beside it, and the Move picker does not offer them the space. Both are re-aimed there.
+- `mtg-3` and `tcm-6` (a guest makes tasks): their suites shared the list with the guest to view, so the list's level refused first. They share it to edit now, so "guests may not make tasks" is the refusal left. The task create gate passes the list, project and folder as its chain, as the list gate does, so an edit share on the way counts for a guest there too. `tcm-5` is re-aimed at the gate's new call.
+- `grs-5` (the guest's half of `taskInReachFilter`): every read of tasks asks the private-task filter beside it, and that filter carries the same half. The copy was shadowed in every read. It is gone, and `grs-5` with it.
+
+Rerun on lane 1, 8/8: `guest-space-level` (5), `meeting-access`, `task-creation-access`, `guest-read-scope`, `search-read-access`, `report-read-access`, `private-list-reach` and `workspace-read-access`. API unit tests for the touched modules 284/284.
+
 *Not changed, and each its own item:* `found-24-sep/guests-read-every-open-channel` and `found-24-sep/guests-list-every-whiteboard`, below. A guest's sidebar is still the tree, cut down to the way to what is shared, not ClickUp's "Shared with Me" section. And a guest assigned a task nothing shares with them no longer reads it; ClickUp asks to share it when assigning. Recorded, not built.
 
 ### `found-24-sep/guests-read-every-open-channel` — **closed** (security, medium; found closing `guests-read-every-open-space`)

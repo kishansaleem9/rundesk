@@ -26,7 +26,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 4
+const EXPECTED_CHECKS = 5
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -176,6 +176,19 @@ try {
       && beside.status === 403 && besideC === 0,
     'where only an item is shared with a guest, its level is theirs there — they comment on the shared task and in the shared list, and make a list in the shared project — and not on the task beside them',
     `the shared task ${said(onTask)}, ${onTaskC}; the shared list's task ${said(onList)}, ${onListC}; a list in the shared project ${said(inProject)}, ${inProjectN}; the task beside them ${said(beside)}, ${besideC}`,
+  )
+
+  // ══ 5. PASSING THROUGH ═══════════════════════════════════════════════════
+  // The open space holds a list shared with the guest now, so its project is on
+  // the way to it: the guest reaches the project, and nothing grants them it.
+  console.log('\n▶ the open space, which the guest now passes through to the list shared with them')
+  const through = await G('/lists', { method: 'POST', body: { projectId: OPEN.project, name: `${TAG} the guest's list passing through` } })
+  const throughN = await listsNamed(`${TAG} the guest's list passing through`)
+  const gTargets2 = await targets(G)
+  chk(
+    through.status === 403 && throughN === 0 && gTargets2.status === 200 && !gTargets2.ids.includes(OPEN.id) && gTargets2.ids.includes(EDIT.id),
+    'a guest who only passes through a space — a list in it shared with them — makes no list beside it, and the Move picker does not offer them the space',
+    `a list beside the shared one ${said(through)}, made ${throughN}; the picker ${gTargets2.status}: the open space ${gTargets2.ids.includes(OPEN.id)}, the space shared to edit ${gTargets2.ids.includes(EDIT.id)}`,
   )
 } catch (e) {
   failed += 1

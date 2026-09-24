@@ -130,9 +130,11 @@ try {
   const hidden = await place(A, WS, 'private', 'private')
   const open = await place(A, WS, 'open')
   // A guest reads only what is shared with them (`found-24-sep/guests-read-every-open-space`):
-  // the open list is shared with this one to VIEW, so the refusal below is the
-  // one under test — a guest may not make tasks — and not that they cannot see the list.
-  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${open.list}, ${guest.id}, 'view')`
+  // the open list is shared with this one to EDIT, so neither the read nor the
+  // list's level refuses them, and the refusal below is the one under test — a
+  // guest may not make tasks. (Shared to view, the level refused first, and a
+  // patch dropping the guest rule reddened nothing.)
+  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${open.list}, ${guest.id}, 'edit')`
   const gate = await member.as(`/tasks/list/${hidden.list}`)
   if (gate.status !== 403) throw new Error(`the member was not refused the private list (${said(gate)}), so nothing here would mean anything`)
 

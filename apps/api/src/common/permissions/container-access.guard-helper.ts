@@ -2,7 +2,7 @@ import { and, eq, inArray, isNull, ne, notInArray, or, type SQL } from 'drizzle-
 import { spaceMembers, projectMembers, workspaceMembers, spaces, projects, lists, tasks, folders } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isManagerRole, listVisibilityFilter } from './item-visibility'
-import { guestProjectFilter, guestSpaceFilter, guestTaskFilter } from './guest-reach'
+import { guestProjectFilter, guestSpaceFilter } from './guest-reach'
 
 /** True if the user holds a manager-tier role in the workspace. */
 export async function isWorkspaceManager(db: Db, workspaceId: string, userId: string): Promise<boolean> {
@@ -187,6 +187,8 @@ export function taskInReachFilter(db: Db, workspaceId: string, actorId: string, 
     .innerJoin(projects, eq(projects.id, lists.projectId))
     .innerJoin(spaces, eq(spaces.id, projects.spaceId))
     .where(and(eq(spaces.workspaceId, workspaceId), containerVisibilityFilter(db, actorId, false), listVisibilityFilter(actorId, false)))
-  // The container rule lists a guest the way to what is shared; of the tasks, only those in reach.
-  return and(inArray(tasks.listId, reachable), guestTaskFilter(db, actorId))
+  // A guest's tasks are narrowed by the private-task filter, which every read of
+  // tasks asks beside this one (`taskVisibilityFilter` → `guestTaskFilter`): a
+  // second copy here was shadowed by it in every read, and measured nothing.
+  return inArray(tasks.listId, reachable)
 }
