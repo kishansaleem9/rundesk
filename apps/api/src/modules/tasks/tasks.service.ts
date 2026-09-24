@@ -2106,14 +2106,16 @@ export class TasksService {
    * the guard's own twin) and the private-item rule now apply, in SQL, so the
    * limit counts only what the caller may see.
    *
-   * OPEN AND NOT BINNED, IN SQL, BEFORE THE LIMIT. Both screens leave finished
-   * work out, and did it in the browser: Home by status KEY (`done`,
-   * `cancelled`, both renamable), the planner by category. Today & overdue did
-   * not do it at all, so every finished task with a past due date was counted
-   * overdue. Closed tasks also took places under a limit of 100 by last
-   * update, so a busy person's older open tasks fell off both lists. And a
-   * task in the Trash is not archived, so it stayed on Home. The soonest due
-   * come first, so when the limit cuts, it cuts the least urgent.
+   * OPEN, IN SQL, BEFORE THE LIMIT. Both screens leave finished work out, and
+   * did it in the browser: Home by status KEY (`done`, `cancelled`, both
+   * renamable), the planner by category. Today & overdue did not do it at
+   * all, so every finished task with a past due date was counted overdue.
+   * Closed tasks also took places under a limit of 100 by last update, so a
+   * busy person's older open tasks fell off both lists. (Binned tasks were
+   * never listed: `binTask` archives as well as setting `deletedAt`. The
+   * `deletedAt` condition is the list reads' own, kept for the same reason
+   * they keep it.) The soonest due come first, so when the limit cuts, it
+   * cuts the least urgent.
    */
   async getTasksForMember(
     workspaceId: string,
@@ -4116,8 +4118,9 @@ export class TasksService {
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')
     /*
-     * This un-archives. A task in the Trash is not archived — it is deleted,
-     * with a purge date — and un-archiving it here would put it back in every
+     * This un-archives. A task in the Trash is archived too (`binTask` sets
+     * both), but it is also DELETED, with a purge date, and `deletedAt` is what
+     * tells the two apart. Un-archiving it here would put it back in every
      * list while the Trash still offered to delete it forever: live and binned
      * at once. Restoring from the Trash is a different door, and it is the one
      * that clears `deletedAt`.

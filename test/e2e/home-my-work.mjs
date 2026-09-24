@@ -5,8 +5,8 @@
  * `GET /tasks/workspace/:ws/members/:userId`. "Today & overdue" kept every task
  * with a past due date, finished or not; "Assigned to me" left out status KEYS
  * `done` and `cancelled`, which are renamable; closed tasks took places under a
- * limit of 100 by last update; a task in the Trash stayed listed; and a failed
- * read showed "no tasks". (Whose tasks a caller may read at all is
+ * limit of 100 by last update; and a failed read showed "no tasks". (A binned
+ * task is archived too, so it was never listed; the check keeps it that way.) (Whose tasks a caller may read at all is
  * `workspace-read-access`.)
  *
  * The API half reads the member's own list; the screen half signs in as the
