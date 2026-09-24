@@ -47,18 +47,17 @@
 # Reddens: syncup-live: "and it arrives without a reload"
 import io
 
+# Re-anchored when the card stopped going to the whole workspace and went to
+# its channel's readers (`found-24-sep/chat-events-broadcast-to-the-workspace`):
+# the emit is now two lines choosing the room, and removing both is the same
+# edit as removing the one call it was.
 p = '/home/user/rundesk/apps/api/src/modules/calls/calls.service.ts'
-a = """    this.realtime.emitToWorkspace(workspaceId, {
-      type: 'chat.message.created',
-      workspaceId,
-      channelId,
-      message: { ...message, authorName: who, reactions: [] },
-    } as never)
-
+a = """    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
+    else for (const userId of readers) this.realtime.emitToUser(userId, event)
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
-io.open(p, 'w', encoding='utf-8').write(s.replace(a, ''))
+io.open(p, 'w', encoding='utf-8').write(s.replace(a, '    void readers\n    void event\n'))
 
 # …and the second path, which is what made the first version of this inert.
 q = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'

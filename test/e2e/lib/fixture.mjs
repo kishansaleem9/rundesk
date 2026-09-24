@@ -222,10 +222,14 @@ export async function ensureShared(
   const existing = (await api(`/tasks/list/${listId}`)).data ?? []
   const tasks = Array.isArray(existing) ? existing : (existing.tasks ?? [])
   let task = tasks.find((t) => t.title === taskTitle)
-  if (!task) {
-    task = (await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } })).data
-    // Assigned to both, because "open tasks with them" means exactly that —
-    // a task only one of you is on is not shared.
+  if (!task) task = (await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } })).data
+  // Assigned to both, because "open tasks with them" means exactly that — a
+  // task only one of you is on is not shared. On EVERY run, not only when the
+  // task is made: the peer is whoever `ensureDm` picks, which is the first
+  // other member and moves as members come and go, so a task found by its
+  // title can be shared with somebody else (an assignee already there is a
+  // no-op, and this client never throws).
+  if (task?.id) {
     for (const userId of [myUserId, peerUserId]) {
       if (userId) await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } })
     }
@@ -261,7 +265,16 @@ export async function ensureShared(
 
   const meetings = (await api(`/workspaces/${workspaceId}/meetings`)).data ?? []
   const list = Array.isArray(meetings) ? meetings : (meetings.items ?? [])
-  let meeting = list.find((m) => m.title === meetingTitle)
+  /*
+   * FOUND BY ITS TITLE AND ITS TWO PEOPLE, not by its title alone. The peer is
+   * the first other member (`ensureDm`), and that moves: on lane 1 a suite had
+   * left "Zoya Outsider" in the workspace, the DM became hers, and the meeting
+   * found by title was still the one with the member before — so "the meeting
+   * both attended is listed" failed about a meeting she never attended
+   * (`found-24-sep/a39-shared-meeting-keyed-by-title`).
+   */
+  const attends = (m, userId) => (m.attendees ?? []).some((a) => (a.user?.id ?? a.userId) === userId)
+  let meeting = list.find((m) => m.title === meetingTitle && attends(m, myUserId) && attends(m, peerUserId))
   if (!meeting) {
     const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
     meeting = (await api(`/workspaces/${workspaceId}/meetings`, {

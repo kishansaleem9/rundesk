@@ -31,7 +31,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
-import { readableChannelsFilter } from './channel-read-filter'
+import { channelReaders, readableChannelsFilter } from './channel-read-filter'
 import { isKeyDirectlyUnder } from '../../common/storage/object-key-shape'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -243,7 +243,11 @@ export class ChatService {
   }
 
   /** If a message mentions @Rundesk, generate + post an AI reply (§7.6). */
-  private async maybeAnswerAiMention(channel: { id: string; workspaceId: string }, authorId: string, body: string) {
+  private async maybeAnswerAiMention(
+    channel: { id: string; workspaceId: string; spaceId: string | null; isPrivate: boolean; isDm: boolean },
+    authorId: string,
+    body: string,
+  ) {
     if (!/@rundesk\b/i.test(body) || !this.ai.isAvailable()) return
     try {
       const aiUserId = await this.ensureAiUser()
@@ -263,7 +267,7 @@ export class ChatService {
         .insert(chatMessages)
         .values({ channelId: channel.id, authorId: aiUserId, body: answer })
         .returning()
-      this.realtime.emitToWorkspace(channel.workspaceId, {
+      await this.emitToChannel(channel, {
         type: 'chat.message.created',
         workspaceId: channel.workspaceId,
         channelId: channel.id,
@@ -428,6 +432,31 @@ export class ChatService {
     // promote a view-only visitor to full posting rights on their second
     // request. Most-specific-wins keeps the granted level authoritative.
     return { ...channel, accessLevel: sharedLevel ?? ('admin' as ShareLevel), isMember }
+  }
+
+  /**
+   * A chat event goes to the people who may read its channel, and no further.
+   *
+   * Every one of these went to the workspace's room, which every member's
+   * socket joins. Measured: a member refused a DM, a private channel and a
+   * private space's channel (403 on each) heard every message in them as it
+   * was written, every edit, and the name of each new private channel
+   * (`found-24-sep/chat-events-broadcast-to-the-workspace`). A public
+   * channel's events still go to the workspace room; the rest go to each
+   * reader's own `user:` room, which every socket joins on connect, so the web
+   * hears them as before (it already drops events of another workspace).
+   *
+   * Membership events (`chat.channel.members.*`) stay workspace-wide: they
+   * carry only the channel's id, and a person just removed must still hear
+   * that they were.
+   */
+  private async emitToChannel(
+    channel: { id: string; workspaceId: string; spaceId: string | null; isPrivate: boolean; isDm: boolean },
+    event: Parameters<RealtimeGateway['emitToWorkspace']>[1],
+  ) {
+    const readers = await channelReaders(this.db, channel)
+    if (readers === 'workspace') this.realtime.emitToWorkspace(channel.workspaceId, event)
+    else for (const userId of readers) this.realtime.emitToUser(userId, event)
   }
 
   /** Read-only visitors (view level) may not write into a channel. */
@@ -744,7 +773,7 @@ export class ChatService {
       ])
       .onConflictDoNothing()
 
-    this.realtime.emitToWorkspace(workspaceId, {
+    await this.emitToChannel(row, {
       type: 'chat.channel.created',
       workspaceId,
       channel: row,
@@ -811,7 +840,7 @@ export class ChatService {
       .values([...target].map((userId) => ({ channelId: row.id, userId })))
       .onConflictDoNothing()
 
-    this.realtime.emitToWorkspace(workspaceId, {
+    await this.emitToChannel(row, {
       type: 'chat.channel.created',
       workspaceId,
       channel: row,
@@ -865,7 +894,7 @@ export class ChatService {
     if (data.memberIds?.length) {
       await this.addChannelMembers(row.id, data.createdById, data.memberIds)
     }
-    this.realtime.emitToWorkspace(data.workspaceId, {
+    await this.emitToChannel(row, {
       type: 'chat.channel.created',
       workspaceId: data.workspaceId,
       channel: row,
@@ -905,7 +934,7 @@ export class ChatService {
       .returning()
     // Reuse chat.channel.created (the client handler just refetches the channel
     // list) so other members pick up the new name / description / icon.
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(row, {
       type: 'chat.channel.created',
       workspaceId: channel.workspaceId,
       channel: row,
@@ -928,7 +957,7 @@ export class ChatService {
       .set({ archivedAt: archived ? new Date() : null })
       .where(eq(chatChannels.id, channelId))
       .returning()
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(row, {
       type: 'chat.channel.created',
       workspaceId: channel.workspaceId,
       channel: row,
@@ -1971,7 +2000,7 @@ export class ChatService {
       channelLabel = peer?.displayName ? peer.displayName : 'Direct message'
     }
 
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.created',
       workspaceId: channel.workspaceId,
       channelId: data.channelId,
@@ -2092,7 +2121,7 @@ export class ChatService {
     }
 
     // @Rundesk AI assistant (§7.6) — best-effort, fire-and-forget.
-    void this.maybeAnswerAiMention({ id: channel.id, workspaceId: channel.workspaceId }, data.authorId, body)
+    void this.maybeAnswerAiMention(channel, data.authorId, body)
 
     return enriched
   }
@@ -2306,7 +2335,7 @@ export class ChatService {
           .insert(chatMessages)
           .values({ channelId: channel.id, authorId: aiUserId, body: answer })
           .returning()
-        this.realtime.emitToWorkspace(channel.workspaceId, {
+        await this.emitToChannel(channel, {
           type: 'chat.message.created',
           workspaceId: channel.workspaceId,
           channelId: channel.id,
@@ -2343,7 +2372,7 @@ export class ChatService {
       .returning()
     const [channel] = await this.db.select().from(chatChannels).where(eq(chatChannels.id, row.channelId))
     if (channel) {
-      this.realtime.emitToWorkspace(channel.workspaceId, {
+      await this.emitToChannel(channel, {
         type: 'chat.message.updated',
         workspaceId: channel.workspaceId,
         channelId: row.channelId,
@@ -2388,7 +2417,7 @@ export class ChatService {
       .set({ pinnedAt: pinned ? new Date() : null, pinnedById: pinned ? userId : null })
       .where(eq(chatMessages.id, messageId))
       .returning()
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.updated',
       workspaceId: channel.workspaceId,
       channelId: row.channelId,
@@ -2531,7 +2560,7 @@ export class ChatService {
     }
 
     // Everyone in the channel sees the badge appear without a refetch.
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.assigned',
       workspaceId: channel.workspaceId,
       channelId: message.channelId,
@@ -2558,7 +2587,7 @@ export class ChatService {
           eq(chatMessageAssignments.assigneeId, assigneeId),
         ),
       )
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.assigned',
       workspaceId: channel.workspaceId,
       channelId: message.channelId,
@@ -2600,7 +2629,7 @@ export class ChatService {
       )
       .returning()
     if (!row) throw new NotFoundException('Assignment not found')
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.assigned',
       workspaceId: channel.workspaceId,
       channelId: message.channelId,
@@ -2983,7 +3012,7 @@ export class ChatService {
       .set({ deletedAt: new Date(), body: '', pinnedAt: null, pinnedById: null })
       .where(eq(chatMessages.id, messageId))
       .returning()
-    this.realtime.emitToWorkspace(channel.workspaceId, {
+    await this.emitToChannel(channel, {
       type: 'chat.message.updated',
       workspaceId: channel.workspaceId,
       channelId: existing.channelId,
@@ -3013,7 +3042,7 @@ export class ChatService {
     if (existing) {
       await this.db.delete(chatMessageReactions).where(eq(chatMessageReactions.id, existing.id))
       if (channel && message) {
-        this.realtime.emitToWorkspace(channel.workspaceId, {
+        await this.emitToChannel(channel, {
           type: 'chat.reaction.toggled',
           workspaceId: channel.workspaceId,
           channelId: message.channelId,
@@ -3024,7 +3053,7 @@ export class ChatService {
     }
     await this.db.insert(chatMessageReactions).values({ messageId, userId, emoji })
     if (channel && message) {
-      this.realtime.emitToWorkspace(channel.workspaceId, {
+      await this.emitToChannel(channel, {
         type: 'chat.reaction.toggled',
         workspaceId: channel.workspaceId,
         channelId: message.channelId,

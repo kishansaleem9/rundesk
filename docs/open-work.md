@@ -622,7 +622,9 @@ The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the mem
 
 *Fixed next: meeting action items,* their own item below (`found-24-sep/meeting-action-items-into-any-list`).
 
-*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: the rest, measured first.
+*Fixed next: chat events,* a HIGH item of their own below (`found-24-sep/chat-events-broadcast-to-the-workspace`).
+
+*Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked). Next, measured first.
 
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
@@ -682,6 +684,36 @@ The new suite `goal-access`, 13/13 on lane 1, 0/13 against the build before the 
 The new suite `meeting-access`, 4/4 on lane 1 both with the model stub and without one (the twins make a task where a model answers, and reach "AI features are not configured" where none does); 0/4 on lane 2 before the fix. With a model it also reads the stub's request log to show that no call was made for a refusal. A unit test in `meeting-task-provenance.test.ts` holds the order: a refused list asks the model nothing (the check sits behind a seam, `assertCanMakeTasksIn`, as the fake database there answers every read). `mtg-1..4`, each compiled; `mtg-5` is a unit claim, shown to fail that test. API unit tests for meetings 16/16. Regression on lane 1, 13/13: the new suite, every suite that touches meetings (`a61-meeting-record`, `syncup-live`, `planner-upcoming-meeting`, `video1-acceptance`, `object-key-boundaries`), the other `read-access.ts` readers (`goal-access`, `custom-field-access`, `dependency-read-access`, `lookup-read-access`, `workspace-read-access`), `person-panel` and `malformed-ids`. In CI.
 
 *Not changed:* whether task creation should also respect a space whose default permission is "view only". `moveTask` applies the space's create gate (`assertCanCreateInSpace`), and its comment says that gate is on the create path, but `createTask` does not call it: a member may make tasks in a view-only space through `POST /tasks` too. Not measured yet; it is `found-24-sep/tasks-created-in-view-only-spaces` below.
+
+### `found-24-sep/chat-events-broadcast-to-the-workspace` — **closed** (security, HIGH; found measuring the audit's "new chat messages broadcast to the whole workspace")
+
+**Every chat event went to the workspace's realtime room: a member heard every DM and private channel as it was written**
+
+*Evidence, measured on lane 1 (probe `measure-chat-broadcast`) before the fix, with the web app's own socket client:* a member refused a DM between two others, a private channel and a private space's channel (403 on each read) joined the workspace room, as every member's socket does, and heard every message in all three with its body, an edit, and the name of a new private channel. A SyncUp's card in a DM ("X started a SyncUp") went the same way.
+
+`ChatService` emitted each chat event with `emitToWorkspace`, 16 places, and `CallsService` emitted the card the same way. The reads had been fixed (`readableChannelsFilter`), and the live copy of what they return had not.
+
+*Closed:* `channelReaders` (`chat/channel-read-filter.ts`, beside `readableChannelsFilter`, the third form of that rule and the one turned round: the people who may read one channel). A public channel outside any private space answers "the workspace", and its events still go to the workspace room. Any other channel's events go to each reader's own `user:` room, which every socket joins on connect, so the web hears them unchanged; it already drops events of another workspace. That covers messages, edits, pins, deletions, reactions, assignments, new and changed channels, and the call card. Membership notices (`chat.channel.members.*`) stay workspace-wide on purpose: they carry only the channel's id, and a person just removed must still hear it.
+
+The new suite `chat-realtime-access`, 6/6 on lane 1, and 5 of 6 failed against the build before the fix (lane 2 at 377acf7; the public twin passed both times). Three sockets listen (an outsider, the admin's DM partner, the admin), and every "hears nothing" has, on the same event, somebody entitled who hears it: the DM and its edit; a private channel's message, edit, pin, reaction and deletion; a private space's channel; a new private channel's name; the call card. A public channel still reaches everyone. `crr-1..7`, each compiled. API unit tests for chat and calls 176/176. Regression on lane 1: 12/13 at first — the new suite, `workspace-read-access`, `call-survives-navigation`, `chat-history`, `chat-message-actions`, `sidebar-dms`, `syncup-live`, `a61-meeting-record`, `replies-inline-thread`, `task-mentions`, `video1-acceptance`, `video-regression` — with `a39-dm-tabs` failing "the meeting both attended is listed". That failure was the suite's own, not this change: it failed the same way on lane 1 with the change taken out, and passed on lane 2. It is `found-24-sep/a39-shared-meeting-keyed-by-title` below, fixed, after which `a39-dm-tabs` is 19/19 on lane 1 with this change in. In CI.
+
+*Not changed:* `call.*` events (started, joined, left, ended, recording) still go to the workspace. They carry ids only (the call, the channel, who), but "these two are in a call in this DM" is still something a member outside it now learns. The web draws call cards and invalidates channel messages from them, so moving them is a change to the call UI, not only to delivery; it is `found-24-sep/call-events-broadcast-to-the-workspace` below.
+
+### `found-24-sep/a39-shared-meeting-keyed-by-title` — **closed** (test tooling; found by the chat sweep)
+
+**`a39-dm-tabs` found its shared meeting by title alone, so a new DM peer made it assert about somebody else's meeting**
+
+*Evidence:* on lane 1, `the meeting both attended is listed` failed twice, and once more with the chat change taken out; it passed on lane 2. The run's own header said why: "DM with Zoya Outsider 1790174109616". `ensureDm` takes the first other member of the workspace, and a suite had left a "Zoya Outsider" there, so the DM became hers. `ensureShared` then found "A39 Sprint sync with colleague" by its title, which was the meeting with the member before (Organization Admin), and created nothing. Measured directly: the API's `people/:id/shared` for Organization Admin returned the meeting, and a browser on the Organization Admin DM showed it at 2.2 seconds.
+
+*Closed:* `ensureShared` finds the meeting by its title AND its two attendees, and creates one for this pair otherwise. The shared task is assigned to both people on every run, not only when it is made. `a39-dm-tabs` 19/19 on lane 1, with the DM still Zoya's. No break patch: which meeting a title-only lookup finds depends on what earlier runs left, so a revert would redden it only sometimes. That is the defect this closes, not a check it could hold.
+
+### `found-24-sep/call-events-broadcast-to-the-workspace` — open, small (security; found fixing chat events)
+
+**Who is in a call, and in which channel, is told to the whole workspace**
+
+*Evidence (code read):* `calls.service.ts` emits `call.started`, `call.participant.joined`, `call.participant.left`, `call.ended` and `call.recording` with `emitToWorkspace`, carrying the call's id, its channel's id and the people's ids. For a call in a DM or a private channel, members outside it learn that it is happening and who joined. No names or content.
+
+*To close:* deliver them as chat events now are (`channelReaders`), after checking what the web's call UI needs from them outside the channel (the call-in-progress bar); a suite that listens as an outsider and as a participant.
 
 ### `found-24-sep/tasks-created-in-view-only-spaces` — open, medium (security; found fixing meeting action items; code read, NOT YET MEASURED)
 

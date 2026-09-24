@@ -28,6 +28,7 @@ import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
 import { FLAGS } from '@rundesk/feature-flags'
 import { R2Service } from '../../common/storage/r2.service'
 import { isCallRecordingKeyFor } from './call-recording-keys'
+import { channelReaders } from '../chat/channel-read-filter'
 
 /**
  * §2.8 gap 10 — one utterance, capped.
@@ -267,12 +268,22 @@ export class CallsService {
       .values({ channelId, authorId: starterId, callId, body: `${who} started a SyncUp` })
       .returning()
 
-    this.realtime.emitToWorkspace(workspaceId, {
+    // To the channel's readers, as every chat message is (`channelReaders`): a
+    // card in a DM or a private channel told the whole workspace who called.
+    const event = {
       type: 'chat.message.created',
       workspaceId,
       channelId,
       message: { ...message, authorName: who, reactions: [] },
-    } as never)
+    } as never
+    const [cardChannel] = await this.db
+      .select({ id: chatChannels.id, workspaceId: chatChannels.workspaceId, spaceId: chatChannels.spaceId, isPrivate: chatChannels.isPrivate, isDm: chatChannels.isDm })
+      .from(chatChannels)
+      .where(eq(chatChannels.id, channelId))
+      .limit(1)
+    const readers = cardChannel ? await channelReaders(this.db, cardChannel) : []
+    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
+    else for (const userId of readers) this.realtime.emitToUser(userId, event)
 
     /*
      * The notification, to the channel's members — not the workspace's. Being
