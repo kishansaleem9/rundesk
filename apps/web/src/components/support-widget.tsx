@@ -23,7 +23,7 @@ import {
   AlertTriangle,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
-import { useWorkspaceStore } from '../store/workspace'
+import { useParams } from '@tanstack/react-router'
 import { useAuthStore } from '../store/auth'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
@@ -83,10 +83,13 @@ const STATUS_COLORS: Record<TicketStatus, string> = {
 export function SupportWidget() {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const activeWorkspace = useWorkspaceStore((s) => s.active)
   const authWorkspaces = useAuthStore((s) => s.workspaces)
-  // Prefer the active workspace; fall back to the first one the user belongs to.
-  const workspaceId = activeWorkspace?.id ?? authWorkspaces[0]?.id ?? null
+  // The workspace on screen, then the first one the user belongs to. "The
+  // active workspace" was read from a store nothing ever wrote to, so every
+  // ticket went to the first workspace, whichever one was open
+  // (`found-24-sep/workspace-store-never-filled`).
+  const routeWorkspaceId = (useParams({ strict: false }) as { workspaceId?: string }).workspaceId
+  const workspaceId = routeWorkspaceId ?? authWorkspaces[0]?.id ?? null
 
   const [open, setOpen] = useState(false)
   const [view, setView] = useState<'list' | 'new' | 'detail'>('list')

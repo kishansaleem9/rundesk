@@ -18,7 +18,7 @@ import {
 import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfWeek } from 'date-fns'
 import { api } from '../lib/api'
 import { useAuthStore } from '../store/auth'
-import { useWorkspaceStore } from '../store/workspace'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
 import { FreshnessControls, REFRESH_INTERVALS } from '../components/freshness-controls'
 import { DashboardTemplateCards } from '../components/dashboard-templates'
@@ -149,11 +149,10 @@ function Dashboard() {
   // workspace-wide default dashboard. Mirrors the role gate used across the app
   // (app.admin gates on the auth-store role; workspace pages read the per-
   // workspace role from the workspace store).
-  const isWorkspaceAdmin = useWorkspaceStore((s) => {
-    const ws = s.workspaces.find((w) => w.id === workspaceId) ?? s.active
-    return ws?.role === 'workspace_admin'
-  })
-  const canManageWorkspaceDefault = user?.role === 'super_admin' || isWorkspaceAdmin
+  // A workspace admin (or a super-admin) sets the workspace's default. This read
+  // a store nothing ever wrote to, so only a super-admin was ever offered it
+  // (`found-24-sep/workspace-store-never-filled`).
+  const { isAdmin: canManageWorkspaceDefault } = useWorkspaceRole(workspaceId)
 
   const setWorkspaceDefault = useMutation({
     mutationFn: (presetId: string) =>

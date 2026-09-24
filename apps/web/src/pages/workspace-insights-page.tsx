@@ -26,7 +26,7 @@ import {
 } from 'lucide-react'
 import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
-import { useWorkspaceStore } from '../store/workspace'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { useTranslation } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
@@ -90,10 +90,10 @@ export function InsightsPage() {
   const qc = useQueryClient()
   const user = useAuthStore((s) => s.user)
   // Managers/admins can execute workload moves and export the contribution PDF.
-  const canManage = useWorkspaceStore((s) => {
-    const ws = s.workspaces.find((w) => w.id === workspaceId) ?? s.active
-    return ['workspace_admin', 'manager', 'super_admin'].includes(ws?.role ?? '')
-  })
+  // From the signed-in person's own workspaces (`useWorkspaceRole`). This read a
+  // store nothing ever wrote to, so it was false for everybody and no manager
+  // was offered either (`found-24-sep/workspace-store-never-filled`).
+  const { isManagerOrAbove: canManage } = useWorkspaceRole(workspaceId)
   const [contribPeriod, setContribPeriod] = useState<ContributionPeriod>('this-month')
   const hour = new Date().getHours()
   const greeting =

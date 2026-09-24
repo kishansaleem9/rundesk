@@ -807,17 +807,31 @@ The new suite `task-space-levels`, 5/5 on lane 1 (1 of 5 before, the grant's twi
 
 *Closed:* the check compares on open work, row by row: every open task the listing holds is in the member endpoint. It makes an open task assigned to the admin first (and removes it after), so it is never two empty lists; a fresh database assigns the admin nothing. It passes on lane 1 in the docs sweep.
 
-### `found-24-sep/report-exports-wrapped-in-the-envelope` — open, medium (visible bug; found measuring reports)
+### `found-24-sep/report-exports-wrapped-in-the-envelope` — **closed** (visible bug; found measuring reports)
 
-**Exporting a custom report fails for everyone: the CSV answers 500, and the PDF downloads as JSON**
+**Every file export failed: the CSVs answered 500, and the PDFs downloaded as JSON**
 
-*Evidence, measured on lane 1 as the admin:*
-- `POST /workspaces/:ws/reports/custom/export` answered 500, and the log says `Attempted to send payload of invalid type 'object'. Expected a string or Buffer.`
-- `POST .../custom/export.pdf` answered 201 with `application/json` and a body beginning `{"data":{"options":{"type":"application/pdf"...`, a description of the file rather than the file.
+*Evidence, measured on lane 1 as the admin (the suite against the build before the fix: 1 of 8, the twin, and it stopped early):*
+- `POST /workspaces/:ws/reports/custom/export` and `GET /workspaces/:ws/audit-logs/export` answered 500: `Attempted to send payload of invalid type 'object'`.
+- `POST .../custom/export.pdf` and `.../contribution.pdf` answered with `application/json` and a body beginning `{"data":{"options":{"type":"application/pdf"...`, a description of the file rather than the file. The web saves whatever it is handed, so "Export PDF" saved a `.pdf` of JSON, and the audit page's Export CSV saved nothing (its failure is not caught).
 
-The global `ResponseInterceptor` wraps every return value as `{ data, meta, error }`. That includes a `StreamableFile`, and a string returned by a handler that declared `Content-Type: text/csv`. The security audit-log export is written the same way (a `text/csv` header over a returned string) and is likely broken too, not yet measured (the probe had its path wrong).
+The global `ResponseInterceptor` wrapped every return value as `{ data, meta, error }`, a `StreamableFile` and a string under a declared `text/csv` alike.
 
-*To close:* let the envelope pass a `StreamableFile`, and a body whose handler declared a non-JSON content type, through unwrapped. Then a suite that downloads each export and reads a CSV header row and a `%PDF` prefix.
+*Closed:* the envelope passes a `StreamableFile`, and anything from a handler that declared a non-JSON `Content-Type` (`isRawBody`, in the interceptor), through as it is. Everything else is wrapped as before. The new suite `file-exports`, 8/8 on lane 1. It downloads each export and reads a CSV's content type and header row and a PDF's `%PDF` signature. The twin is that a report run for the screen is still enveloped. Then it clicks the three export buttons in the app (Insights → Download PDF, Reports → custom → Export PDF, Audit log → Export CSV) and reads the file each one saves. Five unit tests for the interceptor (`response.interceptor.test.ts`). `fex-1..8`, each compiled (`fex-6` a web patch); `fex-9..10` are unit claims, each shown to fail its test. API unit tests 1633/1633. Regression on lane 1, 13/13, with `workspace-store-never-filled` below: the two new suites, `report-read-access`, `list-export`, `addressability-live`, `ai-assign`, `person-panel`, `inbox-scope`, `chat-message-actions`, `video1-acceptance`, `video1-fast-items`, `ui-sweep` and `video-regression`. In CI.
+
+The Insights button could not be clicked at first, because nobody was ever offered it. That is `found-24-sep/workspace-store-never-filled` below, fixed with this.
+
+### `found-24-sep/workspace-store-never-filled` — **closed** (visible bug; found closing the exports)
+
+**Three places read a workspace store that nothing in the app ever wrote to: managers were never offered their controls, and support tickets went to the wrong workspace**
+
+*Evidence:* `store/workspace.ts` held a list of workspaces and an "active" one, and no code called its `setWorkspaces` or `setActive` (grep). Its readers:
+- Insights' `canManage` was false for everybody: the admin's page drew the contribution section and no "Download PDF", and no manager was offered a workload move's "Accept";
+- the dashboard's "Set as workspace default" was offered to a super-admin only, through the account's role, and never to a workspace admin;
+- the support widget filed every ticket in the user's FIRST workspace, whichever one was open.
+Measured by the suite against the bundle before the fix (lane 2): 0 of 3.
+
+*Closed:* Insights and the dashboard read the role from the signed-in person's own workspaces (`useWorkspaceRole`, as the rest of the app does). The support widget takes the workspace on screen, then the first. The dead store is deleted. The new suite `workspace-role-controls`, 3/3 on lane 1 (0/3 before). It reads the screen as the admin, a workspace admin who is not a super-admin (a super-admin always saw the dashboard's control, so only this one shows the fix), and a member, and reads the ticket's workspace back by SQL. `wrc-1..3`, each compiled. Regression on lane 1, 13/13, with the exports above. In CI.
 
 ### `found-24-sep/doc-writes-are-the-read-rule` — **closed** (security, medium; found fixing docs)
 
