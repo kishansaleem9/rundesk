@@ -254,9 +254,9 @@ export class CallsService {
       .from(chatChannels)
       .where(eq(chatChannels.id, channelId))
       .limit(1)
-    const readers = channel ? await channelReaders(this.db, channel) : []
-    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
-    else for (const userId of readers) this.realtime.emitToUser(userId, event)
+    const readers = channel ? await channelReaders(this.db, channel) : { workspace: false, users: [] }
+    if (readers.workspace) this.realtime.emitToWorkspace(workspaceId, event)
+    for (const userId of readers.users) this.realtime.emitToUser(userId, event)
   }
 
   /**

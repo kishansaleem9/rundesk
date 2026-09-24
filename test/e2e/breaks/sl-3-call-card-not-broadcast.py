@@ -44,6 +44,9 @@
 # check's own comment says it reloads, and a check that reloads cannot see a
 # missing push.
 #
+# RE-AIMED 24 September: the readers are `{ workspace, users }` now — the workspace's
+# room, and each guest a public channel reaches told in their own
+# (`found-24-sep/guests-read-every-open-channel`); the mistake is the same.
 # Reddens: syncup-live: "and it arrives without a reload"
 import io
 
@@ -52,8 +55,8 @@ import io
 # the emit is now two lines choosing the room, and removing both is the same
 # edit as removing the one call it was.
 p = '/home/user/rundesk/apps/api/src/modules/calls/calls.service.ts'
-a = """    if (readers === 'workspace') this.realtime.emitToWorkspace(workspaceId, event)
-    else for (const userId of readers) this.realtime.emitToUser(userId, event)
+a = """    if (readers.workspace) this.realtime.emitToWorkspace(workspaceId, event)
+    for (const userId of readers.users) this.realtime.emitToUser(userId, event)
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

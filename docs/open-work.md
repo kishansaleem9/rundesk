@@ -1200,13 +1200,43 @@ The eight changed suites then passed together, 8/8. In CI.
 
 *Not changed, and each its own item:* `found-24-sep/guests-read-every-open-channel` and `found-24-sep/guests-list-every-whiteboard`, below. A guest's sidebar is still the tree, cut down to the way to what is shared, not ClickUp's "Shared with Me" section. And a guest assigned a task nothing shares with them no longer reads it; ClickUp asks to share it when assigning. Recorded, not built.
 
-### `found-24-sep/guests-read-every-open-channel` — open, security, medium (found closing `guests-read-every-open-space`)
+### `found-24-sep/guests-read-every-open-channel` — **closed** (security, medium; found closing `guests-read-every-open-space`)
 
 **A guest reads every public chat channel of the workspace**
 
 *Evidence, read not run:* `readableChannelsFilter` (`modules/chat/channel-read-filter.ts`) keeps a private space's channels for its members, and a private channel or a DM for its own members. Every other channel is every workspace member's, a guest's included. `workspace-read-access`'s activity check asserts that the guest reads the admin's message in a public channel. ClickUp's guests see the channels they are added to.
 
 *To close:* a guest reads a channel they are a member of, one shared with them, or one of a space granted them. Measure it through the channel list, messages, search, activity and the realtime rooms.
+
+*ClickUp's rule* (help.clickup.com "Guest-type user roles", "Permissions in detail"; search snippets): guests use the channels they are invited to and the chats of locations shared with them, cannot create channels, and at view-only cannot send messages.
+
+*Measured on lane 1, before, worse than the evidence said:* a guest was listed and read every public channel, search found its messages, and their socket joined the workspace's room, where a public channel's messages are broadcast whole. They could join any public channel and make channels. And the notifications leaked on their own. Posting told every member row of the channel, with the message's first 180 characters, and a public channel's rows are only people having opened it, a guest's among them. A mention told anybody named, a member outside a private channel too.
+
+*Closed, 24 September.* A public channel reaches a guest through a share of it or a grant on its space (`channelReachesGuest`). A private channel or a DM reaches them through its membership, which for those is an invitation. A public channel's membership is only somebody having opened it (`markChannelRead`), so it counts for nothing. The rule is asked in each of its three statements:
+
+- the SQL filter (`readableChannelsFilter`), which the channel list, activity and search read;
+- the per-channel check (`assertChannelAccess`), which reading, posting and joining ask;
+- who hears an event (`channelReaders`). It now answers `{ workspace, users }`: the workspace's room, which a guest may no longer join, and each guest a public channel reaches, told in their own room.
+
+Two more rules:
+
+- A message's notifications go only to those who may read its channel, member rows and mentions alike.
+- A guest makes no channel. Listing the channels as a guest no longer makes #general, which answered the guest 403.
+
+The new suite `guest-chat-scope`, 7 checks planted by SQL: the list, the messages (with a legacy member row on the workspace's channel), search, the socket and what it hears, what the guest and a member are told when named, joining, and making a channel.
+
+- Before, with the change stashed, on lane 1: 0 of 7.
+- After: 7/7.
+
+`gcs-1..9`, one at least per check. Re-aimed at the readers' new answer, the same mistakes: `crr-1`, `crr-5`, `crr-6`, `crr-7` and `sl-3`. `workspace-read-access`' activity check shares its public channel with its guest, since that is how a guest reads one now.
+
+Regression on lane 1, 25/25: `guest-chat-scope`, `chat-realtime-access`, `call-realtime-access`, `workspace-read-access`, `chat-history`, `chat-message-actions`, `sidebar-dms`, `replies-inline-thread`, `syncup-live`, `call-survives-navigation`, `search-read-access`, `lookup-read-access`, `task-mentions`, `a39-dm-tabs`, `a61-meeting-record`, `inbox-scope`, `task-creation-access`, `planner-default-list`, `object-key-boundaries`, `panel-collapse`, `sidebar-sections`, `video1-fast-items`, `video1-acceptance`, `video-regression` and `ui-sweep`. In CI.
+
+*Not changed, each recorded:*
+
+- A guest may still open a DM with anybody in the workspace. ClickUp limits a guest's DMs to people who share a channel with them.
+- A member may make a channel scoped to a private space they are not in: `createChannel` checks the space's workspace, not the maker's reach.
+- Old member rows of guests on public channels stay in the table. They open nothing now.
 
 ### `found-24-sep/guests-list-every-whiteboard` — open, security, small (found closing `guests-read-every-open-space`)
 

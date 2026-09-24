@@ -302,6 +302,9 @@ try {
   const DM = await channel(`/workspaces/${WS}/chat/dms`, { peerUserId: M.id }, 'the DM')
   const PRIV_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-private`, isPrivate: true, memberIds: [M.id] }, 'the private channel')
   const PUB_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-public` }, 'the public channel')
+  // A guest reads a public channel only when it is shared with them
+  // (`found-24-sep/guests-read-every-open-channel`): this one is, to VIEW.
+  await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'channel', ${PUB_CH}, ${G.id}, 'view')`
   const SPACE_CH = await channel(`/workspaces/${WS}/chat/channels`, { name: `${TAG}-in-the-private-space`, spaceId: spaceOf.private }, 'the private space’s channel')
   await post(DM, `${TAG} said in the DM`)
   await post(PRIV_CH, `${TAG} said in the private channel`)

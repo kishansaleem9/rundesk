@@ -182,6 +182,13 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       .limit(1)
     if (!membership) return false
     /*
+     * THE WORKSPACE'S ROOM IS EVERY MEMBER'S, and a guest's is not: it carries
+     * a public channel's messages whole as they are written, and a guest reads
+     * only what is shared with them. What reaches a guest reaches them in their
+     * own room (`channelReaders`) — `found-24-sep/guests-read-every-open-channel`.
+     */
+    if (kind === 'workspace' && membership.role === 'guest') return false
+    /*
      * A LIST'S OR A TASK'S ROOM CARRIES WHAT THE LIST OR THE TASK SHOWS: the
      * new task whole, every change, every comment. Membership alone let
      * anyone in: measured on lane 1, a member refused a private space's list

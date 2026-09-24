@@ -31,7 +31,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
-import { channelReaders, readableChannelsFilter } from './channel-read-filter'
+import { channelReachesGuest, channelReaders, readableChannelsFilter } from './channel-read-filter'
 import { isKeyDirectlyUnder } from '../../common/storage/object-key-shape'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { NotificationsService } from '../notifications/notifications.service'
@@ -383,11 +383,19 @@ export class ChatService {
     if (!channel) throw new NotFoundException('Channel not found')
 
     const [membership] = await this.db
-      .select({ userId: workspaceMembers.userId })
+      .select({ userId: workspaceMembers.userId, role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, channel.workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
     if (!membership) throw new ForbiddenException('Workspace membership required')
+
+    // A GUEST reads a public channel only through a share of it or a grant on
+    // its space (`channelReachesGuest`); a private channel or a DM, by the
+    // membership below, which for those is an invitation
+    // (`found-24-sep/guests-read-every-open-channel`).
+    if (membership.role === 'guest' && !channel.isPrivate && !channel.isDm && !(await channelReachesGuest(this.db, channel, userId))) {
+      throw new ForbiddenException('This channel is not shared with you')
+    }
 
     // Space-scoped channels (Plan §6.1): a channel in a PRIVATE space also
     // requires space membership. Public spaces (the default) fall back to plain
@@ -455,8 +463,8 @@ export class ChatService {
     event: Parameters<RealtimeGateway['emitToWorkspace']>[1],
   ) {
     const readers = await channelReaders(this.db, channel)
-    if (readers === 'workspace') this.realtime.emitToWorkspace(channel.workspaceId, event)
-    else for (const userId of readers) this.realtime.emitToUser(userId, event)
+    if (readers.workspace) this.realtime.emitToWorkspace(channel.workspaceId, event)
+    for (const userId of readers.users) this.realtime.emitToUser(userId, event)
   }
 
   /** Read-only visitors (view level) may not write into a channel. */
@@ -861,6 +869,13 @@ export class ChatService {
     // A non-string name (missing, number, object) threw on `.trim()` → 500.
     // Validate the type first and return a 400 instead.
     if (typeof data.name !== 'string' || !data.name.trim()) throw new BadRequestException('Channel name required')
+    // ClickUp's guests use the channels they are given and make none.
+    const [maker] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, data.workspaceId), eq(workspaceMembers.userId, data.createdById)))
+      .limit(1)
+    if (maker?.role === 'guest') throw new ForbiddenException('Guests cannot create channels')
     const name = data.name.trim().replace(/^#/, '').toLowerCase().replace(/\s+/g, '-')
     if (!name) throw new BadRequestException('Channel name required')
     // Optional space scoping (Plan §6.1): the space must belong to this workspace.
@@ -2007,6 +2022,28 @@ export class ChatService {
       message: enriched,
     })
 
+    /*
+     * ONLY THOSE WHO MAY READ THE CHANNEL HEAR OF A MESSAGE IN IT. Every member
+     * row was told, with the message's first 180 characters — and a public
+     * channel's rows are only people having opened it, a guest's among them
+     * from before a guest read what is shared with them; and a mention reached
+     * anybody named, outside a private channel too
+     * (`found-24-sep/guests-read-every-open-channel`).
+     */
+    const audience = await channelReaders(this.db, channel)
+    const reached = new Set(audience.users)
+    const guestIds = audience.workspace
+      ? new Set(
+          (
+            await this.db
+              .select({ id: workspaceMembers.userId })
+              .from(workspaceMembers)
+              .where(and(eq(workspaceMembers.workspaceId, channel.workspaceId), eq(workspaceMembers.role, 'guest')))
+          ).map((r) => r.id),
+        )
+      : new Set<string>()
+    const mayRead = (userId: string) => (audience.workspace ? !guestIds.has(userId) || reached.has(userId) : reached.has(userId))
+
     // Per-channel notification levels: 'all' (default) hears every message,
     // 'mentions' only @-mentions, 'none' is muted. Load member ids + levels once.
     const levelRows = await this.db
@@ -2066,6 +2103,7 @@ export class ChatService {
 
     for (const userId of mentionTargets) {
       if (userId === data.authorId) continue
+      if (!mayRead(userId)) continue
       // Muted members don't get pinged even on @mention / @channel.
       if ((levelByUser.get(userId) ?? 'all') === 'none') continue
       void this.notifications.create({
@@ -2088,6 +2126,7 @@ export class ChatService {
     const notifiedIds = new Set([...mentionTargets, data.authorId])
     for (const userId of channelMemberIds) {
       if (notifiedIds.has(userId)) continue
+      if (!mayRead(userId)) continue
       const stance = threadStanceByUser.get(userId)
       // Muted this thread — the one case where a level of 'all' is not the
       // last word. A direct @mention still reaches them: that loop ran above,
@@ -3081,6 +3120,14 @@ export class ChatService {
       .from(chatChannels)
       .where(and(eq(chatChannels.workspaceId, workspaceId), eq(chatChannels.name, 'general')))
     if (existing.length > 0) return existing[0]
+    // A guest makes no channel, #general included: listing the channels as one
+    // leaves the workspace without it until a member lists them.
+    const [caller] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    if (caller?.role === 'guest') return null
     return this.createChannel({ workspaceId, name: 'general', createdById: userId })
   }
 
