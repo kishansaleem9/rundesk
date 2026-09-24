@@ -29,7 +29,7 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
-import { goalReach, goalVisibilityFilter } from '../../common/permissions/read-access'
+import { goalReach, goalVisibilityFilter, sprintVisibilityFilter } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
@@ -814,10 +814,14 @@ export class ReportsService {
 
   // ─── Sprint velocity ──────────────────────────────────────────────────────
   async getSprintVelocity(workspaceId: string, actor?: { id: string; role?: string | null }) {
+    // The sprints the reader may read (`read-access.ts`), the sprints list's own
+    // rule: a private space's sprint was listed here by name to every member.
+    const reach = actor ? await goalReach(this.db, workspaceId, actor) : 'all'
+    if (reach === 'none') return []
     const recentSprints = await this.db
       .select()
       .from(sprints)
-      .where(eq(sprints.workspaceId, workspaceId))
+      .where(and(eq(sprints.workspaceId, workspaceId), reach === 'spaces' && actor ? sprintVisibilityFilter(this.db, actor.id) : undefined))
       .orderBy(desc(sprints.startDate))
       .limit(10)
 

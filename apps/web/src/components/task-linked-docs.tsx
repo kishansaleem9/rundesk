@@ -2,9 +2,10 @@ import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Link } from '@tanstack/react-router'
 import { FileText, Link2, Plus, X } from 'lucide-react'
-import { Button, Input, Popover, PopoverContent, PopoverTrigger, cn } from '@rundesk/ui'
-import { api } from '../lib/api'
+import { Button, Input, Popover, PopoverContent, PopoverTrigger, cn, toast } from '@rundesk/ui'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type LinkedDoc = { id: string; docId: string; title: string; icon: string | null; isArchived: boolean }
 type WorkspaceDoc = { id: string; title: string; icon?: string | null }
@@ -30,13 +31,19 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
   })
 
   const invalidate = () => qc.invalidateQueries({ queryKey: ['task-linked-docs', taskId] })
+  // A refusal is said, in the server's words: linking is a change to the task,
+  // which its creator, an assignee or a manager may make, and without this a
+  // refused link did nothing at all.
+  const said = (err: unknown, fallback: string) => toast.error(err instanceof ApiError ? err.message : fallback)
   const link = useMutation({
     mutationFn: (docId: string) => api(`/tasks/${taskId}/linked-docs`, { method: 'POST', body: { docId } }),
     onSuccess: invalidate,
+    onError: (err) => said(err, t('taskLinkedDocs.linkFailed')),
   })
   const unlink = useMutation({
     mutationFn: (docId: string) => api(`/tasks/${taskId}/linked-docs/${docId}`, { method: 'DELETE' }),
     onSuccess: invalidate,
+    onError: (err) => said(err, t('taskLinkedDocs.unlinkFailed')),
   })
 
   const linked = linkedQuery.data ?? []
@@ -94,7 +101,13 @@ export function LinkedDocsSection({ taskId, workspaceId }: { taskId: string; wor
         )}
       </div>
 
-      {linked.length === 0 ? (
+      {/* "No linked docs." only once the list has said so: not while it
+          loads, and not when it failed (`found-24-sep/linked-docs-read-needs-write-access`). */}
+      {linkedQuery.isPending ? (
+        <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>
+      ) : linkedQuery.isError ? (
+        <p className="text-sm text-muted-foreground" data-testid="task-linked-docs-failed">{t('taskLinkedDocs.loadFailed')}</p>
+      ) : linked.length === 0 ? (
         <p className="text-sm text-muted-foreground">{t('taskLinkedDocs.empty')}</p>
       ) : (
         <div className="space-y-1">

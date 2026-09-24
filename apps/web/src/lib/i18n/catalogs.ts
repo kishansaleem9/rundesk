@@ -3105,6 +3105,9 @@ export const en = {
   'taskLinkedDocs.noDocsToLink': 'No docs to link',
   'taskLinkedDocs.empty': 'No linked docs.',
   'taskLinkedDocs.unlink': 'Unlink',
+  'taskLinkedDocs.loadFailed': 'Linked docs could not be loaded.',
+  'taskLinkedDocs.linkFailed': 'The doc could not be linked.',
+  'taskLinkedDocs.unlinkFailed': 'The doc could not be unlinked.',
 
   // Report builder
   'reportBuilder.reportName': 'Report name',
@@ -9750,6 +9753,9 @@ export const es: Record<TranslationKey, string> = {
   'taskLinkedDocs.noDocsToLink': 'No hay documentos para vincular',
   'taskLinkedDocs.empty': 'No hay documentos vinculados.',
   'taskLinkedDocs.unlink': 'Desvincular',
+  'taskLinkedDocs.loadFailed': 'No se pudieron cargar los documentos vinculados.',
+  'taskLinkedDocs.linkFailed': 'No se pudo vincular el documento.',
+  'taskLinkedDocs.unlinkFailed': 'No se pudo desvincular el documento.',
 
   // Report builder
   'reportBuilder.reportName': 'Nombre del informe',
@@ -16287,6 +16293,9 @@ export const ar: Record<TranslationKey, string> = {
   'taskLinkedDocs.noDocsToLink': 'لا توجد مستندات للربط',
   'taskLinkedDocs.empty': 'لا توجد مستندات مرتبطة.',
   'taskLinkedDocs.unlink': 'إلغاء الربط',
+  'taskLinkedDocs.loadFailed': 'تعذّر تحميل المستندات المرتبطة.',
+  'taskLinkedDocs.linkFailed': 'تعذّر ربط المستند.',
+  'taskLinkedDocs.unlinkFailed': 'تعذّر إلغاء ربط المستند.',
 
   // Report builder
   'reportBuilder.reportName': 'اسم التقرير',
@@ -22739,6 +22748,9 @@ export const ur: Record<TranslationKey, string> = {
   'taskLinkedDocs.noDocsToLink': 'لنک کرنے کے لیے کوئی دستاویز نہیں',
   'taskLinkedDocs.empty': 'کوئی منسلک دستاویز نہیں۔',
   'taskLinkedDocs.unlink': 'لنک ہٹائیں',
+  'taskLinkedDocs.loadFailed': 'منسلک دستاویزات لوڈ نہیں ہو سکیں۔',
+  'taskLinkedDocs.linkFailed': 'دستاویز منسلک نہیں ہو سکی۔',
+  'taskLinkedDocs.unlinkFailed': 'دستاویز کا لنک نہیں ہٹ سکا۔',
   'reportBuilder.reportName': 'رپورٹ کا نام',
   'reportBuilder.untitledName': 'بلا عنوان رپورٹ',
   'reportBuilder.sectionMetrics': 'میٹرکس',

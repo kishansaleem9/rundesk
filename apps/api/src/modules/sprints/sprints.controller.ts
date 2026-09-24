@@ -33,15 +33,19 @@ export class SprintsController {
   create(
     @Param('workspaceId') workspaceId: string,
     @Body() body: CreateSprintDto,
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.sprints.create({
-      workspaceId,
-      spaceId: body.spaceId,
-      name: body.name,
-      goal: body.goal,
-      startDate: new Date(body.startDate),
-      endDate: new Date(body.endDate),
-    })
+    return this.sprints.create(
+      {
+        workspaceId,
+        spaceId: body.spaceId,
+        name: body.name,
+        goal: body.goal,
+        startDate: new Date(body.startDate),
+        endDate: new Date(body.endDate),
+      },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Get('sprints/:sprintId')
@@ -59,17 +63,25 @@ export class SprintsController {
       startDate?: string
       endDate?: string
     },
+    @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.sprints.update(sprintId, {
-      ...body,
-      startDate: body.startDate ? new Date(body.startDate) : undefined,
-      endDate: body.endDate ? new Date(body.endDate) : undefined,
-    })
+    // The fields a sprint has, and no others: the body was spread into the row.
+    return this.sprints.update(
+      sprintId,
+      {
+        name: body.name,
+        goal: body.goal,
+        status: body.status,
+        startDate: body.startDate ? new Date(body.startDate) : undefined,
+        endDate: body.endDate ? new Date(body.endDate) : undefined,
+      },
+      { id: user.id, role: user.role },
+    )
   }
 
   @Delete('sprints/:sprintId')
-  remove(@Param('sprintId') sprintId: string) {
-    return this.sprints.delete(sprintId)
+  remove(@Param('sprintId') sprintId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.sprints.delete(sprintId, { id: user.id, role: user.role })
   }
 
   @Get('sprints/:sprintId/tasks')
@@ -87,7 +99,11 @@ export class SprintsController {
   }
 
   @Delete('sprints/:sprintId/tasks/:taskId')
-  removeTask(@Param('sprintId') sprintId: string, @Param('taskId') taskId: string) {
-    return this.sprints.removeTask(sprintId, taskId)
+  removeTask(
+    @Param('sprintId') sprintId: string,
+    @Param('taskId') taskId: string,
+    @CurrentUser() user: CurrentUserPayload,
+  ) {
+    return this.sprints.removeTask(sprintId, taskId, { id: user.id, role: user.role })
   }
 }

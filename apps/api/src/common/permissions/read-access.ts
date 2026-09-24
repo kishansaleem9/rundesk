@@ -1,5 +1,5 @@
 import { and, eq, inArray, isNull, or, type SQL } from 'drizzle-orm'
-import { goals, lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
+import { goals, lists, projects, spaces, sprints, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { isUuid } from '../validation/uuid'
 import { checkContainerAccess, containerVisibilityFilter, spaceVisibilityFilter } from './container-access.guard-helper'
@@ -249,4 +249,35 @@ export async function readableGoal(
 export function goalVisibilityFilter(db: Db, actorId: string): SQL | undefined {
   const readableSpaces = db.select({ id: spaces.id }).from(spaces).where(spaceVisibilityFilter(db, actorId, false))
   return or(isNull(goals.spaceId), inArray(goals.spaceId, readableSpaces))
+}
+
+/*
+ * A SPRINT IS READ AS A GOAL IS — `goalReach`, then its space. ClickUp keeps a
+ * sprint as a list in a space's Sprint folder, so it is seen by whoever may see
+ * that space; a guest is given none, and a sprint of no space is the
+ * workspace's members'. A private space's sprint was listed, named and opened
+ * to every member (`found-24-sep/sprints-open-to-any-member`).
+ */
+
+/** The sprint's workspace and space when `actor` may read it, else null. */
+export async function readableSprint(
+  db: Db,
+  sprintId: string,
+  actor: ReadActor,
+): Promise<{ id: string; workspaceId: string; spaceId: string | null; spaceVisibility: string | null } | null> {
+  if (!isUuid(sprintId)) return null
+  const [row] = await db
+    .select({ id: sprints.id, workspaceId: sprints.workspaceId, spaceId: sprints.spaceId, spaceVisibility: spaces.visibility })
+    .from(sprints)
+    .leftJoin(spaces, eq(spaces.id, sprints.spaceId))
+    .where(eq(sprints.id, sprintId))
+    .limit(1)
+  if (!row) return null
+  return (await mayReadGoalAt(db, row, actor)) ? row : null
+}
+
+/** `readableSprint` for a list, as a WHERE fragment over `sprints`, for a reader whose reach is `'spaces'`. */
+export function sprintVisibilityFilter(db: Db, actorId: string): SQL | undefined {
+  const readableSpaces = db.select({ id: spaces.id }).from(spaces).where(spaceVisibilityFilter(db, actorId, false))
+  return or(isNull(sprints.spaceId), inArray(sprints.spaceId, readableSpaces))
 }

@@ -94,13 +94,15 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (0c06643):* Home › Reminders reads `GET /workspaces/:ws/reminders` under `['reminders', ws]` — the key `+ Create › Reminder` refreshes — with delete. `home-reminders` 9 checks: made through the modal and listed without a reload, another member's reminder absent, one already gone off not listed as waiting, a delete checked in the row, and the empty state; its 10 patches 10 of 10 reddened (plan-3; `hr-9` re-aimed on the way, `found-23-sep/checks-read-textContent-not-what-is-shown`). Found still open on 23 September by sweeping every open row for a suite that names it: this was the only one.
 
-### `product-siblings/admin-audit-first-workspace-only` — open, small
+### `product-siblings/admin-audit-first-workspace-only` — **closed** (f583354, as `found-24-sep/admin-audit-reads-the-first-workspace`)
 
 **The super-admin 'Audit log' shows only the admin's first workspace, with no picker**
 
 *Evidence:* admin-audit-page.tsx:127-133 uses `wsQuery.data?.[0]?.workspace.id` from GET /workspaces. app.admin.tsx:8-14 is the platform console ('Audit log — See who changed what'), limited to super_admin.
 
 *To close:* Add a workspace picker (or a platform-wide audit endpoint).
+
+*Closed (f583354):* the audit log has the console's workspace picker, which it now shares with the users, webhooks, settings and integrations pages. The same defect was found again while closing the exports and recorded as `found-24-sep/admin-audit-reads-the-first-workspace`, without this row being seen; the evidence, the fix and the suite (`admin-audit-page`, 4/4, 0/4 before) are written there.
 
 ### `product-siblings/chat-attachment-key-unvalidated` — **closed**
 
@@ -634,6 +636,8 @@ The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the mem
 
 *Fixed next: the AI's suggestions and counts,* their own item below (`found-24-sep/ai-suggestions-read-the-whole-workspace`), with a gap in the reports fix above found beside them (`found-24-sep/reach-skipped-private-lists`). That is the last of the audit's list.
 
+*Measured last: the four reports left unmeasured above,* with data in the private space (probe `probe-reports-private`, lane 1). The productivity trend counted 1 completion to the admin's 2, status durations 1 sample to 2, and time and time by project showed only the member's own open-space hour. They are clean. The sprint report was not: it named the private space's sprint, as the sprints module did everywhere. That is `found-24-sep/sprints-open-to-any-member` below, fixed.
+
 ### `found-24-sep/custom-fields-open-to-any-member` — **closed** (security, HIGH; found measuring the audit's "custom-field values")
 
 **Every custom-field route checks workspace membership and nothing else: a member refused a private space reads, overwrites, defines, renames and deletes its fields**
@@ -854,6 +858,8 @@ Measured by the suite against the bundle before the fix (lane 2): 0 of 3.
 
 *Closed:* one picker for the console, `useAdminWorkspace` and `AdminWorkspacePicker` (`components/admin-workspace-picker.tsx`): the workspace picked, else the first joined. Users, webhooks, settings and integrations use it in place of their four copies, and the audit log uses it too. Picking a workspace there starts the actor filter and the page again, since another workspace has other people. A failed export says "The audit log could not be exported.", and a failed read says "The audit log could not be loaded." in place of the empty state. The new suite `admin-audit-page`, 4/4 on lane 1 (0/4 before). Events are planted by SQL in the admin's first workspace and in one they joined last. It reads the page, and the file Export CSV saves, after picking; the export and the list are failed by route, with the service worker blocked. `aap-1..5`, each compiled. Regression: the goals page's sweep above, 14/14. In CI.
 
+*A duplicate:* this is `product-siblings/admin-audit-first-workspace-only` in the inventory above, found a second time; that row is closed by this one.
+
 *Not changed here:* a workspace admin who is not a super-admin has no audit page at all. The API allows them (`WorkspaceAdminGuard`), and ClickUp shows them the log in the workspace's settings; the web offers it only in the super-admin console. That is a feature to build, `found-24-sep/workspace-audit-log-not-in-settings` in the feature list.
 
 ### `found-24-sep/zoom-row-not-connected-while-loading` — **closed** (visible bug; found by the drifted break plan, whose `calendar-accounts` baseline was red)
@@ -878,13 +884,67 @@ Measured by the suite against the bundle before the fix (lane 2): 0 of 3.
 
 The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and edit shares side by side, a guest with and without an edit share, a view-only space beside an open one, and a doc of no space. Docs and shares are planted by SQL and every refusal is read back from the row. `dwl-1..7`, each compiled. API unit tests 1628/1628. Regression on lane 1, 15/15: the new suite, `doc-boundaries`, `doc-import`, `doc-task-links`, `workspace-read-access`, `search-read-access`, `ai-answer-rendering`, `template-center`, `comment-slash-commands`, `chat-message-actions`, `panel-collapse`, `addressability-live`, `video1-acceptance`, `ui-sweep` and `video-regression`. In CI.
 
-### `found-24-sep/linked-docs-read-needs-write-access` — open, low (visible bug; found fixing docs)
+### `found-24-sep/linked-docs-read-needs-write-access` — **closed** (visible bug; found fixing docs)
 
 **A task's linked docs can be listed only by someone who can edit the task, though the code says read access**
 
 *Evidence, read not run:* `tasks.service.listLinkedDocs` calls `assertTaskWriteAccess` (creator, assignee or manager) under a comment that reads "Requires task read access". A member who can open the task sees its Docs section fail with 403. `workspace-read-access` §7 reads it from the member's own task for that reason.
 
 *To close:* `assertTaskReadAccess` for the list (the doc rule already filters what it names), with a check that a member who is neither creator nor assignee sees the open doc linked.
+
+*Measured before the fix (lane 1, the new suite, 0 of 4):* the member's list answered 403 "Only assignees, creators, managers, and workspace admins can edit this task", and the References tab said "No linked docs.". The section had no error state, so a failed read said the same. It also said it while loading. And a link the server refused (the same 403, since linking is a change to the task) did nothing at all: the mutation had no `onError`.
+
+*Closed:* the list asks the task's read rule, and the doc rule still decides which docs it names. The tab shows a skeleton while loading, and "Linked docs could not be loaded." when the read fails. "No linked docs." appears only once the list is empty. A refused link or unlink says why in the server's words. The new suite `linked-docs-access`, 5/5 on lane 1. The docs and their links are planted by SQL, one doc in an open space and one in a private space the member is not in. It reads the member's list from the API and from the References tab, beside the admin's. It holds the list to read the loading state, fails it to read the error state, and has the member try a link. The loading check was added after the first measurement; `lda-3` restores the old branch it guards. `workspace-read-access` §7 still uses the member's own task, for the link half, and its comment now says why. `lda-1..5`, each compiled. Regression on lane 1, 8/8: the new suite, `doc-task-links`, `workspace-read-access`, `doc-boundaries`, `task-depth`, `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
+
+*Not changed:* the web still offers "Link" to a member who may not link. The task sheet does not know the write rule (creator, assignee or manager), so the refusal is said rather than the button hidden. That rule is narrower than ClickUp's, which is `found-24-sep/task-edits-narrower-than-clickup` below.
+
+### `found-24-sep/task-edits-narrower-than-clickup` — open, medium (behaviour; found closing the linked-docs item, researched)
+
+**Only a task's creator, an assignee or a manager may change it; in ClickUp, anybody with "edit" on its location may**
+
+*Evidence (code read):* `assertTaskWriteAccess` (tasks.service) refuses every change to a task by a member who neither made it nor is on it: "Only assignees, creators, managers, and workspace admins can edit this task". That covers the title, status, fields, links, labels and attachments. The space's own level is asked after that (`assertSpaceAllowsTaskWrite`), so a member with "edit" on a space still cannot change a colleague's task in it.
+
+*ClickUp's rule* (help.clickup.com "Intro to permissions", "Permissions in detail", "Default user role permissions", search snippets; the pages cannot be fetched here): a member invited to a workspace has full edit on every public location and item by default, and a location's level can be narrowed. "Edit" lets them edit every task and subtask there, including status, assignees, title, attachments, archiving, moving, merging and duplicating. "Full edit" adds creating and deleting. "Comment" allows comments, and on a task assigned to them a change of status or assignees. "View" allows nothing.
+
+*To close:* decide it as ClickUp does. A change to a task asks the level the person holds where the task lives (`resolveSpaceLevel`, a grant winning over the default), not whether they made it or are on it; deleting asks for full edit. This widens who may write, so first measure every suite that relies on the narrower rule (`task-boundaries`, `task-space-levels`, the `workspace-read-access` link half and others that expect a 403 for a member's colleague's task), then change the rule once, in `assertTaskWriteAccess`, with a suite that sets the three levels side by side on a colleague's task.
+
+### `found-24-sep/sprints-open-to-any-member` — **closed** (security, HIGH; found measuring the last four reports of `workspace-reads-skip-the-container-rule`)
+
+**A sprint in a private space is listed, named and opened to every member, and any member, or guest, may make, rename and delete sprints anywhere**
+
+*Evidence, measured on lane 1 (probes `probe-reports-private` and `probe-sprint-writes`), as a member refused a private space, beside a guest:*
+- the four reports the container item left unmeasured were clean with data in the private space. The productivity trend counted 1 completion to the admin's 2, status durations 1 sample to 2, and time and time by project showed only the member's own open-space hour. The sprint report was not: it listed the private space's sprint by name and dates, with its task count filtered to 0;
+- `GET /workspaces/:ws/sprints` and `GET /sprints/:id` gave the member that sprint's name and goal (200); only its task list was filtered (`[]`);
+- the member made sprints (201 each) in the private space, in a "view only" space, and under a space id of ANOTHER workspace: `create` stored whatever `spaceId` it was given;
+- the member renamed the private space's sprint (200) and deleted it (200, gone); a guest made a sprint (201) and renamed another (200). `update`, `delete` and `removeTask` take no actor at all; the routes ask only for workspace membership.
+- found beside it (probe `probe-sprint-patch`): the rename spread its whole body into the row, so a member who named `spaceId` in it moved a sprint into a private space they were refused (200, moved), and one who named `workspaceId` moved it into ANOTHER workspace (200, moved).
+
+*The rule, ClickUp's:* a sprint is a list in a space's Sprint folder. It is seen by whoever may see its location, and it is made or changed by whoever holds "edit" there; a guest is not given a location's sprints by default. Sprints here have no creator column, so "edit" on the sprint's space is the whole write rule.
+
+*To close:* one rule for a sprint, from its space. It is read by whoever may open that space; a sprint of no space is its workspace's members'; a guest is given none. It is made, changed and deleted by a member (not a guest) holding "edit" on its space, and a sprint's space must be one of its own workspace. The report, the list, the detail and the task list hide or 404 a sprint the reader may not open. A rename takes the fields a sprint has and no others. A suite: the member, the guest and the admin side by side on an open and a private space's sprint, every refusal read back from the row.
+
+*Closed:* a sprint is read as a goal is (`read-access.ts`). The reach is `goalReach`: a guest none, a manager all, a member a sprint of no space and those of the spaces they may open. `readableSprint` judges one sprint and `sprintVisibilityFilter` the lists. The sprints list, the sprint report, a sprint's detail and its tasks all take it, and a sprint the reader may not open is not found. Making, renaming, deleting and moving tasks in or out ask it first. Then they need a member, not a guest, and "edit" on the sprint's space (`assertSpaceLevel`). A new sprint's space must be one of its own workspace that the maker may open and make things in (`assertCanPlaceIn`). A rename takes a sprint's own fields and no others. The new suite `sprint-access`, 7/7 on lane 1, 0/6 before. The seventh check, a rename that also names a space and a workspace, was added from the probe that measured both moves. A guest's rename is not found rather than forbidden, since a guest is given no sprint. `spa-1..11`, each compiled. Regression on lane 1, 9/9: the new suite, `lookup-read-access` (its member's sprint of no space), `report-read-access`, `goal-access` (the read rule's file), `addressability-live` and `task-depth` (the sprints page), `workspace-read-access`, `ai-read-access` and `video1-acceptance`. In CI.
+
+### `found-24-sep/private-lists-skipped-by-task-reads` — open (security, HIGH; found closing `workspace-reads-skip-the-container-rule`)
+
+**The task reads that apply the container rule stop at the space and the project, so a private list's tasks are listed, searched and named to members it refuses; and the workspace list hides a private task from its own assignees**
+
+*Evidence, measured on lane 1 (probe `probe-workspace-tasks`), as a member refused a private list in an open space (403 on the list):*
+- `GET /tasks/workspace/:ws`, the list behind the task pickers and the dashboard, named the private list's task, and `?q=` found it by the list's words;
+- the timeline (`/tasks/workspace/:ws/timeline`) and a colleague's tasks (`/tasks/workspace/:ws/members/:id`) named it too;
+- and a private task ASSIGNED to the member, which they open (200), was missing from their own workspace list.
+
+`containerVisibilityFilter` is the space and project halves of the rule, and a private list's own rule (its maker's, and managers') is a third. `taskInReachFilter` states all three, and it was written for the reports (`found-24-sep/reach-skipped-private-lists`). Every other task read that took `containerVisibilityFilter` inherited the gap: the timeline, a member's tasks and the helpers in tasks.service; the AI's context, suggestions, list names and task search; the meeting task picker; search's task, comment and list branches; and a sprint's tasks. `getTasksForWorkspace` filtered in JavaScript with its own copy of the rule, which had no list rule and a private-item rule that left out assignees, after an over-fetched limit.
+
+*To close:* one rule for a task's reach, used by every task read: `taskInReachFilter` (or a list-aware twin where `lists` is joined) in place of `containerVisibilityFilter` wherever a task, a list or a list's name is read, and the private-item rule where a task is. `getTasksForWorkspace` filters in SQL before its limit, and its JavaScript copy goes. Measure each read before and after with one private list and one private task assigned to the member.
+
+### `found-24-sep/private-folders-unenforced` — open, to measure (security; found reading the container rule)
+
+**A folder's privacy is read by the folder listing and by nothing that reads what is inside it**
+
+*Evidence (code read):* folders sit between a space and its projects (`projects.folderId`), and `folderVisibilityFilter` keeps a private folder from the folder listing. `checkContainerAccess`, `containerVisibilityFilter`, `taskInReachFilter` and `ResourceMemberGuard` never mention a folder. So if a folder can be made private, its projects, lists and tasks are read as if it were open. ClickUp hides a private folder's lists and tasks from those it is not shared with.
+
+*To close:* measure first (make a private folder through the API, then read a project, list and task inside it as a member it is not shared with), then add the folder to the container rule once, in `checkContainerAccess` and its SQL twins.
 
 ### `found-24-sep/ai-knowledge-filter-copies-the-container-rule` — **closed** (security, medium; a duplicated rule, found fixing docs, measured leaking)
 

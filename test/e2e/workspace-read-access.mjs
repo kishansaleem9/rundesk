@@ -655,7 +655,9 @@ try {
   for (const s of docSockets) s.close()
 
   // A task's linked docs name the doc: they list, and link, what may be opened.
-  // The member's own task, since listing a task's docs asks for write access.
+  // The member's own task, since LINKING asks for write access: on a task they
+  // may only read, the link is refused before the doc is looked at. (Listing
+  // asked for it too, until `found-24-sep/linked-docs-read-needs-write-access`.)
   const minePosted = await M('/tasks', { method: 'POST', body: { listId: OPEN_LIST, title: `${TAG} the member's task` } })
   const MINE = minePosted.data?.id
   if (!MINE) throw new Error(`the member could not make a task: ${said(minePosted)}`)

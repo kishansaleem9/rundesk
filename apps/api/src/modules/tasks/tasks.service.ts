@@ -1139,9 +1139,14 @@ export class TasksService {
 
   // --- Linked docs (Plan §4 relationships) ---------------------------------
 
-  /** Docs linked to a task, most-recent first. Requires task read access. */
+  /**
+   * Docs linked to a task, most-recent first, to anybody who may open the task.
+   * This asked the WRITE rule (creator, assignee, manager) under a comment that
+   * said read, so a member who could open the task was refused, and its
+   * References tab said "No linked docs." (`found-24-sep/linked-docs-read-needs-write-access`).
+   */
   async listLinkedDocs(taskId: string, userId: string) {
-    const ctx = await this.assertTaskWriteAccess(taskId, userId)
+    const ctx = await this.assertTaskReadAccess(taskId, userId)
     // Each link names its doc, so it lists only docs the reader may open
     // (`doc-access.ts`); measured, a member read the title of a doc in a space
     // they were refused off a task in an open one.
