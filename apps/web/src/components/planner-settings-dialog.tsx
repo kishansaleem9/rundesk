@@ -960,6 +960,15 @@ function ConferencingRow({ workspaceId }: { workspaceId: string }) {
     (c) => c.provider === 'zoom' && c.status === 'connected',
   )
   /*
+   * NEITHER STATE UNTIL THE LIST ANSWERS. `connected` is false while the list
+   * is in flight, and the row drew it: a person who had connected Zoom was told
+   * they had not, and offered Connect, for as long as the list took
+   * (`found-24-sep/zoom-row-not-connected-while-loading`). So until it knows,
+   * the row says it is checking and offers nothing; and a list that fails says
+   * so, rather than "not connected".
+   */
+  const known = connections.isSuccess
+  /*
    * `?? true` while the availability query is in flight, NOT `?? false`. A
    * button that starts disabled and enables a moment later is a button people
    * click at nothing; and `ai-value-panel.tsx:459` is this ledger's record of
@@ -1009,7 +1018,8 @@ function ConferencingRow({ workspaceId }: { workspaceId: string }) {
       <div
         className="flex items-center gap-3 rounded-md border border-border/70 px-3 py-2"
         data-testid="planner-conferencing-zoom"
-        data-connected={connected ? 'true' : 'false'}
+        data-connected={known ? (connected ? 'true' : 'false') : undefined}
+        data-state={known ? 'known' : connections.isError ? 'failed' : 'checking'}
       >
         <span
           aria-hidden
@@ -1020,14 +1030,18 @@ function ConferencingRow({ workspaceId }: { workspaceId: string }) {
         <div className="min-w-0 flex-1">
           <div className="text-[13px]">{t('plannerSettings.conferencing.zoom')}</div>
           <div className="text-[11px] text-muted-foreground" data-testid="planner-conferencing-zoom-state">
-            {connected
-              ? t('plannerSettings.conferencing.connected')
-              : available
-                ? t('plannerSettings.conferencing.connectZoom')
-                : t('plannerSettings.conferencing.unavailable')}
+            {!known
+              ? connections.isError
+                ? t('plannerSettings.conferencing.checkFailed')
+                : t('plannerSettings.conferencing.checking')
+              : connected
+                ? t('plannerSettings.conferencing.connected')
+                : available
+                  ? t('plannerSettings.conferencing.connectZoom')
+                  : t('plannerSettings.conferencing.unavailable')}
           </div>
         </div>
-        {connected ? (
+        {!known ? null : connected ? (
           <Button
             size="sm"
             variant="outline"

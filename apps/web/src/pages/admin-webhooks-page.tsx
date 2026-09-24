@@ -7,11 +7,7 @@ import { useTranslation } from '../lib/i18n'
 import { webhookEventLabel } from '../lib/webhook-events'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import { WebhookSecretOnce } from '../components/webhook-secret-once'
-
-type WorkspaceEntry = {
-  workspace: { id: string; name: string; slug: string }
-  role: string
-}
+import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
 type Hook = {
   id: string
@@ -26,18 +22,13 @@ export function AdminWebhooksPage() {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const eventLabel = (event: string) => webhookEventLabel(t, event)
-  const [workspaceId, setWorkspaceId] = useState('')
   const [name, setName] = useState('')
   const [url, setUrl] = useState('')
   const [events, setEvents] = useState<string[]>([])
   // The signing secret, from the one answer that carries it — see WebhookSecretOnce.
   const [madeSecret, setMadeSecret] = useState<{ name: string; secret: string } | null>(null)
 
-  const workspaces = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
-  })
-  const resolvedWorkspaceId = workspaceId || workspaces.data?.[0]?.workspace.id || ''
+  const { workspaces, workspaceId: resolvedWorkspaceId, setWorkspaceId } = useAdminWorkspace()
 
   const eventCatalog = useQuery({
     queryKey: ['webhook-events', resolvedWorkspaceId],
@@ -85,21 +76,15 @@ export function AdminWebhooksPage() {
       </header>
 
       <Card className="p-4 space-y-3">
-        <select
-          data-testid="admin-webhook-workspace"
+        <AdminWorkspacePicker
+          testId="admin-webhook-workspace"
+          workspaces={workspaces.data}
           value={resolvedWorkspaceId}
-          onChange={(e) => {
-            setWorkspaceId(e.target.value)
+          onChange={(id) => {
+            setWorkspaceId(id)
             setMadeSecret(null)
           }}
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm w-full md:w-auto"
-        >
-          {(workspaces.data ?? []).map((entry) => (
-            <option key={entry.workspace.id} value={entry.workspace.id}>
-              {entry.workspace.name} ({entry.workspace.slug})
-            </option>
-          ))}
-        </select>
+        />
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
           <Input data-testid="admin-webhook-name" value={name} onChange={(e) => setName(e.target.value)} placeholder={t('adminWebhooks.namePlaceholder')} />

@@ -51,7 +51,7 @@ const argOf = (name, fallback) => {
 // checkbox was checked against the count badge and the stored row, and
 // `ca-3-hiding-is-not-honoured` forces the chips onto the grid regardless: it
 // ran green, because the grid was the one surface nothing read.
-const EXPECTED_CHECKS = 36
+const EXPECTED_CHECKS = 37
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -319,7 +319,10 @@ try {
   await stage('a', `work-${TAG}@example.com`)
   await stage('b', `personal-${TAG}@example.com`)
 
-  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
+  // The service worker answers API reads itself, and a page route never sees a
+  // request it handles: blocked, so the Zoom row's connections list can be
+  // held below.
+  const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' })).newPage()
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ME.email)
   await page.fill('input[type=password]', ME.password)
@@ -723,6 +726,14 @@ try {
   await page.getByTestId('planner-settings').click({ timeout: 10_000 }).catch(() => {})
   await page.getByTestId('planner-settings-nav-accounts').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForSelector('[data-testid="planner-conferencing"]', { timeout: 10_000 }).catch(() => {})
+  // The row claims a state once its connections list has answered, and not
+  // before (`found-24-sep/zoom-row-not-connected-while-loading`). Read as soon
+  // as it was drawn, on a busy lane, it said "not connected", and the check
+  // below compared the App Center with a guess.
+  await waitUntil(
+    async () => (await page.locator('[data-testid="planner-conferencing-zoom"][data-connected]').count()) > 0,
+    { timeoutMs: 15_000 },
+  )
 
   chk(
     (await page.getByTestId('planner-conferencing-zoom').count()) === 1 &&
@@ -798,6 +809,55 @@ try {
       `${JSON.stringify(reason || startedUrl.slice(0, 96))} — a success that does not point at ` +
       'zoom.us is a Connect button wired to nothing, and a refusal whose message names no ' +
       'configuration could equally be a permission refusal, which is a different bug',
+  )
+
+  /*
+   * AND UNTIL IT KNOWS, IT SAYS NOTHING IT WOULD TAKE BACK.
+   *
+   * `found-24-sep/zoom-row-not-connected-while-loading`: the row drew "not
+   * connected", with Connect, while its connections list was in flight, so a
+   * person who had connected Zoom was told they had not. The list is HELD
+   * until the row has been read — not for a fixed time, since a read after the
+   * answer landed proves nothing about loading — and the row must claim
+   * neither state and offer neither action. Released, it says what the App
+   * Center says.
+   */
+  console.log('\n▶ while the connections list is still loading')
+  const CONNS = (u) => u.pathname.endsWith(`/workspaces/${workspaceId}/integrations/connections`)
+  let releaseConns
+  const connsGate = new Promise((r) => { releaseConns = r })
+  let connsHeld = false
+  // A handler's promise is nobody's to await, so its rejections are caught here.
+  const holdConns = async (route) => {
+    if (route.request().method() !== 'GET') return route.continue().catch(() => {})
+    connsHeld = true
+    await connsGate
+    return route.continue().catch(() => {})
+  }
+  await page.route(CONNS, holdConns)
+  await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.getByTestId('planner-settings').click({ timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('planner-settings-nav-accounts').click({ timeout: 10_000 }).catch(() => {})
+  await waitUntil(async () => connsHeld && (await page.getByTestId('planner-conferencing-zoom').count()) > 0, { timeoutMs: 20_000 })
+  const zoomRow = page.getByTestId('planner-conferencing-zoom')
+  const whileHeld = {
+    connected: await zoomRow.getAttribute('data-connected', { timeout: 3000 }).catch(() => 'unread'),
+    actions:
+      (await page.getByTestId('planner-conferencing-connect').count()) +
+      (await page.getByTestId('planner-conferencing-disconnect').count()),
+    says: ((await page.getByTestId('planner-conferencing-zoom-state').innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim(),
+  }
+  releaseConns()
+  const settledTo = await waitUntil(
+    async () => (await zoomRow.getAttribute('data-connected', { timeout: 3000 }).catch(() => null)) === String(zoomLive),
+    { timeoutMs: 15_000 },
+  )
+  await page.unroute(CONNS, holdConns).catch(() => {})
+  chk(
+    connsHeld && whileHeld.connected === null && whileHeld.actions === 0 && whileHeld.says === 'Checking…' && settledTo,
+    'while its connections list loads, the Zoom row claims neither state and offers no action — then says what the App Center says',
+    `held ${connsHeld}; while held the row said connected=${JSON.stringify(whileHeld.connected)}, ` +
+      `offered ${whileHeld.actions} action(s) and read ${JSON.stringify(whileHeld.says)}; answered, it settled to ${zoomLive}: ${settledTo}`,
   )
 
 } catch (e) {

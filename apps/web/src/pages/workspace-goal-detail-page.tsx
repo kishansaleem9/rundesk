@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { goalProgress } from '../lib/goal-progress'
 import type { TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
@@ -60,7 +61,7 @@ const STATUS_META: Record<GoalStatus, { labelKey: TranslationKey; badge: 'succes
   completed: { labelKey: 'goalDetail.status.completed', badge: 'success', icon: CheckCircle2 },
 }
 
-const pctOf = (cur: number, target: number) => (target > 0 ? Math.min(100, Math.round((cur / target) * 100)) : 0)
+const pctOf = goalProgress
 const fmt = (iso: string | null) => (iso ? new Date(iso).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : null)
 
 export function GoalDetailPage() {

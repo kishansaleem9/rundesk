@@ -1,4 +1,3 @@
-import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card } from '@rundesk/ui'
 import { Settings } from 'lucide-react'
@@ -7,11 +6,7 @@ import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { FLAGS, DEFAULT_ENABLED_FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
-
-type WorkspaceEntry = {
-  workspace: { id: string; name: string; slug: string }
-  role: string
-}
+import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
 type OverrideRow = {
   flagKey: FlagKey
@@ -37,13 +32,7 @@ const WORKSPACE_SCOPED_FLAGS: { value: FlagKey; labelKey: TranslationKey }[] = [
 export function AdminSettingsPage() {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [workspaceId, setWorkspaceId] = useState('')
-
-  const workspaces = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
-  })
-  const resolvedWorkspaceId = workspaceId || workspaces.data?.[0]?.workspace.id || ''
+  const { workspaces, workspaceId: resolvedWorkspaceId, setWorkspaceId } = useAdminWorkspace()
 
   const overrides = useQuery({
     queryKey: ['feature-overrides', resolvedWorkspaceId],
@@ -85,17 +74,12 @@ export function AdminSettingsPage() {
       </header>
 
       <Card className="p-4">
-        <select
+        <AdminWorkspacePicker
+          testId="admin-settings-workspace"
+          workspaces={workspaces.data}
           value={resolvedWorkspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm w-full md:w-auto"
-        >
-          {(workspaces.data ?? []).map((entry) => (
-            <option key={entry.workspace.id} value={entry.workspace.id}>
-              {entry.workspace.name} ({entry.workspace.slug})
-            </option>
-          ))}
-        </select>
+          onChange={setWorkspaceId}
+        />
       </Card>
 
       <Card className="overflow-hidden">

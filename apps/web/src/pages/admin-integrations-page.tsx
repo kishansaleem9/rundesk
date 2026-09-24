@@ -6,11 +6,7 @@ import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
-
-type WorkspaceEntry = {
-  workspace: { id: string; name: string; slug: string }
-  role: string
-}
+import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
 type AccessRequest = {
   provider: string
@@ -41,15 +37,10 @@ const STATUS_LABEL_KEYS: Record<AccessRequest['status'], TranslationKey> = {
 export function AdminIntegrationsPage() {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const [workspaceId, setWorkspaceId] = useState('')
   const [adminNote, setAdminNote] = useState('')
   const [statusFilter, setStatusFilter] = useState<'all' | AccessRequest['status']>('all')
 
-  const workspaces = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
-  })
-  const resolvedWorkspaceId = workspaceId || workspaces.data?.[0]?.workspace.id || ''
+  const { workspaces, workspaceId: resolvedWorkspaceId, setWorkspaceId } = useAdminWorkspace()
   const requestsQuery = useQuery({
     queryKey: ['integration-access-requests-admin', resolvedWorkspaceId],
     enabled: Boolean(resolvedWorkspaceId),
@@ -84,17 +75,12 @@ export function AdminIntegrationsPage() {
       </header>
 
       <Card className="p-4 space-y-3">
-        <select
+        <AdminWorkspacePicker
+          testId="admin-integrations-workspace"
+          workspaces={workspaces.data}
           value={resolvedWorkspaceId}
-          onChange={(e) => setWorkspaceId(e.target.value)}
-          className="rounded-md border border-border bg-card px-3 py-2 text-sm w-full md:w-auto"
-        >
-          {(workspaces.data ?? []).map((entry) => (
-            <option key={entry.workspace.id} value={entry.workspace.id}>
-              {entry.workspace.name} ({entry.workspace.slug})
-            </option>
-          ))}
-        </select>
+          onChange={setWorkspaceId}
+        />
         <Input
           value={adminNote}
           onChange={(e) => setAdminNote(e.target.value)}

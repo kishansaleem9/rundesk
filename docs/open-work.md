@@ -466,6 +466,8 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed:* `getTask` takes its reader. It keeps only the related tasks they may open (`readableTaskIds`) and counts the rest (`hiddenDependencies`), so a dependency they cannot see is still known to be there, as the graph reports it. The route passes its caller. Creating, editing, moving, assigning, labelling and following a task answer as their actor sees it, and internal callers pass none. The new suite `related-task-access`, 3/3 (0/3 before), with dependencies planted by SQL: the member's task names nothing of the private one and keeps the open one, counts two left out (the admin, none), and the answer to the member's own edit is as clean. `rta-1..3`, each compiled. API unit tests 1628/1628. Regression: the sweep above, 12/12. In CI.
 
+*Break run (lane 2, 7f37f7b):* `rta-1` and `rta-2` reddened; `rta-3` reddened nothing (3 passed). It changed `updateTask`'s last line, a `return` reached only when the list has no workspace, which no edit reaches; the edit's answer is the read inside the workspace branch. Re-aimed there; its re-run is pending.
+
 ### `found-23-sep/container-read-rule-twice` — open, small
 
 **The container read rule exists in THREE forms: `assertContainerReadAccess` in tasks.service inline, `checkContainerAccess` used by the guard (and its WHERE-fragment twin `containerVisibilityFilter`, written beside it on purpose), and an SQL predicate in ai.service that omits the space-admin case**
@@ -783,13 +785,15 @@ The new suite `task-space-levels`, 5/5 on lane 1 (1 of 5 before, the grant's twi
 
 *Not changed:* ClickUp's comment level also lets an assignee tick their own checklist items; those go through the edit check here, so a "comment" space's assignee cannot. And deleting one's own comment asks nothing of the space.
 
-### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — open, small (visible bug; found fixing goal access)
+### `found-24-sep/goals-page-reads-fields-the-api-never-sends` — **closed** (visible bug; found fixing goal access)
 
 **Every goal card shows 0% and an empty bar, and a guest is offered a "New goal" that fails silently**
 
 *Evidence (code read):* `workspace-goals-page.tsx` types a goal as `{ progress, targetType, … }` and draws each card's bar and percentage from `goal.progress`. The API returns `currentValue`, `targetValue` and `kind`, and no `progress`, so `clampPct(undefined)` makes every card 0% (a confident zero). Creating sends `targetType`, `status` and `progress`, which the API ignores. And since goals are not a guest's (above), a guest's page lists nothing and still offers "New goal" and "Create your first goal": the POST answers 403, and the mutation has no `onError`, so nothing is said.
 
 *To close:* compute the card's progress from `currentValue / targetValue` as the detail page and the report do; hide the create buttons for a guest (`useWorkspaceRole`); give the create mutation an error toast. Check in the browser: a goal at 40 of 100 shows 40% on its card, and a guest's page offers no create.
+
+*Closed:* one rule for a goal's progress, `goalProgress` (`lib/goal-progress.ts`): its current value as a share of its target, 0 to 100. The goals list and the goal page both use it; the list's type is what the API sends. A guest is offered no "New goal" and no "Create your first goal", and their empty page says "No goals have been shared with you." A failed create says "The goal could not be created." The create sends the title alone, which is all the API reads. The new suite `goals-page`, 3/3 on lane 1 (0/3 before, lane 1 with the old bundle). The card is planted at 30 of 60, not 40 of 100: at 100 the raw value and the share read the same, and `gp-2` (the raw value) would pass. A guest and a member are read side by side, and the create is failed by route. `gp-1..6`, each compiled. Regression on lane 1, 14/14, one sweep for this and the two fixes beside it (the console's audit log and the Zoom row): `goals-page`, `admin-audit-page`, `goal-access`, `file-exports`, `webhook-access`, `sw-api-cache`, `settings-depth`, the four planner suites (`planner-appearance-toggles`, `planner-rail`, `planner-settings`, `planner-upcoming-meeting`), `ui-sweep`, `video1-acceptance` and `video-regression`. In CI.
 
 ### `found-24-sep/inbox-chip-read-while-loading` — **closed** (a flake, found by the dependency sweep)
 
@@ -821,6 +825,8 @@ The global `ResponseInterceptor` wrapped every return value as `{ data, meta, er
 
 The Insights button could not be clicked at first, because nobody was ever offered it. That is `found-24-sep/workspace-store-never-filled` below, fixed with this.
 
+*Break run (lane 2, 3aa69a8):* `fex-1`, `fex-2` and `fex-4..8` reddened the checks they name, 7 of 8. `fex-3` as first written unwrapped every answer, the sign-in's too, so the suite could not sign in and ran 1 check of 8. It is re-aimed at a narrower mistake, the reports controller exempted whole (`fex-3-the-reports-controller-passes-through`); its re-run is pending.
+
 ### `found-24-sep/workspace-store-never-filled` — **closed** (visible bug; found closing the exports)
 
 **Three places read a workspace store that nothing in the app ever wrote to: managers were never offered their controls, and support tickets went to the wrong workspace**
@@ -831,7 +837,34 @@ The Insights button could not be clicked at first, because nobody was ever offer
 - the support widget filed every ticket in the user's FIRST workspace, whichever one was open.
 Measured by the suite against the bundle before the fix (lane 2): 0 of 3.
 
-*Closed:* Insights and the dashboard read the role from the signed-in person's own workspaces (`useWorkspaceRole`, as the rest of the app does). The support widget takes the workspace on screen, then the first. The dead store is deleted. The new suite `workspace-role-controls`, 3/3 on lane 1 (0/3 before). It reads the screen as the admin, a workspace admin who is not a super-admin (a super-admin always saw the dashboard's control, so only this one shows the fix), and a member, and reads the ticket's workspace back by SQL. `wrc-1..3`, each compiled. Regression on lane 1, 13/13, with the exports above. In CI.
+*Closed:* Insights and the dashboard read the role from the signed-in person's own workspaces (`useWorkspaceRole`, as the rest of the app does). The support widget takes the workspace on screen, then the first. The dead store is deleted. The new suite `workspace-role-controls`, 3/3 on lane 1 (0/3 before). It reads the screen as the admin, a workspace admin who is not a super-admin (a super-admin always saw the dashboard's control, so only this one shows the fix), and a member, and reads the ticket's workspace back by SQL. `wrc-1..3`, each compiled; on lane 2 at 3aa69a8, 3 of 3 reddened. Regression on lane 1, 13/13, with the exports above. In CI.
+
+### `found-24-sep/admin-audit-reads-the-first-workspace` — **closed** (visible bug; found closing the exports)
+
+**The console's audit log shows only the admin's first workspace, its Export CSV fails without a word, and a trail that fails to load says there are no events**
+
+*Evidence, measured on lane 2 (the new suite `admin-audit-page` against the build before the fix: 0 of 4):*
+- `admin-audit-page.tsx` reads `wsQuery.data?.[0]`, the workspace the admin joined first, and offers no way to pick another. Every other console page that works on one workspace offers the choice (users, webhooks, settings, integrations). Measured: with one event planted in the admin's first workspace and one in a workspace they joined last, the page showed the first's and offered no picker.
+- Export CSV is `void downloadFile(…)`. A failure is a rejected promise nobody reads: with the export held to 500 by route, the page said nothing.
+- The list has no error state. With the trail held to 500, the page said "No audit events yet." (a confident zero).
+
+*The rule, ClickUp's:* the audit log belongs to one workspace, read by its owner and admins in that workspace's settings, filtered by date, event and user, and exported to CSV. The console here is a platform page with no ClickUp twin, so the workspace is picked as its other pages pick it.
+
+*To close:* the console's pages share one workspace picker (four copies now), and the audit page gets it; the export's failure is a toast; a failed read says "The audit log could not be loaded." Check in the browser: a picked workspace's event is shown and exported and the first's is not; a failed export and a failed read each say so.
+
+*Closed:* one picker for the console, `useAdminWorkspace` and `AdminWorkspacePicker` (`components/admin-workspace-picker.tsx`): the workspace picked, else the first joined. Users, webhooks, settings and integrations use it in place of their four copies, and the audit log uses it too. Picking a workspace there starts the actor filter and the page again, since another workspace has other people. A failed export says "The audit log could not be exported.", and a failed read says "The audit log could not be loaded." in place of the empty state. The new suite `admin-audit-page`, 4/4 on lane 1 (0/4 before). Events are planted by SQL in the admin's first workspace and in one they joined last. It reads the page, and the file Export CSV saves, after picking; the export and the list are failed by route, with the service worker blocked. `aap-1..5`, each compiled. Regression: the goals page's sweep above, 14/14. In CI.
+
+*Not changed here:* a workspace admin who is not a super-admin has no audit page at all. The API allows them (`WorkspaceAdminGuard`), and ClickUp shows them the log in the workspace's settings; the web offers it only in the super-admin console. That is a feature to build, `found-24-sep/workspace-audit-log-not-in-settings` in the feature list.
+
+### `found-24-sep/zoom-row-not-connected-while-loading` — **closed** (visible bug; found by the drifted break plan, whose `calendar-accounts` baseline was red)
+
+**The planner's Zoom row says Zoom is not connected, and offers Connect, until its connections list answers**
+
+*Evidence:* the break plan refused `calendar-accounts` on lane 4 (dde1c83): its baseline failed "the row agrees with the App Center", with the row reading `connected=false` against `true`. It passed on lane 1 at 02:43. `ConferencingRow` computes `connected` from the connections query and draws it at once, so while that query is in flight the row is "not connected". The suite reads the row as soon as it is drawn, so a busy lane reads it before the answer. Measured on lane 2 (probe `probe-zoom-row`, the connections list held by route, Zoom staged connected): while held, the row read `data-connected=false`, said "Zoom isn't configured on this server" and offered Connect; once answered, "Connected" and Disconnect. A person who has connected Zoom is told, for a moment or for as long as the list takes, that they have not.
+
+*To close:* until the list answers, the row claims neither state and offers no action (it says it is checking); a list that fails says Zoom's connection could not be checked. `calendar-accounts` waits for the row to settle before it compares, and a new check holds the list and reads that the row claims nothing meanwhile.
+
+*Closed:* the row knows once its list has answered (`known`). Until then it carries no `data-connected`, says "Checking…" and offers neither Connect nor Disconnect. A list that fails says "Zoom's connection could not be checked." `calendar-accounts` waits for the row to settle before it compares (the race that reddened its baseline), and blocks the service worker so a route can hold the list. Its new check holds the list, reads the row, and releases it: 36/37 before (lane 2, the old bundle: while held the row said `connected="false"`, offered Connect and read "Connect Zoom"), 37/37 on lane 1 after. `ca-6..8`, each compiled. Regression: the goals page's sweep above, 14/14, which has the four planner suites. In CI.
 
 ### `found-24-sep/doc-writes-are-the-read-rule` — **closed** (security, medium; found fixing docs)
 
@@ -1810,6 +1843,14 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *Evidence:* reaudit.md:850 (M, 'the write takes no :userId, deliberately'). people.controller.ts:100-119: PrioritiesController writes only the caller's own. Reading someone else's already exists at people.controller.ts:90-97 (GET /people/:userId/priorities). task-detail-sheet.tsx:2611-2635 shows the prompt only when `userId === currentUserId`.
 
 *To close:* Decide from ClickUp's behaviour whether assigning someone else offers to add the task to THEIR priorities. If yes, add a permissioned write, for example allowed to managers or the assigner of a task they can see.
+
+### `found-24-sep/workspace-audit-log-not-in-settings` — open, medium (unbuilt; found fixing the console's audit log)
+
+**A workspace's admins cannot read its audit log: the web shows it only in the super-admin console**
+
+*Evidence:* `GET /workspaces/:id/audit-logs` and its export are guarded by `WorkspaceAdminGuard`, so a workspace admin may read them. The only page that reads them is `/app/admin/audit`, and `/app/admin` lets in a super-admin only. ClickUp puts the audit log in the workspace's own settings, for its owner and admins (an Enterprise feature there), with filters by date, event and user, and a CSV export.
+
+*To close:* research ClickUp's audit log page — its event categories, filters and export — then give workspace settings an "Audit log" tab for owners and admins that reads the same routes as the console page. A suite: a workspace admin reads their own workspace's events and not another's, and a member is offered no tab.
 
 ## Ledger rows still open — 18
 

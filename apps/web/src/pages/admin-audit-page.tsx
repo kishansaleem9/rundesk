@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
 import { api, downloadFile } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
 type AuditLog = {
   id: string
@@ -124,13 +125,11 @@ export function AuditLogPage() {
   const setTo = (v: string) => { setToState(v); setPage(1) }
   const setActorId = (v: string) => { setActorIdState(v); setPage(1) }
 
-  // For audit log we need a workspace — get from user's workspaces
-  const wsQuery = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api<Array<{ workspace: { id: string } }>>('/workspaces'),
-  })
-
-  const workspaceId = wsQuery.data?.[0]?.workspace.id
+  // The trail is one workspace's: the one picked, else the first the admin
+  // joined. A different workspace has different people, so the actor filter
+  // starts again with it.
+  const { workspaces, workspaceId, setWorkspaceId } = useAdminWorkspace()
+  const pickWorkspace = (id: string) => { setWorkspaceId(id); setActorIdState(''); setPage(1) }
 
   // Actor dropdown is sourced from workspace members so it covers everyone, not
   // just actors present on the current page.
@@ -182,10 +181,11 @@ export function AuditLogPage() {
     if (!workspaceId) return
     // Server-side export streams the FULL filtered trail, not just the loaded page.
     const qs = filterParams.toString()
-    void downloadFile(
+    // Its failure is said: this was `void`, so a failed export did nothing at all.
+    downloadFile(
       `/workspaces/${workspaceId}/audit-logs/export${qs ? `?${qs}` : ''}`,
       `audit-log-${new Date().toISOString().split('T')[0]}.csv`,
-    )
+    ).catch(() => toast.error(t('adminAudit.exportFailed')))
   }
 
   return (
@@ -202,6 +202,16 @@ export function AuditLogPage() {
 
       {/* Server-side filters (Plan §13.3): date range + actor, applied to the whole trail. */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card/40 p-3">
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">{t('common.workspace')}</label>
+          <AdminWorkspacePicker
+            testId="admin-audit-workspace"
+            workspaces={workspaces.data}
+            value={workspaceId}
+            onChange={pickWorkspace}
+            className="h-9 py-0 px-2 min-w-44"
+          />
+        </div>
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">{t('adminAudit.dateFrom')}</label>
           <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
@@ -262,7 +272,13 @@ export function AuditLogPage() {
 
       <div className="space-y-2">
         {logsQuery.isLoading && <p className="text-sm text-muted-foreground"><InlineSkeleton /></p>}
-        {!logsQuery.isLoading && logs.length === 0 && (
+        {/* A trail that failed to load is not an empty one. */}
+        {logsQuery.isError && (
+          <Card className="p-8 text-center text-muted-foreground">
+            <p data-testid="admin-audit-load-failed">{t('adminAudit.loadFailed')}</p>
+          </Card>
+        )}
+        {!logsQuery.isLoading && !logsQuery.isError && logs.length === 0 && (
           <Card className="p-8 text-center text-muted-foreground">
             <Shield className="h-8 w-8 mx-auto mb-2 opacity-30" />
             <p>

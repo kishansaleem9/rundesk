@@ -1,17 +1,21 @@
 import { useState } from 'react'
 import { Link, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, cn } from '@rundesk/ui'
+import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { Target, TrendingUp, CheckCircle2, AlertTriangle, Plus } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { goalProgress } from '../lib/goal-progress'
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
+/** A goal as `GET /workspaces/:id/goals` sends it. */
 type Goal = {
   id: string
   title: string
   description?: string | null
-  progress: number
-  targetType: 'numeric' | 'percentage' | 'boolean'
+  currentValue: number
+  targetValue: number
+  kind: 'numeric' | 'percentage' | 'boolean'
   status: 'on_track' | 'at_risk' | 'off_track' | 'completed'
   dueDate?: string | null
   ownerId?: string | null
@@ -30,6 +34,10 @@ export function GoalsPage() {
   const qc = useQueryClient()
   const [creating, setCreating] = useState(false)
   const [newTitle, setNewTitle] = useState('')
+  // A guest has no goal shared with them and may make none (the API answers
+  // an empty list and 403), so they are offered no "New goal" to fail.
+  const { role } = useWorkspaceRole(workspaceId)
+  const isGuest = role === 'guest'
 
   const goalsQuery = useQuery({
     queryKey: ['goals', workspaceId],
@@ -40,18 +48,14 @@ export function GoalsPage() {
     mutationFn: async () =>
       api<Goal>(`/workspaces/${workspaceId}/goals`, {
         method: 'POST',
-        body: {
-          title: newTitle.trim(),
-          targetType: 'percentage',
-          status: 'on_track',
-          progress: 0,
-        },
+        body: { title: newTitle.trim() },
       }),
     onSuccess: async () => {
       setNewTitle('')
       setCreating(false)
       await qc.invalidateQueries({ queryKey: ['goals', workspaceId] })
     },
+    onError: () => toast.error(t('goals.createFailed')),
   })
 
   const goals = goalsQuery.data ?? []
@@ -66,9 +70,11 @@ export function GoalsPage() {
               {t('goals.subtitle')}
             </p>
           </div>
-          <Button onClick={() => setCreating(true)}>
-            <Plus className="h-4 w-4 mr-1" /> {t('goals.newGoal')}
-          </Button>
+          {!isGuest && (
+            <Button onClick={() => setCreating(true)}>
+              <Plus className="h-4 w-4 mr-1" /> {t('goals.newGoal')}
+            </Button>
+          )}
         </div>
       </header>
 
@@ -112,11 +118,13 @@ export function GoalsPage() {
               <Target className="h-10 w-10 text-brand-500 mx-auto mb-2" />
               <h3 className="font-display text-lg font-semibold text-foreground mb-1">{t('goals.emptyTitle')}</h3>
               <p className="text-sm text-muted-foreground max-w-md mx-auto">
-                {t('goals.emptyDesc')}
+                {t(isGuest ? 'goals.emptyGuest' : 'goals.emptyDesc')}
               </p>
-              <Button onClick={() => setCreating(true)} className="mt-4">
-                {t('goals.createFirst')}
-              </Button>
+              {!isGuest && (
+                <Button onClick={() => setCreating(true)} className="mt-4">
+                  {t('goals.createFirst')}
+                </Button>
+              )}
             </Card>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -129,12 +137,6 @@ export function GoalsPage() {
       </div>
     </div>
   )
-}
-
-function clampPct(v: unknown): number {
-  const n = typeof v === 'number' ? v : Number(v)
-  if (!Number.isFinite(n)) return 0
-  return Math.max(0, Math.min(100, n))
 }
 
 function GoalCard({ goal }: { goal: Goal }) {
@@ -162,11 +164,11 @@ function GoalCard({ goal }: { goal: Goal }) {
               <div className="flex-1 h-1.5 rounded-full bg-muted/40 overflow-hidden">
                 <div
                   className={cn('h-full transition-all', meta.color)}
-                  style={{ width: `${clampPct(goal.progress)}%` }}
+                  style={{ width: `${goalProgress(goal.currentValue, goal.targetValue)}%` }}
                 />
               </div>
-              <span className="text-xs text-muted-foreground tabular-nums w-10 text-right">
-                {Math.round(clampPct(goal.progress))}%
+              <span className="text-xs text-muted-foreground tabular-nums w-10 text-right" data-testid={`goal-progress-${goal.id}`}>
+                {goalProgress(goal.currentValue, goal.targetValue)}%
               </span>
             </div>
             <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">

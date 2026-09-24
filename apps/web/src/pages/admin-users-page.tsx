@@ -6,11 +6,7 @@ import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
-
-type WorkspaceEntry = {
-  workspace: { id: string; name: string; slug: string }
-  role: string
-}
+import { AdminWorkspacePicker, useAdminWorkspace } from '../components/admin-workspace-picker'
 
 type Member = {
   userId: string
@@ -32,13 +28,7 @@ export function AdminUsersPage() {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
   const [search, setSearch] = useState('')
-  const [workspaceId, setWorkspaceId] = useState('')
-  const workspaces = useQuery({
-    queryKey: ['workspaces'],
-    queryFn: () => api<WorkspaceEntry[]>('/workspaces'),
-  })
-
-  const resolvedWorkspaceId = workspaceId || workspaces.data?.[0]?.workspace.id || ''
+  const { workspaces, workspaceId: resolvedWorkspaceId, setWorkspaceId } = useAdminWorkspace()
   const members = useQuery({
     queryKey: ['admin-members', resolvedWorkspaceId],
     queryFn: () => api<Member[]>(`/workspaces/${resolvedWorkspaceId}/members`),
@@ -84,17 +74,12 @@ export function AdminUsersPage() {
 
       <Card className="p-4 space-y-3">
         <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-          <select
+          <AdminWorkspacePicker
+            testId="admin-users-workspace"
+            workspaces={workspaces.data}
             value={resolvedWorkspaceId}
-            onChange={(e) => setWorkspaceId(e.target.value)}
-            className="rounded-md border border-border bg-card px-3 py-2 text-sm"
-          >
-            {(workspaces.data ?? []).map((entry) => (
-              <option key={entry.workspace.id} value={entry.workspace.id}>
-                {entry.workspace.name} ({entry.workspace.slug})
-              </option>
-            ))}
-          </select>
+            onChange={setWorkspaceId}
+          />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
