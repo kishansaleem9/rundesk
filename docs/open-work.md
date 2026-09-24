@@ -532,6 +532,15 @@ The people service now reads every task as the requester may see it (`viewerFilt
 
 *Still open, from the read-only audit (23 September, code read, NOT YET MEASURED):* custom-field search; task custom-field values (GET and PUT); sprint tasks; the dependency graph (6 hops); blocker titles in a PATCH error; id-to-title lookups through favourites, planner blocks (reported cross-tenant), sprint task add and AI refs; several reports, members only (workload day, activity, overview, project health, custom run/export, and a scheduled report that runs with NO actor and emails the whole workspace to any address); AI suggest-tasks and workload-balance (behind the new guard now, what they read not yet checked); meeting action items created in any list id; new chat messages broadcast to the whole workspace whatever the channel's privacy. Order of work: search and docs next, then the cross-tenant lookup (planner blocks), then the rest.
 
+### `found-24-sep/assignee-me-compared-with-a-narrowed-endpoint` — **closed** (a regression of mine, found by the docs sweep)
+
+**`addressability-live` compared the whole `assigneeId=me` listing with the member endpoint after that endpoint became open work only**
+
+*Evidence:* `assigneeId=me agrees with the member endpoint (13 <= 9)` failed on lane 1. Read row by row in the admin's Main Workspace, the listing held 13 and the member endpoint 9, and the four extra rows were all closed; nothing was in the member endpoint that the listing lacked. `ecd6bb0` (`home-today-overdue-includes-closed`) made that endpoint Home's open work, and its regression sweep did not include this suite. So the suite's premise went stale with the change, not the product.
+
+*Closed:* the check compares on open work, row by row: every open task the listing holds is in the member endpoint. It makes an open task assigned to the admin first (and removes it after), so it is never two empty lists; a fresh database assigns the admin nothing. It passes on lane 1 in the docs sweep.
+
+
 ## Verification-harness defects — 27
 
 ### `suite-hygiene/branch-checker-confident-zero` — open, medium

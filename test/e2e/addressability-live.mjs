@@ -343,12 +343,26 @@ try {
     check(false, 'no Custom tab to switch to')
   }
   // The server-side half: the scoped listing agrees with the member endpoint.
+  // That endpoint is OPEN work only since `home-today-overdue-includes-closed`
+  // (it is Home's Assigned to me), while the listing still carries closed
+  // tasks, so the two are compared on open work, row by row. Counting all of
+  // one against the other failed 13 against 9 on lane 1: four closed tasks.
+  // One open task of the admin's of its own, so the comparison is never of two
+  // empty lists — a fresh database assigns the admin nothing.
+  const mineOpen = await A('/tasks', { method: 'POST', body: { listId, title: 'Assigned to me, open', assigneeIds: [admin.user.id] } })
   const scoped = await A(`/tasks/workspace/${WS}?limit=500&assigneeId=me`)
   const member = await A(`/tasks/workspace/${WS}/members/${admin.user.id}`)
+  const memberIds = new Set((member.data ?? []).map((t) => t.id))
+  const openScoped = (scoped.data ?? []).filter((t) => t.statusCategory !== 'closed')
+  const strays = openScoped.filter((t) => !memberIds.has(t.id))
   check(
-    Array.isArray(scoped.data) && Array.isArray(member.data) && scoped.data.length <= member.data.length,
-    `assigneeId=me agrees with the member endpoint (${scoped.data?.length} <= ${member.data?.length})`,
+    Array.isArray(scoped.data) && Array.isArray(member.data) && openScoped.some((t) => t.id === mineOpen.data?.id) &&
+      strays.length === 0,
+    'assigneeId=me agrees with the member endpoint: every open task it lists is one the member endpoint lists',
+    `${openScoped.length} open of ${scoped.data?.length} listed (this suite's own among them: ${openScoped.some((t) => t.id === mineOpen.data?.id)}), ` +
+      `${member.data?.length} from the member endpoint, ${strays.length} not in it`,
   )
+  if (mineOpen.data?.id) await A(`/tasks/${mineOpen.data.id}`, { method: 'DELETE' }).catch(() => {})
   const leaked = await A(`/tasks/workspace/${WS}?limit=5&assigneeId=00000000-0000-4000-8000-000000000000`)
   const unfiltered = await A(`/tasks/workspace/${WS}?limit=5`)
   check(
