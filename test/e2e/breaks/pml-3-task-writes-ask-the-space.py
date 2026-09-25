@@ -1,5 +1,5 @@
 # A TASK'S CHANGE ASKS THE SPACE ALONE, not a grant on its project.
-# Reddens: project-member-levels: "a member given View on a project changes nothing in it — not the admin's task, not a new task, not its list — where the space alone would let them, as it does in the project beside it"
+# Reddens: project-member-levels: "a member given View on a project changes nothing in it — not the admin's task, not a new task, not a list, even one they made — where the space alone would let them, as it does in the project beside it"
 #   or "a member given Comment on a project comments on its tasks and changes nothing of them"
 #   or "a member given Edit on a project in a view-only space changes the admin's task there and makes one — and in the project beside it the space's View still decides"
 import io

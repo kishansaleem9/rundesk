@@ -1,5 +1,5 @@
 # A LIST'S RENAME ASKS THE SPACE ALONE, not a grant on its project.
-# Reddens: project-member-levels: "a member given View on a project changes nothing in it — not the admin's task, not a new task, not its list — where the space alone would let them, as it does in the project beside it"
+# Reddens: project-member-levels: "a member given View on a project changes nothing in it — not the admin's task, not a new task, not a list, even one they made — where the space alone would let them, as it does in the project beside it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/lists/lists.service.ts'
 s = io.open(p, encoding='utf-8').read()

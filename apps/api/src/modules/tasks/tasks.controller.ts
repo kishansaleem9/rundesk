@@ -269,6 +269,17 @@ export class TasksController {
     return this.tasks.getTask(taskId, { id: user.id, role: user.role })
   }
 
+  /**
+   * What this person may do to this task, as the write routes would answer —
+   * so the sheet offers only what they would accept
+   * (`found-25-sep/task-sheet-offers-refused-edits`).
+   */
+  @Get(':taskId/capabilities')
+  @UseGuards(ResourceMemberGuard)
+  async capabilities(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.taskCapabilities(taskId, user.id)
+  }
+
   @Get(':taskId/subtasks')
   @UseGuards(ResourceMemberGuard)
   async getSubtasks(@Param('taskId') taskId: string, @CurrentUser() user: CurrentUserPayload) {

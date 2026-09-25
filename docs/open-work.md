@@ -1084,6 +1084,8 @@ The new suite `project-member-levels`, 5 checks: View on a project in an ordinar
 
 `pml-1..5`, each compiled: the member's grants unread, the maker's seed taken for a grant, the task's writes and the list's rule asking the space alone, and the refusal naming the space. Re-aimed at the new lines: `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6`, and `gsl-3` and `gsl-6` (a member's grants have a loop of their own now; these are the guest's). Regression on lanes 2 to 5, 39 suites that set members or shares or change what a member reaches: 38 passed. `folder-create` failed on lane 4 because lane 4's database had drifted from the migrations (`found-25-sep/lane-databases-drift-from-the-migrations`, below), and passed there once repaired, 22/22. In CI (179).
 
+*Break run, lane 1 (`72c5bb7`):* `pml-1`, `-2`, `-3` and `-5` reddened, on a green baseline (5/5). `pml-4` (the list rule asking the space alone) left the suite green: its list was the admin's, and the maker rule refuses a member that rename whatever the project says, so the check could not tell. The check renames a list the member made now, planted by SQL, beside one in the project with no grant; `pml-4` is to be run again on it. The re-aimed `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6` and `gsl-3`, 10 of 10 (`gsl-6` is a unit claim, red in preflight).
+
 *Not changed, recorded:* a member given Full on a project still cannot rename or archive it unless they made it: the container rule asks its maker, an admin or a manager after the level. ClickUp's full edit on a folder allows it. This is the container rule's own question, left as it is here.
 
 ### `found-25-sep/lane-databases-drift-from-the-migrations` — open, test tooling, small (found closing `project-roles-narrow-nothing`)
@@ -1096,13 +1098,33 @@ The new suite `project-member-levels`, 5 checks: View on a project in an ordinar
 
 *To close:* a gate before a lane is used (`fleet-restart.sh`, and `verify.sh`'s staleness refusal) that compares the lane's indexes, constraints, columns and defaults with the pristine database, and refuses one that differs. Show that it catches a dropped index.
 
-### `found-25-sep/task-sheet-offers-refused-edits` — open, visible bug, medium (found closing `task-edits-narrower-than-clickup`)
+### `found-25-sep/task-sheet-offers-refused-edits` — **closed** (visible bug, medium; found closing `task-edits-narrower-than-clickup`)
 
 **The task sheet offers every change to anybody who can open the task, and a comment-only or view-only reader is refused each one**
 
 *Evidence, read not run:* `task-detail-sheet.tsx` gates no control on what the person may do: no capability read, no read-only state. Title, status, assignees, fields, dates, archive and delete are drawn for a reader whose space is view-only or comment-only, and each is refused by the API (403) after it is pressed. The project page had the same defect, closed by asking the API (`GET /projects/:id/capabilities`, `found-24-sep/project-page-offers-guests-its-managers-buttons`).
 
 *To close:* the sheet asks what this person may do to this task (the write rule's own answer: edit, comment-level changes as an assignee, or nothing), and draws only those controls, read-only otherwise.
+
+*Measured, lane 5, on `72c5bb7`:* the new suite below, 1 of 5. A member reading an admin's task in a view-only space was offered the title (it opened for editing), the status and the dates, Archive and Delete in the menu, and a comment box, and each change was refused (403) after they made it. The same held in a comment-only space, and on a task assigned to them there. `GET /tasks/:id/capabilities` did not exist (404). Only the space they may edit passed.
+
+ClickUp (help centre, search snippets): "View" is read-only; "Comment" adds comments, and on a task assigned to the person a change of its status; "Edit" changes every task in the location.
+
+*Closed, 25 September:*
+
+- **`GET /tasks/:id/capabilities`** answers what the routes would: `edit` (the write rule at "edit"), `progress` (its status and assignees: the write rule at "comment", which an assignee passes in a comment-only space) and `comment` (the comment rule, now one private method for the route and this answer). A refusal is `false`; anything else is thrown.
+- **The sheet asks it with the task**, and shows its loading state until both have answered, so no control is drawn and then switched off. A read that fails, or an answer that is not one (a stubbed API's catch-all), offers what the sheet always did, and the routes still refuse.
+- **What it draws by the answer:** the title opens for editing only with `edit`; the status select and its next and complete buttons, the assignee chips and picker with `edit` or `progress`; priority, the dates and their presets, repeat, estimate, the description, Add fields, the type picker, the cover, duplicate, archive, visibility and milestone with `edit`. The menu's Convert, Merge, Custom fields, Archive and Delete are there only with `edit`. The Fields and Checklists tabs sit in a disabled fieldset without `edit`. The subtask rows' controls and their add form, the dependencies' Remove and add form, and the attachments' upload, link and Remove need `edit`. The comment box needs `comment`; without it the tab says the reader may read the comments and not add one (four locales).
+- The capabilities are read again when the task's assignees change, since `progress` depends on being one.
+
+The new suite `task-sheet-capabilities`, 5 checks: a member on four of the admin's tasks, in a view-only space, a comment-only space (one assigned to them, whose status they move, read back by SQL), and a space they may edit (a new title, read back); and the API's four answers.
+
+- Before: 1 of 5 (the edit space).
+- After: 5/5.
+
+`tsc-1..10`, each compiled: the API answering edit to all, progress and comment from the edit rule; the sheet ignoring the answer, the title, status, dates, Archive and the comment box offered to everybody, and the status asked of edit alone. `task-delete-1`, `tfc-6` and `ths-6` re-aimed at the lines that read the answer. Regression on lanes 2 to 5, the 37 suites that open the task sheet with `task-edit-levels`, `ui-sweep`, `video-regression`, `video1-acceptance` and `no-dead-ends`, 41/41. The first sweep drew the controls disabled until the answer came, and three suites failed under the load (`custom-field-progress`, `task-menu`, `task-depth`) and passed on their own. A hand quick enough to act in that gap is the defect's cousin, so the sheet now waits for both answers, and the second sweep was 41/41. In CI (180).
+
+*Not changed, recorded:* the Time tab, the AI bar's actions, a task's linked work, adding somebody else as a watcher, and Share, Save as template and reminders keep their own rules and are drawn as before. A subtask's row is drawn by its parent's answer; the subtask's own answer (its own assignee, say) is not asked per row.
 
 ### `found-25-sep/guests-edit-no-shared-task` — open, behaviour, small (found closing `task-edits-narrower-than-clickup`)
 

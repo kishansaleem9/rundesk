@@ -22,7 +22,7 @@ import {
   cn,
   toast,
 } from '@rundesk/ui'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ImageIcon,
   Maximize2,
@@ -508,6 +508,24 @@ function isNotWired(err: unknown): boolean {
   return true
 }
 
+/**
+ * WHAT THIS PERSON MAY DO TO THE TASK IN THE SHEET — `GET /tasks/:id/capabilities`,
+ * the answers the write routes give (`found-25-sep/task-sheet-offers-refused-edits`).
+ * The sheet drew every control for anybody who could open the task, and a
+ * view-only or comment-only reader was refused each one after pressing it.
+ *
+ *   edit     — any change to the task;
+ *   progress — its status and assignees (an assignee in a comment-only space);
+ *   comment  — a comment.
+ */
+type TaskCaps = { edit: boolean; progress: boolean; comment: boolean }
+const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true }
+const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false }
+const TaskCapsContext = createContext<TaskCaps>(CAPS_ALL)
+const isTaskCaps = (x: unknown): x is TaskCaps =>
+  !!x && typeof (x as TaskCaps).edit === 'boolean' && typeof (x as TaskCaps).progress === 'boolean' && typeof (x as TaskCaps).comment === 'boolean'
+const useTaskCaps = () => useContext(TaskCapsContext)
+
 function NotWiredNote({ children }: { children?: React.ReactNode }) {
   const { t } = useTranslation()
   return (
@@ -760,6 +778,7 @@ function TaskTypePicker({
   current: { id: string; name: string; icon: string | null; color: string | null } | null
 }) {
   const { t } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const typesQuery = useQuery({
     queryKey: ['task-types', workspaceId],
@@ -842,7 +861,7 @@ function TaskTypePicker({
       <select
         value={current?.id ?? ''}
         onChange={(e) => apply.mutate(e.target.value || null)}
-        disabled={apply.isPending}
+        disabled={apply.isPending || !caps.edit}
         aria-label={t('taskTypes.pickerLabel')}
         title={t('taskTypes.pickerLabel')}
         data-testid="task-type-select"
@@ -859,7 +878,7 @@ function TaskTypePicker({
       <button
         type="button"
         data-testid="task-type-fill-ai"
-        disabled={fill.isPending}
+        disabled={fill.isPending || !caps.edit}
         title={t('taskTypes.fillWithAiHint')}
         onClick={() => fill.mutate()}
         className="inline-flex h-[22px] items-center gap-1 rounded border border-border bg-card px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
@@ -1008,6 +1027,21 @@ export function TaskDetailSheet({
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
+  const capsQuery = useQuery({
+    enabled,
+    queryKey: ['task-caps', taskId],
+    queryFn: () => api<TaskCaps>(`/tasks/${taskId}/capabilities`),
+  })
+  /*
+   * The sheet waits for the answer with the task (below), so nothing is drawn
+   * on a guess. A read that fails, or an answer that is not one, offers what
+   * the sheet always did, and the routes refuse as they always have.
+   */
+  const caps: TaskCaps = isTaskCaps(capsQuery.data)
+    ? capsQuery.data
+    : capsQuery.isError || capsQuery.data !== undefined
+      ? CAPS_ALL
+      : CAPS_NONE
 
   /*
    * §V2-S15 — the menu's Favorite item reads and writes through the SAME hooks
@@ -1247,7 +1281,11 @@ export function TaskDetailSheet({
           expanded ? 'sm:max-w-[90vw]' : 'sm:max-w-2xl',
         )}
       >
-        {!taskId ? null : detailQuery.isLoading ? (
+        <TaskCapsContext.Provider value={caps}>
+        {/* The capabilities are awaited with the task: a sheet whose controls are
+            drawn and then switched on (or off) is one a quick hand presses in
+            the gap. A read that fails does not hold it (see `caps`). */}
+        {!taskId ? null : detailQuery.isLoading || capsQuery.isLoading ? (
           // §2.9a — one line of muted text in a full-height sheet was the
           // closest thing to a blank screen left in the app.
           <TaskSheetSkeleton />
@@ -1322,7 +1360,7 @@ export function TaskDetailSheet({
                 size="sm"
                 variant="secondary"
                 onClick={() => duplicateTask.mutate()}
-                disabled={duplicateTask.isPending || !fallbackWorkspaceId}
+                disabled={duplicateTask.isPending || !fallbackWorkspaceId || !caps.edit}
                 className="absolute left-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <Copy className="h-3.5 w-3.5" />
@@ -1334,14 +1372,14 @@ export function TaskDetailSheet({
                 variant="secondary"
                 data-testid="task-archive"
                 onClick={confirmArchive}
-                disabled={archiveTask.isPending}
+                disabled={archiveTask.isPending || !caps.edit}
                 className="absolute left-[7.25rem] top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
                 <ArchiveIcon className="h-3.5 w-3.5" />
                 {t('taskDetail.archiveTask')}
               </Button>
               {/* Reposition sits beside Change cover, and only for an image. */}
-              {detailQuery.data.coverUrl && (
+              {detailQuery.data.coverUrl && caps.edit && (
                 <Button
                   type="button"
                   size="sm"
@@ -1362,7 +1400,7 @@ export function TaskDetailSheet({
                 size="sm"
                 variant="secondary"
                 onClick={() => setCoverPickerOpen(true)}
-                disabled={updateCover.isPending}
+                disabled={updateCover.isPending || !caps.edit}
                 data-testid="cover-change"
                 className="absolute right-3 top-3 h-7 gap-1.5 px-2.5 text-xs opacity-90 hover:opacity-100"
               >
@@ -1394,7 +1432,7 @@ export function TaskDetailSheet({
                   <button
                     type="button"
                     className="shrink-0 rounded border border-border px-1.5 py-0.5 text-[11px] hover:bg-muted/40"
-                    disabled={promoteToTask.isPending}
+                    disabled={promoteToTask.isPending || !caps.edit}
                     onClick={() => promoteToTask.mutate()}
                   >
                     {t('taskDetail.promoteToTask')}
@@ -1443,21 +1481,26 @@ export function TaskDetailSheet({
                   />
                 ) : (
                   <SheetTitle
-                    role="button"
-                    tabIndex={0}
+                    // A title this person may not change is a title, not a button.
+                    role={caps.edit ? 'button' : undefined}
+                    tabIndex={caps.edit ? 0 : undefined}
                     onClick={() => {
+                      if (!caps.edit) return
                       setTitleDraft(detailQuery.data.title)
                       setEditingTitle(true)
                     }}
                     onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
+                      if (caps.edit && (e.key === 'Enter' || e.key === ' ')) {
                         e.preventDefault()
                         setTitleDraft(detailQuery.data.title)
                         setEditingTitle(true)
                       }
                     }}
-                    className="text-2xl font-display leading-tight flex-1 cursor-text rounded-sm hover:bg-muted/40 transition-colors"
-                    title={t('taskDetail.clickToEditTitle')}
+                    className={cn(
+                      'text-2xl font-display leading-tight flex-1 rounded-sm transition-colors',
+                      caps.edit && 'cursor-text hover:bg-muted/40',
+                    )}
+                    title={caps.edit ? t('taskDetail.clickToEditTitle') : undefined}
                   >
                     {detailQuery.data.title}
                   </SheetTitle>
@@ -1573,7 +1616,7 @@ export function TaskDetailSheet({
                     type="button"
                     title={detailQuery.data.visibility === 'private' ? t('taskDetail.makePublic') : t('taskDetail.makePrivate')}
                     aria-pressed={detailQuery.data.visibility === 'private'}
-                    disabled={updateVisibility.isPending}
+                    disabled={updateVisibility.isPending || !caps.edit}
                     onClick={() =>
                       updateVisibility.mutate(detailQuery.data.visibility === 'private' ? 'public' : 'private')
                     }
@@ -1588,7 +1631,7 @@ export function TaskDetailSheet({
                     type="button"
                     title={detailQuery.data.isMilestone ? t('taskDetail.unmarkMilestone') : t('taskDetail.markMilestone')}
                     aria-pressed={!!detailQuery.data.isMilestone}
-                    disabled={updateMilestone.isPending}
+                    disabled={updateMilestone.isPending || !caps.edit}
                     onClick={() => updateMilestone.mutate(!detailQuery.data.isMilestone)}
                     className={cn(
                       'h-8 w-8 inline-flex items-center justify-center rounded hover:text-foreground disabled:opacity-50',
@@ -1667,7 +1710,7 @@ export function TaskDetailSheet({
                         parent strip, so between them a task can go either way
                         and neither control appears where it would fail.
                       */}
-                      {!detailQuery.data.parentTaskId && (
+                      {!detailQuery.data.parentTaskId && caps.edit && (
                         <DropdownMenuItem
                           data-testid="task-menu-convert"
                           onSelect={() => setConvertOpen(true)}
@@ -1682,13 +1725,15 @@ export function TaskDetailSheet({
                         it is also the one that moves the most work, so it
                         reports what it moved rather than saying "done".
                       */}
-                      <DropdownMenuItem
-                        data-testid="task-menu-merge"
-                        onSelect={() => setMergeOpen(true)}
-                      >
-                        <MergeIcon className="mr-2 h-4 w-4" />
-                        {t('taskMerge.menuItem')}
-                      </DropdownMenuItem>
+                      {caps.edit && (
+                        <DropdownMenuItem
+                          data-testid="task-menu-merge"
+                          onSelect={() => setMergeOpen(true)}
+                        >
+                          <MergeIcon className="mr-2 h-4 w-4" />
+                          {t('taskMerge.menuItem')}
+                        </DropdownMenuItem>
+                      )}
                       {/*
                         §V2-S16 frame `15:30` — "Custom Fields" is its own row
                         in this menu, and the frame draws it with NO chevron
@@ -1698,16 +1743,18 @@ export function TaskDetailSheet({
                         field-defining form, which is the same destination as
                         "Add fields" under the description.
                       */}
-                      <DropdownMenuItem
-                        data-testid="task-menu-custom-fields"
-                        onSelect={() => {
-                          setActiveTab('fields')
-                          setFieldCreateStamp((n) => n + 1)
-                        }}
-                      >
-                        <SlidersHorizontal className="mr-2 h-4 w-4" />
-                        {t('taskDetail.tab.fields')}
-                      </DropdownMenuItem>
+                      {caps.edit && (
+                        <DropdownMenuItem
+                          data-testid="task-menu-custom-fields"
+                          onSelect={() => {
+                            setActiveTab('fields')
+                            setFieldCreateStamp((n) => n + 1)
+                          }}
+                        >
+                          <SlidersHorizontal className="mr-2 h-4 w-4" />
+                          {t('taskDetail.tab.fields')}
+                        </DropdownMenuItem>
+                      )}
                       <DropdownMenuSeparator />
                       {/* The frame's header row: Copy link · Copy ID · New tab. */}
                       <DropdownMenuItem
@@ -1790,13 +1837,15 @@ export function TaskDetailSheet({
                         Archiving is reversible and keeps the task for good; the
                         red one is the row with a clock on it.
                       */}
-                      <DropdownMenuItem
-                        data-testid="task-menu-archive"
-                        onSelect={confirmArchive}
-                      >
-                        <ArchiveIcon className="mr-2 h-4 w-4" />
-                        {t('taskDetail.archiveTask')}
-                      </DropdownMenuItem>
+                      {caps.edit && (
+                        <DropdownMenuItem
+                          data-testid="task-menu-archive"
+                          onSelect={confirmArchive}
+                        >
+                          <ArchiveIcon className="mr-2 h-4 w-4" />
+                          {t('taskDetail.archiveTask')}
+                        </DropdownMenuItem>
+                      )}
                       {/*
                         DELETE — the last row in the frame, red, under Archive.
                         A different request (`POST /tasks/:id/trash`), a
@@ -1805,15 +1854,17 @@ export function TaskDetailSheet({
                         thirty days). Two rows only earn their place by being
                         two actions.
                       */}
-                      <DropdownMenuItem
-                        data-testid="task-menu-delete"
-                        onSelect={confirmDelete}
-                        disabled={deleteTask.isPending}
-                        className="text-red-600 focus:text-red-600"
-                      >
-                        <Trash2 className="mr-2 h-4 w-4" />
-                        {t('taskDetail.deleteTask')}
-                      </DropdownMenuItem>
+                      {caps.edit && (
+                        <DropdownMenuItem
+                          data-testid="task-menu-delete"
+                          onSelect={confirmDelete}
+                          disabled={deleteTask.isPending}
+                          className="text-red-600 focus:text-red-600"
+                        >
+                          <Trash2 className="mr-2 h-4 w-4" />
+                          {t('taskDetail.deleteTask')}
+                        </DropdownMenuItem>
+                      )}
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -1897,12 +1948,16 @@ export function TaskDetailSheet({
                   }}
                 />
               )}
+              {/* Pure editors: a disabled fieldset turns every one of their
+                  controls off at once for somebody who may not change the task. */}
               {activeTab === 'fields' && (
-                <CustomFieldsPanel
-                  taskId={detailQuery.data.id}
-                  workspaceId={fallbackWorkspaceId}
-                  openCreateStamp={fieldCreateStamp}
-                />
+                <fieldset disabled={!caps.edit} className="m-0 min-w-0 border-0 p-0" data-testid="task-fields-fieldset">
+                  <CustomFieldsPanel
+                    taskId={detailQuery.data.id}
+                    workspaceId={fallbackWorkspaceId}
+                    openCreateStamp={fieldCreateStamp}
+                  />
+                </fieldset>
               )}
               {activeTab === 'subtasks' && (
                 <SubtasksPanel
@@ -1914,12 +1969,14 @@ export function TaskDetailSheet({
                 />
               )}
               {activeTab === 'checklists' && (
-                <ChecklistsPanel
-                  taskId={detailQuery.data.id}
-                  listId={detailQuery.data.listId}
-                  workspaceId={fallbackWorkspaceId}
-                  checklists={detailQuery.data.checklists ?? []}
-                />
+                <fieldset disabled={!caps.edit} className="m-0 min-w-0 border-0 p-0" data-testid="task-checklists-fieldset">
+                  <ChecklistsPanel
+                    taskId={detailQuery.data.id}
+                    listId={detailQuery.data.listId}
+                    workspaceId={fallbackWorkspaceId}
+                    checklists={detailQuery.data.checklists ?? []}
+                  />
+                </fieldset>
               )}
               {activeTab === 'dependencies' && (
                 <RelatedItemsPanel
@@ -2013,6 +2070,7 @@ export function TaskDetailSheet({
             )}
           </DialogContent>
         </Dialog>
+        </TaskCapsContext.Provider>
       </SheetContent>
       {taskId && (
         <SharePanel
@@ -2191,6 +2249,7 @@ function OverviewPanel({
   onAddFields?: () => void
 }) {
   const { t, tCount } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const navigate = useNavigate()
   /*
@@ -2650,6 +2709,8 @@ function OverviewPanel({
       }),
     onSuccess: async (_data, userId) => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      // Whether they may move its status depends on whether they are on it.
+      await qc.invalidateQueries({ queryKey: ['task-caps', taskId] })
       if (userId === currentUserId && !priorityPromptMuted() && !isAlreadyPriority) {
         setPriorityPromptOpen(true)
       }
@@ -2681,6 +2742,8 @@ function OverviewPanel({
     mutationFn: (userId: string) => api(`/tasks/${taskId}/assignees/${userId}`, { method: 'DELETE' }),
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
+      // Whether they may move its status depends on whether they are on it.
+      await qc.invalidateQueries({ queryKey: ['task-caps', taskId] })
     },
   })
 
@@ -2881,15 +2944,16 @@ function OverviewPanel({
           </div>
         ) : detail.description?.trim() ? (
           <div
-            role="button"
-            tabIndex={0}
+            role={caps.edit ? 'button' : undefined}
+            tabIndex={caps.edit ? 0 : undefined}
             data-testid="description-open"
             onClick={() => {
+              if (!caps.edit) return
               setDescriptionDraft(detail.description ?? '')
               setEditingDescription(true)
             }}
             onKeyDown={(e) => {
-              if (e.key === 'Enter') {
+              if (caps.edit && e.key === 'Enter') {
                 setDescriptionDraft(detail.description ?? '')
                 setEditingDescription(true)
               }
@@ -2918,6 +2982,7 @@ function OverviewPanel({
           <button
             type="button"
             data-testid="description-open"
+            disabled={!caps.edit}
             onClick={() => {
               setDescriptionDraft('')
               setEditingDescription(true)
@@ -2940,7 +3005,7 @@ function OverviewPanel({
         <CollapseEmptyFieldsToggle
           emptyCount={Object.values(emptyFields).filter(Boolean).length}
         />
-        {onAddFields && (
+        {onAddFields && caps.edit && (
           <button
             type="button"
             data-testid="task-add-fields"
@@ -2959,7 +3024,7 @@ function OverviewPanel({
             <select
               value={detail.status}
               onChange={(e) => patchTask.mutate({ status: e.target.value })}
-              disabled={patchTask.isPending}
+              disabled={patchTask.isPending || !(caps.edit || caps.progress)}
               className="min-w-0 flex-1 h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             >
               {/* Keep the current value selectable even if statuses are still loading */}
@@ -2995,7 +3060,7 @@ function OverviewPanel({
               data-testid="task-status-next"
               data-next-status={nextStatus?.key ?? ''}
               data-status-count={orderedStatuses.length}
-              disabled={patchTask.isPending || !nextStatus}
+              disabled={patchTask.isPending || !nextStatus || !(caps.edit || caps.progress)}
               onClick={() => nextStatus && patchTask.mutate({ status: nextStatus.key })}
               title={
                 nextStatus
@@ -3016,7 +3081,7 @@ function OverviewPanel({
               data-testid="task-status-complete"
               data-complete-status={completeStatus?.key ?? ''}
               data-already-complete={currentIsClosed ? 'true' : 'false'}
-              disabled={patchTask.isPending || !completeStatus || currentIsClosed}
+              disabled={patchTask.isPending || !completeStatus || currentIsClosed || !(caps.edit || caps.progress)}
               onClick={() => completeStatus && patchTask.mutate({ status: completeStatus.key })}
               title={
                 !completeStatus
@@ -3043,7 +3108,7 @@ function OverviewPanel({
             <select
               value={detail.priority}
               onChange={(e) => patchTask.mutate({ priority: e.target.value })}
-              disabled={patchTask.isPending}
+              disabled={patchTask.isPending || !caps.edit}
               className={cn(
                 'flex-1 h-8 rounded-md border border-border bg-card px-2 text-sm capitalize focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50',
                 priorityColor(detail.priority),
@@ -3057,7 +3122,7 @@ function OverviewPanel({
             </select>
             <button
               type="button"
-              disabled={aiSuggestPriority.isPending}
+              disabled={aiSuggestPriority.isPending || !caps.edit}
               onClick={() => aiSuggestPriority.mutate()}
               className="h-8 w-8 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10 disabled:opacity-50"
               title={t('taskDetail.suggestPriorityAi')}
@@ -3073,7 +3138,7 @@ function OverviewPanel({
               {t('taskDetail.fieldDueDate')}
               <button
                 type="button"
-                disabled={aiSuggestDeadline.isPending}
+                disabled={aiSuggestDeadline.isPending || !caps.edit}
                 onClick={() => aiSuggestDeadline.mutate()}
                 className="inline-flex items-center gap-1 rounded px-1 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-50"
                 title={t('taskDetail.suggestDeadlineAi')}
@@ -3091,7 +3156,7 @@ function OverviewPanel({
             data-testid="task-due-date"
             value={toDateTimeInput(detail.dueDate)}
             onChange={(e) => patchTask.mutate({ dueDate: fromDateTimeInput(e.target.value) })}
-            disabled={patchTask.isPending}
+            disabled={patchTask.isPending || !caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
           {/*
@@ -3109,7 +3174,7 @@ function OverviewPanel({
                 key={preset.id}
                 type="button"
                 data-testid={`task-due-preset-${preset.id}`}
-                disabled={patchTask.isPending}
+                disabled={patchTask.isPending || !caps.edit}
                 onClick={() => patchTask.mutate({ dueDate: presetToIso(preset.id, detail.dueDate) })}
                 className="rounded-full border border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-accent hover:text-foreground disabled:opacity-50"
               >
@@ -3119,6 +3184,7 @@ function OverviewPanel({
             <button
               type="button"
               data-testid="task-due-set-recurring"
+              disabled={!caps.edit}
               onClick={() => setRecurrenceDialogOpen(true)}
               className="rounded-full border border-dashed border-border/70 px-2 py-0.5 text-[10px] text-muted-foreground hover:border-accent hover:text-foreground"
             >
@@ -3132,7 +3198,7 @@ function OverviewPanel({
             data-testid="task-start-date"
             value={toDateTimeInput(detail.startDate)}
             onChange={(e) => patchTask.mutate({ startDate: fromDateTimeInput(e.target.value) })}
-            disabled={patchTask.isPending}
+            disabled={patchTask.isPending || !caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
           />
         </Field>
@@ -3140,7 +3206,7 @@ function OverviewPanel({
           <select
             value={recurrenceValue}
             onChange={(e) => onRecurrenceChange(e.target.value)}
-            disabled={setRecurrence.isPending}
+            disabled={setRecurrence.isPending || !caps.edit}
             className="w-full h-8 rounded-md border border-border bg-card px-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50"
             title={t('taskDetail.repeatTooltip')}
           >
@@ -3171,7 +3237,7 @@ function OverviewPanel({
         <Field label={t('taskDetail.fieldEstimate')} empty={emptyFields.timeEstimate}>
           <EstimateInput
             seconds={detail.timeEstimate ?? null}
-            pending={patchTask.isPending}
+            pending={patchTask.isPending || !caps.edit}
             onCommit={(secs) => {
               if (secs !== (detail.timeEstimate ?? null)) patchTask.mutate({ timeEstimate: secs })
             }}
@@ -3186,6 +3252,7 @@ function OverviewPanel({
               <button
                 key={a.user.id}
                 onClick={() => removeAssignee.mutate(a.user.id)}
+                disabled={!(caps.edit || caps.progress)}
                 className="inline-flex"
                 title={t('taskDetail.removeAssignee')}
               >
@@ -3198,7 +3265,7 @@ function OverviewPanel({
         ) : (
           <span className="text-sm text-muted-foreground">{t('taskDetail.unassigned')}</span>
         )}
-        {workspaceId && (
+        {workspaceId && (caps.edit || caps.progress) && (
           <AssigneePicker
             workspaceId={workspaceId}
             members={availableMembers}
@@ -3900,6 +3967,7 @@ function SubtasksPanel({
   onOpenTask: (subtaskId: string) => void
 }) {
   const { t } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
   const [editingSubtaskId, setEditingSubtaskId] = useState<string | null>(null)
@@ -4021,6 +4089,7 @@ function SubtasksPanel({
                 type="checkbox"
                 checked={s.status === 'done'}
                 onChange={(e) => toggleDone.mutate({ id: s.id, done: e.target.checked })}
+                disabled={!caps.edit}
                 className="h-4 w-4 rounded border-border"
               />
               {editingSubtaskId === s.id ? (
@@ -4062,6 +4131,7 @@ function SubtasksPanel({
                   className="h-7 max-w-[120px] rounded border border-border bg-background px-1 text-[11px]"
                   value={s.assignees?.[0]?.userId ?? ''}
                   onChange={(e) => setAssignee.mutate({ subtask: s, userId: e.target.value || null })}
+                  disabled={!caps.edit}
                   title={t('taskDetail.assigneeTitle')}
                 >
                   <option value="">{t('taskDetail.unassigned')}</option>
@@ -4083,10 +4153,11 @@ function SubtasksPanel({
                   onChange={(e) =>
                     setDueDate.mutate({ id: s.id, dueDate: withDatePart(s.dueDate, e.target.value) })
                   }
+                  disabled={!caps.edit}
                   title={t('taskDetail.dueDateTitle')}
                 />
               )}
-              {editingSubtaskId !== s.id && (
+              {editingSubtaskId !== s.id && caps.edit && (
                 <button
                   type="button"
                   className="text-xs text-muted-foreground hover:text-foreground"
@@ -4098,18 +4169,21 @@ function SubtasksPanel({
                   {t('taskDetail.edit')}
                 </button>
               )}
-              <button
-                type="button"
-                className="text-xs text-rose-500 hover:text-rose-600"
-                onClick={() => deleteSubtask.mutate(s.id)}
-              >
-                {t('common.delete')}
-              </button>
+              {caps.edit && (
+                <button
+                  type="button"
+                  className="text-xs text-rose-500 hover:text-rose-600"
+                  onClick={() => deleteSubtask.mutate(s.id)}
+                >
+                  {t('common.delete')}
+                </button>
+              )}
             </li>
           ))}
         </ul>
       )}
 
+      {caps.edit && (
       <form
         className="flex gap-2 pt-1"
         onSubmit={(e) => {
@@ -4126,6 +4200,7 @@ function SubtasksPanel({
           {t('taskDetail.add')}
         </Button>
       </form>
+      )}
       {create.isError ? (
         <NotWiredNote>
           {t('taskDetail.couldNotCreateSubtask')}
@@ -4941,6 +5016,7 @@ function DependenciesPanel({
   onOpenTask: (relatedTaskId: string) => void
 }) {
   const { t } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const [relatedId, setRelatedId] = useState('')
   const [type, setType] = useState<'blocks' | 'blocked_by' | 'related_to'>('blocks')
@@ -5043,10 +5119,10 @@ function DependenciesPanel({
 
   return (
     <div className="space-y-4">
-      <DepGroup label={t('taskDetail.dependencies.blocking')} items={blocking} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
-      <DepGroup label={t('taskDetail.dependencies.waitingOn')} items={waitingOn} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+      <DepGroup label={t('taskDetail.dependencies.blocking')} items={blocking} onRemove={caps.edit ? (id) => remove.mutate(id) : undefined} onOpenTask={onOpenTask} />
+      <DepGroup label={t('taskDetail.dependencies.waitingOn')} items={waitingOn} onRemove={caps.edit ? (id) => remove.mutate(id) : undefined} onOpenTask={onOpenTask} />
       {related.length > 0 ? (
-        <DepGroup label={t('taskDetail.dependencies.related')} items={related} onRemove={(id) => remove.mutate(id)} onOpenTask={onOpenTask} />
+        <DepGroup label={t('taskDetail.dependencies.related')} items={related} onRemove={caps.edit ? (id) => remove.mutate(id) : undefined} onOpenTask={onOpenTask} />
       ) : null}
       {graphQuery.data ? (
         <div className="rounded-md border border-border bg-card p-3 space-y-3">
@@ -5092,6 +5168,7 @@ function DependenciesPanel({
         </div>
       ) : null}
 
+      {caps.edit && (
       <form
         className="flex gap-2 pt-1 border-t border-border pt-3"
         onSubmit={(e) => {
@@ -5139,6 +5216,7 @@ function DependenciesPanel({
           {t('taskDetail.add')}
         </Button>
       </form>
+      )}
     </div>
   )
 }
@@ -5197,7 +5275,8 @@ function DepGroup({
 }: {
   label: string
   items: Dependency[]
-  onRemove: (depId: string) => void
+  /** Absent where the reader may not change the task: no Remove is drawn. */
+  onRemove?: (depId: string) => void
   onOpenTask?: (relatedTaskId: string) => void
 }) {
   const { t } = useTranslation()
@@ -5226,13 +5305,15 @@ function DepGroup({
                   {t('taskDetail.open')}
                 </button>
               )}
-              <button
-                type="button"
-                onClick={() => onRemove(d.dep.id)}
-                className="text-xs text-muted-foreground hover:text-destructive"
-              >
-                {t('taskDetail.remove')}
-              </button>
+              {onRemove && (
+                <button
+                  type="button"
+                  onClick={() => onRemove(d.dep.id)}
+                  className="text-xs text-muted-foreground hover:text-destructive"
+                >
+                  {t('taskDetail.remove')}
+                </button>
+              )}
             </li>
           ))}
         </ul>
@@ -5253,6 +5334,7 @@ function AttachmentsPanel({
   inline: Attachment[]
 }) {
   const { t } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const [linkUrl, setLinkUrl] = useState('')
   const [fileName, setFileName] = useState('')
@@ -5390,6 +5472,7 @@ function AttachmentsPanel({
         `files.length` there would reject every real drag. Copied from the chat
         pane, which learned it the same way.
       */}
+      {caps.edit && (<>
       <div
         data-testid="task-attachments-dropzone"
         role="button"
@@ -5477,6 +5560,7 @@ function AttachmentsPanel({
           </div>
         </div>
       )}
+      </>)}
 
       {attachments.length === 0 ? (
         <EmptyState title={t('taskDetail.noFiles')} hint={t('taskDetail.noFilesHint')} />
@@ -5593,7 +5677,7 @@ function AttachmentsPanel({
                       <Copy className="mr-2 h-4 w-4" />
                       {t('taskDetail.attachmentCopyName')}
                     </DropdownMenuItem>
-                    {uploadWired && (
+                    {uploadWired && caps.edit && (
                       <DropdownMenuItem
                         data-testid="attachment-remove"
                         onSelect={() => removeAttachment.mutate(a.id)}
@@ -5862,6 +5946,7 @@ function CommentsPanel({
   listId?: string | null
 }) {
   const { t, tCount } = useTranslation()
+  const caps = useTaskCaps()
   const qc = useQueryClient()
   const currentUser = useAuthStore((s) => s.user)
   const [text, setText] = useState('')
@@ -6606,6 +6691,7 @@ function CommentsPanel({
         </ul>
       )}
 
+      {caps.comment ? (
       <div className="border-t border-border pt-3">
         {replyTo && (
           <div className="mb-2 flex items-center justify-between rounded border border-border bg-muted/30 px-2 py-1 text-xs">
@@ -7296,6 +7382,12 @@ function CommentsPanel({
           </div>
         </div>
       </div>
+      ) : (
+        // Nothing to write where a comment would be refused (`found-25-sep/task-sheet-offers-refused-edits`).
+        <p className="border-t border-border pt-3 text-xs text-muted-foreground" data-testid="comment-composer-locked">
+          {t('taskDetail.commentsLocked')}
+        </p>
+      )}
     </div>
   )
 }

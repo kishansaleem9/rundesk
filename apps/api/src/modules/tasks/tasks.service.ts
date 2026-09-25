@@ -5206,9 +5206,13 @@ export class TasksService {
       }))
   }
 
-  async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
-    // No assertTaskWriteAccess here by design — commenting is open to any
-    // member who can see the task — so the bin check has to be made directly.
+  /**
+   * WHO MAY COMMENT ON A TASK — the one statement of it, for the route and for
+   * the sheet's capabilities. No write access by design: commenting is open to
+   * whoever may open the task, at the space's "comment" level or above (or a
+   * share of it), so the bin is checked here directly.
+   */
+  private async assertMayComment(taskId: string, authorId: string) {
     const [target] = await this.db
       .select({ isArchived: tasks.isArchived })
       .from(tasks)
@@ -5217,6 +5221,40 @@ export class TasksService {
     if (!target) throw new NotFoundException('Task not found')
     this.assertNotInBin(target.isArchived)
     await this.assertSpaceAllowsComments(taskId, authorId)
+  }
+
+  /**
+   * WHAT THIS PERSON MAY DO TO THIS TASK — each answer the routes themselves
+   * give (`found-25-sep/task-sheet-offers-refused-edits`). The task sheet drew
+   * every control for anybody who could open the task, and a comment-only or
+   * view-only reader was refused each one after pressing it.
+   *
+   *   edit     — any change, the write rule at "edit";
+   *   progress — its status and assignees, the write rule at "comment", which
+   *              an assignee passes in a comment-only space;
+   *   comment  — a comment, as the comment route asks.
+   *
+   * A refusal is an answer (false); anything else is thrown.
+   */
+  async taskCapabilities(taskId: string, actorId: string) {
+    const allowed = (check: Promise<unknown>): Promise<boolean> =>
+      check.then(
+        () => true,
+        (e) => {
+          if (e instanceof ForbiddenException || e instanceof NotFoundException || e instanceof ConflictException) return false
+          throw e
+        },
+      )
+    const [edit, progress, comment] = await Promise.all([
+      allowed(this.assertTaskWriteAccess(taskId, actorId)),
+      allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })),
+      allowed(this.assertMayComment(taskId, actorId)),
+    ])
+    return { edit, progress, comment }
+  }
+
+  async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {
+    await this.assertMayComment(taskId, authorId)
 
     /*
      * §V2-05 — a comment with no words is allowed IF it carries a file.

@@ -97,6 +97,9 @@ try {
     }
     return { project: project.data.id, list: list.data.id, task: task.data.id, name }
   }
+  /** A list of the member's own in `place`, planted by SQL: its maker may rename it, so only a grant can refuse them. */
+  const theirList = async (place) =>
+    (await sql`insert into lists (project_id, name, created_by_id) values (${place.project}, ${`${TAG} ${place.name} theirs`}, ${me.id}) returning id`)[0].id
   const title = async (id) => (await sql`select title from tasks where id = ${id}`)[0]?.title ?? null
   const tasksNamed = async (t) => (await sql`select count(*)::int as n from tasks where title = ${t}`)[0].n
   const listName = async (id) => (await sql`select name from lists where id = ${id}`)[0]?.name ?? null
@@ -115,15 +118,22 @@ try {
   const vTitle = await M(`/tasks/${PV.task}`, { method: 'PATCH', body: { title: `${TAG} changed through view` } })
   const vMake = await M('/tasks', { method: 'POST', body: { listId: PV.list, title: `${TAG} made through view` } })
   const vRename = await M(`/lists/${PV.list}`, { method: 'PUT', body: { name: `${TAG} renamed through view` } })
+  // Their own list: the maker rule would let them rename it, so the project's View is what refuses.
+  const vOwn = await theirList(PV)
+  const vOwnRename = await M(`/lists/${vOwn}`, { method: 'PUT', body: { name: `${TAG} theirs renamed through view` } })
+  const nOwn = await theirList(PN)
+  const nOwnRename = await M(`/lists/${nOwn}`, { method: 'PUT', body: { name: `${TAG} theirs renamed with no grant` } })
   const nTitle = await M(`/tasks/${PN.task}`, { method: 'PATCH', body: { title: `${TAG} changed with no grant` } })
   chk(
     vTitle.status === 403 && (await title(PV.task)) === `${TAG} view task` &&
       vMake.status === 403 && (await tasksNamed(`${TAG} made through view`)) === 0 &&
       vRename.status === 403 && (await listName(PV.list)) === `${TAG} view list` &&
-      nTitle.status < 300 && (await title(PN.task)) === `${TAG} changed with no grant`,
-    'a member given View on a project changes nothing in it — not the admin\'s task, not a new task, not its list — where the space alone would let them, as it does in the project beside it',
-    `view: the task ${vTitle.status} ("${await title(PV.task)}"), a new task ${vMake.status}, the list ${vRename.status} ("${await listName(PV.list)}"); ` +
-      `no grant: the task ${nTitle.status} ("${await title(PN.task)}")`,
+      vOwnRename.status === 403 && (await listName(vOwn)) === `${TAG} view theirs` &&
+      nTitle.status < 300 && (await title(PN.task)) === `${TAG} changed with no grant` &&
+      nOwnRename.status < 300 && (await listName(nOwn)) === `${TAG} theirs renamed with no grant`,
+    'a member given View on a project changes nothing in it — not the admin\'s task, not a new task, not a list, even one they made — where the space alone would let them, as it does in the project beside it',
+    `view: the task ${vTitle.status} ("${await title(PV.task)}"), a new task ${vMake.status}, the list ${vRename.status}, their own list ${vOwnRename.status} ("${await listName(vOwn)}"); ` +
+      `no grant: the task ${nTitle.status} ("${await title(PN.task)}"), their own list ${nOwnRename.status}`,
   )
 
   // ══ 2. A COMMENT GRANT ═══════════════════════════════════════════════════
