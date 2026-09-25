@@ -27,8 +27,8 @@ export class EmailAliasController {
   constructor(private readonly svc: EmailToTaskService) {}
 
   @Get()
-  async get(@Param('listId') listId: string) {
-    return this.svc.getAlias(listId)
+  async get(@CurrentUser() user: { id: string }, @Param('listId') listId: string) {
+    return this.svc.getAlias(listId, user.id)
   }
 
   @Post()

@@ -1545,6 +1545,45 @@ The new suite `inbound-hook-makers`, 3 checks: a member makes a hook in a view-o
 
 Regression on lanes 2 to 5: the 9 suites that make, list or deliver to hooks or read the Email panel (`hook-portal-access`, `credential-reads`, `mail-comments-by-level`, `email-reply-routing`, `space-features`, `task-boundaries`, `task-depth`, `task-menu`, the new suite), with `list-page-levels`, `list-empty-states`, `ui-sweep` and `no-dead-ends`. Result: 13/13. In CI (188).
 
+### `found-25-sep/list-address-read-by-those-who-may-not-add` — **closed** (security, medium; found closing `inbound-hooks-made-where-their-maker-cannot-add`)
+
+**A list's email address makes a task for whoever mails it, and every reader of the list could read it — or cut it out of any task's address**
+
+*Measured, lane 3, on `3646991`:*
+- A guest with only a view share on a list read its address (`GET /lists/:id/inbound-email`, 200), mailed it, and a task was made in the list as them (`task_created`).
+- A member of a view-only space did the same. `POST /tasks` refuses them one there (403).
+- A stranger's mail made a task put down as the admin's, the address's maker.
+- A task's address was `list-<the list's alias>+task-<id>`. It goes to everybody who may read the task (the task menu's "Send email to task", and the Reply-To of every notification). Cutting off its `+task-<id>` left the list's address.
+
+ClickUp (help centre, "Create tasks and comments via email", search snippets): Email to List's address is the permission. A guest "can create tasks and add comments via email if the unique email address is shared with them", and cannot see it in ClickUp.
+
+*Closed, 25 September:*
+- **The address is read by those who may add tasks to the list**, the create gate. Anybody else is refused (403). The create gate moved to `common/permissions/task-create.ts`, since `TasksService` depends on the email module and the email module could not ask it; `TasksService.assertCanCreateTaskIn` asks it there.
+- **A task's address carries a tag of the alias**, not the alias: an HMAC of the task id under it (`taskAddressTag`). The tag names that task, cannot be turned back into the alias, and changes when the alias is rotated. Mail answering an address given out before tags still lands, since its sender already had the alias.
+- **The Email panel shows the address only to those who may add**, by the list's answer. For anybody else it says why there is none, with nothing to generate (four locales).
+
+*Not changed, recorded:* mail to the list's address still makes a task for whoever sends it: its sender if they are a member of the workspace, else the address's maker. That is ClickUp's Email to List. The address is what is kept, and whoever is given it may use it.
+
+The new suite `list-address-readers`, 3 checks:
+- who reads the address: a member of a view-only space, a member at Full edit, and a guest with a view share;
+- what a task's address holds: mail to it, to its old form, and to it with its task cut off, read back by SQL;
+- the Email panel, in both lists.
+
+Results:
+- Before (lane 5, `3646991`): 0 of 3.
+- After: 3/3, on lanes 5 and 4.
+
+`lar-1..5`, each compiled: the address for every reader; the task's address carrying the alias; tags refused; old addresses refused; the panel showing every reader the address. Re-aimed at the moved gate, each compiled: `tcm-2`, `-3`, `-5` and `-6`, and `mtg-3`. `mcl-1` re-aimed at the tag's comparison.
+
+*Break run:* queued on lane 1 after the commit (`plan-lar`).
+
+Regression on lanes 2 to 5:
+- the mail suites: `mail-comments-by-level`, `email-reply-routing`, `credential-reads`, `task-menu`, `task-menu-favorite-archive` and `task-boundaries`;
+- the suites that make tasks by the moved gate: `task-creation-access`, `meeting-access`, `hook-portal-access`, `inbound-hook-makers`, `full-edit-levels`, `guest-space-level`, `guest-create-menu`, `list-page-levels` and `space-default-permission`;
+- the new suite.
+
+Result: 16/16. In CI (189).
+
 ### `found-25-sep/sharing-asks-the-maker-not-the-level` — open, behaviour, small (found closing `list-page-offers-refused-edits`)
 
 **Sharing a list, and giving it an email address, is for its maker or a manager, and the list page offers both to every reader**

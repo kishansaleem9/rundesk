@@ -52,10 +52,15 @@ export function ListEmailAliasPanel({
   const { t } = useTranslation()
   const mayCreateWebhook = mayAddTasks
   const qc = useQueryClient()
+  /*
+   * The address is asked for only by those who may add tasks: mail to it makes
+   * one, and the server answers nobody else
+   * (`found-25-sep/list-address-read-by-those-who-may-not-add`).
+   */
   const { data: alias, refetch } = useQuery({
     queryKey: ['list-email-alias', listId],
     queryFn: () => api<Alias | null>(`/lists/${listId}/inbound-email`),
-    enabled: open,
+    enabled: open && mayAddTasks,
   })
 
   const ensure = useMutation({
@@ -111,7 +116,14 @@ export function ListEmailAliasPanel({
         </DialogHeader>
 
         <div className="space-y-3">
-          {alias ? (
+          {!mayAddTasks ? (
+            <div
+              className="rounded-md border border-dashed border-border/70 p-4 text-sm text-muted-foreground"
+              data-testid="list-email-address-withheld"
+            >
+              {t('listEmailAlias.addressWithheld')}
+            </div>
+          ) : alias ? (
             <AliasRow
               address={alias.address}
               onRotate={() => rotate.mutate()}

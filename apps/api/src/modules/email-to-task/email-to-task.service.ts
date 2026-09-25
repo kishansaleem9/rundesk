@@ -2,6 +2,7 @@ import {
   Injectable,
   Inject,
   BadRequestException,
+  ForbiddenException,
   NotFoundException,
   Logger,
 } from '@nestjs/common'
@@ -26,8 +27,9 @@ import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
+import { canCreateTaskIn } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
-import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskReplyAddress } from './task-address'
+import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskAddressMatches, taskReplyAddress } from './task-address'
 
 /**
  * Email-to-task: convert inbound emails into rundesk tasks or comments.
@@ -156,7 +158,24 @@ export class EmailToTaskService {
     })
   }
 
-  async getAlias(listId: string): Promise<AliasView | null> {
+  /**
+   * THE LIST'S ADDRESS, FOR THOSE WHO MAY ADD TASKS TO IT — the create gate.
+   * Mail to it makes a task for whoever sends it: ClickUp's Email to List,
+   * whose address is the permission (help centre: a guest "can create tasks via
+   * email if the address is shared with them", and cannot see it in ClickUp).
+   * It was answered to every reader of the list: measured on lane 3, a guest
+   * with a view share and a member of a view-only space each read it, and each
+   * mailed a task into a list that refuses them one (403)
+   * (`found-25-sep/list-address-read-by-those-who-may-not-add`).
+   */
+  async getAlias(listId: string, readerId: string): Promise<AliasView | null> {
+    if (!(await canCreateTaskIn(this.db, listId, readerId))) {
+      throw new ForbiddenException('Only those who may add tasks to this list see its email address')
+    }
+    return this.liveAlias(listId)
+  }
+
+  private async liveAlias(listId: string): Promise<AliasView | null> {
     const row = await this.findAliasByListId(listId)
     if (!row || row.revokedAt) return null
     return this.aliasView(row)
@@ -206,15 +225,16 @@ export class EmailToTaskService {
         ? await this.db.select().from(tasks).where(eq(tasks.id, route.taskId)).limit(1)
         : []
       /*
-       * A TASK'S ADDRESS CARRIES ITS LIST'S ALIAS, and that is what makes it
-       * one (`found-25-sep/inbound-email-comments-skip-the-comment-rule`). Only
-       * the task id was read, so `list-anything+task-<id>@…` commented on any
-       * task whose id somebody had — the alias, the list's secret, was never
+       * A TASK'S ADDRESS CARRIES ITS LIST'S ALIAS — as a tag of it now
+       * (`taskAddressTag`) — and that is what makes it one
+       * (`found-25-sep/inbound-email-comments-skip-the-comment-rule`). Only the
+       * task id was read, so `list-anything+task-<id>@…` commented on any task
+       * whose id somebody had — the alias, the list's secret, was never
        * compared. An address naming another list's alias, or none, is no
        * task's address.
        */
       const alias = task ? await this.findAliasByListId(task.listId) : null
-      if (!task || !alias || alias.revokedAt || alias.localPart !== route.localPart) {
+      if (!task || !alias || alias.revokedAt || !taskAddressMatches(route.localPart, alias.localPart, task.id)) {
         await this.recordOutcome(payload, totalBytes, 'rejected_unknown_task')
         return { outcome: 'rejected_unknown_task', reason: `Task ${route.taskId} not found` }
       }
@@ -612,7 +632,7 @@ export class EmailToTaskService {
       .where(eq(tasks.id, taskId))
       .limit(1)
     if (!row) throw new NotFoundException('Task not found')
-    const alias = await this.getAlias(row.listId)
+    const alias = await this.liveAlias(row.listId)
     if (!alias || alias.revokedAt) return { address: null, listId: row.listId }
     return { address: taskReplyAddress(alias.localPart, taskId), listId: row.listId }
   }

@@ -10,8 +10,8 @@
  * member); and a view-only member and a guest with nothing shared each
  * commented by mail where the app refuses them (403).
  *
- * A task's reply address is `list-<its list's alias>+task-<id>` and nothing
- * else; the sender is somebody who may comment on the task (read it, and hold
+ * A task's reply address is `list-<a tag of its list's alias>+task-<id>` and
+ * nothing else (`list-address-read-by-those-who-may-not-add`); the sender is somebody who may comment on the task (read it, and hold
  * "comment" where it lives); anybody else's mail is refused and the refusal
  * recorded — no comment is written in somebody else's name. The mail here is
  * posted as the provider posts it, unsigned on a lane with no secret set.

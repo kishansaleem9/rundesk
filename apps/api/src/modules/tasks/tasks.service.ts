@@ -1,4 +1,4 @@
-import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException, HttpException } from '@nestjs/common'
+import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
 import { eq, and, or, asc, desc, ilike, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
@@ -77,8 +77,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableList, readableTask, readableTaskIds } from '../../common/permissions/read-access'
-import { isUuid } from '../../common/validation/uuid'
+import { readableTask, readableTaskIds } from '../../common/permissions/read-access'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
@@ -94,6 +93,7 @@ import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable } from '../../common/permissions/task-write'
+import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
@@ -1866,60 +1866,14 @@ export class TasksService {
   }
 
   /** Guests may view/comment but not create tasks (Plan §3.3). */
-  /**
-   * MAY THIS PERSON MAKE A TASK IN THIS LIST — one answer, asked by
-   * `createTask` itself, so every route that makes a task asks it.
-   *
-   * It was asked in pieces. `POST /tasks` had `ResourceMemberGuard`; the rest
-   * reached `createTask`, which asked only `assertNotGuestInList`, and each
-   * added what it thought of: the AI's plan executor asked membership, an
-   * inbound webhook the container rule, the meeting items `readableList`, and
-   * making a task from a chat message asked nothing about the list at all.
-   * Measured: a member refused a private list made tasks in it from a chat
-   * message and from an AI plan (201 each), and a user of ANOTHER organisation
-   * made one in this workspace's list from a message of their own
-   * (`found-24-sep/task-makers-skip-the-list-rule`).
-   *
-   * So, for the person the task is made by:
-   *   - a member of the list's workspace, who may open the list (the container
-   *     rule and the private-list rule, `readableList`) — else not found;
-   *   - not a guest — 403, as before;
-   *   - on a space that lets them add to it: Full edit
-   *     (`assertCanCreateInSpace`, which `moveTask` already asks of a
-   *     destination) — 403 in a space whose default is "view only",
-   *     "comment" or "edit", as ClickUp's are (`found-25-sep/full-edit-enforced-nowhere`).
-   * A super-admin passes where they are not a member, as every guard lets them.
-   */
+  /** MAY THIS PERSON MAKE A TASK IN THIS LIST — the create gate (`common/permissions/task-create.ts`). */
   async assertCanCreateTaskIn(listId: string, actorId: string): Promise<{ workspaceId: string; spaceId: string; projectId: string }> {
-    const home = isUuid(listId) ? await this.resolveWorkspaceForList(listId) : null
-    if (!home) throw new NotFoundException('List not found')
-    const [account] = await this.db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
-    const list = await readableList(this.db, home.workspaceId, listId, { id: actorId, role: account?.role })
-    if (!list) throw new NotFoundException('List not found')
-    if (list.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
-    await assertCanCreateInSpace(this.db, {
-      spaceId: home.spaceId,
-      actorId,
-      kind: 'task',
-      // What is shared of the way to it counts for a guest, as it does for a list (`WithinStep`).
-      within: [
-        { type: 'list', id: listId },
-        { type: 'project', id: home.projectId },
-        ...(home.folderId ? [{ type: 'folder' as const, id: home.folderId }] : []),
-      ],
-    })
-    return home
+    return assertCanCreateTaskIn(this.db, listId, actorId)
   }
 
-  /** `assertCanCreateTaskIn` as a yes or no, for a caller choosing among lists. A failure that is not a refusal is not a no. */
+  /** The create gate as a yes or no, for a caller choosing among lists. A failure that is not a refusal is not a no. */
   async canCreateTaskIn(listId: string, actorId: string): Promise<boolean> {
-    try {
-      await this.assertCanCreateTaskIn(listId, actorId)
-      return true
-    } catch (err) {
-      if (err instanceof HttpException) return false
-      throw err
-    }
+    return canCreateTaskIn(this.db, listId, actorId)
   }
 
   /**
