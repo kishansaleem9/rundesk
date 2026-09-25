@@ -151,3 +151,10 @@ export const CREATE_TYPES: readonly CreateType[] = [
  * surfaces at once, which is the entire reason this module exists.
  */
 export const SPACE_CREATE_TYPES: readonly CreateType[] = CREATE_TYPES.filter((type) => type.inSpace)
+
+/** The row for a kind, for a creator asking `useCreatable` about its own. */
+export function createTypeOf(kind: CreateKind): CreateType {
+  const type = CREATE_TYPES.find((ty) => ty.value === kind)
+  if (!type) throw new Error(`no create type ${kind}`)
+  return type
+}

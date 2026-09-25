@@ -11,7 +11,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { useCreatable } from '../hooks/use-creatable'
 import { localDateTimeValue } from '../lib/local-date'
 import { parseEstimate } from '../lib/estimate'
-import { CREATE_TYPES, type CreateKind } from '../lib/create-types'
+import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types'
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
@@ -627,10 +627,13 @@ function TaskForm({
   const [newListPrivate, setNewListPrivate] = useState(false)
   const [makingList, setMakingList] = useState(false)
 
-  const spaces = useQuery({
+  // The spaces a task may be made in (`useCreatable`, the menus' own answer):
+  // a view-only space refused its members the task, and was offered here.
+  const creatable = useCreatable(workspaceId)
+  const spaces = (useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
-  }).data ?? []
+  }).data ?? []).filter((s) => creatable(createTypeOf('task'), s.id))
   const projects = useQuery({
     queryKey: ['projects', spaceId],
     queryFn: () => api<Project[]>(`/projects/space/${spaceId}`),
@@ -1896,10 +1899,13 @@ function FolderForm({
    */
   const [description, setDescription] = useState('')
 
-  const spaces = useQuery({
+  // The spaces a folder may be made in (`useCreatable`, the menus' own answer):
+  // a view-only space refused its members the folder, and was offered here.
+  const creatable = useCreatable(workspaceId)
+  const spaces = (useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
-  }).data ?? []
+  }).data ?? []).filter((s) => creatable(createTypeOf('folder'), s.id))
 
   const create = useMutation({
     // Folders have no page of their own — they render on their space, which is
@@ -2036,10 +2042,13 @@ function ProjectForm({
   const qc = useQueryClient()
   const [name, setName] = useState('')
   const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
-  const spaces = useQuery({
+  // The spaces a project may be made in (`useCreatable`, the menus' own answer):
+  // a view-only space refused its members the project, and was offered here.
+  const creatable = useCreatable(workspaceId)
+  const spaces = (useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
-  }).data ?? []
+  }).data ?? []).filter((s) => creatable(createTypeOf('project'), s.id))
 
   const create = useMutation({
     mutationFn: () => api<{ id: string }>(`/projects`, { method: 'POST', body: JSON.stringify({ spaceId, name }) }),
@@ -2338,10 +2347,13 @@ function FormForm({
   const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
   const [targetListId, setTargetListId] = useState('')
 
-  const spaces = useQuery({
+  // The spaces a form may be made in (`useCreatable`, the menus' own answer):
+  // a view-only space refused its members the form, and was offered here.
+  const creatable = useCreatable(workspaceId)
+  const spaces = (useQuery({
     queryKey: ['spaces', workspaceId],
     queryFn: () => api<Space[]>(`/spaces/workspace/${workspaceId}`),
-  }).data ?? []
+  }).data ?? []).filter((s) => creatable(createTypeOf('form'), s.id))
   const listsQuery = useQuery({
     queryKey: ['lists', 'workspace', workspaceId],
     queryFn: () =>

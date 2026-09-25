@@ -305,6 +305,19 @@ export class SpacesService {
    * with the same resolver the write path refuses with, so the picker and the
    * server cannot disagree.
    */
+  /**
+   * THE SPACES THIS PERSON MAY ADD TO — the create gate's answer (`edit` on the
+   * space), as ids alone: what the web's menus ask before offering a thing
+   * that goes in a space (`useCreatable`). The Move picker's own answer
+   * (`moveTargets`) carries every folder, project and list besides, which is
+   * too much to load under every sidebar.
+   */
+  async writableSpaceIds(workspaceId: string, actorId: string) {
+    const seen = await this.getSpacesByWorkspace(workspaceId, actorId)
+    const writable = await this.narrowToWritable(workspaceId, seen, actorId)
+    return writable.map((s) => ({ id: s.id }))
+  }
+
   async moveTargets(workspaceId: string, actorId?: string) {
     const seen = await this.getSpacesByWorkspace(workspaceId, actorId)
     const visible = actorId ? await this.narrowToWritable(workspaceId, seen, actorId) : seen

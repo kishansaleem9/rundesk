@@ -24,6 +24,12 @@ export class SpacesController {
     return this.spacesService.getSpacesByWorkspace(workspaceId, user.id)
   }
 
+  /** The spaces this person may add to (the create gate's answer), as ids. */
+  @Get('workspace/:workspaceId/writable')
+  async writableSpaces(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {
+    return this.spacesService.writableSpaceIds(workspaceId, user.id)
+  }
+
   /** Destination tree for the Move picker: spaces → folders → projects. */
   @Get('workspace/:workspaceId/move-targets')
   async moveTargets(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any) {

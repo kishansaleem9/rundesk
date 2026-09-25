@@ -1497,13 +1497,30 @@ The new suite `dock-defaults`, 3 checks: a new member's dock after three pages (
 
 `dkd-1..3`, each compiled: the insert, the clear, and the web reading an empty choice as none. Regression on lane 5, 12/12: `dock-defaults`, `panel-collapse`, `settings-role-grants`, `sidebar-sections`, `guest-create-menu`, `role-permissions-web`, `video1-fast-items`, `addressability-live`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
-### `found-24-sep/view-only-space-offers-members-what-it-refuses` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
+### `found-24-sep/view-only-space-offers-members-what-it-refuses` — **closed** (visible bug, small; found closing `create-menu-offers-guests-what-they-cannot-make`)
 
 **A view-only space's "+" offers a member a list, a task, a folder and the rest, and the API refuses each**
 
 *Evidence, read not run:* `useCreatable` asks a space only for a guest. A member's answer is the permission keys alone. The API's create gate (`assertCanCreateInSpace`) needs edit on the space, and a space whose default is view or comment gives a member neither. The Move picker already answers which spaces a member may write (`move-targets`); the menus do not ask it for a member.
 
 *To close:* measure a member's menus on a view-only space. Then have `useCreatable` ask every person's writable spaces for the types a space holds (task, list, folder, project, form). ClickUp's own rule for a view-only location is to research first: whether it hides "+" or offers only what the level allows.
+
+*Measured, lane 5, on HEAD's bundle:* a member's "+" on a view-only space offered task, form, list and folder. Folder was there because a member's tier holds `space.create`. The Task, List, Folder and Form creators each named the view-only space among their spaces. The API refused a list and a task there (403, none made).
+
+ClickUp (help centre, search snippets): in a view-only location the create entry leads to a "Request edit access" modal, not to a thing made. Rundesk has no request for a space's access, so the menus withhold what the space refuses, as they do a guest's.
+
+*Closed, 25 September:*
+
+- `GET /spaces/workspace/:id/writable` returns the ids of the spaces this person may add to: the create gate's own answer, the Move picker's resolver without its folders, projects and lists.
+- `useCreatable` asks it for everyone. A type that goes in a space (`scopedToSpace`: task, form, list, folder, project) is offered on a space's "+" only where that space answers yes, and in the Create menu only when some space does. Until the answer arrives, a member is offered what they were before (a menu opened at once still has its tasks), and a guest nothing that goes in a space.
+- The Task, Folder, Project and Form creators' space pickers ask the same question as the List form's (`createTypeOf`).
+
+The new suite `view-only-space-menus`, 3 checks: a member's "+" on a view-only space and on an open one, beside the admin's; the four creators' pickers; and the API.
+
+- Before: 1 of 3 (the API).
+- After: 3/3.
+
+`vsm-1..6`, each compiled: the hook, the endpoint, and each picker. `gcm-1`, `gcm-4`, `gcm-5` and `gcm-10` re-aimed at the rewritten hook. Regression on lane 5, 29/29: `view-only-space-menus`, `guest-create-menu`, `attach-on-create`, `comment-plus-menu`, `create-ai-results`, `create-menu-ai`, `custom-field-progress`, `custom-field-types`, `folder-create`, `folder-dialog`, `home-reminders`, `list-name-taken`, `role-permissions-web`, `sidebar-sections`, `space-create-menu`, `space-wizard-views`, `space-wizard`, `task-depth`, `time-estimate`, `video1-fast-items`, `ai-create-containers`, `project-page-controls`, `space-default-permission`, `form-access`, `clickapps-plan-gating`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
 ### `found-24-sep/project-page-offers-guests-its-managers-buttons` — **closed** (visible bug, small; found closing `create-menu-offers-guests-what-they-cannot-make`)
 
@@ -1524,7 +1541,7 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 - Before (HEAD's API and bundle): 2 of 4 (the admin and the routes).
 - After: 4/4.
 
-`ppc-1..10`, each compiled: the answers (six) and the page's use of them (four). Regression on lane 5, 22/22: `project-page-controls`, `guest-create-menu`, `ai-create-containers`, `custom-field-progress`, `task-depth`, `team-schedules`, `planner-command-bar`, `planner-grid`, `planner-onboarding`, `hook-portal-access`, `space-default-permission`, `private-folder-reach`, `private-list-reach`, `read-visibility`, `workspace-role-controls`, `request-access`, `status-write-access`, `role-permissions-web`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+`ppc-1..10`, each compiled: the answers (six) and the page's use of them (four); break run on lane 1 (09c87d5), 10 of 10 reddened. Regression on lane 5, 22/22: `project-page-controls`, `guest-create-menu`, `ai-create-containers`, `custom-field-progress`, `task-depth`, `team-schedules`, `planner-command-bar`, `planner-grid`, `planner-onboarding`, `hook-portal-access`, `space-default-permission`, `private-folder-reach`, `private-list-reach`, `read-visibility`, `workspace-role-controls`, `request-access`, `status-write-access`, `role-permissions-web`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
 *Not changed, recorded:* the space's Members sheet still offers its changes to everybody (the default `canManage`), and the project page's time, invoice and client-portal sections have their own controls, unmeasured here.
 
