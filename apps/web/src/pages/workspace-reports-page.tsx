@@ -19,6 +19,7 @@ import {
 import { api } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { ReportBuilder } from '../components/report-builder'
+import { usePermissions } from '../hooks/use-permissions'
 
 const TABS = ['overview', 'productivity', 'completion', 'time', 'sprints', 'goals', 'custom'] as const
 type Tab = (typeof TABS)[number]
@@ -124,6 +125,9 @@ export function ReportsPage() {
     if (!exportPayload) return
     downloadCsv(exportPayload.filename, exportPayload.rows)
   }
+  // Viewing a report asks `report.view.basic`; taking it away asks `report.export`
+  // as well, which the API asks of its exports (`role-editor-offers-unenforced-permissions`).
+  const mayExport = usePermissions(workspaceId).can('report.export') === true
 
   const tabs: { id: Tab; label: string; icon: React.ElementType }[] = [
     { id: 'overview', label: t('reports.tabOverview'), icon: BarChart3 },
@@ -159,26 +163,32 @@ export function ReportsPage() {
               <option value={30}>{t('reports.last30Days')}</option>
               <option value={90}>{t('reports.last90Days')}</option>
             </select>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handleExport}
-              disabled={!exportPayload}
-              title={exportPayload ? t('reports.exportTooltip') : t('reports.noExportTooltip')}
-            >
-              <Download className="h-3.5 w-3.5" /> {t('reports.exportCsv')}
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={handlePrint}
-              disabled={!exportPayload}
-              title={exportPayload ? t('reports.printTooltip') : t('reports.noExportTooltip')}
-            >
-              <Printer className="h-3.5 w-3.5" /> {t('reports.printPdf')}
-            </Button>
+            {mayExport && (
+              <>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  data-testid="reports-export-csv"
+                  onClick={handleExport}
+                  disabled={!exportPayload}
+                  title={exportPayload ? t('reports.exportTooltip') : t('reports.noExportTooltip')}
+                >
+                  <Download className="h-3.5 w-3.5" /> {t('reports.exportCsv')}
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  data-testid="reports-print-pdf"
+                  onClick={handlePrint}
+                  disabled={!exportPayload}
+                  title={exportPayload ? t('reports.printTooltip') : t('reports.noExportTooltip')}
+                >
+                  <Printer className="h-3.5 w-3.5" /> {t('reports.printPdf')}
+                </Button>
+              </>
+            )}
           </div>
         </div>
       </header>

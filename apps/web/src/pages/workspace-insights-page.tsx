@@ -27,6 +27,7 @@ import {
 import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { useTranslation } from '../lib/i18n'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
@@ -94,6 +95,8 @@ export function InsightsPage() {
   // store nothing ever wrote to, so it was false for everybody and no manager
   // was offered either (`found-24-sep/workspace-store-never-filled`).
   const { isManagerOrAbove: canManage } = useWorkspaceRole(workspaceId)
+  // The contribution PDF is an export: `report.export`, as the API asks of it.
+  const mayExport = usePermissions(workspaceId).can('report.export') === true
   const [contribPeriod, setContribPeriod] = useState<ContributionPeriod>('this-month')
   // The sprint the Sprint period reports on: the one picked, else the active
   // one that started last (the server's own default).
@@ -545,7 +548,7 @@ export function InsightsPage() {
                 ))}
               </select>
             )}
-            {canManage && (
+            {canManage && mayExport && (
               <Button variant="outline" size="sm" onClick={downloadContributionPdf}>
                 <Download className="h-3.5 w-3.5" /> {t('insights.downloadPdf')}
               </Button>

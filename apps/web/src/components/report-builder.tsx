@@ -23,6 +23,7 @@ import {
 import { api, downloadFilePost } from '../lib/api'
 import { useAuthStore } from '../store/auth'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 
 /**
  * Stream a summary from the SSE endpoint (Plan §7.5), invoking `onDelta` with the
@@ -180,6 +181,8 @@ const csvCell = (v: string | number) => {
 
 export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
+  // Exporting asks `report.export`, as the API does of its exports; running the report does not.
+  const mayExport = usePermissions(workspaceId).can('report.export') === true
   const qc = useQueryClient()
   const userEmail = useAuthStore((s) => s.user?.email ?? '')
   const [name, setName] = useState(() => t('reportBuilder.untitledName'))
@@ -638,12 +641,16 @@ export function ReportBuilder({ workspaceId }: { workspaceId: string }) {
             <Button variant="ghost" size="sm" onClick={() => runAiSummary()} disabled={aiSummarizing || !result}>
               {aiSummarizing ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />} {t('reportBuilder.aiSummarize')}
             </Button>
-            <Button variant="outline" size="sm" onClick={exportPdf}>
-              {t('reportBuilder.exportPdf')}
-            </Button>
-            <Button variant="outline" size="sm" onClick={exportCsv}>
-              {t('reportBuilder.exportCsv')}
-            </Button>
+            {mayExport && (
+              <>
+                <Button variant="outline" size="sm" data-testid="report-builder-export-pdf" onClick={exportPdf}>
+                  {t('reportBuilder.exportPdf')}
+                </Button>
+                <Button variant="outline" size="sm" data-testid="report-builder-export-csv" onClick={exportCsv}>
+                  {t('reportBuilder.exportCsv')}
+                </Button>
+              </>
+            )}
           </div>
         </div>
         <div className="flex-1 overflow-auto p-6 bg-card/10">

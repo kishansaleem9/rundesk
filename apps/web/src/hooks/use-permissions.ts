@@ -11,6 +11,7 @@ export type WorkspacePermission =
   | 'space.create'
   | 'template.manage'
   | 'report.view.basic'
+  | 'report.export'
   | 'webhook.manage'
   | 'sso.manage'
   | 'integrations.manage'

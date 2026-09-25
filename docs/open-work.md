@@ -2995,16 +2995,36 @@ Now:
 `time-approval-rule`, 9 checks:
 - Before: 1 of 9 against the old API (lane 1, at `0b2db8e`). The one that passed pins the everyone-views, which the fix leaves as they were. On lane 5, with the old page as well, the page check read "only workspace admins can approve".
 - After: 9/9 on lanes 5 and 4.
-- Patches `tar-1..10`, each compiled. The break run is queued on lane 1 after the commit.
+- Patches `tar-1..10`: each reddened the check it names (lane 1, baseline 9/9 at `9588fa0`).
 - Regression: the 15 suites that touch time, roles, permissions or notices, and the new one. 15 of 16 passed in the sweep; `person-panel` missed "shows their email" under the sweep's load and passed alone (59/59).
 - API unit tests 1652/1652, web 305/305.
 - In CI (201).
 
 Measuring this also found `found-25-sep/time-page-answers-whose-hours-twice` below.
 
+*Partly fixed, 25 September: the fourth group, `report.export`.* The reports API asked `report.view.basic` of every route, and `report.export` of none. The reports page (Export CSV, Print / PDF) and the report builder (Export PDF, Export CSV) offered their exports to everyone who could open them. So a custom role separated viewing from exporting in name only. Measured on lane 5 (`9588fa0`), a guest granted `report.view.basic` alone:
+- downloaded a custom report as CSV (201) and as PDF (201);
+- was offered all four exports on the two pages.
+
+`report-export-key` was 1 of 5; the one that passed is the pairing below.
+
+ClickUp (help centre "Default user role permissions", "Export List and Table views", from search snippets): exporting is its own permission, "Export Views", which covers dashboard cards among the rest. A guest exports nothing by default.
+
+Now:
+- The three export routes (`custom/export`, `custom/export.pdf`, `contribution.pdf`) ask `report.view.basic` and `report.export`. Running a report and reading the overview ask viewing alone.
+- The reports page, the report builder and the insights page's contribution PDF offer their exports by `report.export`.
+- A member holds both keys by default and a guest neither, so only a custom role draws the line.
+
+`report-export-key`, 5 checks:
+- Before: 1 of 5 on lane 5.
+- After: 5/5 on lanes 5 and 4.
+- Patches `rek-1..5`, each compiled.
+- `contribution.pdf` also asks managers or admins, who hold `report.export` by default, so no check can separate the key there.
+- Regression: the 14 suites that open the reports, insights, roles or exports, and the new one. 14 of 15 passed in the sweep; `video-regression` found no list from the space page under the sweep's load and passed alone (93/93).
+- In CI (202).
+
 *Still open,* per the map (routes and lines in that item's notes):
 - **`workspace.delete`** — nothing permanently deletes a workspace, so the editor offers a key for an action that does not exist.
-- **`report.export`** — no export route asks it.
 - **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table could not be read here.
 - **The settings page is admin-only for any grant but the integrations and SSO ones** (`use-settings-access`), so a member granted the members keys has them by the API alone.
 

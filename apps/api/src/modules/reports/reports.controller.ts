@@ -218,6 +218,9 @@ export class ReportsController {
   }
 
   @Post('contribution.pdf')
+  // Viewing asks `report.view.basic` (the class); exporting asks `report.export`
+  // as well, as the role editor names it (`role-editor-offers-unenforced-permissions`).
+  @RequirePermissions('report.view.basic', 'report.export')
   @ApiOperation({ summary: 'Contribution report as a server-rendered PDF (managers/admins only, §7.14)' })
   async contributionPdf(
     @Param('workspaceId') workspaceId: string,
@@ -252,6 +255,8 @@ export class ReportsController {
   }
 
   @Post('custom/export')
+  // Viewing and exporting, as `contribution.pdf`.
+  @RequirePermissions('report.view.basic', 'report.export')
   @ApiOperation({ summary: 'Run a custom report and return it as CSV' })
   @Header('Content-Type', 'text/csv; charset=utf-8')
   @Header('Content-Disposition', 'attachment; filename="rundesk-report.csv"')
@@ -264,6 +269,8 @@ export class ReportsController {
   }
 
   @Post('custom/export.pdf')
+  // Viewing and exporting, as `contribution.pdf`.
+  @RequirePermissions('report.view.basic', 'report.export')
   @ApiOperation({ summary: 'Run a custom report and return it as a server-rendered PDF' })
   async exportCustomPdf(
     @Param('workspaceId') workspaceId: string,
