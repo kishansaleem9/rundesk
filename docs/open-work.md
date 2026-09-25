@@ -1443,13 +1443,33 @@ Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on th
 
 *To close:* give the Accounts page an address, aim the link there, and read where it lands.
 
-### `found-25-sep/statuses-written-by-readers` — open, security, medium (found probing `project-page-offers-guests-its-managers-buttons`)
+### `found-25-sep/statuses-written-by-readers` — **closed** (security, medium; found probing `project-page-offers-guests-its-managers-buttons`)
 
 **Anybody who may read a space, a project or a list may create, rename, delete and reorder its statuses**
 
 *Evidence, measured on lane 5:* a guest with one list shared with them to view passes through its project. They were answered 201 creating a status on that project, and the row was made. The three status controllers (`spaces/:id/statuses`, `projects/:id/statuses`, `lists/:id/statuses`, `scoped-statuses.controller.ts` and `list-statuses.controller.ts`) are guarded by `ResourceMemberGuard` alone, which asks whether the caller may READ the container. Their services take no actor. Deleting a status reassigns every task in it, so a reader can change other people's tasks. The same reader rename of the project was 404, and changing its visibility was 403.
 
 *To close:* research who manages statuses in ClickUp. Then ask of every status write the rule that already guards the container's own settings. Measure a guest, a member of a view-only space and a member who may edit, each refusal read back by SQL beside its positive twin.
+
+*Measured in full, lane 5, on HEAD's API:* the guest passing through the project made a status (201), renamed the admin's (200) and DELETED it (200; the row is gone). A member of a view-only space made statuses on it, its project and its list (201 each), and switched the list onto its project's statuses (200). A guest given a list to edit made a status on it.
+
+ClickUp (help centre, search snippets): owners, admins and members create, edit and delete statuses by default, because a location's default permission is Full edit. Guests do so only where an advanced permission allows it (Business Plus and Enterprise).
+
+*Closed, 25 September:* every status write, and a list's choice of whose statuses it uses, is guarded by `StatusShapeGuard` after the read guard. The guard asks `assertMayShapeStatuses` (`common/permissions/status-access.ts`):
+
+- the space's level must reach `edit`, the create gate's rung and a space's default, so a member of an ordinary space manages statuses as before, and a view-only or comment-only space refuses them;
+- a guest is refused whatever is shared with them (403, "Guests do not change statuses").
+
+The routes: space, project and list statuses (create, rename, delete, reorder) and `PATCH /lists/:id/status-scope`. The services take no actor and stay as they were.
+
+The new suite `status-write-access`, 4 checks, every refusal read back by SQL beside the same write for somebody it is theirs to make. The four cases: a guest passing through a project; a member of a view-only space on its space, project and list; a guest given a list and then a whole space to edit, where only the guest rule refuses; and a list's status scope.
+
+- Before (HEAD's API): 0 of 4.
+- After: 4/4.
+
+`swa-1..7`, each compiled, one per rule and route. Regression on lane 5, 22/22: `status-write-access`, `list-statuses-seeded`, `task-header-status`, `task-space-levels`, `space-presets`, `list-customize`, `list-empty-states`, `list-card-cover`, `list-assignee-filter`, `folder-dialog`, `ai-create-containers`, `paywall-sites`, `teams-person-cards`, `space-default-permission`, `guest-space-level`, `guest-read-scope`, `guest-create-menu`, `task-creation-access`, `permission-guards`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+
+*Left for the web:* a view-only member or a guest is still shown the status manager, and every change there is now refused. That is `found-24-sep/project-page-offers-guests-its-managers-buttons`, next.
 
 ### `found-25-sep/dock-empties-after-the-first-page` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
 

@@ -4,12 +4,13 @@ import { ListsController } from './lists.controller'
 import { ListStatusesService } from './list-statuses.service'
 import { ListStatusesController } from './list-statuses.controller'
 import { ScopedStatusesService } from './scoped-statuses.service'
+import { StatusShapeGuard } from './status-shape.guard'
 import { SpaceStatusesController, ProjectStatusesController } from './scoped-statuses.controller'
 import { SecurityModule } from '../security/security.module'
 
 @Module({
   imports: [SecurityModule],
-  providers: [ListsService, ListStatusesService, ScopedStatusesService],
+  providers: [ListsService, ListStatusesService, ScopedStatusesService, StatusShapeGuard],
   controllers: [
     ListsController,
     ListStatusesController,

@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Put, Patch, Delete, Param, Body, Ip, UseGuards, BadRequestException } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { StatusShapeGuard } from './status-shape.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { ListsService } from './lists.service'
 import { ScopedStatusesService } from './scoped-statuses.service'
@@ -16,7 +17,9 @@ export class ListsController {
     private scopedStatuses: ScopedStatusesService,
   ) {}
 
+  // Whose statuses a list uses is its statuses' shape too (`StatusShapeGuard`).
   @Patch(':listId/status-scope')
+  @UseGuards(StatusShapeGuard)
   async setStatusScope(@Param('listId') listId: string, @Body() body: { scope: StatusScope }) {
     if (!body?.scope || !VALID_SCOPES.has(body.scope)) {
       throw new BadRequestException("scope must be one of 'list', 'project', 'space'")
