@@ -1,4 +1,5 @@
 import { Module } from '@nestjs/common'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 import { AutomationsService } from './automations.service'
 import { AutomationsController } from './automations.controller'
 import { DatabaseModule } from '../../common/database/database.module'
@@ -11,7 +12,7 @@ import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 // importing ChatModule (Chat → Tasks → Automations) would form a DI cycle.
 // RealtimeModule is a leaf here and only supplies the broadcast gateway.
 @Module({
-  imports: [DatabaseModule, RealtimeModule],
+  imports: [DatabaseModule, RealtimeModule, CustomRolesModule],
   controllers: [AutomationsController],
   providers: [AutomationsService, WorkspaceMemberGuard, WorkspaceAdminGuard],
   exports: [AutomationsService],

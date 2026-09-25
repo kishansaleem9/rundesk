@@ -1,9 +1,9 @@
 import { Body, Controller, Delete, Get, Header, Ip, Param, Post, Query, UseGuards } from '@nestjs/common'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { SecurityService } from './security.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 // ─── 2FA / TOTP (per-user, no workspace) ──────────────────────────────────────
@@ -55,7 +55,9 @@ export class ApiKeysController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  // `security.policy.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('security.policy.manage')
   @ApiOperation({ summary: 'Create a new API key (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
@@ -67,7 +69,9 @@ export class ApiKeysController {
   }
 
   @Post(':keyId/revoke')
-  @UseGuards(WorkspaceAdminGuard)
+  // `security.policy.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('security.policy.manage')
   @ApiOperation({ summary: 'Revoke an API key (admin only)' })
   revoke(
     @Param('workspaceId') workspaceId: string,
@@ -79,7 +83,9 @@ export class ApiKeysController {
   }
 
   @Delete(':keyId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `security.policy.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('security.policy.manage')
   @ApiOperation({ summary: 'Delete an API key (admin only)' })
   delete(
     @Param('workspaceId') workspaceId: string,
@@ -94,7 +100,10 @@ export class ApiKeysController {
 // ─── Audit Logs ───────────────────────────────────────────────────────────────
 @ApiTags('security')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
+// `workspace.audit.view`, as the catalog says; `WorkspaceAdminGuard` admitted
+// managers (`role-editor-offers-unenforced-permissions`).
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, PermissionsGuard)
+@RequirePermissions('workspace.audit.view')
 @Controller('workspaces/:workspaceId/audit-logs')
 export class AuditLogsController {
   constructor(private readonly svc: SecurityService) {}

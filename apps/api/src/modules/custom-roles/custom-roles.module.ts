@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common'
+import { Module, forwardRef } from '@nestjs/common'
 import { DatabaseModule } from '../../common/database/database.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
@@ -8,7 +8,8 @@ import { CustomRolesController, MemberRolesController } from './custom-roles.con
 import { PermissionsGuard } from './permissions.guard'
 
 @Module({
-  imports: [DatabaseModule, SecurityModule],
+  // forwardRef: SecurityModule's routes ask `PermissionsGuard`, from here.
+  imports: [DatabaseModule, forwardRef(() => SecurityModule)],
   controllers: [CustomRolesController, MemberRolesController],
   providers: [CustomRolesService, PermissionsGuard, WorkspaceMemberGuard, WorkspaceAdminGuard],
   exports: [CustomRolesService, PermissionsGuard],

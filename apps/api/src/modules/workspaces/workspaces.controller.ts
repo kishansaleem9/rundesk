@@ -81,7 +81,10 @@ export class WorkspacesController {
   }
 
   @Patch(':workspaceId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.manage')
   async update(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: {
@@ -100,7 +103,10 @@ export class WorkspacesController {
   }
 
   @Post(':workspaceId/logo/presign')
-  @UseGuards(WorkspaceAdminGuard)
+  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.manage')
   @ApiOperation({ summary: 'Presign a direct-to-R2 upload for the workspace logo (Plan §13.5)' })
   async presignLogo(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
@@ -120,14 +126,20 @@ export class WorkspacesController {
   }
 
   @Post(':workspaceId/verify-domain')
-  @UseGuards(WorkspaceAdminGuard)
+  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.manage')
   @ApiOperation({ summary: 'Verify the workspace custom domain via DNS TXT' })
   async verifyDomain(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.workspacesService.verifyCustomDomain(workspaceId)
   }
 
   @Delete(':workspaceId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.manage')
   @ApiOperation({ summary: 'Archive (soft-delete) a workspace' })
   async archive(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
@@ -138,7 +150,10 @@ export class WorkspacesController {
   }
 
   @Post(':workspaceId/restore')
-  @UseGuards(WorkspaceAdminGuard)
+  // `workspace.manage` — rename, logo, domain, archive, restore — as the catalog
+  // says; `WorkspaceAdminGuard` admitted managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.manage')
   @ApiOperation({ summary: 'Restore an archived workspace' })
   async restore(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,

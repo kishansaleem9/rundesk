@@ -1,10 +1,10 @@
 import { Body, Controller, Get, Param, Patch, Req, UseGuards } from '@nestjs/common'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import type { FastifyRequest } from 'fastify'
 import { WorkspaceSecuritySettingsService } from './workspace-security-settings.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('security')
@@ -22,7 +22,10 @@ export class SecuritySettingsController {
   }
 
   @Patch()
-  @UseGuards(WorkspaceAdminGuard)
+  // `security.policy.manage`, as the catalog says; `WorkspaceAdminGuard` admitted
+  // managers (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('security.policy.manage')
   @ApiOperation({ summary: 'Update workspace security settings (admin only)' })
   async update(
     @Param('workspaceId') workspaceId: string,

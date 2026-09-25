@@ -118,12 +118,16 @@ try {
   // ══ 2. CUSTOM ROLES ══════════════════════════════════════════════════════
   console.log('\n▶ a manager makes a custom role holding every permission, and takes the admin’s')
   const everything = `${TAG} everything`
+  const modest = `${TAG} modest`
   const makes = await manager.as(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: everything, permissions: ['webhook.manage', 'sso.manage', 'roles.manage', 'members.role.change'] } })
+  // Only keys a manager holds, so the refusal can only be the missing roles.manage.
+  const makesModest = await manager.as(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: modest, permissions: ['members.invite'] } })
   const takes = await manager.as(`/workspaces/${WS}/members/${await memberRowId(manager.id)}/roles/${hooks.data.id}`, { method: 'POST', body: {} })
   chk(
-    makes.status === 403 && (await rolesNamed(everything)) === 0 && takes.status === 403 && (await assigned(manager.id)).length === 0,
+    makes.status === 403 && (await rolesNamed(everything)) === 0 && makesModest.status === 403 && (await rolesNamed(modest)) === 0
+      && takes.status === 403 && (await assigned(manager.id)).length === 0,
     'a manager makes no custom role and assigns none, themself included (403 each, none made, none held)',
-    `makes ${said(makes)} (${await rolesNamed(everything)} made); takes the admin's ${said(takes)} (holds ${JSON.stringify(await assigned(manager.id))})`,
+    `makes ${said(makes)} (${await rolesNamed(everything)} made), one of their own keys only ${said(makesModest)} (${await rolesNamed(modest)} made); takes the admin's ${said(takes)} (holds ${JSON.stringify(await assigned(manager.id))})`,
   )
 
   // ══ 3. NOBODY GIVES MORE THAN THEY HOLD ══════════════════════════════════

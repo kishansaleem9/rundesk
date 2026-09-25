@@ -1,9 +1,9 @@
 import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { AutomationsService } from './automations.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { FeatureFlagGuard } from '../../common/guards/feature-flag.guard'
 import { FeatureFlag } from '../../common/decorators/feature-flag.decorator'
 import { FLAGS } from '@rundesk/feature-flags'
@@ -26,7 +26,9 @@ export class AutomationsController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  // `automation.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('automation.manage')
   @ApiOperation({ summary: 'Create an automation rule (admin only)' })
   create(
     @Param('workspaceId') workspaceId: string,
@@ -50,7 +52,9 @@ export class AutomationsController {
   }
 
   @Patch(':automationId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `automation.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('automation.manage')
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('automationId') automationId: string,
@@ -60,7 +64,9 @@ export class AutomationsController {
   }
 
   @Delete(':automationId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `automation.manage` (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('automation.manage')
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('automationId') automationId: string,

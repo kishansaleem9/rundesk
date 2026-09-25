@@ -2948,8 +2948,33 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Partly fixed, 25 September: the members group.* Mapping the gates showed something the evidence above missed. `WorkspaceAdminGuard` admits managers (it asks `isManagerRole`), so the "role test" in front of most of these keys let managers through the API, while the web offered the controls to admins only. On the members group that was a privilege escalation, closed as `found-25-sep/managers-grant-themselves-admin` below. `members.invite`, `members.role.change`, `members.remove` and `roles.manage` are the real gates now.
 
+*Partly fixed, 25 September: the second group, the admin-only keys.* Measured on lane 5 (`7a9ff90`), a manager did all of the following, where the catalog and the web give each to admins; `admin-only-keys` was 0 of 4:
+- renamed and archived the workspace;
+- read and exported the audit log;
+- changed the security policy and made an API key;
+- made an automation.
+
+A member granted each key by a custom role was refused every one of these. Each route now asks its key through `PermissionsGuard`:
+- `workspace.manage`: rename, logo, domain, archive and restore;
+- `workspace.audit.view`: the audit log and its export;
+- `security.policy.manage`: security settings, and making, revoking and deleting API keys;
+- `automation.manage`: making, changing and deleting automations.
+
+The security module reaches the guard through a `forwardRef`, since the custom-roles module imports it in turn.
+
+The automations page had offered New automation, Use, the toggle and Delete to everybody. It offers them by `automation.manage` now, and still lists every rule to every member.
+
+`admin-only-keys`, 5 checks, the page among them:
+- Before: 0 of 4 on lane 5; the page check was added after, and `aok-5` restores the ungated page.
+- After: 5/5 on lanes 5 and 4.
+- Patches `aok-1..6`, each compiled.
+- Regression: the 20 suites that touch these routes, and the new one, 21/21.
+- In CI (200).
+
+`workspace.delete` has no route, since the only "delete" is the archive, which the catalog files under `workspace.manage`. So the key still gates nothing.
+
 *Still open,* per the map (routes and lines in that item's notes):
-- **`WorkspaceAdminGuard` admits managers to the admin-only keys.** Those keys are `workspace.manage` (settings, logo, domain, restore), `workspace.delete` (archive, the only delete there is), `workspace.audit.view` (the audit log and its export), `security.policy.manage` (security settings and API keys) and `automation.manage`. The catalog, and the web, give each to admins.
+- **`workspace.delete`** — nothing permanently deletes a workspace, so the editor offers a key for an action that does not exist.
 - **`time.approval.manage`** — the three rules disagree:
   - the catalog gives it to managers;
   - approve and reject admit managers through the guard;

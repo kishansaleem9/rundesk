@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { usePermissions } from '../hooks/use-permissions'
 import { useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, cn } from '@rundesk/ui'
@@ -106,6 +107,10 @@ export function AutomationsPage() {
   const { workspaceId } = useParams({ from: '/app/$workspaceId/automations' })
   const qc = useQueryClient()
   const [showBuilder, setShowBuilder] = useState(false)
+  // Making, changing and deleting an automation ask `automation.manage`, as the
+  // API does; everybody may read them. Offering the rest to all of them was a
+  // button the API refused (`role-editor-offers-unenforced-permissions`).
+  const mayManage = usePermissions(workspaceId).can('automation.manage') === true
 
   const query = useQuery({
     queryKey: ['automations', workspaceId],
@@ -145,13 +150,15 @@ export function AutomationsPage() {
               {t('automations.subtitle')}
             </p>
           </div>
-          <Button onClick={() => setShowBuilder(true)}>
-            <Plus className="h-4 w-4 mr-1" /> {t('automations.newAutomation')}
-          </Button>
+          {mayManage && (
+            <Button onClick={() => setShowBuilder(true)} data-testid="automations-new">
+              <Plus className="h-4 w-4 mr-1" /> {t('automations.newAutomation')}
+            </Button>
+          )}
         </div>
       </header>
 
-      {showBuilder && (
+      {showBuilder && mayManage && (
         <AutomationBuilder
           workspaceId={workspaceId}
           onClose={() => setShowBuilder(false)}
@@ -182,6 +189,7 @@ export function AutomationsPage() {
                   key={a.id}
                   automation={a}
                   workspaceId={workspaceId}
+                  mayManage={mayManage}
                   onToggle={(en) => toggleAuto.mutate({ id: a.id, isEnabled: en })}
                   onDelete={() => {
                     if (confirm(t('automations.confirmDelete', { name: a.name }))) deleteAuto.mutate(a.id)
@@ -193,7 +201,7 @@ export function AutomationsPage() {
         </section>
 
         {/* AI suggestions (§7.7) */}
-        <AiSuggestionsSection workspaceId={workspaceId} />
+        <AiSuggestionsSection workspaceId={workspaceId} mayManage={mayManage} />
 
         {/* Recipes */}
         <section>
@@ -218,15 +226,18 @@ export function AutomationsPage() {
                       ))}
                     </div>
                   </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    className="opacity-0 group-hover:opacity-100 transition-opacity text-xs shrink-0"
-                    onClick={() => createFromRecipe.mutate(r)}
-                    disabled={createFromRecipe.isPending}
-                  >
-                    {t('automations.use')}
-                  </Button>
+                  {mayManage && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      className="opacity-0 group-hover:opacity-100 transition-opacity text-xs shrink-0"
+                      onClick={() => createFromRecipe.mutate(r)}
+                      disabled={createFromRecipe.isPending}
+                      data-testid="automations-recipe-use"
+                    >
+                      {t('automations.use')}
+                    </Button>
+                  )}
                 </div>
               </Card>
             ))}
@@ -239,7 +250,7 @@ export function AutomationsPage() {
 
 // ─── AiSuggestionsSection (§7.7) ──────────────────────────────────────────────
 
-function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
+function AiSuggestionsSection({ workspaceId, mayManage }: { workspaceId: string; mayManage: boolean }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
 
@@ -316,15 +327,17 @@ function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
                   </div>
                   {s.rationale && <p className="mt-2 text-xs text-muted-foreground">{s.rationale}</p>}
                 </div>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-xs shrink-0"
-                  onClick={() => createFromSuggestion.mutate(s)}
-                  disabled={createFromSuggestion.isPending}
-                >
-                  {t('automations.use')}
-                </Button>
+                {mayManage && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="opacity-0 group-hover:opacity-100 transition-opacity text-xs shrink-0"
+                    onClick={() => createFromSuggestion.mutate(s)}
+                    disabled={createFromSuggestion.isPending}
+                  >
+                    {t('automations.use')}
+                  </Button>
+                )}
               </div>
             </Card>
           ))}
@@ -339,11 +352,13 @@ function AiSuggestionsSection({ workspaceId }: { workspaceId: string }) {
 function AutomationRow({
   automation,
   workspaceId,
+  mayManage,
   onToggle,
   onDelete,
 }: {
   automation: Automation
   workspaceId: string
+  mayManage: boolean
   onToggle: (en: boolean) => void
   onDelete: () => void
 }) {
@@ -400,7 +415,7 @@ function AutomationRow({
               {new Date(automation.lastRunAt).toLocaleDateString()}
             </span>
           )}
-          <button onClick={() => onToggle(!automation.isEnabled)} className="text-muted-foreground hover:text-foreground">
+          <button onClick={() => onToggle(!automation.isEnabled)} disabled={!mayManage} data-testid="automation-toggle" className="text-muted-foreground hover:text-foreground disabled:opacity-60 disabled:cursor-default">
             {automation.isEnabled ? (
               <ToggleRight className="h-5 w-5 text-emerald-500" />
             ) : (
@@ -413,9 +428,11 @@ function AutomationRow({
           >
             {expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
           </button>
-          <button onClick={onDelete} className="text-muted-foreground hover:text-destructive">
-            <Trash2 className="h-4 w-4" />
-          </button>
+          {mayManage && (
+            <button onClick={onDelete} data-testid="automation-delete" className="text-muted-foreground hover:text-destructive">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          )}
         </div>
       </div>
 

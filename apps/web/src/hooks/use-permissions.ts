@@ -14,6 +14,7 @@ export type WorkspacePermission =
   | 'webhook.manage'
   | 'sso.manage'
   | 'integrations.manage'
+  | 'automation.manage'
 
 /**
  * The one read of this person's keys, as a query the router can also wait on:
