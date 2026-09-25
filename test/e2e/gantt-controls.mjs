@@ -60,7 +60,7 @@ const argOf = (name, fallback) => {
  * download that never arrived — turns into a shorter run that still reports
  * "0 failed". Exact makes a skipped branch a failure.
  */
-const EXPECTED_CHECKS = 29
+const EXPECTED_CHECKS = 30
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -188,6 +188,8 @@ try {
     idBulk.push(await mkTask(listA.id, `${label} ${TAG}`, start, due))
   }
   const MINE = [idFirst, idMid, idLast, ...idBulk]
+  // Neither date: nothing to draw, so the timeline never carries it.
+  const idUndated = await mkTask(listA.id, `Undated ${TAG}`, undefined, undefined)
   console.log(`\x1b[2m  workspace ${workspaceId}, project ${projectA.id}, tag ${TAG}\x1b[0m`)
 
   /*
@@ -229,6 +231,17 @@ try {
       `${scoped.size}; the other project's task ${JSON.stringify(otherId)} was ` +
       `${scoped.has(otherId) ? 'STILL THERE' : 'absent'} and this run's own ` +
       `${MINE.filter((id) => scoped.has(id)).length}/${MINE.length} survived`,
+  )
+  /*
+   * WHAT IT CAN DRAW, AND NOTHING ELSE, filtered in SQL
+   * (`timeline-projectid-param`): the read has no limit, so an undated task
+   * read and then dropped in JavaScript was the whole workspace's undated work
+   * carried to be thrown away.
+   */
+  chk(
+    wholeWorkspace.status === 200 && scopedToA.status === 200 && !whole.has(idUndated) && !scoped.has(idUndated) && MINE.every((id) => whole.has(id)),
+    'the timeline carries only the tasks it can draw: this run’s task with neither date is in neither read, and its dated ones are',
+    `the undated task ${whole.has(idUndated) || scoped.has(idUndated) ? 'WAS carried' : 'was absent'}; dated ${MINE.filter((id) => whole.has(id)).length}/${MINE.length}`,
   )
 
   const ctx = await browser.newContext({

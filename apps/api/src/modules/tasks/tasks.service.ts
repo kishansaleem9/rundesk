@@ -1,6 +1,6 @@
 import { Injectable, Inject, Optional, NotFoundException, BadRequestException, ForbiddenException, ConflictException } from '@nestjs/common'
 import { randomUUID } from 'node:crypto'
-import { eq, and, or, asc, desc, ilike, inArray, isNull, notInArray, sql, type SQL } from 'drizzle-orm'
+import { eq, and, or, asc, desc, ilike, inArray, isNull, isNotNull, notInArray, sql, type SQL } from 'drizzle-orm'
 import {
   taskTypes,
   tasks,
@@ -2088,7 +2088,9 @@ export class TasksService {
    */
   async getTimelineForWorkspace(
     workspaceId: string,
-    opts: { from?: Date; to?: Date; projectId?: string; actor?: { id: string; role?: string } } = {},
+    // `from` and `to` were declared here and read by nothing; the page fits
+    // its range to the tasks it holds (`timeline-projectid-param`).
+    opts: { projectId?: string; actor?: { id: string; role?: string } } = {},
   ) {
     /*
      * READ AS THE CALLER, BY BOTH RULES. The route is guarded by workspace
@@ -2131,14 +2133,17 @@ export class TasksService {
         and(
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
+          // Only what can be drawn — a start or a due date — and in SQL: an
+          // undated task used to be read with the rest of the workspace and
+          // dropped here afterwards.
+          or(isNotNull(tasks.startDate), isNotNull(tasks.dueDate)),
           ...(opts.projectId ? [eq(lists.projectId, opts.projectId)] : []),
           visFilter,
         ),
       )
       .orderBy(asc(tasks.startDate), asc(tasks.dueDate))
 
-    // Only return tasks with at least a due date — the rest can't be plotted.
-    return rows.filter((r) => r.startDate || r.dueDate)
+    return rows
   }
 
   /**

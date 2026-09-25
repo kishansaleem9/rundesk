@@ -520,13 +520,23 @@ Now the sheet makes one pass per burst, 150 ms after its first event. That pass 
 
 *To close:* Pass the actor and apply taskVisibilityFilter / resolveIsManager as the other readers do.
 
-### `product-siblings/timeline-projectid-param` — open, small
+### `product-siblings/timeline-projectid-param` — **closed** (clean-up, small)
 
 **Timeline ?projectId (resume §3 item 4): still unsent, and harmless in effect; the from/to options are a reader of nothing**
 
 *Evidence:* tasks.controller.ts:126-137 accepts projectId. workspace-timeline-page.tsx:227-230 never sends it, and filters client-side at :260-263 over an UNCAPPED read (tasks.service.ts:1834-1865 has no limit), so users see the same result. The cost is a whole-workspace payload, filtered in JS for `startDate || dueDate` (:1864). getTimelineForWorkspace declares opts.from and opts.to (:1831) that nothing applies.
 
 *To close:* Send projectId when projectFilter !== 'all' (and put it in the query key), or delete the param. Apply or delete from/to, and move the date filter into SQL.
+
+*Closed, 25 September:*
+- **`projectId` stays, unsent, and that is right.** `gantt-controls` recorded why (its check "the timeline endpoint really narrows on `projectId`, which no client sends"). The page holds every dated task, and builds its project list from those rows. Narrowing on the server would shrink the list to the one project already chosen. So the parameter is API surface, exercised by that check, not dead wiring.
+- **`from` and `to` are deleted.** Both were declared on `getTimelineForWorkspace` and read by nothing. The page fits its range to the tasks it holds.
+- **The date filter is in SQL.** The read has no limit, so an undated task was read with the rest of the workspace and then dropped in JavaScript. It is no longer read at all.
+
+The answer is the same either way, so there is no before and after to measure at the route. `gantt-controls` gained a check (30 now) that the timeline carries only what it can draw: this run's task with neither date is in neither read. `gantt-controls-18`, compiled, takes the filter out of the SQL, with none after it, and must redden that check.
+- After: 30/30, on lanes 5 and 4.
+- *Break run:* queued on lane 1 after the commit (`plan-tl`).
+- Regression on lanes 2 to 5, the four suites that read the timeline or open its page: 4/4.
 
 ### `product-siblings/timesheet-mine-includes-everyone` — **closed**
 
