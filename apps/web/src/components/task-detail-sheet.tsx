@@ -4038,9 +4038,42 @@ function SubtasksPanel({
     },
   })
 
-  const deleteSubtask = useMutation({
+  /*
+   * A SUBTASK'S ROW OFFERS WHAT THE TASK'S MENU DOES — Archive and Delete, two
+   * actions (`found-25-sep/subtask-delete-archives`). Its one button said
+   * Delete and called `DELETE /tasks/:id`, which archives. ClickUp's subtask
+   * menu offers both: Archive clears it from view (a filter finds it), Delete
+   * puts it in the Trash for thirty days. Archive takes Edit and Delete Full
+   * edit, as on the menu; the Undo is the menu's.
+   */
+  const archiveSubtask = useMutation({
     mutationFn: (id: string) => api(`/tasks/${id}`, { method: 'DELETE' }),
-    onSuccess: invalidateSubtasks,
+    onSuccess: async () => {
+      toast.success(t('taskDetail.taskArchived'))
+      await invalidateSubtasks()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotArchive')),
+  })
+  const trashSubtask = useMutation({
+    mutationFn: (id: string) => api(`/tasks/${id}/trash`, { method: 'POST' }),
+    onSuccess: async (_answer, id) => {
+      if (workspaceId) {
+        offerUndo({
+          workspaceId,
+          type: 'task',
+          id,
+          message: t('taskDetail.taskDeleted'),
+          undoLabel: t('trash.undo'),
+          restoredMessage: t('taskDetail.taskUndeleted'),
+          failedMessage: t('taskDetail.couldNotUndelete'),
+          onRestored: () => void invalidateSubtasks(),
+        })
+      } else {
+        toast.success(t('taskDetail.taskDeleted'))
+      }
+      await invalidateSubtasks()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotDelete')),
   })
 
   // Single-owner assignment for a subtask row: clear existing then set the pick.
@@ -4174,8 +4207,21 @@ function SubtasksPanel({
               {caps.edit && (
                 <button
                   type="button"
+                  data-testid="subtask-archive"
+                  className="text-xs text-muted-foreground hover:text-foreground"
+                  onClick={() => archiveSubtask.mutate(s.id)}
+                  disabled={archiveSubtask.isPending}
+                >
+                  {t('taskDetail.archiveTask')}
+                </button>
+              )}
+              {caps.full && (
+                <button
+                  type="button"
+                  data-testid="subtask-delete"
                   className="text-xs text-rose-500 hover:text-rose-600"
-                  onClick={() => deleteSubtask.mutate(s.id)}
+                  onClick={() => trashSubtask.mutate(s.id)}
+                  disabled={trashSubtask.isPending}
                 >
                   {t('common.delete')}
                 </button>

@@ -1644,13 +1644,37 @@ Regression on lanes 2 to 5: the 18 suites that share, or set shares up, and `req
 
 In CI (190).
 
-### `found-25-sep/subtask-delete-archives` — open, visible bug, small (found closing `full-edit-enforced-nowhere`)
+### `found-25-sep/subtask-delete-archives` — **closed** (visible bug, small; found closing `full-edit-enforced-nowhere`)
 
 **A subtask's "Delete" in the task sheet archives it**
 
 *Evidence, read not run:* the subtask row's "Delete" (`common.delete`) calls `DELETE /tasks/:id`, which is Archive. The task's own menu keeps the two apart (Archive, then Delete to the Trash), and the subtask row says Delete and archives.
 
 *To close:* decide it as the task menu does. Either offer Archive and Delete on the row, or call it Archive. Then check which one happened.
+
+*Measured, lane 5, on `3d959fc`:* the admin's subtask row offered one button, Delete. Pressing it archived the subtask (`is_archived` true, `deleted_at` null): the task menu's Archive, under the menu's other name. A member at Edit was offered the same button.
+
+ClickUp (help centre, "Archive a task", "Delete a task", search snippets): a subtask's menu offers both. Archive clears it from view, and a filter finds it. Delete moves it to the Trash, restorable for thirty days.
+
+*Closed, 25 September:* the row offers both, as the task's menu does.
+- **Archive** (`DELETE /tasks/:id`) at Edit.
+- **Delete** (`POST /tasks/:id/trash`) at Full edit, with the menu's Undo.
+
+Each says what happened in the menu's words.
+
+The new suite `subtask-row-actions`, 2 checks, read back by SQL:
+- the admin archives one subtask and deletes another;
+- a member at Edit is offered Archive and not Delete.
+
+Results:
+- Before (lane 5, `3d959fc`): 0 of 2.
+- After: 2/2, on lanes 5 and 4.
+
+`srw-1..4`, each compiled: Delete archiving, as it did; Archive trashing; Delete offered at Edit; no Archive.
+
+*Break run:* queued on lane 1 after the commit (`plan-srw`).
+
+Regression on lanes 2 to 5: the 12 suites that open the sheet's subtasks, its menu, the Trash or archiving, and the new suite. Result: 13/13. In CI (191).
 
 ### `found-25-sep/fixture-builds-in-a-space-it-did-not-check` — open, test tooling, small (found closing `full-edit-enforced-nowhere`)
 
