@@ -1,4 +1,5 @@
 import { Body, Controller, Get, Header, Headers, Ip, NotFoundException, Param, Patch, Post, Query, Delete, UseGuards, ParseUUIDPipe, ForbiddenException, Req } from '@nestjs/common'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService, withoutDomainToken } from './workspaces.service'
 import { PlansService } from '../plans/plans.service'
@@ -202,8 +203,17 @@ export class WorkspacesController {
     return this.workspacesService.listMembers(workspaceId)
   }
 
+  /*
+   * The member routes ask their catalog keys — `members.invite`,
+   * `members.role.change`, `members.remove` — whose defaults are the catalog's
+   * (a manager invites; an admin changes roles and removes), and a custom
+   * grant counts. `WorkspaceAdminGuard` admitted managers to all three, and a
+   * manager made themself an admin (`managers-grant-themselves-admin`). The
+   * service adds the rank rule: nobody adds, sets or removes above their own.
+   */
   @Post(':workspaceId/members')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.invite')
   async addMember(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { email: string; role?: string },
@@ -212,11 +222,13 @@ export class WorkspacesController {
     return this.workspacesService.addMember(workspaceId, body.email, body.role, {
       id: user.id,
       email: user.email,
+      role: user.role,
     })
   }
 
   @Patch(':workspaceId/members/:userId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.role.change')
   async updateMember(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -228,6 +240,7 @@ export class WorkspacesController {
       id: user.id,
       email: user.email,
       ip,
+      role: user.role,
     })
   }
 
@@ -315,7 +328,8 @@ export class WorkspacesController {
   }
 
   @Delete(':workspaceId/members/:userId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.remove')
   async removeMember(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -326,6 +340,7 @@ export class WorkspacesController {
       id: user.id,
       email: user.email,
       ip,
+      role: user.role,
     })
   }
 }

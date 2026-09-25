@@ -7,6 +7,8 @@
  * the role editor so admins know what each grant lets a user do.
  */
 
+import { WORKSPACE_ROLE_RANK } from '../../common/permissions/workspace-roles'
+
 export type Permission =
   // Workspace-level
   | 'workspace.manage'
@@ -106,13 +108,8 @@ export const PERMISSION_KEYS: ReadonlySet<Permission> = new Set(
  */
 export type LegacyWorkspaceRole = 'super_admin' | 'workspace_admin' | 'manager' | 'member' | 'guest'
 
-export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = {
-  guest: 0,
-  member: 1,
-  manager: 2,
-  workspace_admin: 3,
-  super_admin: 4,
-}
+// The one rank table, in `common/permissions/workspace-roles.ts`.
+export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = WORKSPACE_ROLE_RANK
 
 // Permissions each lower tier adds. workspace_admin (and super_admin) inherit
 // everything else, so a newly-added catalog permission defaults to admin-only

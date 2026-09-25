@@ -1,4 +1,4 @@
-import { ASSIGNABLE_WORKSPACE_ROLES, isAssignableWorkspaceRole } from '../../common/permissions/workspace-roles'
+import { ASSIGNABLE_WORKSPACE_ROLES, isAssignableWorkspaceRole, roleRank } from '../../common/permissions/workspace-roles'
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
@@ -21,7 +21,7 @@ import { isPublicImagePath, publicImagePath } from '../../common/storage/public-
 const BASE_SLUG_FALLBACK = 'workspace'
 
 /** Actor context threaded into audit events. `ip` is captured best-effort. */
-type AuditActor = { id: string; email?: string; ip?: string }
+type AuditActor = { id: string; email?: string; ip?: string; role?: string | null }
 
 /** Image content types accepted for a workspace logo upload (Plan §13.5). */
 const LOGO_CONTENT_TYPES: Record<string, string> = {
@@ -792,12 +792,37 @@ export class WorkspacesService {
     return { ok: true, managerId }
   }
 
+  /**
+   * NOBODY ADDS, SETS OR REMOVES ABOVE THEIR OWN ROLE
+   * (`managers-grant-themselves-admin`). The routes ask the catalog key; this
+   * asks the rank, so a custom grant of `members.role.change` to a member lets
+   * them move people up to member and no further. A platform admin outranks
+   * every workspace role. An internal call with no actor is let be.
+   */
+  private async assertWithinRank(
+    workspaceId: string,
+    actor: AuditActor | undefined,
+    roles: Array<string | null>,
+    what: string,
+  ): Promise<void> {
+    if (!actor) return
+    const mine = actor.role === 'super_admin' ? roleRank('super_admin') : roleRank((await this.getMembership(workspaceId, actor.id))?.role)
+    const above = roles.filter((r): r is string => !!r && roleRank(r) > mine)
+    if (above.length > 0) throw new ForbiddenException(`You cannot ${what} ${above[0]}: it is above your own role`)
+  }
+
   async addMember(
     workspaceId: string,
     email: string,
     role: string = 'member',
     actor?: AuditActor,
   ) {
+    // Only a role a workspace gives — never the platform's own, never a string
+    // stored as whatever arrived — and none above the adder's own.
+    if (!isAssignableWorkspaceRole(role)) {
+      throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_WORKSPACE_ROLES.join(', ')}`)
+    }
+    await this.assertWithinRank(workspaceId, actor, [role], 'add a member as')
     const [user] = await this.db.select().from(users).where(eq(users.email, email))
     if (!user) throw new BadRequestException(`No user with email ${email}`)
     const existing = await this.getMembership(workspaceId, user.id)
@@ -858,6 +883,9 @@ export class WorkspacesService {
       throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_WORKSPACE_ROLES.join(', ')}`)
     }
     const previous = await this.getMembership(workspaceId, userId)
+    // Neither the role they hold nor the one given may be above the changer's:
+    // nobody makes somebody an admin, or unmakes one, from below.
+    await this.assertWithinRank(workspaceId, actor, [role, previous?.role ?? null], 'change a member to or from')
     // Never let the last workspace admin be demoted out of the workspace.
     if (previous?.role === 'workspace_admin' && role !== 'workspace_admin') {
       const admins = await this.db
@@ -918,6 +946,7 @@ export class WorkspacesService {
 
   async removeMember(workspaceId: string, userId: string, actor?: AuditActor) {
     const member = await this.getMembership(workspaceId, userId)
+    await this.assertWithinRank(workspaceId, actor, [member?.role ?? null], 'remove a member who is')
     if (member?.role === 'workspace_admin') {
       const admins = await this.db
         .select({ userId: workspaceMembers.userId })

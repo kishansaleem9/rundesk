@@ -9,10 +9,10 @@ import {
   Post,
   UseGuards,
 } from '@nestjs/common'
+import { PermissionsGuard, RequirePermissions } from './permissions.guard'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CustomRolesService } from './custom-roles.service'
 
@@ -71,34 +71,42 @@ export class CustomRolesController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  // Every write here asks `roles.manage`, and within the actor's own permissions (the service):
+  // `WorkspaceAdminGuard` admitted managers, who made and took roles holding
+  // every key (`managers-grant-themselves-admin`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('roles.manage')
   create(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { name: string; description?: string | null; color?: string; permissions?: string[] },
     @CurrentUser() user: any,
   ) {
-    return this.roles.create(workspaceId, body, { id: user.id, email: user.email })
+    return this.roles.create(workspaceId, body, { id: user.id, email: user.email, role: user.role })
   }
 
   @Patch(':roleId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `roles.manage`, and only within the actor's own permissions (the service).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('roles.manage')
   update(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('roleId', new ParseUUIDPipe()) roleId: string,
     @Body() body: { name?: string; description?: string | null; color?: string; permissions?: string[] },
     @CurrentUser() user: any,
   ) {
-    return this.roles.update(workspaceId, roleId, body, { id: user.id, email: user.email })
+    return this.roles.update(workspaceId, roleId, body, { id: user.id, email: user.email, role: user.role })
   }
 
   @Delete(':roleId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `roles.manage`, and only within the actor's own permissions (the service).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('roles.manage')
   async remove(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('roleId', new ParseUUIDPipe()) roleId: string,
     @CurrentUser() user: any,
   ) {
-    await this.roles.remove(workspaceId, roleId, { id: user.id, email: user.email })
+    await this.roles.remove(workspaceId, roleId, { id: user.id, email: user.email, role: user.role })
     return { ok: true }
   }
 }
@@ -125,26 +133,30 @@ export class MemberRolesController {
   }
 
   @Post(':roleId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `roles.manage`, and only within the actor's own permissions (the service).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('roles.manage')
   async assign(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('memberId', new ParseUUIDPipe()) memberId: string,
     @Param('roleId', new ParseUUIDPipe()) roleId: string,
     @CurrentUser() user: any,
   ) {
-    await this.roles.assign(workspaceId, memberId, roleId, { id: user.id, email: user.email })
+    await this.roles.assign(workspaceId, memberId, roleId, { id: user.id, email: user.email, role: user.role })
     return { ok: true }
   }
 
   @Delete(':roleId')
-  @UseGuards(WorkspaceAdminGuard)
+  // `roles.manage`, and only within the actor's own permissions (the service).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('roles.manage')
   async unassign(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('memberId', new ParseUUIDPipe()) memberId: string,
     @Param('roleId', new ParseUUIDPipe()) roleId: string,
     @CurrentUser() user: any,
   ) {
-    await this.roles.unassign(workspaceId, memberId, roleId, { id: user.id, email: user.email })
+    await this.roles.unassign(workspaceId, memberId, roleId, { id: user.id, email: user.email, role: user.role })
     return { ok: true }
   }
 }

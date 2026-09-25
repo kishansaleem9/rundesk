@@ -73,7 +73,10 @@ function buildSecurity() {
   return { logAuditEvent: mock.fn(async () => undefined) } as any
 }
 
-const ACTOR = { id: '11111111-1111-1111-1111-111111111111', email: 'admin@example.com' }
+// A platform admin, who holds every key: these tests are about validation, and
+// the rule that nobody gives what they do not hold (`managers-grant-themselves-admin`)
+// is measured end to end by `member-role-grants`.
+const ACTOR = { id: '11111111-1111-1111-1111-111111111111', email: 'admin@example.com', role: 'super_admin' }
 const WORKSPACE_ID = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
 
 describe('permission-catalog', () => {

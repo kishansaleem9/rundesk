@@ -535,7 +535,7 @@ Now the sheet makes one pass per burst, 150 ms after its first event. That pass 
 
 The answer is the same either way, so there is no before and after to measure at the route. `gantt-controls` gained a check (30 now) that the timeline carries only what it can draw: this run's task with neither date is in neither read. `gantt-controls-18`, compiled, takes the filter out of the SQL, with none after it, and must redden that check.
 - After: 30/30, on lanes 5 and 4.
-- *Break run* (lane 1, on `8ba0bac`): the whole set of 19, with `gantt-controls-18`, reddened the check each claims.
+- *Break run* (lane 1, on `8ba0bac`): the whole set of 19, with `gantt-controls-18`, reddened the check each claims. `gantt-controls-18`'s run then stops at 3 of 30, and the patch now declares it (`Expect: SHORT`). The undated task it lets through reaches the page, whose bars no longer narrow to one project, so the suite's own setup for the page sections throws. The page drawing only dated work is what the filter protects.
 - Regression on lanes 2 to 5, the four suites that read the timeline or open its page: 4/4.
 
 ### `product-siblings/timesheet-mine-includes-everyone` — **closed**
@@ -2268,6 +2268,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `settings-role-grants`, 25 September, the sweep for `managers-grant-themselves-admin`: the integrations grant's tabs read as none before its grants had loaded. It passed alone (6/6).
 - `panel-collapse` and `role-permissions-web`, 25 September, the sweep for `role-lists-copied-per-module`. `panel-collapse` listed no spaces to begin with (0), and `role-permissions-web` did not offer Save as template after the grant. Each passed alone (56/56, 5/5).
 - `ai-activity-filters` and `a61-meeting-record` again, 25 September, the sweep for `ai-task-paths-skip-the-read-rule`, with the same failures on other lanes (4 and 2). Each passed alone again (34/34, 25/25). The same two in two sweeps running is not chance: both read fixed waits.
 - `ai-activity-filters` and `a61-meeting-record`, 25 September, the sweep for `guest-guard-reads-the-account-role`. `ai-activity-filters` listed no row under its Failed filter on the page, though the same filter's API read had found the row. `a61-meeting-record` kept offering Save after a save, and lost the recording's address. Each passed alone (34/34, 25/25). `a61-meeting-record` is here for the third time.
@@ -2937,13 +2938,70 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Measured: `tb-30` ran all 45 checks (2 red, its own), `tb-37` 45 (4), `sdp-7` 36 (1) — none short (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `found-23-sep/role-editor-offers-unenforced-permissions` — open, large (found reading the custom-role item)
+### `found-23-sep/role-editor-offers-unenforced-permissions` — partly-fixed, large (found reading the custom-role item)
 
 **Seventeen of the 26 permissions the role editor offers are checked nowhere: granting one changes nothing**
 
 *Evidence:* `permission-catalog.ts` lists 26 permissions and `roles-tab.tsx:154` offers every one of them from `/roles/catalog`. The server checks a permission in two ways — `@RequirePermissions` through `PermissionsGuard`, and `CustomRolesService.hasPermission`, which nothing outside `custom-roles` calls — and 9 keys appear in either (space.create, project.create, template.manage, webhook.manage, integrations.manage, integrations.access_requests.manage, sso.manage, workspace.billing, report.view.basic; two of them also in services). The other 17 appear nowhere outside the catalog: workspace.manage, workspace.delete, workspace.audit.view, members.invite, members.remove, members.role.change, roles.manage, security.policy.manage, space.delete, project.delete, list.delete, task.delete.any, doc.publish, doc.delete.any, automation.manage, report.export, time.approval.manage. What actually gates those actions is a role: 90 uses of `WorkspaceAdminGuard`/`@Roles`, and inline lists such as `invitations.controller.ts:40` (`['workspace_admin', 'manager']` for members.invite), `time-entries.service.ts:163` (approvals), `tasks.service.ts:658,764,2141,5114`, and `spaces.service.ts:520` (`adminOnlyDelete: true`, "space.delete not in MANAGER_DELTA"). So a custom role granting a member `space.delete`, `members.invite` or `time.approval.manage` is saved, shown and ignored — the facade class, in the permission system itself. Under-granting only: no role can gain more than its base role this way.
 
 *To close:* make each permission the real gate for the actions it names — replace the role test at each site with `hasPermission(workspace, user, key)`, which by construction gives every base role exactly what it has today (the cascade) and honours custom grants; or take the key out of the editor until it is. Research ClickUp's custom-role permission list for the names and scope. A suite per group, each check paired: the base role unchanged, a member with the grant allowed, without it refused.
+
+*Partly fixed, 25 September: the members group.* Mapping the gates showed something the evidence above missed. `WorkspaceAdminGuard` admits managers (it asks `isManagerRole`), so the "role test" in front of most of these keys let managers through the API, while the web offered the controls to admins only. On the members group that was a privilege escalation, closed as `found-25-sep/managers-grant-themselves-admin` below. `members.invite`, `members.role.change`, `members.remove` and `roles.manage` are the real gates now.
+
+*Still open,* per the map (routes and lines in that item's notes):
+- **`WorkspaceAdminGuard` admits managers to the admin-only keys.** Those keys are `workspace.manage` (settings, logo, domain, restore), `workspace.delete` (archive, the only delete there is), `workspace.audit.view` (the audit log and its export), `security.policy.manage` (security settings and API keys) and `automation.manage`. The catalog, and the web, give each to admins.
+- **`time.approval.manage`** — the three rules disagree:
+  - the catalog gives it to managers;
+  - approve and reject admit managers through the guard;
+  - `canModerateApprovals` answers admins only, which is what the page reads.
+- **`report.export`** — no export route asks it.
+- **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table could not be read here.
+- **The settings page is admin-only for any grant but the integrations and SSO ones** (`use-settings-access`), so a member granted the members keys has them by the API alone.
+
+### `found-25-sep/managers-grant-themselves-admin` — **closed** (security, HIGH; found mapping `role-editor-offers-unenforced-permissions`)
+
+**A manager could make themself a workspace admin, and give themself every permission**
+
+*Measured, lane 5, on `694a2fc`* (the suite below, 0 of 5):
+- A manager changed their own role to workspace admin (200; the row read `workspace_admin`), and a member's to manager.
+- The same manager made a custom role holding `webhook.manage`, `sso.manage`, `roles.manage` and `members.role.change` (201), and assigned the admin's own role to themself (201).
+- The manager removed a member (200).
+- A member was added with the role `super_admin`, the platform's own (201). The role was stored as whatever string arrived.
+- A member granted `roles.manage` and `members.role.change` by the admin could do none of it (403, "Workspace admin or manager role required"). That grant was the facade.
+
+All of it came in through `WorkspaceAdminGuard`, which admits managers, with nothing asked after it.
+
+ClickUp (help centre, "Manage Custom Role permissions", "Intro to user roles", search snippets): only the owner and admins change roles, and by default only the owner makes custom roles, delegating that to custom admins.
+
+*Closed, 25 September:*
+- **Each route asks its catalog key through `PermissionsGuard`.** Adding a member asks `members.invite`, changing a role `members.role.change`, removing a member `members.remove`, and making, editing, deleting, assigning or taking away a custom role `roles.manage`. The catalog's defaults give a manager `members.invite` and an admin all four. A custom grant counts.
+- **Nobody gives a permission they do not hold** (`CustomRolesService.assertMayGive`). A role is written, deleted, assigned or taken away only within the actor's own permissions. Otherwise `roles.manage` would be every key.
+- **Nobody adds, sets or removes above their own role** (`assertWithinRank`, on the one rank table now in `workspace-roles.ts`). A member granted `members.role.change` moves people up to member and no further, and a manager adds no admin.
+- **An added member's role must be one a workspace gives** (400 otherwise). The platform's role is not one.
+- **Admins hold every key** and outrank every assignable role, so they lose nothing. The custom-role unit tests act as a platform admin, since they are about validation.
+
+The new suite `member-role-grants`, 5 checks, read back by SQL:
+- a manager changes nobody's role;
+- a manager makes no custom role and assigns none;
+- the delegate gives only what they hold, and up to their own rank;
+- a manager removes nobody;
+- the roles a member may be added under.
+
+Results:
+- Before (lane 5, `694a2fc`): 0 of 5.
+- After: 5/5, on lanes 5 and 4.
+
+Patches `mrg-1..6`, each compiled:
+- the role change asks the admin guard again;
+- making a role asks a key every member holds;
+- a role may give what its maker does not hold;
+- the rank is asked of nobody;
+- removing asks the invite key;
+- any role string is added.
+
+*Break run:* queued on lane 1 after the commit (`plan-mrg`).
+
+Regression on lanes 2 to 5: the 23 suites that add, change or remove members, make or grant custom roles, or invite, and the new suite. Result: 24/24. `settings-role-grants` read its tabs before the grants had loaded, under the sweep's load, and passed alone (6/6). API unit tests 1652/1652. In CI (199).
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

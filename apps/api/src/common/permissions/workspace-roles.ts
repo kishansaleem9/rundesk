@@ -38,3 +38,24 @@ export function isAdminRole(role: string | null | undefined): boolean {
 export function isAssignableWorkspaceRole(role: unknown): role is AssignableWorkspaceRole {
   return inSet(ASSIGNABLE_WORKSPACE_ROLES, role)
 }
+
+/**
+ * How the base roles stand to one another. A grant never reaches past its
+ * giver's own rank: nobody makes, adds or removes somebody above themself
+ * (`managers-grant-themselves-admin`). The permission catalog's cascade is
+ * built on the same order.
+ */
+export const WORKSPACE_ROLE_RANK: Readonly<Record<'guest' | 'member' | 'manager' | 'workspace_admin' | 'super_admin', number>> = {
+  guest: 0,
+  member: 1,
+  manager: 2,
+  workspace_admin: 3,
+  super_admin: 4,
+}
+
+/** A role's rank; -1 for anything that is not a workspace role. */
+export function roleRank(role: string | null | undefined): number {
+  return role && Object.prototype.hasOwnProperty.call(WORKSPACE_ROLE_RANK, role)
+    ? WORKSPACE_ROLE_RANK[role as keyof typeof WORKSPACE_ROLE_RANK]
+    : -1
+}

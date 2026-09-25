@@ -1,4 +1,4 @@
-import { BadRequestException, ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, ConflictException, ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { and, asc, desc, eq, inArray } from 'drizzle-orm'
 import {
   customRoles,
@@ -9,9 +9,11 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import { roleRank } from '../../common/permissions/workspace-roles'
 import {
   effectiveCascade,
   PERMISSION_CATALOG,
+  PERMISSION_KEYS,
   isKnownPermission,
   type LegacyWorkspaceRole,
   type Permission,
@@ -118,12 +120,13 @@ export class CustomRolesService {
   async create(
     workspaceId: string,
     input: { name: string; description?: string | null; color?: string; permissions?: string[] },
-    actor: { id: string; email?: string },
+    actor: { id: string; email?: string; role?: string | null },
   ): Promise<RoleView> {
     const name = this.normaliseName(input.name)
     const description = this.normaliseDescription(input.description ?? null)
     const color = this.normaliseColor(input.color)
     const permissions = this.normalisePermissions(input.permissions ?? [])
+    await this.assertMayGive(workspaceId, actor, permissions)
 
     await this.assertNameAvailable(workspaceId, name)
 
@@ -172,9 +175,15 @@ export class CustomRolesService {
     workspaceId: string,
     roleId: string,
     patch: { name?: string; description?: string | null; color?: string; permissions?: string[] },
-    actor: { id: string; email?: string },
+    actor: { id: string; email?: string; role?: string | null },
   ): Promise<RoleView> {
     const existing = await this.requireRole(workspaceId, roleId)
+    // What the role gives now, and what it would: nobody edits a role past
+    // the permissions they hold themselves, either way.
+    await this.assertMayGive(workspaceId, actor, [
+      ...(await this.permissionsOfRole(roleId)),
+      ...(patch.permissions !== undefined ? this.normalisePermissions(patch.permissions) : []),
+    ])
 
     const next: Partial<typeof customRoles.$inferInsert> = {}
     if (patch.name !== undefined) {
@@ -216,9 +225,10 @@ export class CustomRolesService {
     return this.getById(workspaceId, roleId)
   }
 
-  async remove(workspaceId: string, roleId: string, actor: { id: string; email?: string }) {
+  async remove(workspaceId: string, roleId: string, actor: { id: string; email?: string; role?: string | null }) {
     const existing = await this.requireRole(workspaceId, roleId)
     if (existing.isLocked) throw new BadRequestException('Locked roles cannot be deleted')
+    await this.assertMayGive(workspaceId, actor, await this.permissionsOfRole(roleId))
 
     await this.db.delete(customRoles).where(eq(customRoles.id, roleId))
     this.invalidateAfterRoleChange()
@@ -280,10 +290,11 @@ export class CustomRolesService {
     workspaceId: string,
     workspaceMemberId: string,
     roleId: string,
-    actor: { id: string; email?: string },
+    actor: { id: string; email?: string; role?: string | null },
   ) {
     const role = await this.requireRole(workspaceId, roleId)
     await this.requireMember(workspaceId, workspaceMemberId)
+    await this.assertMayGive(workspaceId, actor, await this.permissionsOfRole(roleId))
 
     try {
       await this.db.insert(workspaceMemberCustomRoles).values({
@@ -313,9 +324,10 @@ export class CustomRolesService {
     workspaceId: string,
     workspaceMemberId: string,
     roleId: string,
-    actor: { id: string; email?: string },
+    actor: { id: string; email?: string; role?: string | null },
   ) {
     const role = await this.requireRole(workspaceId, roleId)
+    await this.assertMayGive(workspaceId, actor, await this.permissionsOfRole(roleId))
     await this.db
       .delete(workspaceMemberCustomRoles)
       .where(
@@ -404,6 +416,52 @@ export class CustomRolesService {
   }
 
   // ----------------------------------------------------------- helpers
+
+  /**
+   * What `actor` holds in the workspace: every key of their base role's
+   * defaults and their custom roles, and their base role's rank. A platform
+   * admin holds every key and outranks every workspace role. Null when they
+   * are not a member.
+   */
+  async grantsOf(
+    workspaceId: string,
+    actor: { id: string; role?: string | null },
+  ): Promise<{ permissions: ReadonlySet<string>; rank: number } | null> {
+    if (actor.role === 'super_admin') return { permissions: PERMISSION_KEYS, rank: roleRank('super_admin') }
+    const [membership] = await this.db
+      .select({ id: workspaceMembers.id, role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
+      .limit(1)
+    if (!membership) return null
+    const resolved = await this.resolveForMember(membership.id, membership.role as LegacyRole)
+    return { permissions: new Set(resolved.permissions), rank: roleRank(membership.role) }
+  }
+
+  /**
+   * NOBODY GIVES A PERMISSION THEY DO NOT HOLD (`managers-grant-themselves-admin`).
+   *
+   * A role is made, edited, deleted, assigned or taken away only within the
+   * actor's own permissions: otherwise `roles.manage` is every other key, since
+   * its holder writes a role with all of them and takes it. An admin holds
+   * every key by default, so this refuses them nothing.
+   */
+  async assertMayGive(workspaceId: string, actor: { id: string; role?: string | null }, permissions: readonly string[]): Promise<void> {
+    const grants = await this.grantsOf(workspaceId, actor)
+    if (!grants) throw new ForbiddenException('Not a workspace member')
+    const beyond = [...new Set(permissions)].filter((p) => !grants.permissions.has(p))
+    if (beyond.length > 0) {
+      throw new ForbiddenException(`You cannot give or take away a permission you do not hold: ${beyond.join(', ')}`)
+    }
+  }
+
+  private async permissionsOfRole(roleId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ permission: customRolePermissions.permission })
+      .from(customRolePermissions)
+      .where(eq(customRolePermissions.roleId, roleId))
+    return rows.map((r) => r.permission)
+  }
 
   private async requireRole(workspaceId: string, roleId: string) {
     const [role] = await this.db
