@@ -1205,7 +1205,9 @@ Results:
 - `guest-task-making`, on `2425c08`: 3 of 3 reddened.
 - `task-creation-access`, on `67a4f60`: `tcm-2..6` reddened, the re-aimed `tcm-6` among them.
 - `tcm-1` did not build. It restored the guest-only check this change removed as dead. Re-aimed so that `createTask` asks nothing, it compiles, and it is queued again.
-- `guest-create-menu` was cut off at its tenth patch by a container restart, and `meeting-access` had not started. Both are queued again.
+- `guest-create-menu`, run again on `a3361d7`: `gcm-1..11` all reddened. The run caught `gcm-11` claiming check 6 as it read before this change. A five-word fragment of the old sentence still matched, so both gates counted it verified, but the check that actually failed was the restated one. The claim was re-aimed (`claims-confirmed-by-a-fragment`).
+- `meeting-access`, on `a3361d7`: `mtg-1`, `mtg-3` and `mtg-4` reddened.
+- The re-aimed `tcm-1`, on `14c789f`: reddened.
 
 Regression on lanes 2 to 5: the 18 suites that have guests make or be refused things, or make tasks through the gate, and the new suite. Result: 19/19. Under the sweep's load, `video1-acceptance` did not get its bookmark back after a reload, as recorded before, and passed alone (18/18). In CI (193).
 
@@ -1357,7 +1359,7 @@ Patches `ttr-1..8`, each compiled:
 
 `wra-8` was re-aimed onto the AI controller's guard line without the retired guard.
 
-*Break run:* queued on lane 1 after the commit (`plan-ttr`).
+*Break run* (lane 1, on `14c789f`): `ttr-1..7` all reddened the check they claim, and `ttr-8` reddens its unit test. The re-aimed `wra-8` reddened `workspace-read-access`.
 
 Regression on lanes 2 to 5: the 25 suites that use the AI routes, the knowledge base or time entries, and the new suite. Result: 26/26.
 - Under the sweep's load, two suites failed. `ai-activity-filters` found no row under its Failed filter, and `a61-meeting-record` lost a save and a recording.
@@ -1415,7 +1417,7 @@ Patches `atr-1..6`, each compiled:
 - the workload counts every task (it can redden only where a model answers, and says so);
 - the assignee suggestion asks the role alone.
 
-*Break run:* queued on lane 1 after the commit (`plan-atr`).
+*Break run* (lane 1, on `14c789f`): `atr-1..6` all reddened the check they claim. `atr-1..4` and `atr-6` ran without a model. `atr-5` ran with one, its set's model switched on by the runner because the patch declares it needs one.
 
 Regression on lanes 2 to 5: the 24 suites that use the AI routes, and the new suite. Result: 25/25.
 - Under the sweep's load, `ai-activity-filters` and `a61-meeting-record` failed as in the sweep before, with the same failures.
@@ -2417,6 +2419,18 @@ In CI (198).
 - Wrap each long-running lane script's body in a function called on its last line, so bash parses the whole script before running any of it: `wt-break.sh`, `sweep.sh`, `verify.sh`, the fleet scripts and the set runner.
 - Add a preflight check that they stay shaped that way.
 - Until then, change a script that may be running by writing a new file over it, never in place.
+
+### `found-25-sep/claims-confirmed-by-a-fragment` — open, test tooling, medium (found reading `gcm-11`'s run)
+
+**A claim whose check has changed still reads as verified, and as reddened, on a five-word fragment**
+
+*Measured, 25 September:* `gcm-11` claimed `guest-create-menu`'s check 6 as it read before `guests-with-full-edit-make-no-tasks` restated it. The old sentence is in no suite. Yet `check-break-claims` counted the claim verified, and the reddened checker would count the run a reddening: both ask `findsClaim` (`scripts/lib/claim-match.mjs`), which accepts any five consecutive words of a claim found in the text. "the API makes the guest what the menus offer" is eight. The run had reddened the restated check, which is the patch's intent, so the verdict was right and the claim was stale. Only an exact reading of the report showed it. The matcher's own comment names this limit ("a fragment long enough not to appear by accident is not the same as a fragment that pins the meaning").
+
+An exact scan of every suite's latest report counted 305 of 990 claims not found word for word among their own section's FAIL lines. It does not normalise as `norm` does (quotes, dashes, interpolated values), so that number is an upper bound, not a count of stale claims.
+
+*To close:*
+- For a claim with no interpolation in its check, require the whole normalised sentence: in `check-break-claims`, and in the reddened checker against FAIL lines. Keep the fragment rule only where the suite's sentence is a template.
+- Then re-aim what that finds.
 
 ### `found-25-sep/ledger-ids-cited-unchecked` — open, test tooling, small (found closing `personal-calendar-connect-needs-integrations-manage`)
 
