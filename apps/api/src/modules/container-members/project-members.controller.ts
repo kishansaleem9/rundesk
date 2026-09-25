@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, Get, Param, Patch, Post, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
@@ -15,6 +15,12 @@ export class ProjectMembersController {
   @Get('members')
   list(@Param('projectId') projectId: string) {
     return this.members.listProjectMembers(projectId)
+  }
+
+  /** What this person may do on the project's page, as each route would answer (`?lists=` the lists it shows). */
+  @Get('capabilities')
+  capabilities(@Param('projectId') projectId: string, @CurrentUser() user: any, @Query('lists') listsParam?: string) {
+    return this.members.projectCapabilities(projectId, user.id, (listsParam ?? '').split(',').filter(Boolean))
   }
 
   @Post('members')

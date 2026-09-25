@@ -56,6 +56,7 @@ export function ContainerMembersSheet({
   onOpenChange,
   containerName,
   initialVisibility,
+  canManage = true,
 }: {
   kind: ContainerKind
   containerId: string
@@ -65,6 +66,12 @@ export function ContainerMembersSheet({
   containerName?: string
   /** space: 'public' | 'private'; project: 'public' | 'private' | null (inherit) */
   initialVisibility?: string | null
+  /**
+   * Whether this person may add, re-role or remove members and change the
+   * visibility — the route's own answer, from the caller. Without it the sheet
+   * lists who has access and offers none of the changes each route refuses.
+   */
+  canManage?: boolean
 }) {
   const { t, tCount } = useTranslation()
   const kindWord = t(kind === 'space' ? 'containerMembers.space' : 'containerMembers.project')
@@ -80,7 +87,8 @@ export function ContainerMembersSheet({
   const wsMembersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
     queryFn: () => api<WsMember[]>(`/workspaces/${workspaceId}/members`),
-    enabled: open,
+    // The candidates to add; nobody who may not add is shown the form.
+    enabled: open && canManage,
   })
 
   const [visibility, setVisibility] = useState<string | null>(
@@ -186,13 +194,13 @@ export function ContainerMembersSheet({
             {t('containerMembers.visibility')}
           </p>
           <div className="flex flex-wrap gap-1.5">
-            {visOptions.map((opt) => {
+            {visOptions.filter((opt) => canManage || visibility === opt.value).map((opt) => {
               const active = visibility === opt.value
               const Icon = opt.icon
               return (
                 <button
                   key={String(opt.value)}
-                  disabled={busy || active}
+                  disabled={busy || active || !canManage}
                   onClick={() => changeVisibility(opt.value)}
                   className={cn(
                     'flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] transition-colors',
@@ -217,44 +225,46 @@ export function ContainerMembersSheet({
         </div>
 
         {/* Add member */}
-        <div className="mb-6">
-          <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
-            {t('containerMembers.addMember')}
-          </p>
-          <div className="flex items-center gap-2">
-            <select
-              value={addUserId}
-              onChange={(e) => setAddUserId(e.target.value)}
-              className="h-9 flex-1 min-w-0 rounded-md border border-border/80 bg-background px-2 text-[13px]"
-            >
-              <option value="">{t('containerMembers.selectPerson')}</option>
-              {candidates.map((c) => (
-                <option key={c.userId} value={c.userId}>
-                  {c.displayName || c.email}
-                </option>
-              ))}
-            </select>
-            <select
-              value={addRole}
-              onChange={(e) => setAddRole(e.target.value as ContainerRole)}
-              className="h-9 rounded-md border border-border/80 bg-background px-2 text-[13px]"
-            >
-              {CONTAINER_ROLES.map((r) => (
-                <option key={r} value={r}>
-                  {t(ROLE_LABEL_KEYS[r])}
-                </option>
-              ))}
-            </select>
-            <Button size="sm" onClick={addMember} disabled={!addUserId || busy}>
-              <UserPlus className="h-3.5 w-3.5" />
-            </Button>
-          </div>
-          {wsMembersQuery.data && candidates.length === 0 && (
-            <p className="mt-1.5 text-[11px] text-muted-foreground">
-              {t('containerMembers.allMembers')}
+        {canManage && (
+          <div className="mb-6">
+            <p className="text-[12px] font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+              {t('containerMembers.addMember')}
             </p>
-          )}
-        </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={addUserId}
+                onChange={(e) => setAddUserId(e.target.value)}
+                className="h-9 flex-1 min-w-0 rounded-md border border-border/80 bg-background px-2 text-[13px]"
+              >
+                <option value="">{t('containerMembers.selectPerson')}</option>
+                {candidates.map((c) => (
+                  <option key={c.userId} value={c.userId}>
+                    {c.displayName || c.email}
+                  </option>
+                ))}
+              </select>
+              <select
+                value={addRole}
+                onChange={(e) => setAddRole(e.target.value as ContainerRole)}
+                className="h-9 rounded-md border border-border/80 bg-background px-2 text-[13px]"
+              >
+                {CONTAINER_ROLES.map((r) => (
+                  <option key={r} value={r}>
+                    {t(ROLE_LABEL_KEYS[r])}
+                  </option>
+                ))}
+              </select>
+              <Button size="sm" onClick={addMember} disabled={!addUserId || busy}>
+                <UserPlus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+            {wsMembersQuery.data && candidates.length === 0 && (
+              <p className="mt-1.5 text-[11px] text-muted-foreground">
+                {t('containerMembers.allMembers')}
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Member list */}
         <div>
@@ -282,26 +292,34 @@ export function ContainerMembersSheet({
                       <p className="truncate text-[11px] text-muted-foreground">{m.email}</p>
                     )}
                   </div>
-                  <select
-                    value={m.role}
-                    disabled={busy}
-                    onChange={(e) => changeRole(m.userId, e.target.value as ContainerRole)}
-                    className="h-8 rounded-md border border-border/80 bg-background px-1.5 text-[12px]"
-                  >
-                    {CONTAINER_ROLES.map((r) => (
-                      <option key={r} value={r}>
-                        {t(ROLE_LABEL_KEYS[r])}
-                      </option>
-                    ))}
-                  </select>
-                  <button
-                    onClick={() => removeMember(m.userId)}
-                    disabled={busy}
-                    aria-label={t('containerMembers.removeMember')}
-                    className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
-                  >
-                    <Trash2 className="h-3.5 w-3.5" />
-                  </button>
+                  {canManage ? (
+                    <>
+                      <select
+                        value={m.role}
+                        disabled={busy}
+                        onChange={(e) => changeRole(m.userId, e.target.value as ContainerRole)}
+                        className="h-8 rounded-md border border-border/80 bg-background px-1.5 text-[12px]"
+                      >
+                        {CONTAINER_ROLES.map((r) => (
+                          <option key={r} value={r}>
+                            {t(ROLE_LABEL_KEYS[r])}
+                          </option>
+                        ))}
+                      </select>
+                      <button
+                        onClick={() => removeMember(m.userId)}
+                        disabled={busy}
+                        aria-label={t('containerMembers.removeMember')}
+                        className="p-1.5 rounded-md text-muted-foreground hover:text-red-500 hover:bg-red-500/10"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </>
+                  ) : (
+                    <span className="text-[12px] text-muted-foreground">
+                      {CONTAINER_ROLES.includes(m.role as ContainerRole) ? t(ROLE_LABEL_KEYS[m.role as ContainerRole]) : m.role}
+                    </span>
+                  )}
                 </li>
               ))}
             </ul>

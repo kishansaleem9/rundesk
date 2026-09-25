@@ -33,6 +33,15 @@ import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { useCreatable } from '../hooks/use-creatable'
 import { CREATE_TYPES } from '../lib/create-types'
 
+type ProjectCapabilities = {
+  edit: boolean
+  archive: boolean
+  members: boolean
+  statuses: boolean
+  suggest: boolean
+  lists: Record<string, { rename: boolean; delete: boolean }>
+}
+
 type List = {
   id: string
   name: string
@@ -135,6 +144,21 @@ function ProjectHome() {
     queryFn: () => api<List[]>(`/lists/project/${projectId}`),
   })
 
+  /*
+   * WHAT THIS PERSON MAY DO HERE, as each control's own route would answer
+   * (`GET /projects/:id/capabilities`, with the lists this page shows). The page
+   * drew Statuses, Suggest tasks, Edit, Archive, each list's Rename and Delete,
+   * and the members' changes for anybody who could open it, and the route
+   * behind each refused a guest passing through or a member who did not make
+   * the project. Until it has answered, nothing that changes the project is
+   * offered on a guess.
+   */
+  const listIds = lists.map((l) => l.id).sort().join(',')
+  const { data: caps } = useQuery({
+    queryKey: ['project-capabilities', projectId, listIds],
+    queryFn: () => api<ProjectCapabilities>(`/projects/${projectId}/capabilities?lists=${encodeURIComponent(listIds)}`),
+  })
+
   const reorderLists = useMutation({
     mutationFn: (orderedIds: string[]) =>
       api(`/lists/project/${projectId}/reorder`, { method: 'POST', body: { orderedIds } }),
@@ -189,18 +213,22 @@ function ProjectHome() {
       description={project?.description}
       headerAction={
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
-            <CircleDot className="h-3.5 w-3.5 mr-1.5" />
-            {t('projectShell.statuses')}
-          </Button>
+          {caps?.statuses && (
+            <Button size="sm" variant="outline" onClick={() => setStatusesOpen(true)}>
+              <CircleDot className="h-3.5 w-3.5 mr-1.5" />
+              {t('projectShell.statuses')}
+            </Button>
+          )}
           <Button size="sm" variant="outline" onClick={() => setMembersOpen(true)}>
             <Users className="h-3.5 w-3.5 mr-1.5" />
             {t('projectShell.members')}
           </Button>
-          <Button size="sm" variant="outline" onClick={() => setShowSuggest((v) => !v)}>
-            <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-            {t('projectShell.suggestTasks')}
-          </Button>
+          {caps?.suggest && (
+            <Button size="sm" variant="outline" onClick={() => setShowSuggest((v) => !v)}>
+              <Sparkles className="h-3.5 w-3.5 mr-1.5" />
+              {t('projectShell.suggestTasks')}
+            </Button>
+          )}
           {mayAddList && (
             <Button
               size="sm"
@@ -211,36 +239,42 @@ function ProjectHome() {
               {showCreateList ? t('common.cancel') : t('projectShell.addList')}
             </Button>
           )}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button
-                size="sm"
-                variant="outline"
-                className="px-2"
-                aria-label={t('nav.actionsFor', { name: project?.name ?? '' })}
-              >
-                <MoreHorizontal className="h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => setEditOpen(true)}>
-                <Pencil className="h-3.5 w-3.5" />
-                {t('project.editAction')}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                className="text-destructive focus:text-destructive"
-                onClick={() => {
-                  if (window.confirm(t('project.archiveConfirm', { name: project?.name ?? '' }))) {
-                    archiveProject.mutate()
-                  }
-                }}
-              >
-                <Archive className="h-3.5 w-3.5" />
-                {t('project.archiveAction')}
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          {(caps?.edit || caps?.archive) && (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="px-2"
+                  aria-label={t('nav.actionsFor', { name: project?.name ?? '' })}
+                >
+                  <MoreHorizontal className="h-4 w-4" />
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                {caps.edit && (
+                  <DropdownMenuItem onClick={() => setEditOpen(true)}>
+                    <Pencil className="h-3.5 w-3.5" />
+                    {t('project.editAction')}
+                  </DropdownMenuItem>
+                )}
+                {caps.edit && caps.archive && <DropdownMenuSeparator />}
+                {caps.archive && (
+                  <DropdownMenuItem
+                    className="text-destructive focus:text-destructive"
+                    onClick={() => {
+                      if (window.confirm(t('project.archiveConfirm', { name: project?.name ?? '' }))) {
+                        archiveProject.mutate()
+                      }
+                    }}
+                  >
+                    <Archive className="h-3.5 w-3.5" />
+                    {t('project.archiveAction')}
+                  </DropdownMenuItem>
+                )}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
         </div>
       }
     >
@@ -332,39 +366,46 @@ function ProjectHome() {
                   projectId={projectId}
                 />
                 {/* Rename / delete overlay — sibling of the card Link so it never
-                    triggers navigation (Plan §2/§13.4). */}
-                <div className="absolute right-2 top-2 z-10">
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <button
-                        type="button"
-                        onClick={(e) => e.stopPropagation()}
-                        className="rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground opacity-0 backdrop-blur transition-opacity hover:bg-accent/20 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
-                        aria-label={t('nav.actionsFor', { name: list.name })}
-                      >
-                        <MoreHorizontal className="h-3.5 w-3.5" />
-                      </button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem onClick={() => setRenameList({ id: list.id, name: list.name })}>
-                        <Pencil className="h-3.5 w-3.5" />
-                        {t('container.rename')}
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        className="text-destructive focus:text-destructive"
-                        onClick={() => {
-                          if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
-                            deleteListMutation.mutate(list.id)
-                          }
-                        }}
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        {t('list.deleteAction')}
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
+                    triggers navigation (Plan §2/§13.4). Each offered only where
+                    the list's own route would take it (`caps.lists`). */}
+                {(caps?.lists[list.id]?.rename || caps?.lists[list.id]?.delete) && (
+                  <div className="absolute right-2 top-2 z-10">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <button
+                          type="button"
+                          onClick={(e) => e.stopPropagation()}
+                          className="rounded-md border border-border/60 bg-card/80 p-1 text-muted-foreground opacity-0 backdrop-blur transition-opacity hover:bg-accent/20 hover:text-foreground focus:opacity-100 group-hover:opacity-100 data-[state=open]:opacity-100"
+                          aria-label={t('nav.actionsFor', { name: list.name })}
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-44">
+                        {caps.lists[list.id].rename && (
+                          <DropdownMenuItem onClick={() => setRenameList({ id: list.id, name: list.name })}>
+                            <Pencil className="h-3.5 w-3.5" />
+                            {t('container.rename')}
+                          </DropdownMenuItem>
+                        )}
+                        {caps.lists[list.id].rename && caps.lists[list.id].delete && <DropdownMenuSeparator />}
+                        {caps.lists[list.id].delete && (
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => {
+                              if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
+                                deleteListMutation.mutate(list.id)
+                              }
+                            }}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            {t('list.deleteAction')}
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -391,6 +432,7 @@ function ProjectHome() {
         initialVisibility={project?.visibility ?? null}
         open={membersOpen}
         onOpenChange={setMembersOpen}
+        canManage={caps?.members === true}
       />
 
       <ScopedStatusesManager

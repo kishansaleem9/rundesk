@@ -5,10 +5,13 @@ import {
   ForbiddenException,
   BadRequestException,
 } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
-import { spaceMembers, projectMembers, spaces, projects, workspaceMembers, users } from '@rundesk/db'
+import { and, eq, inArray } from 'drizzle-orm'
+import { spaceMembers, projectMembers, spaces, projects, lists, workspaceMembers, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { assertMayShapeStatuses } from '../../common/permissions/status-access'
+import { isUuid } from '../../common/validation/uuid'
 
 type ContainerRole = 'admin' | 'edit' | 'comment' | 'view'
 const CONTAINER_ROLES: ContainerRole[] = ['admin', 'edit', 'comment', 'view']
@@ -143,6 +146,69 @@ export class ContainerMembersService {
     if (sm?.role === 'admin') return
     if (await this.isWorkspaceManager(ctx.workspaceId, actorId)) return
     throw new ForbiddenException('Only a project/space admin or workspace manager can manage this project')
+  }
+
+  /**
+   * WHAT THIS PERSON MAY DO ON A PROJECT'S PAGE, each answered by the rule its
+   * own route asks — so the page offers a control only where it would be
+   * accepted (`found-24-sep/project-page-offers-guests-its-managers-buttons`):
+   *
+   *   - `edit` and `archive`: the project's own manage rule (PUT and DELETE
+   *     `/projects/:id`, `assertCanManageContainer`);
+   *   - `members`: who may add, re-role or remove its members, and change its
+   *     visibility (`assertCanManageProject`);
+   *   - `statuses`: who may shape its statuses (`assertMayShapeStatuses`);
+   *   - `suggest`: anybody but a guest (the AI routes refuse a guest);
+   *   - `lists`: rename and delete for each list the page names (`?lists=`),
+   *     by the list's own manage rule, whose creator is part of the answer.
+   *
+   * A refusal is an answer (false); anything else is not, and is thrown.
+   */
+  async projectCapabilities(projectId: string, actorId: string, listIds: string[]) {
+    const [row] = await this.db
+      .select({ workspaceId: spaces.workspaceId, spaceId: projects.spaceId, createdById: projects.createdById })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(eq(projects.id, projectId))
+      .limit(1)
+    if (!row) throw new NotFoundException('Project not found')
+    const allowed = (check: Promise<unknown>): Promise<boolean> =>
+      check.then(
+        () => true,
+        (e) => {
+          if (e instanceof ForbiddenException || e instanceof NotFoundException) return false
+          throw e
+        },
+      )
+    const manage = (createdById: string | null, kind: 'project' | 'list', action: 'manage' | 'delete') =>
+      assertCanManageContainer(this.db, { workspaceId: row.workspaceId, createdById, actorId, kind, action, spaceId: row.spaceId })
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, row.workspaceId), eq(workspaceMembers.userId, actorId)))
+      .limit(1)
+    const ids = [...new Set(listIds.filter((id) => isUuid(id)))].slice(0, 200)
+    const listRows = ids.length
+      ? await this.db
+          .select({ id: lists.id, createdById: lists.createdById })
+          .from(lists)
+          .where(and(inArray(lists.id, ids), eq(lists.projectId, projectId)))
+      : []
+    const [edit, archive, members, statuses] = await Promise.all([
+      allowed(manage(row.createdById, 'project', 'manage')),
+      allowed(manage(row.createdById, 'project', 'delete')),
+      allowed(this.assertCanManageProject(projectId, actorId)),
+      allowed(assertMayShapeStatuses(this.db, { owner: 'project', ownerId: projectId, actorId })),
+    ])
+    const perList: Record<string, { rename: boolean; delete: boolean }> = {}
+    for (const list of listRows) {
+      const [rename, remove] = await Promise.all([
+        allowed(manage(list.createdById, 'list', 'manage')),
+        allowed(manage(list.createdById, 'list', 'delete')),
+      ])
+      perList[list.id] = { rename, delete: remove }
+    }
+    return { edit, archive, members, statuses, suggest: membership?.role !== 'guest', lists: perList }
   }
 
   async listProjectMembers(projectId: string) {

@@ -96,6 +96,8 @@ The new suite `settings-role-grants`, 6 checks: a plain member and the holders o
 
 `search-sources` gains a check (11): its Connect lands on the App Center, searched for Gmail. 10 of 11 before (it led to `/settings`), 11/11 after.
 
+*Break run, lane 1 (0eea3b9):* `srg-1..18`, 18 of 18 reddened; `search-sources-4`, `-7`, `-8` and `-9`, 4 of 4.
+
 `srg-1..18` and `search-sources-8..9`, one per mechanism, each compiled; `search-sources-7` and `-4` re-aimed at the key. `app-catalogue-11` and `-13` (the tile's action is `asks` now) and `whk-10` and `-13` (the webhooks card is inside its condition) were re-aimed at the new text. Regression on lane 5, 45/45: `settings-role-grants`, `search-sources`, `role-permissions-web`, `guest-create-menu`, `space-wizard`, `sidebar-sections`, `space-create-menu`, `activity-rail`, `addressability-live`, `app-catalogue`, `calendar-accounts`, `command-palette`, `focus-pill`, `folder-dialog`, `integration-error-card`, `panel-collapse`, `permission-guards`, `person-panel`, every planner suite (13), `settings-depth`, `settings-writes`, `stable-images`, `sw-api-cache`, `tab-title-countdown`, `task-cover`, `task-delete`, `team-schedules`, `teams-destination`, `webhook-access`, `video1-fast-items`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
 *Not changed, recorded:*
@@ -1487,13 +1489,28 @@ The new suite `status-write-access`, 4 checks, every refusal read back by SQL be
 
 *To close:* measure a member's menus on a view-only space. Then have `useCreatable` ask every person's writable spaces for the types a space holds (task, list, folder, project, form). ClickUp's own rule for a view-only location is to research first: whether it hides "+" or offers only what the level allows.
 
-### `found-24-sep/project-page-offers-guests-its-managers-buttons` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
+### `found-24-sep/project-page-offers-guests-its-managers-buttons` — **closed** (visible bug, small; found closing `create-menu-offers-guests-what-they-cannot-make`)
 
 **A project's page offers a guest who only passes through Statuses, Members and Suggest tasks**
 
 *Evidence, read not run:* the header draws all three for anyone who can open the page. A guest reaches a project's page when a list in it is shared with them. Each of the three writes to the project or its tasks, and whether the API refuses each is unmeasured.
 
 *To close:* measure what the API answers a guest for each, then offer each only where it is answered.
+
+*Measured, lane 5:* it was wider than the guest. A member who did not make the project was offered Edit project, Archive project, Rename and Delete on the admin's list, and the Members sheet's add, role and remove controls, as was the guest passing through, who was also offered Statuses and Suggest tasks. Each route refused them: renaming the project 403, the admin's list 403, adding a member 403 (the member's own list 200); a status 403 for the guest since `statuses-written-by-readers`; suggestions 403. The first probe had measured nothing on two of these: it used PATCH, and the routes are PUT, and a member role of `member`, which `assertRole` refuses as 400 before any permission is asked.
+
+ClickUp (help centre, search snippets): a view-only person or a guest cannot rename, delete or change a location's settings, and Edit (below Full edit) may not delete one.
+
+*Closed, 25 September:* the page asks the API what this person may do there. `GET /projects/:id/capabilities?lists=…` returns `edit`, `archive`, `members`, `statuses` and `suggest`, and each list's `rename` and `delete`. Each answer comes from the rule its own route asks: the container manage rule for manage and for delete, `assertCanManageProject`, `assertMayShapeStatuses`, and not a guest for the AI. The page draws Statuses, Suggest tasks, the project's menu items and each list's menu items only where the answer is yes, and nothing on a guess before it has answered. The Members sheet takes `canManage`: without it, it lists who has access and the visibility, and offers no add, role, remove or visibility change.
+
+The new suite `project-page-controls`, 4 checks: the admin (every control), a member who made one list and not the project, a guest passing through, and what each route answers.
+
+- Before (HEAD's API and bundle): 2 of 4 (the admin and the routes).
+- After: 4/4.
+
+`ppc-1..10`, each compiled: the answers (six) and the page's use of them (four). Regression on lane 5, 22/22: `project-page-controls`, `guest-create-menu`, `ai-create-containers`, `custom-field-progress`, `task-depth`, `team-schedules`, `planner-command-bar`, `planner-grid`, `planner-onboarding`, `hook-portal-access`, `space-default-permission`, `private-folder-reach`, `private-list-reach`, `read-visibility`, `workspace-role-controls`, `request-access`, `status-write-access`, `role-permissions-web`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+
+*Not changed, recorded:* the space's Members sheet still offers its changes to everybody (the default `canManage`), and the project page's time, invoice and client-portal sections have their own controls, unmeasured here.
 
 ### `found-24-sep/restart-witness-blind-to-new-tables` — **closed** (test tooling; found adding migration 0162)
 
