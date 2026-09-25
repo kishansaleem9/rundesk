@@ -6,7 +6,6 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { TasksService } from '../tasks/tasks.service'
 import { isManagerRole } from '../../common/permissions/item-visibility'
-import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 
 const PRIORITIES = new Set(['urgent', 'high', 'normal', 'low'])
 
@@ -17,16 +16,10 @@ export class InboundWebhooksService {
     private tasks: TasksService,
   ) {}
 
-  /** The list's workspace and containers, and the person's role in that workspace. */
+  /** The list's workspace, and the person's role in that workspace. */
   private async listContext(listId: string, userId: string) {
     const [ctx] = await this.db
-      .select({
-        workspaceId: spaces.workspaceId,
-        spaceId: spaces.id,
-        spaceVisibility: spaces.visibility,
-        projectId: projects.id,
-        projectVisibility: projects.visibility,
-      })
+      .select({ workspaceId: spaces.workspaceId })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -64,11 +57,15 @@ export class InboundWebhooksService {
   }
 
   async create(listId: string, name: string, createdById: string) {
-    // A hook adds tasks as its creator, so its creator must be somebody who
-    // may add tasks here — guests may not (`assertNotGuestInList`).
-    const ctx = await this.listContext(listId, createdById)
-    if (!ctx) throw new NotFoundException('List not found')
-    if (ctx.role === 'guest') throw new ForbiddenException('Guests cannot add inbound webhooks')
+    /*
+     * A HOOK ADDS TASKS AS ITS MAKER, so its maker is somebody who may add them
+     * here — the create gate (`assertCanCreateTaskIn`: the list read, not a
+     * guest, Full edit), which every delivery asks again. It asked only that
+     * they were not a guest, and a member of a view-only, a comment-only or an
+     * Edit space made hooks whose every delivery was refused
+     * (`found-25-sep/inbound-hooks-made-where-their-maker-cannot-add`).
+     */
+    await this.tasks.assertCanCreateTaskIn(listId, createdById)
     const token = crypto.randomBytes(24).toString('hex')
     const [row] = await this.db
       .insert(inboundWebhooks)
@@ -112,17 +109,11 @@ export class InboundWebhooksService {
       if (!Number.isNaN(d.getTime())) dueDate = d
     }
     if (!hook.createdById) throw new BadRequestException('Webhook has no owning user')
-    // The creator must STILL be somebody who may add tasks to this list — a
-    // member (not a guest) who can see it. A hook made by someone who has since
-    // left, or lost the list, stops; it does not keep adding tasks in their name.
-    const ctx = await this.listContext(hook.listId, hook.createdById)
-    const stillMay =
-      !!ctx && !!ctx.role && ctx.role !== 'guest' &&
-      (await checkContainerAccess(
-        this.db,
-        { spaceId: ctx.spaceId, spaceVisibility: ctx.spaceVisibility, projectId: ctx.projectId, projectVisibility: ctx.projectVisibility },
-        { userId: hook.createdById, workspaceRole: ctx.role },
-      ))
+    // Its maker must STILL be somebody who may add tasks here, by the rule that
+    // let them make it. A hook whose maker has left, lost the list, or been
+    // narrowed below Full edit stops, and says so in its own words; it does not
+    // keep adding tasks in their name.
+    const stillMay = await this.tasks.canCreateTaskIn(hook.listId, hook.createdById)
     if (!stillMay) throw new ForbiddenException('This webhook’s creator can no longer add tasks to its list')
 
     const task = await this.tasks.createTask({

@@ -15,7 +15,6 @@ import {
 import { Check, Copy, Mail, RefreshCcw, Trash2, Webhook } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
-import { useWorkspaceRole } from '../hooks/use-workspace-role'
 
 type Alias = {
   id: string
@@ -34,20 +33,24 @@ type Alias = {
  */
 export function ListEmailAliasPanel({
   listId,
-  workspaceId,
   open,
   onOpenChange,
+  mayAddTasks,
 }: {
   listId: string
-  workspaceId: string
   open: boolean
   onOpenChange: (open: boolean) => void
+  /**
+   * Whether the reader may add tasks to the list — the list's own answer
+   * (`GET /tasks/list/:listId/capabilities`), which the page asks. A hook adds
+   * tasks as its maker, so the server asks the same of whoever makes one
+   * (`found-25-sep/inbound-hooks-made-where-their-maker-cannot-add`). This read
+   * the workspace role and offered the hook to every member.
+   */
+  mayAddTasks: boolean
 }) {
   const { t } = useTranslation()
-  // A hook adds tasks as its creator, and a guest may not add tasks — the
-  // server refuses, so the button is not offered.
-  const { role } = useWorkspaceRole(workspaceId)
-  const mayCreateWebhook = role !== 'guest'
+  const mayCreateWebhook = mayAddTasks
   const qc = useQueryClient()
   const { data: alias, refetch } = useQuery({
     queryKey: ['list-email-alias', listId],

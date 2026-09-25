@@ -1520,7 +1520,7 @@ In CI (187). The job's limit is 240 minutes now: 187 suites is about 206 minutes
 - A member who may not add tasks makes an inbound webhook, and every delivery to it is refused (`found-25-sep/inbound-hooks-made-where-their-maker-cannot-add`).
 - Sharing a list, and giving it an email address, is for its maker or a manager (`found-25-sep/sharing-asks-the-maker-not-the-level`).
 
-### `found-25-sep/inbound-hooks-made-where-their-maker-cannot-add` — open, visible bug, small (dead control; found closing `list-page-offers-refused-edits`)
+### `found-25-sep/inbound-hooks-made-where-their-maker-cannot-add` — **closed** (visible bug, small; dead control; found closing `list-page-offers-refused-edits`)
 
 **A member who may not add tasks to a list makes an inbound webhook on it, and every delivery to it is refused**
 
@@ -1529,6 +1529,21 @@ In CI (187). The job's limit is 240 minutes now: 187 suites is about 206 minutes
 `InboundWebhooksService.create` asks only that its maker is not a guest. Its own comment says "a hook adds tasks as its creator, so its creator must be somebody who may add tasks here", and then asks less. Delivery asks the create gate, through `createTask`, so nothing is added where it should not be: the hook is dead from the start, and nothing tells its maker.
 
 *To close:* making a hook asks the create gate for its maker (Full edit, not a guest), and the Email panel offers it by the same answer. Check with a view-only, an Edit and a Full edit member.
+
+*Closed, 25 September:*
+- **Making a hook asks the create gate** for its maker (`assertCanCreateTaskIn`: the list read, not a guest, Full edit). A guest is refused by the same gate, so the separate guest line went: one rule, not two.
+- **A delivery asks the same gate** (`canCreateTaskIn`), and refuses in the hook's own words when its maker can no longer add. It asked a restatement of an older rule (a member, not a guest, who could see the list), and the gate was asked again inside `createTask`. The restatement went, with the visibility columns only it read.
+- **The Email panel offers a new webhook by the list's answer** (`add`), which the page passes it. It read the workspace role and offered the hook to every member: a copy of the server's old rule.
+
+The new suite `inbound-hook-makers`, 3 checks: a member makes a hook in a view-only, a comment-only and an Edit space, and at Full edit; a delivery to the Full edit one; and the Email panel in three of the lists. Hooks and tasks are read back by SQL.
+- Before (lane 5, `39acc88`): 1 of 3 (the Full edit control). All three refused levels made hooks (201, stored), and the panel offered a new webhook in every list.
+- After: 3/3, on lanes 5 and 4.
+
+`ihm-1..5`, each compiled: making asks nothing; making asks only "not a guest", as it did; the panel offers to everybody; the page passes the panel `edit` for `add`; every delivery refused. Re-aimed at the new lines, each compiled: `hpa-1`, `hpa-2` and `hpa-15`. `hpa-18` and `-19` apply unchanged.
+
+*Break run:* queued on lane 1 after the commit (`plan-ihm`).
+
+Regression on lanes 2 to 5: the 9 suites that make, list or deliver to hooks or read the Email panel (`hook-portal-access`, `credential-reads`, `mail-comments-by-level`, `email-reply-routing`, `space-features`, `task-boundaries`, `task-depth`, `task-menu`, the new suite), with `list-page-levels`, `list-empty-states`, `ui-sweep` and `no-dead-ends`. Result: 13/13. In CI (188).
 
 ### `found-25-sep/sharing-asks-the-maker-not-the-level` — open, behaviour, small (found closing `list-page-offers-refused-edits`)
 
