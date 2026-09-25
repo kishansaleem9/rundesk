@@ -1514,7 +1514,7 @@ rail, "+ New Super Agent".
 `apps/web/src`, `apps/api/src` and `packages/db/src`. The only matches are marketing copy
 (`apps/web/src/lib/i18n/catalogs.ts:1210`, `:4511` — "AI agents trained on your workspace",
 shown on the sign-up hero) and a comment at
-`apps/api/src/common/guards/not-guest.guard.ts:5`. The chat rail
+`apps/api/src/common/guards/not-guest.guard.ts:5` (that guard was retired on 25 September). The chat rail
 (`apps/web/src/components/chat/chat-sidebar.tsx:125-262`) has channels, space groups,
 archived and DMs only.
 

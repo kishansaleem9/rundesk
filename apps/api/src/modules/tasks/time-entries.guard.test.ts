@@ -2,35 +2,35 @@ import 'reflect-metadata'
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
 import { TaskTimeEntriesController } from './time-entries.controller'
-import { NotGuestGuard } from '../../common/guards/not-guest.guard'
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
 
 /**
- * §3.3 — time tracking is a member capability. Guests may read entries but must
- * not start/stop a timer or log manual time. `NotGuestGuard` is bound (on top of
- * the class-level JwtAuthGuard + ResourceMemberGuard) to the mutation handlers
- * only; the read handler stays open to guests.
+ * Time is tracked by whoever may read the task: ClickUp's default for view-only
+ * members and guests (`guest-guard-reads-the-account-role`). So every route of
+ * a task's time — reading entries, starting and stopping a timer, logging time
+ * by hand — asks the one read rule, `ResourceMemberGuard`, which lets a guest
+ * only where the task is shared with them. Without it, anybody signed in could
+ * put time on any task whose id they had.
  *
- * We assert the wiring via the metadata NestJS's `@UseGuards` writes onto each
- * handler, so a future refactor that drops the guard fails loudly here.
+ * This used to assert that a guest guard was bound to the three writes. That
+ * guard read the ACCOUNT's role, which no guest of a workspace holds, so the
+ * test passed while it refused nobody. `time-tracking-readers.mjs` measures
+ * the rule itself; this keeps the read rule on every route of the controller.
  */
-const guardsOn = (method: string): unknown[] =>
+const classGuards = (Reflect.getMetadata('__guards__', TaskTimeEntriesController) ?? []) as unknown[]
+const handlerGuards = (method: string): unknown[] =>
   (Reflect.getMetadata('__guards__', (TaskTimeEntriesController.prototype as any)[method]) ?? []) as unknown[]
 
-describe('TaskTimeEntriesController — NotGuestGuard on mutations (§3.3)', () => {
-  for (const method of ['start', 'stop', 'manual']) {
-    it(`guards ${method}() against guests`, () => {
-      assert.ok(
-        guardsOn(method).includes(NotGuestGuard),
-        `${method}() must be protected by NotGuestGuard`,
-      )
+describe('TaskTimeEntriesController — time asks the read rule', () => {
+  it('guards the whole controller with the sign-in and the read rule', () => {
+    assert.ok(classGuards.includes(JwtAuthGuard), 'the time routes must ask for a signed-in caller')
+    assert.ok(classGuards.includes(ResourceMemberGuard), 'the time routes must ask the task’s read rule')
+  })
+
+  for (const method of ['list', 'start', 'stop', 'manual']) {
+    it(`${method}() asks nothing beyond it`, () => {
+      assert.deepEqual(handlerGuards(method), [], `${method}() carries a guard of its own: time is tracked by whoever may read the task`)
     })
   }
-
-  it('leaves the read handler (list) open to guests', () => {
-    assert.equal(
-      guardsOn('list').includes(NotGuestGuard),
-      false,
-      'list() is a read endpoint and must not gain NotGuestGuard',
-    )
-  })
 })

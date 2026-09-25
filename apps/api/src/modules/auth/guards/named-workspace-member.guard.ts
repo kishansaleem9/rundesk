@@ -19,8 +19,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * and not as a guest.
  *
  * WHY IT EXISTS. The AI routes take `workspaceId` in the body or the query,
- * and nothing checked it. `NotGuestGuard` reads the ACCOUNT's role, and
- * `PlanFeatureGuard` asks only whether that workspace's plan has the feature.
+ * and nothing checked it. The guest guard beside it read the ACCOUNT's role
+ * (retired, `guest-guard-reads-the-account-role`), and `PlanFeatureGuard`
+ * asks only whether that workspace's plan has the feature.
  * Measured on lane 1 with the model stub: a user of another organisation, who
  * gets 404 on the workspace itself, had AI chat and AI command build their
  * prompts from it (its name, its spaces' and projects' names, its totals, and
@@ -30,7 +31,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * A stranger is answered 404, as `WorkspaceMemberGuard` answers, so the route
  * does not confirm the workspace exists. A guest of the workspace is refused
  * with 403: the AI features are not for guests, which the account-wide check
- * could only ever enforce for accounts whose global role is `guest`. A request
+ * could only ever have enforced for accounts whose global role is `guest`. A request
  * that names no workspace passes; it reads nothing of one.
  */
 @Injectable()

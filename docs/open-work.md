@@ -1201,7 +1201,11 @@ Results:
 - `gcm-2` offers the task to every guest.
 - `tcm-6` and `mtg-3` count a guest's share as Full edit. Their guests hold Edit, and the guest line they removed is gone.
 
-*Break run:* queued on lane 1 after the commit (`plan-gtm`).
+*Break run* (lane 1, `plan-gtm`):
+- `guest-task-making`, on `2425c08`: 3 of 3 reddened.
+- `task-creation-access`, on `67a4f60`: `tcm-2..6` reddened, the re-aimed `tcm-6` among them.
+- `tcm-1` did not build. It restored the guest-only check this change removed as dead. Re-aimed so that `createTask` asks nothing, it compiles, and it is queued again.
+- `guest-create-menu` was cut off at its tenth patch by a container restart, and `meeting-access` had not started. Both are queued again.
 
 Regression on lanes 2 to 5: the 18 suites that have guests make or be refused things, or make tasks through the gate, and the new suite. Result: 19/19. Under the sweep's load, `video1-acceptance` did not get its bookmark back after a reload, as recorded before, and passed alone (18/18). In CI (193).
 
@@ -1303,7 +1307,7 @@ Re-aimed at the moved rule, each compiled: `td-bin-1`, `tel-1..4`, `tsl-2` and `
 
 Regression on lanes 2 to 5: the 15 suites that touch custom fields, and 15 that write tasks through the moved rule (`task-edit-levels`, `task-space-levels`, `task-boundaries`, `project-member-levels`, `task-depth` with its bin checks, `task-menu`, `task-merge`, `task-delete`, `task-header-status`, `task-sheet-capabilities`, `task-rows-by-id`, `guest-space-level`, `video1-acceptance`, `video-regression`, `ui-sweep`). Result: 30/30. Under the sweep's load 29 of 30 passed the first time: `video1-acceptance` failed the same check as in the last sweep (the assistant's way forward), then passed on its own right after (18/18). It is recorded under `three-suites-fail-under-a-full-sweep`. API unit tests 202/202 for the task and custom-field modules. In CI (182).
 
-### `found-25-sep/guest-guard-reads-the-account-role` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/guest-guard-reads-the-account-role` — **closed** (facade, small; found closing `task-rows-changed-by-id-anywhere`)
 
 **The time routes mean to refuse guests and refuse none, and ClickUp would not refuse them**
 
@@ -1317,6 +1321,83 @@ ClickUp (help centre, "Manage individual permissions for view only users", searc
 - Take the guard off the time routes, as ClickUp's default. The per-person permission is its own unbuilt item.
 - Measure what a workspace guest reaches through the knowledge routes, and give them the workspace's role there.
 - Make the guard read the role in the workspace, or retire it.
+
+*Measured, lane 5, on `67a4f60`* (the suite below, 3 of 4):
+- A workspace's guest with a view share tracked time on the task: started, stopped and logged it by hand (201 each). A member of a view-only space did the same. The guard let both through, which is ClickUp's default.
+- The only accounts the guard refused were ones whose own role is `guest`. The enum allows that value, but no product path sets it (no insert or update writes it, nor does a migration or the seed), and none of the 406 accounts on lane 5 has it. One such account, made by SQL and a member of the workspace, was refused a timer and the knowledge base (403, "Guests cannot use this feature"), whatever the workspace made it.
+- A workspace's guest was refused both the knowledge answer and the reindex (403 each), by other checks, not this one. The answer is refused by `NamedWorkspaceMemberGuard`, which reads the role in the workspace; the route requires a `workspaceId`. The reindex is refused by the handler's own manager check, which also reads the workspace role.
+
+*Closed, 25 September:*
+- **The guard is retired.** It is off the time routes, the AI controller and the knowledge controller, and the file is gone. Nothing in the API or the web reads the account's role as guest now.
+- **Time is tracked by whoever may read the task**, through the class's read rule (`ResourceMemberGuard`), which admits a guest only where the task is shared with them. The sheet's Time tab was never gated, so it now agrees with the API by rule rather than by accident.
+- **The AI routes refuse a workspace's guests by their role there**, as before.
+- **The unit test is restated.** `time-entries.guard.test.ts` asserted that the guard was wired on, so it passed while the guard refused nobody. It now asserts the read rule on every route of a task's time, and nothing beside it.
+- **Comments corrected** where they named the guard: the named-workspace guard's comment, and the spec's citation in `clickup-platform-overview-spec.md`.
+- **Not built:** ClickUp's per-person switch for a view-only member's or guest's time tracking. It is its own item, `found-25-sep/view-only-individual-permissions`.
+
+The new suite `time-tracking-readers`, 4 checks, with time entries and the knowledge index read back by SQL:
+- A guest tracks time on a task shared with them at View, and not on one that is not (403, none made). A view-only member tracks time too.
+- An account marked guest on its own, and a member of the workspace, tracks time and asks the knowledge base.
+- A workspace's guest neither asks nor reindexes, and a member does not reindex (nothing indexed); its admin reindexes.
+- The sheet offers the guest Start timer, and the timer runs.
+
+Results:
+- Before (lane 5, `67a4f60`): 3 of 4.
+- After: 4/4, on lanes 5 and 4.
+
+Patches `ttr-1..8`, each compiled:
+- time asks the edit rule;
+- the account's role refuses a timer, as the guard did;
+- the time routes ask no read rule;
+- the knowledge base refuses by the account's role;
+- the named-workspace guard lets guests in;
+- reindexing asks no role;
+- the sheet offers Start timer to editors only;
+- `ttr-8`, which claims the unit test: the controller guarded by the sign-in alone.
+
+`wra-8` was re-aimed onto the AI controller's guard line without the retired guard.
+
+*Break run:* queued on lane 1 after the commit (`plan-ttr`).
+
+Regression on lanes 2 to 5: the 25 suites that use the AI routes, the knowledge base or time entries, and the new suite. Result: 26/26.
+- Under the sweep's load, two suites failed. `ai-activity-filters` found no row under its Failed filter, and `a61-meeting-record` lost a save and a recording.
+- Each passed alone: 34/34 on lane 2, 25/25 on lane 3.
+
+In CI (195).
+
+### `found-25-sep/ai-task-paths-skip-the-read-rule` — open, security (found closing `guest-guard-reads-the-account-role`)
+
+**The AI routes that take a task by id ask only that the caller belongs to its workspace**
+
+*Evidence:* `assertTaskWorkspaceAccess` (`ai.service.ts`) asks only `memberRole`. So a guest of the workspace passes it, and so does a member refused the task's private list.
+- `summarize` and `task/deadline` read the task through it. When the request names no workspace, `NamedWorkspaceMemberGuard` lets it through. The guard's comment says a request that names no workspace "reads nothing of one"; this one reads a task.
+- `assignee-suggestion` refuses guests but asks nothing else.
+
+Measured on lane 2, which has no model (probe `probe-ai-task-paths`): a member got an assignee suggestion for a task in a private list they are refused. The route answered 200, `ok: true`, with a pick; reading the task itself was 403. The guest was refused (`no_permission`). `summarize` and `task/deadline` answered 503 there, for want of a model, so the prompts they build are still to be measured on a lane with the model stub.
+
+*To close:*
+- Measure `summarize` and `task/deadline` with the model, by what the stub is sent.
+- Make every AI path that takes a task ask the task's read rule, as the task routes do.
+- Correct the guard's sentence.
+
+### `found-25-sep/view-only-individual-permissions` — open, feature, medium (found closing `guest-guard-reads-the-account-role`)
+
+**ClickUp's four individual permissions for view-only members and guests are not built**
+
+ClickUp (help centre, "Manage individual permissions for view only users", search snippets): view-only members and guests have four individual permissions.
+- On by default: time estimates and time tracking.
+- Off by default: adding or removing tags, and creating views.
+- An owner or admin turns each on or off per person, on the Unlimited plan and above.
+
+Here:
+- Time tracking follows reading, with no switch.
+- A time estimate asks the task's write rule, so a view-only member cannot set one where ClickUp's default lets them.
+- Tags ask the write rule, which matches ClickUp's default.
+- Making views is not measured.
+
+*To close:*
+- Measure time estimates and views for a view-only member and a guest.
+- Build the four switches per person, with ClickUp's defaults, on the member's row of the workspace's people settings.
 
 ### `found-25-sep/inbound-email-comments-skip-the-comment-rule` — **closed** (security, HIGH once measured; found closing `task-rows-changed-by-id-anywhere`)
 
@@ -2095,6 +2176,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `ai-activity-filters` and `a61-meeting-record`, 25 September, the sweep for `guest-guard-reads-the-account-role`. `ai-activity-filters` listed no row under its Failed filter on the page, though the same filter's API read had found the row. `a61-meeting-record` kept offering Save after a save, and lost the recording's address. Each passed alone (34/34, 25/25). `a61-meeting-record` is here for the third time.
 - `task-menu` and `task-depth`, 25 September, the sweep for `read-only-tasks-blocked-and-parented`: the menu's rows late, and the tag's removal. `task-depth` passed alone (91/91). `task-menu` passed on lane 3 (37/37), after once more missing Send email to task alone on lane 2 while lane 1's break runs held the machine.
 - `request-access` and `space-default-permission`, 25 September, the sweep for `sharing-asks-the-maker-not-the-level`. `request-access` did not find its notification among the admin's latest 50 rows, which the other suites were filling. `space-default-permission` was refused a signup by the rate limit (429) before its first check. Each passed alone, 9/9 and 36/36.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
