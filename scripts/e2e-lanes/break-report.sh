@@ -39,6 +39,12 @@
 # declaration is checked against the measured outcome, so a patch that declares
 # SHORT and then reddens properly is reported as a row to look at too — its
 # header is out of date.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -uo pipefail
 HERE="$(dirname "$0")"
 LOGS=/tmp/claude-0
@@ -152,3 +158,5 @@ else
   echo "[break-report] some set has a patch that proves less than its number suggests — see above"
 fi
 exit "$bad"
+exit
+}

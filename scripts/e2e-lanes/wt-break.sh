@@ -11,6 +11,12 @@
 # The patch scripts hardcode /home/user/rundesk, so each is rewritten into the
 # worktree path before it runs. The tree the agents are working in is never
 # touched.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 LANE="$1"; shift
 SUITE="$1"; shift
@@ -536,3 +542,5 @@ pnpm -C apps/web exec vite build > /dev/null 2>&1
 pnpm -C apps/web exec vite build > /dev/null 2>&1
 restart && echo "$SERVING" > "$STAMP"
 echo "DONE $SUITE" >> "$OUT"
+exit
+}

@@ -24,6 +24,12 @@
 # arguments after the lane. The canonical log is removed before each set so the
 # file belongs to one run; `wt-break.sh`'s per-run archive keeps what came
 # before.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -uo pipefail
 # RUN_PLAN_REPO only for `scripts/check-run-plan.sh`, whose broken copies of
 # this file live outside the repo and would otherwise find no lane-env.sh.
@@ -131,3 +137,5 @@ while :; do
   sleep "${DISPATCH_TICK:-20}"
 done
 say "PLAN DRAINED: $started set(s) launched of ${#WORK[@]}"
+exit
+}

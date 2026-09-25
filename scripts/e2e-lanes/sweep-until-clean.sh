@@ -25,6 +25,12 @@
 #
 #   bash scripts/e2e-lanes/sweep-until-clean.sh          # until drained
 #   ROUNDS=3 bash scripts/e2e-lanes/sweep-until-clean.sh
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -59,3 +65,5 @@ heal () {
 before_round () { heal; }
 . scripts/e2e-lanes/rounds.sh
 run_rounds sweep
+exit
+}

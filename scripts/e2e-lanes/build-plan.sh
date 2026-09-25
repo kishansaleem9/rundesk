@@ -23,6 +23,12 @@
 # Exit 0 with the plan written (possibly empty, meaning genuinely nothing
 # left); exit 4 with the reason in the log when the plan cannot be trusted.
 # `PLANNER` overrides the planner, for `scripts/check-build-plan.sh`.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 plan="$1"
@@ -71,3 +77,5 @@ then
   exit 4
 fi
 mv "$plan.merged" "$plan"
+exit
+}

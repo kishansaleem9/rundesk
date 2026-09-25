@@ -18,6 +18,12 @@
 #
 # Nothing here touches Postgres itself beyond starting the cluster, and nothing
 # drops anything.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 R=/home/user/rundesk
 TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
@@ -176,3 +182,5 @@ echo "$ok of ${#LANES[@]} lanes up"
 # A lane that did not come up is a failure, not a line of output. This exited 0
 # with every lane down, and so did `build-api.sh`, whose last command it is.
 [ "$ok" = "${#LANES[@]}" ] || exit 1
+exit
+}

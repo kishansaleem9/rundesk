@@ -15,6 +15,12 @@
 # slower than seven sequential ones and can exhaust memory; the whole point of
 # the refusal is that the rebuild happens once, deliberately, rather than seven
 # times by accident.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 cd /home/user/rundesk
 
@@ -42,3 +48,5 @@ for k in "${LANES[@]}"; do
   fi
 done
 echo "${#LANES[@]} bundle(s) refreshed"
+exit
+}

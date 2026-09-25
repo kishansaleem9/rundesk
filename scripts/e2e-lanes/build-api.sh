@@ -38,6 +38,12 @@
 # process starts, so a column added there reaches a lane when its API
 # RESTARTS. A build with no lanes named restarts nothing; that is why
 # `verify.sh` also refuses a lane whose API started before the last build.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 cd /home/user/rundesk
 
@@ -53,3 +59,5 @@ LANES="${1:-}"
 if [ -n "$LANES" ]; then
   bash scripts/e2e-lanes/fleet-restart.sh "$LANES"
 fi
+exit
+}

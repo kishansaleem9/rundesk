@@ -41,6 +41,12 @@
 # Absent, it falls back to the shared one, which is right for a single-agent
 # session where there is nothing to collide with. The chosen path is printed on
 # the result line, so a run can always be traced to the bundle it measured.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 cd /home/user/rundesk
 SUITE="$1"; LANE="${2:-1}"
@@ -202,3 +208,5 @@ grep -E 'passed,|FAIL' "$OUT" | sed 's/\x1b\[[0-9;]*m//g' | tail -8
 # so it exited 0 for a suite that failed or crashed, and every runner that read
 # its status — sweep.sh and batch.sh among them — counted a red run as green.
 exit "$code"
+exit
+}

@@ -2421,7 +2421,7 @@ Regression on lanes 2 to 5: the 21 suites that start grants, read provider statu
 
 In CI (198).
 
-### `found-25-sep/lane-scripts-read-as-they-run` — open, test tooling, small (found closing `oauth-start-answers-for-no-application`)
+### `found-25-sep/lane-scripts-read-as-they-run` — **closed** (test tooling, small; found closing `oauth-start-answers-for-no-application`)
 
 **A lane script edited while it runs breaks the run in flight**
 
@@ -2431,6 +2431,18 @@ In CI (198).
 - Wrap each long-running lane script's body in a function called on its last line, so bash parses the whole script before running any of it: `wt-break.sh`, `sweep.sh`, `verify.sh`, the fleet scripts and the set runner.
 - Add a preflight check that they stay shaped that way.
 - Until then, change a script that may be running by writing a new file over it, never in place.
+
+*Closed, 25 September:*
+- **Every script the lanes execute keeps its body in one brace group ending in `exit`.** That is thirteen of them, `wt-break.sh`, `sweep.sh`, `verify.sh` and the fleet scripts among them. Bash parses a group whole before running any of it, and nothing after it is ever read. Each was written as a new file and moved over the old, so a run in flight kept its own copy.
+- **Exempt, by name:** `lane-env.sh` and `rounds.sh`, which are libraries that are sourced and never run, and `batch.sh`, one `exec` line.
+- **The gate.** `scripts/check-lane-scripts-whole.mjs` fails on a lane script whose code does not open with `{` and end with `exit` and `}`. It also fails on a directory with no scripts. It reads 16 scripts.
+- **Its cases.** `check-lane-scripts-whole-cases.mjs` first measures the premise: a line inserted in place while a script sleeps breaks the plain script's run, and the wrapped one finishes as written. It then plants six directories for the gate. `--mutate` breaks the gate six ways, and every mutation reddens a case (7 cases).
+- **Both run in the preflight and in CI.**
+
+Measured with the wrapped scripts:
+- `verify.sh` and `sweep.sh` ran suites as before (2/2, and a two-lane sweep 2/2).
+- The next break set, `space-default-permission`'s, was the first started from the wrapped `wt-break.sh`.
+- `build-api.sh`, `refresh-dists.sh` and the fleet scripts are run by the next build.
 
 ### `found-25-sep/claims-confirmed-by-a-fragment` — open, test tooling, medium (found reading `gcm-11`'s run)
 

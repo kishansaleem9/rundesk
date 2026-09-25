@@ -21,6 +21,12 @@
 # time. So a round that asks for exactly what the last round asked for is the
 # end of it: the loop has stopped making progress, and saying that once beats
 # burning the machine all night to say it never.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -uo pipefail
 cd "$(dirname "$0")/../.."
 
@@ -30,3 +36,5 @@ say() { printf '%s %s\n' "$(date -u +%H:%M:%S)" "$*" >> "$LOG"; }
 
 . scripts/e2e-lanes/rounds.sh
 run_rounds chain
+exit
+}

@@ -27,6 +27,8 @@ step "migration guardrail"              node scripts/check-migration-order.mjs
 step "every workspace write is guarded" node scripts/check-workspace-guards.mjs
 step "a workspace role list is stated once" node scripts/check-role-lists.mjs
 step "and that gate can fail too"      node scripts/check-role-lists-cases.mjs --mutate
+step "each lane script is read whole"   node scripts/check-lane-scripts-whole.mjs
+step "and an edit mid-run is harmless"  node scripts/check-lane-scripts-whole-cases.mjs --mutate
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "and that guard actually looks"    node scripts/check-patch-guard.mjs --mutate
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs

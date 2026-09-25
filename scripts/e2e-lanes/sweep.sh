@@ -20,6 +20,12 @@
 #
 # Now a shared queue feeds one worker per lane, each suite's exit status is
 # recorded beside its name, and `batch.sh` calls this.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO="$(cd "$HERE/../.." && pwd)"
@@ -88,3 +94,5 @@ if [ "$bad" -gt 0 ]; then
   exit 1
 fi
 exit 0
+exit
+}

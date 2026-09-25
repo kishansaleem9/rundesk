@@ -20,6 +20,12 @@
 # which is how `sweep-until-clean.sh` heals one lane that went down, dropped
 # lanes 1 and 2 as well (`commit-log/log-8ac33d9-1`). `lane_list` (lane-env.sh)
 # is the one reading of a lane argument, shared with `fleet-restart.sh`.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 R=/home/user/rundesk
 export PGPASSWORD=rundesk
@@ -108,3 +114,5 @@ echo "$ok/${#LANES[@]} lanes up"
 # A lane that did not come up is a failure, not a line of output. This exited 0
 # with every lane down, and `build-api.sh` after it.
 [ "$ok" = "${#LANES[@]}" ] || exit 1
+exit
+}

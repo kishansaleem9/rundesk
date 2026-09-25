@@ -9,6 +9,12 @@
 # running API always has the schema the working tree has, while the database
 # only has what has been pushed. An agent adding a column makes every lane
 # start failing with `column "x" does not exist` until this runs.
+# READ WHOLE BEFORE IT RUNS. Bash reads a script as it goes, by offset, so an
+# edit to this file while it runs shifts what the run reads next — two break
+# sets died that way (`lane-scripts-read-as-they-run`). The body is one brace
+# group, which bash parses entirely before running any of it, and it ends in
+# `exit`, so nothing appended after it runs either.
+{
 set -u
 R=/home/user/rundesk
 N=${1:-4}
@@ -81,3 +87,5 @@ for k in $(seq 1 "$N"); do
   else echo "lane $k: DOWN"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok/$N lanes synced and up"
+exit
+}

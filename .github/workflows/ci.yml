@@ -343,6 +343,16 @@ jobs:
       - name: And that gate can fail, and each case bites
         run: node scripts/check-role-lists-cases.mjs --mutate
 
+      # Bash reads a script as it runs, by offset; an in-place edit to a lane
+      # script mid-run broke two break sets. Each script the lanes execute keeps
+      # its body in one brace group ending in `exit`, parsed whole before it
+      # runs (lane-scripts-read-as-they-run). The cases show the premise too.
+      - name: Each lane script is read whole before it runs
+        run: node scripts/check-lane-scripts-whole.mjs
+
+      - name: And an edit mid-run is harmless, and each case bites
+        run: node scripts/check-lane-scripts-whole-cases.mjs --mutate
+
       # A suite that is not registered is verified once on a lane and never
       # again. `doc-import` was in that state while the resume doc said every
       # suite was registered, and nothing compared the directory with this
