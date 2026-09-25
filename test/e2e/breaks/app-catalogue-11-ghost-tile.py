@@ -1,6 +1,7 @@
 # A TILE WITH NOTHING BEHIND IT. Basecamp joins the catalogue, and the old
 # "coming soon" shape comes back with it: a card whose switch and whose button
 # are both dead. It photographs exactly like a working integration.
+# RE-AIMED 25 September: the tile's action button was re-indented or renamed (a tile the viewer cannot connect is now a request too, `asks`); the mistake is the same.
 # Reddens: app-catalogue: "every one of the N tiles offered can be acted on"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-integrations-page.tsx'
@@ -11,20 +12,20 @@ b1 = (
     "  { id: 'basecamp', name: 'Basecamp', descKey: 'integrations.desc.notion', category: 'knowledge', brandColor: '#1D2D35', logo: 'B' },\n"
 )
 
-a2 = """              disabled={
-                isLoading ||
-                (!supported &&
-                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
-              }
-              onClick={() => {
+a2 = """                disabled={
+                  isLoading ||
+                  (asks &&
+                    (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+                }
+                onClick={() => {
 """
-b2 = """              disabled={
-                isLoading ||
-                !supported ||
-                (!supported &&
-                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
-              }
-              onClick={() => {
+b2 = """                disabled={
+                  isLoading ||
+                  !supported ||
+                  (asks &&
+                    (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+                }
+                onClick={() => {
 """
 
 s = io.open(p, encoding='utf-8').read()

@@ -23,9 +23,11 @@
  * subjects, senders and snippets for anybody in the workspace. It now answers
  * the person who connected it (the unit tests in `search.service.test.ts` prove
  * the query side; nothing here can reach Google). What is checked here is what
- * each person is TOLD: the source list says whose account it is, a member is
- * not offered a Connect button that would lead to settings they cannot open,
- * and the connection is staged straight into Postgres (DATABASE_URL).
+ * each person is TOLD: the source list says whose account it is, a member who
+ * may not connect apps (`integrations.manage`) is not offered a Connect button,
+ * the button leads to the App Center at that source's app (it led to Settings,
+ * which connects no source), and the connection is staged straight into
+ * Postgres (DATABASE_URL).
  *
  *   node test/e2e/search-sources.mjs --api 3011 --dist apps/web/dist
  */
@@ -42,7 +44,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 11
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -171,6 +173,21 @@ try {
     'and offers the way to connect it',
     'the message names no way out',
   )
+  // And the way leads somewhere that connects it: the App Center, at Gmail's own
+  // tile. It went to Settings → General, which connects no source at all.
+  await page.getByTestId('palette-source-connect').click({ timeout: 5000 }).catch(() => {})
+  await page.waitForURL(/\/integrations/, { timeout: 15_000 }).catch(() => {})
+  const gmailTile = page.locator('[data-testid="integration-card"][data-provider="gmail"]')
+  const tileShown = await gmailTile.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true).catch(() => false)
+  const landedAt = new URL(page.url()).pathname
+  // AT the app: the catalogue opens searched for it, not at all eighty tiles.
+  const searched = await page.getByTestId('integrations-search').inputValue({ timeout: 5000 }).catch(() => null)
+  const tiles = await page.locator('[data-testid="integration-card"]').count()
+  chk(
+    landedAt.endsWith('/integrations') && tileShown && searched === 'Gmail' && tiles <= 3,
+    'and that way is the App Center, at the source’s own app',
+    `it led to ${landedAt}; Gmail's tile shown ${tileShown}; the catalogue searched for ${JSON.stringify(searched)}, ${tiles} tile(s) shown`,
+  )
 
   // ══ WHOSE ACCOUNT ════════════════════════════════════════════════════════
   console.log('\n▶ a connected account answers the person who connected it, and says so to everyone else')
@@ -228,7 +245,7 @@ try {
   const spConnect = await mpage.getByTestId('palette-source-connect').count()
   chk(
     /not connected/i.test(spText) && !/someone else/i.test(spText) && spConnect === 0,
-    'and a source nobody connected says so, with no Connect for a member who cannot open settings',
+    'and a source nobody connected says so, with no Connect for a member who may not connect apps',
     `notice ${JSON.stringify(spText)}; Connect buttons ${spConnect}`,
   )
 } catch (e) {

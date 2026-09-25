@@ -1416,6 +1416,7 @@ export const en = {
   'integrations.desc.jira': 'Preview, create and search Jira issues from a task.',
   'integrations.desc.sharepoint': 'Search SharePoint files and attach them to the work they belong to.',
   'integrations.notConnectable': 'Rundesk has no connector for this app yet, so there is nothing to sign in to. Ask your workspace admins to prioritise it.',
+  'integrations.needsPermission': 'Apps are connected here by the workspace’s admins, and by anyone whose role may manage integrations. Ask them to connect it.',
   'integrations.railIntegrations': 'Integrations',
   'integrations.railAi': 'AI',
   'integrations.suggestApp': 'Suggest an app',
@@ -3262,6 +3263,7 @@ export const en = {
 
   // SSO tab
   'ssoTab.title': 'Enterprise SSO',
+  'ssoTab.loadFailed': 'The SSO settings could not be loaded.',
   'ssoTab.subtitle': 'Connect Okta, Azure AD, Google Workspace, or any SAML / OIDC IdP. JIT-provisioned members are added with the default role and audit-logged on every sign-in.',
   'ssoTab.badgeActive': 'Active',
   'ssoTab.oidcTitle': 'OpenID Connect (OIDC)',
@@ -8133,6 +8135,7 @@ export const es: Record<TranslationKey, string> = {
   'integrations.desc.jira': 'Consulta, crea y busca incidencias de Jira desde una tarea.',
   'integrations.desc.sharepoint': 'Busca archivos de SharePoint y adjúntalos al trabajo al que pertenecen.',
   'integrations.notConnectable': 'Rundesk aún no tiene un conector para esta app, así que no hay nada a lo que iniciar sesión. Pide a los administradores del espacio que le den prioridad.',
+  'integrations.needsPermission': 'Aquí conectan apps los administradores del espacio y quienes tengan un rol que permita gestionar integraciones. Pídeles que la conecten.',
   'integrations.railIntegrations': 'Integraciones',
   'integrations.railAi': 'IA',
   'integrations.suggestApp': 'Sugerir una app',
@@ -9910,6 +9913,7 @@ export const es: Record<TranslationKey, string> = {
 
   // SSO tab
   'ssoTab.title': 'SSO empresarial',
+  'ssoTab.loadFailed': 'No se pudieron cargar los ajustes de SSO.',
   'ssoTab.subtitle': 'Conecta Okta, Azure AD, Google Workspace o cualquier IdP SAML / OIDC. Los miembros aprovisionados mediante JIT se agregan con el rol predeterminado y se registran en la auditoría en cada inicio de sesión.',
   'ssoTab.badgeActive': 'Activo',
   'ssoTab.oidcTitle': 'OpenID Connect (OIDC)',
@@ -14673,6 +14677,7 @@ export const ar: Record<TranslationKey, string> = {
   'integrations.desc.jira': 'اعرض مشكلات Jira وأنشئها وابحث فيها من داخل المهمة.',
   'integrations.desc.sharepoint': 'ابحث في ملفات SharePoint وأرفِقها بالعمل الذي تخصّه.',
   'integrations.notConnectable': 'لا يملك Rundesk موصِّلًا لهذا التطبيق بعد، لذا لا يوجد ما تسجّل الدخول إليه. اطلب من مشرفي مساحة العمل إعطاءه الأولوية.',
+  'integrations.needsPermission': 'يربط التطبيقاتِ هنا مشرفو مساحة العمل ومن يسمح له دوره بإدارة التكاملات. اطلب منهم ربطه.',
   'integrations.railIntegrations': 'التكاملات',
   'integrations.railAi': 'الذكاء الاصطناعي',
   'integrations.suggestApp': 'اقترح تطبيقًا',
@@ -16450,6 +16455,7 @@ export const ar: Record<TranslationKey, string> = {
 
   // SSO tab
   'ssoTab.title': 'الدخول الموحّد (SSO) للمؤسسات',
+  'ssoTab.loadFailed': 'تعذّر تحميل إعدادات الدخول الموحّد.',
   'ssoTab.subtitle': 'اربط Okta أو Azure AD أو Google Workspace أو أي موفّر هوية SAML / OIDC. تتم إضافة الأعضاء المزوّدين عبر JIT بالدور الافتراضي وتُسجَّل في سجل التدقيق عند كل تسجيل دخول.',
   'ssoTab.badgeActive': 'نشط',
   'ssoTab.oidcTitle': 'OpenID Connect (OIDC)',
@@ -21166,6 +21172,7 @@ export const ur: Record<TranslationKey, string> = {
   'integrations.desc.jira': 'ٹاسک کے اندر سے Jira کے ایشوز دیکھیں، بنائیں اور تلاش کریں۔',
   'integrations.desc.sharepoint': 'SharePoint کی فائلیں تلاش کریں اور انہیں متعلقہ کام سے منسلک کریں۔',
   'integrations.notConnectable': 'Rundesk کے پاس ابھی اس ایپ کا کنیکٹر نہیں، اس لیے سائن اِن کرنے کو کچھ نہیں ہے۔ اپنے ورک اسپیس ایڈمنز سے کہیں کہ اسے ترجیح دیں۔',
+  'integrations.needsPermission': 'یہاں ایپس ورک اسپیس کے ایڈمنز جوڑتے ہیں، اور وہ جن کا رول انٹیگریشنز سنبھالنے کی اجازت دیتا ہے۔ ان سے اسے جوڑنے کو کہیں۔',
   'integrations.railIntegrations': 'انٹیگریشنز',
   'integrations.railAi': 'AI',
   'integrations.suggestApp': 'ایپ تجویز کریں',
@@ -22897,6 +22904,7 @@ export const ur: Record<TranslationKey, string> = {
   'docTemplates.desc.rfc': 'متبادل کے ساتھ فیصلے کی تجویز۔',
   'docTemplates.desc.oneOnOne': 'مستقل ایجنڈا + پارکنگ لاٹ۔',
   'ssoTab.title': 'انٹرپرائز SSO',
+  'ssoTab.loadFailed': 'SSO کی ترتیبات لوڈ نہیں ہو سکیں۔',
   'ssoTab.subtitle': 'Okta، Azure AD، Google Workspace، یا کسی بھی SAML / OIDC IdP کو منسلک کریں۔ JIT سے فراہم کردہ اراکین پہلے سے طے شدہ کردار کے ساتھ شامل کیے جاتے ہیں اور ہر سائن اِن پر آڈٹ لاگ ہوتے ہیں۔',
   'ssoTab.badgeActive': 'فعال',
   'ssoTab.oidcTitle': 'OpenID Connect (OIDC)',

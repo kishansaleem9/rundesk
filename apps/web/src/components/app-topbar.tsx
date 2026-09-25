@@ -64,6 +64,7 @@ import { getRealtimeSocket } from '../lib/realtime'
 import { MentionText } from './mention-text'
 import { formatMentionsPlain } from '../lib/mentions'
 import { useMentionNames } from '../hooks/use-mention-names'
+import { useSettingsAccess } from '../hooks/use-settings-access'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, ACCENT_PALETTE, ACCENT_HEX } from '@rundesk/feature-flags'
 import type { AccentName } from '@rundesk/feature-flags'
@@ -1093,6 +1094,7 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
   const setTool = useSetTopbarItem()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const settingsAccess = useSettingsAccess(workspaceId)
   const { t } = useTranslation()
 
   // Presence and quiet hours are both "am I reachable right now" answers, so the
@@ -1633,8 +1635,11 @@ function UserMenu({ workspaceId }: { workspaceId?: string }) {
           <SettingsIcon className="h-4 w-4 text-muted-foreground" />
           {t('topbar.accountSettings')}
         </DropdownMenuItem>
-        {workspaceId && (
+        {/* Offered to whomever settings lets in — it was offered to everyone,
+            and the route sent a member straight back to the start. */}
+        {workspaceId && settingsAccess.mayOpen && (
           <DropdownMenuItem
+            data-testid="menu-workspace-settings"
             onSelect={() =>
               navigate({ to: '/app/$workspaceId/settings', params: { workspaceId } })
             }

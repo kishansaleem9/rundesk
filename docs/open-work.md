@@ -38,7 +38,7 @@ Produced by a read-only sweep: eight lanes (handoff defects, every open ledger r
 
 *Closed (e419039):* a channel pages back 100 at a time by an `(created_at, id)` cursor to its first message, a thread opens on its newest replies with the rest on request, and a link to an old message pages back to it. `chat-history` 14/14; `chx-1..16` 16 of 16 reddened their claims, each run full-length (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `product-siblings/custom-role-permissions-unread-by-web` — partly-fixed, medium
+### `product-siblings/custom-role-permissions-unread-by-web` — **closed** (the second half, 25 September), medium
 
 **GET /workspaces/:ws/roles/me/permissions has no caller; web gating ignores custom-role permissions the server enforces**
 
@@ -67,10 +67,43 @@ The new suite `role-permissions-web` has 5 checks: a member; a guest; the member
 
 Regression on lanes 1 and 2: 29 of 30 at first (`space-wizard`, as above). Then 13/13 on the final build: `role-permissions-web`, `space-wizard`, `clickapps-plan-gating`, `sidebar-sections`, `space-create-menu`, `folder-create`, `create-menu-ai`, `space-wizard-views`, `ui-sweep`, `video-regression`, `video1-acceptance`, `no-dead-ends` and `command-palette`. In CI.
 
-*Still open:*
+*Still open then:*
 
 - `webhook.manage` (Integrations → Webhooks) and `sso.manage` (SSO). Workspace settings is admin-only in the router, so the API honours a custom role granting either key and the web never reaches it.
 - `integrations.manage`. Slack's routes ask for a workspace admin, not the key the catalog says covers Slack. The App Center offers every member a Connect switch that `POST …/oauth/start` refuses without the key.
+
+*Measured, 25 September, lane 5 (the new suite against HEAD's API and bundle):* the avatar menu and the palette offered every member Workspace settings, and the route sent a plain member back to `/app`. It sent the holder of `webhook.manage` back too, with no way to their webhooks, as it did the holders of `sso.manage` and `integrations.manage`. The holder of `integrations.manage` was refused Slack (403). In the App Center, the plain member's Slack switch was live, with Connect, and said nothing of who connects apps. Found on the way:
+
+- The palette's Connect, for a search source not yet connected, went to Settings → General, which connects no source. `search-sources` checked only that the link was there.
+- The SSO tab seeded its forms from the saved connection once, when the form mounted, and the connections loaded after that. After a reload a saved OIDC connection showed an empty issuer under an "Update" button, which would save those blanks over it (probe on HEAD's bundle: saved `https://idp-….example.invalid`, shown `""`, button "Update").
+
+ClickUp (search snippets; the help pages cannot be fetched here): workspace-level connections are the owners' and admins', or a role's given the permission, and a member without it finds the connect option unavailable or disabled. Personal connections are a separate permission, which is `found-24-sep/personal-calendar-connect-needs-integrations-manage`'s question.
+
+*Closed, 25 September:*
+
+- **One answer to "may this person open settings, and which tabs"** (`hooks/use-settings-access.ts`): every tab for an admin; for anybody else, the tabs their keys serve (Integrations for `webhook.manage` or `integrations.manage`, SSO for `sso.manage`). The route asks it before the page renders (`permissionsQuery`, the same cache the hook reads). Anybody else goes to `/app`, and a holder lands on their own tab. The page draws only their tabs.
+- **Every way in asks the same question:** the avatar menu, the palette's Settings command, the dock's tool, the browse list's link, the switcher's shortcut (People stays an admin's), and the collapsed rail.
+- **The Integrations tab shows each card to its key:** Webhooks to `webhook.manage`, Slack to `integrations.manage`. The importer and the data export stay an admin's, as their routes are.
+- **Slack's write routes ask `integrations.manage`** (`PermissionsGuard`), the key the catalog files Slack under, instead of `WorkspaceAdminGuard`. An admin holds it through their role.
+- **In the App Center, a tile the viewer cannot connect is a request, not a switch.** The switch is live only for `integrations.manage`. The tile says in words who connects apps (four locales), and its action is Request access. A connected tile they cannot manage offers no action.
+- **The palette's Connect** is offered by `integrations.manage` and opens the App Center at that source's own app (`?app=`, which prefills the catalogue's search).
+- **The SSO forms wait for what is saved** (a skeleton while loading, keyed by the connection), and a failed read says so (`ssoTab.loadFailed`, four locales) instead of drawing empty forms.
+
+The new suite `settings-role-grants`, 6 checks: a plain member and the holders of each key, the avatar menu, palette, dock, browse list, switcher and rail, the tabs and cards, a webhook made and an OIDC connection saved from Settings (each read back by SQL; the form after a reload, and a failed read), Slack by the key, and the App Center's Slack tile.
+
+- Before (HEAD's API and bundle, lane 5): 0 of 6. Each check was measured failing on a condition it still holds; conditions were added afterwards (the sidebar's four ways in, the failed SSO read).
+- After: 6/6.
+
+`search-sources` gains a check (11): its Connect lands on the App Center, searched for Gmail. 10 of 11 before (it led to `/settings`), 11/11 after.
+
+`srg-1..18` and `search-sources-8..9`, one per mechanism, each compiled; `search-sources-7` and `-4` re-aimed at the key. `app-catalogue-11` and `-13` (the tile's action is `asks` now) and `whk-10` and `-13` (the webhooks card is inside its condition) were re-aimed at the new text. Regression on lane 5, 45/45: `settings-role-grants`, `search-sources`, `role-permissions-web`, `guest-create-menu`, `space-wizard`, `sidebar-sections`, `space-create-menu`, `activity-rail`, `addressability-live`, `app-catalogue`, `calendar-accounts`, `command-palette`, `focus-pill`, `folder-dialog`, `integration-error-card`, `panel-collapse`, `permission-guards`, `person-panel`, every planner suite (13), `settings-depth`, `settings-writes`, `stable-images`, `sw-api-cache`, `tab-title-countdown`, `task-cover`, `task-delete`, `team-schedules`, `teams-destination`, `webhook-access`, `video1-fast-items`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+
+*Not changed, recorded:*
+
+- A member cannot connect their own calendar: `found-24-sep/personal-calendar-connect-needs-integrations-manage`.
+- The Meetings page's Connect Calendar goes to a settings tab with no calendar: `found-24-sep/meetings-connect-calendar-goes-to-settings`.
+- The onboarding checklist's Invite step opens Settings, General tab, and a manager, who may invite, is sent back. Invitations are role-listed (`['workspace_admin', 'manager']`) rather than asked of `members.invite`, which is `found-23-sep/role-editor-offers-unenforced-permissions`'s territory.
+- A person's dock empties after their first page: `found-25-sep/dock-empties-after-the-first-page`, below.
 
 *Found beside it:* `found-24-sep/guest-makes-lists-where-nothing-is-shared` (security) and `found-24-sep/create-menu-offers-guests-what-they-cannot-make`, both below.
 
@@ -1357,6 +1390,8 @@ The new suite `guest-create-menu`, 6 checks. A guest first passes through one sp
 
 `gcm-1..11`, each compiled, at least one per check: the hook's guest branch, the task and reminder rows, a list in any space and with no space, Imports and Templates, the picker, the project page's two buttons, the question never asked, and the API's guest default. `form-1`, `form-2`, `rpw-1`, `rpw-2`, `rpw-3`, `rpw-7` and `sidebar-sections-8` were re-aimed at the new rows and hook. Regression on lane 1, 28/28: `guest-create-menu`, `role-permissions-web`, `space-create-menu`, `create-menu-ai`, `folder-create`, `folder-dialog`, `sidebar-sections`, `space-wizard`, `space-wizard-views`, `list-name-taken`, `attach-on-create`, `comment-plus-menu`, `create-ai-results`, `custom-field-progress`, `custom-field-types`, `home-reminders`, `task-depth`, `time-estimate`, `ai-create-containers`, `guest-space-level`, `guest-read-scope`, `guest-chat-scope`, `guest-canvas-scope`, `form-access`, `clickapps-plan-gating`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
+*Break run, lane 1 (bbf19f2):* `gcm-1..11`, 11 of 11 reddened. `form-1`, `form-2`, `rpw-1`, `rpw-3` and `sidebar-sections-8` reddened. `rpw-2` and `rpw-7` stayed green: each dropped the `space.create` key, and `guests: 'no'` now withholds Space and Folder from the same people, because custom roles only add keys and every tier but a guest's holds `space.create`. Both now drop the two, to be re-run.
+
 *Not changed, recorded:*
 
 - A guest given edit on a folder or a project, rather than its space, may make a list there (the create gate reads their share on the way, `within`), but no menu offers it: the menus read grants on spaces. That offers less than the API allows, not more.
@@ -1388,6 +1423,8 @@ The new suite `guest-create-menu`, 6 checks. A guest first passes through one sp
 
 Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on the current build.
 
+*Break run, lane 1 (bbf19f2):* `sti-7`, `sti-8`, `search-sources-4`, `fma-11` and `plr-16` reddened (`plr-16` on a lane its marker started a model on). `ars-3` stayed green again. The second project had no task, and the plan's basis names only projects that have tasks, so the answers were the same with or without it. It has one now (unassigned; the overview totals become 3 and 12). `ai-read-access` is 5/5, and `ars-3` is to be re-run.
+
 *Recorded:* the create gate passing non-members (`assertSpaceLevel` returns when `resolveSpaceLevel` has no membership to read) is deliberate, so that a super-admin and internal callers pass. It makes every caller's own workspace check load-bearing. That is a hardening question, not a defect today.
 
 ### `found-24-sep/personal-calendar-connect-needs-integrations-manage` — open, behaviour, medium (found reading `custom-role-permissions-unread-by-web`)
@@ -1405,6 +1442,22 @@ Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on th
 *Evidence, read not run:* `workspace-meetings-page.tsx` links the empty "Upcoming" state to `settings?tab=integrations`. That tab holds webhooks, Slack, the importer and data export. Calendars connect in the planner's Accounts page, a tab of the planner's settings dialog, which has no address. A member is sent back to `/app` by the settings route.
 
 *To close:* give the Accounts page an address, aim the link there, and read where it lands.
+
+### `found-25-sep/statuses-written-by-readers` — open, security, medium (found probing `project-page-offers-guests-its-managers-buttons`)
+
+**Anybody who may read a space, a project or a list may create, rename, delete and reorder its statuses**
+
+*Evidence, measured on lane 5:* a guest with one list shared with them to view passes through its project. They were answered 201 creating a status on that project, and the row was made. The three status controllers (`spaces/:id/statuses`, `projects/:id/statuses`, `lists/:id/statuses`, `scoped-statuses.controller.ts` and `list-statuses.controller.ts`) are guarded by `ResourceMemberGuard` alone, which asks whether the caller may READ the container. Their services take no actor. Deleting a status reassigns every task in it, so a reader can change other people's tasks. The same reader rename of the project was 404, and changing its visibility was 403.
+
+*To close:* research who manages statuses in ClickUp. Then ask of every status write the rule that already guards the container's own settings. Measure a guest, a member of a view-only space and a member who may edit, each refusal read back by SQL beside its positive twin.
+
+### `found-25-sep/dock-empties-after-the-first-page` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
+
+**A person's dock loses its default tools as soon as they visit any page**
+
+*Evidence, read, and seen once:* in `settings-role-grants`, a member who had never opened the dock picker had no tool in their dock after a few pages. The web keeps the default set (`DEFAULT_DOCK_TOOLS`) for "never chosen", which it reads as `pinnedLinks` being absent. But the first write of anything else to the dock row creates the row with `pinned_links = []`, and the sidebar records recents on navigation. The column is `NOT NULL DEFAULT '[]'` and the insert writes `patch.pinnedLinks ?? []`, so "never arranged" becomes "arranged to hold nothing". The same service already keeps that difference for `navFavorites` and `navRecents`, which stay null until arranged.
+
+*To close:* measure it (a new member, one page, the dock). Then let `pinned_links` hold null for "never arranged": a migration dropping the NOT NULL and the default, and the insert leaving it null when absent. Read it back in the browser.
 
 ### `found-24-sep/view-only-space-offers-members-what-it-refuses` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
 

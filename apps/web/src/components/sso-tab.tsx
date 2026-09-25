@@ -4,6 +4,7 @@ import { Button, Card, Input, Label, Switch, Badge, toast, cn } from '@rundesk/u
 import { KeyRound, Copy, Plus, Trash2, ShieldCheck, AlertTriangle } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { InlineSkeleton } from './loading-skeletons'
 
 type SsoProvider = 'oidc' | 'saml'
 
@@ -86,17 +87,35 @@ export function SsoTab({ workspaceId }: { workspaceId: string }) {
         </div>
       </Card>
 
-      <OidcCard
-        workspaceId={workspaceId}
-        connection={oidc}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['sso-connections', workspaceId] })}
-      />
+      {/*
+        THE FORMS ARE SEEDED FROM WHAT IS SAVED, SO THEY WAIT FOR IT. Each card
+        copies its connection into its fields once, when it mounts; drawn
+        before the connections had loaded, it copied nothing, and after a
+        reload a saved connection showed as an empty form under an "Update"
+        button — which saved those blanks over it. Keyed by the connection, so
+        the first save (none → one) seeds the card afresh from the answer.
+      */}
+      {connectionsQ.isLoading ? (
+        <InlineSkeleton />
+      ) : connectionsQ.isError ? (
+        <p className="text-xs text-destructive" data-testid="sso-load-failed">{t('ssoTab.loadFailed')}</p>
+      ) : (
+        <>
+          <OidcCard
+            key={oidc?.id ?? 'new'}
+            workspaceId={workspaceId}
+            connection={oidc}
+            onSaved={() => qc.invalidateQueries({ queryKey: ['sso-connections', workspaceId] })}
+          />
 
-      <SamlCard
-        workspaceId={workspaceId}
-        connection={saml}
-        onSaved={() => qc.invalidateQueries({ queryKey: ['sso-connections', workspaceId] })}
-      />
+          <SamlCard
+            key={saml?.id ?? 'new'}
+            workspaceId={workspaceId}
+            connection={saml}
+            onSaved={() => qc.invalidateQueries({ queryKey: ['sso-connections', workspaceId] })}
+          />
+        </>
+      )}
 
       <ScimSection
         workspaceId={workspaceId}
@@ -183,7 +202,7 @@ function OidcCard({
           <Input value={displayName} onChange={(e) => setDisplayName(e.target.value)} placeholder="Okta" />
         </Field>
         <Field label={t('ssoTab.issuerUrl')}>
-          <Input value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://example.okta.com" />
+          <Input data-testid="sso-oidc-issuer" value={issuer} onChange={(e) => setIssuer(e.target.value)} placeholder="https://example.okta.com" />
         </Field>
         <Field label={t('ssoTab.clientId')}>
           <Input value={clientId} onChange={(e) => setClientId(e.target.value)} placeholder="0oab..." />
@@ -227,7 +246,7 @@ function OidcCard({
             ? t('ssoTab.lastUsed', { date: new Date(connection.lastUsedAt).toLocaleString() })
             : t('ssoTab.notYetUsed')}
         </p>
-        <Button onClick={() => save.mutate()} disabled={save.isPending}>
+        <Button data-testid="sso-oidc-save" onClick={() => save.mutate()} disabled={save.isPending}>
           {save.isPending ? t('common.saving') : connection ? t('ssoTab.update') : t('common.create')}
         </Button>
       </div>

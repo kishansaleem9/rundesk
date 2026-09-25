@@ -99,11 +99,15 @@ try {
   // The open space: the member's own project, with a PRIVATE list of the admin's in it.
   const OS = await make('/spaces', { workspaceId: WS, name: `${TAG} open space` }, 'the open space')
   const OP = await make('/projects', { spaceId: OS, name: 'Website launch' }, 'the open project')
-  // And a second open project, named like nothing here. With one candidate there
-  // is nothing to rank, so a private project's name leaking into the plan changed
-  // nothing and `ars-3` measured nothing (green in two plans); with two, a leaked
-  // "Website launch …" keeps only the project it matches, where naming none keeps both.
-  await make('/projects', { spaceId: OS, name: `Garden shed ${TAG}` }, 'the second open project')
+  // And a second open project, named like nothing here, with a task of its own
+  // (the basis names only projects that have tasks). With one candidate there is
+  // nothing to rank, so a private project's name leaking into the plan changed
+  // nothing and `ars-3` measured nothing (green twice); with two, a leaked
+  // "Website launch …" keeps only the project it matches, where naming none keeps
+  // both. Unassigned, so no one's load changes; the overview counts it.
+  const SHED = await make('/projects', { spaceId: OS, name: `Garden shed ${TAG}` }, 'the second open project')
+  const SHEDL = await make('/lists', { projectId: SHED, name: `${TAG} shed list` }, 'the second project’s list')
+  await make('/tasks', { listId: SHEDL, title: `${TAG} shed step` }, 'the second project’s task')
   const OL = await make('/lists', { projectId: OP, name: `${TAG} open list` }, 'the open list')
   const PL = await make('/lists', { projectId: OP, name: `${WORD} private list`, visibility: 'private' }, 'the private list')
   for (let i = 0; i < 3; i++) await make('/tasks', { listId: PL, title: `${WORD} private-list task ${i}`, assigneeIds: [adminId], dueDate: tomorrow }, 'a private-list task')
@@ -176,7 +180,7 @@ try {
     M(`/workspaces/${WS}/reports/activity`), A(`/workspaces/${WS}/reports/activity`),
   ])
   chk(
-    mOver.data?.total === 2 && aOver.data?.total === 11 && !mAct.text.includes(`${WORD} private-list task`) && aAct.text.includes(`${WORD} private-list task`),
+    mOver.data?.total === 3 && aOver.data?.total === 12 && !mAct.text.includes(`${WORD} private-list task`) && aAct.text.includes(`${WORD} private-list task`),
     'a member’s overview counts none of a private list’s tasks and their activity feed names none — the admin’s count and name them',
     `the overview: the member ${mOver.data?.total}, the admin ${aOver.data?.total}; the member's feed names them: ${mAct.text.includes(`${WORD} private-list task`)}, the admin's: ${aAct.text.includes(`${WORD} private-list task`)}`,
   )

@@ -91,6 +91,7 @@ import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
 import { useCreatable } from '../hooks/use-creatable'
+import { useSettingsAccess } from '../hooks/use-settings-access'
 import { MoveDialog, type MovableKind } from './move-dialog'
 import { SharePanel, type ShareObjectType } from './share-panel'
 import { CreateSpaceWizard } from './create-space-wizard'
@@ -202,7 +203,7 @@ function workspaceNavEntries(workspaceId: string): Array<{ label: string; path: 
 function railEntries(
   workspaceId: string,
   featureEnabled: (flag?: FlagKey) => boolean,
-  isAdmin: boolean,
+  mayOpenSettings: boolean,
   mayViewReports: boolean,
 ): Array<{ path: string; label: string; icon: typeof Home; exact?: boolean }> {
   const base = `/app/${workspaceId}`
@@ -248,7 +249,9 @@ function railEntries(
   const visible = all.filter(
     (entry) => (!entry.flag || featureEnabled(entry.flag)) && (entry.path !== `${base}/reports` || mayViewReports),
   )
-  if (isAdmin) visible.push({ path: `${base}/settings`, label: 'Settings', icon: Settings })
+  // Settings, for whomever it lets in: an admin, or the holder of a key one of
+  // its tabs serves (`useSettingsAccess`).
+  if (mayOpenSettings) visible.push({ path: `${base}/settings`, label: 'Settings', icon: Settings })
   return visible.map(({ flag: _flag, ...entry }) => entry)
 }
 
@@ -305,7 +308,8 @@ const DOCKABLE_TOOLS: Array<{
   icon: typeof Home
   labelKey: TranslationKey
   flag?: FlagKey
-  adminOnly?: boolean
+  /** Offered only to somebody workspace settings will let in (`useSettingsAccess`). */
+  settings?: boolean
 }> = [
   { id: 'home', path: '', icon: Home, labelKey: 'nav.home' },
   { id: 'inbox', path: '/inbox', icon: Inbox, labelKey: 'nav.inbox' },
@@ -319,14 +323,15 @@ const DOCKABLE_TOOLS: Array<{
   { id: 'goals', path: '/goals', icon: Target, labelKey: 'nav.goals' },
   /*
    * §V2-12, frame `20:55` — Teams is a DESTINATION, and deliberately not
-   * `adminOnly`. Everything it shows already existed inside workspace settings,
-   * which redirects any non-admin back to `/app`, so an ordinary member could
-   * not see who was on which team or who reported to whom. Marking this admin
-   * too would rebuild the wall this item exists to remove.
+   * gated. Everything it shows already existed inside workspace settings, which
+   * sends anybody but an admin (or the holder of a key one of its tabs serves)
+   * back to `/app`, so an ordinary member could not see who was on which team
+   * or who reported to whom. Gating this too would rebuild the wall this item
+   * exists to remove.
    */
   { id: 'teams', path: '/teams', icon: Users2, labelKey: 'nav.teams' },
   { id: 'whiteboards', path: '/whiteboards', icon: Frame, labelKey: 'nav.whiteboards' },
-  { id: 'settings', path: '/settings', icon: Settings, labelKey: 'nav.settings', adminOnly: true },
+  { id: 'settings', path: '/settings', icon: Settings, labelKey: 'nav.settings', settings: true },
 ]
 
 /** What the dock carries for somebody who has never opened the picker. */
@@ -338,6 +343,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const workspaceId = isUuidLike(params.workspaceId) ? params.workspaceId : undefined
   const { isAdmin, canCreateWorkspace, role: workspaceRole } = useWorkspaceRole(workspaceId)
+  // Whether workspace settings will let this person in: an admin, or the holder
+  // of a key one of its tabs serves (`useSettingsAccess`, the route's own answer).
+  const settingsAccess = useSettingsAccess(workspaceId)
   // A space's own "+" offers what this person may make THERE (`useCreatable`,
   // the Create menu's own answer): a permission key once held, and for a guest
   // a list only in a space they may add to.
@@ -1193,7 +1201,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
    * rendering a link to a 404.
    */
   const offerableTools = DOCKABLE_TOOLS.filter(
-    (tool) => (!tool.flag || featureEnabled(tool.flag)) && (!tool.adminOnly || isAdmin),
+    (tool) => (!tool.flag || featureEnabled(tool.flag)) && (!tool.settings || settingsAccess.mayOpen),
   )
   const storedDockTools: string[] | null = Array.isArray(dockConfigQuery.data?.pinnedLinks)
     ? (dockConfigQuery.data.pinnedLinks as unknown[]).map(String)
@@ -1476,7 +1484,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
           style={{ paddingBottom: listPadBottom + 8 }}
         >
           {workspaceId
-            ? railEntries(workspaceId, featureEnabled, isAdmin, permissions.can('report.view.basic') === true).map((entry) => {
+            ? railEntries(workspaceId, featureEnabled, settingsAccess.mayOpen, permissions.can('report.view.basic') === true).map((entry) => {
                   const Icon = entry.icon
                   const active = isNavPathActive(pathname, entry.path, entry.exact)
                   return (
@@ -1602,32 +1610,36 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
             <ChevronDown className={cn('h-4 w-4 shrink-0 text-muted-foreground transition-transform', openSwitcher && 'rotate-180')} />
           </div>
         </button>
-        {workspaceId && isAdmin && (
+        {/* Settings for whomever it lets in; People is an admin's tab. */}
+        {workspaceId && settingsAccess.mayOpen && (
           <div className="mt-2 flex gap-2">
             <Button
               size="sm"
               variant="outline"
               className="flex-1 text-xs"
+              data-testid="switcher-settings"
               onClick={() => navigate({ to: '/app/$workspaceId/settings', params: { workspaceId } })}
             >
               <Settings className="h-3.5 w-3.5 mr-1" />
               {t('nav.workspaceSettingsShortcut')}
             </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              className="flex-1 text-xs"
-              onClick={() =>
-                navigate({
-                  to: '/app/$workspaceId/settings',
-                  params: { workspaceId },
-                  search: { tab: 'members' },
-                })
-              }
-            >
-              <Users className="h-3.5 w-3.5 mr-1" />
-              {t('nav.workspacePeopleShortcut')}
-            </Button>
+            {isAdmin && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="flex-1 text-xs"
+                onClick={() =>
+                  navigate({
+                    to: '/app/$workspaceId/settings',
+                    params: { workspaceId },
+                    search: { tab: 'members' },
+                  })
+                }
+              >
+                <Users className="h-3.5 w-3.5 mr-1" />
+                {t('nav.workspacePeopleShortcut')}
+              </Button>
+            )}
           </div>
         )}
         {openSwitcher && (
@@ -1990,7 +2002,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                 )}
                 <NavLink to={"/app/$workspaceId/mindmaps" as any} params={{ workspaceId }} icon={Frame} label={t('nav.mindMaps')} compact favorite={favoriteProps('Mind maps', `/app/${workspaceId}/mindmaps`)} />
                 <NavLink to={"/app/$workspaceId/clips" as any} params={{ workspaceId }} icon={MessageCircle} label={t('nav.clips')} compact favorite={favoriteProps('Clips', `/app/${workspaceId}/clips`)} />
-                {isAdmin && (
+                {settingsAccess.mayOpen && (
                   <NavLink to="/app/$workspaceId/settings" params={{ workspaceId }} icon={Settings} label={t('nav.settings')} compact />
                 )}
               </div>

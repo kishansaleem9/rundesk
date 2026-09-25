@@ -3,12 +3,14 @@ import { SlackService } from './slack.service'
 import { SlackController } from './slack.controller'
 import { DatabaseModule } from '../../../common/database/database.module'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
+import { CustomRolesModule } from '../../custom-roles/custom-roles.module'
 
 @Module({
-  imports: [DatabaseModule],
+  // `CustomRolesModule` for the permission guard on the write routes, which ask
+  // for `integrations.manage` rather than a workspace admin.
+  imports: [DatabaseModule, CustomRolesModule],
   controllers: [SlackController],
-  providers: [SlackService, WorkspaceMemberGuard, WorkspaceAdminGuard],
+  providers: [SlackService, WorkspaceMemberGuard],
   exports: [SlackService],
 })
 export class SlackModule {}

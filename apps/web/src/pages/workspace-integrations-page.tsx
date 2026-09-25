@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react'
-import { Link, useParams } from '@tanstack/react-router'
+import { Link, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
   Card,
@@ -16,6 +16,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { api } from '../lib/api'
+import { usePermissions } from '../hooks/use-permissions'
 import {
   Search,
   Plug,
@@ -305,8 +306,12 @@ function HelpCentreLink({ testId }: { testId: string }) {
 export function IntegrationsMarketplacePage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ from: '/app/$workspaceId/integrations' })
+  // Opened at one app (`?app=`, the palette's Connect): the search starts at its name.
+  const { app: openedAt } = useSearch({ from: '/app/$workspaceId/integrations' })
   const qc = useQueryClient()
-  const [query, setQuery] = useState('')
+  const [query, setQuery] = useState(() => INTEGRATIONS.find((i) => i.id === openedAt)?.name ?? '')
+  // Connecting an app is `integrations.manage`'s (the connect and Slack routes).
+  const mayConnect = usePermissions(workspaceId).can('integrations.manage')
   const [filter, setFilter] = useState<FacetId>('all')
   const [activeIntegration, setActiveIntegration] = useState<Integration | null>(null)
   const [activeProvider, setActiveProvider] = useState<string | null>(null)
@@ -865,6 +870,7 @@ export function IntegrationsMarketplacePage() {
             providerReady={isProviderReady(integration)}
             accessRequest={accessRequestByProvider.get(integration.id)}
             onRequestAccess={() => requestAccess.mutate(integration.id)}
+            mayConnect={mayConnect}
           />
         ))}
       </div>
@@ -1145,6 +1151,7 @@ function IntegrationCard({
   providerReady,
   accessRequest,
   onRequestAccess,
+  mayConnect,
 }: {
   integration: Integration
   connected: boolean
@@ -1157,8 +1164,20 @@ function IntegrationCard({
   accessRequest?: { status: 'pending' | 'approved' | 'rejected'; note?: string | null; updatedAt?: string }
   onRequestAccess: () => void
   connection?: ConnectionState
+  /** `integrations.manage`, the key the connect route asks for; null until known. */
+  mayConnect: boolean | null
 }) {
   const { t } = useTranslation()
+  /*
+   * A TILE THE VIEWER CANNOT CONNECT IS A REQUEST, NOT A SWITCH: an app Rundesk
+   * has no connector for, or one only `integrations.manage` connects. Every
+   * member was offered a live switch and Connect, and the connect route refused
+   * them (`product-siblings/custom-role-permissions-unread-by-web`); ClickUp's
+   * member finds a workspace connection's option unavailable. Connected, there
+   * is nothing for them to ask for, and nothing to press.
+   */
+  const asks = !supported || (mayConnect === false && !connected)
+  const actionless = supported && mayConnect === false && connected
   return (
     <Card
       variant="glass"
@@ -1181,11 +1200,11 @@ function IntegrationCard({
               {integration.popular && !connected && (
                 <Badge variant="info" className="text-[9px] uppercase">{t('integrations.popular')}</Badge>
               )}
-              {!supported && accessRequest?.status === 'rejected' ? (
+              {asks && accessRequest?.status === 'rejected' ? (
                 <Badge variant="destructive" className="text-[9px] uppercase">{t('integrations.rejected')}</Badge>
-              ) : !supported && accessRequest?.status === 'approved' ? (
+              ) : asks && accessRequest?.status === 'approved' ? (
                 <Badge variant="success" className="text-[9px] uppercase">{t('integrations.approved')}</Badge>
-              ) : !supported && accessRequest?.status === 'pending' ? (
+              ) : asks && accessRequest?.status === 'pending' ? (
                 <Badge variant="info" className="text-[9px] uppercase">{t('integrations.requested')}</Badge>
               ) : !supported ? (
                 <Badge variant="secondary" className="text-[9px] uppercase">{t('integrations.unavailable')}</Badge>
@@ -1225,6 +1244,15 @@ function IntegrationCard({
               {t('integrations.notConnectable')}
             </p>
           )}
+          {supported && mayConnect === false && (
+            <p
+              className="text-[11px] text-muted-foreground mt-1 leading-relaxed"
+              data-testid="integration-needs-permission"
+              data-provider={integration.id}
+            >
+              {t('integrations.needsPermission')}
+            </p>
+          )}
           {supported && !providerReady && setupReason && (
             <p className="text-[11px] text-amber-700 dark:text-amber-300 mt-1">
               {setupReason}
@@ -1240,12 +1268,12 @@ function IntegrationCard({
               {t('integrations.tokenExpires')} {new Date(connection.tokenExpiresAt).toLocaleString()}
             </p>
           )}
-          {!supported && accessRequest?.note ? (
+          {asks && accessRequest?.note ? (
             <p className="text-[11px] text-muted-foreground mt-1 truncate">
               {t('integrations.adminNote')} {accessRequest.note}
             </p>
           ) : null}
-          {!supported && accessRequest?.updatedAt ? (
+          {asks && accessRequest?.updatedAt ? (
             <p className="text-[11px] text-muted-foreground mt-0.5">
               {t('integrations.decisionUpdated')} {new Date(accessRequest.updatedAt).toLocaleString()}
             </p>
@@ -1283,55 +1311,59 @@ function IntegrationCard({
             <Switch
               checked={connected}
               onCheckedChange={onToggle}
-              disabled={isLoading || !supported || !providerReady}
+              disabled={isLoading || !supported || !providerReady || mayConnect !== true}
               data-testid="integration-toggle"
             />
             {/*
               EVERY TILE CAN BE ACTED ON. That is the deliverable, and it is
               why there is no longer a branch here that renders a disabled
               button labelled "Not available yet". A tile you cannot connect
-              offers the one thing that is real — telling the admins you want
-              it — and reports what came back. Only a request already pending
-              or already granted disables it, because pressing it again would
-              do nothing and the label says which.
+              offers the one thing that is real — telling the people who can
+              that you want it — and reports what came back. Only a request
+              already pending or already granted disables it, because pressing
+              it again would do nothing and the label says which. The one tile
+              with nothing to act on is an app already connected, for somebody
+              who may not manage it: it says Connected, and offers no button.
             */}
-            <Button
-              variant="ghost"
-              size="sm"
-              className="h-7 text-xs"
-              data-testid="integration-action"
-              data-actionable={
-                isLoading ||
-                (!supported &&
-                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
-                  ? 'no'
-                  : 'yes'
-              }
-              disabled={
-                isLoading ||
-                (!supported &&
-                  (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
-              }
-              onClick={() => {
-                if (!supported) {
-                  onRequestAccess()
-                  return
+            {!actionless && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                data-testid="integration-action"
+                data-actionable={
+                  isLoading ||
+                  (asks &&
+                    (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+                    ? 'no'
+                    : 'yes'
                 }
-                onOpenConnect()
-              }}
-            >
-              {!supported
-                ? accessRequest?.status === 'rejected'
-                  ? t('integrations.requestAgain')
-                  : accessRequest?.status === 'approved'
-                  ? t('integrations.approved')
-                  : accessRequest?.status === 'pending'
-                  ? t('integrations.requested')
-                  : t('integrations.requestAccess')
-                : connected
-                ? t('integrations.configure')
-                : t('integrations.connect')}
-            </Button>
+                disabled={
+                  isLoading ||
+                  (asks &&
+                    (accessRequest?.status === 'pending' || accessRequest?.status === 'approved'))
+                }
+                onClick={() => {
+                  if (asks) {
+                    onRequestAccess()
+                    return
+                  }
+                  onOpenConnect()
+                }}
+              >
+                {asks
+                  ? accessRequest?.status === 'rejected'
+                    ? t('integrations.requestAgain')
+                    : accessRequest?.status === 'approved'
+                    ? t('integrations.approved')
+                    : accessRequest?.status === 'pending'
+                    ? t('integrations.requested')
+                    : t('integrations.requestAccess')
+                  : connected
+                  ? t('integrations.configure')
+                  : t('integrations.connect')}
+              </Button>
+            )}
           </div>
         </div>
       </div>

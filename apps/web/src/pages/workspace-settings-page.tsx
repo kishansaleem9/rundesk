@@ -15,6 +15,8 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { TrashTab } from '../components/trash-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
+import { useSettingsAccess } from '../hooks/use-settings-access'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -153,7 +155,11 @@ export function SettingsPage() {
    * the write was missing. workspace-time-approvals-page.tsx has done it this
    * way all along.
    */
-  const tab: SettingsTabId = tabFromUrl ?? 'general'
+  // The tabs this person may open: every one for an admin; for anybody else,
+  // those a key they hold serves (`useSettingsAccess`, which the route asks too).
+  const access = useSettingsAccess(workspaceId)
+  const tab: SettingsTabId = tabFromUrl ?? (access.tabs.includes('general') ? 'general' : (access.tabs[0] ?? 'general'))
+  const shown = (id: SettingsTabId) => access.tabs.includes(id)
   const setTab = (next: SettingsTabId) =>
     navigate({
       to: '/app/$workspaceId/settings',
@@ -206,12 +212,12 @@ export function SettingsPage() {
           )}
         >
           <nav className="space-y-4">
-            {TAB_GROUPS.map((group) => (
+            {TAB_GROUPS.filter((group) => group.tabs.some((item) => shown(item.id))).map((group) => (
               <div key={group.headingKey} className="space-y-0.5">
                 <div className="px-3 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70">
                   {t(group.headingKey)}
                 </div>
-                {group.tabs.map((item) => (
+                {group.tabs.filter((item) => shown(item.id)).map((item) => (
                   <button
                     key={item.id}
                     data-testid={`settings-tab-${item.id}`}
@@ -247,21 +253,27 @@ export function SettingsPage() {
               wide child (the Trash table) stretch the column instead of
               scrolling inside its own overflow container. */}
           <div className="min-w-0">
-            {tab === 'general' && <GeneralTab workspaceId={validWorkspaceId} />}
-            {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
-            {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
-            {tab === 'roles' && <RolesTab workspaceId={validWorkspaceId} />}
-            {tab === 'features' && <FeaturesTab workspaceId={validWorkspaceId} />}
-            {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
-            {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
-            {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
-            {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
-            {tab === 'taskTypes' && <TaskTypesTab workspaceId={validWorkspaceId} />}
-            {tab === 'workSchedule' && <WorkScheduleTab workspaceId={validWorkspaceId} />}
-            {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
-            {tab === 'spaces' && <SpacesTab workspaceId={validWorkspaceId} />}
-            {tab === 'aiUsage' && <AiUsageTab workspaceId={validWorkspaceId} />}
-            {tab === 'trash' && <TrashTab workspaceId={validWorkspaceId} />}
+            {/* A tab is drawn only for somebody who may open it: the route sends
+                anybody else to one they may, and this is the same answer. */}
+            {shown(tab) && (
+              <>
+                {tab === 'general' && <GeneralTab workspaceId={validWorkspaceId} />}
+                {tab === 'members' && <MembersTab workspaceId={validWorkspaceId} />}
+                {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
+                {tab === 'roles' && <RolesTab workspaceId={validWorkspaceId} />}
+                {tab === 'features' && <FeaturesTab workspaceId={validWorkspaceId} />}
+                {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
+                {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
+                {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
+                {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
+                {tab === 'taskTypes' && <TaskTypesTab workspaceId={validWorkspaceId} />}
+                {tab === 'workSchedule' && <WorkScheduleTab workspaceId={validWorkspaceId} />}
+                {tab === 'archived' && <ArchivedTab workspaceId={validWorkspaceId} />}
+                {tab === 'spaces' && <SpacesTab workspaceId={validWorkspaceId} />}
+                {tab === 'aiUsage' && <AiUsageTab workspaceId={validWorkspaceId} />}
+                {tab === 'trash' && <TrashTab workspaceId={validWorkspaceId} />}
+              </>
+            )}
           </div>
         </div>
       </div>
@@ -1462,6 +1474,14 @@ function UsageTable({
 function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
+  // Each card is its key's, as its routes are: webhooks and Slack a custom role
+  // can grant (`webhook.manage`, `integrations.manage`); the importer and the
+  // data export are an admin's. The tab is somebody's for either key, so it
+  // shows them the card that key is for, not an admin's four.
+  const { isAdmin } = useWorkspaceRole(workspaceId)
+  const permissions = usePermissions(workspaceId)
+  const mayWebhooks = permissions.can('webhook.manage') === true
+  const maySlack = permissions.can('integrations.manage') === true
   const [showWebhookForm, setShowWebhookForm] = useState(false)
   const [whName, setWhName] = useState('')
   const [whUrl, setWhUrl] = useState('')
@@ -1474,12 +1494,14 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const eventCatalog = useQuery({
     queryKey: ['webhook-events', workspaceId],
     queryFn: () => api<string[]>(`/workspaces/${workspaceId}/webhooks/events`),
+    enabled: mayWebhooks,
   })
 
   type Webhook = { id: string; name: string; url: string; events: string[]; isEnabled: boolean; successCount: number; failureCount: number }
   const whQuery = useQuery({
     queryKey: ['webhooks', workspaceId],
     queryFn: () => api<Webhook[]>(`/workspaces/${workspaceId}/webhooks`),
+    enabled: mayWebhooks,
   })
 
   const createWh = useMutation({
@@ -1520,6 +1542,7 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   const slackQuery = useQuery({
     queryKey: ['slack', workspaceId],
     queryFn: () => api<SlackInfo>(`/workspaces/${workspaceId}/integrations/slack`),
+    enabled: maySlack,
   })
 
   const connectSlack = useMutation({
@@ -1552,215 +1575,223 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-5">
       {/* Webhooks */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="font-semibold text-sm">{t('settings.webhooks')}</h3>
-            <p className="text-xs text-muted-foreground">{t('settings.webhooksDesc')}</p>
-          </div>
-          <Button size="sm" data-testid="webhook-add" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
-            <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.addWebhook')}
-          </Button>
-        </div>
-
-        {showWebhookForm && (
-          <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
-            <Input data-testid="webhook-form-name" value={whName} onChange={(e) => setWhName(e.target.value)} placeholder={t('settings.webhookNamePlaceholder')} />
-            <Input data-testid="webhook-form-url" value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
-            <div className="flex flex-wrap gap-1">
-              {(eventCatalog.data ?? []).map((ev) => (
-                <button
-                  key={ev}
-                  data-testid={`webhook-form-event-${ev}`}
-                  onClick={() => setWhEvents((prev) => prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev])}
-                  className={cn('text-xs px-2 py-0.5 rounded-full border transition-colors', whEvents.includes(ev) ? 'bg-brand-700 text-white border-brand-700' : 'border-border text-muted-foreground')}
-                >
-                  {webhookEventLabel(t, ev)}
-                </button>
-              ))}
+      {mayWebhooks && (
+        <Card className="p-4" data-testid="settings-card-webhooks">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-sm">{t('settings.webhooks')}</h3>
+              <p className="text-xs text-muted-foreground">{t('settings.webhooksDesc')}</p>
             </div>
-            <div className="flex gap-2">
-              <Button size="sm" data-testid="webhook-form-save" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>{t('common.save')}</Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>{t('common.cancel')}</Button>
-            </div>
-          </div>
-        )}
-
-        {madeSecret && (
-          <div className="mb-3">
-            <WebhookSecretOnce name={madeSecret.name} secret={madeSecret.secret} onDone={() => setMadeSecret(null)} />
-          </div>
-        )}
-
-        {/* Nothing listed is "none" only once the list has ANSWERED: while it
-            loads, or when it fails, zero is not what the server holds. */}
-        {whQuery.isLoading ? (
-          <InlineSkeleton />
-        ) : whQuery.isError ? (
-          <p className="text-xs text-destructive" data-testid="webhooks-load-failed">{t('webhooks.loadFailed')}</p>
-        ) : hooks.length === 0 && !showWebhookForm ? (
-          <p className="text-xs text-muted-foreground">{t('settings.noWebhooks')}</p>
-        ) : null}
-        {hooks.map((hook) => (
-          <div key={hook.id} data-testid={`webhook-row-${hook.id}`} className="flex items-center gap-3 py-2 border-t border-border/50">
-            <div className="flex-1 min-w-0">
-              <div className="font-medium text-sm">{hook.name}</div>
-              <div className="text-xs text-muted-foreground font-mono truncate">{hook.url}</div>
-              <div className="text-xs text-muted-foreground mt-0.5">{(hook.events as string[]).map((ev) => webhookEventLabel(t, ev)).join(', ')}</div>
-            </div>
-            <div className="text-xs text-muted-foreground shrink-0">
-              <span className="text-emerald-600">{hook.successCount}✓</span>
-              {' '}<span className="text-red-500">{hook.failureCount}✗</span>
-            </div>
-            <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>{t('settings.test')}</Button>
-            <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteWh.mutate(hook.id)}>
-              <Trash2 className="h-3.5 w-3.5" />
+            <Button size="sm" data-testid="webhook-add" onClick={() => setShowWebhookForm(true)} disabled={showWebhookForm}>
+              <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.addWebhook')}
             </Button>
           </div>
-        ))}
-      </Card>
+
+          {showWebhookForm && (
+            <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
+              <Input data-testid="webhook-form-name" value={whName} onChange={(e) => setWhName(e.target.value)} placeholder={t('settings.webhookNamePlaceholder')} />
+              <Input data-testid="webhook-form-url" value={whUrl} onChange={(e) => setWhUrl(e.target.value)} placeholder="https://your-endpoint.com/hook" />
+              <div className="flex flex-wrap gap-1">
+                {(eventCatalog.data ?? []).map((ev) => (
+                  <button
+                    key={ev}
+                    data-testid={`webhook-form-event-${ev}`}
+                    onClick={() => setWhEvents((prev) => prev.includes(ev) ? prev.filter((e) => e !== ev) : [...prev, ev])}
+                    className={cn('text-xs px-2 py-0.5 rounded-full border transition-colors', whEvents.includes(ev) ? 'bg-brand-700 text-white border-brand-700' : 'border-border text-muted-foreground')}
+                  >
+                    {webhookEventLabel(t, ev)}
+                  </button>
+                ))}
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" data-testid="webhook-form-save" disabled={!whName || !whUrl || createWh.isPending} onClick={() => createWh.mutate()}>{t('common.save')}</Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowWebhookForm(false)}>{t('common.cancel')}</Button>
+              </div>
+            </div>
+          )}
+
+          {madeSecret && (
+            <div className="mb-3">
+              <WebhookSecretOnce name={madeSecret.name} secret={madeSecret.secret} onDone={() => setMadeSecret(null)} />
+            </div>
+          )}
+
+          {/* Nothing listed is "none" only once the list has ANSWERED: while it
+              loads, or when it fails, zero is not what the server holds. */}
+          {whQuery.isLoading ? (
+            <InlineSkeleton />
+          ) : whQuery.isError ? (
+            <p className="text-xs text-destructive" data-testid="webhooks-load-failed">{t('webhooks.loadFailed')}</p>
+          ) : hooks.length === 0 && !showWebhookForm ? (
+            <p className="text-xs text-muted-foreground">{t('settings.noWebhooks')}</p>
+          ) : null}
+          {hooks.map((hook) => (
+            <div key={hook.id} data-testid={`webhook-row-${hook.id}`} className="flex items-center gap-3 py-2 border-t border-border/50">
+              <div className="flex-1 min-w-0">
+                <div className="font-medium text-sm">{hook.name}</div>
+                <div className="text-xs text-muted-foreground font-mono truncate">{hook.url}</div>
+                <div className="text-xs text-muted-foreground mt-0.5">{(hook.events as string[]).map((ev) => webhookEventLabel(t, ev)).join(', ')}</div>
+              </div>
+              <div className="text-xs text-muted-foreground shrink-0">
+                <span className="text-emerald-600">{hook.successCount}✓</span>
+                {' '}<span className="text-red-500">{hook.failureCount}✗</span>
+              </div>
+              <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>{t('settings.test')}</Button>
+              <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteWh.mutate(hook.id)}>
+                <Trash2 className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          ))}
+        </Card>
+      )}
 
       {/* Slack integration */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h3 className="font-semibold text-sm flex items-center gap-2">
-              Slack
-              {slackQuery.data?.isEnabled && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-                  {t('settings.connected')}
-                </span>
-              )}
-            </h3>
-            <p className="text-xs text-muted-foreground">
-              {t('settings.slackDesc')}
-            </p>
+      {maySlack && (
+        <Card className="p-4" data-testid="settings-card-slack">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-semibold text-sm flex items-center gap-2">
+                Slack
+                {slackQuery.data?.isEnabled && (
+                  <span className="text-[10px] px-1.5 py-0.5 rounded-full font-medium uppercase tracking-wider bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                    {t('settings.connected')}
+                  </span>
+                )}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {t('settings.slackDesc')}
+              </p>
+            </div>
+            {!slackQuery.data && !showSlackForm && (
+              <Button size="sm" onClick={() => setShowSlackForm(true)}>
+                <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.connect')}
+              </Button>
+            )}
           </div>
-          {!slackQuery.data && !showSlackForm && (
-            <Button size="sm" onClick={() => setShowSlackForm(true)}>
-              <Plus className="h-3.5 w-3.5 mr-1" /> {t('settings.connect')}
-            </Button>
+
+          {showSlackForm && !slackQuery.data && (
+            <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
+              <Input
+                value={slackUrl}
+                onChange={(e) => setSlackUrl(e.target.value)}
+                placeholder="https://hooks.slack.com/services/T.../B.../..."
+              />
+              <Input
+                value={slackChannel}
+                onChange={(e) => setSlackChannel(e.target.value)}
+                placeholder={t('settings.slackChannelPlaceholder')}
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  disabled={!slackUrl || connectSlack.isPending}
+                  onClick={() => connectSlack.mutate()}
+                >
+                  {t('settings.connect')}
+                </Button>
+                <Button size="sm" variant="ghost" onClick={() => setShowSlackForm(false)}>
+                  {t('common.cancel')}
+                </Button>
+              </div>
+              <p className="text-xs text-muted-foreground">
+                {t('settings.slackWebhookHelp')}{' '}
+                <a
+                  href="https://api.slack.com/messaging/webhooks"
+                  target="_blank"
+                  rel="noreferrer"
+                  className="underline"
+                >
+                  {t('settings.slackApps')}
+                </a>.
+              </p>
+            </div>
           )}
-        </div>
 
-        {showSlackForm && !slackQuery.data && (
-          <div className="mb-3 p-3 bg-muted/50 rounded-md space-y-2">
-            <Input
-              value={slackUrl}
-              onChange={(e) => setSlackUrl(e.target.value)}
-              placeholder="https://hooks.slack.com/services/T.../B.../..."
-            />
-            <Input
-              value={slackChannel}
-              onChange={(e) => setSlackChannel(e.target.value)}
-              placeholder={t('settings.slackChannelPlaceholder')}
-            />
-            <div className="flex gap-2">
-              <Button
-                size="sm"
-                disabled={!slackUrl || connectSlack.isPending}
-                onClick={() => connectSlack.mutate()}
-              >
-                {t('settings.connect')}
-              </Button>
-              <Button size="sm" variant="ghost" onClick={() => setShowSlackForm(false)}>
-                {t('common.cancel')}
-              </Button>
-            </div>
-            <p className="text-xs text-muted-foreground">
-              {t('settings.slackWebhookHelp')}{' '}
-              <a
-                href="https://api.slack.com/messaging/webhooks"
-                target="_blank"
-                rel="noreferrer"
-                className="underline"
-              >
-                {t('settings.slackApps')}
-              </a>.
-            </p>
-          </div>
-        )}
-
-        {slackQuery.data && (
-          <div className="space-y-2">
-            <div className="text-xs text-muted-foreground">
-              <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
-              {slackQuery.data.channelName && (
-                <span className="ml-2">• {slackQuery.data.channelName}</span>
+          {slackQuery.data && (
+            <div className="space-y-2">
+              <div className="text-xs text-muted-foreground">
+                <span className="font-mono">{slackQuery.data.webhookUrlHint}</span>
+                {slackQuery.data.channelName && (
+                  <span className="ml-2">• {slackQuery.data.channelName}</span>
+                )}
+              </div>
+              <div className="text-xs text-muted-foreground">
+                <span className="text-emerald-600">{slackQuery.data.successCount}✓</span>
+                {' '}
+                <span className="text-red-500">{slackQuery.data.failureCount}✗</span>
+              </div>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" onClick={() => testSlack.mutate()} disabled={testSlack.isPending}>
+                  {testSlack.isPending ? t('settings.sending') : t('settings.sendTest')}
+                </Button>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="text-destructive"
+                  onClick={() => disconnectSlack.mutate()}
+                >
+                  {t('settings.disconnect')}
+                </Button>
+              </div>
+              {testSlack.isSuccess && (
+                <p className="text-xs text-emerald-600">{t('settings.testMessageSent')}</p>
+              )}
+              {testSlack.isError && (
+                <p className="text-xs text-destructive">{(testSlack.error as Error).message}</p>
               )}
             </div>
-            <div className="text-xs text-muted-foreground">
-              <span className="text-emerald-600">{slackQuery.data.successCount}✓</span>
-              {' '}
-              <span className="text-red-500">{slackQuery.data.failureCount}✗</span>
-            </div>
-            <div className="flex gap-2">
-              <Button size="sm" variant="outline" onClick={() => testSlack.mutate()} disabled={testSlack.isPending}>
-                {testSlack.isPending ? t('settings.sending') : t('settings.sendTest')}
-              </Button>
-              <Button
-                size="sm"
-                variant="ghost"
-                className="text-destructive"
-                onClick={() => disconnectSlack.mutate()}
-              >
-                {t('settings.disconnect')}
-              </Button>
-            </div>
-            {testSlack.isSuccess && (
-              <p className="text-xs text-emerald-600">{t('settings.testMessageSent')}</p>
-            )}
-            {testSlack.isError && (
-              <p className="text-xs text-destructive">{(testSlack.error as Error).message}</p>
-            )}
-          </div>
-        )}
-      </Card>
+          )}
+        </Card>
+      )}
 
       {/* ClickUp Import */}
-      <Card className="p-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <h3 className="font-semibold text-sm">{t('settings.clickupImport')}</h3>
-            <p className="text-xs text-muted-foreground">
-              {t('settings.clickupImportDesc')}
-            </p>
+      {isAdmin && (
+        <Card className="p-4" data-testid="settings-card-import">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="font-semibold text-sm">{t('settings.clickupImport')}</h3>
+              <p className="text-xs text-muted-foreground">
+                {t('settings.clickupImportDesc')}
+              </p>
+            </div>
+            <a href={`/app/${workspaceId}/import`}>
+              <Button size="sm" variant="outline">{t('settings.openImporter')}</Button>
+            </a>
           </div>
-          <a href={`/app/${workspaceId}/import`}>
-            <Button size="sm" variant="outline">{t('settings.openImporter')}</Button>
-          </a>
-        </div>
-      </Card>
+        </Card>
+      )}
 
       {/* Data export */}
-      <Card className="p-4">
-        <h3 className="font-semibold text-sm mb-1">{t('settings.dataExport')}</h3>
-        <p className="text-xs text-muted-foreground mb-3">{t('settings.dataExportDesc')}</p>
-        <div className="flex gap-2">
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
-                toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
-              )
-            }
-          >
-            {t('settings.exportJson')}
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() =>
-              downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
-                toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
-              )
-            }
-          >
-            {t('settings.exportTasksCsv')}
-          </Button>
-        </div>
-      </Card>
+      {isAdmin && (
+        <Card className="p-4" data-testid="settings-card-export">
+          <h3 className="font-semibold text-sm mb-1">{t('settings.dataExport')}</h3>
+          <p className="text-xs text-muted-foreground mb-3">{t('settings.dataExportDesc')}</p>
+          <div className="flex gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                downloadFile(`/workspaces/${workspaceId}/export/json`, `rundesk-${workspaceId}.json`).catch((e) =>
+                  toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
+                )
+              }
+            >
+              {t('settings.exportJson')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() =>
+                downloadFile(`/workspaces/${workspaceId}/export/csv/tasks`, `rundesk-${workspaceId}-tasks.csv`).catch((e) =>
+                  toast.error(e instanceof Error ? e.message : t('settings.exportFailed')),
+                )
+              }
+            >
+              {t('settings.exportTasksCsv')}
+            </Button>
+          </div>
+        </Card>
+      )}
     </div>
   )
 }

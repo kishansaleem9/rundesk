@@ -48,7 +48,8 @@ import { api } from '../lib/api'
 import { forgetSearch, recentSearches, rememberSearch } from '../lib/recent-searches'
 import { rememberRevealedTypes, revealedTypesFor } from '../lib/revealed-types'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
-import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
+import { useSettingsAccess } from '../hooks/use-settings-access'
 
 type SearchHit = { id: string; entityType: string; title: string; content: string; url: string }
 
@@ -251,9 +252,11 @@ export function CommandPalette({
       ),
   })
   const activeSource = sourcesQuery.data?.find((s) => s.id === source) ?? null
-  // Connecting happens in workspace settings, which only admins can open — a
-  // Connect button for anybody else led to a page that sent them back.
-  const { isAdmin } = useWorkspaceRole(workspaceId ?? undefined)
+  // Connecting an app is `integrations.manage`'s, as the connect route has it —
+  // a Connect for anybody else led to a refusal. Settings is offered to
+  // whomever it lets in (`useSettingsAccess`).
+  const mayConnectApps = usePermissions(workspaceId ?? undefined).can('integrations.manage') === true
+  const settingsAccess = useSettingsAccess(workspaceId ?? undefined)
 
   const labelsQuery = useQuery({
     enabled: open && Boolean(workspaceId),
@@ -647,7 +650,7 @@ export function CommandPalette({
         { icon: Play, label: t('nav.sprints'), to: `/app/${workspaceId}/sprints` },
         { icon: Sparkles, label: t('nav.ai'), to: `/app/${workspaceId}/ai` },
         { icon: Zap, label: t('nav.automations'), to: `/app/${workspaceId}/automations` },
-        { icon: Settings, label: t('nav.settings'), to: `/app/${workspaceId}/settings` },
+        ...(settingsAccess.mayOpen ? [{ icon: Settings, label: t('nav.settings'), to: `/app/${workspaceId}/settings` }] : []),
       ]
     : []
 
@@ -849,14 +852,16 @@ export function CommandPalette({
               `federatedCredential`), so it is not connected for this person —
               and "Connect" would replace theirs, not add one. */}
           <span>{t(activeSource.heldBy === 'someone-else' ? 'palette.sourceSomeoneElses' : 'palette.sourceNotConnected')}</span>
-          {isAdmin && activeSource.heldBy !== 'someone-else' && (
+          {/* To the App Center, at this source's own app: Settings connects
+              no source, and sent the person to a page with nothing to press. */}
+          {mayConnectApps && activeSource.heldBy !== 'someone-else' && activeSource.provider && (
           <button
             type="button"
             data-testid="palette-source-connect"
             className="text-accent underline underline-offset-2"
             onClick={() => {
               setOpen(false)
-              navigate({ to: '/app/$workspaceId/settings', params: { workspaceId: workspaceId! } })
+              navigate({ to: '/app/$workspaceId/integrations', params: { workspaceId: workspaceId! }, search: { app: activeSource.provider! } })
             }}
           >
             {t('palette.sourceConnect')}

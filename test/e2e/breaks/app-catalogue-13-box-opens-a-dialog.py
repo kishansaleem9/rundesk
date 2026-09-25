@@ -1,19 +1,20 @@
 # The button on an unconnectable tile opens the connect dialog instead of
 # recording the ask. It looks alive, it closes again, and nothing was written.
+# RE-AIMED 25 September: the tile's action was re-indented or renamed (a tile the viewer cannot connect is now a request too, `asks`); the mistake is the same.
 # Reddens: app-catalogue: "pressing it records the ask against this workspace"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-integrations-page.tsx'
-a = """              onClick={() => {
-                if (!supported) {
-                  onRequestAccess()
-                  return
-                }
-                onOpenConnect()
-              }}
+a = """                onClick={() => {
+                  if (asks) {
+                    onRequestAccess()
+                    return
+                  }
+                  onOpenConnect()
+                }}
 """
-b = """              onClick={() => {
-                onOpenConnect()
-              }}
+b = """                onClick={() => {
+                  onOpenConnect()
+                }}
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
