@@ -2425,7 +2425,7 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Progress:* `clip-created-card` blocks the worker now (with `clip-create-task-persists-24h-url`), and its handlers catch their own errors. It holds nothing. Its routes stand in for presign and share, and its checks count them, so a route that never fired would fail them rather than pass. `chat-history` too, found when its run died on "route.continue: Route is already handled!": the held first page's handler did not catch, and the route was taken down straight after the release, so Playwright settled the request first. It blocks the worker, its handler catches, the check requires that the hold fired, and the route comes down once the rows are in (18/18 in the chat sweep). Two to go: `create-menu-ai`, `ui-sweep`.
 
-### `found-23-sep/secret-and-credential-reads` — partly-fixed, low now (from a read-only sweep of every credential column, each measured before it was fixed; only admin-side invitation tokens remain)
+### `found-23-sep/secret-and-credential-reads` — **closed** (from a read-only sweep of every credential column, each measured before it was fixed)
 
 **Read routes handed credentials to people who should not have them, and an invitation could grant another organisation's workspace**
 
@@ -2437,7 +2437,31 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Closed (federated search):* a connection is one person's Google or Microsoft account, and every member's query ran through it — the connector's mail subjects, senders and snippets, Drive files and SharePoint documents, for anybody in the workspace, guests included. Measured on lane 1 before the change: a member's `/search/sources` reported the admin's Gmail as connected for them. The frame is somebody searching "meri Gmail" — MY Gmail. Now `federatedCredential` and `searchDrive` answer only `connectedById` (which the OAuth callback records), and `listSources` tells each person whose it is (`heldBy`: you / someone-else / none), so the palette says "Connected with someone else's account — its mail and files are searched only for them" rather than promising results, and offers Connect only to admins — for a member it opened settings that sent them back. The query side is proven by unit tests (nothing in a test environment reaches Google): 48/48, three new, each reddened by `fsr-1..3` through `check-unit-claims` (9/9). `search-sources` 10/10 with three new checks, which failed 3 of 3 on the old code; `search-sources-5..7`. `app-catalogue` staged its grants with no connector — a row naming nobody is now connected for nobody — and stages them as the admin's, as the callback would; `search-sources-1/2` and `app-catalogue-5/6/7` re-anchored to the new `listSources`. Regression: app-catalogue, search-sources, command-palette, video1-acceptance 4/4. *Not built:* each member connecting their OWN account (ClickUp's per-person connected search) — today a second member connecting Google replaces the first's connection; that is a feature, listed with the unbuilt ones.
 
-*Still open:* invitation tokens still come back to org admins in the list and create answers (low — the same admins can fetch the link); whether an existing portal's link should die when sharing is blocked is a ClickUp question (today's setting text says existing links stay revocable, and portals now match it).
+*Closed, the last of it (25 September):* an invitation's token reaches only those who may copy its link. The create answer goes to the workspace admin or manager who made it. The organisation's pending list is `OrganizationAdminGuard`'s. The workspace's pending list carries no token (id, email, role, status, expiry). `GET /invitations/:id/link` refuses a member (403) and answers an admin, measured on lane 5 and now checked by `guest-invitations`.
+
+Reading that list found something else: it answered a guest every pending invitee and the role they were offered (`found-25-sep/guests-read-pending-invitations`, closed below).
+
+Whether an existing portal's link should die when sharing is blocked stays as the setting's own text says: existing links stay revocable, and portals match it.
+
+### `found-25-sep/guests-read-pending-invitations` — **closed** (security, small; found closing `secret-and-credential-reads`)
+
+**A guest read every pending invitation: who was invited, and to what role**
+
+*Measured, lane 5, on `ee661b7`:* `GET /invitations/workspace/:id` asks only for membership, and answered a guest every pending invitee's email and the role they were offered (a workspace admin's, in the probe). Members read the list on purpose: the task sheet's assignee picker and the chat's mention and DM pickers offer people who were invited. A guest sees no people list (ClickUp; `guest-read-scope`).
+
+*Closed, 25 September:* a guest's answer is empty. The list never carried tokens, and now a check says so.
+
+The new suite `guest-invitations`, 2 checks:
+- A guest reads no invitation, and a member reads them.
+- The token is in no list, and the link is refused to a member and given to the admin.
+
+Results:
+- Before: 1 of 2. The token check passes either way.
+- After: 2/2.
+
+`gin-1..3`, each compiled: guests reading the list, the list carrying the token, and the link for any member.
+
+Regression on lanes 2 to 5: `guest-invitations`, `assignee-picker`, `credential-reads`, `no-dead-ends`, `guest-read-scope` and `guest-create-menu`, 7/7. In CI (186).
 
 ### `found-23-sep/break-patch-check-died-on-an-exit` — **closed** (found closing the credential item)
 

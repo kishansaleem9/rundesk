@@ -131,6 +131,14 @@ export class InvitationsController {
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, reqUserId)))
       .limit(1)
     if (!membership) throw new ForbiddenException('Workspace membership required')
+    /*
+     * A GUEST SEES NOBODY'S INVITATION (`found-25-sep/guests-read-pending-invitations`).
+     * Members read this list so the assignee and mention pickers can offer the
+     * people invited; a guest read it too — measured on lane 5: every pending
+     * invitee's email, and the role they were offered — where a guest sees no
+     * people list at all (ClickUp; `guest-read-scope`).
+     */
+    if (membership.role === 'guest') return []
 
     return this.invitationsService.listPendingForWorkspace(workspaceId)
   }
