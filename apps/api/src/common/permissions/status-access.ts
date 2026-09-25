@@ -22,10 +22,13 @@ export type StatusOwner = 'space' | 'project' | 'list'
  *
  * ClickUp's rule (help centre, search snippets): owners, admins and members
  * manage statuses by default, because a location's default permission is Full
- * edit; guests do so only where an advanced permission allows it. Here a
- * space's default is `edit`, which is the rung this asks, so a member of an
- * ordinary space manages statuses as before, a view-only or comment-only
- * space refuses them, and a guest is refused whatever is shared with them.
+ * edit; guests do so only where an advanced permission allows it. This asks
+ * `edit`, which a space's default — Full edit, since 0164 — reaches, so a
+ * member of an ordinary space manages statuses as before, as does one in an
+ * Edit space (ClickUp's articles do not say whether Edit alone reaches this);
+ * a view-only or comment-only space refuses them, and a guest is refused
+ * whatever is shared with them. The list page asks this for its Statuses
+ * (`TasksService.listCapabilities`).
  *
  * Not found when the owner does not exist; a super-admin, who holds no
  * membership, passes as every create gate lets them.

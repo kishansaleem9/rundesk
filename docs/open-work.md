@@ -1152,6 +1152,8 @@ The new suite `guest-task-edits`, 5 checks: a guest with tasks shared at View, a
 
 `gte-1`, `-2`, `-4` and `-5`, each compiled: the flat refusal back, guests skipping the read rule, guests changing at any share, and a guest never counted as the assignee they are.
 
+*Break run, lane 1 (`a0a0d70`):* `gte-1`, `-2`, `-4` and `-5`, 4 of 4 reddened, on a green baseline (5/5).
+
 Regression on lanes 2 to 5, 20/20:
 - the six guest suites (`guest-task-edits`, `guest-space-level`, `guest-read-scope`, `guest-create-menu`, `guest-chat-scope`, `guest-canvas-scope`);
 - the suites that write tasks by a level (`task-edit-levels`, `task-space-levels`, `task-boundaries`, `task-sheet-capabilities`, `task-rows-by-id`, `field-writes-by-level`, `full-edit-levels`, `project-member-levels`);
@@ -1316,6 +1318,8 @@ Results:
 
 `mcl-1..4`, each compiled: the alias not compared, any account commenting, the old fallback author, and the mail path's rule asking no level.
 
+*Break run, lane 1 (`a0a0d70`):* `mcl-1..4`, 4 of 4 reddened, on a green baseline (5/5).
+
 Regression on lanes 2 to 5: the 14 suites that send mail or comment on tasks (`mail-comments-by-level`, `email-reply-routing`, `credential-reads`, `hook-portal-access`, `task-boundaries`, `task-depth`, `task-menu`, `guest-space-level`, `guest-task-edits`, `task-rows-by-id`, `task-sheet-capabilities`, `task-edit-levels`, `notification-gaps`, `activity-rail`). Result: 14/14. `task-menu` missed its top four rows twice: in the sweep, and once alone while lane 1's break runs held the machine (load 5). It passed alone on lane 4 (37/37), and is recorded under `three-suites-fail-under-a-full-sweep`. In CI (185).
 
 *Not changed:* a new task by mail to a list's alias still comes from anybody who has the address, put down as its sender if they are a member and as the alias's maker otherwise. The alias is the list's secret, as a form's link is, and that is the feature. The service's comment rule and `taskCommentAllowed` state the same chain; the first was left as it is because two break patches read it.
@@ -1400,6 +1404,11 @@ Results:
 
 Re-aimed, each compiled: `dwl-7`, `sdp-2`, `-4`, `-5`, `-9` and `-19`, `space-default-permission-1`, `tsc-1` and `task-delete-1`.
 
+*Break run, lane 1 (`4f51162`, then `ee661b7` and `a0a0d70`):*
+- `fel-1..11`: 11 of 11 reddened, on a green baseline (8/8).
+- The re-aims: `space-default-permission`'s 22 patches, the six re-aimed among them, 22 of 22 on a green baseline (36/36). `dwl-7` (4 of 5 passed), `tsc-1` (1 of 5) and `task-delete-1` (14 of 15) reddened, each on a green baseline.
+- The restated suites, on their own patches: `guest-create-menu` 11 of 11 (6/6), `guest-space-level` 5 of 5 (5/5; `gsl-6` claims the unit test and stayed green here, as it should), `project-member-levels` 5 of 5 (5/5).
+
 *Suites restated for the new model, none weakened.* Each asked Edit to make or delete something:
 - `task-boundaries` and `hook-portal-access` build their spaces at Full edit.
 - `guest-space-level` and `guest-create-menu` give the guest Full edit where it makes lists, and say so.
@@ -1427,7 +1436,7 @@ All 190 pass: the 189 and `full-edit-levels`. In CI (183).
 - A subtask's "Delete" archives it (`found-25-sep/subtask-delete-archives`).
 - The sweep fixture helper walks every space to pick a workspace, then builds in the first space whatever it holds (`found-25-sep/fixture-builds-in-a-space-it-did-not-check`).
 
-### `found-25-sep/list-page-offers-refused-edits` — open, visible bug, medium (found closing `full-edit-enforced-nowhere`)
+### `found-25-sep/list-page-offers-refused-edits` — **closed** (visible bug, medium; found closing `full-edit-enforced-nowhere`)
 
 **The list page offers its add row and its inline edits to anybody who can open the list**
 
@@ -1436,6 +1445,104 @@ All 190 pass: the 189 and `full-edit-levels`. In CI (183).
 *To close:*
 - Measure a view-only, a comment-only and an Edit reader on the list page.
 - Draw the add row by the answer `/writable` gives for the list's space, and the inline edits by what the list's reader may change.
+
+*Measured, lane 5, on `a0a0d70`:* the new suite below, 1 of 7 as first written.
+- In a view-only space the member was offered Add task, four add rows, and a done circle, priority, due date and selection box on every row, with Statuses and Create field.
+- In an Edit space they were offered the same, Add task included, which takes Full edit.
+- In a comment-only space they were offered a done circle on the task not assigned to them as well.
+- The Table view offered every cell and its add row. The Board offered its add row, Add group, the column names and a drag on every card.
+- `GET /tasks/list/:listId/capabilities` did not exist (404). Only the Full edit space passed.
+
+With the web page at `a0a0d70` against the new API, the nine checks the suite ended with: 2 of 9 (the Full edit space and the API's answer). On the Gantt a view-only member's drag moved the bar, and the move was refused.
+
+ClickUp (help centre, "Permissions in detail" and "Manage task statuses", search snippets):
+- View changes nothing.
+- Comment comments, and completes a task assigned to the person.
+- Edit changes every task in the location — its status, assignees, title — and adds none.
+- Full edit adds and deletes.
+- Owners, admins and members manage statuses by default.
+
+*Closed, 25 September:*
+- **`GET /tasks/list/:listId/capabilities`** answers what the list's routes would, once for the page:
+  - `add`, the create gate;
+  - `edit` and `comment`, the level the write rule reads at the list;
+  - `statuses`, the status routes' own rule (`assertMayShapeStatuses`);
+  - `fields`, the field routes' own rule. That rule moved to `common/permissions/field-access.ts`, so the answer asks the rule the routes ask, not a copy of it.
+- **The page asks it with the tasks**, and draws nothing that changes the list until it answers. A read that fails, or an answer that is not one, offers what the page always did, and the routes still refuse.
+- **What it draws by the answer:**
+  - `add`: Add task, a group's add row, the Table's and the Board's add rows, a calendar day's Add, and the empty list's Create task.
+  - `edit`, or `comment` on a task assigned to the reader: a row's done circle, the Table's status and assignee cells, and a Board card's drag.
+  - `edit`: a row's priority, due date and selection box, and the bulk bar; the Table's other cells, its titles and its field cells; a subtask's done circle; the Calendar's and the Gantt's drag. A press on a Gantt bar the reader may not move opens the task.
+  - `statuses`: Statuses, the Board's column names and Add group.
+  - `fields`: Create field.
+- A row, cell or card the reader may not change still says what it holds: a done task is still drawn done.
+- `status-access.ts` said a space's default is `edit`. It has been Full edit since 0164; the sentence says so now.
+
+The new suite `list-page-levels`, 9 checks. A member reads four lists of the admin's, one per level: View; Comment, with the first task assigned to them; Edit; Full edit. Each list has a subtask, a text field and an empty list beside it. The suite reads the List, Table, Board, Calendar and Gantt views, and every change the member makes is read back by SQL:
+- a priority in the Edit list;
+- a status from the Edit table;
+- a task added through a group's row at Full edit;
+- the assigned task completed at Comment;
+- a Gantt bar dragged at Full edit, and one pressed at View.
+
+Results:
+- Before: 1 of 7 as first written (the old API and web); 2 of 9 with the web at `a0a0d70` against the new API.
+- After: 9/9, on lanes 5 and 4.
+
+`lpl-1..33`, each compiled, at least one per check:
+- the API answering `add`, `edit`, `comment`, `statuses` or `fields` to everybody, or reading the space's default instead of the reader's level;
+- the page ignoring the answer;
+- Add task, a group's add row, a row's done circle, priority and due date, and its selection box offered to everybody;
+- the done circle for a comment-only reader on any task, or on none;
+- a subtask's done circle, Statuses and Create field offered to everybody;
+- each Table cell, its titles, field cells, add row and selection boxes offered to everybody;
+- the Board's add row, drag, Add group and column names offered to everybody;
+- the Calendar's drag and Add, the Gantt's drag, and the empty list's Create task offered to everybody.
+
+`fwl-6` re-aimed at the moved rule. `fwl-3`, `-4` and `-5` and `cfa-4` compile unchanged. `b7-rowgate` (`list-view-controls`) re-aimed at the row's due date, which reads `mayEdit` now; the gate is the same.
+
+*Break run:* queued on lane 1 after the commit (`plan-lpl`): `lpl-1..33`; `field-writes-by-level`'s six and `list-view-controls`' thirteen, whose sets the re-aims left stale; and `cfa-4`.
+
+Regression on lanes 2 to 5: the 71 suites that open a list page, define fields or change statuses. That is the 60 whose steps reach the list route, with `custom-field-access`, `field-writes-by-level`, `folder-dialog`, `list-statuses-seeded`, `project-page-controls`, `status-write-access`, `space-presets`, `no-dead-ends`, `video-regression`, `task-edit-levels` and `gantt-controls`.
+- Result: 71/71.
+- Under the sweep's load, 70 passed the first time. `video-regression` found no list from the space page on lane 4 ([A1.2]), as it has once before. It passed alone on lanes 4 and 2 (93/93), and is recorded under `three-suites-fail-under-a-full-sweep`.
+- API unit tests: 1649/1649.
+
+In CI (187). The job's limit is 240 minutes now: 187 suites is about 206 minutes, against 210.
+
+*Not changed, recorded:*
+- Saved views and saved filters are made by any reader (201 at every level), as before. They change what the reader sees, not the list.
+- Share and the Email panel's address follow the list's maker rule (`sharing-asks-the-maker-not-the-level`, below).
+- The bulk bar's own gate, and a row's shift-click select, sit behind the selection box. That box is not drawn without `edit`, so no check can reach them.
+- Until the answer comes, nothing that changes the list is drawn, and no check measures that gap.
+
+*Found beside it:*
+- A member who may not add tasks makes an inbound webhook, and every delivery to it is refused (`found-25-sep/inbound-hooks-made-where-their-maker-cannot-add`).
+- Sharing a list, and giving it an email address, is for its maker or a manager (`found-25-sep/sharing-asks-the-maker-not-the-level`).
+
+### `found-25-sep/inbound-hooks-made-where-their-maker-cannot-add` — open, visible bug, small (dead control; found closing `list-page-offers-refused-edits`)
+
+**A member who may not add tasks to a list makes an inbound webhook on it, and every delivery to it is refused**
+
+*Measured, lane 3, on the working tree after `a0a0d70`:* a member of a view-only, a comment-only and an Edit space each made a hook on the admin's list there (201). A POST to each hook's address was refused (403, "This space's default permission is … which does not allow adding a task"), and no task was made. Asking the list directly was refused the same way (403). The Email panel offers the hook to them.
+
+`InboundWebhooksService.create` asks only that its maker is not a guest. Its own comment says "a hook adds tasks as its creator, so its creator must be somebody who may add tasks here", and then asks less. Delivery asks the create gate, through `createTask`, so nothing is added where it should not be: the hook is dead from the start, and nothing tells its maker.
+
+*To close:* making a hook asks the create gate for its maker (Full edit, not a guest), and the Email panel offers it by the same answer. Check with a view-only, an Edit and a Full edit member.
+
+### `found-25-sep/sharing-asks-the-maker-not-the-level` — open, behaviour, small (found closing `list-page-offers-refused-edits`)
+
+**Sharing a list, and giving it an email address, is for its maker or a manager, and the list page offers both to every reader**
+
+*Measured, lane 3, on the working tree after `a0a0d70`:* a member with Full edit, the space's default, was refused sharing the admin's list (403) and giving it an email address (403). Each succeeded (201) on a list they had made. A member of an Edit space was refused both too. The list page draws Share for every reader, and the Email panel draws its address button.
+
+ClickUp (help centre, "Share Spaces, Folders, Subfolders, Lists, and tasks", search snippets): edit permissions on a location let a member share it; a guest shares nothing, at any level.
+
+*To close:*
+- Decide the share rule by the location's level, as ClickUp does: Edit or Full edit, never a guest.
+- Decide the address rule to match.
+- Have the list page draw Share and the address button by the answer.
+- Check with a member at each level, on a list they did not make.
 
 ### `found-25-sep/subtask-delete-archives` — open, visible bug, small (found closing `full-edit-enforced-nowhere`)
 
@@ -1765,7 +1872,7 @@ Each is its own question.
 - `addressability-live`: the palette showed no result for a word in a task's description, 2.5 fixed seconds after typing it.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
-- `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
+- `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
 - `task-menu`, 25 September, the sweep for `inbound-email-comments-skip-the-comment-rule`, and once alone on lane 3 while lane 1's break runs held the machine (load 5): Copy ID, New tab, Convert to and Send email to task were not yet in the menu when it was read. It passed alone on lane 4 right after (37/37).
@@ -2460,6 +2567,8 @@ Results:
 - After: 2/2.
 
 `gin-1..3`, each compiled: guests reading the list, the list carrying the token, and the link for any member.
+
+*Break run, lane 1 (`a0a0d70`):* `gin-1..3`, 3 of 3 reddened, on a green baseline (2/2).
 
 Regression on lanes 2 to 5: `guest-invitations`, `assignee-picker`, `credential-reads`, `no-dead-ends`, `guest-read-scope` and `guest-create-menu`, 7/7. In CI (186).
 

@@ -92,8 +92,10 @@ import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
-import { assertSpaceLevel } from '../../common/permissions/space-default-permission'
+import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable } from '../../common/permissions/task-write'
+import { assertMayShapeStatuses } from '../../common/permissions/status-access'
+import { assertMayDefineFields } from '../../common/permissions/field-access'
 import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
@@ -1882,10 +1884,10 @@ export class TasksService {
    *   - a member of the list's workspace, who may open the list (the container
    *     rule and the private-list rule, `readableList`) — else not found;
    *   - not a guest — 403, as before;
-   *   - on a space that lets them add to it: `edit` or above
+   *   - on a space that lets them add to it: Full edit
    *     (`assertCanCreateInSpace`, which `moveTask` already asks of a
-   *     destination) — 403 in a space whose default is "view only" or
-   *     "comment", as ClickUp's are.
+   *     destination) — 403 in a space whose default is "view only",
+   *     "comment" or "edit", as ClickUp's are (`found-25-sep/full-edit-enforced-nowhere`).
    * A super-admin passes where they are not a member, as every guard lets them.
    */
   async assertCanCreateTaskIn(listId: string, actorId: string): Promise<{ workspaceId: string; spaceId: string; projectId: string }> {
@@ -5120,6 +5122,55 @@ export class TasksService {
     if (!target) throw new NotFoundException('Task not found')
     this.assertNotInBin(target.isArchived)
     await this.assertSpaceAllowsComments(taskId, authorId)
+  }
+
+  /**
+   * WHAT THIS PERSON MAY DO IN THIS LIST — the answers its routes give, once
+   * for the list page (`found-25-sep/list-page-offers-refused-edits`). The page
+   * drew Add task, each group's add row, a row's done circle, priority and due
+   * date, the board's drag and column names, Statuses and Create field for
+   * anybody who could open the list, and each was refused after it was used.
+   *
+   *   add      — a new task here (`assertCanCreateTaskIn`: Full edit, no guest);
+   *   edit     — changes to its tasks: the level the write rule reads, at the list;
+   *   comment  — comments, and on a task assigned to them its status and
+   *              assignees (the page asks the row's assignees for that half);
+   *   statuses — its statuses, as the status routes ask (`assertMayShapeStatuses`);
+   *   fields   — its project's custom fields, as the field routes ask
+   *              (`assertMayDefineFields`).
+   *
+   * A task's own share can say more than its list does; the sheet asks the
+   * task for that (`taskCapabilities`).
+   */
+  async listCapabilities(listId: string, actor: { id: string; role?: string | null }) {
+    const home = await this.resolveWorkspaceForList(listId)
+    if (!home) throw new NotFoundException('List not found')
+    const allowed = (check: Promise<unknown>): Promise<boolean> =>
+      check.then(
+        () => true,
+        (e) => {
+          if (e instanceof ForbiddenException || e instanceof NotFoundException) return false
+          throw e
+        },
+      )
+    const [add, resolved, statuses, fields] = await Promise.all([
+      this.canCreateTaskIn(listId, actor.id),
+      resolveSpaceLevel(this.db, {
+        spaceId: home.spaceId,
+        actorId: actor.id,
+        within: [
+          { type: 'list', id: listId },
+          { type: 'project', id: home.projectId },
+          ...(home.folderId ? [{ type: 'folder' as const, id: home.folderId }] : []),
+        ],
+      }),
+      allowed(assertMayShapeStatuses(this.db, { owner: 'list', ownerId: listId, actorId: actor.id })),
+      allowed(assertMayDefineFields(this.db, { workspaceId: home.workspaceId, projectId: home.projectId, reader: actor })),
+    ])
+    // Nothing resolved is somebody no space setting narrows (a super-admin
+    // acting across workspaces), as every rule reads it.
+    const level = resolved?.level ?? 'admin'
+    return { add, edit: spaceLevelReaches(level, 'edit'), comment: spaceLevelReaches(level, 'comment'), statuses, fields }
   }
 
   /**

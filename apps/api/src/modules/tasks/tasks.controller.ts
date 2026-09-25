@@ -245,6 +245,13 @@ export class TasksController {
     res.send(out.body)
   }
 
+  /** What this person may do in the list — add, change, comment, its statuses and fields (`TasksService.listCapabilities`). */
+  @Get('list/:listId/capabilities')
+  @UseGuards(ResourceMemberGuard)
+  async listCapabilities(@Param('listId') listId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.tasks.listCapabilities(listId, { id: user.id, role: user.role })
+  }
+
   @Get('list/:listId')
   @UseGuards(ResourceMemberGuard)
   async getByList(

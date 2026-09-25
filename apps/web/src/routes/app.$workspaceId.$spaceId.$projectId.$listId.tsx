@@ -725,6 +725,35 @@ const DEFAULT_STATUS_META: Record<string, StatusMeta> = {
 const ListStatusesContext = createContext<ListStatus[]>([])
 
 /**
+ * WHAT THIS PERSON MAY DO IN THIS LIST — `GET /tasks/list/:listId/capabilities`,
+ * the answers its routes give (`found-25-sep/list-page-offers-refused-edits`).
+ * The page drew its add rows, a row's done circle, priority and due date, the
+ * table's cells, the board's drag and column names, Statuses and Create field
+ * for anybody who could open the list, and a view-only or comment-only reader —
+ * or an Edit one, for adding, which takes Full edit — was refused each one
+ * after using it. The task sheet asks its task the same (`task-sheet-offers-refused-edits`).
+ *
+ *   add      — Add task and the add rows: the header's, a group's, the
+ *              table's, the board's, the calendar's;
+ *   edit     — any change to a task from a row, a cell, a drag or the bulk bar;
+ *   comment  — through `mayProgress`, the status and assignees of a task
+ *              assigned to the reader (ClickUp's "comment with task assigned");
+ *   statuses — Statuses, the board's column names and Add group;
+ *   fields   — Create field.
+ */
+type ListCaps = { add: boolean; edit: boolean; comment: boolean; statuses: boolean; fields: boolean }
+type ListAccess = ListCaps & { mayProgress: (task: { assignees?: Array<{ userId: string }> }) => boolean }
+const LIST_CAPS_ALL: ListCaps = { add: true, edit: true, comment: true, statuses: true, fields: true }
+const LIST_CAPS_NONE: ListCaps = { add: false, edit: false, comment: false, statuses: false, fields: false }
+const isListCaps = (x: unknown): x is ListCaps =>
+  !!x && (['add', 'edit', 'comment', 'statuses', 'fields'] as const).every((k) => typeof (x as ListCaps)[k] === 'boolean')
+/* Outside the provider (a test, a story) a row offers what it always did. */
+const ListCapsContext = createContext<ListAccess>({ ...LIST_CAPS_ALL, mayProgress: () => true })
+function useListCaps() {
+  return useContext(ListCapsContext)
+}
+
+/**
  * §V2-06 — the space's ClickApps, for the row components that are three levels
  * down from where they are read. A context beside the one this file already
  * uses, rather than a `showTags` prop threaded through Board → Column → Card.
@@ -1740,6 +1769,30 @@ function ListDetail() {
     },
     refetchInterval: refresh.refetchInterval,
   })
+  /*
+   * What this reader may do here, asked once for the page (`ListCaps`). Until
+   * it answers, nothing that changes the list is drawn on a guess; a read that
+   * fails, or an answer that is not one, offers what the page always did, and
+   * the routes refuse as they always have.
+   */
+  const listCapsQuery = useQuery({
+    queryKey: ['list-caps', listId],
+    queryFn: () => api<ListCaps>(`/tasks/list/${listId}/capabilities`),
+  })
+  const listCaps: ListCaps = isListCaps(listCapsQuery.data)
+    ? listCapsQuery.data
+    : listCapsQuery.isError || listCapsQuery.data !== undefined
+      ? LIST_CAPS_ALL
+      : LIST_CAPS_NONE
+  const listAccess = useMemo<ListAccess>(
+    () => ({
+      ...listCaps,
+      mayProgress: (task) =>
+        listCaps.edit || (listCaps.comment && (task.assignees ?? []).some((a) => a.userId === currentUserId)),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [listCaps.add, listCaps.edit, listCaps.comment, listCaps.statuses, listCaps.fields, currentUserId],
+  )
   const { data: projectFields = [] } = useQuery({
     queryKey: ['project-fields', workspaceId, projectId],
     queryFn: () =>
@@ -2702,6 +2755,7 @@ function ListDetail() {
   return (
     <ListStatusesContext.Provider value={listStatuses}>
     <SpaceFeaturesContext.Provider value={spaceFeatures}>
+    <ListCapsContext.Provider value={listAccess}>
     <div className="flex-1 flex flex-col min-h-0 bg-white dark:bg-[#0f1114]">
       <TaskListChrome
         listName={listMeta?.name ?? t('list.defaultListName')}
@@ -2747,6 +2801,7 @@ function ListDetail() {
           ) : null
         }
         quickAdd={
+          listAccess.add ? (
           <>
             <Input
               ref={quickAddRef}
@@ -2779,6 +2834,7 @@ function ListDetail() {
               {t('list.addTask')}
             </Button>
           </>
+          ) : null
         }
         viewTabs={
           <WorkViewTabs
@@ -3228,6 +3284,7 @@ function ListDetail() {
                   {projectFields.length === 0 && (
                     <p className="px-2 py-1.5 text-[12px] text-muted-foreground">{t('list.table.noFieldsYet')}</p>
                   )}
+                  {listAccess.fields && (
                   <form
                     className="mt-1 space-y-1 border-t border-border/60 pt-1.5"
                     onSubmit={(e) => {
@@ -3278,10 +3335,12 @@ function ListDetail() {
                       />
                     )}
                   </form>
+                  )}
                   <p className="px-2 pt-1 text-[11px] text-muted-foreground">{t('list.saveToPersist')}</p>
                 </div>
               </details>
             )}
+            {listAccess.statuses && (
             <Button
               size="sm"
               variant="outline"
@@ -3291,6 +3350,7 @@ function ListDetail() {
             >
               {t('list.statusesButton')}
             </Button>
+            )}
             {spaceFeatures.listEmail && (
               <Button
                 size="sm"
@@ -3359,13 +3419,17 @@ function ListDetail() {
             className="rounded-xl border border-dashed border-border/80 bg-[#fbfbfc]/60 dark:bg-[#16181d]/40 p-12 text-center"
           >
             <p className="text-[15px] font-medium text-foreground mb-1">{t('list.noTasksYet')}</p>
-            <p className="text-[13px] text-muted-foreground mb-4">
-              {t('list.empty.addFirstHintBefore')}{' '}
-              <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> {t('list.empty.addFirstHintAfter')}
-            </p>
-            <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => quickAddRef.current?.focus()}>
-              {t('list.createTask')}
-            </Button>
+            {listAccess.add && (
+              <>
+                <p className="text-[13px] text-muted-foreground mb-4">
+                  {t('list.empty.addFirstHintBefore')}{' '}
+                  <kbd className="px-1.5 py-0.5 rounded bg-muted text-[11px] font-mono">C</kbd> {t('list.empty.addFirstHintAfter')}
+                </p>
+                <Button size="sm" className="bg-violet-600 hover:bg-violet-700 text-white" onClick={() => quickAddRef.current?.focus()}>
+                  {t('list.createTask')}
+                </Button>
+              </>
+            )}
           </div>
         ) : activeView === 'list' ? (
           <>
@@ -3489,7 +3553,7 @@ function ListDetail() {
                       return next
                     })
                   }
-                  onRename={listStatuses.length === 0 ? undefined : async (name) => {
+                  onRename={listStatuses.length === 0 || !listAccess.statuses ? undefined : async (name) => {
                     await api(`/lists/${listId}/statuses/${s.id}`, {
                       method: 'PATCH',
                       body: { name },
@@ -3515,6 +3579,7 @@ function ListDetail() {
                   }}
                 />
               ))}
+              {listAccess.statuses && (
               <AddBoardGroup
                 onAdd={async (name) => {
                   await api(`/lists/${listId}/statuses`, {
@@ -3525,6 +3590,7 @@ function ListDetail() {
                   await refetch()
                 }}
               />
+              )}
             </div>
             <DragOverlay>
               {draggingTask ? (
@@ -3717,6 +3783,7 @@ function ListDetail() {
                   >
                     <div className="flex items-center justify-between mb-1">
                       <span className="text-xs">{format(day, 'd')}</span>
+                      {listAccess.add && (
                       <button
                         type="button"
                         aria-label={t('list.calendar.addTaskAria')}
@@ -3728,15 +3795,19 @@ function ListDetail() {
                       >
                         <Plus className="h-3 w-3" />
                       </button>
+                      )}
                     </div>
                     <div className="space-y-1">
                       {dayTasks.slice(0, calendarView === 'week' ? 12 : 3).map((task) => (
                         <button
                           key={task.id}
-                          draggable
-                          onDragStart={() => setCalendarDragTaskId(task.id)}
+                          draggable={listAccess.edit}
+                          onDragStart={() => { if (listAccess.edit) setCalendarDragTaskId(task.id) }}
                           onDragEnd={() => setCalendarDragTaskId(null)}
-                          className="block w-full text-left rounded bg-muted px-1 py-0.5 text-[11px] hover:bg-secondary cursor-grab active:cursor-grabbing"
+                          className={cn(
+                            'block w-full text-left rounded bg-muted px-1 py-0.5 text-[11px] hover:bg-secondary',
+                            listAccess.edit && 'cursor-grab active:cursor-grabbing',
+                          )}
                           onClick={() => setSelectedTaskId(task.id)}
                         >
                           {task.title}
@@ -3811,6 +3882,7 @@ function ListDetail() {
       {/* §V2-13 frames `09:26` / `10:42` — one dialog, both gates. */}
       {gateDialog}
     </div>
+    </ListCapsContext.Provider>
     </SpaceFeaturesContext.Provider>
     </ListStatusesContext.Provider>
   )
@@ -4232,6 +4304,9 @@ function TaskRow({
   notes?: RowNotes
 }) {
   const { t, locale } = useTranslation()
+  /* What the reader may change from the row (`ListCaps`); the rest is drawn, not offered. */
+  const caps = useListCaps()
+  const mayEdit = !!onPatchTask && caps.edit
   // statusCategory ('closed') is the post-custom-statuses signal; falling
   // back to the literal 'done' key keeps existing tasks rendering correctly
   // while the API/list-statuses caches warm up.
@@ -4279,7 +4354,7 @@ function TaskRow({
         selected && 'bg-accent/10 hover:bg-accent/15',
       )}
       onClick={(e) => {
-        if (e.shiftKey || e.metaKey || e.ctrlKey) {
+        if (caps.edit && (e.shiftKey || e.metaKey || e.ctrlKey)) {
           e.preventDefault()
           onToggleSelect(true)
           return
@@ -4303,32 +4378,44 @@ function TaskRow({
       ) : (
         <span className="w-2.5 shrink-0" aria-hidden />
       )}
-      <input
-        type="checkbox"
-        checked={selected}
-        onClick={(e) => e.stopPropagation()}
-        onChange={(e) => onToggleSelect(e.target.checked ? true : false)}
-        className={cn(
-          'h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-accent',
-          'opacity-0 group-hover:opacity-100 transition-opacity',
-          selected && 'opacity-100',
-        )}
-        aria-label={selected ? t('list.deselectTaskAria') : t('list.selectTaskAria')}
-      />
-      <button
-        className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
-        onClick={(e) => {
-          e.stopPropagation()
-          void onToggleDone(task)
-        }}
-        aria-label={isDone ? t('list.markIncompleteAria') : t('list.markDoneAria')}
-      >
-        {isDone ? (
-          <CheckCircle2 className="h-4 w-4 text-emerald-500" />
-        ) : (
-          <Circle className="h-4 w-4" />
-        )}
-      </button>
+      {/* Selecting is for the bulk bar, which changes tasks: an editor's. */}
+      {caps.edit ? (
+        <input
+          type="checkbox"
+          checked={selected}
+          onClick={(e) => e.stopPropagation()}
+          onChange={(e) => onToggleSelect(e.target.checked ? true : false)}
+          className={cn(
+            'h-3.5 w-3.5 shrink-0 cursor-pointer rounded border-border accent-accent',
+            'opacity-0 group-hover:opacity-100 transition-opacity',
+            selected && 'opacity-100',
+          )}
+          aria-label={selected ? t('list.deselectTaskAria') : t('list.selectTaskAria')}
+        />
+      ) : (
+        <span className="w-3.5 shrink-0" aria-hidden />
+      )}
+      {caps.mayProgress(task) ? (
+        <button
+          className="shrink-0 text-muted-foreground hover:text-accent transition-colors"
+          onClick={(e) => {
+            e.stopPropagation()
+            void onToggleDone(task)
+          }}
+          aria-label={isDone ? t('list.markIncompleteAria') : t('list.markDoneAria')}
+        >
+          {isDone ? (
+            <CheckCircle2 className="h-4 w-4 text-emerald-500" />
+          ) : (
+            <Circle className="h-4 w-4" />
+          )}
+        </button>
+      ) : (
+        /* The state, without the control: done or not is still worth reading. */
+        <span className="shrink-0 text-muted-foreground" data-testid="list-task-done-state">
+          {isDone ? <CheckCircle2 className="h-4 w-4 text-emerald-500" /> : <Circle className="h-4 w-4" />}
+        </span>
+      )}
 
       <div className="flex-1 min-w-0">
         <div className="flex min-w-0 items-center gap-2">
@@ -4405,7 +4492,7 @@ function TaskRow({
       {/* §M `12:10` — the Columns panel decides whether these three are drawn.
           Each is gated where it is RENDERED rather than by a wrapper, so the
           row's flex spacing closes up instead of leaving a hole. */}
-      {showCol('col:priority') && (onPatchTask ? (
+      {showCol('col:priority') && (mayEdit ? (
         <button
           type="button"
           onClick={(e) => {
@@ -4425,12 +4512,12 @@ function TaskRow({
       {/* Coarse on purpose — this is a nudge from a row, not the place you set
           a deadline. It may change the day; it may not quietly drop a time the
           row is carrying, which sending a bare YYYY-MM-DD did. */}
-      {showCol('col:due') && (onPatchTask ? (
+      {showCol('col:due') && (mayEdit ? (
         <input
           type="date"
           value={toDateInput(task.dueDate)}
           onClick={(e) => e.stopPropagation()}
-          onChange={(e) => void onPatchTask(task.id, { dueDate: withDatePart(task.dueDate, e.target.value) })}
+          onChange={(e) => void onPatchTask?.(task.id, { dueDate: withDatePart(task.dueDate, e.target.value) })}
           title={t('list.setDueDateTitle')}
           className="h-6 w-[7.5rem] shrink-0 rounded border border-transparent bg-transparent px-1 text-xs text-muted-foreground hover:border-border focus:border-border focus:bg-card focus:outline-none"
         />
@@ -4488,24 +4575,32 @@ function SubtaskRow({
   onToggleDone: (task: TaskItem) => Promise<void> | void
 }) {
   const { t, locale } = useTranslation()
+  /* The row does not carry a subtask's assignees, so completing one here is an editor's; its sheet asks the task. */
+  const caps = useListCaps()
   const done = subtask.statusCategory === 'closed' || subtask.status === 'done'
   return (
     <div
       className="group/st flex cursor-pointer items-center gap-3 py-1.5 pl-10 pr-3 transition-colors hover:bg-muted/50"
       onClick={() => onOpenTask(subtask.id)}
     >
-      <button
-        type="button"
-        className="shrink-0 text-muted-foreground transition-colors hover:text-accent"
-        onClick={(e) => {
-          e.stopPropagation()
-          // onToggleDone only reads id/status/statusCategory, all present here.
-          void onToggleDone(subtask as unknown as TaskItem)
-        }}
-        aria-label={done ? t('list.markIncompleteAria') : t('list.markDoneAria')}
-      >
-        {done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Circle className="h-3.5 w-3.5" />}
-      </button>
+      {caps.edit ? (
+        <button
+          type="button"
+          className="shrink-0 text-muted-foreground transition-colors hover:text-accent"
+          onClick={(e) => {
+            e.stopPropagation()
+            // onToggleDone only reads id/status/statusCategory, all present here.
+            void onToggleDone(subtask as unknown as TaskItem)
+          }}
+          aria-label={done ? t('list.markIncompleteAria') : t('list.markDoneAria')}
+        >
+          {done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Circle className="h-3.5 w-3.5" />}
+        </button>
+      ) : (
+        <span className="shrink-0 text-muted-foreground">
+          {done ? <CheckCircle2 className="h-3.5 w-3.5 text-emerald-500" /> : <Circle className="h-3.5 w-3.5" />}
+        </span>
+      )}
       <span className={cn('min-w-0 flex-1 truncate text-[13px]', done && 'line-through text-muted-foreground')}>
         {subtask.isMilestone && <Diamond className="mr-1 inline h-3 w-3 fill-amber-400 text-amber-500 align-[-1px]" />}
         {subtask.title ?? ''}
@@ -4565,6 +4660,8 @@ function InlineAddTask({
   // Guards the field-level onBlur from collapsing the composer while focus is
   // simply moving between the title/priority/date controls in the same row.
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const caps = useListCaps()
+  if (!caps.add) return null
 
   const reset = () => {
     setValue('')
@@ -4730,6 +4827,8 @@ function TableView({
   const { t, tCount, locale } = useTranslation()
   /** §V2-06 — the space's ClickApps, for the markers this table draws. */
   const rowFeatures = useSpaceFeatureFlags()
+  /** What the reader may change from a cell (`ListCaps`): a cell they may not is drawn, not offered. */
+  const caps = useListCaps()
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [editingTitleId, setEditingTitleId] = useState<string | null>(null)
   // Disambiguate single-click (open task) from double-click (inline rename): a
@@ -4921,13 +5020,15 @@ function TableView({
                 className={cn('group px-3 py-2 flex items-center gap-1', col.width)}
               >
                 {col.key === 'checkbox' ? (
-                  <input
-                    type="checkbox"
-                    checked={allSelected}
-                    onChange={toggleAll}
-                    className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
-                    aria-label={t('list.table.selectAllAria')}
-                  />
+                  caps.edit && (
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
+                      aria-label={t('list.table.selectAllAria')}
+                    />
+                  )
                 ) : col.sortField ? (
                   <>
                     <SortHeaderButton label={col.label} field={col.sortField} sort={sort} onSort={onSort} />
@@ -4990,6 +5091,9 @@ function TableView({
               return (
                 <div
                   key={key}
+                  /* Addressable by id: while its name is being changed, the row's text no longer holds it. */
+                  data-testid="list-table-row"
+                  data-task-id={task.id}
                   className={cn(
                     'group flex items-stretch h-9 text-sm transition-colors hover:bg-muted/60 even:bg-muted/30',
                     isSelected && 'bg-accent/10',
@@ -4997,14 +5101,16 @@ function TableView({
                 >
                   {/* Checkbox */}
                   <div className="w-9 px-3 flex items-center">
-                    <input
-                      type="checkbox"
-                      checked={isSelected}
-                      onChange={() => toggleOne(task.id)}
-                      onClick={(e) => e.stopPropagation()}
-                      className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
-                      aria-label={t('list.table.selectTaskAria', { title: task.title })}
-                    />
+                    {caps.edit && (
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => toggleOne(task.id)}
+                        onClick={(e) => e.stopPropagation()}
+                        className="h-3.5 w-3.5 rounded border-border accent-brand-700 cursor-pointer"
+                        aria-label={t('list.table.selectTaskAria', { title: task.title })}
+                      />
+                    )}
                   </div>
 
                   {/* Title */}
@@ -5020,6 +5126,7 @@ function TableView({
                     }}
                     onDoubleClick={(e) => {
                       e.stopPropagation()
+                      if (!caps.edit) return
                       if (openClickTimer.current) {
                         clearTimeout(openClickTimer.current)
                         openClickTimer.current = null
@@ -5066,13 +5173,15 @@ function TableView({
                   <div data-testid="list-table-status-cell" className="w-36 px-3 flex items-center relative">
                     <button
                       type="button"
+                      disabled={!caps.mayProgress(task)}
+                      data-testid="list-table-status-button"
                       onClick={(e) => {
                         e.stopPropagation()
                         setStatusOpenFor((cur) => (cur === task.id ? null : task.id))
                         setPriorityOpenFor(null)
                         setDateOpenFor(null)
                       }}
-                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border"
+                      className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-xs font-medium border disabled:cursor-default"
                       style={pillStyleFor(meta.color)}
                     >
                       <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: meta.color }} />
@@ -5118,13 +5227,15 @@ function TableView({
                   <div className="w-28 px-3 flex items-center relative">
                     <button
                       type="button"
+                      disabled={!caps.edit}
+                      data-testid="list-table-priority-button"
                       onClick={(e) => {
                         e.stopPropagation()
                         setPriorityOpenFor((cur) => (cur === task.id ? null : task.id))
                         setStatusOpenFor(null)
                         setDateOpenFor(null)
                       }}
-                      className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-foreground"
+                      className="inline-flex items-center gap-1.5 text-xs font-medium text-foreground hover:text-foreground disabled:cursor-default"
                     >
                       <Flag className={cn('h-3.5 w-3.5', PRIORITY_COLORS[task.priority])} />
                       <span className="capitalize">{t(PRIORITY_LABEL_KEYS[task.priority])}</span>
@@ -5160,6 +5271,8 @@ function TableView({
                   <div className="w-28 px-3 flex items-center relative">
                     <button
                       type="button"
+                      disabled={!caps.mayProgress(task)}
+                      data-testid="list-table-assignee-button"
                       onClick={(e) => {
                         e.stopPropagation()
                         setAssigneeOpenFor((cur) => (cur === task.id ? null : task.id))
@@ -5167,10 +5280,10 @@ function TableView({
                         setPriorityOpenFor(null)
                         setDateOpenFor(null)
                       }}
-                      className="w-full text-left"
+                      className="w-full text-left disabled:cursor-default"
                     >
                       {assignees.length === 0 ? (
-                        <span className="text-muted-foreground text-xs">{t('list.table.assign')}</span>
+                        <span className="text-muted-foreground text-xs">{caps.mayProgress(task) ? t('list.table.assign') : '—'}</span>
                       ) : (
                         <div className="flex -space-x-1">
                           {assignees.slice(0, 3).map((a) => {
@@ -5254,13 +5367,15 @@ function TableView({
                     ) : (
                       <button
                         type="button"
+                        disabled={!caps.edit}
+                        data-testid="list-table-due-button"
                         onClick={(e) => {
                           e.stopPropagation()
                           setDateOpenFor(task.id)
                           setStatusOpenFor(null)
                           setPriorityOpenFor(null)
                         }}
-                        className="inline-flex items-center gap-1 text-xs tabular-nums hover:text-foreground"
+                        className="inline-flex items-center gap-1 text-xs tabular-nums hover:text-foreground disabled:cursor-default"
                       >
                         {task.dueDate ? (
                           <>
@@ -5283,7 +5398,7 @@ function TableView({
                   )}
 
                   {customColumns.map((field) => {
-                    const editable = INLINE_EDITABLE_TYPES.has(field.type)
+                    const editable = INLINE_EDITABLE_TYPES.has(field.type) && caps.edit
                     const open =
                       editable && customOpen?.taskId === task.id && customOpen.fieldId === field.id
                     const current = taskCustom[field.id]
@@ -5293,6 +5408,9 @@ function TableView({
                       <div key={field.id} className="w-36 px-3 flex items-center relative">
                         {!editable ? (
                           /*
+                           * A reader who may not change the task reads the value
+                           * and is offered nothing (`ListCaps`).
+                           *
                            * 0158 — READ-ONLY, and it opens nothing.
                            *
                            * A `people`, `tasks`, `signature` or derived field
@@ -5303,7 +5421,7 @@ function TableView({
                            */
                           <span
                             data-testid={`custom-cell-readonly-${task.id}-${field.id}`}
-                            title={t('list.table.cellEditOnTask')}
+                            title={caps.edit ? t('list.table.cellEditOnTask') : undefined}
                             className="text-xs truncate text-left w-full text-muted-foreground"
                           >
                             {valueLabel}
@@ -5348,6 +5466,7 @@ function TableView({
             ) : null}
 
             {/* Add task row */}
+            {caps.add && (
             <div className="flex items-center h-9">
               {addActive ? (
                 <div className="flex-1 px-3 flex items-center gap-2">
@@ -5373,6 +5492,7 @@ function TableView({
               ) : (
                 <button
                   type="button"
+                  data-testid="list-table-add-task"
                   onClick={() => setAddActive(true)}
                   className="w-full h-full flex items-center gap-2 px-3 text-sm text-muted-foreground hover:bg-muted/60 hover:text-foreground transition-colors text-left"
                 >
@@ -5381,6 +5501,7 @@ function TableView({
                 </button>
               )}
             </div>
+            )}
           </div>
           </div>
         </div>
@@ -5592,6 +5713,7 @@ function BoardColumn({
   showEmptyFields?: boolean
 }) {
   const { t } = useTranslation()
+  const caps = useListCaps()
   const [renaming, setRenaming] = useState(false)
   const { isOver, setNodeRef } = useDroppable({
     id: `status:${status}`,
@@ -5744,6 +5866,7 @@ function BoardColumn({
               <div className="text-xs text-muted-foreground text-center py-4">{t('list.board.dropHere')}</div>
             )}
           </div>
+          {caps.add && (
           <form
             className="p-2 pt-0"
             onSubmit={async (e) => {
@@ -5758,9 +5881,11 @@ function BoardColumn({
               value={addTitle}
               onChange={(e) => setAddTitle(e.target.value)}
               placeholder={t('list.board.addTaskPlaceholder')}
+              data-testid="board-column-add"
               className="w-full h-8 rounded border border-dashed border-border/70 bg-transparent px-2 text-sm placeholder:text-muted-foreground hover:border-border hover:bg-card/60 focus:border-border focus:bg-card focus:outline-none"
             />
           </form>
+          )}
         </>
       )}
     </div>
@@ -5788,8 +5913,11 @@ function BoardTaskCard({
 }) {
   const features = useSpaceFeatureFlags()
   const { t, locale } = useTranslation()
+  /* Dropping a card on another column changes its status: the reader's to make, or no drag. */
+  const caps = useListCaps()
   const { attributes, listeners, setNodeRef, transform, isDragging } = useDraggable({
     id: `task:${task.id}`,
+    disabled: !caps.mayProgress(task),
   })
   const style = transform
     ? { transform: `translate3d(${transform.x}px, ${transform.y}px, 0)` }
@@ -6089,6 +6217,8 @@ function GanttBar({
 }) {
   const [dragDx, setDragDx] = useState<number | null>(null)
   const state = useRef<{ startX: number; moved: boolean } | null>(null)
+  /* A drag reschedules the task; a reader who may not change it gets the press, which opens it. */
+  const mayDrag = useListCaps().edit
   const start = task.startDate
     ? startOfDay(new Date(task.startDate))
     : task.dueDate
@@ -6112,7 +6242,7 @@ function GanttBar({
     setDragDx(0)
   }
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!state.current) return
+    if (!state.current || !mayDrag) return
     const dx = e.clientX - state.current.startX
     if (Math.abs(dx) > GANTT_DRAG_THRESHOLD) state.current.moved = true
     setDragDx(dx)
@@ -6154,7 +6284,7 @@ function GanttBar({
       }}
       className={cn(
         'absolute flex touch-none select-none items-center truncate rounded px-1.5 text-[10px] text-white shadow-sm',
-        dragging ? 'z-20 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab',
+        !mayDrag ? 'cursor-pointer' : dragging ? 'z-20 cursor-grabbing ring-2 ring-white/70' : 'cursor-grab',
         critical ? 'bg-red-500' : done ? 'bg-emerald-500/80' : 'bg-brand-700',
       )}
       style={{ left: x + snapDays * dayW, top, width: w, height: GANTT_BAR_H }}
@@ -6630,6 +6760,7 @@ function BulkActionBar({
   moveLists?: Array<{ id: string; name: string }>
 }) {
   const { t, tCount } = useTranslation()
+  const caps = useListCaps()
   const [busy, setBusy] = useState(false)
   const count = selectedIds.size
   const bulkStatuses = useOrderedStatuses()
@@ -6644,7 +6775,7 @@ function BulkActionBar({
     return () => window.removeEventListener('keydown', onKey)
   }, [count, onClear])
 
-  if (count === 0) return null
+  if (count === 0 || !caps.edit) return null
 
   const apply = async (patch: Record<string, unknown>) => {
     setBusy(true)
