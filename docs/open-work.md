@@ -1285,13 +1285,40 @@ ClickUp (help centre, "Manage individual permissions for view only users", searc
 - Measure what a workspace guest reaches through the knowledge routes, and give them the workspace's role there.
 - Make the guard read the role in the workspace, or retire it.
 
-### `found-25-sep/inbound-email-comments-skip-the-comment-rule` — open, security, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/inbound-email-comments-skip-the-comment-rule` — **closed** (security, HIGH once measured; found closing `task-rows-changed-by-id-anywhere`)
 
-**A comment sent by mail to a task's address skips the comment rule**
+**A comment sent by mail to a task's address skipped the comment rule, and the address itself**
 
-*Evidence, read not run:* `POST /inbound/email` is signed by the mail provider. It adds a comment authored by the From address whenever that address belongs to any member of the workspace (`email-to-task.service.ts`), and a `+task-<id>` address checks only that the task exists. So a view-only member, or a guest who can read nothing there, comments by mail where the app refuses them.
+*Measured, lane 5, on `5916541`* (probe `measure-inbound-comments`, then the suite below, 1 of 5):
+- **The address.** `POST /inbound/email` to `list-<anything>+task-<id>@…` commented on any task whose id somebody had. The task's list's alias, the secret half of the address, was never compared (201).
+- **The author.** A stranger's mail was put down as a member's comment. The author fell back to "the workspace's owner", which was whichever member the lookup found: once the view-only member, once the guest.
+- **The level.** A view-only member, and a guest with nothing shared, each commented by mail where the app refuses them (403).
+- **Replies.** A reply to a notification (by `In-Reply-To`) did the same.
 
-*To close:* the comment asks the comment rule for its author, and a refusal is answered as a bounce, not written as a comment.
+That made it a high-severity hole, not the small one it was recorded as: anybody who could send mail and had seen a task's id could post on it in a member's name.
+
+*Closed, 25 September:*
+- **A task's address is its list's.** The `+task-<id>` path takes the task only when the address's alias is its list's live alias. A task id that is not a uuid is no task, where it had been a database error.
+- **A comment by mail is its sender's.** It is written only when the From address is an account that may comment on the task.
+- **That permission is asked by `taskCommentAllowed`** (`common/permissions/task-write.ts`): not in the bin, the read rule, and "comment" along the task's chain, the three things the app's route asks.
+- **Anybody else's mail is refused.** It is recorded as `rejected_not_allowed`, and no comment is written in somebody else's name. Replies go the same way.
+
+The new suite `mail-comments-by-level`, 5 checks, each read back by SQL, both the comment and the recorded outcome:
+- the admin and a member to the task's own address;
+- the task's id under another list's alias and under a made-up one;
+- a stranger with an account elsewhere, and an address with none;
+- a view-only member, a guest with nothing shared, and a guest with the task shared to comment;
+- replies to a notification from the view-only member and the admin.
+
+Results:
+- Before: 1 of 5. Only the first passed, as it should either way.
+- After: 5/5.
+
+`mcl-1..4`, each compiled: the alias not compared, any account commenting, the old fallback author, and the mail path's rule asking no level.
+
+Regression on lanes 2 to 5: the 14 suites that send mail or comment on tasks (`mail-comments-by-level`, `email-reply-routing`, `credential-reads`, `hook-portal-access`, `task-boundaries`, `task-depth`, `task-menu`, `guest-space-level`, `guest-task-edits`, `task-rows-by-id`, `task-sheet-capabilities`, `task-edit-levels`, `notification-gaps`, `activity-rail`). Result: 14/14. `task-menu` missed its top four rows twice: in the sweep, and once alone while lane 1's break runs held the machine (load 5). It passed alone on lane 4 (37/37), and is recorded under `three-suites-fail-under-a-full-sweep`. In CI (185).
+
+*Not changed:* a new task by mail to a list's alias still comes from anybody who has the address, put down as its sender if they are a member and as the alias's maker otherwise. The alias is the list's secret, as a form's link is, and that is the feature. The service's comment rule and `taskCommentAllowed` state the same chain; the first was left as it is because two break patches read it.
 
 ### `found-25-sep/read-only-tasks-blocked-and-parented` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
 
@@ -1741,6 +1768,7 @@ Each is its own question.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
+- `task-menu`, 25 September, the sweep for `inbound-email-comments-skip-the-comment-rule`, and once alone on lane 3 while lane 1's break runs held the machine (load 5): Copy ID, New tab, Convert to and Send email to task were not yet in the menu when it was read. It passed alone on lane 4 right after (37/37).
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 

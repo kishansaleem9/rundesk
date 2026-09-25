@@ -174,3 +174,53 @@ async function assertSpaceAllowsTaskWrite(
   if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
   await assertSpaceLevel(db, { spaceId, actorId, required: 'edit', kind: 'tasks', within })
 }
+
+/**
+ * MAY THIS PERSON COMMENT ON THIS TASK — for a path with no route guard in
+ * front of it: a comment sent by mail (`found-25-sep/inbound-email-comments-skip-the-comment-rule`).
+ * The app's comment route has the guard's read rule and then the service's
+ * (`TasksService.assertMayComment`): not in the bin, and the comment level
+ * along the task's chain. Mail asked none of them — a view-only member, a
+ * guest with nothing shared, and a stranger (put down as a member of the
+ * workspace) each commented by mail. This asks all three, and answers rather
+ * than throws: the mail path records a refusal, it has nobody to answer 403.
+ *
+ * The chain — task, list, project, folder — is the one `assertTaskWritable`
+ * and the service's comment rule walk.
+ */
+export async function taskCommentAllowed(db: Db, taskId: string, actorId: string): Promise<boolean> {
+  const [ctx] = await db
+    .select({
+      isArchived: tasks.isArchived,
+      listId: tasks.listId,
+      workspaceId: spaces.workspaceId,
+      spaceId: spaces.id,
+      projectId: projects.id,
+      folderId: projects.folderId,
+    })
+    .from(tasks)
+    .innerJoin(lists, eq(lists.id, tasks.listId))
+    .innerJoin(projects, eq(projects.id, lists.projectId))
+    .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+    .where(eq(tasks.id, taskId))
+    .limit(1)
+  if (!ctx || ctx.isArchived) return false
+  const [membership] = await db
+    .select({ role: workspaceMembers.role })
+    .from(workspaceMembers)
+    .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
+    .limit(1)
+  if (!membership) return false
+  if (!(await readableTask(db, ctx.workspaceId, taskId, { id: actorId, role: membership.role }))) return false
+  const resolved = await resolveSpaceLevel(db, {
+    spaceId: ctx.spaceId,
+    actorId,
+    within: [
+      { type: 'task', id: taskId },
+      { type: 'list', id: ctx.listId },
+      { type: 'project', id: ctx.projectId },
+      ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
+    ],
+  })
+  return !resolved || spaceLevelReaches(resolved.level, 'comment')
+}

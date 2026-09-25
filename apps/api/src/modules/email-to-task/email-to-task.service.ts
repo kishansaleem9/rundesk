@@ -25,6 +25,8 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { taskCommentAllowed } from '../../common/permissions/task-write'
+import { isUuid } from '../../common/validation/uuid'
 import { LOCAL_PART_PREFIX, TASK_TAG, inboundDomain, taskReplyAddress } from './task-address'
 
 /**
@@ -79,6 +81,7 @@ export type InboundOutcome =
   | 'rejected_duplicate'
   | 'rejected_too_large'
   | 'rejected_unknown_task'
+  | 'rejected_not_allowed'
 
 const MAX_EMAIL_BYTES = 25 * 1024 * 1024 // 25 MB total payload
 const MAX_ATTACHMENT_BYTES = 15 * 1024 * 1024 // 15 MB per attachment
@@ -199,8 +202,19 @@ export class EmailToTaskService {
     }
 
     if (route.taskId) {
-      const [task] = await this.db.select().from(tasks).where(eq(tasks.id, route.taskId)).limit(1)
-      if (!task) {
+      const [task] = isUuid(route.taskId)
+        ? await this.db.select().from(tasks).where(eq(tasks.id, route.taskId)).limit(1)
+        : []
+      /*
+       * A TASK'S ADDRESS CARRIES ITS LIST'S ALIAS, and that is what makes it
+       * one (`found-25-sep/inbound-email-comments-skip-the-comment-rule`). Only
+       * the task id was read, so `list-anything+task-<id>@…` commented on any
+       * task whose id somebody had — the alias, the list's secret, was never
+       * compared. An address naming another list's alias, or none, is no
+       * task's address.
+       */
+      const alias = task ? await this.findAliasByListId(task.listId) : null
+      if (!task || !alias || alias.revokedAt || alias.localPart !== route.localPart) {
         await this.recordOutcome(payload, totalBytes, 'rejected_unknown_task')
         return { outcome: 'rejected_unknown_task', reason: `Task ${route.taskId} not found` }
       }
@@ -289,8 +303,22 @@ export class EmailToTaskService {
     payload: InboundEmailPayload,
     ctx: { taskId: string; listId: string },
     totalBytes: number,
-  ): Promise<{ outcome: InboundOutcome; commentId: string }> {
-    const authorId = await this.resolveAuthorId(ctx.listId, payload.fromAddress, null)
+  ): Promise<{ outcome: InboundOutcome; commentId?: string; reason?: string }> {
+    /*
+     * A COMMENT BY MAIL IS ITS SENDER'S, AND ASKS WHAT THE APP ASKS
+     * (`found-25-sep/inbound-email-comments-skip-the-comment-rule`). The author
+     * was whoever the From address named among the workspace's members, and
+     * anybody else was put down as the workspace's owner — measured: a stranger's
+     * mail became a member's comment, and a view-only member and a guest with
+     * nothing shared each commented by mail where the app refuses them (403).
+     * A sender who may not comment on this task is refused, and the refusal
+     * recorded; no comment is written in somebody else's name.
+     */
+    const authorId = await this.memberWhoMayComment(ctx.taskId, payload.fromAddress)
+    if (!authorId) {
+      await this.recordOutcome(payload, totalBytes, 'rejected_not_allowed', 'the sender may not comment on this task', ctx.listId, ctx.taskId)
+      return { outcome: 'rejected_not_allowed', reason: 'the sender may not comment on this task' }
+    }
     const body = this.stripQuotedReply(payload.textBody ?? this.htmlToText(payload.htmlBody ?? ''))
     const [comment] = await this.db
       .insert(taskComments)
@@ -404,6 +432,17 @@ export class EmailToTaskService {
     throw new BadRequestException(
       'No author available — list has no workspace members and alias has no creator',
     )
+  }
+
+  /** The sender, when they are somebody who may comment on this task (`taskCommentAllowed`); null otherwise. */
+  private async memberWhoMayComment(taskId: string, fromAddress: string): Promise<string | null> {
+    const [byEmail] = await this.db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.email, fromAddress.toLowerCase().trim()))
+      .limit(1)
+    if (!byEmail) return null
+    return (await taskCommentAllowed(this.db, taskId, byEmail.id)) ? byEmail.id : null
   }
 
   private async userBelongsToList(userId: string, listId: string): Promise<boolean> {
