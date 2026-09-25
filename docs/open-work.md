@@ -2967,7 +2967,7 @@ The automations page had offered New automation, Use, the toggle and Delete to e
 `admin-only-keys`, 5 checks, the page among them:
 - Before: 0 of 4 on lane 5; the page check was added after, and `aok-5` restores the ungated page.
 - After: 5/5 on lanes 5 and 4.
-- Patches `aok-1..6`, each compiled.
+- Patches `aok-1..6`: each reddened the check it names (lane 1, baseline 5/5 at `0b2db8e`).
 - Regression: the 20 suites that touch these routes, and the new one, 21/21.
 - In CI (200).
 
@@ -3024,7 +3024,7 @@ Patches `mrg-1..6`, each compiled:
 - removing asks the invite key;
 - any role string is added.
 
-*Break run:* queued on lane 1 after the commit (`plan-mrg`).
+*Break run* (lane 1): at `7a9ff90` five of the six reddened the check they name. `mrg-2` reddened nothing: its role held keys the manager does not have, so `assertMayGive` refused it even with `roles.manage` asked of every member. Check 2 now also asks for a role holding only `members.invite`, a key the manager has, so the refusal it measures can only be the missing `roles.manage`. Re-run at `0b2db8e` (baseline 5/5): all six reddened the check they name.
 
 Regression on lanes 2 to 5: the 23 suites that add, change or remove members, make or grant custom roles, or invite, and the new suite. Result: 24/24. `settings-role-grants` read its tabs before the grants had loaded, under the sweep's load, and passed alone (6/6). API unit tests 1652/1652. In CI (199).
 
