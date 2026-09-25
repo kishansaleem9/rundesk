@@ -1365,7 +1365,7 @@ Regression on lanes 2 to 5: the 25 suites that use the AI routes, the knowledge 
 
 In CI (195).
 
-### `found-25-sep/ai-task-paths-skip-the-read-rule` — open, security (found closing `guest-guard-reads-the-account-role`)
+### `found-25-sep/ai-task-paths-skip-the-read-rule` — **closed** (security, HIGH once measured; found closing `guest-guard-reads-the-account-role`)
 
 **The AI routes that take a task by id ask only that the caller belongs to its workspace**
 
@@ -1379,6 +1379,49 @@ Measured on lane 2, which has no model (probe `probe-ai-task-paths`): a member g
 - Measure `summarize` and `task/deadline` with the model, by what the stub is sent.
 - Make every AI path that takes a task ask the task's read rule, as the task routes do.
 - Correct the guard's sentence.
+
+*Measured, on `e7e8748`* (the suite below, 0 of 4 on lane 2 with the model stub, and 0 of 4 on lane 5 without a model):
+- **Summaries.** A guest of the workspace with nothing shared, refused the task itself (403), had it summarised (201). The prompt the model was sent carried its title and description. The summary's input also carries the task's activity, open subtasks, blockers and comments. A member refused the task's private list got the same, and so did the streamed summary.
+- **Deadlines.** A deadline was suggested for both (201). For a member, the workload it weighs counted all three of a colleague's open tasks, two of them in a list the member is refused.
+- **Assignees.** The member was suggested an assignee for the task in the private list (200, `ok: true`, with a pick).
+- **With no model configured,** every one of these answered 503 "not configured", so the refusal was never asked.
+
+That made it high severity, not a gap in a rule: with a model configured, anybody in a workspace could read any task in it through its summary, by id.
+
+ClickUp (help centre, "What is ClickUp Brain?", search snippets): Brain only surfaces information the person already has permission to see.
+
+*Closed, 25 September:*
+- **A task by id is read only as its reader may open it.** `assertTaskReadable` asks the task routes' own rule (`readableTask`): the container, a guest's reach, a private list or task. It replaces `assertTaskWorkspaceAccess`, which asked only for the workspace. A task id that is not a uuid is no task.
+- **The routes ask it first.** Summarising, streaming a summary and suggesting a deadline ask it before the model's availability, so a refusal reads the same with a model or without.
+- **The deadline's workload** counts each assignee's open tasks among those the asker may open, as the workload panel counts them.
+- **The assignee suggestion** asks the same rule, and answers `no_permission` with no pick.
+- **The named-workspace guard's comment** said that a request naming no workspace "reads nothing of one". It now says what such a route asks instead.
+
+The new suite `ai-task-reads`, 4 checks. Where a model answers, the prompts the stub is sent are read back; where none does, each refusal must come before the 503.
+- A summary is refused to the guest and to the member refused the private list, with nothing of the task sent to a model; a member who reads the task gets one.
+- A streamed summary, the same.
+- A deadline is refused the same way, and the workload it weighs counts, for the member, one of the colleague's three tasks, where the admin's counts all three.
+- An assignee suggestion is refused on the private list's task, and given on the open one.
+
+Results:
+- Before (`e7e8748`): 0 of 4 on lane 2 with the model, and 0 of 4 on lane 5 without one.
+- After: 4/4 on both.
+
+Patches `atr-1..6`, each compiled:
+- the task asks the workspace alone;
+- the summary asks the model first;
+- the streamed summary asks nothing;
+- the deadline asks nothing;
+- the workload counts every task (it can redden only where a model answers, and says so);
+- the assignee suggestion asks the role alone.
+
+*Break run:* queued on lane 1 after the commit (`plan-atr`).
+
+Regression on lanes 2 to 5: the 24 suites that use the AI routes, and the new suite. Result: 25/25.
+- Under the sweep's load, `ai-activity-filters` and `a61-meeting-record` failed as in the sweep before, with the same failures.
+- Each passed alone: 34/34 on lane 4, 25/25 on lane 2.
+
+In CI (196).
 
 ### `found-25-sep/view-only-individual-permissions` — open, feature, medium (found closing `guest-guard-reads-the-account-role`)
 
@@ -2176,6 +2219,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `ai-activity-filters` and `a61-meeting-record` again, 25 September, the sweep for `ai-task-paths-skip-the-read-rule`, with the same failures on other lanes (4 and 2). Each passed alone again (34/34, 25/25). The same two in two sweeps running is not chance: both read fixed waits.
 - `ai-activity-filters` and `a61-meeting-record`, 25 September, the sweep for `guest-guard-reads-the-account-role`. `ai-activity-filters` listed no row under its Failed filter on the page, though the same filter's API read had found the row. `a61-meeting-record` kept offering Save after a save, and lost the recording's address. Each passed alone (34/34, 25/25). `a61-meeting-record` is here for the third time.
 - `task-menu` and `task-depth`, 25 September, the sweep for `read-only-tasks-blocked-and-parented`: the menu's rows late, and the tag's removal. `task-depth` passed alone (91/91). `task-menu` passed on lane 3 (37/37), after once more missing Send email to task alone on lane 2 while lane 1's break runs held the machine.
 - `request-access` and `space-default-permission`, 25 September, the sweep for `sharing-asks-the-maker-not-the-level`. `request-access` did not find its notification among the admin's latest 50 rows, which the other suites were filling. `space-default-permission` was refused a signup by the rate limit (429) before its first check. Each passed alone, 9/9 and 36/36.

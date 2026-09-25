@@ -51,6 +51,7 @@ import {
 import { isUuid } from '../../common/validation/uuid'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { hiddenDocIds } from '../../common/permissions/doc-access'
+import { readableTask } from '../../common/permissions/read-access'
 import {
   assembleKnowledgeContext,
   deterministicKnowledgeAnswer,
@@ -2372,10 +2373,12 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
   /**
    * Compact current-workload signal for a task's assignees (Plan §7.4): each
    * assignee's count of open (non-closed, non-archived) tasks across the
-   * workspace. Returns undefined when the task has no assignees so the deadline
-   * prompt omits the line entirely.
+   * workspace, OF THE TASKS THE ASKER MAY OPEN, as the workload panel counts
+   * them — a colleague's load in a list the asker is refused is not theirs to
+   * read, as a number or otherwise. Returns undefined when the task has no
+   * assignees so the deadline prompt omits the line entirely.
    */
-  async buildTeamWorkloadSignal(taskId: string): Promise<string | undefined> {
+  async buildTeamWorkloadSignal(taskId: string, reader: { id: string; role?: string | null }): Promise<string | undefined> {
     const assignees = await this.db
       .select({ userId: taskAssignees.userId, name: sql<string>`coalesce(${users.displayName}, ${users.email})` })
       .from(taskAssignees)
@@ -2387,6 +2390,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
     if (!workspaceId) return undefined
 
     const ids = assignees.map((a) => a.userId)
+    const readerSees = await this.readerTaskFilter(workspaceId, reader)
     const counts = await this.db
       .select({ userId: taskAssignees.userId, count: sql<number>`count(*)::int` })
       .from(taskAssignees)
@@ -2400,6 +2404,7 @@ Respond ONLY with valid JSON: { "suggestedDate": "YYYY-MM-DD", "reasoning": "str
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, false),
           sql`${tasks.statusCategory} <> 'closed'`,
+          readerSees,
         ),
       )
       .groupBy(taskAssignees.userId)
@@ -3082,6 +3087,10 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
 
     const actorRole = await this.memberRole(row.workspaceId, actorId)
     if (!actorRole || actorRole === 'guest') return refuseAssign('no_permission')
+    // Nor for a task its asker may not open: the task routes' read rule, which
+    // a member refused its private list failed and was answered anyway
+    // (`ai-task-paths-skip-the-read-rule`).
+    if (!(await readableTask(this.db, row.workspaceId, taskId, { id: actorId }))) return refuseAssign('no_permission')
     // Every count below is of the tasks the ASKER may open, as the workload
     // panel's are: a colleague's load in a space the asker is refused is not
     // theirs to read, as a number or otherwise.
@@ -3232,15 +3241,22 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
   }
 
   /**
-   * Assert the user may read a task's workspace (Plan §7.5 hardening). Reused by
-   * the `/ai/summarize` taskId path so any authed user can no longer summarize an
-   * arbitrary task by id.
+   * A task by id is read for its reader only as they may open it: the task
+   * routes' own rule (`readableTask`) — the container, a guest's reach, a
+   * private list or task. ClickUp's Brain surfaces only what its asker may see.
+   *
+   * It used to ask only that the reader belonged to the task's WORKSPACE, so a
+   * guest with nothing shared, and a member refused the task's private list,
+   * had its title, description, activity and comments sent to the model for
+   * them (`ai-task-paths-skip-the-read-rule`). The routes ask it BEFORE they ask
+   * whether a model is configured, so a refusal reads the same either way.
    */
-  async assertTaskWorkspaceAccess(taskId: string, userId: string): Promise<void> {
-    const workspaceId = await this.resolveTaskWorkspaceId(taskId)
+  async assertTaskReadable(taskId: string, reader: { id: string; role?: string | null }): Promise<void> {
+    const workspaceId = isUuid(taskId) ? await this.resolveTaskWorkspaceId(taskId) : null
     if (!workspaceId) throw new NotFoundException('Task not found')
-    const role = await this.memberRole(workspaceId, userId)
-    if (!role) throw new ForbiddenException('You do not have access to this task')
+    if (!(await readableTask(this.db, workspaceId, taskId, reader))) {
+      throw new ForbiddenException('You do not have access to this task')
+    }
   }
 
   /**

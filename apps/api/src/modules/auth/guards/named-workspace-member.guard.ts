@@ -32,7 +32,9 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
  * does not confirm the workspace exists. A guest of the workspace is refused
  * with 403: the AI features are not for guests, which the account-wide check
  * could only ever have enforced for accounts whose global role is `guest`. A request
- * that names no workspace passes; it reads nothing of one.
+ * that names no workspace passes here, and a route that then reads something
+ * of one by id asks that thing's own read rule: a task by id asks the task
+ * routes' (`assertTaskReadable`, `ai-task-paths-skip-the-read-rule`).
  */
 @Injectable()
 export class NamedWorkspaceMemberGuard implements CanActivate {

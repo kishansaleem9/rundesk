@@ -250,14 +250,17 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { title: string; description?: string; teamWorkload?: string; taskId?: string; workspaceId?: string },
   ) {
+    // A task named by id is asked for by someone who may open it, before
+    // anything else — the model's availability included — so a refusal reads
+    // the same with a model or without (`ai-task-paths-skip-the-read-rule`).
+    if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
     await this.ai.assertAvailable('task.deadline', { userId: user.id, workspaceId: body.workspaceId })
     // Factor in current team workload (Plan §7.4). Prefer a client-supplied
     // signal; otherwise enrich server-side from the task's assignees' open-task
-    // counts (access-checked, like the summarize taskId path).
+    // counts, of the tasks the asker may open.
     let teamWorkload = body.teamWorkload
     if (!teamWorkload && body.taskId) {
-      await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
-      teamWorkload = await this.ai.buildTeamWorkloadSignal(body.taskId)
+      teamWorkload = await this.ai.buildTeamWorkloadSignal(body.taskId, { id: user.id, role: user.role })
     }
     return this.ai.suggestDeadline(body.title, body.description, teamWorkload, {
       userId: user.id,
@@ -283,11 +286,12 @@ export class AiController {
     @CurrentUser() user: any,
     @Body() body: { content?: string; taskId?: string; type?: 'task' | 'project'; workspaceId?: string },
   ) {
+    // When a taskId is provided, the input is built server-side (Plan §7.5)
+    // from the task's recent activity, open subtasks, open blockers and recent
+    // comments — so first, before the model's availability, the caller must be
+    // one who may open that task (`ai-task-paths-skip-the-read-rule`).
+    if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
     await this.ai.assertAvailable('summarize', { userId: user.id, workspaceId: body.workspaceId })
-    // When a taskId is provided, enrich the input server-side (Plan §7.5) with
-    // recent activity, open subtasks, open blockers, and recent comments — but
-    // first assert the caller can access that task's workspace (Plan §7.5 hardening).
-    if (body.taskId) await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
     const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
     const summary = await this.ai.summarize(content, body.type ?? 'task', {
       userId: user.id,
@@ -303,6 +307,9 @@ export class AiController {
     @Body() body: { content?: string; taskId?: string; type?: 'task' | 'project'; workspaceId?: string },
     @Res() res: any,
   ) {
+    // Before the model's availability, as the summary asks it: a task named by
+    // id is summarised only for someone who may open it.
+    if (body.taskId) await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
     if (!this.ai.isAvailable()) {
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
@@ -312,9 +319,7 @@ export class AiController {
     }
     // A task summary is enriched server-side from the task's recent activity,
     // open subtasks, blockers and comments; a project summary streams the
-    // caller-provided report text (Plan §7.5). Assert task-workspace access
-    // before reading a task by id (Plan §7.5 hardening).
-    if (body.taskId) await this.ai.assertTaskWorkspaceAccess(body.taskId, user.id)
+    // caller-provided report text (Plan §7.5).
     const content = body.taskId ? await this.ai.buildTaskSummaryInput(body.taskId) : body.content ?? ''
     await this.ai.summarizeStream(content, body.type ?? 'task', res as any, {
       userId: user.id,
