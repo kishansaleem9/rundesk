@@ -149,13 +149,17 @@ try {
   const fullAtEdit = await M.api(`/shares/list/${EDIT.list}`, { method: 'POST', body: { email: G.email, level: 'admin' } })
   const view = await M.api(`/shares/list/${VIEW.list}`, { method: 'POST', body: { email: O.email, level: 'view' } })
   await A(`/shares/list/${FULL.list}`, { method: 'POST', body: { email: G.email, level: 'edit' } })
-  const guest = await G.api(`/shares/list/${FULL.list}`, { method: 'POST', body: { email: O.email, level: 'view' } })
+  // To somebody new — an outsider's address — so no cap on a share already
+  // there can be what refuses them: only their being a guest.
+  const outsider = `${TAG}-outsider@rundesk.invalid`
+  const guest = await G.api(`/shares/list/${FULL.list}`, { method: 'POST', body: { email: outsider, level: 'view' } })
+  const [invited] = await sql`select count(*)::int as n from object_shares where object_id = ${FULL.list} and invited_email = ${outsider}`
   const levels = { full: await levelOf(FULL, O.id), edit: await levelOf(EDIT, O.id), view: await levelOf(VIEW, O.id) }
   chk(
     full.status < 300 && levels.full === 'admin' && editAtEdit.status < 300 && levels.edit === 'edit' && fullAtEdit.status === 403
-      && view.status === 403 && levels.view === null && guest.status === 403,
+      && view.status === 403 && levels.view === null && guest.status === 403 && invited.n === 0,
     'a member shares by the level the space gives them, as ClickUp’s edit permissions do: at Full edit the admin’s list up to Full edit, at Edit up to Edit, at View not at all — and a guest shares nothing, even with Edit',
-    `Full edit ${said(full)}; Edit at Edit ${said(editAtEdit)}, Full edit at Edit ${said(fullAtEdit)}; View ${said(view)}; guest ${said(guest)}; shares ${JSON.stringify(levels)}`,
+    `Full edit ${said(full)}; Edit at Edit ${said(editAtEdit)}, Full edit at Edit ${said(fullAtEdit)}; View ${said(view)}; guest ${said(guest)} (${invited.n} invited); shares ${JSON.stringify(levels)}`,
   )
 
   // ══ 5. THE LIST'S ADDRESS ════════════════════════════════════════════════

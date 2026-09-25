@@ -1396,7 +1396,7 @@ The new suite `checklist-assignee-ticks`, 3 checks: a member in a comment-only s
 
 `trb-13` re-aimed at the new branch.
 
-*Break run:* queued on lane 1 after the commit (`plan-cat`).
+*Break run, lane 1 (`baa7d3e`):* `cat-1..8`, 8 of 8 reddened, on a green baseline (3/3). `task-rows-by-id`'s thirteen, `trb-13` re-aimed, 13 of 13 (6/6).
 
 Regression on lanes 2 to 5: the 8 suites that use checklists, with `task-sheet-capabilities`, `task-edit-levels`, `guest-task-edits`, `video1-acceptance` and the new suite. Result: 13/13. In CI (192).
 
@@ -1557,7 +1557,11 @@ Results:
 
 `fwl-6` re-aimed at the moved rule. `fwl-3`, `-4` and `-5` and `cfa-4` compile unchanged. `b7-rowgate` (`list-view-controls`) re-aimed at the row's due date, which reads `mayEdit` now; the gate is the same.
 
-*Break run:* queued on lane 1 after the commit (`plan-lpl`): `lpl-1..33`; `field-writes-by-level`'s six and `list-view-controls`' thirteen, whose sets the re-aims left stale; and `cfa-4`.
+*Break run, lane 1 (`39acc88`):*
+- `lpl-1..33`: 33 of 33 reddened, on a green baseline (9/9).
+- `field-writes-by-level`'s six, whose set the re-aim left stale: 6 of 6 (5/5).
+- `list-view-controls`' thirteen: 13 of 13 (50/50).
+- `cfa-4`: reddened (4/4).
 
 Regression on lanes 2 to 5: the 71 suites that open a list page, define fields or change statuses. That is the 60 whose steps reach the list route, with `custom-field-access`, `field-writes-by-level`, `folder-dialog`, `list-statuses-seeded`, `project-page-controls`, `status-write-access`, `space-presets`, `no-dead-ends`, `video-regression`, `task-edit-levels` and `gantt-controls`.
 - Result: 71/71.
@@ -1597,7 +1601,7 @@ The new suite `inbound-hook-makers`, 3 checks: a member makes a hook in a view-o
 
 `ihm-1..5`, each compiled: making asks nothing; making asks only "not a guest", as it did; the panel offers to everybody; the page passes the panel `edit` for `add`; every delivery refused. Re-aimed at the new lines, each compiled: `hpa-1`, `hpa-2` and `hpa-15`. `hpa-18` and `-19` apply unchanged.
 
-*Break run:* queued on lane 1 after the commit (`plan-ihm`).
+*Break run, lane 1 (`af5ab5a`):* `ihm-1..5`, 5 of 5 reddened, on a green baseline (3/3). `hook-portal-access`'s nineteen, the re-aims among them, 19 of 19 (11/11).
 
 Regression on lanes 2 to 5: the 9 suites that make, list or deliver to hooks or read the Email panel (`hook-portal-access`, `credential-reads`, `mail-comments-by-level`, `email-reply-routing`, `space-features`, `task-boundaries`, `task-depth`, `task-menu`, the new suite), with `list-page-levels`, `list-empty-states`, `ui-sweep` and `no-dead-ends`. Result: 13/13. In CI (188).
 
@@ -1631,7 +1635,11 @@ Results:
 
 `lar-1..5`, each compiled: the address for every reader; the task's address carrying the alias; tags refused; old addresses refused; the panel showing every reader the address. Re-aimed at the moved gate, each compiled: `tcm-2`, `-3`, `-5` and `-6`, and `mtg-3`. `mcl-1` re-aimed at the tag's comparison.
 
-*Break run:* queued on lane 1 after the commit (`plan-lar`).
+*Break run, lane 1 (`3d959fc`):*
+- `lar-1..5`: 5 of 5 reddened, on a green baseline (3/3).
+- `mail-comments-by-level`'s four, `mcl-1` re-aimed: 4 of 4 (5/5).
+- `task-creation-access`: 5 of 6 (6/6). `meeting-access`: 2 of 3 (4/4).
+- `tcm-6` and `mtg-3` stayed green. They took the guest refusal away, and each suite's guest held only Edit, which the level refuses anyway. They are re-aimed under `guests-with-full-edit-make-no-tasks`, below, where the guest refusal went.
 
 Regression on lanes 2 to 5:
 - the mail suites: `mail-comments-by-level`, `email-reply-routing`, `credential-reads`, `task-menu`, `task-menu-favorite-archive` and `task-boundaries`;
@@ -1690,7 +1698,10 @@ The new suite `share-levels`, 6 checks. A member reads four lists of the admin's
 - the panel offering every level;
 - the reader's level from their grants alone.
 
-*Break run:* queued on lane 1 after the commit (`plan-shl`).
+*Break run, lane 1 (`3d959fc`):*
+- `shl-1..9`: 8 of 9 reddened, on a green baseline (6/6). `request-access`' four: 4 of 4 (9/9). `ui-sweep`'s three: 3 of 3 (107/107).
+- `shl-6` (guests share) stayed green. The check's guest shared the list with a member who already held Full edit on it, so the cap refused them before the guest rule could.
+- The guest now shares with an outsider's address, and no invite row may be made. The suite passed again (6/6); `shl-6` is queued on it.
 
 Regression on lanes 2 to 5: the 18 suites that share, or set shares up, and `request-access`, `ui-sweep` and `project-member-levels`. Result: 21/21.
 - Under the sweep's load, 19 passed the first time.
@@ -1728,7 +1739,7 @@ Results:
 
 `srw-1..4`, each compiled: Delete archiving, as it did; Archive trashing; Delete offered at Edit; no Archive.
 
-*Break run:* queued on lane 1 after the commit (`plan-srw`).
+*Break run, lane 1 (`4135abd`):* `srw-1..4`, 4 of 4 reddened, on a green baseline (2/2).
 
 Regression on lanes 2 to 5: the 12 suites that open the sheet's subtasks, its menu, the Trash or archiving, and the new suite. Result: 13/13. In CI (191).
 
