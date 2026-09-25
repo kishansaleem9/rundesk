@@ -5,6 +5,7 @@ import { reminders, tasks, lists, projects, spaces, chatMessages, chatChannels }
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { NotificationsService } from '../notifications/notifications.service'
+import { readableTask, type ReadActor } from '../../common/permissions/read-access'
 
 /**
  * User-created task reminders (Plan §4/§10). Users pin an arbitrary "remind me
@@ -43,12 +44,16 @@ export class TaskRemindersService {
     return when
   }
 
-  async create(workspaceId: string, userId: string, taskId: string, remindAt: Date | string, note?: string) {
+  async create(workspaceId: string, actor: ReadActor, taskId: string, remindAt: Date | string, note?: string) {
     if (!taskId) throw new BadRequestException('taskId is required')
     const when = this.parseWhen(remindAt)
+    const userId = actor.id
 
     const task = await this.resolveTask(workspaceId, taskId)
-    if (!task) throw new NotFoundException('Task not found in this workspace')
+    // A reminder is about a task its maker may read: the answer carries the
+    // title, and so does the notification it becomes. A member refused a
+    // private space was told a task's title there (`found-25-sep/task-rows-changed-by-id-anywhere`).
+    if (!task || !(await readableTask(this.db, workspaceId, taskId, actor))) throw new NotFoundException('Task not found in this workspace')
 
     const trimmedNote = note?.trim() || null
     const [row] = await this.db

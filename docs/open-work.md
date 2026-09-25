@@ -1134,6 +1134,128 @@ The new suite `task-sheet-capabilities`, 5 checks: a member on four of the admin
 
 *To close:* a guest's change to a task asks the level of their share on the task or a container above it, and "view" or "comment" refuse as they do a member. Measure a guest with a task shared to view, to comment and to edit.
 
+### `found-25-sep/task-rows-changed-by-id-anywhere` — **closed** (security, HIGH; found by reading every write that hangs off a task, route by route, after closing `task-sheet-offers-refused-edits`)
+
+**A task's routes changed rows of other tasks by their ids, another organisation's included, and several asked only membership or nothing**
+
+*Measured, lane 5, on `b986949` (probe `measure-task-subwrites`):*
+- **Checklists across organisations.** Somebody from another organisation named a task of their own in the URL. With it they renamed an admin's checklist (200) and added an item to it (201). They edited and ticked an item (200). They moved an item into a checklist of their own (200), because the item's update wrote the raw body, `checklistId` included. They deleted an item (200) and a checklist (200). The checklist routes' guard asked about the task in the URL, and the service never matched the checklist or item to that task.
+- **Reactions and old descriptions.** The same person reacted to the admin's comment through their own task (201), and its author was notified. They also read the admin's task's old descriptions (200): `GET /tasks/:id/description-history` had no guard at all.
+- **A private space.** A member refused a private space still reached a task in it:
+  - read its old descriptions (200);
+  - saved its checklist as a workspace template, with the items' words in it (201);
+  - added a checklist to it from a template (201);
+  - cleared its type (200);
+  - made a reminder on it, with its title in the answer (201);
+  - pushed it to the workspace's calendars (201).
+
+  Each of these asked only for membership of the workspace.
+- **A view-only space.** A member in a view-only space made a checklist on a task there (201), ticked an item (200) and changed the task's type (200). Renaming the task was refused (403).
+
+ClickUp (help centre, search snippets): "View" can't comment or edit. A like is a comment-level act. A task's checklists are part of the task, so changing them is editing it.
+
+*Closed, 25 September:*
+- **Checklists** are found through the task in the URL. A checklist or item on another task is not found (404). Every change asks the task's write rule: making, renaming, reordering or deleting a checklist, and adding, editing, ticking or deleting an item. The item's update writes only an item's own fields: words, done, position, due date and assignee.
+- **A reaction** must be to a comment on the task in the URL (404 otherwise), and it asks the comment rule.
+- **A task's old descriptions** are read as the task is (`ResourceMemberGuard`).
+- **Templates.** A template can be made only from a checklist its maker may read (404 otherwise). A template's checklist can be added only where the task's write rule allows.
+- **A task's type** asks the write rule. The module's other services reach that rule through `TasksService.assertMayEditTask`.
+- **A reminder on a task and a calendar push** ask that the task may be read. Otherwise they answer 404, and no title is told.
+
+The new suite `task-rows-by-id`, 6 checks. Every refusal is read back by SQL beside the same act allowed: the admin on their own task, and a member in an open space.
+- Before: 0 of 6.
+- After: 6/6.
+
+`trb-1..13`, each compiled. Each undoes one rule:
+- checklists or items found by id alone;
+- the item's update taking the whole body;
+- checklists or items changed without the write rule;
+- a reaction to any comment, or one asking no level;
+- old descriptions unguarded;
+- a template made from an unread checklist;
+- a template applied, or a type set, without the write rule;
+- a reminder or a push on an unread task.
+
+Regression on lanes 2 to 5: the 20 suites that reach these routes, and ten more that open tasks as members, readers and guests (`video-regression`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `task-sheet-capabilities`, `task-edit-levels`, `task-boundaries`, `task-space-levels`, `guest-read-scope`, `guest-space-level`), plus `credential-reads`. Result: 30/30. Under the sweep's load, 28 of 30 passed the first time. `task-depth` (a tag's removal) and `video1-acceptance` (a bookmark, and the assistant's follow-up) failed on things this change does not touch, and each passed on its own right after (91/91, 18/18). Both are recorded under `three-suites-fail-under-a-full-sweep`. The API unit tests for the template and type services now run with the write rule given. In CI (181).
+
+*Found beside it* (the same reading, then measured or read):
+- A reader who may not change a task sets its custom fields and defines new ones (`found-25-sep/field-values-written-by-readers`).
+- The time routes mean to refuse guests and refuse none: the guard reads the account's role. ClickUp would let both a view-only reader and a guest track time by default (`found-25-sep/guest-guard-reads-the-account-role`).
+- A comment sent by mail skips the comment rule (`found-25-sep/inbound-email-comments-skip-the-comment-rule`).
+- A task one may only read can be blocked, or made a parent, from one they may edit (`found-25-sep/read-only-tasks-blocked-and-parented`).
+- An assignee in a comment-only space cannot tick their own checklist item, which ClickUp allows (`found-25-sep/assigned-checklist-items-need-edit`).
+- A calendar pull overwrites linked tasks for any member (`found-25-sep/calendar-pull-for-any-member`).
+
+### `found-25-sep/field-values-written-by-readers` — open, security, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**A reader who may not change a task sets its custom fields, and defines new ones**
+
+*Evidence, measured on lane 5 (`b986949`):*
+- A member in a view-only space set a task's custom field value (200, read back).
+- The same member defined a new field from the task (201).
+- A guest with only a view share on a task defined a field from it (201).
+
+`setValue` and `createDefinitionForTask` ask only the read rule (`readableTask`). So do the project routes that define, rename and delete fields, and deleting a field takes every task's value in it.
+
+ClickUp (search snippets): a custom field's value is part of the task, since "Edit" changes "any ClickApps". Guests cannot create fields.
+
+*To close:*
+- A value asks the task's write rule.
+- Defining, renaming and deleting a field ask for edit on its location, and are refused to a guest.
+
+`CustomFieldsService` cannot inject `TasksService`, which already injects it, so the write rule has to be reachable without the service.
+
+### `found-25-sep/guest-guard-reads-the-account-role` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**The time routes mean to refuse guests and refuse none, and ClickUp would not refuse them**
+
+*Evidence, measured on lane 5 (`b986949`):* a guest with only a view share on a task started a timer on it (201). A member in a view-only space logged time on a task there (201).
+
+The time routes carry `NotGuestGuard`, which says "Guests cannot use this feature". It reads the ACCOUNT's role (`common/guards/not-guest.guard.ts`), and a person invited to a workspace as a guest keeps the account role `member`, so it refuses nobody who is a guest of a workspace. `NamedWorkspaceMemberGuard` says as much about it. The AI knowledge routes (`knowledge.controller.ts`) rely on it alone.
+
+ClickUp (help centre, "Manage individual permissions for view only users", search snippets): view-only users and guests have four individual permissions, one of them time tracking. It is on by default, and an owner or admin can turn it off per person. So the view-only member's timer is ClickUp's default, and so is the guest's. The guard's intent is narrower than ClickUp, and it enforces nothing.
+
+*To close:*
+- Take the guard off the time routes, as ClickUp's default. The per-person permission is its own unbuilt item.
+- Measure what a workspace guest reaches through the knowledge routes, and give them the workspace's role there.
+- Make the guard read the role in the workspace, or retire it.
+
+### `found-25-sep/inbound-email-comments-skip-the-comment-rule` — open, security, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**A comment sent by mail to a task's address skips the comment rule**
+
+*Evidence, read not run:* `POST /inbound/email` is signed by the mail provider. It adds a comment authored by the From address whenever that address belongs to any member of the workspace (`email-to-task.service.ts`), and a `+task-<id>` address checks only that the task exists. So a view-only member, or a guest who can read nothing there, comments by mail where the app refuses them.
+
+*To close:* the comment asks the comment rule for its author, and a refusal is answered as a bounce, not written as a comment.
+
+### `found-25-sep/read-only-tasks-blocked-and-parented` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**A task one may only read can be blocked, or given a subtask, from a task one may edit**
+
+*Evidence, read not run:*
+- A `blocks` dependency from a task you may edit onto one you may only read asks only the read rule of the second. That task then cannot be closed.
+- A subtask can be hung under a parent you may only read.
+
+*To close:* research ClickUp's rule for dependencies and subtasks across levels. Then a change that alters another task asks that task's rule.
+
+### `found-25-sep/assigned-checklist-items-need-edit` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**An assignee in a comment-only space cannot tick their own checklist item**
+
+ClickUp (search snippets): "Comment" lets a person "complete or mark complete assigned checklist items". Since `task-rows-changed-by-id-anywhere`, every checklist change here asks the write rule at "edit", so the person cannot tick the item, and the sheet's Checklists tab is disabled for them.
+
+*To close:*
+- Ticking an item assigned to the person asks the write rule at "comment", with the item's assignee counted as the task's would be.
+- The sheet offers that tick.
+
+### `found-25-sep/calendar-pull-for-any-member` — open, small (found closing `task-rows-changed-by-id-anywhere`)
+
+**A calendar pull overwrites linked tasks for any member**
+
+*Evidence, read not run:* `POST /workspaces/:id/calendar-sync/:provider/pull` asks only for membership. It overwrites the title, description and dates of every task linked to an event in the workspace's calendars (`calendar-sync.service.ts`).
+
+*To close:* measure what a member who may not change those tasks changes through it, and what it answers them. Then decide who may pull.
+
 ### `found-24-sep/sprints-open-to-any-member` — **closed** (security, HIGH; found measuring the last four reports of `workspace-reads-skip-the-container-rule`)
 
 **A sprint in a private space is listed, named and opened to every member, and any member, or guest, may make, rename and delete sprints anywhere**
@@ -1447,6 +1569,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
+- `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18).
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 

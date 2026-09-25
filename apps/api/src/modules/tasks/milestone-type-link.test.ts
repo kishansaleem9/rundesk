@@ -74,7 +74,7 @@ describe('milestone / task type link (§1.1)', () => {
   describe('changing a task type writes both sides', () => {
     it('moving onto a milestone type draws the diamond', async () => {
       const { db, writes } = fakeDb({ type: { id: 'ty-ms', isMilestone: true } })
-      const svc = new TaskTypesService(db as never)
+      const svc = new TaskTypesService(db as never, { assertMayEditTask: async () => {} } as never)
       await svc.setForTask('t1', 'ty-ms', 'u1')
       assert.equal(writes[0].taskTypeId, 'ty-ms')
       assert.equal(writes[0].isMilestone, true, 'the surfaces all render from this flag')
@@ -82,14 +82,14 @@ describe('milestone / task type link (§1.1)', () => {
 
     it('moving onto an ordinary type stops drawing it', async () => {
       const { db, writes } = fakeDb({ type: { id: 'ty-task', isMilestone: false } })
-      const svc = new TaskTypesService(db as never)
+      const svc = new TaskTypesService(db as never, { assertMayEditTask: async () => {} } as never)
       await svc.setForTask('t1', 'ty-task', 'u1')
       assert.equal(writes[0].isMilestone, false, 'a one-way sync would leave the diamond behind')
     })
 
     it('clearing the type clears it too', async () => {
       const { db, writes } = fakeDb({ type: null })
-      const svc = new TaskTypesService(db as never)
+      const svc = new TaskTypesService(db as never, { assertMayEditTask: async () => {} } as never)
       await svc.setForTask('t1', null, 'u1')
       assert.equal(writes[0].taskTypeId, null)
       assert.equal(writes[0].isMilestone, false)

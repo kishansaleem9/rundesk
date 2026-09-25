@@ -531,7 +531,14 @@ export class TasksController {
     return this.emailToTask.taskEmailAddress(taskId)
   }
 
+  /*
+   * What a task's description used to say is read as the task is. This route
+   * had no guard: measured on lane 5, somebody from another organisation read
+   * an admin's old descriptions (200), and a member refused a private space
+   * those of a task in it (`found-25-sep/task-rows-changed-by-id-anywhere`).
+   */
   @Get(':taskId/description-history')
+  @UseGuards(ResourceMemberGuard)
   descriptionHistory(@Param('taskId') taskId: string) {
     return this.tasks.listDescriptionRevisions(taskId)
   }

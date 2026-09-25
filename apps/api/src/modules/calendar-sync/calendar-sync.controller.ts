@@ -112,8 +112,9 @@ export class CalendarSyncController {
   async pushTask(
     @Param('workspaceId') workspaceId: string,
     @Param('taskId') taskId: string,
+    @CurrentUser() user: { id: string; role?: string | null },
   ) {
-    return this.sync.pushTask(taskId, workspaceId)
+    return this.sync.pushTaskAs(taskId, workspaceId, { id: user.id, role: user.role })
   }
 }
 

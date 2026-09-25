@@ -13,6 +13,8 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { readableTask, type ReadActor } from '../../common/permissions/read-access'
+import { TasksService } from './tasks.service'
 
 /** Longest a template name may be, and the most items one may carry. */
 const MAX_NAME = 200
@@ -27,7 +29,10 @@ const MAX_ITEMS = 200
  */
 @Injectable()
 export class ChecklistTemplatesService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private tasks: TasksService,
+  ) {}
 
   /** The workspace a task belongs to, walking list → project → space. */
   private async workspaceOfTask(taskId: string) {
@@ -104,11 +109,16 @@ export class ChecklistTemplatesService {
    * Save an existing checklist as a template, so a list someone already built
    * by hand can be reused instead of retyped.
    */
-  async createFromChecklist(checklistId: string, userId: string, name?: string) {
+  async createFromChecklist(checklistId: string, actor: ReadActor, name?: string) {
+    const userId = actor.id
     const [cl] = await this.db.select().from(taskChecklists).where(eq(taskChecklists.id, checklistId)).limit(1)
     if (!cl) throw new NotFoundException('Checklist not found')
     const workspaceId = await this.workspaceOfTask(cl.taskId)
     await this.assertMember(workspaceId, userId)
+    // Its items become a template the whole workspace reads, so the checklist
+    // is read as its task is: a member refused a private space copied a task's
+    // checklist there into one (`found-25-sep/task-rows-changed-by-id-anywhere`).
+    if (!(await readableTask(this.db, workspaceId, cl.taskId, actor))) throw new NotFoundException('Checklist not found')
 
     const items = await this.db
       .select({ content: taskChecklistItems.content })
@@ -130,6 +140,9 @@ export class ChecklistTemplatesService {
   async applyToTask(taskId: string, templateId: string, userId: string) {
     const workspaceId = await this.workspaceOfTask(taskId)
     await this.assertMember(workspaceId, userId)
+    // A checklist added to a task is a change to it, and asks the task's write
+    // rule: membership alone let a member refused a private space add one there.
+    await this.tasks.assertMayEditTask(taskId, userId)
 
     const [tpl] = await this.db
       .select()

@@ -3,6 +3,7 @@ import { eq, asc, and, sql, ne } from 'drizzle-orm'
 import { taskTypes, tasks, lists, projects, spaces, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { TasksService } from './tasks.service'
 
 const MAX_NAME = 80
 /** Emoji, or a couple of characters. Long enough for "🚀", short enough not to be a label. */
@@ -19,7 +20,10 @@ const MAX_ICON = 8
  */
 @Injectable()
 export class TaskTypesService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private tasks: TasksService,
+  ) {}
 
   private async assertMember(workspaceId: string, userId: string) {
     const [m] = await this.db
@@ -202,6 +206,9 @@ export class TaskTypesService {
   async setForTask(taskId: string, typeId: string | null, userId: string) {
     const workspaceId = await this.workspaceOfTask(taskId)
     await this.assertMember(workspaceId, userId)
+    // A task's type is a change to it: membership alone let a member refused a
+    // private space retype a task there (`found-25-sep/task-rows-changed-by-id-anywhere`).
+    await this.tasks.assertMayEditTask(taskId, userId)
     const type = typeId ? await this.byId(workspaceId, typeId) : null
     // §1.1 — the type is what a person sets; tasks.isMilestone is what the
     // timeline, list badges and the client portal render from. Moving onto a

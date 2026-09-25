@@ -724,6 +724,14 @@ export class TasksService {
   }
 
   /**
+   * The write rule, for this module's other services: a checklist from a
+   * template, a task's type (`found-25-sep/task-rows-changed-by-id-anywhere`).
+   */
+  async assertMayEditTask(taskId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+  }
+
+  /**
    * WHAT A SPACE LETS A MEMBER DO TO ITS TASKS — its default permission, or
    * their own grant on it, read for tasks as it is read for containers. It was
    * asked of lists, projects and folders (`assertCanManageContainer`) and, since
@@ -5591,7 +5599,23 @@ export class TasksService {
     return row?.role === 'workspace_admin' || row?.role === 'manager' || row?.role === 'super_admin'
   }
 
-  async toggleReaction(commentId: string, userId: string, emoji: string) {
+  /**
+   * A REACTION IS TO A COMMENT ON THE TASK IN THE URL, BY SOMEBODY WHO MAY
+   * COMMENT THERE (`found-25-sep/task-rows-changed-by-id-anywhere`). The route's
+   * guard asked that the caller could open the task in the URL, and the comment
+   * id was never matched to it: measured on lane 5, somebody from another
+   * organisation, naming a task of their own, reacted to an admin's comment
+   * (201), and its author was told. ClickUp counts a like with the comment
+   * level: "View" can't comment.
+   */
+  async toggleReaction(taskId: string, commentId: string, userId: string, emoji: string) {
+    const [onTask] = await this.db
+      .select({ id: taskComments.id })
+      .from(taskComments)
+      .where(and(eq(taskComments.id, commentId), eq(taskComments.taskId, taskId)))
+      .limit(1)
+    if (!onTask) throw new NotFoundException('Comment not found')
+    await this.assertMayComment(taskId, userId)
     const [existing] = await this.db
       .select()
       .from(taskCommentReactions)
@@ -5654,7 +5678,45 @@ export class TasksService {
   }
 
   // --- Checklists ----------------------------------------------------------
+  /*
+   * A CHECKLIST IS ITS TASK'S, AND CHANGED AS ITS TASK IS
+   * (`found-25-sep/task-rows-changed-by-id-anywhere`). The routes sit under
+   * `tasks/:taskId/checklists`; the guard asked that the caller could open the
+   * task in the URL, and the service then wrote whatever checklist or item id
+   * it was handed. Measured on lane 5: somebody from another organisation,
+   * naming a task of their own, renamed an admin's checklist, added, edited,
+   * ticked and deleted its items, moved one into a checklist of their own (the
+   * item's update took the raw body, `checklistId` included) and deleted a
+   * checklist — 200 or 201 each. Nor was the task's write rule asked: a member
+   * in a view-only space made checklists on its tasks.
+   *
+   * So a checklist or an item is found through the task in the URL — one on
+   * another task is not found — and every change asks the write rule, as a
+   * change to the task's other parts does.
+   */
+  private async checklistOf(taskId: string, checklistId: string) {
+    const [row] = await this.db
+      .select()
+      .from(taskChecklists)
+      .where(and(eq(taskChecklists.id, checklistId), eq(taskChecklists.taskId, taskId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Checklist not found')
+    return row
+  }
+
+  private async checklistItemOf(taskId: string, itemId: string) {
+    const [row] = await this.db
+      .select({ item: taskChecklistItems, checklist: taskChecklists })
+      .from(taskChecklistItems)
+      .innerJoin(taskChecklists, eq(taskChecklists.id, taskChecklistItems.checklistId))
+      .where(and(eq(taskChecklistItems.id, itemId), eq(taskChecklists.taskId, taskId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Checklist item not found')
+    return row
+  }
+
   async createChecklist(taskId: string, title: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
     const [existing] = await this.db
       .select({ maxPos: sql<number>`coalesce(max(${taskChecklists.position}), -1)` })
       .from(taskChecklists)
@@ -5668,10 +5730,12 @@ export class TasksService {
     return { ...checklist, items: [] }
   }
 
-  async updateChecklist(checklistId: string, patch: { title?: string; position?: number }) {
+  async updateChecklist(taskId: string, checklistId: string, actorId: string, patch: { title?: string; position?: number }) {
     if (patch.position !== undefined && (typeof patch.position !== 'number' || !Number.isInteger(patch.position))) {
       throw new BadRequestException('Checklist position must be an integer')
     }
+    await this.assertTaskWriteAccess(taskId, actorId)
+    await this.checklistOf(taskId, checklistId)
     const set: Record<string, unknown> = { updatedAt: new Date() }
     if (patch.title !== undefined) set.title = patch.title
     if (patch.position !== undefined) set.position = patch.position
@@ -5685,23 +5749,24 @@ export class TasksService {
     return updated
   }
 
-  async deleteChecklist(checklistId: string) {
-    const [existing] = await this.db.select().from(taskChecklists).where(eq(taskChecklists.id, checklistId))
-    if (!existing) throw new NotFoundException('Checklist not found')
+  async deleteChecklist(taskId: string, checklistId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const existing = await this.checklistOf(taskId, checklistId)
     await this.db.delete(taskChecklists).where(eq(taskChecklists.id, checklistId))
     this.realtime.emitToTask(existing.taskId, { type: 'checklist.updated', taskId: existing.taskId })
     return { ok: true }
   }
 
   async addChecklistItem(
+    taskId: string,
     checklistId: string,
     content: string,
-    assigneeId?: string | null,
-    dueDate?: Date | null,
-    actorId?: string | null,
+    assigneeId: string | null | undefined,
+    dueDate: Date | null | undefined,
+    actorId: string,
   ) {
-    const [parent] = await this.db.select().from(taskChecklists).where(eq(taskChecklists.id, checklistId))
-    if (!parent) throw new NotFoundException('Checklist not found')
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const parent = await this.checklistOf(taskId, checklistId)
     const [existing] = await this.db
       .select({ maxPos: sql<number>`coalesce(max(${taskChecklistItems.position}), -1)` })
       .from(taskChecklistItems)
@@ -5730,14 +5795,20 @@ export class TasksService {
   }
 
   async updateChecklistItem(
+    taskId: string,
     itemId: string,
     actorId: string,
     patch: { content?: string; isDone?: boolean; position?: number; dueDate?: Date | null; assigneeId?: string | null },
   ) {
-    const [existing] = await this.db.select().from(taskChecklistItems).where(eq(taskChecklistItems.id, itemId))
-    if (!existing) throw new NotFoundException('Checklist item not found')
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const { item: existing } = await this.checklistItemOf(taskId, itemId)
 
-    const set: Record<string, unknown> = { ...patch, updatedAt: new Date() }
+    // What an item's update may change, named: the body is not the row, and a
+    // `checklistId` in it moved the item into somebody else's checklist.
+    const set: Record<string, unknown> = { updatedAt: new Date() }
+    for (const key of ['content', 'isDone', 'position', 'dueDate', 'assigneeId'] as const) {
+      if (key in patch) set[key] = patch[key]
+    }
     if (patch.isDone === true && !existing.isDone) set.completedAt = new Date()
     if (patch.isDone === false && existing.isDone) set.completedAt = null
 
@@ -5762,9 +5833,9 @@ export class TasksService {
     return updated
   }
 
-  async deleteChecklistItem(itemId: string) {
-    const [existing] = await this.db.select().from(taskChecklistItems).where(eq(taskChecklistItems.id, itemId))
-    if (!existing) throw new NotFoundException('Checklist item not found')
+  async deleteChecklistItem(taskId: string, itemId: string, actorId: string) {
+    await this.assertTaskWriteAccess(taskId, actorId)
+    const { item: existing } = await this.checklistItemOf(taskId, itemId)
     await this.db.delete(taskChecklistItems).where(eq(taskChecklistItems.id, itemId))
     const [parent] = await this.db.select().from(taskChecklists).where(eq(taskChecklists.id, existing.checklistId))
     if (parent) this.realtime.emitToTask(parent.taskId, { type: 'checklist.updated', taskId: parent.taskId })

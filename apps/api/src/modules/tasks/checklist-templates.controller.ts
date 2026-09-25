@@ -40,7 +40,7 @@ export class ChecklistTemplatesController {
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: { name?: string },
   ) {
-    return this.templates.createFromChecklist(checklistId, user.id, body?.name)
+    return this.templates.createFromChecklist(checklistId, { id: user.id, role: user.role }, body?.name)
   }
 
   @Post('tasks/:taskId/checklists/from-template/:templateId')

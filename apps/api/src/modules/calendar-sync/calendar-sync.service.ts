@@ -16,6 +16,7 @@ import {
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { readableTask, type ReadActor } from '../../common/permissions/read-access'
 
 /**
  * Bidirectional calendar sync for Google Calendar + Outlook.
@@ -102,6 +103,17 @@ export class CalendarSyncService {
       }
     }
     return { pushed, skipped }
+  }
+
+  /**
+   * The route's push, by somebody who may read the task: it writes the task's
+   * title and description into the workspace's calendars, or deletes its
+   * events there. Membership of the workspace was all it asked, and a member
+   * refused a private space pushed a task there (`found-25-sep/task-rows-changed-by-id-anywhere`).
+   */
+  async pushTaskAs(taskId: string, workspaceId: string, actor: ReadActor) {
+    if (!(await readableTask(this.db, workspaceId, taskId, actor))) throw new NotFoundException('Task not found')
+    return this.pushTask(taskId, workspaceId)
   }
 
   /**

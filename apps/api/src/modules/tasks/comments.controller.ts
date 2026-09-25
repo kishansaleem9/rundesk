@@ -61,11 +61,12 @@ export class TaskCommentsController {
 
   @Post(':commentId/reactions')
   toggleReaction(
+    @Param('taskId') taskId: string,
     @Param('commentId') commentId: string,
     @CurrentUser() user: CurrentUserPayload,
     @Body() body: { emoji: string },
   ) {
-    return this.tasks.toggleReaction(commentId, user.id, body.emoji)
+    return this.tasks.toggleReaction(taskId, commentId, user.id, body.emoji)
   }
 
   @Post(':commentId/assign')

@@ -40,7 +40,7 @@ export class RemindersController {
     @Body() body: { taskId?: string; remindAt: string; note?: string },
   ) {
     if (body.taskId) {
-      return this.reminders.create(workspaceId, user.id, body.taskId, body.remindAt, body.note)
+      return this.reminders.create(workspaceId, { id: user.id, role: user.role }, body.taskId, body.remindAt, body.note)
     }
     return this.reminders.createStandalone(workspaceId, user.id, body.remindAt, body.note ?? '')
   }

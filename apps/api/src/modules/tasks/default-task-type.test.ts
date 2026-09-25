@@ -71,7 +71,7 @@ describe('a workspace keeps a default task type (§1.1)', () => {
       [],                                     // ensureDefault: any default left? no
       [{ id: 'b' }],                          // …so promote the first remaining
     ])
-    const svc = new TaskTypesService(fake.db as never)
+    const svc = new TaskTypesService(fake.db as never, { assertMayEditTask: async () => {} } as never)
     const result = await svc.remove('ws1', 'a', 'u1')
 
     assert.deepEqual(result, { ok: true, untypedTasks: 0 })
@@ -86,7 +86,7 @@ describe('a workspace keeps a default task type (§1.1)', () => {
       [{ id: 'a', isDefault: false }],        // deleting a non-default
       COUNT,
     ])
-    const svc = new TaskTypesService(fake.db as never)
+    const svc = new TaskTypesService(fake.db as never, { assertMayEditTask: async () => {} } as never)
     await svc.remove('ws1', 'a', 'u1')
     assert.equal(fake.updates.length, 0, 'nothing to re-nominate')
   })
@@ -99,7 +99,7 @@ describe('a workspace keeps a default task type (§1.1)', () => {
       [],                                     // no default left
       [],                                     // and no candidate either
     ])
-    const svc = new TaskTypesService(fake.db as never)
+    const svc = new TaskTypesService(fake.db as never, { assertMayEditTask: async () => {} } as never)
     await svc.remove('ws1', 'only', 'u1')
     assert.equal(fake.updates.length, 0, 'an empty workspace has nothing to promote')
   })
@@ -107,7 +107,7 @@ describe('a workspace keeps a default task type (§1.1)', () => {
   it('looks the type up once, not twice', async () => {
     // The first version read the row, then read it again to check one boolean.
     const fake = fakeDb([ADMIN, [{ id: 'a', isDefault: false }], COUNT])
-    const svc = new TaskTypesService(fake.db as never)
+    const svc = new TaskTypesService(fake.db as never, { assertMayEditTask: async () => {} } as never)
     await svc.remove('ws1', 'a', 'u1')
     assert.equal(fake.remaining(), 0, 'an extra lookup would leave the queue short')
   })

@@ -32,10 +32,18 @@ function makeDb(selectResults: any[][]) {
 }
 
 const member = [{ userId: 'u1' }]
-const svcWith = (results: any[][]) => {
+/** The task write rule's answer, for `applyToTask`: allowed unless a test says otherwise. */
+const allowEdits = { assertMayEditTask: async () => {} }
+const svcWith = (results: any[][], tasks: { assertMayEditTask: (...a: any[]) => Promise<void> } = allowEdits) => {
   const { db, inserted, deleted } = makeDb(results)
-  return { svc: new ChecklistTemplatesService(db), inserted, deleted }
+  return { svc: new ChecklistTemplatesService(db, tasks as never), inserted, deleted }
 }
+/** What `readableTask` reads for a member on a task in an open space: the task, their role, its folder (none). */
+const readable = [
+  [{ taskId: 'task1', listId: 'l1', taskVisibility: 'public', taskCreatedById: 'x', listVisibility: 'public', listCreatedById: 'x', projectId: 'p1', projectVisibility: 'public', spaceId: 's1', spaceVisibility: 'public' }],
+  [{ role: 'member' }],
+  [],
+]
 
 describe('ChecklistTemplatesService.create', () => {
   it('stores the trimmed items and drops blank ones', async () => {
@@ -113,19 +121,27 @@ describe('ChecklistTemplatesService.applyToTask', () => {
     const { svc } = svcWith([[]])
     await assert.rejects(() => svc.applyToTask('missing', 't1', 'u1'), /Task not found/)
   })
+
+  it('asks the task write rule, and adds nothing where it refuses', async () => {
+    const refuse = { assertMayEditTask: async () => { throw new Error('This space\'s default permission is "View only"') } }
+    const { svc, inserted } = svcWith([[{ workspaceId: 'w1' }], member], refuse)
+    await assert.rejects(() => svc.applyToTask('task1', 't1', 'u1'), /View only/)
+    assert.equal(inserted.length, 0)
+  })
 })
 
 describe('ChecklistTemplatesService.createFromChecklist', () => {
   it('names the template after the checklist when none is given', async () => {
-    // checklist -> workspaceOfTask -> assertMember(from create) -> items -> assertMember(create)
+    // checklist -> workspaceOfTask -> assertMember -> readableTask -> items -> assertMember(create)
     const { svc, inserted } = svcWith([
       [{ id: 'c1', taskId: 'task1', title: 'Launch steps' }],
       [{ workspaceId: 'w1' }],
       member,
+      ...readable,
       [{ content: 'one' }, { content: 'two' }],
       member,
     ])
-    const res = await svc.createFromChecklist('c1', 'u1')
+    const res = await svc.createFromChecklist('c1', { id: 'u1' })
     assert.equal(res.name, 'Launch steps')
     assert.equal(res.itemCount, 2)
     assert.ok(inserted.some((v) => !Array.isArray(v) && v.name === 'Launch steps'))
@@ -133,7 +149,18 @@ describe('ChecklistTemplatesService.createFromChecklist', () => {
 
   it('404s for a checklist that does not exist', async () => {
     const { svc } = svcWith([[]])
-    await assert.rejects(() => svc.createFromChecklist('nope', 'u1'), /Checklist not found/)
+    await assert.rejects(() => svc.createFromChecklist('nope', { id: 'u1' }), /Checklist not found/)
+  })
+
+  it('404s for a checklist on a task the caller may not read, and makes no template', async () => {
+    const { svc, inserted } = svcWith([
+      [{ id: 'c1', taskId: 'task1', title: 'Launch steps' }],
+      [{ workspaceId: 'w1' }],
+      member,
+      [],
+    ])
+    await assert.rejects(() => svc.createFromChecklist('c1', { id: 'u1' }), /Checklist not found/)
+    assert.equal(inserted.length, 0)
   })
 })
 
