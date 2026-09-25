@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { CalendarSyncService } from './calendar-sync.service'
 
 /**
@@ -165,5 +166,44 @@ describe('CalendarSyncService.buildIcalFeed', () => {
     const ics = await svc.buildIcalFeed('u-1', 'ws-1')
     const matches = ics.match(/BEGIN:VEVENT/g) ?? []
     assert.equal(matches.length, 1)
+  })
+})
+
+/*
+ * A pull overwrites the task linked to each event it reads. The link is looked
+ * up by the provider's event id, which is not the workspace's: the same
+ * calendar connected in two workspaces, or an event id a calendar's owner
+ * chose, puts one id on links in both. So the lookup is this workspace's links
+ * alone (`calendar-pull-for-any-member`), or a pull in one workspace rewrites
+ * a task in another. The provider is stubbed here — no lane can reach it with
+ * a token that works — and the lookup's predicate is read back as SQL.
+ */
+describe('CalendarSyncService.pullEvents', () => {
+  const WS = '11111111-1111-4111-8111-111111111111'
+  const dialect = new PgDialect()
+
+  it("looks each event's link up among the pulling workspace's links only", async () => {
+    const lookups: unknown[] = []
+    const db = {
+      select: () => ({
+        from: () => ({
+          where: (condition: unknown) => {
+            lookups.push(condition)
+            return { limit: async () => [] }
+          },
+        }),
+      }),
+      insert: () => ({ values: () => ({ returning: async () => [{ id: 'new-task', createdById: 'admin' }] }) }),
+    } as any
+    const svc = new CalendarSyncService(db)
+    mock.method(svc as any, 'requireConnection', async () => ({ id: 'conn', workspaceId: WS, provider: 'gcal', metadata: { inboxListId: 'inbox' }, connectedById: 'admin' }))
+    mock.method(svc as any, 'listGoogleEvents', async () => [{ id: 'evt-shared', etag: 'e1', summary: 'Standup', start: new Date(), end: new Date() }])
+
+    await svc.pullEvents(WS, 'gcal')
+
+    assert.equal(lookups.length, 1, 'one link lookup for the one event')
+    const q = dialect.sqlToQuery(lookups[0] as never)
+    assert.match(q.sql, /"task_calendar_links"\."workspace_id" = \$\d+/, `the lookup asks the workspace: ${q.sql}`)
+    assert.ok(q.params.includes(WS), `and it is the pulling workspace: ${JSON.stringify(q.params)}`)
   })
 })

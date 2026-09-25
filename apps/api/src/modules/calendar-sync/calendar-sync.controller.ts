@@ -12,6 +12,7 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { CalendarSyncService, type CalendarProvider } from './calendar-sync.service'
 import { CalendarAccountsService } from './calendar-accounts.service'
@@ -100,7 +101,19 @@ export class CalendarSyncController {
     return { ok: true }
   }
 
+  /*
+   * The WORKSPACE's calendar, pulled: its connection is an account somebody
+   * connected under `integrations.manage`, and a pull uses it — creates tasks
+   * in its inbox list and overwrites every task linked to one of its events.
+   * So pulling asks what connecting and disconnecting ask. It asked only for
+   * membership, and a member or a guest set the admin's token to work
+   * (`calendar-pull-for-any-member`). ClickUp's calendar integration is
+   * private: nobody else in a workspace reaches a person's calendar through it.
+   * A person's OWN calendar is `accounts` above, and theirs alone.
+   */
   @Post(':provider/pull')
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('integrations.manage')
   async pull(
     @Param('workspaceId') workspaceId: string,
     @Param('provider') provider: CalendarProvider,

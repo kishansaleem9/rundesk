@@ -1555,13 +1555,49 @@ The new suite `checklist-assignee-ticks`, 3 checks: a member in a comment-only s
 
 Regression on lanes 2 to 5: the 8 suites that use checklists, with `task-sheet-capabilities`, `task-edit-levels`, `guest-task-edits`, `video1-acceptance` and the new suite. Result: 13/13. In CI (192).
 
-### `found-25-sep/calendar-pull-for-any-member` — open, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/calendar-pull-for-any-member` — **closed** (security, small; found closing `task-rows-changed-by-id-anywhere`)
 
 **A calendar pull overwrites linked tasks for any member**
 
 *Evidence, read not run:* `POST /workspaces/:id/calendar-sync/:provider/pull` asks only for membership. It overwrites the title, description and dates of every task linked to an event in the workspace's calendars (`calendar-sync.service.ts`).
 
 *To close:* measure what a member who may not change those tasks changes through it, and what it answers them. Then decide who may pull.
+
+*Measured, lane 5, on `a3361d7`* (the suite below, 1 of 3):
+- A member, and a guest, each pulled the workspace's Google Calendar. Each pull reached Google with the workspace connection's stored token: the API's log shows "Google Calendar LIST 401" for the staged token, from `listGoogleEvents`. With a token that worked, the pull would have made tasks from the admin's calendar in the inbox list, and overwritten every task linked to one of its events, for anybody in the workspace.
+- The integrations page's Calendar sync dialog offered the member "Sync now".
+- Read, not run: the pull looked each event's link up by the provider's event id alone, in any workspace. So a pull in one workspace could overwrite a task in another that carries a link with the same event id: the same calendar connected in two workspaces, or an id the calendar's owner chose.
+
+ClickUp (help centre, "Google Calendar integration", search snippets): the integration is private, and no one else in the workspace can reach a person's calendar through it. Guests and limited members connect their own. Here, a person's own calendar is the planner's Accounts, and the workspace's connection is made and removed under `integrations.manage`.
+
+*Closed, 25 September:*
+- **Pulling the workspace's calendar asks `integrations.manage`**, as connecting and disconnecting it do. A custom role's grant counts.
+- **A pull looks each event's link up among its own workspace's links.**
+- **The Calendar sync dialog** still shows everybody whose calendar is connected, and offers "Sync now" only to those who may pull.
+
+The new suite `calendar-pull-access`, 3 checks. The connection is staged by SQL and the inbox read back. No lane can reach the provider with a token that works, so a pull let through ends at the provider's failure and a refused one at 403; that difference is what is measured.
+- A member, and a guest, are refused before the connection is used, and nothing is made.
+- A member granted `integrations.manage`, and the admin, are let through.
+- The dialog offers Sync now to the member who manages integrations, and not to the member who does not.
+
+A unit test in `calendar-sync.service.test.ts` stubs the provider and reads back the link lookup's SQL: it asks the pulling workspace.
+
+Results:
+- Before (lane 5, `a3361d7`): 1 of 3.
+- After: 3/3, on lanes 5 and 4.
+
+Patches `cpa-1..5`, each compiled:
+- the pull asks membership alone;
+- the pull asks another key;
+- the dialog offers Sync now to everyone;
+- the dialog asks another key;
+- `cpa-5`, which claims the unit test: the link lookup asks no workspace.
+
+*Break run:* queued on lane 1 after the commit (`plan-cpa`).
+
+Regression on lanes 2 to 5: the 18 suites that touch calendars, integrations or custom-role grants, and the new suite. Result: 19/19.
+
+In CI (197).
 
 ### `found-25-sep/full-edit-enforced-nowhere` — **closed** (security, large; found closing `field-values-written-by-readers`, before letting guests edit)
 

@@ -179,11 +179,16 @@ export class CalendarSyncService {
     let updated = 0
     let skipped = 0
     for (const event of events) {
+      // THIS workspace's link to the event. An event id is the provider's, and
+      // a link in another workspace carrying the same one — the same calendar
+      // connected twice, or an id a calendar's owner chose — is not this
+      // pull's to overwrite.
       const [existing] = await this.db
         .select()
         .from(taskCalendarLinks)
         .where(
           and(
+            eq(taskCalendarLinks.workspaceId, workspaceId),
             eq(taskCalendarLinks.provider, provider),
             eq(taskCalendarLinks.externalEventId, event.id),
           ),

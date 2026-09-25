@@ -14,6 +14,7 @@ import {
 } from '@rundesk/ui'
 import { Calendar, Check, Copy, RefreshCcw, AlertTriangle } from 'lucide-react'
 import { api } from '../lib/api'
+import { usePermissions } from '../hooks/use-permissions'
 import { useTranslation } from '../lib/i18n'
 
 type ConnectionRow = {
@@ -47,6 +48,10 @@ export function CalendarSyncWizard({
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  // Pulling uses the workspace's connection, somebody's account, so it asks
+  // what connecting it asks (`calendar-pull-for-any-member`). Everybody sees
+  // whose calendar is connected; only those who manage integrations sync it.
+  const mayPull = usePermissions(workspaceId).can('integrations.manage') === true
 
   const { data: connections = [] } = useQuery({
     queryKey: ['integration-connections', workspaceId],
@@ -122,7 +127,7 @@ export function CalendarSyncWizard({
                   </div>
                 </div>
                 {isConnected ? (
-                  <Button
+                  mayPull && <Button
                     variant="outline"
                     size="sm"
                     className="h-7 text-xs"
