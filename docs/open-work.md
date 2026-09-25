@@ -1334,7 +1334,7 @@ Regression on lanes 2 to 5: the 14 suites that send mail or comment on tasks (`m
 
 *To close:* research ClickUp's rule for dependencies and subtasks across levels. Then a change that alters another task asks that task's rule.
 
-### `found-25-sep/assigned-checklist-items-need-edit` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/assigned-checklist-items-need-edit` — **closed** (behaviour, small; found closing `task-rows-changed-by-id-anywhere`)
 
 **An assignee in a comment-only space cannot tick their own checklist item**
 
@@ -1343,6 +1343,31 @@ ClickUp (search snippets): "Comment" lets a person "complete or mark complete as
 *To close:*
 - Ticking an item assigned to the person asks the write rule at "comment", with the item's assignee counted as the task's would be.
 - The sheet offers that tick.
+
+*Measured, lane 5, on `4135abd`:* a member in a comment-only space was refused ticking the item assigned to them (403, "does not allow changing its tasks"). The sheet's Checklists tab was one disabled fieldset for them.
+
+*Closed, 25 September:*
+- **A tick of one's own item asks the comment rule** (`taskCommentAllowed`): the bin, the read rule, and "comment" along the task's chain. The tick must be alone in the change, on an item assigned to the person. Anything else asks Edit, as before: another's item, or the words, assignee or date of one's own.
+- **The sheet offers that tick.** The Checklists tab is disabled only for a reader without "comment". Inside it, every editing control sits in a fieldset of its own for editors (`EditorsOnly`, with no box of its own, so each row keeps its layout). An item's checkbox is free for an editor, and for a commenter on their own item.
+
+The new suite `checklist-assignee-ticks`, 3 checks: a member in a comment-only space with two of the admin's items assigned to them and one to the admin, and in a view-only space with one. Read back by SQL.
+- Before (lane 5, `4135abd`): 1 of 3 (the view-only control).
+- After: 3/3, on lanes 5 and 4.
+
+`cat-1..8`, each compiled:
+- every tick asking Edit;
+- a commenter ticking anybody's item;
+- a commenter changing anything on their own;
+- no level asked;
+- the sheet's tick for editors only, or for every commenter;
+- the editing controls free;
+- the tab one disabled fieldset again.
+
+`trb-13` re-aimed at the new branch.
+
+*Break run:* queued on lane 1 after the commit (`plan-cat`).
+
+Regression on lanes 2 to 5: the 8 suites that use checklists, with `task-sheet-capabilities`, `task-edit-levels`, `guest-task-edits`, `video1-acceptance` and the new suite. Result: 13/13. In CI (192).
 
 ### `found-25-sep/calendar-pull-for-any-member` — open, small (found closing `task-rows-changed-by-id-anywhere`)
 

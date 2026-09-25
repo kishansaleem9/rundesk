@@ -1971,7 +1971,9 @@ export function TaskDetailSheet({
                 />
               )}
               {activeTab === 'checklists' && (
-                <fieldset disabled={!caps.edit} className="m-0 min-w-0 border-0 p-0" data-testid="task-checklists-fieldset">
+                /* A commenter ticks the items assigned to them; the panel keeps
+                   the rest to editors (`assigned-checklist-items-need-edit`). */
+                <fieldset disabled={!caps.edit && !caps.comment} className="m-0 min-w-0 border-0 p-0" data-testid="task-checklists-fieldset">
                   <ChecklistsPanel
                     taskId={detailQuery.data.id}
                     listId={detailQuery.data.listId}
@@ -4262,6 +4264,20 @@ function SubtasksPanel({
 // Checklists
 // ---------------------------------------------------------------------------
 
+/**
+ * Its controls, for an editor only: a fieldset with no box of its own, so it
+ * sits in any row's layout and leaves a commenter's own tick beside it free
+ * (`found-25-sep/assigned-checklist-items-need-edit`).
+ */
+function EditorsOnly({ children }: { children: React.ReactNode }) {
+  const caps = useTaskCaps()
+  return (
+    <fieldset disabled={!caps.edit} className="contents">
+      {children}
+    </fieldset>
+  )
+}
+
 function ChecklistsPanel({
   taskId,
   listId,
@@ -4275,6 +4291,8 @@ function ChecklistsPanel({
 }) {
   const { t, tCount } = useTranslation()
   const qc = useQueryClient()
+  const caps = useTaskCaps()
+  const me = useAuthStore((state) => state.user?.id) ?? ''
   const [templateId, setTemplateId] = useState('')
   // §V2-S03 frame `02:15` — "Add checklist" is its own button, because a task
   // holds SEVERAL named checklists. The panel used to have no way to make one:
@@ -4474,6 +4492,7 @@ function ChecklistsPanel({
           </span>
         )}
         <div className="flex-1" />
+        <EditorsOnly>
         {addingChecklist ? (
           <form
             className="flex items-center gap-2"
@@ -4523,8 +4542,10 @@ function ChecklistsPanel({
             + {t('taskDetail.checklistAdd')}
           </Button>
         )}
+        </EditorsOnly>
       </div>
       {templates.length > 0 && (
+        <EditorsOnly>
         <div className="flex items-center gap-2 rounded-md border border-border/70 bg-card/40 px-3 py-2">
           <span className="text-[12px] text-muted-foreground shrink-0">{t('taskDetail.checklistFromTemplate')}</span>
           <select
@@ -4546,6 +4567,7 @@ function ChecklistsPanel({
             ))}
           </select>
         </div>
+        </EditorsOnly>
       )}
       {checklists.length === 0 ? (
         <EmptyState title={t('taskDetail.noChecklists')} hint={t('taskDetail.noChecklistsHint')} />
@@ -4553,6 +4575,7 @@ function ChecklistsPanel({
         checklists.map((cl) => (
           <div key={cl.id} className="rounded-md border border-border">
             <div className="border-b border-border px-3 py-2 flex items-center gap-2">
+              <EditorsOnly>
               {editingChecklistId === cl.id ? (
                 <>
                   <Input
@@ -4617,6 +4640,7 @@ function ChecklistsPanel({
                   </button>
                 </>
               )}
+              </EditorsOnly>
             </div>
             <ul className="divide-y divide-border">
               {cl.items.length === 0 ? (
@@ -4631,11 +4655,14 @@ function ChecklistsPanel({
                       type="checkbox"
                       data-testid="checklist-item-checkbox"
                       checked={item.isDone}
+                      // An editor ticks any item; a commenter the ones assigned to them.
+                      disabled={!(caps.edit || (caps.comment && !!me && item.assigneeId === me))}
                       onChange={(e) =>
                         toggleItem.mutate({ itemId: item.id, isDone: e.target.checked })
                       }
                       className="h-4 w-4 rounded border-border"
                     />
+                    <EditorsOnly>
                     {editingItemId === item.id ? (
                       <div className="flex-1 flex items-center gap-2">
                         <Input
@@ -4718,6 +4745,7 @@ function ChecklistsPanel({
                     >
                       {t('common.delete')}
                     </button>
+                    </EditorsOnly>
                   </li>
                 ))
               )}
@@ -4725,6 +4753,7 @@ function ChecklistsPanel({
             {/* Frame `02:15` — "Add item" belongs to the checklist it is under.
                 One form at the bottom of the panel could only ever feed the
                 first list. */}
+            <EditorsOnly>
             <ChecklistItemForm
               members={members}
               pending={addItem.isPending}
@@ -4732,6 +4761,7 @@ function ChecklistsPanel({
                 addItem.mutateAsync({ checklistId: cl.id, content, assigneeId })
               }
             />
+            </EditorsOnly>
           </div>
         ))
       )}

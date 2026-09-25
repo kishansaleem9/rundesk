@@ -92,7 +92,7 @@ import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
-import { assertTaskNotInBin, assertTaskWritable } from '../../common/permissions/task-write'
+import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
@@ -5699,8 +5699,19 @@ export class TasksService {
     actorId: string,
     patch: { content?: string; isDone?: boolean; position?: number; dueDate?: Date | null; assigneeId?: string | null },
   ) {
-    await this.assertTaskWriteAccess(taskId, actorId)
     const { item: existing } = await this.checklistItemOf(taskId, itemId)
+    /*
+     * TICKING AN ITEM ASSIGNED TO YOU IS A COMMENTER'S — ClickUp's Comment may
+     * "complete or mark complete assigned checklist items"
+     * (`found-25-sep/assigned-checklist-items-need-edit`). The tick alone, on
+     * one's own item, asks the comment rule; every other change, and a tick of
+     * somebody else's item, asks Edit, as it did.
+     */
+    const tickOfTheirOwn =
+      Object.keys(patch).length === 1 && typeof patch.isDone === 'boolean' && existing.assigneeId === actorId
+    if (!(tickOfTheirOwn && (await taskCommentAllowed(this.db, taskId, actorId)))) {
+      await this.assertTaskWriteAccess(taskId, actorId)
+    }
 
     // What an item's update may change, named: the body is not the row, and a
     // `checklistId` in it moved the item into somebody else's checklist.
