@@ -7,7 +7,15 @@ export const userDockConfigs = pgTable('user_dock_configs', {
   id:          uuid('id').primaryKey().defaultRandom(),
   userId:      uuid('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   workspaceId: uuid('workspace_id').notNull().references(() => workspaces.id, { onDelete: 'cascade' }),
-  pinnedLinks: jsonb('pinned_links').notNull().default([]),
+  /**
+   * The dock's tools, by id (G07-7). Null, not `[]`, for the same reason as the
+   * nav lists below: a dock nobody arranged carries the default tools, and one
+   * arranged to hold nothing carries none. It was `NOT NULL DEFAULT '[]'`, and
+   * the first write of anything else to this row (the recents, on a person's
+   * first page) created it holding `[]` — so every dock emptied itself
+   * (`found-25-sep/dock-empties-after-the-first-page`).
+   */
+  pinnedLinks: jsonb('pinned_links').$type<string[] | null>(),
   /**
    * G04-7 [05:29] / G07-6 [08:26–08:31] — the sidebar arrangement, on the
    * account rather than the browser.

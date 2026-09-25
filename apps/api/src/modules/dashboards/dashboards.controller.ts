@@ -74,7 +74,7 @@ export class DashboardsController {
   updateDockConfig(
     @Request() req: { user: { id: string } },
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
-    @Body() patch: { pinnedLinks?: any[]; appearance?: any; navFavorites?: unknown; navRecents?: unknown }
+    @Body() patch: { pinnedLinks?: unknown[] | null; appearance?: any; navFavorites?: unknown; navRecents?: unknown }
   ) {
     return this.dashboardsService.updateDockConfig(req.user.id, workspaceId, patch)
   }

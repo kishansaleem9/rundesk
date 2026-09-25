@@ -96,7 +96,7 @@ The new suite `settings-role-grants`, 6 checks: a plain member and the holders o
 
 `search-sources` gains a check (11): its Connect lands on the App Center, searched for Gmail. 10 of 11 before (it led to `/settings`), 11/11 after.
 
-*Break run, lane 1 (0eea3b9):* `srg-1..18`, 18 of 18 reddened; `search-sources-4`, `-7`, `-8` and `-9`, 4 of 4.
+*Break run, lane 1 (0eea3b9):* `srg-1..18`, 18 of 18 reddened; `search-sources-4`, `-7`, `-8` and `-9`, 4 of 4; the re-aimed `app-catalogue-11` and `-13`, and `whk-10` and `-13`, 4 of 4.
 
 `srg-1..18` and `search-sources-8..9`, one per mechanism, each compiled; `search-sources-7` and `-4` re-aimed at the key. `app-catalogue-11` and `-13` (the tile's action is `asks` now) and `whk-10` and `-13` (the webhooks card is inside its condition) were re-aimed at the new text. Regression on lane 5, 45/45: `settings-role-grants`, `search-sources`, `role-permissions-web`, `guest-create-menu`, `space-wizard`, `sidebar-sections`, `space-create-menu`, `activity-rail`, `addressability-live`, `app-catalogue`, `calendar-accounts`, `command-palette`, `focus-pill`, `folder-dialog`, `integration-error-card`, `panel-collapse`, `permission-guards`, `person-panel`, every planner suite (13), `settings-depth`, `settings-writes`, `stable-images`, `sw-api-cache`, `tab-title-countdown`, `task-cover`, `task-delete`, `team-schedules`, `teams-destination`, `webhook-access`, `video1-fast-items`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
@@ -1392,7 +1392,7 @@ The new suite `guest-create-menu`, 6 checks. A guest first passes through one sp
 
 `gcm-1..11`, each compiled, at least one per check: the hook's guest branch, the task and reminder rows, a list in any space and with no space, Imports and Templates, the picker, the project page's two buttons, the question never asked, and the API's guest default. `form-1`, `form-2`, `rpw-1`, `rpw-2`, `rpw-3`, `rpw-7` and `sidebar-sections-8` were re-aimed at the new rows and hook. Regression on lane 1, 28/28: `guest-create-menu`, `role-permissions-web`, `space-create-menu`, `create-menu-ai`, `folder-create`, `folder-dialog`, `sidebar-sections`, `space-wizard`, `space-wizard-views`, `list-name-taken`, `attach-on-create`, `comment-plus-menu`, `create-ai-results`, `custom-field-progress`, `custom-field-types`, `home-reminders`, `task-depth`, `time-estimate`, `ai-create-containers`, `guest-space-level`, `guest-read-scope`, `guest-chat-scope`, `guest-canvas-scope`, `form-access`, `clickapps-plan-gating`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
-*Break run, lane 1 (bbf19f2):* `gcm-1..11`, 11 of 11 reddened. `form-1`, `form-2`, `rpw-1`, `rpw-3` and `sidebar-sections-8` reddened. `rpw-2` and `rpw-7` stayed green: each dropped the `space.create` key, and `guests: 'no'` now withholds Space and Folder from the same people, because custom roles only add keys and every tier but a guest's holds `space.create`. Both now drop the two, to be re-run.
+*Break run, lane 1 (bbf19f2):* `gcm-1..11`, 11 of 11 reddened. `form-1`, `form-2`, `rpw-1`, `rpw-3` and `sidebar-sections-8` reddened. `rpw-2` and `rpw-7` stayed green: each dropped the `space.create` key, and `guests: 'no'` now withholds Space and Folder from the same people, because custom roles only add keys and every tier but a guest's holds `space.create`. Both now drop the two; re-run on lane 1 (0eea3b9), both reddened.
 
 *Not changed, recorded:*
 
@@ -1425,7 +1425,7 @@ The new suite `guest-create-menu`, 6 checks. A guest first passes through one sp
 
 Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on the current build.
 
-*Break run, lane 1 (bbf19f2):* `sti-7`, `sti-8`, `search-sources-4`, `fma-11` and `plr-16` reddened (`plr-16` on a lane its marker started a model on). `ars-3` stayed green again. The second project had no task, and the plan's basis names only projects that have tasks, so the answers were the same with or without it. It has one now (unassigned; the overview totals become 3 and 12). `ai-read-access` is 5/5, and `ars-3` is to be re-run.
+*Break run, lane 1 (bbf19f2):* `sti-7`, `sti-8`, `search-sources-4`, `fma-11` and `plr-16` reddened (`plr-16` on a lane its marker started a model on). `ars-3` stayed green again. The second project had no task, and the plan's basis names only projects that have tasks, so the answers were the same with or without it. It has one now (unassigned; the overview totals become 3 and 12). `ai-read-access` is 5/5, and `ars-3`, re-run on lane 1 (0eea3b9), reddened.
 
 *Recorded:* the create gate passing non-members (`assertSpaceLevel` returns when `resolveSpaceLevel` has no membership to read) is deliberate, so that a super-admin and internal callers pass. It makes every caller's own workspace check load-bearing. That is a hardening question, not a defect today.
 
@@ -1469,17 +1469,33 @@ The new suite `status-write-access`, 4 checks, every refusal read back by SQL be
 - Before (HEAD's API): 0 of 4.
 - After: 4/4.
 
-`swa-1..7`, each compiled, one per rule and route. Regression on lane 5, 22/22: `status-write-access`, `list-statuses-seeded`, `task-header-status`, `task-space-levels`, `space-presets`, `list-customize`, `list-empty-states`, `list-card-cover`, `list-assignee-filter`, `folder-dialog`, `ai-create-containers`, `paywall-sites`, `teams-person-cards`, `space-default-permission`, `guest-space-level`, `guest-read-scope`, `guest-create-menu`, `task-creation-access`, `permission-guards`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+`swa-1..7`, each compiled, one per rule and route; break run on lane 1 (f9be035), 7 of 7 reddened. Regression on lane 5, 22/22: `status-write-access`, `list-statuses-seeded`, `task-header-status`, `task-space-levels`, `space-presets`, `list-customize`, `list-empty-states`, `list-card-cover`, `list-assignee-filter`, `folder-dialog`, `ai-create-containers`, `paywall-sites`, `teams-person-cards`, `space-default-permission`, `guest-space-level`, `guest-read-scope`, `guest-create-menu`, `task-creation-access`, `permission-guards`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
 *Left for the web:* a view-only member or a guest is still shown the status manager, and every change there is now refused. That is `found-24-sep/project-page-offers-guests-its-managers-buttons`, next.
 
-### `found-25-sep/dock-empties-after-the-first-page` — open, visible bug, small (found closing `custom-role-permissions-unread-by-web`)
+### `found-25-sep/dock-empties-after-the-first-page` — **closed** (visible bug, small; found closing `custom-role-permissions-unread-by-web`)
 
 **A person's dock loses its default tools as soon as they visit any page**
 
 *Evidence, read, and seen once:* in `settings-role-grants`, a member who had never opened the dock picker had no tool in their dock after a few pages. The web keeps the default set (`DEFAULT_DOCK_TOOLS`) for "never chosen", which it reads as `pinnedLinks` being absent. But the first write of anything else to the dock row creates the row with `pinned_links = []`, and the sidebar records recents on navigation. The column is `NOT NULL DEFAULT '[]'` and the insert writes `patch.pinnedLinks ?? []`, so "never arranged" becomes "arranged to hold nothing". The same service already keeps that difference for `navFavorites` and `navRecents`, which stay null until arranged.
 
 *To close:* measure it (a new member, one page, the dock). Then let `pinned_links` hold null for "never arranged": a migration dropping the NOT NULL and the default, and the insert leaving it null when absent. Read it back in the browser.
+
+*Measured, lane 5, on HEAD:* a new member's dock carried no tool after three pages, with `[]` stored. Ticking one tool (Goals) left Goals alone, not the defaults plus Goals. Clearing the choice (`pinnedLinks: null`) stored `[]`, so there was no way back to the defaults.
+
+*Closed, 25 September:* `pinned_links` holds null for "never arranged", and an array for a choice, even an empty one. This is the three states `navFavorites` and `navRecents` already had.
+
+- Migration 0163 drops the NOT NULL and the default, and turns the `[]` rows into null. Nothing tells the bug's rows from a dock emptied on purpose; the second is one untick away from being made again, and the first had no way back.
+- The insert leaves the column null when absent, and an update takes null as "clear".
+- The web already read null as the default tools.
+- 0163 was applied by hand to the pristine database and lanes 1 to 10. It adds no column or table, so the restart witness walks past it.
+
+The new suite `dock-defaults`, 3 checks: a new member's dock after three pages (on screen, and the row by SQL); the picker's first tick; an empty choice held, and a cleared one back to the defaults.
+
+- Before: 0 of 3.
+- After: 3/3.
+
+`dkd-1..3`, each compiled: the insert, the clear, and the web reading an empty choice as none. Regression on lane 5, 12/12: `dock-defaults`, `panel-collapse`, `settings-role-grants`, `sidebar-sections`, `guest-create-menu`, `role-permissions-web`, `video1-fast-items`, `addressability-live`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
 ### `found-24-sep/view-only-space-offers-members-what-it-refuses` — open, visible bug, small (found closing `create-menu-offers-guests-what-they-cannot-make`)
 

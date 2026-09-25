@@ -302,12 +302,16 @@ export class DashboardsService {
   async updateDockConfig(
     userId: string,
     workspaceId: string,
-    patch: { pinnedLinks?: any[]; appearance?: any; navFavorites?: unknown; navRecents?: unknown },
+    patch: { pinnedLinks?: unknown[] | null; appearance?: any; navFavorites?: unknown; navRecents?: unknown },
   ) {
     const existing = await this.getDockConfig(userId, workspaceId)
     // Whitelist the jsonb columns; never spread the raw body onto the row.
     const set: Record<string, unknown> = { updatedAt: new Date() }
-    if (patch.pinnedLinks !== undefined) set.pinnedLinks = Array.isArray(patch.pinnedLinks) ? patch.pinnedLinks : []
+    // The same three states as the nav lists below: null clears it back to the
+    // default tools, an array is that exact choice (even an empty one).
+    if (patch.pinnedLinks !== undefined) {
+      set.pinnedLinks = patch.pinnedLinks === null ? null : Array.isArray(patch.pinnedLinks) ? patch.pinnedLinks.map(String) : []
+    }
     if (patch.appearance !== undefined) set.appearance = patch.appearance
     /*
      * Three states, and they are all different answers:
@@ -349,7 +353,12 @@ export class DashboardsService {
         .values({
           userId,
           workspaceId,
-          pinnedLinks: patch.pinnedLinks ?? [],
+          // Left null when absent, like the nav lists: a row made by the recents
+          // (a person's first page) is not a choice of an empty dock.
+          pinnedLinks:
+            patch.pinnedLinks === undefined || patch.pinnedLinks === null
+              ? null
+              : Array.isArray(patch.pinnedLinks) ? patch.pinnedLinks.map(String) : [],
           appearance: patch.appearance ?? { size: 'md', opacity: 0.8, theme: 'system' },
           // Left null when absent: "never arranged it" earns the defaults,
           // "arranged it to be empty" does not.
