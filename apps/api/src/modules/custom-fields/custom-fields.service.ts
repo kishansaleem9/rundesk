@@ -1,4 +1,4 @@
-import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, eq, or, asc, isNull, isNotNull, inArray } from 'drizzle-orm'
 import {
   customFieldDefinitions,
@@ -17,6 +17,8 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { readableProject, readableTask, type ReadActor } from '../../common/permissions/read-access'
+import { assertSpaceLevel, type WithinStep } from '../../common/permissions/space-default-permission'
+import { assertTaskWritable } from '../../common/permissions/task-write'
 import { computeProgress, toProgressConfig, type ProgressInputs } from './progress'
 import {
   evaluateFormula,
@@ -121,6 +123,35 @@ export class CustomFieldsService {
     return this.assertTaskInWorkspace(workspaceId, taskId)
   }
 
+  /*
+   * WHO MAY DEFINE, RENAME OR DELETE A PROJECT'S FIELDS — somebody who may
+   * change the project, and not a guest (`found-25-sep/field-values-written-by-readers`).
+   * Opening the project was enough: measured on lane 5, a member in a view-only
+   * space defined a field from a task there (201), and so did a guest with only
+   * a view share on one; deleting a field takes every task's value in it.
+   * ClickUp (help centre, "Custom Field permissions", search snippets): guests
+   * with edit change fields' values and create none; a field belongs to its
+   * location, and changing a location asks "edit" of it.
+   */
+  private async assertMayDefineFields(workspaceId: string, projectId: string, reader: ReadActor, listId?: string | null) {
+    if (reader.role === 'super_admin') return
+    const [row] = await this.db
+      .select({ role: workspaceMembers.role, spaceId: projects.spaceId, folderId: projects.folderId })
+      .from(projects)
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .innerJoin(workspaceMembers, and(eq(workspaceMembers.workspaceId, spaces.workspaceId), eq(workspaceMembers.userId, reader.id)))
+      .where(and(eq(projects.id, projectId), eq(spaces.workspaceId, workspaceId)))
+      .limit(1)
+    if (!row) throw new NotFoundException('Project not found in this workspace')
+    if (row.role === 'guest') throw new ForbiddenException('Guests cannot define custom fields')
+    const within: WithinStep[] = [
+      ...(listId ? [{ type: 'list' as const, id: listId }] : []),
+      { type: 'project', id: projectId },
+      ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
+    ]
+    await assertSpaceLevel(this.db, { spaceId: row.spaceId, actorId: reader.id, required: 'edit', kind: 'custom fields', within })
+  }
+
   // ── Definition ownership guard ──────────────────────────────────────────────
   private async assertProjectInWorkspace(workspaceId: string, projectId: string) {
     const [row] = await this.db
@@ -169,6 +200,7 @@ export class CustomFieldsService {
     reader?: ReadActor,
   ) {
     await this.assertProjectOpenTo(workspaceId, projectId, reader)
+    if (reader) await this.assertMayDefineFields(workspaceId, projectId, reader, dto.listId)
     /*
      * The TYPE is validated here, and it was not before.
      *
@@ -354,6 +386,7 @@ export class CustomFieldsService {
   ) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
     await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
+    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader)
     if (patch.options != null && !Array.isArray(patch.options)) {
       throw new BadRequestException('Custom field "options" must be an array')
     }
@@ -417,6 +450,7 @@ export class CustomFieldsService {
   async deleteDefinition(workspaceId: string, fieldId: string, reader?: ReadActor) {
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
     await this.assertProjectOpenTo(workspaceId, def.projectId, reader)
+    if (reader) await this.assertMayDefineFields(workspaceId, def.projectId, reader)
     // Cascade deletes the values automatically via FK.
     await this.db.delete(customFieldDefinitions).where(eq(customFieldDefinitions.id, def.id))
     return { ok: true }
@@ -606,6 +640,14 @@ export class CustomFieldsService {
   ) {
     await this.assertTaskOpenTo(workspaceId, taskId, reader)
     const def = await this.getDefOwnedBy(workspaceId, fieldId)
+    /*
+     * A VALUE IS PART OF THE TASK, and set as the task is changed: the write
+     * rule, where the read rule was all it asked — a member in a view-only
+     * space set one (200) (`found-25-sep/field-values-written-by-readers`).
+     * A vote is the voter's own, and ClickUp lets anybody who can see the task
+     * cast one, so a Voting field keeps the read rule.
+     */
+    if (reader && def.type !== 'voting') await assertTaskWritable(this.db, taskId, reader.id)
 
     /*
      * §V2-01b — a Progress (Auto) value cannot be written, and refusing is the

@@ -27,24 +27,13 @@
 # error. Those three pass, which is what tells a reader the guard was widened
 # rather than removed.
 #
+# Re-aimed 25 September: the write rule is written once now, in `common/permissions/task-write.ts` (`field-values-written-by-readers`).
 # Reddens: task-depth: "and refuses edits once it is in the bin" and
 #   "and refuses comments too" and "and wrote nothing while refusing"
 import io
-p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
-a = """  private assertNotInBin(isArchived: boolean | null | undefined) {
-    if (isArchived) {
-      throw new ConflictException('This task is in the bin. Restore it before editing.')
-    }
-  }
-"""
-b = """  private assertNotInBin(isArchived: boolean | null | undefined) {
-    if (isArchived) {
-      // Warn rather than refuse: a caller holding an id from before a bulk
-      // delete should not have its writes rejected outright.
-      console.warn('write to a task that is in the bin')
-    }
-  }
-"""
+p = '/home/user/rundesk/apps/api/src/common/permissions/task-write.ts'
+a = "export function assertTaskNotInBin(isArchived: boolean | null | undefined) {\n  if (isArchived) {\n    throw new ConflictException('This task is in the bin. Restore it before editing.')\n  }\n}\n"
+b = "export function assertTaskNotInBin(isArchived: boolean | null | undefined) {\n  if (isArchived) {\n    // Warn rather than refuse: a caller holding an id from before a bulk\n    // delete should not have its writes rejected outright.\n    console.warn('write to a task that is in the bin')\n  }\n}\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))

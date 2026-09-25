@@ -1084,7 +1084,7 @@ The new suite `project-member-levels`, 5 checks: View on a project in an ordinar
 
 `pml-1..5`, each compiled: the member's grants unread, the maker's seed taken for a grant, the task's writes and the list's rule asking the space alone, and the refusal naming the space. Re-aimed at the new lines: `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6`, and `gsl-3` and `gsl-6` (a member's grants have a loop of their own now; these are the guest's). Regression on lanes 2 to 5, 39 suites that set members or shares or change what a member reaches: 38 passed. `folder-create` failed on lane 4 because lane 4's database had drifted from the migrations (`found-25-sep/lane-databases-drift-from-the-migrations`, below), and passed there once repaired, 22/22. In CI (179).
 
-*Break run, lane 1 (`72c5bb7`):* `pml-1`, `-2`, `-3` and `-5` reddened, on a green baseline (5/5). `pml-4` (the list rule asking the space alone) left the suite green: its list was the admin's, and the maker rule refuses a member that rename whatever the project says, so the check could not tell. The check renames a list the member made now, planted by SQL, beside one in the project with no grant; `pml-4` is to be run again on it. The re-aimed `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6` and `gsl-3`, 10 of 10 (`gsl-6` is a unit claim, red in preflight).
+*Break run, lane 1 (`72c5bb7`):* `pml-1`, `-2`, `-3` and `-5` reddened, on a green baseline (5/5). `pml-4` (the list rule asking the space alone) left the suite green: its list was the admin's, and the maker rule refuses a member that rename whatever the project says, so the check could not tell. The check renames a list the member made now, planted by SQL, beside one in the project with no grant. Run again on it (lane 1, `b986949`), all five reddened on a green baseline (5/5), `pml-4` now on that check. The re-aimed `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6` and `gsl-3`, 10 of 10 (`gsl-6` is a unit claim, red in preflight).
 
 *Not changed, recorded:* a member given Full on a project still cannot rename or archive it unless they made it: the container rule asks its maker, an admin or a manager after the level. ClickUp's full edit on a folder allows it. This is the container rule's own question, left as it is here.
 
@@ -1122,7 +1122,7 @@ The new suite `task-sheet-capabilities`, 5 checks: a member on four of the admin
 - Before: 1 of 5 (the edit space).
 - After: 5/5.
 
-`tsc-1..10`, each compiled: the API answering edit to all, progress and comment from the edit rule; the sheet ignoring the answer, the title, status, dates, Archive and the comment box offered to everybody, and the status asked of edit alone. `task-delete-1`, `tfc-6` and `ths-6` re-aimed at the lines that read the answer. Regression on lanes 2 to 5, the 37 suites that open the task sheet with `task-edit-levels`, `ui-sweep`, `video-regression`, `video1-acceptance` and `no-dead-ends`, 41/41. The first sweep drew the controls disabled until the answer came, and three suites failed under the load (`custom-field-progress`, `task-menu`, `task-depth`) and passed on their own. A hand quick enough to act in that gap is the defect's cousin, so the sheet now waits for both answers, and the second sweep was 41/41. In CI (180).
+`tsc-1..10`, each compiled: the API answering edit to all, progress and comment from the edit rule; the sheet ignoring the answer, the title, status, dates, Archive and the comment box offered to everybody, and the status asked of edit alone. `task-delete-1`, `tfc-6` and `ths-6` re-aimed at the lines that read the answer. *Break run, lane 1 (`b986949`):* `tsc-1..10`, 10 of 10 reddened on a green baseline (5/5), and the three re-aims 3 of 3 (15/15, 18/18, 15/15 without them). Regression on lanes 2 to 5, the 37 suites that open the task sheet with `task-edit-levels`, `ui-sweep`, `video-regression`, `video1-acceptance` and `no-dead-ends`, 41/41. The first sweep drew the controls disabled until the answer came, and three suites failed under the load (`custom-field-progress`, `task-menu`, `task-depth`) and passed on their own. A hand quick enough to act in that gap is the defect's cousin, so the sheet now waits for both answers, and the second sweep was 41/41. In CI (180).
 
 *Not changed, recorded:* the Time tab, the AI bar's actions, a task's linked work, adding somebody else as a watcher, and Share, Save as template and reminders keep their own rules and are drawn as before. A subtask's row is drawn by its parent's answer; the subtask's own answer (its own assignee, say) is not asked per row.
 
@@ -1176,6 +1176,8 @@ The new suite `task-rows-by-id`, 6 checks. Every refusal is read back by SQL bes
 - a template applied, or a type set, without the write rule;
 - a reminder or a push on an unread task.
 
+*Break run, lane 1 (`2e8d168`):* 13 of 13 reddened, on a green baseline (6/6). `trb-10` broke both of the checks it claims.
+
 Regression on lanes 2 to 5: the 20 suites that reach these routes, and ten more that open tasks as members, readers and guests (`video-regression`, `video1-acceptance`, `ui-sweep`, `no-dead-ends`, `task-sheet-capabilities`, `task-edit-levels`, `task-boundaries`, `task-space-levels`, `guest-read-scope`, `guest-space-level`), plus `credential-reads`. Result: 30/30. Under the sweep's load, 28 of 30 passed the first time. `task-depth` (a tag's removal) and `video1-acceptance` (a bookmark, and the assistant's follow-up) failed on things this change does not touch, and each passed on its own right after (91/91, 18/18). Both are recorded under `three-suites-fail-under-a-full-sweep`. The API unit tests for the template and type services now run with the write rule given. In CI (181).
 
 *Found beside it* (the same reading, then measured or read):
@@ -1186,7 +1188,7 @@ Regression on lanes 2 to 5: the 20 suites that reach these routes, and ten more 
 - An assignee in a comment-only space cannot tick their own checklist item, which ClickUp allows (`found-25-sep/assigned-checklist-items-need-edit`).
 - A calendar pull overwrites linked tasks for any member (`found-25-sep/calendar-pull-for-any-member`).
 
-### `found-25-sep/field-values-written-by-readers` — open, security, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/field-values-written-by-readers` — **closed** (security, small; found closing `task-rows-changed-by-id-anywhere`)
 
 **A reader who may not change a task sets its custom fields, and defines new ones**
 
@@ -1195,15 +1197,38 @@ Regression on lanes 2 to 5: the 20 suites that reach these routes, and ten more 
 - The same member defined a new field from the task (201).
 - A guest with only a view share on a task defined a field from it (201).
 
-`setValue` and `createDefinitionForTask` ask only the read rule (`readableTask`). So do the project routes that define, rename and delete fields, and deleting a field takes every task's value in it.
+`setValue` and `createDefinitionForTask` asked only the read rule (`readableTask`). So did the project routes that define, rename and delete fields, and deleting a field takes every task's value in it.
 
-ClickUp (search snippets): a custom field's value is part of the task, since "Edit" changes "any ClickApps". Guests cannot create fields.
+ClickUp (help centre, "Custom Field permissions", "Use Voting Custom Fields", search snippets):
+- A custom field's value is part of the task, changed with "Edit".
+- Guests with edit change values and create no fields.
+- Anybody who can see a task may vote on it.
 
-*To close:*
-- A value asks the task's write rule.
-- Defining, renaming and deleting a field ask for edit on its location, and are refused to a guest.
+*Closed, 25 September:*
+- **The task write rule is written once**, in `common/permissions/task-write.ts` (`assertTaskWritable`, and `assertTaskNotInBin`). `TasksService`'s method delegates to it. `CustomFieldsService` could not ask the service's copy, because `TasksService` injects it.
+- **A value** asks the write rule. A Voting field keeps the read rule, since the vote is the voter's own.
+- **Defining, renaming and deleting a field** ask `edit` on the project (and on its list, for a list's field) through `assertSpaceLevel` with the project's chain, so a grant on the project counts. A guest is refused with "Guests cannot define custom fields".
 
-`CustomFieldsService` cannot inject `TasksService`, which already injects it, so the write rule has to be reachable without the service.
+The new suite `field-writes-by-level`, 5 checks, every value and definition read back by SQL:
+- A member in a view-only space beside an open one: values, defining from a task and on the project, renaming and deleting.
+- A vote in the view-only space.
+- A guest with a project shared to edit and a task shared to view.
+
+Results:
+- Before: 1 of 5. Only the vote passed, as it should either way.
+- After: 5/5.
+
+`fwl-1..6`, each compiled:
+- values asking the read rule;
+- votes asking the write rule;
+- defining, renaming or deleting asking nothing;
+- guests defining fields.
+
+Re-aimed at the moved rule, each compiled: `td-bin-1`, `tel-1..4`, `tsl-2` and `pml-3`. Two custom-field patches changed too:
+- `cfa-4`'s anchor now holds the define rule.
+- `cfa-2` claims the values read, since setting one is now also refused by the write rule's own read check.
+
+Regression on lanes 2 to 5: the 15 suites that touch custom fields, and 15 that write tasks through the moved rule (`task-edit-levels`, `task-space-levels`, `task-boundaries`, `project-member-levels`, `task-depth` with its bin checks, `task-menu`, `task-merge`, `task-delete`, `task-header-status`, `task-sheet-capabilities`, `task-rows-by-id`, `guest-space-level`, `video1-acceptance`, `video-regression`, `ui-sweep`). Result: 30/30. Under the sweep's load 29 of 30 passed the first time: `video1-acceptance` failed the same check as in the last sweep (the assistant's way forward), then passed on its own right after (18/18). It is recorded under `three-suites-fail-under-a-full-sweep`. API unit tests 202/202 for the task and custom-field modules. In CI (182).
 
 ### `found-25-sep/guest-guard-reads-the-account-role` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
 
@@ -1569,7 +1594,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
-- `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18).
+- `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 

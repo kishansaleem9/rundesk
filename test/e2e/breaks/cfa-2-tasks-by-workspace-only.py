@@ -1,5 +1,6 @@
 # A TASK'S FIELDS BY WORKSPACE ALONE, as they were: its values read and written by any member.
-# Reddens: custom-field-access: "a member cannot set a field on a task of a space they are refused (404, the value unchanged) — while they set one on an open task"
+# Re-aimed 25 September: setting a value asks the task write rule now, whose own read check refuses the task (`field-values-written-by-readers`); what this read check alone still guards is reading the values.
+# Reddens: custom-field-access: "a member cannot read the fields of a project they are refused, nor a task’s values there (404 each) — while they read an open one’s, and the admin reads the refused one’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/custom-fields/custom-fields.service.ts'
 a = "    if (reader && !(await readableTask(this.db, workspaceId, taskId, reader))) throw new NotFoundException('Task not found in this workspace')\n"
