@@ -186,6 +186,11 @@ try {
    */
   await sql`insert into task_assignees (task_id, user_id) values (${T2}, ${memberId}) on conflict do nothing`
   const T3 = await make('/tasks', { listId: LE1, title: `${TAG} poisoned` }, 'the read-side task')
+  // T3V: the admin's, in the view-only space — the task the member may only
+  // READ. A task's level is its space's now, not whether they made it or are
+  // on it (`found-24-sep/task-edits-narrower-than-clickup`), so T3, in a
+  // space the member may edit, is no longer one they only read.
+  const T3V = await make('/tasks', { listId: LV, title: `${TAG} read-only` }, 'the task the member only reads')
 
   const row = async (id) =>
     (await sql`
@@ -476,25 +481,25 @@ try {
   )
   await sql`delete from task_watchers where task_id = ${T} and user_id = ${stranger.id}`
 
-  const selfFollow = await M(`/tasks/${T3}/watchers`, { method: 'POST', body: { userId: memberId } })
+  const selfFollow = await M(`/tasks/${T3V}/watchers`, { method: 'POST', body: { userId: memberId } })
   chk(
-    selfFollow.status < 300 && (await holds('task_watchers', T3, 'user_id', memberId)),
+    selfFollow.status < 300 && (await holds('task_watchers', T3V, 'user_id', memberId)),
     'while a member who can see a task follows it themselves — reading it is enough for that',
     `it answered ${said(selfFollow)}`,
   )
 
-  const putsPeerOn = await M(`/tasks/${T3}/watchers`, { method: 'POST', body: { userId: peer.id } })
-  const peerOn = await holds('task_watchers', T3, 'user_id', peer.id)
+  const putsPeerOn = await M(`/tasks/${T3V}/watchers`, { method: 'POST', body: { userId: peer.id } })
+  const peerOn = await holds('task_watchers', T3V, 'user_id', peer.id)
   chk(
     putsPeerOn.status >= 400 && !peerOn,
     'but putting somebody else on it is an edit, refused to a member who may only read the task',
     `it answered ${said(putsPeerOn)} and the peer is ${peerOn ? '' : 'not '}following`,
   )
-  await sql`delete from task_watchers where task_id = ${T3} and user_id = ${peer.id}`
+  await sql`delete from task_watchers where task_id = ${T3V} and user_id = ${peer.id}`
 
-  const adminPutsPeerOn = await A(`/tasks/${T3}/watchers`, { method: 'POST', body: { userId: peer.id } })
+  const adminPutsPeerOn = await A(`/tasks/${T3V}/watchers`, { method: 'POST', body: { userId: peer.id } })
   chk(
-    adminPutsPeerOn.status < 300 && (await holds('task_watchers', T3, 'user_id', peer.id)),
+    adminPutsPeerOn.status < 300 && (await holds('task_watchers', T3V, 'user_id', peer.id)),
     'which somebody who may edit the task can do',
     `it answered ${said(adminPutsPeerOn)}`,
   )
@@ -517,18 +522,18 @@ try {
   )
   await sql`delete from task_watchers where task_id = ${TPRIV} and user_id = ${memberId}`
 
-  const takesPeerOff = await M(`/tasks/${T3}/watchers/${peer.id}`, { method: 'DELETE' })
-  const peerStillOn = await holds('task_watchers', T3, 'user_id', peer.id)
+  const takesPeerOff = await M(`/tasks/${T3V}/watchers/${peer.id}`, { method: 'DELETE' })
+  const peerStillOn = await holds('task_watchers', T3V, 'user_id', peer.id)
   chk(
     takesPeerOff.status >= 400 && peerStillOn,
     'and taking somebody else off needs the same edit access',
     `it answered ${said(takesPeerOff)} and the peer is ${peerStillOn ? 'still' : 'no longer'} following`,
   )
-  await sql`insert into task_watchers (task_id, user_id) values (${T3}, ${peer.id}) on conflict do nothing`
+  await sql`insert into task_watchers (task_id, user_id) values (${T3V}, ${peer.id}) on conflict do nothing`
 
-  const unfollows = await M(`/tasks/${T3}/watchers/${memberId}`, { method: 'DELETE' })
+  const unfollows = await M(`/tasks/${T3V}/watchers/${memberId}`, { method: 'DELETE' })
   chk(
-    unfollows.status < 300 && !(await holds('task_watchers', T3, 'user_id', memberId)),
+    unfollows.status < 300 && !(await holds('task_watchers', T3V, 'user_id', memberId)),
     'while stopping following it yourself needs only to see it',
     `it answered ${said(unfollows)}`,
   )
@@ -576,7 +581,7 @@ try {
     'while assigning a member who can see the task still works',
     `it answered ${said(assignVisible)}`,
   )
-  // An assignee may write, and T3 is the task the member may only READ above.
+  // Put back: T3 is the admin's, with nobody on it, for the checks below.
   await sql`delete from task_assignees where task_id = ${T3} and user_id = ${memberId}`
 
   const BORN_OUT = `${TAG} born assigned outside`

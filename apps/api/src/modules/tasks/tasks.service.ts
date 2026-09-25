@@ -77,7 +77,7 @@ import {
 } from '../../common/permissions/item-visibility'
 import { PUBLIC_USER_COLUMNS, PUBLIC_USER_WITH } from '../../common/permissions/public-user'
 import { canReadDoc, hiddenDocIds } from '../../common/permissions/doc-access'
-import { readableList, readableTaskIds } from '../../common/permissions/read-access'
+import { readableList, readableTask, readableTaskIds } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
 import { listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { safeFetch } from '../../common/http/safe-fetch'
@@ -690,14 +690,28 @@ export class TasksService {
     if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
     if (membership.role === 'guest') throw new ForbiddenException('Guests cannot edit tasks')
 
+    /*
+     * THE SPACE'S LEVEL DECIDES, AS IN CLICKUP — not who made the task or is on
+     * it (`found-24-sep/task-edits-narrower-than-clickup`). "Edit" there lets a
+     * person change every task in the location, status, assignees, title,
+     * archiving and deleting; "comment" lets an assignee change their task's
+     * status and assignees; "view" nothing. Only the creator, an assignee or a
+     * manager could change a task, so a member with "edit" on a space could
+     * not touch a colleague's task in it.
+     *
+     * READ FIRST. Being its creator or on it meant, nearly always, being able
+     * to open it; without that, a task in a private list, project or folder
+     * this person is not in is refused here as it is to every read — its
+     * space's level is no leave to change what they cannot see.
+     */
+    if (!(await readableTask(this.db, ctx.workspaceId, taskId, { id: actorId, role: membership.role }))) {
+      throw new NotFoundException('Task not found')
+    }
     const [assignee] = await this.db
       .select({ userId: taskAssignees.userId })
       .from(taskAssignees)
       .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
       .limit(1)
-    if (ctx.createdById !== actorId && !assignee) {
-      throw new ForbiddenException('Only assignees, creators, managers, and workspace admins can edit this task')
-    }
     await this.assertSpaceAllowsTaskWrite(ctx.spaceId, actorId, opts.level ?? 'edit', !!assignee)
     return ctx
   }

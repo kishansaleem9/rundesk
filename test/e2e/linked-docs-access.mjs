@@ -92,7 +92,11 @@ try {
     if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
-  const space = await make('/spaces', { workspaceId: WS, name: `${TAG} open` }, 'the open space')
+  // Comment-only: the member opens everything here and may link nothing. A
+  // task's level is its space's now, not whether they made it or are on it
+  // (`found-24-sep/task-edits-narrower-than-clickup`), so that is the refusal
+  // section 5 reads.
+  const space = await make('/spaces', { workspaceId: WS, name: `${TAG} open`, defaultPermission: 'comment' }, 'the open space')
   const hidden = await make('/spaces', { workspaceId: WS, name: `${TAG} private`, visibility: 'private' }, 'the private space')
   const project = await make('/projects', { spaceId: space, name: `${TAG} project` }, 'the project')
   const list = await make('/lists', { projectId: project, name: `${TAG} list` }, 'the list')

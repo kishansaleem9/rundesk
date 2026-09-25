@@ -1032,7 +1032,7 @@ The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and 
 
 *Not changed:* the web still offers "Link" to a member who may not link. The task sheet does not know the write rule (creator, assignee or manager), so the refusal is said rather than the button hidden. That rule is narrower than ClickUp's, which is `found-24-sep/task-edits-narrower-than-clickup` below.
 
-### `found-24-sep/task-edits-narrower-than-clickup` — open, medium (behaviour; found closing the linked-docs item, researched)
+### `found-24-sep/task-edits-narrower-than-clickup` — **closed** (behaviour, medium; found closing the linked-docs item, researched)
 
 **Only a task's creator, an assignee or a manager may change it; in ClickUp, anybody with "edit" on its location may**
 
@@ -1041,6 +1041,51 @@ The new suite `doc-write-levels`, 5/5 on lane 1 (0/5 before): view, comment and 
 *ClickUp's rule* (help.clickup.com "Intro to permissions", "Permissions in detail", "Default user role permissions", search snippets; the pages cannot be fetched here): a member invited to a workspace has full edit on every public location and item by default, and a location's level can be narrowed. "Edit" lets them edit every task and subtask there, including status, assignees, title, attachments, archiving, moving, merging and duplicating. "Full edit" adds creating and deleting. "Comment" allows comments, and on a task assigned to them a change of status or assignees. "View" allows nothing.
 
 *To close:* decide it as ClickUp does. A change to a task asks the level the person holds where the task lives (`resolveSpaceLevel`, a grant winning over the default), not whether they made it or are on it; deleting asks for full edit. This widens who may write, so first measure every suite that relies on the narrower rule (`task-boundaries`, `task-space-levels`, the `workspace-read-access` link half and others that expect a 403 for a member's colleague's task), then change the rule once, in `assertTaskWriteAccess`, with a suite that sets the three levels side by side on a colleague's task.
+
+*Measured, lane 5, on HEAD:* in a space the member may edit, they were refused every change to a colleague's task: its title and status, its assignees, archiving and deleting (403 each, the rows unchanged), with "Only assignees, creators, managers, and workspace admins can edit this task". The comment-only and view-only spaces and a private list's task refused them as they should.
+
+ClickUp (help centre, search snippets): "Edit" lets a person edit all tasks and subtasks in the location, "status, assignee, title of the task, any ClickApps", remove attachments, archive, move, merge and duplicate; "Full edit" adds deleting and creating. Members hold full edit on public locations by default. "Comment" is comments, and "comment with task assigned" a change of status on a task assigned to them; "View" nothing.
+
+*Closed, 25 September:* a change to a task asks the level its space gives the person (`assertSpaceAllowsTaskWrite`, as before), not whether they made it or are on it. First the read rule (`readableTask`): a task in a private list, project or folder they are not in is refused as it is to every read (404), whatever the space lets them do. That had been implied by the creator-or-assignee rule, and no longer is. Guests are unchanged: they edit no task (their edit on a task shared with them is `found-25-sep/guests-edit-no-shared-task`, below).
+
+Rundesk's "edit" is the space default and already makes tasks, as ClickUp's default full edit does, so it is read that way here, deleting included. A space narrowed to ClickUp's "Edit", which archives and does not delete, has no level of its own here.
+
+The new suite `task-edit-levels`, 5 checks: in an edit space, a colleague's task's title, status, assignees, archive and delete; a comment-only space, a colleague's task and one assigned to the member; a view-only space; a private list's task in an edit space, beside the admin's change; and what a refusal says. Each change is read back by SQL.
+
+- Before (HEAD, lane 5): 3 of 5. The comment-only, view-only and private-list checks passed, as they must after the change too.
+- After: 5/5.
+
+`tel-1..4`, each compiled: creators and assignees only, writes that skip the read rule, the space's level not asked, and everybody taken for an assignee. Regression on lanes 2 to 5, the 64 suites that change a task through the API: 60 passed in the sweep. Two read a member refused a colleague's task as one who "may only read" it, in a space the member may edit, and are pointed at a task they may only read now: `linked-docs-access`'s space is comment-only (5/5), and `task-boundaries`' watcher checks use a task in its view-only space (45/45). `task-depth` and `addressability-live` failed in the sweep and passed on their own, 91/91 and 28/28 (`found-24-sep/three-suites-fail-under-a-full-sweep`). In CI (178).
+
+*Found beside it:*
+- A project's members' roles narrow nothing for a member: the Members sheet sets a member to View or Comment on a project, and every rule asks the space (`found-25-sep/project-roles-narrow-nothing`).
+- The task sheet offers every edit to anybody who can open the task, and a comment-only or view-only reader is refused each one (`found-25-sep/task-sheet-offers-refused-edits`).
+
+### `found-25-sep/project-roles-narrow-nothing` — open, security, medium (found closing `task-edits-narrower-than-clickup`)
+
+**A project's members' roles narrow nothing for a member**
+
+*Evidence, measured on lane 5:* the admin made a space (edit, the default), a project, a list and a task, and put a member on the project as View (`POST /projects/:id/members`, 201; the Members sheet lists them as View). The member then changed the admin's task (200) and made a task in the list (201). Every rule a member meets asks the space: `resolveSpaceLevel` reads a project's grants for a guest (`within`) and not for a member. So the role the Members sheet sets for a member on a project is recorded and read by nothing. With `task-edits-narrower-than-clickup` closed, that View member may change any task in the project, where before only their own.
+
+*ClickUp's rule* (help centre, search snippets): a location's permission can be set per Space, Folder and List, and the most specific one decides.
+
+*To close:* a member's grant on the project (and on the list, where a list has members) decides before the space's level, as a guest's share does. Pass the chain from the task's writes, the task and list create gates and the container rules. Measure every suite that sets a project member's role.
+
+### `found-25-sep/task-sheet-offers-refused-edits` — open, visible bug, medium (found closing `task-edits-narrower-than-clickup`)
+
+**The task sheet offers every change to anybody who can open the task, and a comment-only or view-only reader is refused each one**
+
+*Evidence, read not run:* `task-detail-sheet.tsx` gates no control on what the person may do: no capability read, no read-only state. Title, status, assignees, fields, dates, archive and delete are drawn for a reader whose space is view-only or comment-only, and each is refused by the API (403) after it is pressed. The project page had the same defect, closed by asking the API (`GET /projects/:id/capabilities`, `found-24-sep/project-page-offers-guests-its-managers-buttons`).
+
+*To close:* the sheet asks what this person may do to this task (the write rule's own answer: edit, comment-level changes as an assignee, or nothing), and draws only those controls, read-only otherwise.
+
+### `found-25-sep/guests-edit-no-shared-task` — open, behaviour, small (found closing `task-edits-narrower-than-clickup`)
+
+**A guest cannot change a task shared with them to edit**
+
+*Evidence, read not run:* `assertTaskWriteAccess` refuses every guest ("Guests cannot edit tasks") before any share is read. ClickUp gives a guest the level of the share: a task, list or folder shared with them to edit lets them edit its tasks. Rundesk's own share levels (`object_shares`, read by `resolveSpaceLevel`'s `within` for a guest) are asked by the create gate and not by the write.
+
+*To close:* a guest's change to a task asks the level of their share on the task or a container above it, and "view" or "comment" refuse as they do a member. Measure a guest with a task shared to view, to comment and to edit.
 
 ### `found-24-sep/sprints-open-to-any-member` — **closed** (security, HIGH; found measuring the last four reports of `workspace-reads-skip-the-container-rule`)
 
@@ -1458,6 +1503,8 @@ The new suite `personal-calendar-connect`, 6 checks: a member's and a guest's gr
 
 `pcc-1..9`, each compiled. `pcc-3` (the callback takes a personal grant for the workspace's) and `pcc-7` (any provider "for oneself") are unit claims, and each fails the unit test it names. `mcc-5` re-aimed at the close that clears the reason too. Regression on lanes 2 to 5: `personal-calendar-connect`, `meetings-connect-calendar`, `planner-gates`, `planner-onboarding`, `calendar-accounts`, `app-catalogue`, `credential-reads`, `integration-error-card`, `permission-guards`, `search-sources`, `settings-role-grants`, `planner-settings`, `planner-upcoming-meeting`, `planner-rail`, `planner-views`, `webhook-access`, `addressability-live`, `no-dead-ends`, `ui-sweep` and `video1-acceptance`, 20/20 in the sweep; `video-regression` failed two checks in the sweep ([A1.2] no list reached from the space page, [A2.3] no Ask AI row in search) and passed on its own, 93/93 (`found-24-sep/three-suites-fail-under-a-full-sweep`). In CI (177).
 
+*Break run, lane 1 (4ce717b):* `pcc-1`, `-2`, `-4`, `-5`, `-6`, `-8` and `-9`, 7 of 7 reddened, on a green baseline (6/6). `pcc-3` and `pcc-7` fail the unit test they name.
+
 *Found beside it, not changed:* `found-25-sep/oauth-start-answers-for-no-application` and `found-25-sep/ledger-ids-cited-unchecked`, below.
 
 ### `found-25-sep/oauth-start-answers-for-no-application` — open, small (found closing `personal-calendar-connect-needs-integrations-manage`)
@@ -1504,6 +1551,8 @@ The new suite `meetings-connect-calendar`, 5 checks: the admin and a member foll
 `mcc-1..11`, each compiled. `planner-settings-1` re-aimed at the page list, which the nav is drawn from; `pgt-4` and `planner-onboarding-1` re-aimed at the connect hook. Regression on lanes 2 to 5, 33/33: `meetings-connect-calendar`, `calendar-accounts`, every planner suite (`planner-appearance-toggles`, `planner-blocks`, `planner-command-bar`, `planner-default-list`, `planner-gates`, `planner-grid`, `planner-onboarding`, `planner-prefix`, `planner-priorities`, `planner-rail`, `planner-settings`, `planner-upcoming-meeting`, `planner-views`), `focus-pill`, `tab-title-countdown`, `team-schedules`, `a61-meeting-record`, `meeting-access`, `meeting-tags`, `local-dates`, `assign-to-priorities`, `object-key-boundaries`, `syncup-live`, `addressability-live`, `workspace-read-access`, `private-list-reach`, `no-dead-ends`, `ui-sweep`, `video-regression`, `video1-acceptance` and `video1-fast-items`. In CI (176).
 
 *Not changed, recorded:* a member's connect is refused, since `oauth/start` asks `integrations.manage`: `found-24-sep/personal-calendar-connect-needs-integrations-manage`.
+
+*Break run, lane 1 (080102d):* `mcc-1..4` and `-6..11`, 10 of 10 reddened, on a green baseline (5/5). `mcc-5`, re-aimed within the day, on `4ce717b`, reddened too. The re-aimed `planner-settings-1`, `pgt-4` and `planner-onboarding-1`, 3 of 3.
 
 ### `found-25-sep/add-account-goes-to-settings` — **closed** (dead control, small; found closing `meetings-connect-calendar-goes-to-settings`)
 
