@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ClickUpImportService, type ConflictStrategy } from './clickup-import.service'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../../custom-roles/permissions.guard'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 
 @ApiTags('integrations:clickup-import')
@@ -23,7 +23,10 @@ export class ClickUpImportController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  // Importing asks `workspace.import`, an admin's by default, as ClickUp has it
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
   @ApiOperation({
     summary:
       'Start a ClickUp CSV import (admin only) — returns a job id to poll. Supply apiToken to ALSO import comments + attachments via the ClickUp API.',
@@ -51,7 +54,10 @@ export class ClickUpImportController {
   }
 
   @Post('jobs/:jobId/enrich')
-  @UseGuards(WorkspaceAdminGuard)
+  // Importing asks `workspace.import`, an admin's by default, as ClickUp has it
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
   @ApiOperation({
     summary:
       'Import ClickUp comments + attachments for an already-imported job (admin only). Body: { apiToken, mapping: [{ clickupTaskId, taskId }] }.',

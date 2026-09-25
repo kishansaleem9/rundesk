@@ -18,6 +18,8 @@ export type WorkspacePermission =
   | 'automation.manage'
   | 'workspace.manage'
   | 'workspace.billing'
+  | 'workspace.export'
+  | 'workspace.import'
   | 'members.invite'
   | 'members.remove'
   | 'members.role.change'

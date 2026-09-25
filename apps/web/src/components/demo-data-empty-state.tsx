@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 import { InlineSkeleton } from './loading-skeletons'
 
 /**
@@ -40,6 +41,7 @@ export function DemoDataEmptyState({
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const mayImport = usePermissions(workspaceId).can('workspace.import') === true
   const [confirmOpen, setConfirmOpen] = useState(false)
   const [dismissed, setDismissed] = useState<boolean>(() => {
     try {
@@ -87,6 +89,8 @@ export function DemoDataEmptyState({
   if (spacesQuery.isLoading) return <>{children}</>
   if ((spacesQuery.data?.length ?? 0) > 0) return <>{children}</>
   if (dismissed) return <>{children}</>
+  // Loading sample data is an import: `workspace.import`, which the API asks.
+  if (!mayImport) return <>{children}</>
 
   return (
     <div className="max-w-3xl mx-auto py-12 px-4">

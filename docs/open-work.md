@@ -2277,6 +2277,8 @@ Each is its own question.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
 - `task-menu`, 25 September, the sweep for `inbound-email-comments-skip-the-comment-rule`, and once alone on lane 3 while lane 1's break runs held the machine (load 5): Copy ID, New tab, Convert to and Send email to task were not yet in the menu when it was read. It passed alone on lane 4 right after (37/37).
+- `person-panel`, 25 September, the sweep for the time-approvals group: "shows their email" missed under load. It passed alone (59/59).
+- `list-export`, 25 September, twice: in the sweeps for `billing-open-to-managers-and-every-member` and for the data slice of `admin-guard-admits-managers-where-the-web-says-admin`. "In the table it asks for the custom fields the table shows" saw no request under load, both times. It passed alone both times (30/30).
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 
@@ -3198,9 +3200,32 @@ Now:
 `project-template-key`, 4 checks:
 - Before: 0 of 4 on lane 5.
 - After: 4/4 on lanes 5 and 4.
-- Patches `ptk-1..6`, each compiled.
+- Patches `ptk-1..6`: each reddened the check it names (lane 1, baseline 4/4 at `e6189ca`).
 - Regression: the 8 suites that save, apply or browse templates or open settings, and the new one: 10/10 (with `settings-tabs-by-key` again).
 - In CI (206).
+
+*Partly fixed, 25 September: the workspace's data.* Measured on lane 5 (`e6189ca`), `data-transfer-keys` was 0 of 6:
+- A manager exported the whole workspace as JSON, every task as CSV, and the people as CSV (200 each).
+- A manager passed the gates of the spreadsheet and ClickUp imports and of the sample-data seed.
+- The web offered the export to admins alone, but the import page and the sample-data card to everybody.
+- No key could hand any of it to anyone.
+
+ClickUp (help centre "Import and export feature availability and limits", "How do I export my Workspace's data?", from search snippets): exporting the workspace's task data and its people list is the owner's and the admins'. Importing is too, and a custom role can grant it.
+
+Now:
+- The catalog has `workspace.export` and `workspace.import`, each an admin's by default and grantable.
+- The export routes ask `workspace.export`. The imports (ClickUp, its enrichment, spreadsheet) and the sample-data seed ask `workspace.import`.
+- Settings offers the data export on Integrations by `workspace.export`, and Integrations opens to it. The roster's CSV asks it too.
+- The import page offers the spreadsheet and ClickUp imports by `workspace.import` and says so otherwise; documents stay anyone's.
+- The sample-data card offers Load demo data by `workspace.import`.
+
+`data-transfer-keys`, 6 checks:
+- Before: 0 of 5 on lane 5. The sixth, the sample-data card, was measured on an earlier bundle: it offered the manager Load demo data.
+- After: 6/6 on lanes 5 and 4.
+- Patches `dtk-1..9`, each compiled.
+- `check-permission-keys-asked` reads 27 keys offered, 21 asked.
+- Regression: the 13 suites that import, export, open settings or grant roles, and the new one. 13 of 14 passed in the sweep; `list-export` missed its fields request under load and passed alone (30/30), recorded under `three-suites-fail-under-a-full-sweep`.
+- In CI (207).
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

@@ -3,12 +3,17 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { ExportService } from './export.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('export')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
+// The whole workspace's data and its people ask `workspace.export`, an admin's by default, as
+// ClickUp has it; `WorkspaceAdminGuard` admitted managers
+// (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, PermissionsGuard)
+@RequirePermissions('workspace.export')
 @Controller('workspaces/:workspaceId/export')
 export class ExportController {
   constructor(

@@ -5,6 +5,7 @@ import { Button, Card, Input, Progress, RadioGroup, RadioGroupItem, Badge } from
 import { Upload, FileText, CheckCircle2, AlertCircle, Loader2, Copy, Info, KeyRound, Table2, Ban } from 'lucide-react'
 import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 import {
   SHEET_FIELDS,
   fetchSheetJob,
@@ -82,6 +83,10 @@ type ImportTab = 'clickup' | 'sheet' | 'doc'
 export function ImportPage() {
   const { t } = useTranslation()
   const [tab, setTab] = useState<ImportTab>('sheet')
+  const { workspaceId } = useParams({ from: '/app/$workspaceId/import' })
+  // Importing a spreadsheet or a ClickUp export is `workspace.import`'s, an admin's by default
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`); documents are anyone's.
+  const mayImport = usePermissions(workspaceId).can('workspace.import') === true
 
   return (
     <div className="container mx-auto max-w-4xl p-6 space-y-6">
@@ -120,7 +125,17 @@ export function ImportPage() {
         />
       </div>
 
-      {tab === 'sheet' ? <SpreadsheetImportPanel /> : tab === 'doc' ? <DocImportPanel /> : <ClickUpImportPanel />}
+      {tab === 'doc' ? (
+        <DocImportPanel />
+      ) : !mayImport ? (
+        <p className="rounded-md border border-border/60 bg-card/40 p-4 text-sm text-muted-foreground" data-testid="import-not-yours">
+          {t('import.notYours')}
+        </p>
+      ) : tab === 'sheet' ? (
+        <SpreadsheetImportPanel />
+      ) : (
+        <ClickUpImportPanel />
+      )}
     </div>
   )
 }

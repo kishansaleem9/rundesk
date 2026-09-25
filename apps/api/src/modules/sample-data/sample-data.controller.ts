@@ -1,17 +1,21 @@
 import { Controller, Param, ParseUUIDPipe, Post, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { SampleDataService } from './sample-data.service'
 
 /**
  * One-shot endpoint that loads a realistic demo workspace.
- * Admin-only and idempotent-by-refusal: see SampleDataService.seed.
+ * Loading sample data is an import: `workspace.import`, an admin's by default
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+ * Idempotent-by-refusal: see SampleDataService.seed.
  */
 @ApiTags('sample-data')
 @ApiBearerAuth()
-@UseGuards(JwtAuthGuard, WorkspaceAdminGuard)
+@UseGuards(JwtAuthGuard, WorkspaceMemberGuard, PermissionsGuard)
+@RequirePermissions('workspace.import')
 @Controller('workspaces/:workspaceId/sample-data')
 export class SampleDataController {
   constructor(private readonly sampleData: SampleDataService) {}

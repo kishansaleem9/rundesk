@@ -13,6 +13,8 @@ export type Permission =
   // Workspace-level
   | 'workspace.manage'
   | 'workspace.billing'
+  | 'workspace.export'
+  | 'workspace.import'
   | 'workspace.audit.view'
   // Member management
   | 'members.invite'
@@ -63,6 +65,10 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   // Workspace
   { key: 'workspace.manage',     label: 'Manage workspace settings',  description: 'Rename, set logo, change colour, archive', category: 'Workspace' },
   { key: 'workspace.billing',    label: 'Manage billing',             description: 'View invoices, change plan, manage payment method', category: 'Workspace' },
+  // ClickUp: exporting the workspace's data and its people, and importing, are the owner's and
+  // admins' (help centre, "Import and export feature availability and limits"); a custom role can grant them.
+  { key: 'workspace.export',     label: 'Export workspace data',      description: 'Download every task and the people list as CSV or JSON', category: 'Workspace' },
+  { key: 'workspace.import',     label: 'Import data',                description: 'Import from ClickUp or a spreadsheet, and load sample data', category: 'Workspace' },
   { key: 'workspace.audit.view', label: 'View audit log',             description: 'Read the workspace activity / audit trail', category: 'Workspace' },
   // Members
   { key: 'members.invite',        label: 'Invite members',     description: 'Send invitations and create new accounts', category: 'Members' },

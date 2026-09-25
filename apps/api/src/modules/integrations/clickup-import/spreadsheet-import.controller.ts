@@ -8,7 +8,7 @@ import {
 import type { ColumnMapping, SheetDelimiter } from './spreadsheet-import.util'
 import { JwtAuthGuard } from '../../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../../custom-roles/permissions.guard'
 import { CurrentUser } from '../../../common/decorators/current-user.decorator'
 
 /**
@@ -55,7 +55,10 @@ export class SpreadsheetImportController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  // Importing asks `workspace.import`, an admin's by default, as ClickUp has it
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('workspace.import')
   @ApiOperation({ summary: 'Start a spreadsheet import (admin only) — returns a job id to poll' })
   run(
     @Param('workspaceId') workspaceId: string,

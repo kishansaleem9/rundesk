@@ -1123,8 +1123,8 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
       <Card className="overflow-hidden">
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <h2 className="font-semibold text-sm">{tCount('settings.activeMembers', membersQuery.data?.length ?? 0)}</h2>
-          {/* §A4.1 — the roster is the one list an admin is asked to hand over. */}
-          {isManagerOrAbove && (
+          {/* §A4.1 — the roster is the one list an admin is asked to hand over: `workspace.export`. */}
+          {perms.can('workspace.export') === true && (
           <Button
             size="sm"
             variant="outline"
@@ -1796,8 +1796,8 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
         </Card>
       )}
 
-      {/* Data export */}
-      {isAdmin && (
+      {/* Data export: `workspace.export`, an admin's by default and grantable, as the API asks. */}
+      {permissions.can('workspace.export') === true && (
         <Card className="p-4" data-testid="settings-card-export">
           <h3 className="font-semibold text-sm mb-1">{t('settings.dataExport')}</h3>
           <p className="text-xs text-muted-foreground mb-3">{t('settings.dataExportDesc')}</p>

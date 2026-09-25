@@ -37,7 +37,8 @@ const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
   members: ['members.invite', 'members.remove', 'members.role.change'],
   roles: ['roles.manage'],
   security: ['security.policy.manage'],
-  integrations: ['webhook.manage', 'integrations.manage'],
+  // The workspace's data export sits on Integrations.
+  integrations: ['webhook.manage', 'integrations.manage', 'workspace.export'],
   sso: ['sso.manage'],
 }
 
