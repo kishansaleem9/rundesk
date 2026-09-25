@@ -3,6 +3,7 @@
 # delete one, and can freely make a new one.
 #
 # RE-AIMED 24 September: the gate passes a guest's chain through (`within`).
+# Re-aimed 25 September: Full edit is asked where it was offered (`full-edit-enforced-nowhere`).
 # Reddens: space-default-permission:
 #   "creating a list in a view-only space is refused with 403"
 #   "and it says WHY, in the same words the rename refusal uses"
@@ -10,14 +11,7 @@
 #   "and \"Comment\" refuses it too — the rung below `edit`, not only the bottom one"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
-a = """  if (!params.spaceId || !params.actorId) return
-  await assertSpaceLevel(db, {
-    spaceId: params.spaceId,
-    actorId: params.actorId,
-    required: 'edit',
-    kind: params.kind,
-    within: params.within,
-  })"""
+a = "  if (!params.spaceId || !params.actorId) return\n  await assertSpaceLevel(db, {\n    spaceId: params.spaceId,\n    actorId: params.actorId,\n    required: 'admin',\n    kind: params.kind,\n    within: params.within,\n    act: 'adding a',\n  })"
 b = """  void db
   void params
   return"""

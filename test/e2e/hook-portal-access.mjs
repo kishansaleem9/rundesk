@@ -93,7 +93,8 @@ try {
     if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${res.status}`)
     return res.data.id
   }
-  const SPACE = await make('/spaces', { workspaceId: WS, name: `${TAG} space`, defaultPermission: 'edit' }, 'the space')
+  // Full edit, where a member's hook may add a task (Edit adds none: `found-25-sep/full-edit-enforced-nowhere`).
+  const SPACE = await make('/spaces', { workspaceId: WS, name: `${TAG} space`, defaultPermission: 'admin' }, 'the space')
   // A guest reads only what is shared with them (`found-24-sep/guests-read-every-open-space`):
   // the space is shared with this one to VIEW, so what is asked below is what a
   // guest who may read the list sees of its hooks and portals — never a hook's

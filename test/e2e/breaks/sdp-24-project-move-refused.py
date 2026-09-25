@@ -1,5 +1,5 @@
 # MOVING A PROJECT BETWEEN SPACES REFUSED OUTRIGHT.
-# Reddens: space-default-permission: "while moving it into another space they may edit works"
+# Reddens: space-default-permission: "while moving it into another space they may add to works"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/projects/projects.service.ts'
 a = "      await assertCanPlaceIn(this.db, { spaceId: destSpaceId, actorId, kind: 'project' })\n"

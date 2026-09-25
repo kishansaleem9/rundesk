@@ -151,13 +151,18 @@ try {
   const viewSpace = await makeSpace('view')
   const commentSpace = await makeSpace('comment')
   const editSpace = await makeSpace('edit')
+  // Full edit — `admin` — is what adds to a space and deletes from it; Edit
+  // changes what is there (`found-25-sep/full-edit-enforced-nowhere`). The
+  // member makes and moves things where they may: here.
+  const fullSpace = await makeSpace('admin')
 
   chk(
     viewSpace.defaultPermission === 'view' &&
       commentSpace.defaultPermission === 'comment' &&
-      editSpace.defaultPermission === 'edit',
-    'the wizard\'s three answers are on the three spaces `[frame 06:52]`',
-    `got ${JSON.stringify([viewSpace.defaultPermission, commentSpace.defaultPermission, editSpace.defaultPermission])}`,
+      editSpace.defaultPermission === 'edit' &&
+      fullSpace.defaultPermission === 'admin',
+    'the wizard\'s four answers are on the four spaces `[frame 06:52]`',
+    `got ${JSON.stringify([viewSpace.defaultPermission, commentSpace.defaultPermission, editSpace.defaultPermission, fullSpace.defaultPermission])}`,
   )
 
   /*
@@ -187,7 +192,7 @@ try {
   )
   chk(
     bogusPerm.data?.defaultPermission === undefined,
-    'and no space is created with the value rounded up to edit',
+    'and no space is created with the value rounded up to Full edit',
     `a space came back with defaultPermission ${JSON.stringify(bogusPerm.data?.defaultPermission)}`,
   )
   const bogusUpdate = await A(`/spaces/${viewSpace.id}`, {
@@ -240,14 +245,14 @@ try {
    *
    * The member's own list still has to EXIST in each space, because the
    * creator-branch refusals below are the other half of the row. So the space
-   * is briefly raised to `edit`, the member creates their list, and it is put
+   * is briefly raised to Full edit, the member creates their list, and it is put
    * back. That is also the real sequence rather than a contrivance: a space
    * gets downgraded and what is already inside it stays.
    */
   const withEditable = async (space, fn) => {
     const up = await A(`/spaces/${space.id}`, {
       method: 'PUT',
-      body: { defaultPermission: 'edit' },
+      body: { defaultPermission: 'admin' },
     })
     if (up.status >= 400) throw new Error(`could not raise ${space.id}: ${up.status}`)
     try {
@@ -267,7 +272,7 @@ try {
   }
   const viewList = await withEditable(viewSpace, () => makeList(viewSpace))
   const commentList = await withEditable(commentSpace, () => makeList(commentSpace))
-  const editList = await makeList(editSpace)
+  const editList = await withEditable(editSpace, () => makeList(editSpace))
   chk(
     viewList.status < 400 && !!viewList.data?.id &&
       commentList.status < 400 && !!commentList.data?.id &&
@@ -485,9 +490,9 @@ try {
     )}`,
   )
   chk(
-    memberIds.has(editSpace.id),
-    'while the `edit` space still is — the filter is the permission, not an empty answer',
-    'move-targets dropped the edit-default space too, so the list is empty rather than filtered',
+    memberIds.has(fullSpace.id),
+    'while the Full edit space still is — the filter is the permission, not an empty answer',
+    'move-targets dropped the Full edit space too, so the list is empty rather than filtered',
   )
 
   const adminTargets = await A(`/spaces/workspace/${workspaceId}/move-targets`)
@@ -532,12 +537,12 @@ try {
   const SIDE_DOOR = named('applied without project.create')
   const sideDoor = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
     method: 'POST',
-    body: { templateId: template.data.id, targetSpaceId: editSpace.id, projectName: SIDE_DOOR },
+    body: { templateId: template.data.id, targetSpaceId: fullSpace.id, projectName: SIDE_DOOR },
   })
   chk(
-    sideDoor.status === 403 && (await projectsNamed(editSpace.id, SIDE_DOOR)) === 0,
+    sideDoor.status === 403 && (await projectsNamed(fullSpace.id, SIDE_DOOR)) === 0,
     'a member without project.create cannot make a folder by applying a template either — the templates page was a way round the permission',
-    `it answered ${sideDoor.status} ${JSON.stringify(sideDoor.error ?? '')} and ${await projectsNamed(editSpace.id, SIDE_DOOR)} project(s) were made`,
+    `it answered ${sideDoor.status} ${JSON.stringify(sideDoor.error ?? '')} and ${await projectsNamed(fullSpace.id, SIDE_DOOR)} project(s) were made`,
   )
 
   /*
@@ -559,7 +564,7 @@ try {
     : { status: 0 }
   if (roleGiven.status >= 400 || roleGiven.status === 0) throw new Error(`could not give the member the role: ${roleGiven.status}`)
 
-  const mine = await makeAs(M, '/projects', { spaceId: editSpace.id, name: named('member project') }, "the member's project")
+  const mine = await makeAs(M, '/projects', { spaceId: fullSpace.id, name: named('member project') }, "the member's project")
   const myList = await makeAs(M, '/lists', { projectId: mine, name: named('member list') }, "the member's list")
   // Made while the space is briefly editable, as the lists above are: an admin
   // making it straight into the view-only space leans on the admin bypass, and
@@ -567,8 +572,8 @@ try {
   const inView = await withEditable(viewSpace, () =>
     makeAs(A, '/projects', { spaceId: viewSpace.id, name: named('project in view') }, 'a project in the view-only space'),
   )
-  const otherEdit = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('other edit project') }, 'another project in the edit space')
-  const hidden = await makeAs(A, '/projects', { spaceId: editSpace.id, name: named('private project') }, 'a private project')
+  const otherEdit = await makeAs(A, '/projects', { spaceId: fullSpace.id, name: named('other full edit project') }, 'another project in the Full edit space')
+  const hidden = await makeAs(A, '/projects', { spaceId: fullSpace.id, name: named('private project') }, 'a private project')
   const madeHidden = await A(`/projects/${hidden}/visibility`, { method: 'PATCH', body: { visibility: 'private' } })
   if (madeHidden.status >= 400) throw new Error(`could not make the project private: ${madeHidden.status}`)
   const listIn = async (id) => (await M(`/lists/${id}`)).data?.projectId ?? (await A(`/lists/${id}`)).data?.projectId
@@ -582,56 +587,56 @@ try {
   const listIntoHidden = await M(`/lists/${myList}/move`, { method: 'POST', body: { projectId: hidden } })
   chk(
     listIntoHidden.status === 403 && (await listIn(myList)) === mine,
-    'nor into a private project they are not in, even in a space they may edit',
+    'nor into a private project they are not in, even in a space they may add to',
     `it answered ${listIntoHidden.status} and the list is in ${await listIn(myList)}`,
   )
   const listIntoEdit = await M(`/lists/${myList}/move`, { method: 'POST', body: { projectId: otherEdit } })
   chk(
     listIntoEdit.status < 300 && (await listIn(myList)) === otherEdit,
-    'while moving it into another project they may edit still works',
+    'while moving it into another project they may add to still works',
     `it answered ${listIntoEdit.status} ${JSON.stringify(listIntoEdit.error ?? '')}`,
   )
 
-  const secondEdit = await A('/spaces', { method: 'POST', body: { workspaceId, name: named('second edit space'), defaultPermission: 'edit' } })
-  if (secondEdit.status >= 400 || !secondEdit.data?.id) throw new Error(`could not make a second edit space: ${secondEdit.status}`)
+  const secondEdit = await A('/spaces', { method: 'POST', body: { workspaceId, name: named('second full edit space'), defaultPermission: 'admin' } })
+  if (secondEdit.status >= 400 || !secondEdit.data?.id) throw new Error(`could not make a second Full edit space: ${secondEdit.status}`)
   cleanup.push(() => A(`/spaces/${secondEdit.data.id}`, { method: 'DELETE' }))
   const editSpace2 = secondEdit.data
   const projectIn = async (id) => (await A(`/projects/${id}`)).data?.spaceId
   const projectIntoView = await M(`/projects/${mine}/move`, { method: 'POST', body: { spaceId: viewSpace.id } })
   chk(
-    projectIntoView.status === 403 && (await projectIn(mine)) === editSpace.id,
+    projectIntoView.status === 403 && (await projectIn(mine)) === fullSpace.id,
     'nor their own project into the view-only space',
     `it answered ${projectIntoView.status} and the project is in ${await projectIn(mine)}`,
   )
   const projectIntoEdit = await M(`/projects/${mine}/move`, { method: 'POST', body: { spaceId: editSpace2.id } })
   chk(
     projectIntoEdit.status < 300 && (await projectIn(mine)) === editSpace2.id,
-    'while moving it into another space they may edit works',
+    'while moving it into another space they may add to works',
     `it answered ${projectIntoEdit.status} ${JSON.stringify(projectIntoEdit.error ?? '')}`,
   )
 
   // A folder is the third thing a member can move. Plain members hold
   // `space.create`, which the folder routes require, so this is the member's
   // own folder and only the destination rule can refuse it.
-  const myFolder = await makeAs(M, `/spaces/${editSpace.id}/folders`, { name: named('member folder') }, "the member's folder")
+  const myFolder = await makeAs(M, `/spaces/${fullSpace.id}/folders`, { name: named('member folder') }, "the member's folder")
   const folderIn = async (spaceId, id) =>
     ((await A(`/spaces/${spaceId}/folders`)).data ?? []).some((f) => f.id === id)
-  const folderIntoView = await M(`/spaces/${editSpace.id}/folders/${myFolder}/move`, {
+  const folderIntoView = await M(`/spaces/${fullSpace.id}/folders/${myFolder}/move`, {
     method: 'POST',
     body: { targetSpaceId: viewSpace.id },
   })
   chk(
-    folderIntoView.status === 403 && (await folderIn(editSpace.id, myFolder)) && !(await folderIn(viewSpace.id, myFolder)),
+    folderIntoView.status === 403 && (await folderIn(fullSpace.id, myFolder)) && !(await folderIn(viewSpace.id, myFolder)),
     'nor their own folder into the view-only space',
     `it answered ${folderIntoView.status} ${JSON.stringify(folderIntoView.error ?? '')}`,
   )
-  const folderIntoEdit = await M(`/spaces/${editSpace.id}/folders/${myFolder}/move`, {
+  const folderIntoEdit = await M(`/spaces/${fullSpace.id}/folders/${myFolder}/move`, {
     method: 'POST',
     body: { targetSpaceId: editSpace2.id },
   })
   chk(
     folderIntoEdit.status < 300 && (await folderIn(editSpace2.id, myFolder)),
-    'while moving the folder into another space they may edit works',
+    'while moving the folder into another space they may add to works',
     `it answered ${folderIntoEdit.status} ${JSON.stringify(folderIntoEdit.error ?? '')}`,
   )
 
@@ -648,11 +653,11 @@ try {
   const INTO_EDIT = named('applied into edit')
   const appliedIntoEdit = await M(`/workspaces/${workspaceId}/project-templates/apply`, {
     method: 'POST',
-    body: { templateId: template.data.id, targetSpaceId: editSpace.id, projectName: INTO_EDIT },
+    body: { templateId: template.data.id, targetSpaceId: fullSpace.id, projectName: INTO_EDIT },
   })
   chk(
-    appliedIntoEdit.status < 300 && (await projectsNamed(editSpace.id, INTO_EDIT)) === 1,
-    'while applying it into a space they may edit makes it there',
+    appliedIntoEdit.status < 300 && (await projectsNamed(fullSpace.id, INTO_EDIT)) === 1,
+    'while applying it into a space they may add to makes it there',
     `it answered ${appliedIntoEdit.status} ${JSON.stringify(appliedIntoEdit.error ?? '')}`,
   )
 

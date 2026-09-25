@@ -1,5 +1,5 @@
 # A PLACEMENT RULE THAT REFUSES EVERYTHING: nothing can be moved or applied anywhere.
-# Reddens: space-default-permission: "while moving it into another project they may edit still works"
+# Reddens: space-default-permission: "while moving it into another project they may add to still works"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = '  if (!params.actorId) return\n  const [space] = await db\n'

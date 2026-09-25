@@ -1,5 +1,5 @@
 # A TEMPLATE THAT CANNOT BE APPLIED ANYWHERE.
-# Reddens: space-default-permission: "while applying it into a space they may edit makes it there"
+# Reddens: space-default-permission: "while applying it into a space they may add to makes it there"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 a = "        await assertCanPlaceIn(this.db, { spaceId: space.id, actorId: userId, kind: 'project' })\n"

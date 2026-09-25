@@ -59,12 +59,13 @@ export async function assertCanManageContainer(
    * seeds them as a `space_members` admin, which `resolveSpaceLevel` treats as
    * the explicit grant it is.
    *
-   * `edit` for BOTH manage and delete, not `admin` for delete. `admin` on this
-   * ladder is the rung that may re-share an object (`SharesService.canShare`),
-   * and deleting a container you are otherwise allowed to edit is not a
-   * sharing act. Requiring `admin` here would also mean the column's own
-   * default — `edit`, on every row that exists — started refusing deletes it
-   * has always allowed, which is a migration disguised as a permission check.
+   * `edit` to manage, `admin` — Full edit — to delete. ClickUp's Edit changes
+   * a location and archives it; Full edit adds deleting it, and the share
+   * panel has always said so (`found-25-sep/full-edit-enforced-nowhere`).
+   * This asked `edit` for both, because every space's default was `edit` and
+   * asking more would have quietly refused deletes it had always allowed; the
+   * default is Full edit now, and migration 0164 moved every `edit` default to
+   * it, openly, so nothing a space's default allowed has changed.
    *
    * Only runs when the caller told us which space this container lives in.
    * `lists`, `projects` and `folders` already pass `spaceId` (they need it for
@@ -76,9 +77,10 @@ export async function assertCanManageContainer(
     await assertSpaceLevel(db, {
       spaceId: params.spaceId,
       actorId: params.actorId,
-      required: 'edit',
+      required: action === 'delete' ? 'admin' : 'edit',
       kind: params.kind,
       within: params.within,
+      ...(action === 'delete' ? { act: 'deleting this' } : {}),
     })
   }
 
@@ -143,8 +145,10 @@ export async function assertCanManageContainer(
  * means an explicit `space_members` grant raises both at once, so a person
  * given `edit` on a view-only space can still create.
  *
- * `edit`, matching manage and delete. `admin` on this ladder is the rung that
- * may re-share an object, and making a list is not a sharing act.
+ * `admin` — Full edit. ClickUp's Edit changes what is in a location and adds
+ * nothing to it; Full edit adds creating, as it adds deleting (help centre,
+ * "Permissions in detail"; `found-25-sep/full-edit-enforced-nowhere`). A
+ * space's default is Full edit, so its members add to it as they always did.
  *
  * A caller with no actor is an internal one (a seeder, a template expansion)
  * and is left alone, exactly as `assertCanManageContainer` leaves it alone.
@@ -163,9 +167,10 @@ export async function assertCanCreateInSpace(
   await assertSpaceLevel(db, {
     spaceId: params.spaceId,
     actorId: params.actorId,
-    required: 'edit',
+    required: 'admin',
     kind: params.kind,
     within: params.within,
+    act: 'adding a',
   })
 }
 

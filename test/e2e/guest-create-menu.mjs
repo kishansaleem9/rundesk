@@ -10,9 +10,9 @@
  * in any project they could open.
  *
  * What a guest may make, as the API has it now: a reminder, their own; a list,
- * only in a space shared with them to edit. The guest here first passes
+ * only in a space shared with them with Full edit. The guest here first passes
  * through a space (a list in it is shared with them to view) and can add to
- * none, then is given another space to edit. Each menu is read beside a
+ * none, then is given another space with Full edit. Each menu is read beside a
  * member's, and the API is asked the same things the menus answer.
  *
  *   node test/e2e/guest-create-menu.mjs --api 3021 --dist /tmp/claude-0/dist-1
@@ -198,15 +198,16 @@ try {
   )
 
   // ══ 3. A SPACE TO EDIT ═══════════════════════════════════════════════════
-  console.log('\n▶ the guest, once a space is shared with them to edit')
-  await sql`insert into space_members (space_id, user_id, role) values (${EDIT.id}, ${guest.id}, 'edit')`
+  console.log('\n▶ the guest, once a space is shared with them with Full edit')
+  // Full edit: adding to a space takes it (`found-25-sep/full-edit-enforced-nowhere`).
+  await sql`insert into space_members (space_id, user_id, role) values (${EDIT.id}, ${guest.id}, 'admin')`
   const gPage2 = await signIn(guest)
   const gTabs2 = await createTabs(gPage2, true)
   const gEdit = await spaceMenu(gPage2, EDIT.id, true)
   const gThrough2 = await spaceMenu(gPage2, THROUGH.id, true)
   chk(
     gTabs2.includes('list') && !gTabs2.includes('task') && gEdit.includes('list') && !gEdit.includes('task') && !gThrough2.includes('list'),
-    'given a space to edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task',
+    'given a space with Full edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task',
     `the Create menu ${JSON.stringify(gTabs2)}; the edited space's ${JSON.stringify(gEdit)}; the passed-through space's ${JSON.stringify(gThrough2)}`,
   )
 
@@ -216,7 +217,7 @@ try {
   const mList = await listSpaces(mPage, EDIT.id)
   chk(
     gList.includes(EDIT.id) && !gList.includes(THROUGH.id) && mList.includes(EDIT.id) && mList.includes(THROUGH.id),
-    'the List form offers the guest the space to edit and not the one they pass through — a member is offered both',
+    'the List form offers the guest the space with Full edit and not the one they pass through — a member is offered both',
     `the guest's spaces ${JSON.stringify(gList.map((id) => id === EDIT.id ? 'EDIT' : id === THROUGH.id ? 'THROUGH' : id))}; the member's ${JSON.stringify(mList.map((id) => id === EDIT.id ? 'EDIT' : id === THROUGH.id ? 'THROUGH' : id))}`,
   )
 
@@ -230,7 +231,7 @@ try {
   chk(
     gOnThrough.drawn && gOnThrough.offered === 0 && gOnBare.drawn && gOnBare.offered === 0 && gOnEdit.drawn && gOnEdit.offered === 1
       && mOnThrough.drawn && mOnThrough.offered === 1 && mOnBare.drawn && mOnBare.offered === 2,
-    'a project’s page offers the guest "Add list" in the space to edit, and not in the one they pass through, nor from an empty project’s own empty state there — a member is offered both',
+    'a project’s page offers the guest "Add list" in the space with Full edit, and not in the one they pass through, nor from an empty project’s own empty state there — a member is offered both',
     `the guest: passing through ${JSON.stringify(gOnThrough)}, the empty project ${JSON.stringify(gOnBare)}, to edit ${JSON.stringify(gOnEdit)}; the member, passing through ${JSON.stringify(mOnThrough)}, the empty project ${JSON.stringify(mOnBare)}`,
   )
 
@@ -256,7 +257,7 @@ try {
   chk(
     api.reminder === 201 && rows.reminder === 1 && api.listInEdit === 201 && rows.listInEdit === 1 && api.listThrough === 403 && rows.listThrough === 0
       && api.task === 403 && rows.task === 0 && api.doc === 403 && api.whiteboard === 403 && api.form === 403,
-    'the API makes the guest what the menus offer — a reminder, a list in the space to edit — and refuses what they withhold: a list where they pass through, a task, a workspace doc, a whiteboard, a form',
+    'the API makes the guest what the menus offer — a reminder, a list in the space with Full edit — and refuses what they withhold: a list where they pass through, a task, a workspace doc, a whiteboard, a form',
     `answers ${JSON.stringify(api)}; rows ${JSON.stringify(rows)}`,
   )
 } catch (e) {

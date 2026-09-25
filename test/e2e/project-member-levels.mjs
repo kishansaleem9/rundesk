@@ -111,6 +111,9 @@ try {
   const PN = await place(OPEN, 'no grant')
   const LOCKED = await space('locked', 'view')
   const PE = await place(LOCKED, 'edit', { role: 'edit' })
+  // Full edit on the project beside it: making a task takes Full edit, and Edit
+  // changes what is there (`found-25-sep/full-edit-enforced-nowhere`).
+  const PF = await place(LOCKED, 'full edit', { role: 'admin' })
   const PX = await place(LOCKED, 'nothing')
 
   // ══ 1. A VIEW GRANT NARROWS ══════════════════════════════════════════════
@@ -146,17 +149,19 @@ try {
     `the comment ${cSaid.status} (${await comments(PC.task)}); the title ${cTitle.status} ("${await title(PC.task)}")`,
   )
 
-  // ══ 3. AN EDIT GRANT WIDENS ══════════════════════════════════════════════
-  console.log('\n▶ Edit on a project, in a view-only space — and the project beside it, with no grant')
+  // ══ 3. A GRANT WIDENS ════════════════════════════════════════════════════
+  console.log('\n▶ Edit and Full edit on projects, in a view-only space — and a project beside them, with no grant')
   const eTitle = await M(`/tasks/${PE.task}`, { method: 'PATCH', body: { title: `${TAG} changed through edit` } })
   const eMake = await M('/tasks', { method: 'POST', body: { listId: PE.list, title: `${TAG} made through edit` } })
+  const fMake = await M('/tasks', { method: 'POST', body: { listId: PF.list, title: `${TAG} made through full edit` } })
   const xTitle = await M(`/tasks/${PX.task}`, { method: 'PATCH', body: { title: `${TAG} changed in view-only` } })
   chk(
     eTitle.status < 300 && (await title(PE.task)) === `${TAG} changed through edit` &&
-      eMake.status < 300 && (await tasksNamed(`${TAG} made through edit`)) === 1 &&
+      eMake.status === 403 && (await tasksNamed(`${TAG} made through edit`)) === 0 &&
+      fMake.status < 300 && (await tasksNamed(`${TAG} made through full edit`)) === 1 &&
       xTitle.status === 403 && (await title(PX.task)) === `${TAG} nothing task`,
-    'a member given Edit on a project in a view-only space changes the admin\'s task there and makes one — and in the project beside it the space\'s View still decides',
-    `edit: the task ${eTitle.status} ("${await title(PE.task)}"), a new task ${eMake.status}; no grant: ${xTitle.status} ("${await title(PX.task)}")`,
+    'a member given Edit on a project in a view-only space changes the admin\'s task there and makes none, and given Full edit on the one beside it makes one — and in a project with no grant the space\'s View still decides',
+    `edit: the task ${eTitle.status} ("${await title(PE.task)}"), a new task ${eMake.status}; full edit: a new task ${fMake.status}; no grant: ${xTitle.status} ("${await title(PX.task)}")`,
   )
 
   // ══ 4. MAKING A PROJECT IS NOT A GRANT ═══════════════════════════════════

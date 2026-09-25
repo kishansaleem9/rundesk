@@ -1,6 +1,6 @@
 # THE PLACEMENT RULE WITHOUT ITS VISIBILITY HALF: a private project accepts lists
 # from people it keeps out.
-# Reddens: space-default-permission: "nor into a private project they are not in, even in a space they may edit"
+# Reddens: space-default-permission: "nor into a private project they are not in, even in a space they may add to"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = '  if (!reachable) throw new ForbiddenException(`You do not have access to where this ${params.kind} would go`)\n'

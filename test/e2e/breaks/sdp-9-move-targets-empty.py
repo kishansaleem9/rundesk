@@ -2,15 +2,12 @@
 # empty for every member. The "not offered" assertion passes on this — an empty
 # answer satisfies "the view-only space is absent" just as well as a filtered
 # one does — which is why the suite asserts the `edit` space SURVIVES as well.
+# Re-aimed 25 September: Full edit is asked where it was offered (`full-edit-enforced-nowhere`).
 # Reddens: space-default-permission:
-#   "while the `edit` space still is — the filter is the permission, not an empty answer"
+#   "while the Full edit space still is — the filter is the permission, not an empty answer"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/spaces/spaces.service.ts'
-a = """    return rows.filter((row) => {
-      const resolved = levels.get(row.id)
-      return !resolved || spaceLevelReaches(resolved.level, 'edit')
-    })
-"""
+a = "    return rows.filter((row) => {\n      const resolved = levels.get(row.id)\n      return !resolved || spaceLevelReaches(resolved.level, 'admin')\n    })\n"
 b = """    return rows.filter(() => false)
 """
 s = io.open(p, encoding='utf-8').read()

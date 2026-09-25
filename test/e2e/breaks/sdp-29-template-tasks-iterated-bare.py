@@ -1,7 +1,7 @@
 # APPLY AS IT WAS: `for (const task of list.tasks)` — a template list with no tasks
 # array answers 500 to whoever applies it. The suite's own folder template carries
 # none, which is how this was found.
-# Reddens: space-default-permission: "while applying it into a space they may edit makes it there"
+# Reddens: space-default-permission: "while applying it into a space they may add to makes it there"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/project-templates/project-templates.service.ts'
 a = "      for (const task of list.tasks ?? []) {\n"

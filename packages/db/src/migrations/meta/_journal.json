@@ -1149,6 +1149,13 @@
       "when": 1900000130030,
       "tag": "0163_dock_pinned_links_unarranged",
       "breakpoints": true
+    },
+    {
+      "idx": 164,
+      "version": "7",
+      "when": 1900000130031,
+      "tag": "0164_space_default_full_edit",
+      "breakpoints": true
     }
   ]
 }

@@ -111,11 +111,29 @@ describe('assertCanManageContainer — delete scoping (plan §3: Manager own-spa
   })
 
   it('lets the creator delete their own space (short-circuits after the space gate)', async () => {
-    // The space's default is `edit`, which is what the gate requires, so it
-    // passes the decision back and the creator branch takes it.
-    await assertCanManageContainer(dbQueue([...gate('edit', 'member')]), {
+    // The space's default is Full edit — every space's, unless told otherwise —
+    // which is what deleting asks, so the gate passes the decision back and the
+    // creator branch takes it (`found-25-sep/full-edit-enforced-nowhere`).
+    await assertCanManageContainer(dbQueue([...gate('admin', 'member')]), {
       workspaceId: 'w1', createdById: 'owner', actorId: 'owner', kind: 'space',
       action: 'delete', adminOnlyDelete: true, spaceId: 's1',
+    })
+  })
+
+  it('refuses the creator a delete where the space is Edit — Edit changes and does not delete', async () => {
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('edit', 'member')]), {
+        workspaceId: 'w1', createdById: 'owner', actorId: 'owner', kind: 'list',
+        action: 'delete', spaceId: 's1',
+      }),
+      /does not allow deleting this list/,
+    )
+  })
+
+  it('lets the creator manage at Edit — renaming asks Edit, not Full edit', async () => {
+    await assertCanManageContainer(dbQueue([...gate('edit', 'member')]), {
+      workspaceId: 'w1', createdById: 'owner', actorId: 'owner', kind: 'list',
+      action: 'manage', spaceId: 's1',
     })
   })
 

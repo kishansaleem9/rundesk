@@ -637,7 +637,7 @@ export class TasksService {
   private async assertTaskWriteAccess(
     taskId: string,
     actorId: string,
-    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' } = {},
+    opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' } = {},
   ) {
     return assertTaskWritable(this.db, taskId, actorId, opts)
   }
@@ -4126,7 +4126,8 @@ export class TasksService {
   async binTask(taskId: string, actorId: string, ipAddress?: string) {
     // allowArchived: an archived task can still be deleted — that is the whole
     // point of two states — and re-deleting a binned one is a no-op, not a 409.
-    await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
+    // Full edit: Edit archives and does not delete (`found-25-sep/full-edit-enforced-nowhere`).
+    await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true, level: 'full' })
     // Managers can only delete within their own spaces (§3.3), exactly as for
     // archiving; a weaker check here would be a way around that one.
     await this.assertManagerDeleteScope(taskId, actorId)
@@ -5130,7 +5131,9 @@ export class TasksService {
    *   edit     — any change, the write rule at "edit";
    *   progress — its status and assignees, the write rule at "comment", which
    *              an assignee passes in a comment-only space;
-   *   comment  — a comment, as the comment route asks.
+   *   comment  — a comment, as the comment route asks;
+   *   full     — Full edit: deleting it, and adding a subtask to it (the
+   *              write rule at "full"; `found-25-sep/full-edit-enforced-nowhere`).
    *
    * A refusal is an answer (false); anything else is thrown.
    */
@@ -5143,12 +5146,13 @@ export class TasksService {
           throw e
         },
       )
-    const [edit, progress, comment] = await Promise.all([
+    const [edit, progress, comment, full] = await Promise.all([
       allowed(this.assertTaskWriteAccess(taskId, actorId)),
       allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })),
       allowed(this.assertMayComment(taskId, actorId)),
+      allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'full' })),
     ])
-    return { edit, progress, comment }
+    return { edit, progress, comment, full }
   }
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {

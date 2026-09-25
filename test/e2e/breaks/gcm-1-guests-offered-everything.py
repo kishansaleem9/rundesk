@@ -4,7 +4,7 @@
 # RE-AIMED 25 September: the hook asks every person's writable spaces now (the view-only
 # space's menus), and its guest branch was rewritten around that; the mistake is the same.
 # Reddens: guest-create-menu: "a guest who may add to no space is offered a reminder and nothing else — a member is offered a task, a doc, a whiteboard and a list"
-#   or "given a space to edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task"
+#   or "given a space with Full edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task"
 import io
 p = '/home/user/rundesk/apps/web/src/hooks/use-creatable.ts'
 a = '      if (guest) {\n'

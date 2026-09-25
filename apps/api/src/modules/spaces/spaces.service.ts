@@ -1,5 +1,5 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException, Logger } from '@nestjs/common'
-import { eq, and, inArray } from 'drizzle-orm'
+import { eq, and, inArray, asc } from 'drizzle-orm'
 import { spaces, spaceMembers, spaceStatuses, folders, projects, lists, workspaces } from '@rundesk/db'
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -206,8 +206,9 @@ export class SpacesService {
      * indistinguishable from having asked for `edit`.
      *
      * ABSENT still defaults. That is the preset path and it is not a mistake:
-     * a space created from a preset does not name a permission, and `'edit'`
-     * is the documented default. What is refused is a value that was SENT and
+     * a space created from a preset does not name a permission, and Full edit
+     * (`'admin'`) is the documented default: frame `06:52`, and the column's
+     * own (`found-25-sep/full-edit-enforced-nowhere`). What is refused is a value that was SENT and
      * is not one of the four.
      */
     if (
@@ -217,7 +218,7 @@ export class SpacesService {
       throw new BadRequestException('invalid defaultPermission')
     }
     const permission: SpaceDefaultPermission =
-      (data.defaultPermission as SpaceDefaultPermission | undefined) ?? 'edit'
+      (data.defaultPermission as SpaceDefaultPermission | undefined) ?? 'admin'
 
     const result = await this.db
       .insert(spaces)
@@ -306,8 +307,8 @@ export class SpacesService {
    * server cannot disagree.
    */
   /**
-   * THE SPACES THIS PERSON MAY ADD TO — the create gate's answer (`edit` on the
-   * space), as ids alone: what the web's menus ask before offering a thing
+   * THE SPACES THIS PERSON MAY ADD TO — the create gate's answer (Full edit on
+   * the space), as ids alone: what the web's menus ask before offering a thing
    * that goes in a space (`useCreatable`). The Move picker's own answer
    * (`moveTargets`) carries every folder, project and list besides, which is
    * too much to load under every sidebar.
@@ -362,7 +363,8 @@ export class SpacesService {
   }
 
   /**
-   * Keep only the spaces this actor holds at least `edit` on.
+   * Keep only the spaces this actor may add to: Full edit (`admin`), what the
+   * create gate asks (`assertCanCreateInSpace`).
    *
    * A space the resolver says nothing about is KEPT, not dropped: the map is
    * empty for an actor with no `workspace_members` row (a super-admin acting
@@ -382,20 +384,31 @@ export class SpacesService {
     })
     return rows.filter((row) => {
       const resolved = levels.get(row.id)
-      return !resolved || spaceLevelReaches(resolved.level, 'edit')
+      return !resolved || spaceLevelReaches(resolved.level, 'admin')
     })
   }
 
   async getSpacesByWorkspace(workspaceId: string, actorId?: string) {
     const base = and(eq(spaces.workspaceId, workspaceId), eq(spaces.isArchived, false))
+    /*
+     * IN THE ORDER THEY WERE MADE. There was no order at all, so the sidebar,
+     * the Move picker and every space picker drew spaces in the order Postgres
+     * happened to store their rows — and an UPDATE moves a row. Renaming a
+     * space could move it; migration 0164, which rewrites every space whose
+     * default was `edit`, would have shuffled every workspace's sidebar at once
+     * (found closing `found-25-sep/full-edit-enforced-nowhere`, when it did so
+     * to a lane's). Spaces have no position of their own; the order they were
+     * made in is the order people have been shown, and a new one goes last.
+     */
+    const inOrder = [asc(spaces.createdAt), asc(spaces.id)] as const
     // Managers (and internal callers with no actor) see every space.
     const rows =
       !actorId || (await isWorkspaceManager(this.db, workspaceId, actorId))
-        ? await this.db.select().from(spaces).where(base)
+        ? await this.db.select().from(spaces).where(base).orderBy(...inOrder)
         : // Everyone else: public spaces and the private ones they belong to — and a
           // guest, those granted them or on the way to what is (`spaceVisibilityFilter`,
           // which this restated without the guest's half).
-          await this.db.select().from(spaces).where(and(base, spaceVisibilityFilter(this.db, actorId, false)))
+          await this.db.select().from(spaces).where(and(base, spaceVisibilityFilter(this.db, actorId, false))).orderBy(...inOrder)
     /*
      * THE READ SITE THAT MAKES THE GATE REAL. `useSpaceFeatures` reads exactly
      * these rows, so narrowing here means a downgrade takes the ClickApp away

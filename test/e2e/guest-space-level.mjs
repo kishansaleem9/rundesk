@@ -13,7 +13,9 @@
  * only what is shared with them, at the level it was shared at. Writes are
  * asked here; what a guest READS is `guest-read-scope`'s. Each refusal is read
  * back by SQL beside a member doing the same, and beside the guest doing it
- * where a grant allows. Lists, tasks and grants are planted by SQL.
+ * where a grant allows. Lists, tasks and grants are planted by SQL. Making
+ * anything takes Full edit, so the grants that let a guest make one are Full
+ * edit (`found-25-sep/full-edit-enforced-nowhere`).
  *
  *   node test/e2e/guest-space-level.mjs --api 3021
  */
@@ -84,9 +86,9 @@ try {
   const M = member.as
   const G = guest.as
 
-  // Three open spaces, each on the default "edit": one shared with nobody, one
-  // shared with the guest to edit, one to comment. A project and a list in
-  // each, and a task in each list.
+  // Three open spaces, each on the default, Full edit: one shared with nobody,
+  // one shared with the guest with Full edit, one to comment. A project and a
+  // list in each, and a task in each list.
   const space = async (name) => {
     const res = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
     if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the ${name} space: ${said(res)}`)
@@ -97,14 +99,14 @@ try {
     return { id: res.data.id, project: project.data.id, list: list.id, task: task.id }
   }
   const OPEN = await space('open')
-  const EDIT = await space('shared to edit')
+  const EDIT = await space('shared with full edit')
   const COMMENT = await space('shared to comment')
-  await sql`insert into space_members (space_id, user_id, role) values (${EDIT.id}, ${guest.id}, 'edit'), (${COMMENT.id}, ${guest.id}, 'comment')`
+  await sql`insert into space_members (space_id, user_id, role) values (${EDIT.id}, ${guest.id}, 'admin'), (${COMMENT.id}, ${guest.id}, 'comment')`
   const listsNamed = async (name) => (await sql`select count(*)::int as n from lists where name = ${name}`)[0].n
   const commentsSaying = async (body) => (await sql`select count(*)::int as n from task_comments where body = ${body}`)[0].n
 
   // ══ 1. MAKING A LIST ═════════════════════════════════════════════════════
-  console.log('\n▶ a list, in the open space, by the guest and by the member; and by the guest where the space is shared to edit')
+  console.log('\n▶ a list, in the open space, by the guest and by the member; and by the guest where the space is shared with Full edit')
   const gList = await G('/lists', { method: 'POST', body: { projectId: OPEN.project, name: `${TAG} the guest's list` } })
   const mList = await M('/lists', { method: 'POST', body: { projectId: OPEN.project, name: `${TAG} the member's list` } })
   const gShared = await G('/lists', { method: 'POST', body: { projectId: EDIT.project, name: `${TAG} the guest's list where shared` } })
@@ -115,7 +117,7 @@ try {
   ]
   chk(
     gList.status === 403 && gN === 0 && mList.status === 201 && mN === 1 && gShared.status === 201 && gSharedN === 1,
-    'a guest makes no list in an open space not shared with them (403, none made) — a member does, and so does the guest where the space is shared with them to edit',
+    'a guest makes no list in an open space not shared with them (403, none made) — a member does, and so does the guest where the space is shared with them with Full edit',
     `the guest ${said(gList)}, lists made ${gN}; the member ${said(mList)}, ${mN}; the guest where shared ${said(gShared)}, ${gSharedN}`,
   )
 
@@ -147,12 +149,12 @@ try {
   chk(
     gTargets.status === 200 && gTargets.ids.includes(EDIT.id) && !gTargets.ids.includes(OPEN.id) && !gTargets.ids.includes(COMMENT.id)
       && mTargets.status === 200 && mTargets.ids.includes(OPEN.id),
-    'the Move picker offers a guest only the space shared with them to edit — a member, the open space',
-    `the guest ${gTargets.status}: open ${gTargets.ids.includes(OPEN.id)}, shared to edit ${gTargets.ids.includes(EDIT.id)}, shared to comment ${gTargets.ids.includes(COMMENT.id)}; the member ${mTargets.status}: open ${mTargets.ids.includes(OPEN.id)}`,
+    'the Move picker offers a guest only the space shared with them with Full edit — a member, the open space',
+    `the guest ${gTargets.status}: open ${gTargets.ids.includes(OPEN.id)}, shared with full edit ${gTargets.ids.includes(EDIT.id)}, shared to comment ${gTargets.ids.includes(COMMENT.id)}; the member ${mTargets.status}: open ${mTargets.ids.includes(OPEN.id)}`,
   )
 
   // ══ 4. AN ITEM SHARED, NOT ITS SPACE ═════════════════════════════════════
-  console.log('\n▶ in the open space, a task shared with the guest to comment, a list likewise, and a project to edit')
+  console.log('\n▶ in the open space, a task shared with the guest to comment, a list likewise, and a project with Full edit')
   const [sharedTask] = await sql`insert into tasks (list_id, title, created_by_id) values (${OPEN.list}, ${`${TAG} a task shared with the guest`}, ${adminId}) returning id`
   const [sharedList] = await sql`insert into lists (project_id, name) values (${OPEN.project}, ${`${TAG} a list shared with the guest`}) returning id`
   const [inSharedList] = await sql`insert into tasks (list_id, title, created_by_id) values (${sharedList.id}, ${`${TAG} a task of the shared list`}, ${adminId}) returning id`
@@ -160,7 +162,7 @@ try {
   await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values
     (${WS}, 'task', ${sharedTask.id}, ${guest.id}, 'comment'),
     (${WS}, 'list', ${sharedList.id}, ${guest.id}, 'comment'),
-    (${WS}, 'project', ${sharedProject.id}, ${guest.id}, 'edit')`
+    (${WS}, 'project', ${sharedProject.id}, ${guest.id}, 'admin')`
   const onTask = await say(G, sharedTask.id, `${TAG} the guest says on the shared task`)
   const onList = await say(G, inSharedList.id, `${TAG} the guest says in the shared list`)
   const inProject = await G('/lists', { method: 'POST', body: { projectId: sharedProject.id, name: `${TAG} the guest's list in the shared project` } })
@@ -188,7 +190,7 @@ try {
   chk(
     through.status === 403 && throughN === 0 && gTargets2.status === 200 && !gTargets2.ids.includes(OPEN.id) && gTargets2.ids.includes(EDIT.id),
     'a guest who only passes through a space — a list in it shared with them — makes no list beside it, and the Move picker does not offer them the space',
-    `a list beside the shared one ${said(through)}, made ${throughN}; the picker ${gTargets2.status}: the open space ${gTargets2.ids.includes(OPEN.id)}, the space shared to edit ${gTargets2.ids.includes(EDIT.id)}`,
+    `a list beside the shared one ${said(through)}, made ${throughN}; the picker ${gTargets2.status}: the open space ${gTargets2.ids.includes(OPEN.id)}, the space shared with full edit ${gTargets2.ids.includes(EDIT.id)}`,
   )
 } catch (e) {
   failed += 1

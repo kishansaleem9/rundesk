@@ -2,7 +2,7 @@
 # Re-aimed 25 September: the write rule is written once now, in `common/permissions/task-write.ts` (`field-values-written-by-readers`).
 # Reddens: project-member-levels: "a member given View on a project changes nothing in it — not the admin's task, not a new task, not a list, even one they made — where the space alone would let them, as it does in the project beside it"
 #   or "a member given Comment on a project comments on its tasks and changes nothing of them"
-#   or "a member given Edit on a project in a view-only space changes the admin's task there and makes one — and in the project beside it the space's View still decides"
+#   or "a member given Edit on a project in a view-only space changes the admin's task there and makes none, and given Full edit on the one beside it makes one — and in a project with no grant the space's View still decides"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/task-write.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -55,13 +55,14 @@ export type TaskWriteContext = {
  * @param opts.allowArchived — for the two operations whose whole purpose is a
  *   task already in the bin. Everything else is refused; see assertTaskNotInBin.
  * @param opts.level — "comment" for a change of status or assignees, which an
- *   assignee may make at that level; "edit" otherwise.
+ *   assignee may make at that level; "edit" otherwise; "full" — Full edit —
+ *   to delete the task (`found-25-sep/full-edit-enforced-nowhere`).
  */
 export async function assertTaskWritable(
   db: Db,
   taskId: string,
   actorId: string,
-  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' } = {},
+  opts: { allowArchived?: boolean; level?: 'comment' | 'edit' | 'full' } = {},
 ): Promise<TaskWriteContext> {
   const [ctx] = await db
     .select({
@@ -96,8 +97,8 @@ export async function assertTaskWritable(
   /*
    * THE SPACE'S LEVEL DECIDES, AS IN CLICKUP — not who made the task or is on
    * it (`found-24-sep/task-edits-narrower-than-clickup`). "Edit" there lets a
-   * person change every task in the location, status, assignees, title,
-   * archiving and deleting; "comment" lets an assignee change their task's
+   * person change every task in the location, status, assignees, title and
+   * archiving, and Full edit adds deleting (below); "comment" lets an assignee change their task's
    * status and assignees; "view" nothing. Only the creator, an assignee or a
    * manager could change a task, so a member with "edit" on a space could
    * not touch a colleague's task in it.
@@ -143,13 +144,24 @@ async function assertSpaceAllowsTaskWrite(
   db: Db,
   spaceId: string,
   actorId: string,
-  wanted: 'comment' | 'edit',
+  wanted: 'comment' | 'edit' | 'full',
   isAssignee: boolean,
   /** The task and the containers above it: a grant on any of them decides first (`WithinStep`). */
   within: WithinStep[],
 ) {
   const resolved = await resolveSpaceLevel(db, { spaceId, actorId, within })
   if (!resolved) return
+  /*
+   * DELETING IS FULL EDIT. ClickUp's Edit changes a task and archives it and
+   * does not delete it; Full edit adds deleting, and the share panel says it is
+   * "the only level that may delete the item". Nothing asked it, so an Edit
+   * grant — a share, a space or project role — sent tasks to the Trash
+   * (`found-25-sep/full-edit-enforced-nowhere`).
+   */
+  if (wanted === 'full') {
+    await assertSpaceLevel(db, { spaceId, actorId, required: 'admin', kind: 'tasks', within, act: 'deleting its' })
+    return
+  }
   if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
   await assertSpaceLevel(db, { spaceId, actorId, required: 'edit', kind: 'tasks', within })
 }

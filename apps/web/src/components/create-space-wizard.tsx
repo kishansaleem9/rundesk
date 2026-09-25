@@ -194,7 +194,9 @@ export function CreateSpaceWizard({
   const [description, setDescription] = useState('')
   const [icon, setIcon] = useState('🚀')
   const [color, setColor] = useState(CONTAINER_COLORS[0])
-  const [permission, setPermission] = useState('edit')
+  // Frame `06:52`: "Default permission  Full edit ▾" — Full edit is `admin`
+  // (`found-25-sep/full-edit-enforced-nowhere`).
+  const [permission, setPermission] = useState('admin')
   const [isPrivate, setIsPrivate] = useState(false)
   const [presetKey, setPresetKey] = useState('starter')
   /* null until the person opens a panel and changes something — then theirs wins. */

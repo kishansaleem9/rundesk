@@ -33,14 +33,17 @@ export const spaces = pgTable('spaces', {
    *
    * What a workspace member gets on this space without an explicit grant.
    * Deliberately the same four rungs as `object_shares.level`
-   * (view < comment < edit < admin) rather than a second vocabulary: ClickUp's
-   * "Full edit" is this ladder's `edit`, and a space that said "Editor" while
-   * a share said "edit" would be two words for one thing.
+   * (view < comment < edit < admin) rather than a second vocabulary. ClickUp's
+   * "Full edit" is `admin` — it makes and deletes; `edit` is ClickUp's "Edit",
+   * which changes and archives and does neither — and a public location's
+   * default is Full edit (`docs/share-and-permissions-spec.md`). It said
+   * "Full edit is `edit`" here, and nothing asked `admin`, until
+   * `found-25-sep/full-edit-enforced-nowhere` (migration 0164).
    */
   defaultPermission: text('default_permission')
     .$type<SpaceDefaultPermission>()
     .notNull()
-    .default('edit'),
+    .default('admin'),
   /**
    * §V2-06, frame `07:19` — "Enable ClickApps": which of this space's optional
    * features are on. `null` means every one of them, so a space made before

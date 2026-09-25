@@ -237,7 +237,11 @@ export class DocsService {
     const level = await docLevel(this.db, doc, { id: userId, workspaceRole: membership?.role as string | undefined })
     if (!docLevelReaches(level, need)) {
       throw new ForbiddenException(
-        need === 'comment' ? 'Your access to this doc does not allow commenting' : 'Your access to this doc does not allow changing it',
+        need === 'comment'
+          ? 'Your access to this doc does not allow commenting'
+          : need === 'admin'
+            ? 'Your access to this doc does not allow deleting it: that takes "Full edit"'
+            : 'Your access to this doc does not allow changing it',
       )
     }
     return { doc, level, role: membership?.role as string | undefined }
@@ -698,7 +702,8 @@ export class DocsService {
   }
 
   async deleteForUser(docId: string, userId: string) {
-    await this.assertDocLevel(docId, userId, 'edit')
+    // Full edit deletes a doc; Edit changes it (`found-25-sep/full-edit-enforced-nowhere`).
+    await this.assertDocLevel(docId, userId, 'admin')
     const [row] = await this.db
       .update(docs)
       .set({ isArchived: true, archivedAt: new Date(), archivedById: userId, updatedAt: new Date() })

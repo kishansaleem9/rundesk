@@ -1228,6 +1228,8 @@ Re-aimed at the moved rule, each compiled: `td-bin-1`, `tel-1..4`, `tsl-2` and `
 - `cfa-4`'s anchor now holds the define rule.
 - `cfa-2` claims the values read, since setting one is now also refused by the write rule's own read check.
 
+*Break run, lane 1 (`d8471cf`):* `fwl-1..6`, 6 of 6 reddened on a green baseline (5/5). The re-aims all reddened too, 9 of 9: `tel-1..4`, `tsl-2`, `pml-3`, `td-bin-1` (3 of `task-depth`'s 91), and `cfa-2` on the values read and `cfa-4`.
+
 Regression on lanes 2 to 5: the 15 suites that touch custom fields, and 15 that write tasks through the moved rule (`task-edit-levels`, `task-space-levels`, `task-boundaries`, `project-member-levels`, `task-depth` with its bin checks, `task-menu`, `task-merge`, `task-delete`, `task-header-status`, `task-sheet-capabilities`, `task-rows-by-id`, `guest-space-level`, `video1-acceptance`, `video-regression`, `ui-sweep`). Result: 30/30. Under the sweep's load 29 of 30 passed the first time: `video1-acceptance` failed the same check as in the last sweep (the assistant's way forward), then passed on its own right after (18/18). It is recorded under `three-suites-fail-under-a-full-sweep`. API unit tests 202/202 for the task and custom-field modules. In CI (182).
 
 ### `found-25-sep/guest-guard-reads-the-account-role` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
@@ -1280,6 +1282,111 @@ ClickUp (search snippets): "Comment" lets a person "complete or mark complete as
 *Evidence, read not run:* `POST /workspaces/:id/calendar-sync/:provider/pull` asks only for membership. It overwrites the title, description and dates of every task linked to an event in the workspace's calendars (`calendar-sync.service.ts`).
 
 *To close:* measure what a member who may not change those tasks changes through it, and what it answers them. Then decide who may pull.
+
+### `found-25-sep/full-edit-enforced-nowhere` — **closed** (security, large; found closing `field-values-written-by-readers`, before letting guests edit)
+
+**"Full edit" is offered everywhere and asked for nowhere, so an Edit grant creates and deletes, and a new space's default says Edit where the frame says Full edit**
+
+*Evidence, measured on lane 5 (`d8471cf`):* a member in a view-only space deleted a task to the Trash (201, read back) through each kind of grant at "edit":
+- a task shared with them at Edit;
+- a space-member role of Edit;
+- a project role of Edit.
+
+Archiving with an Edit share went through (200). ClickUp allows that.
+
+*Read:*
+- No API rule asks for `admin` (Full edit). `grep` finds no `required: 'admin'` and no `spaceLevelReaches(…, 'admin')`.
+- The share panel says "`admin` is ClickUp's 'Full edit' — the only level that may delete the item" (`share-panel.tsx`), and so does the permissions spec (`docs/share-and-permissions-spec.md`): "Full edit → our `admin`", "Edit … cannot delete the item", "public locations default to full edit".
+- The create gate's comment says the opposite: "`admin` on this ladder is the rung that may re-share an object" (`container-access.ts`). So does the spaces schema: "ClickUp's 'Full edit' is this ladder's `edit`".
+- Frame `06:52` shows the space wizard's default as **Full edit**. The wizard preselects Edit (`create-space-wizard.tsx`, `useState('edit')`), and the column defaults to `edit`.
+
+ClickUp (help centre, "Permissions in detail", search snippets): Edit changes every task and subtask (status, assignees, title, ClickApps), removes attachments, archives, moves, merges and duplicates. Full edit adds creating tasks and subtasks, adding attachments and deleting.
+
+*Closed, 25 September:*
+- **A space is Full edit unless told otherwise.** The column defaults to `admin`, the API falls back to it, and the wizard preselects it (frame `06:52`). Migration 0164 moves every existing `edit` default to `admin`. Those spaces always behaved as Full edit, so nothing their members may do changes.
+- **Creating in a location asks Full edit**: tasks, lists, projects, folders, forms and docs (`assertCanCreateInSpace`). So do the spaces the "+" and the Move picker offer (`/writable`, `move-targets`).
+- **Deleting asks Full edit.** This covers a task sent to the Trash (the write rule's new `full` rung), a list, project or folder (the container rule's `delete`), and a doc. Changing and archiving keep asking Edit.
+- **A refusal says what was refused**: "does not allow adding a task", "deleting its tasks", "deleting this list" (`assertSpaceLevel`'s `act`). Before, every refusal said "changing", which an Edit holder may do.
+- **The task sheet** reads a fourth answer, `full`, from `/capabilities`. Its menu draws Delete, and its subtask form, only with Full edit.
+- **The stale reasons are corrected**: the schema's "Full edit is `edit`", the create gate's "`admin` is the re-share rung" (sharing asks `edit`), the container rule's "`edit` for both", and the task rule's "Edit … deleting".
+- **Spaces are listed in the order they were made.** `GET /spaces/workspace/:id` had no ORDER BY, so the sidebar, the Move picker and every space picker drew spaces in the order Postgres stored the rows. An UPDATE moves a row: renaming a space could move it, and 0164 would have reshuffled every workspace's sidebar. It did so to lane 4's, which put an empty leftover space first and broke every suite that builds its fixture in the first space.
+
+The new suite `full-edit-levels`, 8 checks, each read back by SQL:
+- the default (API, stored, and the wizard's own preselection);
+- a space whose default is Edit beside a Full edit one;
+- grants at Edit (a task share, a space role, a project role) beside a share at Full edit;
+- what each refusal says;
+- the sheet's menu and `/capabilities`;
+- the "+" and the Move picker;
+- deleting a list of one's own;
+- a doc shared at Edit and at Full edit.
+
+Results:
+- Before (lane 1, `d8471cf`, unmigrated): 0 of 8.
+- After: 8/8.
+
+`fel-1..11`, each compiled. Each undoes one rule:
+- the default, or the wizard, back to Edit;
+- adding, deleting a task, the Full edit rung, deleting a container, or deleting a doc asking Edit again;
+- the sheet's Delete drawn for Edit;
+- `/writable` at Edit;
+- adding said as "changing";
+- the sheet's `full` taken from the Edit rule.
+
+Re-aimed, each compiled: `dwl-7`, `sdp-2`, `-4`, `-5`, `-9` and `-19`, `space-default-permission-1`, `tsc-1` and `task-delete-1`.
+
+*Suites restated for the new model, none weakened.* Each asked Edit to make or delete something:
+- `task-boundaries` and `hook-portal-access` build their spaces at Full edit.
+- `guest-space-level` and `guest-create-menu` give the guest Full edit where it makes lists, and say so.
+- `project-member-levels` check 3 has an Edit role that changes the task and makes none, beside a Full edit role that makes one.
+- `space-default-permission` keeps its Edit space for renaming, and makes and moves things in a new Full edit space. Its Move-picker check asserts the Full edit space survives.
+
+The patches quoting the changed sentences were updated with them.
+
+Regression, a full sweep of all 189 suites on lanes 2 to 5 after 0164 was applied to their databases: 175 passed.
+- Ten of the fourteen failures died in the shared fixture on lane 4. The migration's UPDATE had reordered lane 4's spaces, which is the missing ORDER BY above.
+- `guest-create-menu` still gave its guest Edit to make lists, and was restated.
+- After the ordering fix all fourteen ran again with `full-edit-levels`, and eleven passed.
+- `a61-meeting-record`, `list-empty-states`, `addressability-live` and `chat-message-actions` failed under load, on different checks each time. Each passed on its own right after (25/25, 23/23, 28/28, 73/73), and they are recorded under `three-suites-fail-under-a-full-sweep`.
+
+All 190 pass: the 189 and `full-edit-levels`. In CI (183).
+
+*Not changed, recorded:*
+- ClickUp's Full edit also "adds attachments". Here adding one asks Edit, as before.
+- Duplicating a task makes one, so it asks Full edit; ClickUp's Edit may duplicate.
+- A doc's pages still ask Edit.
+- Lane databases were migrated by hand (lanes 1 to 5), since the lanes build their schema with `push` (`lane-databases-drift-from-the-migrations`).
+
+*Found beside it:*
+- The list page offers its add row and inline edits to anybody who can open the list (`found-25-sep/list-page-offers-refused-edits`).
+- A subtask's "Delete" archives it (`found-25-sep/subtask-delete-archives`).
+- The sweep fixture helper walks every space to pick a workspace, then builds in the first space whatever it holds (`found-25-sep/fixture-builds-in-a-space-it-did-not-check`).
+
+### `found-25-sep/list-page-offers-refused-edits` — open, visible bug, medium (found closing `full-edit-enforced-nowhere`)
+
+**The list page offers its add row and its inline edits to anybody who can open the list**
+
+*Evidence, read not run:* the list page (`app.$workspaceId.$spaceId.$projectId.$listId.tsx`) creates tasks and changes their fields inline, and asks nothing about what the reader may do: no `useCreatable`, no capabilities. `task-sheet-offers-refused-edits` closed this for the sheet, and `view-only-space-menus` for the space's "+". A view-only or comment-only reader, or one whose Edit adds nothing, is offered the add row and the inline status, dates and assignees, and each is refused (403) after it is used.
+
+*To close:*
+- Measure a view-only, a comment-only and an Edit reader on the list page.
+- Draw the add row by the answer `/writable` gives for the list's space, and the inline edits by what the list's reader may change.
+
+### `found-25-sep/subtask-delete-archives` — open, visible bug, small (found closing `full-edit-enforced-nowhere`)
+
+**A subtask's "Delete" in the task sheet archives it**
+
+*Evidence, read not run:* the subtask row's "Delete" (`common.delete`) calls `DELETE /tasks/:id`, which is Archive. The task's own menu keeps the two apart (Archive, then Delete to the Trash), and the subtask row says Delete and archives.
+
+*To close:* decide it as the task menu does. Either offer Archive and Delete on the row, or call it Archive. Then check which one happened.
+
+### `found-25-sep/fixture-builds-in-a-space-it-did-not-check` — open, test tooling, small (found closing `full-edit-enforced-nowhere`)
+
+**The sweep fixture picks a workspace by walking every space, then builds in the first space whatever it holds**
+
+*Evidence:* `pickWorkspace` (`test/e2e/lib/fixture.mjs`) accepts a workspace when any of its spaces has a project with a list. `ensureSweepFixture` then takes `spaces[0]` and throws "space has no projects" when that one is empty. On lane 4 a space left by an interrupted `space-default-permission` run came first, and nine suites died before their first check. The two helpers answer one question two ways.
+
+*To close:* one walk for both, so the fixture builds where the workspace was picked for. A leftover empty space should not end a run.
 
 ### `found-24-sep/sprints-open-to-any-member` — **closed** (security, HIGH; found measuring the last four reports of `workspace-reads-skip-the-container-rule`)
 
@@ -1595,6 +1702,7 @@ Each is its own question.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
+- `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 

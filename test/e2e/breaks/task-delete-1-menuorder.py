@@ -2,6 +2,7 @@
 # measured gap goes sharply negative.
 #
 # Re-aimed 25 September: the line reads the sheet's capabilities now (`task-sheet-offers-refused-edits`).
+# Re-aimed 25 September: Delete is drawn with Full edit now (`full-edit-enforced-nowhere`).
 # Reddens: task-delete: "the menu draws Archive and Delete as adjacent rows, Delete under Archive"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
@@ -16,7 +17,7 @@ archive = """                      {caps.edit && (
                         </DropdownMenuItem>
                       )}
 """
-delete = """                      {caps.edit && (
+delete = """                      {caps.full && (
                         <DropdownMenuItem
                           data-testid="task-menu-delete"
                           onSelect={confirmDelete}

@@ -121,7 +121,9 @@ try {
     cleanup.push(() => A(`/workspaces/${id}`, { method: 'DELETE' }))
     return id
   }
-  const space = (workspaceId, label, defaultPermission = 'edit') =>
+  // Full edit unless told otherwise, as a space is: Edit changes and archives
+  // and makes nothing (`found-25-sep/full-edit-enforced-nowhere`).
+  const space = (workspaceId, label, defaultPermission = 'admin') =>
     make('/spaces', { workspaceId, name: `${TAG} ${label}`, defaultPermission }, `space ${label}`)
   const project = (spaceId, label) => make('/projects', { spaceId, name: `${TAG} ${label}` }, `project ${label}`)
   const list = (projectId, label) => make('/lists', { projectId, name: `${TAG} ${label}` }, `list ${label}`)

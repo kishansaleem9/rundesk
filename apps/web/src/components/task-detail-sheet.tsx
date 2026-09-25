@@ -518,12 +518,14 @@ function isNotWired(err: unknown): boolean {
  *   progress — its status and assignees (an assignee in a comment-only space);
  *   comment  — a comment.
  */
-type TaskCaps = { edit: boolean; progress: boolean; comment: boolean }
-const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true }
-const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false }
+/** `full` is Full edit: deleting the task, and adding a subtask (`found-25-sep/full-edit-enforced-nowhere`). */
+type TaskCaps = { edit: boolean; progress: boolean; comment: boolean; full: boolean }
+const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true, full: true }
+const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false, full: false }
 const TaskCapsContext = createContext<TaskCaps>(CAPS_ALL)
 const isTaskCaps = (x: unknown): x is TaskCaps =>
   !!x && typeof (x as TaskCaps).edit === 'boolean' && typeof (x as TaskCaps).progress === 'boolean' && typeof (x as TaskCaps).comment === 'boolean'
+  && typeof (x as TaskCaps).full === 'boolean'
 const useTaskCaps = () => useContext(TaskCapsContext)
 
 function NotWiredNote({ children }: { children?: React.ReactNode }) {
@@ -1854,7 +1856,7 @@ export function TaskDetailSheet({
                         thirty days). Two rows only earn their place by being
                         two actions.
                       */}
-                      {caps.edit && (
+                      {caps.full && (
                         <DropdownMenuItem
                           data-testid="task-menu-delete"
                           onSelect={confirmDelete}
@@ -4183,7 +4185,7 @@ function SubtasksPanel({
         </ul>
       )}
 
-      {caps.edit && (
+      {caps.full && (
       <form
         className="flex gap-2 pt-1"
         onSubmit={(e) => {

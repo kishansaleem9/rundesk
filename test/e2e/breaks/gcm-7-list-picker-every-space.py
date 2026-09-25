@@ -1,6 +1,6 @@
 # THE LIST FORM'S SPACE PICKER NAMES EVERY SPACE A GUEST CAN SEE AGAIN,
 # and one they only pass through refuses the list.
-# Reddens: guest-create-menu: "the List form offers the guest the space to edit and not the one they pass through — a member is offered both"
+# Reddens: guest-create-menu: "the List form offers the guest the space with Full edit and not the one they pass through — a member is offered both"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "  }).data ?? []).filter((s) => CREATE_TYPES.some((ty) => ty.value === 'list' && creatable(ty, s.id)))\n"

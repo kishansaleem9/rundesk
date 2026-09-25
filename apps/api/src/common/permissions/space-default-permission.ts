@@ -336,6 +336,13 @@ export async function assertSpaceLevel(
     kind: string
     /** The item and the containers above it, for a guest's own shares (`WithinStep`). */
     within?: WithinStep[]
+    /**
+     * What the refusal says was refused: "changing its" (the default),
+     * "adding a" for a new one, "deleting this" / "deleting its". Edit changes what is there and
+     * does not add or delete, so "does not allow changing" would be false for
+     * it (`found-25-sep/full-edit-enforced-nowhere`).
+     */
+    act?: string
   },
 ): Promise<void> {
   const resolved = await resolveSpaceLevel(db, params)
@@ -345,11 +352,11 @@ export async function assertSpaceLevel(
     resolved.source === 'guest-default'
       ? `Nothing here is shared with you, and a guest changes only what is shared with them`
       : resolved.source === 'item-share'
-        ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+        ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow ${params.act ?? 'changing its'} ${params.kind}`
         : resolved.source === 'project-member'
-          ? `Your access to this project is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+          ? `Your access to this project is "${LEVEL_LABEL[resolved.level]}", which does not allow ${params.act ?? 'changing its'} ${params.kind}`
           : resolved.source === 'space-default'
-            ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-            : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
+            ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow ${params.act ?? 'changing its'} ${params.kind}`
+            : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow ${params.act ?? 'changing its'} ${params.kind}`,
   )
 }
