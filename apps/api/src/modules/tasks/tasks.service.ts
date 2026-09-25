@@ -800,13 +800,19 @@ export class TasksService {
    * that the one they guessed exists somewhere else, which is the enumeration
    * this check is closing.
    *
-   * Read access and not write: hanging a task under a parent does not edit the
-   * parent's own fields, but it does put the new subtask in front of everyone
-   * who opens it, and nobody should be able to attach work to a task in a
-   * private space or project they cannot see.
+   * AND ONE THEY MAY ADD A SUBTASK TO — Full edit where the parent lives, the
+   * level the sheet already asks before it offers "Add subtask" (`caps.full`),
+   * as ClickUp's Full edit "creates tasks and subtasks"
+   * (`found-25-sep/read-only-tasks-blocked-and-parented`). This asked the read
+   * rule alone, reasoning that a subtask edits none of the parent's own
+   * fields; measured on lane 3, a member made a subtask under the admin's task
+   * in a view-only space (201), and moved their own task there (200). A
+   * subtask counts toward its parent's progress and closes with it: it is
+   * part of the parent, and the parent's rule decides it.
    */
   private async assertParentInWorkspace(parentTaskId: string, workspaceId: string, actorId: string) {
     await this.assertTaskReference(parentTaskId, workspaceId, actorId, 'Parent task not found')
+    await this.assertTaskWriteAccess(parentTaskId, actorId, { level: 'full' })
   }
 
   /**
@@ -5891,6 +5897,15 @@ export class TasksService {
     // assertTaskReference.
     const access = await this.assertTaskWriteAccess(taskId, actorId)
     await this.assertTaskReference(relatedTaskId, access.workspaceId, actorId, 'Related task not found')
+    /*
+     * BLOCKING ANOTHER TASK IS A CHANGE TO IT: it cannot be closed while its
+     * blocker is open. So the task this blocks asks its own write rule
+     * (`found-25-sep/read-only-tasks-blocked-and-parented`); measured on lane
+     * 3, a member blocked the admin's task in a view-only space (201), and the
+     * admin then could not close it (400). A task of theirs may still wait on
+     * one they only read — `blocked_by` and `related_to` bind nobody else's.
+     */
+    if (type === 'blocks') await this.assertTaskWriteAccess(relatedTaskId, actorId)
     if (type === 'blocks' || type === 'blocked_by') {
       const blocker = type === 'blocks' ? taskId : relatedTaskId
       const blocked = type === 'blocks' ? relatedTaskId : taskId

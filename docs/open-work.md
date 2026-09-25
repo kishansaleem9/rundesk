@@ -1355,7 +1355,7 @@ Regression on lanes 2 to 5: the 14 suites that send mail or comment on tasks (`m
 
 *Not changed:* a new task by mail to a list's alias still comes from anybody who has the address, put down as its sender if they are a member and as the alias's maker otherwise. The alias is the list's secret, as a form's link is, and that is the feature. The service's comment rule and `taskCommentAllowed` state the same chain; the first was left as it is because two break patches read it.
 
-### `found-25-sep/read-only-tasks-blocked-and-parented` — open, behaviour, small (found closing `task-rows-changed-by-id-anywhere`)
+### `found-25-sep/read-only-tasks-blocked-and-parented` — **closed** (integrity, small; found closing `task-rows-changed-by-id-anywhere`)
 
 **A task one may only read can be blocked, or given a subtask, from a task one may edit**
 
@@ -1364,6 +1364,37 @@ Regression on lanes 2 to 5: the 14 suites that send mail or comment on tasks (`m
 - A subtask can be hung under a parent you may only read.
 
 *To close:* research ClickUp's rule for dependencies and subtasks across levels. Then a change that alters another task asks that task's rule.
+
+*Measured, lane 3, on `e09125a`:*
+- A member marked their own task as blocking the admin's task in a view-only space (201). The admin then could not close their own task (400, "blocked by open dependencies"): a reader could stop a task being completed.
+- The same member moved their task under the admin's read-only task as a subtask (200).
+- They made a new subtask under it (201).
+
+ClickUp (help centre, "Intro to Dependency Relationships", "Permissions in detail", search snippets):
+- Creating a dependency takes edit permission, guests' included.
+- Full edit creates tasks and subtasks, and the sheet here already asks it before offering "Add subtask" (`caps.full`).
+
+*Closed, 25 September:*
+- **A task that another blocks asks its own write rule.** A task cannot be closed while its blocker is open, so blocking it is a change to it. A task may still wait on one its owner only reads (`blocked_by`), and be related to it (`related_to`): neither binds anybody else's task.
+- **A subtask's parent asks Full edit where it lives**, both for a new subtask and for a task moved under it. The service said it asked the read rule alone because a subtask edits none of the parent's own fields. But a subtask counts toward its parent and closes with it, and the sheet asked Full edit before offering one; that reason went with the rule.
+
+The new suite `other-task-rules`, 2 checks, read back by SQL:
+- blocking the admin's read-only task, and waiting on it;
+- subtasks under a read-only parent, under one at Edit, and under one at Full edit.
+
+Results:
+- Before (lane 5, `e09125a`): 0 of 2.
+- After: 2/2, on lanes 5 and 4.
+
+`otr-1..4`, each compiled: blocking asking nothing of the other task; waiting asking it too; a parent asked for reading, as before; a parent asked Edit.
+
+*Break run:* queued on lane 1 after the commit (`plan-otr`).
+
+Regression on lanes 2 to 5: the 20 suites that add dependencies or subtasks, read them, or build on subtasks, and the new suite. Result: 21/21.
+- Under the sweep's load, `task-menu` found its menu's rows late, and `task-depth` a tag's removal, both as recorded before.
+- `task-depth` passed alone (91/91). `task-menu` passed on lane 3 (37/37); alone on lane 2, while lane 1's break runs held the machine, Send email to task was once more late.
+
+In CI (194).
 
 ### `found-25-sep/assigned-checklist-items-need-edit` — **closed** (behaviour, small; found closing `task-rows-changed-by-id-anywhere`)
 
@@ -2064,6 +2095,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `task-menu` and `task-depth`, 25 September, the sweep for `read-only-tasks-blocked-and-parented`: the menu's rows late, and the tag's removal. `task-depth` passed alone (91/91). `task-menu` passed on lane 3 (37/37), after once more missing Send email to task alone on lane 2 while lane 1's break runs held the machine.
 - `request-access` and `space-default-permission`, 25 September, the sweep for `sharing-asks-the-maker-not-the-level`. `request-access` did not find its notification among the admin's latest 50 rows, which the other suites were filling. `space-default-permission` was refused a signup by the rate limit (429) before its first check. Each passed alone, 9/9 and 36/36.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
