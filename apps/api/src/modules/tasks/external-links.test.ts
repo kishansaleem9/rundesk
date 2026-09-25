@@ -357,12 +357,15 @@ describe('TasksService external links — CRUD + access', () => {
     )
   })
 
-  it('denies a guest (access check)', async () => {
+  it('denies a guest with nothing shared (access check)', async () => {
+    // A guest changes what is shared with them, at its level
+    // (`found-25-sep/guests-edit-no-shared-task`); with nothing shared the read
+    // rule answers first, as it does a foreign id.
     const { db } = makeCaptureDb([CTX, [{ role: 'guest' }]])
     const svc = makeService(db)
     await assert.rejects(
       () => svc.addExternalLink('t1', 'guest-user', { url: 'https://github.com/a/b/pull/1' }),
-      /guest/i,
+      /task not found/i,
     )
   })
 

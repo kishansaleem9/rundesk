@@ -1,4 +1,4 @@
-import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common'
+import { ConflictException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -92,7 +92,16 @@ export async function assertTaskWritable(
   if (!membership) throw new NotFoundException('Workspace not found')
 
   if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
-  if (membership.role === 'guest') throw new ForbiddenException('Guests cannot edit tasks')
+  /*
+   * A GUEST CHANGES WHAT IS SHARED WITH THEM, AT ITS LEVEL — by the same rule,
+   * not a refusal of their own (`found-25-sep/guests-edit-no-shared-task`).
+   * Every guest was refused here before any share was read, so a task or list
+   * shared with one to edit was read-only to them, while the create and comment
+   * gates read the same shares. ClickUp gives a guest the level of the share:
+   * Edit changes a task, Comment comments and completes one assigned to them,
+   * View nothing. The read rule below keeps a guest to what is shared with them
+   * (not found otherwise), and `resolveSpaceLevel` reads their shares.
+   */
 
   /*
    * THE SPACE'S LEVEL DECIDES, AS IN CLICKUP — not who made the task or is on

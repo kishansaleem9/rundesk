@@ -447,11 +447,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs ONE HUNDRED AND EIGHTY-THREE — every suite in the repo but the
+    # The job now runs ONE HUNDRED AND EIGHTY-FOUR — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 201 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183.
+    # that is about 202 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184.
     #
     # The limit is 210, raised from 180 when the job reached 153 suites: about
     # 168 minutes plus setup against 180 left a margin under five percent. That
@@ -2300,6 +2300,16 @@ jobs:
       - name: Full edit makes and deletes, and is a space's default
         if: '!cancelled()'
         run: node test/e2e/full-edit-levels.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # A guest changes a task shared with them at the level it was shared at —
+      # Edit changes it, Comment and assigned moves its status, View nothing —
+      # and a task shared with nobody is not theirs; the sheet draws the same.
+      - name: A guest changes what is shared with them, at its level
+        if: '!cancelled()'
+        run: node test/e2e/guest-task-edits.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

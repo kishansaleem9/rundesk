@@ -1126,13 +1126,51 @@ The new suite `task-sheet-capabilities`, 5 checks: a member on four of the admin
 
 *Not changed, recorded:* the Time tab, the AI bar's actions, a task's linked work, adding somebody else as a watcher, and Share, Save as template and reminders keep their own rules and are drawn as before. A subtask's row is drawn by its parent's answer; the subtask's own answer (its own assignee, say) is not asked per row.
 
-### `found-25-sep/guests-edit-no-shared-task` — open, behaviour, small (found closing `task-edits-narrower-than-clickup`)
+### `found-25-sep/guests-edit-no-shared-task` — **closed** (behaviour, small; found closing `task-edits-narrower-than-clickup`)
 
 **A guest cannot change a task shared with them to edit**
 
-*Evidence, read not run:* `assertTaskWriteAccess` refuses every guest ("Guests cannot edit tasks") before any share is read. ClickUp gives a guest the level of the share: a task, list or folder shared with them to edit lets them edit its tasks. Rundesk's own share levels (`object_shares`, read by `resolveSpaceLevel`'s `within` for a guest) are asked by the create gate and not by the write.
+*Measured, lane 5, on `4f51162`:* the new suite below, 0 of 5. A guest with a task shared at Edit, and with a list shared at Edit, renamed neither: 403, "Guests cannot edit tasks". An assignee with a task shared at Comment could not move its status. The sheet drew them nothing to change. The task shared with nobody answered 403 with the same sentence, which told the guest it exists.
 
-*To close:* a guest's change to a task asks the level of their share on the task or a container above it, and "view" or "comment" refuse as they do a member. Measure a guest with a task shared to view, to comment and to edit.
+The write rule refused every guest before any share was read. The create gate and the comment gate read the same shares (`guest-space-level`).
+
+ClickUp (help centre, "Use ClickUp as a guest", "Guest-type user roles", search snippets): a guest holds the level of what is shared with them.
+- Edit updates a task's details and changes its status and assignees.
+- Comment comments, and completes a task assigned to them.
+- View changes nothing.
+- Deleting takes Full edit (`full-edit-enforced-nowhere`).
+
+*Closed, 25 September:*
+- The flat refusal is gone from `assertTaskWritable`. A guest's change runs the same rule as a member's.
+- The read rule comes first: a guest reads only what is shared with them, and anything else is not found.
+- Then the level their shares give, read by `resolveSpaceLevel`'s guest branch: the task, its list, its project, its folder. The refusal names the share ("What is shared with you here is "View only"…").
+- The sheet draws a guest what the answer allows, since `/capabilities` asks the same rule.
+
+The new suite `guest-task-edits`, 5 checks: a guest with tasks shared at View, at Comment, at Comment and assigned, at Edit, a list shared at Edit, and one task shared with nobody. What they change is read back by SQL.
+- Before: 0 of 5.
+- After: 5/5.
+
+`gte-1`, `-2`, `-4` and `-5`, each compiled: the flat refusal back, guests skipping the read rule, guests changing at any share, and a guest never counted as the assignee they are.
+
+Regression on lanes 2 to 5, 20/20:
+- the six guest suites (`guest-task-edits`, `guest-space-level`, `guest-read-scope`, `guest-create-menu`, `guest-chat-scope`, `guest-canvas-scope`);
+- the suites that write tasks by a level (`task-edit-levels`, `task-space-levels`, `task-boundaries`, `task-sheet-capabilities`, `task-rows-by-id`, `field-writes-by-level`, `full-edit-levels`, `project-member-levels`);
+- `credential-reads`, `hook-portal-access`, `doc-write-levels`, `task-menu`, `task-delete` and `task-depth`.
+
+The external-links unit test that expected a guest to be refused for being one now expects the read rule's not-found. API unit tests 1649/1649. In CI (184).
+
+*Not changed:* a guest still makes no task (`Guests cannot create tasks`), whatever they hold (`found-25-sep/guests-with-full-edit-make-no-tasks`).
+
+### `found-25-sep/guests-with-full-edit-make-no-tasks` — open, behaviour, small (found closing `guests-edit-no-shared-task`)
+
+**A guest with Full edit on a list cannot add a task to it**
+
+*Evidence, read not run:* `createTask` refuses every guest ("Guests cannot create tasks") before the create gate reads their shares. So does the Create menu, which offers a guest no task (`guest-create-menu`, `found-24-sep/create-menu-offers-guests-tasks`). ClickUp ("Permissions in detail"): Full edit creates tasks and subtasks, and a guest may hold Full edit on what is shared with them.
+
+*To close:*
+- Research whether ClickUp lets a guest make tasks with Full edit on every plan.
+- If it does: a guest's new task asks the create gate with their shares, as a list does, and the Create menu offers a task where `/writable` says yes.
+- Measure a guest at Edit and at Full edit on a list.
 
 ### `found-25-sep/task-rows-changed-by-id-anywhere` — **closed** (security, HIGH; found by reading every write that hangs off a task, route by route, after closing `task-sheet-offers-refused-edits`)
 
