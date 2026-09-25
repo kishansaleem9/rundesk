@@ -16,6 +16,12 @@ import { SearchService, meiliSort } from './search.service'
  * the result set — without reproducing SQL execution. Real value-narrowing is
  * covered by the runtime Postgres check.
  */
+/** A query's own predicates, on the query: a subquery handed to another query
+ *  as a value is rendered as a parameter, and this is how a test finds what it
+ *  asks — the reach of THAT query, not one another branch built. */
+const OWN = Symbol('the predicates this query was built with')
+type Predicate = { table: string; condition: unknown; executed?: boolean }
+
 function makeDb(tableRows: Record<string, unknown[]>) {
   const fromTables: string[] = []
   // Every WHERE predicate, paired with the table it was built against, so a
@@ -64,6 +70,7 @@ function makeDb(tableRows: Record<string, unknown[]>) {
         for (const entry of own) entry.executed = true
         return Promise.resolve(rows).then(resolve, reject)
       },
+      [OWN]: own,
     }
     return c
   }
@@ -83,6 +90,10 @@ function sqlFor(
   const q = dialect.sqlToQuery(hit.condition as never)
   return { sql: q.sql, params: q.params as unknown[] }
 }
+
+/** The predicates of the subqueries a query's parameters carry. */
+const subqueriesOf = (params: unknown[]): Predicate[] =>
+  params.flatMap((p) => (p as { [OWN]?: Predicate[] } | null)?.[OWN] ?? [])
 
 const config: any = { get: () => undefined }
 
@@ -720,21 +731,22 @@ describe('SearchService holds Meili hits to the read rules', () => {
     await svc.search('w1', 'u1', 'probe', 10, {})
     const q = sqlFor(wheres, 'tasks')
     assert.ok(q, 'the task hits were never checked against the database')
-    assert.match(q.sql, /"tasks"\."list_id" in/, `no reach rule on the task hits: ${q.sql}`)
     assert.match(q.sql, /"tasks"\."visibility"/, `no private-item rule on the task hits: ${q.sql}`)
     // The reach is a subquery of the lists the searcher may open: the space and
     // project rules, and the list's own privacy, which the space and project
     // rule alone left out (`found-24-sep/private-lists-skipped-by-task-reads`).
-    // The list-name search is its own read and asks the list rule itself; the
-    // reach is the lists query that asks no words.
+    // Read from THIS query's own subqueries. Read from every lists query the
+    // search built, it passed with the task hits' reach taken out: the comment
+    // search builds a reach of its own, and the guest rule's clause says
+    // `"tasks"."list_id" in` too (`found-25-sep/search-reach-test-passes-without-the-reach`).
     // The guest rule's own subqueries on lists ask only what is shared with the
-    // reader (`guest-reach.ts`) and hold no visibility rule; every query that
+    // reader (`guest-reach.ts`) and hold no visibility rule; every one that
     // does hold one must hold all three.
-    const reaches = wheres
+    const reaches = subqueriesOf(q.params)
       .filter((w) => w.table === 'lists' && w.condition != null)
       .map((w) => dialect.sqlToQuery(w.condition as never).sql)
-      .filter((sql) => !/ilike/i.test(sql) && /"visibility"/.test(sql))
-    assert.ok(reaches.length > 0, 'no reach was built for the task hits')
+      .filter((sql) => /"visibility"/.test(sql))
+    assert.ok(reaches.length > 0, `no reach on the task hits: ${q.sql}`)
     for (const reach of reaches) {
       assert.match(reach, /"lists"\."visibility"/, `the reach has no list rule: ${reach}`)
       assert.match(reach, /"spaces"\."visibility"/, `the reach has no space rule: ${reach}`)

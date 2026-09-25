@@ -1497,6 +1497,8 @@ The new suite `dock-defaults`, 3 checks: a new member's dock after three pages (
 
 `dkd-1..3`, each compiled: the insert, the clear, and the web reading an empty choice as none. Regression on lane 5, 12/12: `dock-defaults`, `panel-collapse`, `settings-role-grants`, `sidebar-sections`, `guest-create-menu`, `role-permissions-web`, `video1-fast-items`, `addressability-live`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
 
+*Break run, lane 1 (685ab9d):* `dkd-1..3`, 3 of 3 reddened, on a green baseline (3/3).
+
 ### `found-24-sep/view-only-space-offers-members-what-it-refuses` — **closed** (visible bug, small; found closing `create-menu-offers-guests-what-they-cannot-make`)
 
 **A view-only space's "+" offers a member a list, a task, a folder and the rest, and the API refuses each**
@@ -1552,6 +1554,14 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 *Evidence, read not run:* `fleet-restart.sh` walks back to the newest migration with `ALTER TABLE … ADD COLUMN IF NOT EXISTS`, and checks the lane has that column. 0162 creates `outbound_email_messages` and adds no column, so the check stayed on 0160's `folders.description`. A lane without the new table would have been started, and 500'd on its first write to it. The patterns matched `[a-z_]+` too, so a table or column with a digit in its name could never be a witness.
 
 *Closed:* `newest_schema_witness` (lane-env.sh) names the newest migration that adds a column OR creates a table, walking past data-only ones. `fleet-restart.sh` checks a table's existence when that is the witness. The patterns take digits. The new `check-schema-witness.sh` holds four cases (a table, a column past a data-only migration, nothing, and the script's wiring) and catches 4 of 4 mutations. In preflight and CI. 0162 was applied by hand to the pristine database and lanes 1 to 4.
+
+### `found-25-sep/search-reach-test-passes-without-the-reach` — **closed** (test tooling, small; found by preflight's unit claims)
+
+**Search's unit test for a task hit's reach passed with the reach taken out**
+
+*Evidence, measured:* preflight's unit-claims step, 25 September: `sst-2` (the Meili task hits lose `taskInReachFilter`) left `search.service.test.ts` green, 26 of 27 claims reddening. Every preflight before the guest read rule had it red. The test found the reach in the wrong places. It asked for `"tasks"."list_id" in` anywhere in the task query, and the guest rule's clause in `taskVisibilityFilter` says that too. It asked every lists query the search built for the three visibility rules, and the comment search builds a reach of its own. With the task hits' reach gone, both were still there.
+
+*Closed:* the test reads the reach from the task query's own subqueries. The fake database keeps each query's predicates on the query (a subquery reaches the outer query as a parameter), so the assertion asks what THAT query was built with. The clean tree passes, 47/47. With `sst-2` applied, "no reach on the task hits"; with `sst-3` (the reach without the list's rule), "the reach has no list rule". `check-unit-claims`: 27 of 27 redden.
 
 ### `suite-hygiene/branch-checker-confident-zero` — open, medium
 
