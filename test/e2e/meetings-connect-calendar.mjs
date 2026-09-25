@@ -14,7 +14,7 @@
  * calendar settings. Video 1's row: the Connect Calendar prompt shows "when no
  * calendar is connected". The empty state's sentence promised that connecting
  * one would bring the meetings here, and nothing reads a calendar into
- * "Upcoming" (`found-25-sep/meetings-upcoming-reads-no-calendar`).
+ * "Upcoming" (`found-25-sep/connected-calendars-read-by-nothing`).
  *
  * The dialog's page is an address now (`/calendar?settings=accounts`), and the
  * link goes there. Read for the admin and for a member, after a reload, and
@@ -97,12 +97,12 @@ try {
     const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
     const page = await ctx.newPage()
     page.asked = []
-    page.on('request', (req) => { if (/\/oauth\/start$/.test(new URL(req.url()).pathname)) page.asked.push(req.url()) })
+    page.on('request', (req) => { if (/\/calendar-sync\/connect\/[^/]+$/.test(new URL(req.url()).pathname)) page.asked.push(req.url()) })
     if (routed) {
       await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }], error: null }) }).catch(() => {}),
       )
-      await page.route((u) => /\/oauth\/start$/.test(u.pathname), (route) =>
+      await page.route((u) => /\/calendar-sync\/connect\/[^/]+$/.test(u.pathname), (route) =>
         route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { authUrl: 'about:blank#oauth' }, error: null }) }).catch(() => {}),
       )
     }

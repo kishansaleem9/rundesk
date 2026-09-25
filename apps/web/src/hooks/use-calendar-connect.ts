@@ -32,12 +32,17 @@ export function useCalendarConnect(workspaceId: string) {
   const canConnect = (provider: CalendarProvider): boolean | null =>
     providerStatus === undefined ? null : (providerStatus.find((p) => p.provider === provider)?.available ?? false)
 
+  /*
+   * THE PERSON'S OWN GRANT, not the workspace's: a calendar is a personal
+   * connection, asked of membership and written to this person's account alone
+   * (`found-24-sep/personal-calendar-connect-needs-integrations-manage`). The
+   * workspace's `oauth/start` asked `integrations.manage`, so a member was
+   * offered Connect and refused, and an admin's calendar became the
+   * workspace's. It lands back on the Accounts page, or says there why not.
+   */
   const connect = useMutation({
     mutationFn: (provider: CalendarProvider) =>
-      api<{ authUrl: string }>(
-        `/workspaces/${workspaceId}/integrations/connections/${provider}/oauth/start`,
-        { method: 'POST' },
-      ),
+      api<{ authUrl: string }>(`/workspaces/${workspaceId}/calendar-sync/connect/${provider}`, { method: 'POST' }),
     onSuccess: ({ authUrl }) => {
       window.location.href = authUrl
     },

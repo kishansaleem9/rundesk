@@ -14,9 +14,15 @@ export const Route = createFileRoute('/app/$workspaceId/calendar')({
   // The settings dialog's page, as an address: the Meetings page's "Connect
   // Calendar" leads to Accounts, where a calendar is connected. Whitelisted, so
   // an address naming no page opens nothing.
-  validateSearch: (search: Record<string, unknown>): { settings?: PlannerSettingsPage } => ({
+  // `calendarError`: why a calendar the person tried to connect was not, as the
+  // grant's callback sends them back — said on the Accounts page.
+  validateSearch: (search: Record<string, unknown>): { settings?: PlannerSettingsPage; calendarError?: string } => ({
     settings: (PLANNER_SETTINGS_PAGES as readonly string[]).includes(search.settings as string)
       ? (search.settings as PlannerSettingsPage)
       : undefined,
+    calendarError:
+      typeof search.calendarError === 'string' && search.calendarError.trim()
+        ? search.calendarError.trim().slice(0, 300)
+        : undefined,
   }),
 })

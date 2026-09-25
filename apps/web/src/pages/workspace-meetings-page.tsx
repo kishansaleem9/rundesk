@@ -214,7 +214,7 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
    * Video 1's row: the Connect Calendar prompt is there "when no calendar is
    * connected". It was there always, beside a sentence promising that a
    * connected calendar's meetings would show up here — and nothing reads a
-   * calendar into this list (`found-25-sep/meetings-upcoming-reads-no-calendar`).
+   * calendar into this list (`found-25-sep/connected-calendars-read-by-nothing`).
    */
   const { data: calendarAccounts } = useQuery({
     ...calendarAccountsQuery(workspaceId),

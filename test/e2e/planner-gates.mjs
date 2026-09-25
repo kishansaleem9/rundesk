@@ -81,14 +81,15 @@ try {
     page.on('request', (req) => {
       const u = req.url()
       if (/\/work-schedule|\/time-off/.test(u)) asked.push(new URL(u).pathname.split('/').pop())
-      if (/\/oauth\/start/.test(u)) asked.push('oauth/start')
+      // The person's own grant (`found-24-sep/personal-calendar-connect-needs-integrations-manage`).
+      if (/\/calendar-sync\/connect\//.test(u)) asked.push('oauth/start')
     })
     if (providersAvailable) {
       await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
         route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }], error: null }) }).catch(() => {}),
       )
       // Somewhere harmless to be sent: the page follows the consent address.
-      await page.route((u) => /\/oauth\/start$/.test(u.pathname), (route) =>
+      await page.route((u) => /\/calendar-sync\/connect\/[^/]+$/.test(u.pathname), (route) =>
         route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { authUrl: 'about:blank#oauth' }, error: null }) }).catch(() => {}),
       )
     }

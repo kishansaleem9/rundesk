@@ -84,6 +84,27 @@ export class IntegrationConnectionsController {
     return this.svc.getOAuthStartUrl(workspaceId, user.id, provider)
   }
 
+  /**
+   * §V2-14 — a person connects their OWN calendar, from the planner (its
+   * onboarding and its Accounts page). Asked of membership alone, guests
+   * included: ClickUp's calendar integrations are personal and private, and
+   * its guests and limited members use them. The grant is marked personal, so
+   * its callback writes this person's account and nothing of the workspace's
+   * (`found-24-sep/personal-calendar-connect-needs-integrations-manage`). The
+   * workspace's own connection stays the route above, and `integrations.manage`.
+   */
+  @ApiBearerAuth()
+  @UseGuards(JwtAuthGuard, WorkspaceMemberGuard)
+  @Post('workspaces/:workspaceId/calendar-sync/connect/:provider')
+  @ApiOperation({ summary: "Create an OAuth authorization URL for one person's own calendar" })
+  personalCalendarStart(
+    @Param('workspaceId') workspaceId: string,
+    @Param('provider') provider: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.svc.getOAuthStartUrl(workspaceId, user.id, provider, { personal: true })
+  }
+
   @Get('integrations/oauth/:provider/callback')
   @ApiOperation({ summary: 'OAuth callback for workspace integrations' })
   async oauthCallback(
@@ -95,7 +116,12 @@ export class IntegrationConnectionsController {
   ) {
     try {
       const result = await this.svc.handleOAuthCallback(provider, code, state, ip)
-      return reply.redirect(this.svc.getSuccessRedirect(result.workspaceId, result.provider), 302)
+      return reply.redirect(
+        result.personal
+          ? this.svc.getPersonalRedirect(result.workspaceId)
+          : this.svc.getSuccessRedirect(result.workspaceId, result.provider),
+        302,
+      )
     } catch (error: any) {
       /*
        * §V2-11 frame `18:39` — "Google gave us this error: …".
@@ -109,6 +135,11 @@ export class IntegrationConnectionsController {
        */
       const reason = error?.message ?? 'oauth_callback_failed'
       const ctx = state ? this.svc.peekState(state) : null
+      // A personal grant's failure is said on the person's own Accounts page;
+      // the workspace's calendar card is not theirs to write an error onto.
+      if (ctx?.personal) {
+        return reply.redirect(this.svc.getPersonalRedirect(ctx.workspaceId, reason), 302)
+      }
       if (ctx) {
         await this.svc.recordFailure(ctx.workspaceId, ctx.provider, reason).catch(() => undefined)
       }

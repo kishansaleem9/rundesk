@@ -156,7 +156,8 @@ try {
     const url = req.url()
     const reply = (data) => route.fulfill({ status: 200, contentType: 'application/json', body: envelope(data) })
     if (url.includes('/users/me')) return reply(USER)
-    const oauth = url.match(/\/integrations\/connections\/([^/]+)\/oauth\/start/)
+    // The person's own grant, not the workspace's (`found-24-sep/personal-calendar-connect-needs-integrations-manage`).
+    const oauth = url.match(/\/calendar-sync\/connect\/([^/?]+)/)
     if (oauth && req.method() === 'POST') {
       oauthStarts.push(oauth[1])
       /* An inert destination rather than an inert URL: the page assigns

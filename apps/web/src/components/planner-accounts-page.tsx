@@ -18,6 +18,7 @@
  * the same accounts are two places to keep in step for no gain.
  */
 
+import { useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, cn, toast } from '@rundesk/ui'
 import { CalendarPlus, Check, Trash2 } from 'lucide-react'
@@ -36,6 +37,10 @@ export function PlannerAccountsPage({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const accountsQuery = calendarAccountsQuery(workspaceId)
   const { canConnect, connect } = useCalendarConnect(workspaceId)
+  /* Why the calendar this person just tried to connect was not: the grant's
+   * callback sends them back here with it rather than onto the workspace's
+   * card in the App Center, which is not theirs. */
+  const { calendarError } = useSearch({ strict: false }) as { calendarError?: string }
 
   const query = useQuery(accountsQuery)
 
@@ -177,6 +182,15 @@ export function PlannerAccountsPage({ workspaceId }: { workspaceId: string }) {
         instead of replacing the first.
       */}
       <div className="space-y-1.5" data-testid="planner-account-add">
+        {calendarError && (
+          <p
+            role="alert"
+            className="rounded-md border border-red-500/30 bg-red-500/5 px-3 py-2 text-[12px] text-red-600 dark:text-red-400"
+            data-testid="planner-account-connect-error"
+          >
+            {t('planner.onboarding.connectFailed')} {calendarError}
+          </p>
+        )}
         <p className="inline-flex items-center gap-1.5 text-sm font-medium">
           <CalendarPlus className="h-3.5 w-3.5" />
           {t('plannerAccounts.add')}

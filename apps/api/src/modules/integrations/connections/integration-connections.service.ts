@@ -68,6 +68,8 @@ type ProviderAvailability = {
   available: boolean
   reason?: string
 }
+/** A grant's signed state. `personal`: a calendar connected by one person for themselves. */
+type OAuthState = { provider: Provider; workspaceId: string; userId: string; ts: number; personal?: true }
 
 @Injectable()
 export class IntegrationConnectionsService {
@@ -198,10 +200,18 @@ export class IntegrationConnectionsService {
     })
   }
 
-  async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string) {
+  /**
+   * `personal`: a calendar connected by one person for themselves, from the
+   * planner — marked in the signed state, so its callback writes their account
+   * and nothing of the workspace's. Only a calendar is connected that way.
+   */
+  async getOAuthStartUrl(workspaceId: string, userId: string, providerRaw: string, opts: { personal?: boolean } = {}) {
     const provider = this.assertProvider(providerRaw)
+    if (opts.personal && provider !== 'gcal' && provider !== 'outlook') {
+      throw new BadRequestException('Only a calendar is connected by one person for themselves')
+    }
     const cfg = this.getProviderConfig(provider)
-    const state = this.signState({ provider, workspaceId, userId, ts: Date.now() })
+    const state = this.signState({ provider, workspaceId, userId, ts: Date.now(), ...(opts.personal ? { personal: true as const } : {}) })
     const redirectUri = this.getRedirectUri(provider)
     const params = new URLSearchParams({
       client_id: cfg.clientId,
@@ -236,6 +246,44 @@ export class IntegrationConnectionsService {
     const redirectUri = this.getRedirectUri(provider)
     const token = await this.exchangeCode(cfg, code, redirectUri)
     const profile = await this.fetchProfile(provider, token.accessToken)
+
+    /*
+     * A PERSONAL GRANT IS THE PERSON'S ALONE
+     * (`found-24-sep/personal-calendar-connect-needs-integrations-manage`).
+     *
+     * ClickUp's calendar integrations are private — "No one else in your
+     * Workspace can access your Google Calendar through this integration" —
+     * and any member or guest may connect one. So a calendar connected from the
+     * planner writes the person's own account and nothing of the workspace's:
+     * not the connection row below, which the task push and pull run on and
+     * which is the admin's to set in the App Center. Not best-effort here,
+     * either: this row IS the connection.
+     */
+    if (payload.personal) {
+      await this.calendarAccounts.upsertFromOAuth({
+        userId: payload.userId,
+        workspaceId: payload.workspaceId,
+        provider,
+        externalAccountId: profile.id ?? '',
+        externalAccountEmail: profile.email,
+        accessToken: token.accessToken,
+        refreshToken: token.refreshToken,
+        tokenExpiresAt: token.expiresAt,
+        scopes: token.scopes,
+      })
+      await this.security.logAuditEvent({
+        workspaceId: payload.workspaceId,
+        actorId: payload.userId,
+        action: 'calendar_account.connected',
+        resourceType: 'calendar_account',
+        resourceId: provider,
+        // Without the account's address: it is the person's own calendar.
+        description: `Connected their own ${provider} calendar`,
+        metadata: { provider },
+        ipAddress,
+      })
+      return { workspaceId: payload.workspaceId, provider, personal: true }
+    }
 
     const existing = await this.db
       .select()
@@ -332,6 +380,7 @@ export class IntegrationConnectionsService {
     return {
       workspaceId: payload.workspaceId,
       provider,
+      personal: false,
     }
   }
 
@@ -546,13 +595,13 @@ export class IntegrationConnectionsService {
     throw new BadRequestException(`Unsupported provider: ${providerRaw}`)
   }
 
-  private signState(payload: { provider: Provider; workspaceId: string; userId: string; ts: number }) {
+  private signState(payload: OAuthState) {
     const body = Buffer.from(JSON.stringify(payload)).toString('base64url')
     const signature = createHmac('sha256', this.getStateSecret()).update(body).digest('base64url')
     return `${body}.${signature}`
   }
 
-  private verifyState(state: string): { provider: Provider; workspaceId: string; userId: string; ts: number } {
+  private verifyState(state: string): OAuthState {
     const [body, signature] = state.split('.')
     if (!body || !signature) throw new UnauthorizedException('Invalid OAuth state')
     const expected = createHmac('sha256', this.getStateSecret()).update(body).digest()
@@ -560,12 +609,7 @@ export class IntegrationConnectionsService {
     if (given.length !== expected.length || !timingSafeEqual(given, expected)) {
       throw new UnauthorizedException('Invalid OAuth signature')
     }
-    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as {
-      provider: Provider
-      workspaceId: string
-      userId: string
-      ts: number
-    }
+    const parsed = JSON.parse(Buffer.from(body, 'base64url').toString('utf8')) as OAuthState
     return parsed
   }
 
@@ -777,14 +821,28 @@ export class IntegrationConnectionsService {
    * tell it. Signature-checked all the same: an unsigned state must not be
    * able to write an error message onto somebody else's workspace.
    */
-  peekState(state: string): { workspaceId: string; provider: Provider } | null {
+  peekState(state: string): { workspaceId: string; provider: Provider; personal: boolean } | null {
     try {
       const payload = this.verifyState(state)
       if (!payload?.workspaceId || !payload?.provider) return null
-      return { workspaceId: payload.workspaceId, provider: payload.provider }
+      return { workspaceId: payload.workspaceId, provider: payload.provider, personal: payload.personal === true }
     } catch {
       return null
     }
+  }
+
+  /**
+   * Where a personal grant lands: the planner's Accounts page, which lists the
+   * new calendar — or, when it failed, says why. The workspace's own card is
+   * not the person's, so nothing of theirs is written onto it.
+   */
+  getPersonalRedirect(workspaceId: string, error?: string) {
+    const webBase = this.getWebBase().replace(/\/$/, '')
+    const params = new URLSearchParams({ settings: 'accounts' })
+    // Bounded, as `recordFailure` bounds what it keeps: a provider's page of
+    // HTML must not become somebody's address bar.
+    if (error) params.set('calendarError', String(error).trim().slice(0, 300) || 'Unknown error')
+    return `${webBase}/app/${workspaceId}/calendar?${params.toString()}`
   }
 
   private async exchangeCode(cfg: ProviderConfig, code: string, redirectUri: string) {

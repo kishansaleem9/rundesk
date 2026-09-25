@@ -361,7 +361,7 @@ export function PlannerPage() {
    * opens the dialog there; closing the dialog takes it off the address, so a
    * reload or a Back does not open it again.
    */
-  const { settings: settingsFromAddress } = useSearch({ from: '/app/$workspaceId/calendar' })
+  const { settings: settingsFromAddress, calendarError } = useSearch({ from: '/app/$workspaceId/calendar' })
   const navigate = useNavigate({ from: '/app/$workspaceId/calendar' })
   useEffect(() => {
     if (!settingsFromAddress) return
@@ -370,8 +370,9 @@ export function PlannerPage() {
   }, [settingsFromAddress])
   const changeSettingsOpen = (next: boolean) => {
     setSettingsOpen(next)
-    if (!next && settingsFromAddress) {
-      void navigate({ search: (prev) => ({ ...prev, settings: undefined }), replace: true })
+    // A failed connect's reason goes with the page it was said on.
+    if (!next && (settingsFromAddress || calendarError)) {
+      void navigate({ search: (prev) => ({ ...prev, settings: undefined, calendarError: undefined }), replace: true })
     }
   }
   /*

@@ -1354,6 +1354,7 @@ Each is its own question.
 - `addressability-live`: the palette showed no result for a word in a task's description, 2.5 fixed seconds after typing it.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
+- `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93.
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 
@@ -1429,13 +1430,51 @@ Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on th
 
 *Recorded:* the create gate passing non-members (`assertSpaceLevel` returns when `resolveSpaceLevel` has no membership to read) is deliberate, so that a super-admin and internal callers pass. It makes every caller's own workspace check load-bearing. That is a hardening question, not a defect today.
 
-### `found-24-sep/personal-calendar-connect-needs-integrations-manage` — open, behaviour, medium (found reading `custom-role-permissions-unread-by-web`)
+### `found-24-sep/personal-calendar-connect-needs-integrations-manage` — **closed** (behaviour, medium; found reading `custom-role-permissions-unread-by-web`)
 
 **A member cannot connect their own calendar: the planner's Connect asks for the workspace's integration key**
 
 *Evidence, read not run:* the planner's calendar connect (onboarding and the Accounts page) posts `…/integrations/connections/{gcal|outlook}/oauth/start`, which requires `integrations.manage`, an admin's key unless a custom role grants it. Its buttons gate only on whether the provider is configured, so a member is offered Connect and refused. The callback records the grant as the connecting person's own account (`user_calendar_accounts`, §V2-14: a person manages their OWN accounts), and also as the workspace's connection. ClickUp separates the two: workspace connections are the admins', and a member connects a personal account when their role allows Personal Integrations.
 
 *To close:* measure a member's connect. Then decide, with ClickUp's model, whether a calendar is a personal connection (asked of the person, not of `integrations.manage`) and what the workspace row then means.
+
+*Measured, lane 5, on HEAD:* a member's calendar connect is the workspace's `oauth/start`, and they were answered 403. Pressing "Add account" (a server routed to have the keys) left them on the Accounts page with "Missing permission". The admin's connect from the planner was the workspace's grant: its state carried no mark of whose calendar it was, and its callback wrote the workspace's calendar connection, which the task push and pull run on. A grant that failed was written onto the App Center's Google Calendar card, and the person was sent to the App Center.
+
+ClickUp (help centre, search snippets): the Google Calendar and Outlook Calendar integrations are private — "No one else in your Workspace can access your Google Calendar through this integration" — and "Guests and limited members can use" them. Only personal connections are supported for Google Calendar. The admin approval ClickUp names is the provider's (a Google or Microsoft admin approving the scopes), not a workspace role.
+
+*Closed, 25 September:*
+
+- **A person connects their own calendar**: `POST /workspaces/:id/calendar-sync/connect/:provider`, asked of membership (guests included), for Google Calendar and Outlook only. Its grant carries `personal` in its signed state.
+- **A personal grant's callback writes the person's account and nothing of the workspace's**: not the connection row the task push and pull run on, which stays the admin's, from the App Center. The account is written as the result, not best-effort. The audit log records `calendar_account.connected`, without the account's address.
+- **It lands on the planner's Accounts page**, which lists the new calendar. A personal grant that fails lands there too, and the page says why (`calendarError` on the address, gone when the dialog closes). It is no longer written onto the workspace's card.
+- **The planner's connects use it**: the onboarding panel and "Add account" (`useCalendarConnect`). The App Center's Google Calendar and Outlook tiles are still the workspace's grant, `integrations.manage`.
+
+`planner-gates`, `planner-onboarding` and `meetings-connect-calendar` route or stub the connect; they route the personal one now.
+
+The new suite `personal-calendar-connect`, 6 checks: a member's and a guest's grant (the state they are handed, read and not followed); the workspace's connection, asked by the member and the admin; somebody outside the workspace; a grant whose code the provider refuses, personal and the workspace's, with the card read back by SQL; and in the browser, the member's "Add account" to the provider's page, and the failure said on the Accounts page. The unit test `integration-connections.personal.test.ts` holds which rows each grant writes; a code exchange cannot succeed here.
+
+- Before (HEAD's API and bundle, lane 5): 1 of 6. The one that passed is the workspace's connection, which holds the change to its edge and passes both ways. On `080102d`'s bundle, the browser check failed the same way: the member's "Add account" was refused and went nowhere.
+- After: 6/6.
+
+`pcc-1..9`, each compiled. `pcc-3` (the callback takes a personal grant for the workspace's) and `pcc-7` (any provider "for oneself") are unit claims, and each fails the unit test it names. `mcc-5` re-aimed at the close that clears the reason too. Regression on lanes 2 to 5: `personal-calendar-connect`, `meetings-connect-calendar`, `planner-gates`, `planner-onboarding`, `calendar-accounts`, `app-catalogue`, `credential-reads`, `integration-error-card`, `permission-guards`, `search-sources`, `settings-role-grants`, `planner-settings`, `planner-upcoming-meeting`, `planner-rail`, `planner-views`, `webhook-access`, `addressability-live`, `no-dead-ends`, `ui-sweep` and `video1-acceptance`, 20/20 in the sweep; `video-regression` failed two checks in the sweep ([A1.2] no list reached from the space page, [A2.3] no Ask AI row in search) and passed on its own, 93/93 (`found-24-sep/three-suites-fail-under-a-full-sweep`). In CI (177).
+
+*Found beside it, not changed:* `found-25-sep/oauth-start-answers-for-no-application` and `found-25-sep/ledger-ids-cited-unchecked`, below.
+
+### `found-25-sep/oauth-start-answers-for-no-application` — open, small (found closing `personal-calendar-connect-needs-integrations-manage`)
+
+**A grant's start answers a consent address whatever the server's keys: with no client id, one for no application**
+
+*Evidence, measured on lane 5:* `POST …/integrations/connections/gcal/oauth/start` on a server with no Google keys answered 201 with `https://accounts.google.com/o/oauth2/v2/auth?client_id=&…`. Google answers that with an error page. `getOAuthStartUrl` builds the address from `getProviderConfig` and never asks `getMissingProviderEnv`, which `providers/status` does. The web asks `providers/status` before it offers a button (`ledger-rows/defect-planner-connect-empty-consent`), so no button reaches it, but the API does not refuse it either.
+
+*To close:* the start refuses (400, "not set up on this server") where `providers/status` says the provider is unavailable. The suites that read a grant's state on a server with no keys (`personal-calendar-connect`, `app-catalogue`'s scope checks) then need a lane with keys that are not real.
+
+### `found-25-sep/ledger-ids-cited-unchecked` — open, test tooling, small (found closing `personal-calendar-connect-needs-integrations-manage`)
+
+**A ledger id cited in the code is never checked against the ledger**
+
+*Evidence, measured:* I cited `found-25-sep/meetings-upcoming-reads-no-calendar` in `workspace-meetings-page.tsx` and in `meetings-connect-calendar`, and named the ledger item `found-25-sep/connected-calendars-read-by-nothing`. Nothing noticed, and it was committed in `080102d`; it is corrected in the next commit. Across `apps/`, `test/`, `scripts/`, `deploy/` and `packages/`, 74 distinct ids are cited. That one named no ledger item, and one more is a citation wrapped over two comment lines (`found-23-sep/clip-library-lists-the-` / `oldest-200`).
+
+*To close:* a gate, in preflight and CI, that reads every id cited in the code against the ledger's headings, joining a citation wrapped at a hyphen. Show that it catches a misnamed id.
 
 ### `found-24-sep/meetings-connect-calendar-goes-to-settings` — **closed** (visible bug, small; found reading `custom-role-permissions-unread-by-web`)
 
