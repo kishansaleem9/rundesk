@@ -16,6 +16,13 @@ export type WorkspacePermission =
   | 'sso.manage'
   | 'integrations.manage'
   | 'automation.manage'
+  | 'workspace.manage'
+  | 'workspace.billing'
+  | 'members.invite'
+  | 'members.remove'
+  | 'members.role.change'
+  | 'roles.manage'
+  | 'security.policy.manage'
 
 /**
  * The one read of this person's keys, as a query the router can also wait on:

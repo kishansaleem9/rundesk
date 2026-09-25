@@ -14,7 +14,7 @@ import { RolesTab } from '../components/roles-tab'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { TrashTab } from '../components/trash-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
-import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { useWorkspaceRole, withinRank } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
 import { useSettingsAccess } from '../hooks/use-settings-access'
 import { FLAGS } from '@rundesk/feature-flags'
@@ -640,6 +640,7 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
 function GeneralTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
+  const mayBill = usePermissions(workspaceId).can('workspace.billing') === true
   const wsQuery = useQuery({
     queryKey: ['workspace', workspaceId],
     queryFn: () => api<Workspace>(`/workspaces/${workspaceId}`),
@@ -752,7 +753,9 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
   return (
     <div className="space-y-5">
     <PlanCard workspaceId={workspaceId} />
-    <BillingCard workspaceId={workspaceId} />
+    {/* The invoices, the plan's change and the payment portal are `workspace.billing`'s,
+        which General's own key (`workspace.manage`) does not carry. */}
+    {mayBill && <BillingCard workspaceId={workspaceId} />}
     <Card className="p-6 space-y-5">
       <div>
         <Label>{t('settings.workspaceId')}</Label>
@@ -903,6 +906,21 @@ function GeneralTab({ workspaceId }: { workspaceId: string }) {
 function MembersTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t, tCount } = useTranslation()
+  /*
+   * EACH CONTROL ASKS THE KEY ITS ROUTE ASKS (`role-editor-offers-unenforced-permissions`):
+   * the tab opens to any of the three members keys, so a manager (who holds
+   * `members.invite`) sees the invite form and not a member's role to change.
+   * No one is offered a role above their own, which the API refuses. Capacity,
+   * reports-to and the roster's CSV stand behind `WorkspaceAdminGuard`: a
+   * manager's and up.
+   */
+  const perms = usePermissions(workspaceId)
+  const { role: workspaceRole, isSuperAdmin, isManagerOrAbove } = useWorkspaceRole(workspaceId)
+  const own = isSuperAdmin ? 'super_admin' : workspaceRole
+  const mayInvite = perms.can('members.invite') === true
+  const mayChangeRole = perms.can('members.role.change') === true
+  const mayRemove = perms.can('members.remove') === true
+  const givable = ROLES.filter((r) => withinRank(own, r.value))
 
   const membersQuery = useQuery({
     queryKey: ['workspace-members', workspaceId],
@@ -997,6 +1015,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
 
   return (
     <div className="space-y-6">
+      {mayInvite && (
       <Card className="p-5">
         <div className="flex items-center gap-2 mb-4">
           <div className="h-8 w-8 rounded-lg bg-accent/10 flex items-center justify-center text-accent">
@@ -1027,7 +1046,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
             onChange={(e) => setInviteRole(e.target.value)}
             className="px-3 rounded-md border border-border bg-card text-sm focus:outline-none focus:ring-2 focus:ring-ring"
           >
-            {ROLES.map((r) => (
+            {givable.map((r) => (
               <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
             ))}
           </select>
@@ -1040,6 +1059,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
           <p className="text-xs text-destructive mt-2">{invite.error.message}</p>
         )}
       </Card>
+      )}
 
       {/* Pending Invitations */}
       {(invitesQuery.data?.length ?? 0) > 0 && (
@@ -1061,6 +1081,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                     {inv.role} · {t('settings.expires', { date: new Date(inv.expiresAt).toLocaleDateString() })}
                   </div>
                 </div>
+                {mayInvite && (<>
                 <Button
                   variant="ghost"
                   size="sm"
@@ -1092,6 +1113,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                 >
                   {t('common.cancel')}
                 </Button>
+                </>)}
               </li>
             ))}
           </ul>
@@ -1102,6 +1124,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
         <div className="px-4 py-3 border-b border-border flex items-center justify-between gap-3">
           <h2 className="font-semibold text-sm">{tCount('settings.activeMembers', membersQuery.data?.length ?? 0)}</h2>
           {/* §A4.1 — the roster is the one list an admin is asked to hand over. */}
+          {isManagerOrAbove && (
           <Button
             size="sm"
             variant="outline"
@@ -1116,6 +1139,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
             <Upload className="h-3.5 w-3.5 mr-1" />
             {t('settings.exportMembersCsv')}
           </Button>
+          )}
         </div>
         <ul className="divide-y divide-border">
           {(membersQuery.data ?? []).map((m) => (
@@ -1154,6 +1178,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                     : t('settings.invitedNoRecord')}
                 </div>
               </div>
+              {isManagerOrAbove && (<>
               <CapacityInput
                 value={m.weeklyCapacityHours ?? 40}
                 pending={updateCapacity.isPending && updateCapacity.variables?.userId === m.userId}
@@ -1180,24 +1205,34 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                     <option key={c.userId} value={c.userId}>{c.displayName}</option>
                   ))}
               </select>
-              <select
-                value={m.role}
-                onChange={(e) => updateRole.mutate({ userId: m.userId, role: e.target.value })}
-                className="text-xs px-2 py-1 rounded border border-border bg-card"
-              >
-                {ROLES.map((r) => (
-                  <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
-                ))}
-              </select>
-              <button
-                onClick={() => {
-                  if (confirm(t('settings.removeMemberConfirm', { name: m.displayName }))) remove.mutate(m.userId)
-                }}
-                className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground hover:text-destructive"
-                title={t('settings.removeMember')}
-              >
-                <Trash2 className="h-3.5 w-3.5" />
-              </button>
+              </>)}
+              {mayChangeRole && withinRank(own, m.role) ? (
+                <select
+                  value={m.role}
+                  data-testid="settings-member-role"
+                  onChange={(e) => updateRole.mutate({ userId: m.userId, role: e.target.value })}
+                  className="text-xs px-2 py-1 rounded border border-border bg-card"
+                >
+                  {givable.map((r) => (
+                    <option key={r.value} value={r.value}>{t(r.labelKey)}</option>
+                  ))}
+                </select>
+              ) : (
+                <span className="text-xs text-muted-foreground px-2" data-testid="settings-member-role-read">
+                  {t((ROLES.find((r) => r.value === m.role)?.labelKey ?? 'settings.roleMember') as TranslationKey)}
+                </span>
+              )}
+              {mayRemove && withinRank(own, m.role) && (
+                <button
+                  onClick={() => {
+                    if (confirm(t('settings.removeMemberConfirm', { name: m.displayName }))) remove.mutate(m.userId)
+                  }}
+                  className="p-1.5 rounded hover:bg-surface-50 text-muted-foreground hover:text-destructive"
+                  title={t('settings.removeMember')}
+                >
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              )}
             </li>
           ))}
           {membersQuery.data?.length === 0 && (

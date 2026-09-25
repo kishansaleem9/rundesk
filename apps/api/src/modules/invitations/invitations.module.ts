@@ -8,6 +8,7 @@ import { EmailModule } from '../email/email.module'
 import { SecurityModule } from '../security/security.module'
 import { WebhooksModule } from '../webhooks/webhooks.module'
 import { PlansModule } from '../plans/plans.module'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
 @Module({
   imports: [
@@ -16,6 +17,8 @@ import { PlansModule } from '../plans/plans.module'
     SecurityModule,
     WebhooksModule,
     PlansModule,
+    // Custom roles: inviting and handling an invitation ask `members.invite`.
+    CustomRolesModule,
     JwtModule.registerAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({

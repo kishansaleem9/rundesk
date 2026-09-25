@@ -139,10 +139,20 @@ export function OnboardingChecklist({ workspaceId }: { workspaceId: string }) {
                   </div>
                   {!done && (
                     <Button variant="outline" size="sm" asChild className="shrink-0">
-                      <Link to={step.to} params={{ workspaceId }}>
-                        {t('onboarding.stepStart')}
-                        <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />
-                      </Link>
+                      {/* Inviting is on Settings' Members tab, not General. The step is
+                          done once a second person is in, so only the workspace's
+                          lone maker, its admin, is shown it undone. */}
+                      {step.key === 'invite' ? (
+                        <Link to="/app/$workspaceId/settings" params={{ workspaceId }} search={{ tab: 'members' }} data-testid="onboarding-invite-start">
+                          {t('onboarding.stepStart')}
+                          <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />
+                        </Link>
+                      ) : (
+                        <Link to={step.to} params={{ workspaceId }}>
+                          {t('onboarding.stepStart')}
+                          <ArrowRight className="h-3.5 w-3.5 rtl:rotate-180" />
+                        </Link>
+                      )}
                     </Button>
                   )}
                 </div>

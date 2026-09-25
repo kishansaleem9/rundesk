@@ -1,4 +1,4 @@
-import { WS_MANAGER_ROLES } from '../../common/permissions/workspace-roles'
+import { roleRank } from '../../common/permissions/workspace-roles'
 import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -8,6 +8,7 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { AuthService } from '../auth/auth.service'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { JwtService } from '@nestjs/jwt'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 
 @ApiTags('invitations')
 @Controller('invitations')
@@ -17,34 +18,38 @@ export class InvitationsController {
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
     @Inject(DB_TOKEN) private readonly db: any, 
+    private readonly roles: CustomRolesService,
   ) {}
 
-  private async assertInviteWorkspaceAdminOrManager(invitationId: string, userId: string) {
-    const { invitations, workspaceMembers } = await import('@rundesk/db')
-    const { eq, and, inArray } = await import('drizzle-orm')
+  /*
+   * INVITING ASKS `members.invite` (`role-editor-offers-unenforced-permissions`),
+   * as adding a member does: a manager holds it by default, and anyone an admin
+   * grants it. This asked the manager role list instead, so a member granted
+   * the key could neither invite nor handle an invitation.
+   */
+
+  /** Whether `user` holds `members.invite` in `workspaceId` (a platform admin always does). */
+  private async mayInvite(workspaceId: string, user: { id: string; role?: string | null }): Promise<boolean> {
+    return user.role === 'super_admin' || this.roles.hasPermission(workspaceId, user.id, 'members.invite')
+  }
+
+  /** The invitation, when `user` may invite into one of the workspaces it grants. */
+  private async assertMayHandleInvitation(invitationId: string, user: { id: string; role?: string | null }) {
+    const { invitations } = await import('@rundesk/db')
+    const { eq } = await import('drizzle-orm')
 
     const [inv] = await this.db.select().from(invitations).where(eq(invitations.id, invitationId)).limit(1)
     if (!inv) throw new NotFoundException('Invitation not found')
 
-    const workspaceIds = Array.isArray(inv.workspaceMemberships)
+    const workspaceIds: string[] = Array.isArray(inv.workspaceMemberships)
       ? inv.workspaceMemberships.map((m: any) => m.workspaceId).filter(Boolean)
       : []
     if (workspaceIds.length === 0) throw new ForbiddenException('No workspace context on invitation')
 
-    const [membership] = await this.db
-      .select()
-      .from(workspaceMembers)
-      .where(
-        and(
-          inArray(workspaceMembers.workspaceId, workspaceIds),
-          eq(workspaceMembers.userId, userId),
-          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
-        ),
-      )
-      .limit(1)
-
-    if (!membership) throw new ForbiddenException('Workspace admin or manager access required')
-    return inv
+    for (const workspaceId of workspaceIds) {
+      if (await this.mayInvite(workspaceId, user)) return inv
+    }
+    throw new ForbiddenException('Missing required permission: members.invite')
   }
 
   @Post()
@@ -56,23 +61,22 @@ export class InvitationsController {
     @Body() body: { email: string; workspaceId: string; role: string },
   ) {
     const { workspaceMembers } = await import('@rundesk/db')
-    const { and, eq, inArray } = await import('drizzle-orm')
+    const { and, eq } = await import('drizzle-orm')
     const [membership] = await this.db
-      .select()
+      .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, body.workspaceId),
-          eq(workspaceMembers.userId, user.id),
-          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
-        ),
-      )
+      .where(and(eq(workspaceMembers.workspaceId, body.workspaceId), eq(workspaceMembers.userId, user.id)))
       .limit(1)
-    if (!membership) throw new ForbiddenException('Workspace admin or manager access required')
-    // Nobody grants more than they hold: a manager may invite managers,
-    // members and guests, and only a workspace admin may invite an admin.
-    if (membership.role === 'manager' && body.role === 'workspace_admin') {
-      throw new ForbiddenException('Only a workspace admin can invite a workspace admin')
+    if (!membership && user.role !== 'super_admin') throw new ForbiddenException('Workspace membership required')
+    if (!(await this.mayInvite(body.workspaceId, user))) {
+      throw new ForbiddenException('Missing required permission: members.invite')
+    }
+    // Nobody invites above their own role, as nobody adds a member above it
+    // (`assertWithinRank`): a manager invites no admin, a member granted the
+    // key no manager.
+    const own = user.role === 'super_admin' ? roleRank('super_admin') : roleRank(membership?.role)
+    if (roleRank(body.role ?? 'member') > own) {
+      throw new ForbiddenException(`You cannot invite ${String(body.role)}: it is above your own role`)
     }
 
     // 1. Find organization for this workspace
@@ -185,33 +189,33 @@ export class InvitationsController {
   @Delete(':invitationId')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Revoke an invitation (workspace admin/manager only)' })
+  @ApiOperation({ summary: 'Revoke an invitation (holders of members.invite)' })
   async revoke(@Param('invitationId') id: string, @Req() req: any) {
     const reqUserId = req.user?.id as string | undefined
     if (!reqUserId) throw new ForbiddenException('Not authenticated')
-    await this.assertInviteWorkspaceAdminOrManager(id, reqUserId)
+    await this.assertMayHandleInvitation(id, req.user)
     return this.invitationsService.revoke(id)
   }
 
   @Get(':invitationId/link')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Get invitation claim link (workspace admin/manager only)' })
+  @ApiOperation({ summary: 'Get invitation claim link (holders of members.invite)' })
   async getLink(@Param('invitationId') id: string, @Req() req: any) {
     const reqUserId = req.user?.id as string | undefined
     if (!reqUserId) throw new ForbiddenException('Not authenticated')
-    await this.assertInviteWorkspaceAdminOrManager(id, reqUserId)
+    await this.assertMayHandleInvitation(id, req.user)
     return this.invitationsService.getClaimUrlById(id)
   }
 
   @Post(':invitationId/resend')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: 'Resend invitation email (workspace admin/manager only)' })
+  @ApiOperation({ summary: 'Resend invitation email (holders of members.invite)' })
   async resend(@Param('invitationId') id: string, @Req() req: any) {
     const reqUserId = req.user?.id as string | undefined
     if (!reqUserId) throw new ForbiddenException('Not authenticated')
-    await this.assertInviteWorkspaceAdminOrManager(id, reqUserId)
+    await this.assertMayHandleInvitation(id, req.user)
     return this.invitationsService.resend(id)
   }
 }

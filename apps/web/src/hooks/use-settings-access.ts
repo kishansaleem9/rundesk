@@ -25,11 +25,18 @@ export type SettingsTabId = (typeof SETTINGS_TABS)[number]
 
 /**
  * THE TABS A KEY OPENS, for somebody who is not an admin: the keys the API
- * already honours from a custom role, where a settings tab is the only place
- * the web offers them (`product-siblings/custom-role-permissions-unread-by-web`).
- * Every other tab is an admin's, as the API has it (`WorkspaceAdminGuard`).
+ * honours from a role — a manager's defaults, or a custom role's — where a
+ * settings tab is the only place the web offers them. A manager holds
+ * `members.invite`, so Members opens to them; a member granted `roles.manage`
+ * gets Roles (`product-siblings/custom-role-permissions-unread-by-web`,
+ * `role-editor-offers-unenforced-permissions`). Inside a tab each control asks
+ * its own key. Every other tab is an admin's.
  */
 const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
+  general: ['workspace.manage'],
+  members: ['members.invite', 'members.remove', 'members.role.change'],
+  roles: ['roles.manage'],
+  security: ['security.policy.manage'],
   integrations: ['webhook.manage', 'integrations.manage'],
   sso: ['sso.manage'],
 }

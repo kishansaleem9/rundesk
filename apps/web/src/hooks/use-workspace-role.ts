@@ -22,6 +22,18 @@ function resolve(workspaceId: string | undefined, user: { role?: string } | null
   return { role, isSuperAdmin, isAdmin, isManagerOrAbove, canCreateWorkspace }
 }
 
+/**
+ * How the base roles stand to one another — the API's rank table
+ * (`workspace-roles.ts`), stated once in the web. Nobody gives a role above
+ * their own: the API refuses it (`assertWithinRank`), so the web offers none.
+ */
+const RANK: Record<WorkspaceRole, number> = { guest: 0, member: 1, manager: 2, workspace_admin: 3, super_admin: 4 }
+
+/** Whether one whose role is `own` may give `role`. */
+export function withinRank(own: WorkspaceRole, role: string): boolean {
+  return (RANK[role as WorkspaceRole] ?? Number.POSITIVE_INFINITY) <= RANK[own]
+}
+
 /** React hook: the current user's role for a given workspace (admin gating, etc.). */
 export function useWorkspaceRole(workspaceId?: string) {
   const user = useAuthStore((s) => s.user)

@@ -104,7 +104,7 @@ The new suite `settings-role-grants`, 6 checks: a plain member and the holders o
 
 - A member cannot connect their own calendar: `found-24-sep/personal-calendar-connect-needs-integrations-manage`.
 - The Meetings page's Connect Calendar goes to a settings tab with no calendar: `found-24-sep/meetings-connect-calendar-goes-to-settings`.
-- The onboarding checklist's Invite step opens Settings, General tab, and a manager, who may invite, is sent back. Invitations are role-listed (`['workspace_admin', 'manager']`) rather than asked of `members.invite`, which is `found-23-sep/role-editor-offers-unenforced-permissions`'s territory.
+- (Corrected 25 September: the Invite step is done once a second person is in, so no manager is ever shown it undone; it starts on Members now. Inviting asks `members.invite` — `role-editor-offers-unenforced-permissions`, its sixth group.) The onboarding checklist's Invite step opens Settings, General tab, and a manager, who may invite, is sent back. Invitations are role-listed (`['workspace_admin', 'manager']`) rather than asked of `members.invite`, which is `found-23-sep/role-editor-offers-unenforced-permissions`'s territory.
 - A person's dock empties after their first page: `found-25-sep/dock-empties-after-the-first-page`, below.
 
 *Found beside it:* `found-24-sep/guest-makes-lists-where-nothing-is-shared` (security) and `found-24-sep/create-menu-offers-guests-what-they-cannot-make`, both below.
@@ -3047,9 +3047,31 @@ Now:
 - Regression: the 11 suites that make, grant or ask roles and keys, and the new one: 12/12.
 - In CI (203).
 
+*Partly fixed, 25 September: the sixth group, the settings page and invitations.* Measured on lane 5 (`fd1737d`), `settings-tabs-by-key` was 1 of 7:
+- Settings opened to admins, and to holders of the integrations and SSO keys. The route sent everyone else to the start: a manager, who holds `members.invite`, and members granted `roles.manage`, `workspace.manage` or `security.policy.manage`.
+- Inviting asked the manager role list instead of `members.invite`, and so did copying, resending and cancelling an invitation. A member granted the key was refused all four (403).
+
+Now:
+- Each tab opens to the keys it serves (`use-settings-access`): General `workspace.manage`, Members any of the three members keys, Roles `roles.manage`, Security `security.policy.manage`.
+- Inside Members each control asks its own key: the invite form `members.invite`, a member's role `members.role.change`, Remove `members.remove`. No one is offered a role above their own (`withinRank`, the web's one rank table beside the role lists).
+- Capacity, reports-to and the roster's CSV stay a manager's and up; they stand behind `WorkspaceAdminGuard`, which `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` maps.
+- The billing card on General asks `workspace.billing`.
+- Inviting and handling an invitation ask `members.invite`. The rank rule (`roleRank`) replaces the hand-written "a manager invites no admin", so a member granted the key invites no manager.
+- The onboarding checklist's Invite step starts on Members, where the invite form is, instead of General. The step is done once a second person is in (`counts.members > 1`), so only a workspace's lone maker, its admin, ever sees it undone. The earlier note that a manager following it was "sent back" could not happen: a manager is the second person.
+- `crd-8`, `crd-9` and `gin-3` are re-aimed onto the new lines.
+
+`settings-tabs-by-key`, 8 checks:
+- Before: 1 of 7 on lane 5; the one that passed is the plain member, sent away before and after. The eighth, the Invite step, was measured on the previous commit's bundle: it led to `/settings`, which is General.
+- After: 8/8 on lanes 5 and 4.
+- Patches `stp-1..12`, each compiled.
+- `crd-8`, `crd-9` and `gin-3` compile on the new lines.
+- Regression, in two sweeps: the suites that open settings, invite, grant or ask roles, or draw the onboarding checklist. 26 distinct suites, all green. The first sweep's last seven were refused as run on a stale bundle, after a web edit mid-sweep, and passed when re-run.
+- In CI (205).
+
+This was the last group the map could close. What stays open below is blocked on ClickUp's deletion table.
+
 *Still open,* per the map (routes and lines in that item's notes):
 - **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table still cannot be read here (25 September: the help centre is denied, and the snippets carry no table). What the snippets do say: deleting a List or a task takes Full edit on it ("Permissions FAQ"), and only the owner deletes a workspace. `check-permission-keys-asked.mjs` exempts these six keys under this item until then.
-- **The settings page is admin-only for any grant but the integrations and SSO ones** (`use-settings-access`), so a member granted the members keys has them by the API alone.
 
 ### `found-25-sep/managers-grant-themselves-admin` — **closed** (security, HIGH; found mapping `role-editor-offers-unenforced-permissions`)
 
@@ -3133,7 +3155,7 @@ The catalog says `workspace.billing` is "view invoices, change plan, manage paym
 The new suite `billing-key`, 3 checks:
 - Before: 0 of 3.
 - After: 3/3 on lanes 5 and 4.
-- Patches `bil-1..4`, each compiled.
+- Patches `bil-1..4`: each reddened the check it names (lane 1, baseline 3/3 at `fd1737d`).
 - Billing unit tests 27/27.
 - Regression: the 9 suites that read plans, billing, settings or roles, and the new one. 9 of 10 passed in the sweep; `list-export` saw no fields request under the sweep's load and passed alone (30/30).
 - In CI (204).
