@@ -18,8 +18,8 @@ import { useWorkspaceRole } from './use-workspace-role'
  *     default is "View only" or "Comment" refused its members every one of
  *     them, and its "+" offered them all
  *     (`found-24-sep/view-only-space-offers-members-what-it-refuses`);
- *   - for a GUEST, what the row's `guests` says: a reminder, yes; a list only
- *     in a space they may add to; the rest, never
+ *   - for a GUEST, what the row's `guests` says: a reminder, yes; a list or a
+ *     task only in a space they may add to; the rest, never
  *     (`found-24-sep/create-menu-offers-guests-what-they-cannot-make`).
  *
  * `spaceId` asks about one space (its own "+"); without it, anywhere. Until the

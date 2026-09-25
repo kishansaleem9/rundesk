@@ -9,8 +9,9 @@
  * named every space they could see, and a project's page offered "Add list"
  * in any project they could open.
  *
- * What a guest may make, as the API has it now: a reminder, their own; a list,
- * only in a space shared with them with Full edit. The guest here first passes
+ * What a guest may make, as the API has it now: a reminder, their own; a list
+ * or a task, only in a space shared with them with Full edit
+ * (`found-25-sep/guests-with-full-edit-make-no-tasks`). The guest here first passes
  * through a space (a list in it is shared with them to view) and can add to
  * none, then is given another space with Full edit. Each menu is read beside a
  * member's, and the API is asked the same things the menus answer.
@@ -206,8 +207,8 @@ try {
   const gEdit = await spaceMenu(gPage2, EDIT.id, true)
   const gThrough2 = await spaceMenu(gPage2, THROUGH.id, true)
   chk(
-    gTabs2.includes('list') && !gTabs2.includes('task') && gEdit.includes('list') && !gEdit.includes('task') && !gThrough2.includes('list'),
-    'given a space with Full edit, a guest is offered a list — in the Create menu and on that space’s menu, not on the space they pass through — and still no task',
+    gTabs2.includes('list') && gTabs2.includes('task') && gEdit.includes('list') && gEdit.includes('task') && !gThrough2.includes('list') && !gThrough2.includes('task'),
+    'given a space with Full edit, a guest is offered a list and a task — in the Create menu and on that space’s menu, not on the space they pass through',
     `the Create menu ${JSON.stringify(gTabs2)}; the edited space's ${JSON.stringify(gEdit)}; the passed-through space's ${JSON.stringify(gThrough2)}`,
   )
 
@@ -243,6 +244,7 @@ try {
     listInEdit: (await G('/lists', { method: 'POST', body: { projectId: EDIT.project, name: `${TAG} guestlistedit` } })).status,
     listThrough: (await G('/lists', { method: 'POST', body: { projectId: THROUGH.project, name: `${TAG} guestlistthrough` } })).status,
     task: (await G('/tasks', { method: 'POST', body: { listId: EDIT.list, title: `${TAG} guesttask` } })).status,
+    taskThrough: (await G('/tasks', { method: 'POST', body: { listId: THROUGH.list, title: `${TAG} guesttaskthrough` } })).status,
     doc: (await G(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: `${TAG} guestdoc` } })).status,
     whiteboard: (await G(`/workspaces/${WS}/canvases`, { method: 'POST', body: { type: 'whiteboard', title: `${TAG} guestboard` } })).status,
     form: (await G(`/workspaces/${WS}/forms`, { method: 'POST', body: { title: `${TAG} guestform` } })).status,
@@ -253,11 +255,13 @@ try {
     listInEdit: await named('lists', 'name', `${TAG} guestlistedit`),
     listThrough: await named('lists', 'name', `${TAG} guestlistthrough`),
     task: await named('tasks', 'title', `${TAG} guesttask`),
+    taskThrough: await named('tasks', 'title', `${TAG} guesttaskthrough`),
   }
   chk(
     api.reminder === 201 && rows.reminder === 1 && api.listInEdit === 201 && rows.listInEdit === 1 && api.listThrough === 403 && rows.listThrough === 0
-      && api.task === 403 && rows.task === 0 && api.doc === 403 && api.whiteboard === 403 && api.form === 403,
-    'the API makes the guest what the menus offer — a reminder, a list in the space with Full edit — and refuses what they withhold: a list where they pass through, a task, a workspace doc, a whiteboard, a form',
+      && api.task === 201 && rows.task === 1 && api.taskThrough >= 400 && rows.taskThrough === 0
+      && api.doc === 403 && api.whiteboard === 403 && api.form === 403,
+    'the API makes the guest what the menus offer — a reminder, and a list and a task in the space with Full edit — and refuses what they withhold: a list or a task where they pass through, a workspace doc, a whiteboard, a form',
     `answers ${JSON.stringify(api)}; rows ${JSON.stringify(rows)}`,
   )
 } catch (e) {

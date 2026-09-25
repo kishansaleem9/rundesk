@@ -1163,7 +1163,7 @@ The external-links unit test that expected a guest to be refused for being one n
 
 *Not changed:* a guest still makes no task (`Guests cannot create tasks`), whatever they hold (`found-25-sep/guests-with-full-edit-make-no-tasks`).
 
-### `found-25-sep/guests-with-full-edit-make-no-tasks` — open, behaviour, small (found closing `guests-edit-no-shared-task`)
+### `found-25-sep/guests-with-full-edit-make-no-tasks` — **closed** (behaviour, small; found closing `guests-edit-no-shared-task`)
 
 **A guest with Full edit on a list cannot add a task to it**
 
@@ -1173,6 +1173,37 @@ The external-links unit test that expected a guest to be refused for being one n
 - Research whether ClickUp lets a guest make tasks with Full edit on every plan.
 - If it does: a guest's new task asks the create gate with their shares, as a list does, and the Create menu offers a task where `/writable` says yes.
 - Measure a guest at Edit and at Full edit on a list.
+
+ClickUp (help centre, "Permissions in detail"; the feature request "Option for guests to have access to create tasks in a list but not be able to delete the list"; search snippets):
+- Full edit creates tasks and subtasks, and a guest may hold it on what is shared with them.
+- The request asks for a level that adds without deleting. So a guest at Full edit adds tasks, and Edit adds none.
+- No plan limit on it was found.
+
+*Measured, lane 5, on `baa7d3e`:* the new suite below, 0 of 3.
+- A guest with a list shared at Full edit was refused a task in it (403), as was one given a whole space at Full edit.
+- The list page offered neither of them an add row.
+
+*Closed, 25 September:*
+- **The create gate reads a guest's shares**, on the list and the containers above it, as it does a member's grants. It adds where that is Full edit, and a guest at Edit, or with nothing shared, is refused as before. The flat refusal went, with a guest-only check nothing called.
+- **The Create menu and a space's "+" offer a guest a task where a space is theirs at Full edit**, as they do a list. The list page offers the add rows by the list's own answer, which reads a share on the list itself.
+- `guest-create-menu` said "and still no task" for a guest at Full edit on a space, and that the API refused them one. Both checks now say they are offered and make one, and a task where they pass through is refused. The comments in `task-creation-access` and `meeting-access` say what refuses their guest now: the level (Edit), not a guest rule.
+
+The new suite `guest-task-making`, 3 checks, read back by SQL:
+- a guest adds a task to lists shared at Full edit, at Edit, and not at all;
+- a guest adds one in a space given whole at Full edit;
+- the list page offers them the add rows.
+
+Results:
+- Before (lane 5, `baa7d3e`): 0 of 3.
+- After: 3/3, on lanes 5 and 4.
+
+`gtm-1..3`, each compiled: every guest refused first, as before; a guest's share counting as Full edit whatever its level; the list's answer refusing guests. Re-aimed, each compiled:
+- `gcm-2` offers the task to every guest.
+- `tcm-6` and `mtg-3` count a guest's share as Full edit. Their guests hold Edit, and the guest line they removed is gone.
+
+*Break run:* queued on lane 1 after the commit (`plan-gtm`).
+
+Regression on lanes 2 to 5: the 18 suites that have guests make or be refused things, or make tasks through the gate, and the new suite. Result: 19/19. Under the sweep's load, `video1-acceptance` did not get its bookmark back after a reload, as recorded before, and passed alone (18/18). In CI (193).
 
 ### `found-25-sep/task-rows-changed-by-id-anywhere` — **closed** (security, HIGH; found by reading every write that hangs off a task, route by route, after closing `task-sheet-offers-refused-edits`)
 

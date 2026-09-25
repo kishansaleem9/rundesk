@@ -1924,17 +1924,6 @@ export class TasksService {
     return null
   }
 
-  private async assertNotGuestInList(listId: string, actorId: string) {
-    const ctx = await this.resolveWorkspaceForList(listId)
-    if (!ctx) return
-    const [m] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
-      .limit(1)
-    if (m?.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
-  }
-
   async createTask(data: {
     listId: string
     title: string

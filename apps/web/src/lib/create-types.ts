@@ -99,10 +99,11 @@ export type CreateType = {
   requires?: WorkspacePermission
   /**
    * What a GUEST may do with it, as the API has it: `yes` (a reminder is their
-   * own), `no` (a task, a doc of the workspace — the form makes no other —
-   * a whiteboard, a dashboard, a form, and the containers the permission keys
-   * already withhold), or `where-writable`, a list, only in a space shared
-   * with them to edit. Offered otherwise, each was a 403
+   * own), `no` (a doc of the workspace — the form makes no other — a
+   * whiteboard, a dashboard, a form, and the containers the permission keys
+   * already withhold), or `where-writable`, a list or a task, only in a space
+   * shared with them at Full edit (`found-25-sep/guests-with-full-edit-make-no-tasks`).
+   * Offered otherwise, each was a 403
    * (`found-24-sep/create-menu-offers-guests-what-they-cannot-make`).
    */
   guests: 'yes' | 'no' | 'where-writable'
@@ -114,7 +115,7 @@ export type CreateType = {
  * then the containers, largest last.
  */
 export const CREATE_TYPES: readonly CreateType[] = [
-  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task', blurbKey: 'createMenu.blurbTask', inSpace: true, scopedToSpace: true, isContainer: false, guests: 'no' },
+  { value: 'task', icon: CheckSquare, labelKey: 'quickCreate.tab.task', blurbKey: 'createMenu.blurbTask', inSpace: true, scopedToSpace: true, isContainer: false, guests: 'where-writable' },
   { value: 'doc', icon: FileText, labelKey: 'quickCreate.tab.doc', blurbKey: 'createMenu.blurbDoc', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'no' },
   { value: 'reminder', icon: Clock, labelKey: 'quickCreate.tab.reminder', blurbKey: 'createMenu.blurbReminder', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'yes' },
   { value: 'whiteboard', icon: PenTool, labelKey: 'quickCreate.tab.whiteboard', blurbKey: 'createMenu.blurbWhiteboard', inSpace: true, scopedToSpace: false, isContainer: false, guests: 'no' },

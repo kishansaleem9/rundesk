@@ -1,4 +1,4 @@
-import { ForbiddenException, HttpException, NotFoundException } from '@nestjs/common'
+import { HttpException, NotFoundException } from '@nestjs/common'
 import { eq } from 'drizzle-orm'
 import { lists, projects, spaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -46,11 +46,14 @@ async function listHome(db: Db, listId: string) {
  * So, for the person the task is made by:
  *   - a member of the list's workspace, who may open the list (the container
  *     rule and the private-list rule, `readableList`) — else not found;
- *   - not a guest — 403, as before;
- *   - on a space that lets them add to it: Full edit
- *     (`assertCanCreateInSpace`, which `moveTask` already asks of a
- *     destination) — 403 in a space whose default is "view only",
- *     "comment" or "edit", as ClickUp's are (`found-25-sep/full-edit-enforced-nowhere`).
+ *   - holding Full edit where it goes (`assertCanCreateInSpace`, which
+ *     `moveTask` already asks of a destination) — 403 in a space whose
+ *     default is "view only", "comment" or "edit", as ClickUp's are
+ *     (`found-25-sep/full-edit-enforced-nowhere`). A guest holds what is
+ *     shared with them, on the list or above it, and adds a task where that
+ *     is Full edit: every guest was refused first
+ *     (`found-25-sep/guests-with-full-edit-make-no-tasks`), where ClickUp's
+ *     Full edit "creates tasks and subtasks", a guest's included.
  * A super-admin passes where they are not a member, as every guard lets them.
  */
 export async function assertCanCreateTaskIn(
@@ -63,7 +66,6 @@ export async function assertCanCreateTaskIn(
   const [account] = await db.select({ role: users.role }).from(users).where(eq(users.id, actorId)).limit(1)
   const list = await readableList(db, home.workspaceId, listId, { id: actorId, role: account?.role })
   if (!list) throw new NotFoundException('List not found')
-  if (list.role === 'guest') throw new ForbiddenException('Guests cannot create tasks')
   await assertCanCreateInSpace(db, {
     spaceId: home.spaceId,
     actorId,
