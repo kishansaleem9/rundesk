@@ -1584,7 +1584,23 @@ Regression on lanes 2 to 5:
 
 Result: 16/16. In CI (189).
 
-### `found-25-sep/sharing-asks-the-maker-not-the-level` — open, behaviour, small (found closing `list-page-offers-refused-edits`)
+### `found-25-sep/sharers-raise-their-own-level` — **closed** (security, HIGH; found closing `sharing-asks-the-maker-not-the-level`)
+
+**A member who may share raises themselves: they share the place with themselves at Full edit, and give it to others above their own level**
+
+*Measured, lane 3, on `af5ab5a`:*
+- A member with a list in a view-only space shared to them at Edit was refused a task in it (403).
+- They shared the list with themselves at Full edit (201), or changed their own share to it (200), and made the task (201).
+- They gave Full edit to another member (201).
+- They lowered, and then removed, a Full edit share the admin had given another member (200 each).
+
+Sharing asked only whether the sharer could share: never what level they gave, or whose share they changed. Fixing `sharing-asks-the-maker-not-the-level` alone would have let every Edit member do it: they could share by the space's default.
+
+*Closed, 25 September:* nobody gives, changes or removes more than they hold, their own share included. A share, a change of level (the new level and the old) and a removal are each capped at the sharer's own level (`assertWithinOwnLevel`). One rule covers raising oneself and raising others: a raise is above one's own level either way. The Share panel offers the levels up to the reader's own. A row they may not touch, their own or one above them, is drawn and not changed.
+
+The suite and patches are shared with the item below (`share-levels`, checks 1 to 3 and 6; `shl-1..4`, `shl-8` and `shl-9`).
+
+### `found-25-sep/sharing-asks-the-maker-not-the-level` — **closed** (behaviour, small; found closing `list-page-offers-refused-edits`)
 
 **Sharing a list, and giving it an email address, is for its maker or a manager, and the list page offers both to every reader**
 
@@ -1597,6 +1613,36 @@ ClickUp (help centre, "Share Spaces, Folders, Subfolders, Lists, and tasks", sea
 - Decide the address rule to match.
 - Have the list page draw Share and the address button by the answer.
 - Check with a member at each level, on a list they did not make.
+
+*Closed, 25 September:*
+- **Sharing reads the level the sharer holds** (`actorLevel`). That is their own grant on the place or the nearest one above it. Without one, it is what the place's space gives them: its default, their grant on it, a project role (`resolveSpaceLevel`, the level the write rules read). Managers hold Full edit. Edit or above shares; a guest never does. A doc, a channel or a dashboard is its maker's, as before.
+- **The share route says the reader's level from the same answer.** It read their grants alone, so a member at Edit by the space's default was told they held nothing.
+- **A list's address is given, rotated and revoked by those who may add tasks to it**, the create gate, as reading it is (`list-address-read-by-those-who-may-not-add`). It was the list's maker's or a manager's.
+- The list page's Share opens the panel, which offers sharing by the answer or says why not. The Email panel shows the address, and its buttons, to those who may add.
+
+The new suite `share-levels`, 6 checks. A member reads four lists of the admin's: one in a view-only space shared to them at Edit, and one each by the default at View, Edit and Full edit. Another member and a guest are shared to. Every share and address is read back by SQL.
+- Before (lane 5, `af5ab5a`): 0 of 6.
+- After: 6/6, on lanes 5 and 4.
+
+`shl-1..9`, each compiled:
+- a share given at any level;
+- sharing over a higher share;
+- a level changed, or a share removed, above one's own;
+- the space's level unread;
+- a guest sharing;
+- the address given by anybody who reads the list;
+- the panel offering every level;
+- the reader's level from their grants alone.
+
+*Break run:* queued on lane 1 after the commit (`plan-shl`).
+
+Regression on lanes 2 to 5: the 18 suites that share, or set shares up, and `request-access`, `ui-sweep` and `project-member-levels`. Result: 21/21.
+- Under the sweep's load, 19 passed the first time.
+- `request-access` did not find its notification among the admin's latest 50, which the other suites were filling. It passed alone, 9/9.
+- `space-default-permission` was refused a signup by the rate limit (429) before its first check. It passed alone, 36/36.
+- Both are recorded under `three-suites-fail-under-a-full-sweep`.
+
+In CI (190).
 
 ### `found-25-sep/subtask-delete-archives` — open, visible bug, small (found closing `full-edit-enforced-nowhere`)
 
@@ -1927,6 +1973,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `request-access` and `space-default-permission`, 25 September, the sweep for `sharing-asks-the-maker-not-the-level`. `request-access` did not find its notification among the admin's latest 50 rows, which the other suites were filling. `space-default-permission` was refused a signup by the rate limit (429) before its first check. Each passed alone, 9/9 and 36/36.
 - `task-depth` and `video1-acceptance`, 25 September, the four-lane sweep for `task-rows-changed-by-id-anywhere`. `task-depth`: "and pressing it takes the tag off" still listed the tag. `video1-acceptance`: the bookmark did not come back after a reload, and the assistant's answer had no way forward. Neither touches what that change did. Each passed on its own on lane 4 right after (91/91, 18/18). `video1-acceptance` failed the same way again in the next sweep (`field-values-written-by-readers`), and again passed alone (18/18).
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
 - `task-menu`, 25 September, the sweep for `inbound-email-comments-skip-the-comment-rule`, and once alone on lane 3 while lane 1's break runs held the machine (load 5): Copy ID, New tab, Convert to and Send email to task were not yet in the menu when it was read. It passed alone on lane 4 right after (37/37).

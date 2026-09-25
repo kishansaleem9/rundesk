@@ -24,12 +24,13 @@ export class SharesController {
     @CurrentUser() user: any,
   ) {
     const type = this.shares.assertType(objectType)
-    const [items, mine, canShare] = await Promise.all([
+    // The caller's level is the one sharing reads — what the space gives them
+    // counts, not only a share of their own (`sharing-asks-the-maker-not-the-level`).
+    const [items, may] = await Promise.all([
       this.shares.list(type, objectId, user),
-      this.shares.resolveLevel(type, objectId, user.id),
-      this.shares.canShare(type, objectId, user).then((r) => r.allowed),
+      this.shares.canShare(type, objectId, user),
     ])
-    return { items, myLevel: mine, canShare, levels: SHARE_LEVELS, types: SHARE_TYPES }
+    return { items, myLevel: may.level, canShare: may.allowed, levels: SHARE_LEVELS, types: SHARE_TYPES }
   }
 
   @Post()

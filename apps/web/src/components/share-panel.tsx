@@ -14,6 +14,7 @@ import { UserPlus, X, Mail, Lock } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { InlineSkeleton } from './loading-skeletons'
+import { useAuthStore } from '../store/auth'
 
 /** Every object a share can be attached to. */
 export type ShareObjectType = 'space' | 'folder' | 'project' | 'list' | 'task' | 'doc' | 'channel' | 'dashboard' | 'view'
@@ -36,6 +37,8 @@ const LEVELS: { value: ShareLevel; labelKey: TranslationKey; hintKey: Translatio
   { value: 'edit', labelKey: 'share.levelEdit', hintKey: 'share.levelEditHint' },
   { value: 'admin', labelKey: 'share.levelFull', hintKey: 'share.levelFullHint' },
 ]
+
+const RANK: Record<ShareLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
 
 const TITLE_KEY: Record<ShareObjectType, TranslationKey> = {
   space: 'share.titleSpace',
@@ -104,6 +107,16 @@ export function SharePanel({
   const data = sharesQuery.data
   const canShare = data?.canShare ?? false
   const items = data?.items ?? []
+  /*
+   * NOBODY GIVES MORE THAN THEY HOLD, AND NOBODY CHANGES THEIR OWN — the server
+   * refuses both (`found-25-sep/sharers-raise-their-own-level`), so they are not
+   * offered: the levels go up to the reader's own, and a row they may not touch
+   * (their own, or one above them) is drawn, not changed.
+   */
+  const me = useAuthStore((state) => state.user?.id) ?? ''
+  const myLevel = data?.myLevel ?? null
+  const within = (l: ShareLevel) => myLevel != null && RANK[l] <= RANK[myLevel]
+  const grantable = LEVELS.filter((l) => within(l.value))
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -137,7 +150,7 @@ export function SharePanel({
               aria-label={t('share.levelLabel')}
               className="h-9 rounded-md border border-border bg-background px-2 text-sm"
             >
-              {LEVELS.map((l) => (
+              {grantable.map((l) => (
                 <option key={l.value} value={l.value}>{t(l.labelKey)}</option>
               ))}
             </select>
@@ -158,7 +171,9 @@ export function SharePanel({
             <p className="py-4 text-center text-[13px] text-muted-foreground">{t('share.noneYet')}</p>
           ) : (
             <ul className="divide-y divide-border/60 max-h-[280px] overflow-y-auto">
-              {items.map((s) => (
+              {items.map((s) => {
+                const mayChange = canShare && within(s.level) && s.user?.id !== me
+                return (
                 <li key={s.id} className="flex items-center gap-2.5 py-2">
                   <div className="flex-1 min-w-0">
                     <div className="text-[13px] font-medium truncate flex items-center gap-1.5">
@@ -171,19 +186,19 @@ export function SharePanel({
                   </div>
                   <select
                     value={s.level}
-                    disabled={!canShare || changeLevel.isPending}
+                    disabled={!mayChange || changeLevel.isPending}
                     aria-label={t('share.levelFor', { name: s.user?.name || s.invitedEmail || '' })}
                     onChange={(e) => changeLevel.mutate({ id: s.id, next: e.target.value as ShareLevel })}
                     className={cn(
                       'h-8 rounded-md border border-border bg-background px-1.5 text-[12px] shrink-0',
-                      !canShare && 'opacity-60',
+                      !mayChange && 'opacity-60',
                     )}
                   >
-                    {LEVELS.map((l) => (
+                    {LEVELS.filter((l) => within(l.value) || l.value === s.level).map((l) => (
                       <option key={l.value} value={l.value}>{t(l.labelKey)}</option>
                     ))}
                   </select>
-                  {canShare && (
+                  {canShare && within(s.level) && (
                     <button
                       type="button"
                       aria-label={t('share.removeAccess')}
@@ -196,7 +211,8 @@ export function SharePanel({
                     </button>
                   )}
                 </li>
-              ))}
+                )
+              })}
             </ul>
           )}
         </div>

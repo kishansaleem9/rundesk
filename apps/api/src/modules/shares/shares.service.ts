@@ -10,6 +10,7 @@ import { SecurityService } from '../security/security.service'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import { NotificationsService } from '../notifications/notifications.service'
+import { resolveSpaceLevel, type WithinStep } from '../../common/permissions/space-default-permission'
 
 /** Everything that can be shared. */
 export const SHARE_TYPES = ['space', 'folder', 'project', 'list', 'task', 'doc', 'channel', 'dashboard', 'view'] as const
@@ -23,6 +24,9 @@ export type ShareType = (typeof SHARE_TYPES)[number]
 export const SHARE_LEVELS = ['view', 'comment', 'edit', 'admin'] as const
 export type ShareLevel = (typeof SHARE_LEVELS)[number]
 const RANK: Record<ShareLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
+/** The places a space's levels reach, and so what a member holds on them without a share of their own. */
+const LOCATION_TYPES: ReadonlySet<ShareType> = new Set<ShareType>(['space', 'folder', 'project', 'list', 'task', 'view'])
+const WITHIN_TYPES: ReadonlySet<string> = new Set(['task', 'list', 'project', 'folder'])
 /** Human wording used in the notification email. */
 const LEVEL_LABEL: Record<ShareLevel, string> = {
   view: 'view only', comment: 'comment', edit: 'edit', admin: 'full edit',
@@ -214,26 +218,71 @@ export class SharesService {
   }
 
   /**
+   * THE LEVEL THIS PERSON HOLDS ON THE OBJECT — their own grant on it or the
+   * nearest thing above it; for a place in a space without one, what the space
+   * gives them (its default, their grant on it, a project role: the level every
+   * write rule reads, `resolveSpaceLevel`); Full edit for a manager; and, for a
+   * doc, a channel or a dashboard, Full edit for its maker. Null for nobody.
+   *
+   * Sharing read the grants alone, so a member who held Full edit by the
+   * space's default — every ordinary member — could not share the admin's
+   * list, where ClickUp's edit permissions share
+   * (`found-25-sep/sharing-asks-the-maker-not-the-level`).
+   */
+  private async actorLevel(
+    type: ShareType,
+    id: string,
+    actor: { id: string; role?: string },
+    loc: { workspaceId: string; createdById: string | null; chain: Array<{ type: ShareType; id: string }> },
+  ): Promise<ShareLevel | null> {
+    if (actor.role === 'super_admin') return 'admin'
+    const wsRole = await this.workspaceRole(loc.workspaceId, actor.id)
+    if (!wsRole) return null
+    if (wsRole === 'workspace_admin' || wsRole === 'manager') return 'admin'
+    const granted = await this.resolveLevel(type, id, actor.id)
+    if (granted) return granted
+    if (!LOCATION_TYPES.has(type)) return loc.createdById === actor.id ? 'admin' : null
+    const space = loc.chain.find((step) => step.type === 'space')
+    if (!space) return null
+    const within = loc.chain.filter((step) => WITHIN_TYPES.has(step.type)) as WithinStep[]
+    const resolved = await resolveSpaceLevel(this.db, { spaceId: space.id, actorId: actor.id, within })
+    return (resolved?.level as ShareLevel | undefined) ?? null
+  }
+
+  /**
    * Sharing rights are a function of (level, user type) — not level alone.
-   * A member with edit+ on the object may share it; a GUEST may never share,
-   * even with edit. Admins/managers and the object's creator may always share.
+   * A member with edit+ on the object may share it (ClickUp: "the edit
+   * permissions on a Folder allow members to share that Folder"); a GUEST may
+   * never share, even with edit. Admins and managers may always share.
    */
   async canShare(type: ShareType, id: string, actor: { id: string; role?: string }) {
     const loc = await this.locate(type, id)
-    if (actor.role === 'super_admin') return { allowed: true, loc }
-    const wsRole = await this.workspaceRole(loc.workspaceId, actor.id)
-    if (!wsRole) return { allowed: false, loc }
-    if (wsRole === 'guest') return { allowed: false, loc }
-    if (wsRole === 'workspace_admin' || wsRole === 'manager') return { allowed: true, loc }
-    if (loc.createdById && loc.createdById === actor.id) return { allowed: true, loc }
-    const level = await this.resolveLevel(type, id, actor.id)
-    return { allowed: level != null && RANK[level] >= RANK.edit, loc }
+    if (actor.role !== 'super_admin' && (await this.workspaceRole(loc.workspaceId, actor.id)) === 'guest') {
+      return { allowed: false, loc, level: null as ShareLevel | null }
+    }
+    const level = await this.actorLevel(type, id, actor, loc)
+    return { allowed: level != null && RANK[level] >= RANK.edit, loc, level }
   }
 
   private async assertCanShare(type: ShareType, id: string, actor: { id: string; role?: string }) {
-    const { allowed, loc } = await this.canShare(type, id, actor)
-    if (!allowed) throw new ForbiddenException('You do not have permission to share this item')
-    return loc
+    const { allowed, loc, level } = await this.canShare(type, id, actor)
+    if (!allowed || !level) throw new ForbiddenException('You do not have permission to share this item')
+    return { ...loc, actorLevel: level }
+  }
+
+  /**
+   * NOBODY GIVES, CHANGES OR REMOVES MORE THAN THEY HOLD — their own share
+   * included, which is how a raise was made. Nothing compared the level given
+   * with the giver's: measured on lane 3, a member with a list shared to them
+   * at Edit, refused a task in it (403), shared it with themselves at Full edit
+   * (201), made the task (201), gave Full edit to another member too, and
+   * lowered and then removed a Full edit share the admin had given
+   * (`found-25-sep/sharers-raise-their-own-level`).
+   */
+  private assertWithinOwnLevel(mine: ShareLevel, ...levels: ShareLevel[]) {
+    if (levels.some((l) => RANK[l] > RANK[mine])) {
+      throw new ForbiddenException('You can give, change or remove access only up to your own')
+    }
   }
 
   // ─── resolution ────────────────────────────────────────────────────────────
@@ -478,6 +527,7 @@ export class SharesService {
   ) {
     const loc = await this.assertCanShare(type, id, actor)
     const level = this.assertLevel(input.level ?? 'view')
+    this.assertWithinOwnLevel(loc.actorLevel, level)
 
     let userId = input.userId ?? null
     let invitedEmail: string | null = null
@@ -498,6 +548,8 @@ export class SharesService {
         .where(and(eq(objectShares.objectType, type), eq(objectShares.objectId, id), eq(objectShares.userId, userId)))
         .limit(1)
       if (dupe) {
+        const [held] = await this.db.select({ level: objectShares.level }).from(objectShares).where(eq(objectShares.id, dupe.id)).limit(1)
+        this.assertWithinOwnLevel(loc.actorLevel, held.level as ShareLevel)
         await this.db.update(objectShares).set({ level, updatedAt: new Date() }).where(eq(objectShares.id, dupe.id))
         return { ok: true, updated: true }
       }
@@ -569,6 +621,10 @@ export class SharesService {
   async updateLevel(type: ShareType, id: string, shareId: string, actor: { id: string; role?: string }, level: string, ip?: string) {
     const loc = await this.assertCanShare(type, id, actor)
     const lvl = this.assertLevel(level)
+    const [held] = await this.db.select({ level: objectShares.level }).from(objectShares)
+      .where(and(eq(objectShares.id, shareId), eq(objectShares.objectType, type), eq(objectShares.objectId, id))).limit(1)
+    if (!held) throw new NotFoundException('Share not found')
+    this.assertWithinOwnLevel(loc.actorLevel, lvl, held.level as ShareLevel)
     const [row] = await this.db.update(objectShares).set({ level: lvl, updatedAt: new Date() })
       .where(and(eq(objectShares.id, shareId), eq(objectShares.objectType, type), eq(objectShares.objectId, id)))
       .returning({ id: objectShares.id })
@@ -582,6 +638,10 @@ export class SharesService {
 
   async revoke(type: ShareType, id: string, shareId: string, actor: { id: string; role?: string }, ip?: string) {
     const loc = await this.assertCanShare(type, id, actor)
+    const [held] = await this.db.select({ level: objectShares.level }).from(objectShares)
+      .where(and(eq(objectShares.id, shareId), eq(objectShares.objectType, type), eq(objectShares.objectId, id))).limit(1)
+    if (!held) throw new NotFoundException('Share not found')
+    this.assertWithinOwnLevel(loc.actorLevel, held.level as ShareLevel)
     const [row] = await this.db.delete(objectShares)
       .where(and(eq(objectShares.id, shareId), eq(objectShares.objectType, type), eq(objectShares.objectId, id)))
       .returning({ id: objectShares.id })

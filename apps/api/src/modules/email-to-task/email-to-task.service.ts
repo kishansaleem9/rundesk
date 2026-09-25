@@ -25,7 +25,6 @@ import {
 import { DB_TOKEN } from '../../common/database/database.module'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
-import { assertCanManageContainer } from '../../common/permissions/container-access'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
 import { canCreateTaskIn } from '../../common/permissions/task-create'
 import { isUuid } from '../../common/validation/uuid'
@@ -139,23 +138,17 @@ export class EmailToTaskService {
     return { ok: true }
   }
 
-  // Managing a list's inbound-email alias requires the list's creator or a
-  // workspace admin/manager (not any member).
+  /*
+   * GIVING A LIST AN ADDRESS, ROTATING OR REVOKING IT, IS FOR THOSE WHO MAY ADD
+   * TASKS TO IT — the create gate, as reading the address is: mail to it adds a
+   * task. It was the list's maker's or a manager's, so a member with Full edit
+   * could not give the admin's list an address, and one who had made a list in
+   * a space since narrowed still could (`found-25-sep/sharing-asks-the-maker-not-the-level`).
+   */
   private async assertCanManageAlias(listId: string, actorId: string) {
-    const [row] = await this.db
-      .select({ createdById: lists.createdById, workspaceId: spaces.workspaceId })
-      .from(lists)
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(lists.id, listId))
-      .limit(1)
-    if (!row) throw new NotFoundException('List not found')
-    await assertCanManageContainer(this.db, {
-      workspaceId: row.workspaceId,
-      createdById: row.createdById,
-      actorId,
-      kind: 'list email alias',
-    })
+    if (!(await canCreateTaskIn(this.db, listId, actorId))) {
+      throw new ForbiddenException('Only those who may add tasks to this list manage its email address')
+    }
   }
 
   /**
