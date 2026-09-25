@@ -1,3 +1,4 @@
+import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, BadRequestException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
 import { and, desc, eq, inArray } from 'drizzle-orm'
@@ -516,7 +517,7 @@ export class BillingService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     const emails = rows.map((r) => r.email)
@@ -542,7 +543,7 @@ export class BillingService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     if (admins.length === 0) return

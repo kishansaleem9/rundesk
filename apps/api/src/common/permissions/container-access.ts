@@ -1,3 +1,4 @@
+import { isAdminRole } from './workspace-roles'
 import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { workspaceMembers, spaceMembers, spaces, projects } from '@rundesk/db'
@@ -5,7 +6,6 @@ import type { Db } from '@rundesk/db'
 import { assertSpaceLevel, type WithinStep } from './space-default-permission'
 import { checkContainerAccess } from './container-access.guard-helper'
 
-const ADMIN_ROLES = new Set(['super_admin', 'workspace_admin'])
 
 /**
  * Container (space / project / list) mutations are allowed only for the creator
@@ -99,7 +99,7 @@ export async function assertCanManageContainer(
     .limit(1)
   const role = membership?.role
   // Workspace admins / super-admins may always manage + delete any container.
-  if (role && ADMIN_ROLES.has(role)) return
+  if (isAdminRole(role)) return
 
   if (role === 'manager') {
     if (action !== 'delete') return // edits: a manager may manage any container

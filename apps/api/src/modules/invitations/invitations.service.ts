@@ -1,3 +1,4 @@
+import { ASSIGNABLE_WORKSPACE_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, NotFoundException, ConflictException, ForbiddenException, GoneException, BadRequestException } from '@nestjs/common'
 import { eq, and, inArray } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
@@ -18,7 +19,7 @@ import { PlansService } from '../plans/plans.service'
  * one. And an organisation is handed over, not invited into, so `owner` is not
  * on the organisation list.
  */
-export const INVITE_WORKSPACE_ROLES = ['workspace_admin', 'manager', 'member', 'guest'] as const
+export const INVITE_WORKSPACE_ROLES = ASSIGNABLE_WORKSPACE_ROLES
 export type InviteWorkspaceRole = (typeof INVITE_WORKSPACE_ROLES)[number]
 export const INVITE_ORG_ROLES = ['admin', 'billing', 'member'] as const
 type InviteOrgRole = (typeof INVITE_ORG_ROLES)[number]

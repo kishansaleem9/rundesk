@@ -1,3 +1,4 @@
+import { WS_MANAGER_ROLES, isManagerRole } from './workspace-roles'
 import { and, or, eq, ne, inArray, type SQL } from 'drizzle-orm'
 import { tasks, lists, folders, taskAssignees, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
@@ -20,11 +21,9 @@ import { guestTaskFilter } from './guest-reach'
  * (by-id) reads are gated by ResourceMemberGuard, which enforces the same rule.
  */
 
-export const WS_MANAGER_ROLES = ['workspace_admin', 'manager', 'super_admin']
-
-export function isManagerRole(role: string | null | undefined): boolean {
-  return !!role && WS_MANAGER_ROLES.includes(role)
-}
+// The list lives in `workspace-roles.ts`, once; re-exported for the modules
+// that have always imported it from here.
+export { WS_MANAGER_ROLES, isManagerRole }
 
 /**
  * Resolve whether an actor sees everything in a workspace (super_admin, or a

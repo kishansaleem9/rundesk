@@ -1,3 +1,4 @@
+import { ASSIGNABLE_WORKSPACE_ROLES, isAssignableWorkspaceRole } from '../../common/permissions/workspace-roles'
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
 import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
@@ -853,9 +854,8 @@ export class WorkspacesService {
     // Only these roles may be assigned to a workspace member. Crucially this
     // excludes `super_admin` (a platform-level role in the same enum) — without
     // this allowlist any workspace admin could self-promote to god-mode.
-    const ASSIGNABLE_ROLES = ['workspace_admin', 'manager', 'member', 'guest']
-    if (!ASSIGNABLE_ROLES.includes(role)) {
-      throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_ROLES.join(', ')}`)
+    if (!isAssignableWorkspaceRole(role)) {
+      throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_WORKSPACE_ROLES.join(', ')}`)
     }
     const previous = await this.getMembership(workspaceId, userId)
     // Never let the last workspace admin be demoted out of the workspace.

@@ -1,3 +1,4 @@
+import { WS_MANAGER_ROLES } from '../../common/permissions/workspace-roles'
 import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -37,7 +38,7 @@ export class InvitationsController {
         and(
           inArray(workspaceMembers.workspaceId, workspaceIds),
           eq(workspaceMembers.userId, userId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'manager']),
+          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
         ),
       )
       .limit(1)
@@ -63,7 +64,7 @@ export class InvitationsController {
         and(
           eq(workspaceMembers.workspaceId, body.workspaceId),
           eq(workspaceMembers.userId, user.id),
-          inArray(workspaceMembers.role, ['workspace_admin', 'manager']),
+          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
         ),
       )
       .limit(1)

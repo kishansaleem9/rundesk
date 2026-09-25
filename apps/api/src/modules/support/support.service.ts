@@ -1,3 +1,4 @@
+import { isManagerRole } from '../../common/permissions/workspace-roles'
 import {
   Injectable,
   Inject,
@@ -42,8 +43,6 @@ const trimStr = (v: unknown): string => (typeof v === 'string' ? v.trim() : '')
 /** Plan tiers that include the support ticket system (§14.4) — paid tiers only. */
 const TICKETING_TIERS = ['pro', 'business', 'enterprise']
 
-/** Workspace roles that can manage/see every ticket in their workspace. */
-const WS_STAFF_ROLES = ['workspace_admin', 'manager', 'super_admin']
 
 /**
  * SupportService (Plan §14.4) — the human support surface behind the AI help
@@ -504,7 +503,7 @@ export class SupportService {
       .select({ workspaceId: workspaceMembers.workspaceId, role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(eq(workspaceMembers.userId, userId))
-    return rows.filter((r) => WS_STAFF_ROLES.includes(r.role)).map((r) => r.workspaceId)
+    return rows.filter((r) => isManagerRole(r.role)).map((r) => r.workspaceId)
   }
 
   /** True if the actor is support staff for the given workspace. */
@@ -515,7 +514,7 @@ export class SupportService {
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
       .limit(1)
-    return !!member && WS_STAFF_ROLES.includes(member.role)
+    return !!member && isManagerRole(member.role)
   }
 
   /** Ensure the actor may read/reply to a ticket: creator, workspace staff, or super_admin. */

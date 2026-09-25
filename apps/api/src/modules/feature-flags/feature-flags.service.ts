@@ -1,3 +1,4 @@
+import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { and, eq, gte, inArray, isNull } from 'drizzle-orm'
 import { featureFlagRequests, featureFlags, workspaceMembers } from '@rundesk/db'
@@ -224,7 +225,7 @@ export class FeatureFlagsService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     const recipients = admins.map((a) => a.userId).filter((id) => id !== requester.id)

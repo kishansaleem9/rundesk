@@ -29,6 +29,7 @@
  * was missing.
  */
 
+import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -110,12 +111,13 @@ type PersonPreview = {
   }>
 }
 
-/** The roles the API lets create a team (`WorkspaceAdminGuard`). */
-const MAY_CREATE_TEAM = ['workspace_admin', 'manager', 'super_admin']
-
 export function TeamsPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string }
+  // Who may create a team is who manages the workspace, as the API's
+  // `WorkspaceAdminGuard` has it — the role hook's own answer, not a copy of
+  // its list (`role-lists-copied-per-module`).
+  const { isManagerOrAbove: mayCreateTeam } = useWorkspaceRole(workspaceId)
   const me = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabId>('teams')
@@ -161,10 +163,6 @@ export function TeamsPage() {
     return map
   }, [previewQuery.data])
 
-  const myRole = me
-    ? (members.find((m) => m.userId === me.id)?.role ?? me.role)
-    : undefined
-  const mayCreateTeam = MAY_CREATE_TEAM.includes(String(myRole ?? ''))
 
   const createTeam = useMutation({
     mutationFn: (name: string) =>

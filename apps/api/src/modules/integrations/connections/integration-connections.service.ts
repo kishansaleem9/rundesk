@@ -1,3 +1,4 @@
+import { WS_ADMIN_ROLES } from '../../../common/permissions/workspace-roles'
 import { BadRequestException, Inject, Injectable, UnauthorizedException } from '@nestjs/common'
 import { DRIVE_SEARCH_SCOPE } from '../../search/drive-scope'
 import { GMAIL_SEARCH_SCOPE, SHAREPOINT_SEARCH_SCOPE } from '../../search/sources'
@@ -522,7 +523,7 @@ export class IntegrationConnectionsService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     for (const admin of admins) {

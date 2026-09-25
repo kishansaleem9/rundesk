@@ -1,3 +1,4 @@
+import { isAdminRole } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
 import { eq, and, or, ne, inArray, sql } from 'drizzle-orm'
 import { dashboardPresets, userDockConfigs, workspaceMembers, objectShares, users } from '@rundesk/db'
@@ -247,7 +248,7 @@ export class DashboardsService {
       )
       .limit(1)
 
-    if (!member || !['workspace_admin', 'super_admin'].includes(member.role)) {
+    if (!member || !isAdminRole(member.role)) {
       throw new ForbiddenException('Only workspace admins can manage the workspace-default dashboard')
     }
   }

@@ -1,3 +1,4 @@
+import { isManagerRole } from '../../common/permissions/workspace-roles'
 import {
   Injectable,
   Inject,
@@ -446,7 +447,7 @@ export class WorkspaceGroupsService {
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
       .limit(1)
-    const isAdmin = !!actor && ['workspace_admin', 'manager', 'super_admin'].includes(actor.role)
+    const isAdmin = !!actor && isManagerRole(actor.role)
     if (actorId !== userId && !isAdmin) {
       throw new ForbiddenException('Only a workspace admin may change somebody else’s job title')
     }

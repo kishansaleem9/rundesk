@@ -1,3 +1,4 @@
+import { WS_MANAGER_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, desc, isNull, gte, lt, inArray, sql } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
@@ -160,7 +161,7 @@ export class TimeEntriesService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'manager', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
         ),
       )
     for (const m of managers) {

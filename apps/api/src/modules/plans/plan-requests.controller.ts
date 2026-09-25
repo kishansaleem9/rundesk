@@ -1,3 +1,4 @@
+import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
 import {
   BadRequestException,
   Body,
@@ -79,7 +80,7 @@ export class PlanRequestsController {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     const recipients = admins.map((a) => a.userId).filter((id) => id !== user?.id)

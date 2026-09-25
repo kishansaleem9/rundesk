@@ -332,6 +332,17 @@ jobs:
       - name: Every workspace write proves the caller belongs there
         run: node scripts/check-workspace-guards.mjs
 
+      # Who manages a workspace was an array literal in nine places, who
+      # administers it in eight, and who may be given a role in it in four;
+      # identical copies drift one at a time. They live in
+      # common/permissions/workspace-roles.ts, and a list anywhere else in the
+      # API fails here (role-lists-copied-per-module).
+      - name: A workspace role list is stated once
+        run: node scripts/check-role-lists.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-role-lists-cases.mjs --mutate
+
       # A suite that is not registered is verified once on a lane and never
       # again. `doc-import` was in that state while the resume doc said every
       # suite was registered, and nothing compared the directory with this

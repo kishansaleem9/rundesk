@@ -1,3 +1,4 @@
+import { isManagerRole } from './workspace-roles'
 import { ForbiddenException } from '@nestjs/common'
 import { and, eq, inArray } from 'drizzle-orm'
 import { spaces, spaceMembers, objectShares, projectMembers, workspaceMembers } from '@rundesk/db'
@@ -68,12 +69,6 @@ export const SPACE_LEVEL_RANK: Record<SpaceDefaultPermission, number> = {
   admin: 3,
 }
 
-/**
- * Workspace roles the space default does not narrow. Same set as
- * `item-visibility.WS_MANAGER_ROLES` — stated again rather than imported so a
- * change to one is a deliberate change to the other.
- */
-const WS_UNRESTRICTED = new Set(['super_admin', 'workspace_admin', 'manager'])
 
 /**
  * Where an actor's level on a space came from. `item-share` is a guest's share
@@ -143,7 +138,7 @@ export async function resolveSpaceLevel(
     )
     .limit(1)
   if (!membership) return null
-  if (WS_UNRESTRICTED.has(membership.role as string)) {
+  if (isManagerRole(membership.role as string)) {
     return { level: 'admin', source: 'workspace-role' }
   }
   const guest = membership.role === 'guest'
@@ -265,7 +260,7 @@ export async function resolveSpaceLevels(
     )
     .limit(1)
   if (!membership) return out
-  if (WS_UNRESTRICTED.has(membership.role as string)) {
+  if (isManagerRole(membership.role as string)) {
     for (const id of params.spaceIds) out.set(id, { level: 'admin', source: 'workspace-role' })
     return out
   }

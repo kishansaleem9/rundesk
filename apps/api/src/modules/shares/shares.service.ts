@@ -1,3 +1,4 @@
+import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, BadRequestException, ForbiddenException, NotFoundException, Logger } from '@nestjs/common'
 import { and, desc, eq, gte, inArray, sql } from 'drizzle-orm'
 import {
@@ -707,7 +708,7 @@ export class SharesService {
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
         ),
       )
     const recipients = [

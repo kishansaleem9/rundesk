@@ -1,3 +1,4 @@
+import { WS_MANAGER_ROLES, isManagerRole } from '../../common/permissions/workspace-roles'
 import {
   Injectable,
   Inject,
@@ -1280,7 +1281,7 @@ export class AiService {
         .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
         .limit(1)
       if (!member) throw new ForbiddenException('Workspace membership required')
-      if (!['workspace_admin', 'manager', 'super_admin'].includes(member.role as string)) {
+      if (!isManagerRole(member.role as string)) {
         throw new ForbiddenException('Only a workspace admin can change the AI benchmark')
       }
     }
@@ -4289,7 +4290,7 @@ Respond ONLY with valid JSON: { "score": 0-100 integer (0 very negative, 50 neut
   /** Ensure the caller is a manager/admin of the workspace (mutating AI actions). */
   async assertWorkspaceManager(workspaceId: string, userId: string): Promise<void> {
     const role = await this.memberRole(workspaceId, userId)
-    if (!role || !['workspace_admin', 'manager', 'super_admin'].includes(role)) {
+    if (!isManagerRole(role)) {
       throw new ForbiddenException('Only managers or admins can perform this action')
     }
   }
@@ -4571,7 +4572,7 @@ Only move work FROM people above the team average TO people below it. Never move
       .where(
         and(
           eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, ['workspace_admin', 'manager', 'super_admin']),
+          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
         ),
       )
   }

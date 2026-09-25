@@ -237,7 +237,8 @@ describe('the emitters exist and know who acted (source-level, §2.2)', () => {
 
   it('an access request tells the admins who can grant it', () => {
     assert.match(integrations, /type: 'access_requested'/)
-    assert.match(integrations, /'workspace_admin', 'super_admin'/)
+    // The admins, as the one list states them (`role-lists-copied-per-module`).
+    assert.match(integrations, /inArray\(workspaceMembers\.role, \[\.\.\.WS_ADMIN_ROLES\]\)/)
   })
 
   /**

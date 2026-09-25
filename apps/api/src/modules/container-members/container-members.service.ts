@@ -1,3 +1,4 @@
+import { isManagerRole } from '../../common/permissions/workspace-roles'
 import {
   Injectable,
   Inject,
@@ -16,7 +17,6 @@ import { isUuid } from '../../common/validation/uuid'
 
 type ContainerRole = 'admin' | 'edit' | 'comment' | 'view'
 const CONTAINER_ROLES: ContainerRole[] = ['admin', 'edit', 'comment', 'view']
-const WS_MANAGE_ROLES = ['workspace_admin', 'manager', 'super_admin']
 
 function assertRole(role: string): asserts role is ContainerRole {
   if (!CONTAINER_ROLES.includes(role as ContainerRole)) throw new BadRequestException('Invalid role')
@@ -32,7 +32,7 @@ export class ContainerMembersService {
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
-    return !!wm && WS_MANAGE_ROLES.includes(wm.role as string)
+    return !!wm && isManagerRole(wm.role as string)
   }
 
   // ── Spaces ─────────────────────────────────────────────────────────────────

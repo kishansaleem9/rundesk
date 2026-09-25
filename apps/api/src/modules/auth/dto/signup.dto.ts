@@ -1,3 +1,5 @@
+import { ASSIGNABLE_WORKSPACE_ROLES } from '../../../common/permissions/workspace-roles'
+import type { AssignableWorkspaceRole } from '../../../common/permissions/workspace-roles'
 import { IsEmail, IsString, MinLength, MaxLength, IsOptional, IsArray, ValidateNested, IsIn } from 'class-validator'
 import { Type } from 'class-transformer'
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger'
@@ -12,10 +14,10 @@ export class InviteItemDto {
   @IsIn(['admin', 'member'])
   orgRole?: 'admin' | 'member'
 
-  @ApiPropertyOptional({ enum: ['workspace_admin', 'manager', 'member', 'guest'], default: 'member' })
+  @ApiPropertyOptional({ enum: [...ASSIGNABLE_WORKSPACE_ROLES], default: 'member' })
   @IsOptional()
-  @IsIn(['workspace_admin', 'manager', 'member', 'guest'])
-  workspaceRole?: 'workspace_admin' | 'manager' | 'member' | 'guest'
+  @IsIn([...ASSIGNABLE_WORKSPACE_ROLES])
+  workspaceRole?: AssignableWorkspaceRole
 }
 
 export class SignupDto {

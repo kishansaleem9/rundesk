@@ -3,12 +3,13 @@
 # to "View only" and you have locked yourself out of it — a permission column
 # that can do that is a foot-gun, not a permission.
 # RE-AIMED 24 September: the guest rule now follows the role check in the resolver.
+# Re-aimed 25 September: the manager list is stated once now (`role-lists-copied-per-module`); the anchor reads `isManagerRole(...)`.
 # Reddens: space-default-permission:
 #   "a workspace admin is not narrowed by a space setting, with no explicit grant to lean on"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/space-default-permission.ts'
 a = """  if (!membership) return null
-  if (WS_UNRESTRICTED.has(membership.role as string)) {
+  if (isManagerRole(membership.role as string)) {
     return { level: 'admin', source: 'workspace-role' }
   }
   const guest = membership.role === 'guest'

@@ -1,3 +1,4 @@
+import { isManagerRole } from './workspace-roles'
 import { ConflictException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { lists, projects, spaces, taskAssignees, tasks, workspaceMembers } from '@rundesk/db'
@@ -91,7 +92,7 @@ export async function assertTaskWritable(
     .limit(1)
   if (!membership) throw new NotFoundException('Workspace not found')
 
-  if (['workspace_admin', 'manager', 'super_admin'].includes(membership.role)) return ctx
+  if (isManagerRole(membership.role)) return ctx
   /*
    * A GUEST CHANGES WHAT IS SHARED WITH THEM, AT ITS LEVEL — by the same rule,
    * not a refusal of their own (`found-25-sep/guests-edit-no-shared-task`).

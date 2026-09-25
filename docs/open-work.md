@@ -535,7 +535,7 @@ Now the sheet makes one pass per burst, 150 ms after its first event. That pass 
 
 The answer is the same either way, so there is no before and after to measure at the route. `gantt-controls` gained a check (30 now) that the timeline carries only what it can draw: this run's task with neither date is in neither read. `gantt-controls-18`, compiled, takes the filter out of the SQL, with none after it, and must redden that check.
 - After: 30/30, on lanes 5 and 4.
-- *Break run:* queued on lane 1 after the commit (`plan-tl`).
+- *Break run* (lane 1, on `8ba0bac`): the whole set of 19, with `gantt-controls-18`, reddened the check each claims.
 - Regression on lanes 2 to 5, the four suites that read the timeline or open its page: 4/4.
 
 ### `product-siblings/timesheet-mine-includes-everyone` — **closed**
@@ -1524,7 +1524,7 @@ Results:
 
 `otr-1..4`, each compiled: blocking asking nothing of the other task; waiting asking it too; a parent asked for reading, as before; a parent asked Edit.
 
-*Break run:* queued on lane 1 after the commit (`plan-otr`).
+*Break run* (lane 1, run again after the edit that broke the first run, `lane-scripts-read-as-they-run`): `otr-1..4` all reddened the check they claim.
 
 Regression on lanes 2 to 5: the 20 suites that add dependencies or subtasks, read them, or build on subtasks, and the new suite. Result: 21/21.
 - Under the sweep's load, `task-menu` found its menu's rows late, and `task-depth` a tag's removal, both as recorded before.
@@ -1605,7 +1605,7 @@ Patches `cpa-1..5`, each compiled:
 - the dialog asks another key;
 - `cpa-5`, which claims the unit test: the link lookup asks no workspace.
 
-*Break run:* queued on lane 1 after the commit (`plan-cpa`).
+*Break run* (lane 1, on `14c789f`): `cpa-1..4` all reddened the check they claim, and `cpa-5` reddens its unit test.
 
 Regression on lanes 2 to 5: the 18 suites that touch calendars, integrations or custom-role grants, and the new suite. Result: 19/19.
 
@@ -1904,7 +1904,8 @@ The new suite `share-levels`, 6 checks. A member reads four lists of the admin's
 *Break run, lane 1 (`3d959fc`):*
 - `shl-1..9`: 8 of 9 reddened, on a green baseline (6/6). `request-access`' four: 4 of 4 (9/9). `ui-sweep`'s three: 3 of 3 (107/107).
 - `shl-6` (guests share) stayed green. The check's guest shared the list with a member who already held Full edit on it, so the cap refused them before the guest rule could.
-- The guest now shares with an outsider's address, and no invite row may be made. The suite passed again (6/6); `shl-6` is queued on it.
+- The guest now shares with an outsider's address, and no invite row may be made. The suite passed again (6/6).
+- Run again on lane 1 (on `14c789f`, after the edit that broke the first run, `lane-scripts-read-as-they-run`): `shl-1..9` all reddened the check they claim, `shl-6` among them.
 
 Regression on lanes 2 to 5: the 18 suites that share, or set shares up, and `request-access`, `ui-sweep` and `project-member-levels`. Result: 21/21.
 - Under the sweep's load, 19 passed the first time.
@@ -2267,6 +2268,7 @@ Each is its own question.
 - `request-access`: no request-access card on the locked-out task.
 - `task-menu`: New tab, Convert to and Send email to task were missing from the menu.
 - `video-regression`, 25 September, a four-lane sweep: [A1.2] no list reached from the space page, and [A2.3] no Ask AI row in search. It passed on its own, 93/93. Again the same day, in the sweep for `list-page-offers-refused-edits`: [A1.2] on lane 4, then 93/93 alone on lanes 4 and 2.
+- `panel-collapse` and `role-permissions-web`, 25 September, the sweep for `role-lists-copied-per-module`. `panel-collapse` listed no spaces to begin with (0), and `role-permissions-web` did not offer Save as template after the grant. Each passed alone (56/56, 5/5).
 - `ai-activity-filters` and `a61-meeting-record` again, 25 September, the sweep for `ai-task-paths-skip-the-read-rule`, with the same failures on other lanes (4 and 2). Each passed alone again (34/34, 25/25). The same two in two sweeps running is not chance: both read fixed waits.
 - `ai-activity-filters` and `a61-meeting-record`, 25 September, the sweep for `guest-guard-reads-the-account-role`. `ai-activity-filters` listed no row under its Failed filter on the page, though the same filter's API read had found the row. `a61-meeting-record` kept offering Save after a save, and lost the recording's address. Each passed alone (34/34, 25/25). `a61-meeting-record` is here for the third time.
 - `task-menu` and `task-depth`, 25 September, the sweep for `read-only-tasks-blocked-and-parented`: the menu's rows late, and the tag's removal. `task-depth` passed alone (91/91). `task-menu` passed on lane 3 (37/37), after once more missing Send email to task alone on lane 2 while lane 1's break runs held the machine.
@@ -2411,7 +2413,7 @@ Patches `osr-1..4`, each compiled:
 - every provider is refused;
 - `osr-4`, which claims the unit test: the start asks for no keys.
 
-*Break run:* queued on lane 1 after the commit (`plan-osr`), with the two restated suites' sets (`pgt`, `mcc`).
+*Break run* (lane 1, on `d277fd5`): `osr-1..3` reddened, and `osr-4` reddens its unit test. The restated suites' sets did too: `pgt-1..4`, and all eleven `mcc` patches.
 
 Regression on lanes 2 to 5: the 21 suites that start grants, read provider status, or draw the App Center, the planner's connects and the walkthroughs, and the new suite. Result: 22/22.
 - `planner-gates` and `meetings-connect-calendar` failed first: they read the lane's keys as "cannot connect". Restated as above, they passed (3/3, 5/5).
@@ -3063,13 +3065,34 @@ Regression on lanes 2 to 5: `guest-invitations`, `assignee-picker`, `credential-
 
 *Closed:* `isManagerRole`, the one list. `view-visibility` 23/23 with two new checks in a workspace of its own — an admin and a manager may both change a member's protected view; neither may touch the member's private view — the first of which failed on the old API (403 against the manager's 200). `view-visibility-5` (the old list) and `-6` (the lookup that hides a private view). Regression: list-save-view, read-visibility, view-visibility 3/3.
 
-### `found-23-sep/role-lists-copied-per-module` — open, small (found closing the views role list)
+### `found-23-sep/role-lists-copied-per-module` — **closed** (duplicated list, small; found closing the views role list)
 
 **The manager-role list is kept in four more places, and the assignable workspace roles in two**
 
 *Evidence:* `item-visibility.ts` exports `WS_MANAGER_ROLES`/`isManagerRole`; the same three roles are also `WS_MANAGE_ROLES` (`container-members.service.ts:15`) and `WS_STAFF_ROLES` (`support.service.ts:46`) — identical today, which is how `views.service.ts`'s copy drifted into naming roles that do not exist before anybody noticed. `workspaces.service.ts:837` `ASSIGNABLE_ROLES` and `invitations.service.ts` `INVITE_WORKSPACE_ROLES` are one list twice. `container-access.ts:8` `ADMIN_ROLES` (admins only) is a different set and stays.
 
 *To close:* import the one list at each site (no behaviour changes, so: type-check, the modules' unit tests, and a sweep of the suites that exercise each module), and a checker that fails on a new array literal of workspace role names outside `common/permissions`.
+
+*Closed, 25 September.* A scan of the API found more copies than were listed here, 21 in all:
+- the managers (admins, managers and platform admins) nine times;
+- the admins alone eight times;
+- the roles a person may be given four times;
+- the invitations controller's two-role list, which left out `super_admin`. No membership row holds that role (no path writes one), so that list and the managers' behave the same on rows.
+
+Each set is stated once now, in `common/permissions/workspace-roles.ts`: `WS_MANAGER_ROLES` with `isManagerRole`, `WS_ADMIN_ROLES` with `isAdminRole`, and `ASSIGNABLE_WORKSPACE_ROLES` with `isAssignableWorkspaceRole`.
+- **Every site imports them.** That is fourteen modules, the sign-up DTO's `@IsIn` among them. `item-visibility` re-exports for the modules that always imported from there.
+- **`space-default-permission`'s copy is gone.** It had been kept on purpose "so a change to one is a deliberate change to the other", which a single list makes true by itself.
+- **The web's one copy is gone too.** The teams page's `MAY_CREATE_TEAM` asks the role hook's `isManagerOrAbove` now. The hook, like the API's `WorkspaceAdminGuard`, counts a platform admin.
+
+**The gate.** `scripts/check-role-lists.mjs` fails on an array literal holding two or more workspace role names anywhere in `apps/api/src` outside `common/permissions`, or in `apps/web/src` outside `hooks/use-workspace-role.ts`. Unit tests are exempt. It also fails on a source directory that is missing or holds no TypeScript. It reads 912 files.
+- `check-role-lists-cases.mjs` plants trees to fool it: split, double-quoted, `Set`, `inArray` and web lists; the allowed places; the empty trees. That is 8 cases. `--mutate` breaks the gate eight ways, and every mutation reddens a case.
+- Both run in the preflight and in CI.
+
+Measured:
+- API typecheck clean, and the web's.
+- API unit tests 1652/1652. One source-level test had asserted the literal `'workspace_admin', 'super_admin'` in the integrations service; it asserts the service reads `WS_ADMIN_ROLES` now.
+- `gte-1` and `sdp-7` anchored on the literals, and were re-aimed onto `isManagerRole(...)`; each compiled. They are queued (`plan-rl`).
+- Regression on lanes 2 to 5, the 32 suites that exercise the fourteen modules: 32/32. `panel-collapse` and `role-permissions-web` failed under the sweep's load and passed alone (56/56, 5/5). The five teams suites passed after the web change (5/5).
 
 ### `found-23-sep/signup-throttle-killed-a-break-run` — **closed** (found reading plan-3's logs)
 
