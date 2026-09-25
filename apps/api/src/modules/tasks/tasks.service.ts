@@ -92,7 +92,7 @@ import { safeFileName } from '../../common/storage/file-name'
 import { CalendarSyncService } from '../calendar-sync/calendar-sync.service'
 import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
-import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
+import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches, type WithinStep } from '../../common/permissions/space-default-permission'
 import { checkContainerAccess, containerRefusal, containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { attachmentKind, isLinkAttachmentKey, isTaskOwnObjectKey, isTaskUploadKey } from './task-object-keys'
 import { isWorkspaceClipKey } from '../clips/clip-keys'
@@ -670,6 +670,8 @@ export class TasksService {
         isArchived: tasks.isArchived,
         workspaceId: spaces.workspaceId,
         spaceId: spaces.id,
+        projectId: projects.id,
+        folderId: projects.folderId,
       })
       .from(tasks)
       .innerJoin(lists, eq(lists.id, tasks.listId))
@@ -712,7 +714,12 @@ export class TasksService {
       .from(taskAssignees)
       .where(and(eq(taskAssignees.taskId, taskId), eq(taskAssignees.userId, actorId)))
       .limit(1)
-    await this.assertSpaceAllowsTaskWrite(ctx.spaceId, actorId, opts.level ?? 'edit', !!assignee)
+    await this.assertSpaceAllowsTaskWrite(ctx.spaceId, actorId, opts.level ?? 'edit', !!assignee, [
+      { type: 'task', id: taskId },
+      { type: 'list', id: ctx.listId },
+      { type: 'project', id: ctx.projectId },
+      ...(ctx.folderId ? [{ type: 'folder' as const, id: ctx.folderId }] : []),
+    ])
     return ctx
   }
 
@@ -731,11 +738,18 @@ export class TasksService {
    *   - "view" — nothing.
    * A manager is never narrowed (`resolveSpaceLevel` answers "admin").
    */
-  private async assertSpaceAllowsTaskWrite(spaceId: string, actorId: string, wanted: 'comment' | 'edit', isAssignee: boolean) {
-    const resolved = await resolveSpaceLevel(this.db, { spaceId, actorId })
+  private async assertSpaceAllowsTaskWrite(
+    spaceId: string,
+    actorId: string,
+    wanted: 'comment' | 'edit',
+    isAssignee: boolean,
+    /** The task and the containers above it: a grant on any of them decides first (`WithinStep`). */
+    within: WithinStep[],
+  ) {
+    const resolved = await resolveSpaceLevel(this.db, { spaceId, actorId, within })
     if (!resolved) return
     if (wanted === 'comment' && isAssignee && spaceLevelReaches(resolved.level, 'comment')) return
-    await assertSpaceLevel(this.db, { spaceId, actorId, required: 'edit', kind: 'tasks' })
+    await assertSpaceLevel(this.db, { spaceId, actorId, required: 'edit', kind: 'tasks', within })
   }
 
   /** A comment needs the space's "comment" level: "view only" means view (see assertSpaceAllowsTaskWrite). */

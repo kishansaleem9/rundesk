@@ -43,6 +43,8 @@ export async function assertCanManageContainer(
     spaceId?: string | null
     /** When true, deletion is admin-only regardless of role (space.delete is admin-only in the catalog). */
     adminOnlyDelete?: boolean
+    /** The container and those above it: a grant on any of them decides before the space (`WithinStep`). */
+    within?: WithinStep[]
   },
 ): Promise<void> {
   const action = params.action ?? 'manage'
@@ -76,6 +78,7 @@ export async function assertCanManageContainer(
       actorId: params.actorId,
       required: 'edit',
       kind: params.kind,
+      within: params.within,
     })
   }
 

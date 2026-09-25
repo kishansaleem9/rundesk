@@ -307,6 +307,7 @@ export class ProjectsService {
         workspaceId: spaces.workspaceId,
         name: projects.name,
         spaceId: projects.spaceId,
+        folderId: projects.folderId,
       })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
@@ -321,6 +322,8 @@ export class ProjectsService {
       action,
       // Managers may delete a project only within a space they belong to.
       spaceId: row.spaceId,
+      // A grant on the project, or its folder, decides before the space.
+      within: [{ type: 'project', id: projectId }, ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : [])],
     })
     return row
   }

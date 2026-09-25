@@ -3,6 +3,7 @@
 # and the person who set the space to View only has no way to connect the two.
 # RE-AIMED 24 September: the refusal has a sentence for a guest with nothing shared,
 # and for a guest's share below the space.
+# Re-aimed 25 September: the message has a project's branch now (`project-roles-narrow-nothing`).
 # Reddens: space-default-permission:
 #   "and the refusal says WHY — the space's default permission, not a generic denial"
 import io
@@ -12,9 +13,11 @@ a = """  throw new ForbiddenException(
       ? `Nothing here is shared with you, and a guest changes only what is shared with them`
       : resolved.source === 'item-share'
         ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-        : resolved.source === 'space-default'
-          ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-          : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
+        : resolved.source === 'project-member'
+          ? `Your access to this project is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+          : resolved.source === 'space-default'
+            ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+            : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
   )
 """
 b = """  throw new ForbiddenException('Forbidden')

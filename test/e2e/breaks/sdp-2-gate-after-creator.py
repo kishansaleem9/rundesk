@@ -2,6 +2,7 @@
 # this list myself" is an exception to a space nobody may write in. This is the
 # commonest way the rule would be quietly avoided: every container a member
 # creates in a view-only space stays editable by them forever.
+# Re-aimed 25 September: the rule passes the chain a grant is read on now (`project-roles-narrow-nothing`).
 # Reddens: space-default-permission:
 #   "renaming their OWN list in a view-only space is refused with 403"
 #   "and the list really is unchanged"
@@ -15,6 +16,7 @@ a = """  if (params.spaceId) {
       actorId: params.actorId,
       required: 'edit',
       kind: params.kind,
+      within: params.within,
     })
   }
 
@@ -30,6 +32,7 @@ b = """  // The creator may always manage / delete their own container.
       actorId: params.actorId,
       required: 'edit',
       kind: params.kind,
+      within: params.within,
     })
   }
 """

@@ -1,6 +1,6 @@
 import { ForbiddenException } from '@nestjs/common'
 import { and, eq, inArray } from 'drizzle-orm'
-import { spaces, spaceMembers, objectShares, workspaceMembers } from '@rundesk/db'
+import { spaces, spaceMembers, objectShares, projectMembers, workspaceMembers } from '@rundesk/db'
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 
 /**
@@ -80,7 +80,7 @@ const WS_UNRESTRICTED = new Set(['super_admin', 'workspace_admin', 'manager'])
  * on something inside the space (see `within`); `guest-default` is a guest with
  * nothing shared, who holds "view" whatever the space's default says.
  */
-export type SpaceLevelSource = 'workspace-role' | 'space-member' | 'object-share' | 'item-share' | 'space-default' | 'guest-default'
+export type SpaceLevelSource = 'workspace-role' | 'space-member' | 'object-share' | 'item-share' | 'project-member' | 'space-default' | 'guest-default'
 
 /**
  * What a guest's level is asked ABOUT, below the space: the item and the
@@ -169,6 +169,45 @@ export async function resolveSpaceLevel(
     for (const step of params.within) {
       const hit = rows.find((r) => r.objectType === step.type && r.objectId === step.id)
       if (hit) return { level: hit.level as SpaceDefaultPermission, source: 'item-share' }
+    }
+  }
+
+  /*
+   * A MEMBER'S GRANT BELOW THE SPACE DECIDES FIRST, TOO
+   * (`found-25-sep/project-roles-narrow-nothing`). ClickUp: permissions set on
+   * a Folder or List override the Space's, and the most specific decides — in
+   * either direction. A project's members' roles (the Members sheet) were
+   * recorded and read by nothing: a member set to View on a project changed
+   * its tasks and made new ones, and one given Edit on a project in a
+   * view-only space could change nothing there.
+   *
+   * A GRANT IS WHAT SOMEBODY GAVE THEM. A project's maker is seeded as its
+   * admin member (`projects.service`, added by themselves), and that row says
+   * who made it, not what they were given: making something is no exception
+   * to its space's level (`assertCanManageContainer`), so it is not read here.
+   */
+  if (!guest && params.within?.length) {
+    const ids = params.within.map((step) => step.id)
+    const projectIds = params.within.filter((step) => step.type === 'project').map((step) => step.id)
+    const [shares, roles] = await Promise.all([
+      db
+        .select({ objectType: objectShares.objectType, objectId: objectShares.objectId, level: objectShares.level })
+        .from(objectShares)
+        .where(and(eq(objectShares.userId, params.actorId), inArray(objectShares.objectId, ids))),
+      projectIds.length
+        ? db
+            .select({ projectId: projectMembers.projectId, role: projectMembers.role, addedById: projectMembers.addedById })
+            .from(projectMembers)
+            .where(and(eq(projectMembers.userId, params.actorId), inArray(projectMembers.projectId, projectIds)))
+        : Promise.resolve([] as Array<{ projectId: string; role: string; addedById: string | null }>),
+    ])
+    for (const step of params.within) {
+      const shared = (shares.find((r) => r.objectType === step.type && r.objectId === step.id)?.level as SpaceDefaultPermission | undefined) ?? null
+      const given = step.type === 'project'
+        ? ((roles.find((r) => r.projectId === step.id && r.addedById !== params.actorId)?.role as SpaceDefaultPermission | undefined) ?? null)
+        : null
+      const level = strongest(shared, given)
+      if (level) return { level, source: level === given ? 'project-member' : 'item-share' }
     }
   }
 
@@ -307,8 +346,10 @@ export async function assertSpaceLevel(
       ? `Nothing here is shared with you, and a guest changes only what is shared with them`
       : resolved.source === 'item-share'
         ? `What is shared with you here is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-        : resolved.source === 'space-default'
-          ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
-          : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
+        : resolved.source === 'project-member'
+          ? `Your access to this project is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+          : resolved.source === 'space-default'
+            ? `This space's default permission is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`
+            : `Your access to this space is "${LEVEL_LABEL[resolved.level]}", which does not allow changing its ${params.kind}`,
   )
 }

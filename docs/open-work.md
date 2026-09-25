@@ -1055,13 +1055,13 @@ The new suite `task-edit-levels`, 5 checks: in an edit space, a colleague's task
 - Before (HEAD, lane 5): 3 of 5. The comment-only, view-only and private-list checks passed, as they must after the change too.
 - After: 5/5.
 
-`tel-1..4`, each compiled: creators and assignees only, writes that skip the read rule, the space's level not asked, and everybody taken for an assignee. Regression on lanes 2 to 5, the 64 suites that change a task through the API: 60 passed in the sweep. Two read a member refused a colleague's task as one who "may only read" it, in a space the member may edit, and are pointed at a task they may only read now: `linked-docs-access`'s space is comment-only (5/5), and `task-boundaries`' watcher checks use a task in its view-only space (45/45). `task-depth` and `addressability-live` failed in the sweep and passed on their own, 91/91 and 28/28 (`found-24-sep/three-suites-fail-under-a-full-sweep`). In CI (178).
+`tel-1..4`, each compiled: creators and assignees only, writes that skip the read rule, the space's level not asked, and everybody taken for an assignee. Break run, lane 1 (`ddbd509`): 4 of 4 reddened, on a green baseline (5/5); `tel-1`, `-3` and `-4` were re-aimed the same day at the call that passes the task's chain (`project-roles-narrow-nothing`). Regression on lanes 2 to 5, the 64 suites that change a task through the API: 60 passed in the sweep. Two read a member refused a colleague's task as one who "may only read" it, in a space the member may edit, and are pointed at a task they may only read now: `linked-docs-access`'s space is comment-only (5/5), and `task-boundaries`' watcher checks use a task in its view-only space (45/45). `task-depth` and `addressability-live` failed in the sweep and passed on their own, 91/91 and 28/28 (`found-24-sep/three-suites-fail-under-a-full-sweep`). In CI (178).
 
 *Found beside it:*
 - A project's members' roles narrow nothing for a member: the Members sheet sets a member to View or Comment on a project, and every rule asks the space (`found-25-sep/project-roles-narrow-nothing`).
 - The task sheet offers every edit to anybody who can open the task, and a comment-only or view-only reader is refused each one (`found-25-sep/task-sheet-offers-refused-edits`).
 
-### `found-25-sep/project-roles-narrow-nothing` — open, security, medium (found closing `task-edits-narrower-than-clickup`)
+### `found-25-sep/project-roles-narrow-nothing` — **closed** (security, medium; found closing `task-edits-narrower-than-clickup`)
 
 **A project's members' roles narrow nothing for a member**
 
@@ -1070,6 +1070,31 @@ The new suite `task-edit-levels`, 5 checks: in an edit space, a colleague's task
 *ClickUp's rule* (help centre, search snippets): a location's permission can be set per Space, Folder and List, and the most specific one decides.
 
 *To close:* a member's grant on the project (and on the list, where a list has members) decides before the space's level, as a guest's share does. Pass the chain from the task's writes, the task and list create gates and the container rules. Measure every suite that sets a project member's role.
+
+*Measured, lane 5, on `ddbd509`:* the new suite below, 0 of 5. A member given View on a project changed the admin's task (200) and made a task (201) there; given Comment, they changed its title (200); given Edit on a project in a view-only space, they could change nothing (403). Only the list's rename was refused, by the list's own maker rule.
+
+ClickUp (help centre, search snippets): permissions set on a Folder or List override the Space's, and the most specific decides ("full edit on the List but edit on the Folder"), in either direction.
+
+*Closed, 25 September:* `resolveSpaceLevel` reads a member's grants on the item and the containers above it (`within`) before the space, as it read a guest's: their role on the project, and a share on the task, list, project or folder. The most specific decides, either way. A project's maker is seeded as its admin member, added by themselves, and that row is not a grant: making something is no exception to its space's level, as `assertCanManageContainer` already has it for a list's maker. The chain is passed from a task's writes, the container rule (a project's and a list's rename, archive and delete, and the project page's capabilities), and the status rule. The task and list create gates already passed it, for guests. A refusal by a project's grant says so ("Your access to this project is …").
+
+The new suite `project-member-levels`, 5 checks: View on a project in an ordinary space (the task, a new task, the list, beside a project with no grant); Comment; Edit on a project in a view-only space (beside a project with no grant); the maker's seed row, then the same row given by the admin; and what the refusal says. Every change is read back by SQL.
+
+- Before: 0 of 5.
+- After: 5/5.
+
+`pml-1..5`, each compiled: the member's grants unread, the maker's seed taken for a grant, the task's writes and the list's rule asking the space alone, and the refusal naming the space. Re-aimed at the new lines: `tel-1`, `-3` and `-4`, `tsl-2`, `sdp-2`, `sdp-5`, `swa-2`, `ppc-6`, and `gsl-3` and `gsl-6` (a member's grants have a loop of their own now; these are the guest's). Regression on lanes 2 to 5, 39 suites that set members or shares or change what a member reaches: 38 passed. `folder-create` failed on lane 4 because lane 4's database had drifted from the migrations (`found-25-sep/lane-databases-drift-from-the-migrations`, below), and passed there once repaired, 22/22. In CI (179).
+
+*Not changed, recorded:* a member given Full on a project still cannot rename or archive it unless they made it: the container rule asks its maker, an admin or a manager after the level. ClickUp's full edit on a folder allows it. This is the container rule's own question, left as it is here.
+
+### `found-25-sep/lane-databases-drift-from-the-migrations` — open, test tooling, small (found closing `project-roles-narrow-nothing`)
+
+**Lanes 2 to 4's databases lacked four unique indexes and a dropped default; lanes 6 to 10 lacked two migrations**
+
+*Evidence, measured:* `folder-create` failed on lane 4 ("the database accepted it") and passed on lane 5. Comparing each lane's indexes and columns with lane 5's: `rundesk_v2`, `v3` and `v4` had no `uq_folders_space_name_active` (0157), `uq_lists_project_name_active` (0147), `uq_saved_searches_user_ws_name` (0040) or `uq_task_calendar_links_task_provider_user` (0021), and `user_dock_configs.pinned_links` still defaulted to `'[]'`, which 0163 drops. That is the default the dock bug came from, so `dock-defaults` would have read a different product there. `rundesk_v6` to `v10` had neither 0160 nor 0162. `fleet-restart.sh`'s witness checks the newest migration that adds a column or a table, and a missing index or default is neither.
+
+*Repaired by hand, 25 September:* the four constraints (no duplicates on any lane) and the default on lanes 2 to 4, and 0160 and 0162 on lanes 6 to 10. Every lane database now matches lane 5's and the pristine database's indexes, columns and defaults.
+
+*To close:* a gate before a lane is used (`fleet-restart.sh`, and `verify.sh`'s staleness refusal) that compares the lane's indexes, constraints, columns and defaults with the pristine database, and refuses one that differs. Show that it catches a dropped index.
 
 ### `found-25-sep/task-sheet-offers-refused-edits` — open, visible bug, medium (found closing `task-edits-narrower-than-clickup`)
 

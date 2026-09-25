@@ -428,6 +428,8 @@ export class ListsService {
         workspaceId: spaces.workspaceId,
         name: lists.name,
         spaceId: projects.spaceId,
+        projectId: projects.id,
+        folderId: projects.folderId,
       })
       .from(lists)
       .innerJoin(projects, eq(projects.id, lists.projectId))
@@ -443,6 +445,12 @@ export class ListsService {
       action,
       // Managers may delete a list only within a space they belong to.
       spaceId: row.spaceId,
+      // A grant on the list, its project or its folder decides before the space.
+      within: [
+        { type: 'list', id: listId },
+        { type: 'project', id: row.projectId },
+        ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
+      ],
     })
     return row
   }

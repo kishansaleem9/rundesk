@@ -2,7 +2,7 @@ import { ForbiddenException, NotFoundException } from '@nestjs/common'
 import { and, eq } from 'drizzle-orm'
 import { lists, projects, spaces, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
-import { assertSpaceLevel } from './space-default-permission'
+import { assertSpaceLevel, type WithinStep } from './space-default-permission'
 import { isUuid } from '../validation/uuid'
 
 /** What owns a set of statuses: a space, a project, or a list of its own. */
@@ -44,34 +44,51 @@ export async function assertMayShapeStatuses(
   if (membership?.role === 'guest') {
     throw new ForbiddenException('Guests do not change statuses')
   }
-  await assertSpaceLevel(db, { spaceId: place.spaceId, actorId: params.actorId, required: 'edit', kind: 'statuses' })
+  // A grant on the list or project that owns them decides before the space (`WithinStep`).
+  await assertSpaceLevel(db, { spaceId: place.spaceId, actorId: params.actorId, required: 'edit', kind: 'statuses', within: place.within })
 }
 
-/** The space (and its workspace) a status owner lives in. */
-async function locate(db: Db, owner: StatusOwner, ownerId: string): Promise<{ spaceId: string; workspaceId: string } | null> {
+/** The space (and its workspace) a status owner lives in, and the owner with the containers above it. */
+async function locate(
+  db: Db,
+  owner: StatusOwner,
+  ownerId: string,
+): Promise<{ spaceId: string; workspaceId: string; within: WithinStep[] } | null> {
   if (owner === 'space') {
     const [row] = await db
       .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId })
       .from(spaces)
       .where(eq(spaces.id, ownerId))
       .limit(1)
-    return row ?? null
+    return row ? { ...row, within: [] } : null
   }
   if (owner === 'project') {
     const [row] = await db
-      .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId })
+      .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId, folderId: projects.folderId })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(projects.id, ownerId))
       .limit(1)
-    return row ?? null
+    return row
+      ? { spaceId: row.spaceId, workspaceId: row.workspaceId, within: [{ type: 'project', id: ownerId }, ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : [])] }
+      : null
   }
   const [row] = await db
-    .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId })
+    .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId, projectId: projects.id, folderId: projects.folderId })
     .from(lists)
     .innerJoin(projects, eq(projects.id, lists.projectId))
     .innerJoin(spaces, eq(spaces.id, projects.spaceId))
     .where(eq(lists.id, ownerId))
     .limit(1)
-  return row ?? null
+  return row
+    ? {
+        spaceId: row.spaceId,
+        workspaceId: row.workspaceId,
+        within: [
+          { type: 'list', id: ownerId },
+          { type: 'project', id: row.projectId },
+          ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : []),
+        ],
+      }
+    : null
 }

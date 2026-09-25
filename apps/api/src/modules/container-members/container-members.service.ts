@@ -10,6 +10,7 @@ import { spaceMembers, projectMembers, spaces, projects, lists, workspaceMembers
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import type { WithinStep } from '../../common/permissions/space-default-permission'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { isUuid } from '../../common/validation/uuid'
 
@@ -166,7 +167,7 @@ export class ContainerMembersService {
    */
   async projectCapabilities(projectId: string, actorId: string, listIds: string[]) {
     const [row] = await this.db
-      .select({ workspaceId: spaces.workspaceId, spaceId: projects.spaceId, createdById: projects.createdById })
+      .select({ workspaceId: spaces.workspaceId, spaceId: projects.spaceId, createdById: projects.createdById, folderId: projects.folderId })
       .from(projects)
       .innerJoin(spaces, eq(spaces.id, projects.spaceId))
       .where(eq(projects.id, projectId))
@@ -180,8 +181,13 @@ export class ContainerMembersService {
           throw e
         },
       )
-    const manage = (createdById: string | null, kind: 'project' | 'list', action: 'manage' | 'delete') =>
-      assertCanManageContainer(this.db, { workspaceId: row.workspaceId, createdById, actorId, kind, action, spaceId: row.spaceId })
+    // The same chain each route passes: a grant on the list, the project or its folder decides first.
+    const above: WithinStep[] = [{ type: 'project', id: projectId }, ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : [])]
+    const manage = (createdById: string | null, kind: 'project' | 'list', action: 'manage' | 'delete', listId?: string) =>
+      assertCanManageContainer(this.db, {
+        workspaceId: row.workspaceId, createdById, actorId, kind, action, spaceId: row.spaceId,
+        within: listId ? [{ type: 'list', id: listId }, ...above] : above,
+      })
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
@@ -203,8 +209,8 @@ export class ContainerMembersService {
     const perList: Record<string, { rename: boolean; delete: boolean }> = {}
     for (const list of listRows) {
       const [rename, remove] = await Promise.all([
-        allowed(manage(list.createdById, 'list', 'manage')),
-        allowed(manage(list.createdById, 'list', 'delete')),
+        allowed(manage(list.createdById, 'list', 'manage', list.id)),
+        allowed(manage(list.createdById, 'list', 'delete', list.id)),
       ])
       perList[list.id] = { rename, delete: remove }
     }
