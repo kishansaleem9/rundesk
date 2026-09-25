@@ -3,12 +3,18 @@ import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { BillingService } from './billing.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
+import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 /**
- * Workspace-scoped billing endpoints (Plan §14.1). Checkout + Portal mutate the
- * commercial subscription and are admin-gated (WorkspaceAdminGuard = workspace
- * admin / manager / super admin); the read-only status is member-gated. The
+ * Workspace-scoped billing endpoints (Plan §14.1). Checkout and the portal
+ * change the commercial subscription, and ask `workspace.billing` — "view
+ * invoices, change plan, manage payment method", an admin's by default.
+ * `WorkspaceAdminGuard` had admitted managers and refused the grant, and the
+ * status gave every member, guests too, the invoices with their Stripe links
+ * (`found-25-sep/billing-open-to-managers-and-every-member`). The status's plan
+ * stays every member's, since the web gates features by it. The
  * unauthenticated Stripe webhook lives in BillingWebhookController.
  */
 @ApiTags('billing')
@@ -16,10 +22,14 @@ import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 @UseGuards(JwtAuthGuard)
 @Controller('workspaces')
 export class BillingController {
-  constructor(private readonly billing: BillingService) {}
+  constructor(
+    private readonly billing: BillingService,
+    private readonly roles: CustomRolesService,
+  ) {}
 
   @Post(':workspaceId/billing/checkout')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.billing')
   @ApiOperation({ summary: 'Start a Stripe Checkout session to subscribe to a tier (Plan §14.1)' })
   async checkout(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
@@ -29,7 +39,8 @@ export class BillingController {
   }
 
   @Post(':workspaceId/billing/portal')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.billing')
   @ApiOperation({ summary: 'Open the Stripe Billing Portal (manage/upgrade/downgrade/cancel)' })
   async portal(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.billing.createBillingPortalSession(workspaceId)
@@ -38,7 +49,11 @@ export class BillingController {
   @Get(':workspaceId/billing')
   @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Billing status: configured flag, plan, subscription and recent invoices' })
-  async status(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
-    return this.billing.getBillingStatus(workspaceId)
+  async status(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @CurrentUser() user: { id: string; role?: string | null },
+  ) {
+    const accounts = user.role === 'super_admin' || (await this.roles.hasPermission(workspaceId, user.id, 'workspace.billing'))
+    return this.billing.getBillingStatus(workspaceId, { accounts })
   }
 }

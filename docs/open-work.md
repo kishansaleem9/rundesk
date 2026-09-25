@@ -3043,7 +3043,7 @@ Now:
 `retired-permission-keys`, 4 checks:
 - Before: 0 of 4.
 - After: 4/4 on lanes 5 and 2.
-- Patches `rpk-1..4`, each compiled.
+- Patches `rpk-1..4`: each reddened the check it names (lane 1, baseline 4/4 at `1707248`). The re-aimed `pgd-4` still reddens its check (baseline 8/8).
 - Regression: the 11 suites that make, grant or ask roles and keys, and the new one: 12/12.
 - In CI (203).
 
@@ -3113,6 +3113,54 @@ Regression on lanes 2 to 5: the 23 suites that add, change or remove members, ma
 *ClickUp* (search snippets from "Transfer Workspace ownership"): only the owner deletes a workspace. Here no member is the owner; the creator is recorded, and admins manage the workspace.
 
 *To close:* decide who may delete for good (the creator, or an admin holding a restored `workspace.delete`), and after what — an archive first, and a typed confirmation. Build the route, the cascade, and a check that archived data is gone. The key returns to the catalog with the route that asks it, and `check-permission-keys-asked.mjs` holds the two together.
+
+### `found-25-sep/billing-open-to-managers-and-every-member` — **closed** (security, medium; found mapping `WorkspaceAdminGuard` after the fifth group of `role-editor-offers-unenforced-permissions`)
+
+**Every member, guests too, read the workspace's invoices and their Stripe links, and a manager could change its plan**
+
+*Measured, lane 5, on `1707248`* (`billing-key` was 0 of 3):
+- `GET /workspaces/:id/billing` asked only membership. It gave a guest and a manager the last twenty invoices, each with its Stripe hosted page and PDF, and the subscription row.
+- Checkout and the billing portal were behind `WorkspaceAdminGuard`, which admits managers. A manager passed both, and was stopped only because Stripe is not configured on the lanes (400).
+- A member granted `workspace.billing` was refused both (403).
+
+The catalog says `workspace.billing` is "view invoices, change plan, manage payment method" and gives it to admins. The web shows billing on an admin's settings tab. ClickUp (search snippets): billing is the owner's and the admins'.
+
+*Closed, 25 September:*
+- Checkout and the portal ask `workspace.billing` through `PermissionsGuard`.
+- The status gives the plan to every member, since the web gates features by it. It gives the subscription and the invoices only to a holder of the key.
+- The status's comment in the controller no longer calls the manager guard admin-gated.
+
+The new suite `billing-key`, 3 checks:
+- Before: 0 of 3.
+- After: 3/3 on lanes 5 and 4.
+- Patches `bil-1..4`, each compiled.
+- Billing unit tests 27/27.
+- Regression: the 9 suites that read plans, billing, settings or roles, and the new one. 9 of 10 passed in the sweep; `list-export` saw no fields request under the sweep's load and passed alone (30/30).
+- In CI (204).
+
+### `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` — open, permissions, medium (found closing `billing-open-to-managers-and-every-member`)
+
+**Thirty-one routes still stand behind `WorkspaceAdminGuard`, which admits managers, where the web or the catalog says admin**
+
+*Evidence (reading, 25 September):* `WorkspaceAdminGuard` asks `isManagerRole`. The groups of `role-editor-offers-unenforced-permissions` moved every route with a catalog key off it. What is left:
+- **The whole workspace's data:**
+  - `GET /workspaces/:id/export/json`, and `csv/tasks` and `csv/members`;
+  - the ClickUp and spreadsheet imports (`import/clickup`, `jobs/:jobId/enrich`, `import/spreadsheet`);
+  - `sample-data/seed`.
+- **ClickApps:** `GET /feature-flags/workspace/:id`.
+- **The workspace's people and calendar:** a member's capacity and reports-to, the work schedule, holidays, and `archived-tasks`, all on `workspaces.controller`.
+- **User groups:** make, rename, delete, and set their members (six routes).
+- **Project templates:** save, make, delete. `template.manage` exists, and task templates ask it; project templates do not.
+- **The rest:** clients (make, delete), announcements (four routes), and the workspace's default dashboard (set, clear).
+
+For each, the web offers the control to admins only, on the admin settings tabs, or the catalog names a key. So a manager does by the API what no page offers them, and a member granted the matching key cannot.
+
+*To close:* take each group through ClickUp's rule:
+- Exporting and importing a workspace, and billing, are the owner's and admins' (search snippets).
+- Project templates ask `template.manage`.
+- The people-and-calendar group, groups, announcements, clients and the dashboard default: decide per group whether managers keep them, then make the web offer them to exactly those.
+
+Measure a manager and a granted member on each, before and after, as `admin-only-keys` did. The route map is in this item's evidence.
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

@@ -5,6 +5,7 @@ import { BillingWebhookController } from './billing-webhook.controller'
 import { stripeClientProvider } from './stripe.provider'
 import { PlansModule } from '../plans/plans.module'
 import { EmailModule } from '../email/email.module'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
 /**
  * Stripe billing (Plan §14.1). Imports PlansModule so the webhook can sync
@@ -14,7 +15,8 @@ import { EmailModule } from '../email/email.module'
  * yields null when unconfigured, so the whole module degrades gracefully.
  */
 @Module({
-  imports: [PlansModule, EmailModule],
+  // Custom roles: checkout, the portal and the invoices ask `workspace.billing`.
+  imports: [PlansModule, EmailModule, CustomRolesModule],
   controllers: [BillingController, BillingWebhookController],
   providers: [BillingService, stripeClientProvider],
   exports: [BillingService],

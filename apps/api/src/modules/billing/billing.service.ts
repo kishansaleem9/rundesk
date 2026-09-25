@@ -160,8 +160,15 @@ export class BillingService {
   }
 
   /** { configured, plan, subscription?, invoices[] } for the billing UI. */
-  async getBillingStatus(workspaceId: string) {
+  /**
+   * The plan, for every member; the subscription and the invoices, with their
+   * Stripe links, only for one holding `workspace.billing` (`accounts`).
+   */
+  async getBillingStatus(workspaceId: string, opts: { accounts: boolean } = { accounts: false }) {
     const plan = await this.plans.getWorkspacePlan(workspaceId)
+    if (!opts.accounts) {
+      return { configured: this.isConfigured(), plan: { id: plan.id, label: plan.label }, subscription: null, invoices: [] }
+    }
     const [subscription] = await this.db
       .select()
       .from(subscriptions)
