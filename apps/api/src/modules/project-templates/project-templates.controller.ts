@@ -3,7 +3,7 @@ import { ApiBearerAuth, ApiOperation, ApiQuery, ApiTags } from '@nestjs/swagger'
 import { ProjectTemplatesService } from './project-templates.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 
 @ApiTags('project-templates')
@@ -58,8 +58,12 @@ export class ProjectTemplatesController {
   }
 
   @Post('save-from-project')
-  @UseGuards(WorkspaceAdminGuard)
-  @ApiOperation({ summary: 'Save an existing project as a reusable template (admin only)' })
+  // Making, saving and deleting a template ask `template.manage`, as task
+  // templates do: `WorkspaceAdminGuard` admitted managers and refused the grant
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('template.manage')
+  @ApiOperation({ summary: 'Save an existing project as a reusable template (template.manage)' })
   saveFromProject(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -73,12 +77,13 @@ export class ProjectTemplatesController {
       targetType?: string
     },
   ) {
-    return this.svc.saveFromProject(workspaceId, user.id, body)
+    return this.svc.saveFromProject(workspaceId, { id: user.id, role: user.role }, body)
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
-  @ApiOperation({ summary: 'Create a template from an inline payload (admin only)' })
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('template.manage')
+  @ApiOperation({ summary: 'Create a template from an inline payload (template.manage)' })
   create(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() user: any,
@@ -107,8 +112,9 @@ export class ProjectTemplatesController {
   }
 
   @Delete(':templateId')
-  @UseGuards(WorkspaceAdminGuard)
-  @ApiOperation({ summary: 'Delete a workspace template (admin only)' })
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('template.manage')
+  @ApiOperation({ summary: 'Delete a workspace template (template.manage)' })
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('templateId') templateId: string,

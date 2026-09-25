@@ -28,6 +28,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { TaskTemplatesSection } from '../components/task-templates-section'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 import {
   Card,
   Button,
@@ -188,6 +189,7 @@ export function TemplatesPage() {
   const [category, setCategory] = useState('')
   const [applyTemplate, setApplyTemplate] = useState<ProjectTemplate | null>(null)
   const [saveOpen, setSaveOpen] = useState(false)
+  const mayManageTemplates = usePermissions(workspaceId ?? undefined).can('template.manage') === true
 
   // One request per pause, not one per keystroke — but still a request: the
   // search narrows the corpus the counts are taken over, so it cannot be a
@@ -266,15 +268,18 @@ export function TemplatesPage() {
             {t('templates.subtitle')}
           </p>
         </div>
-        <Button
-          variant="gradient"
-          size="lg"
-          data-testid="templates-save-open"
-          onClick={() => setSaveOpen(true)}
-          disabled={!workspaceId}
-        >
-          <LayoutTemplate className="h-4 w-4" /> {t('templates.saveAsTemplate')}
-        </Button>
+        {/* Saving a project as a template asks `template.manage`, as the API does. */}
+        {mayManageTemplates && (
+          <Button
+            variant="gradient"
+            size="lg"
+            data-testid="templates-save-open"
+            onClick={() => setSaveOpen(true)}
+            disabled={!workspaceId}
+          >
+            <LayoutTemplate className="h-4 w-4" /> {t('templates.saveAsTemplate')}
+          </Button>
+        )}
       </header>
 
       {/* Search + the frame's top-bar Use Cases dropdown + the scope rail. */}

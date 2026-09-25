@@ -3063,8 +3063,8 @@ Now:
 `settings-tabs-by-key`, 8 checks:
 - Before: 1 of 7 on lane 5; the one that passed is the plain member, sent away before and after. The eighth, the Invite step, was measured on the previous commit's bundle: it led to `/settings`, which is General.
 - After: 8/8 on lanes 5 and 4.
-- Patches `stp-1..12`, each compiled.
-- `crd-8`, `crd-9` and `gin-3` compile on the new lines.
+- Patches `stp-1..12`: each reddened the check it names (lane 1, baseline 8/8 at `39c0a4e`).
+- `crd-8`, `crd-9` and `gin-3`, re-aimed onto the new lines, redden theirs (baselines 11/11 and 2/2).
 - Regression, in two sweeps: the suites that open settings, invite, grant or ask roles, or draw the onboarding checklist. 26 distinct suites, all green. The first sweep's last seven were refused as run on a stale bundle, after a web edit mid-sweep, and passed when re-run.
 - In CI (205).
 
@@ -3160,7 +3160,7 @@ The new suite `billing-key`, 3 checks:
 - Regression: the 9 suites that read plans, billing, settings or roles, and the new one. 9 of 10 passed in the sweep; `list-export` saw no fields request under the sweep's load and passed alone (30/30).
 - In CI (204).
 
-### `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` — open, permissions, medium (found closing `billing-open-to-managers-and-every-member`)
+### `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` — partly-fixed, permissions, medium (found closing `billing-open-to-managers-and-every-member`)
 
 **Thirty-one routes still stand behind `WorkspaceAdminGuard`, which admits managers, where the web or the catalog says admin**
 
@@ -3183,6 +3183,24 @@ For each, the web offers the control to admins only, on the admin settings tabs,
 - The people-and-calendar group, groups, announcements, clients and the dashboard default: decide per group whether managers keep them, then make the web offer them to exactly those.
 
 Measure a manager and a granted member on each, before and after, as `admin-only-keys` did. The route map is in this item's evidence.
+
+*Partly fixed, 25 September: project templates.* Measured on lane 5 (`39c0a4e`), `project-template-key` was 0 of 4:
+- a member granted `template.manage` could not save a project as a template, make one, or delete one (403 each), while task templates asked that key;
+- the templates page offered Save as template to everybody, and the API then refused a plain member.
+
+Measuring also showed that saving copied every list and task of the project and asked only that the project be in the workspace. That was harmless while only managers and admins could save, since they read everything. It is not harmless for a member granted the key, and a template is shown to the whole workspace.
+
+Now:
+- Saving, making and deleting ask `template.manage` through `PermissionsGuard`.
+- Saving asks the read rule of the project (`readableProject`; 404 otherwise) and copies only the lists and tasks its saver may open (`listVisibilityFilter`, `taskVisibilityFilter`).
+- The templates page offers Save as template by the key.
+
+`project-template-key`, 4 checks:
+- Before: 0 of 4 on lane 5.
+- After: 4/4 on lanes 5 and 4.
+- Patches `ptk-1..6`, each compiled.
+- Regression: the 8 suites that save, apply or browse templates or open settings, and the new one: 10/10 (with `settings-tabs-by-key` again).
+- In CI (206).
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

@@ -21,6 +21,9 @@ import { SpacesService } from '../spaces/spaces.service'
 import { seedListStatuses } from '../lists/list-statuses.defaults'
 import { assertCanPlaceIn } from '../../common/permissions/container-access'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
+import { readableProject } from '../../common/permissions/read-access'
+import { listVisibilityFilter, resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { isUuid } from '../../common/validation/uuid'
 
 type TemplatePayload = NonNullable<typeof projectTemplates.$inferSelect.payload>
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -587,9 +590,17 @@ export class ProjectTemplatesService implements OnModuleInit {
    * Snapshot an existing project (with its lists and tasks) into a named
    * template owned by this workspace.
    */
+  /**
+   * A template of the project as its saver may read it
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`):
+   * the project by the read rule, and only the lists and tasks the saver may
+   * open. While managers and admins alone could save, they read all of it; a
+   * member granted `template.manage` does not, and a template is shown to the
+   * whole workspace.
+   */
   async saveFromProject(
     workspaceId: string,
-    userId: string,
+    actor: { id: string; role?: string | null },
     dto: {
       projectId: string
       name: string
@@ -600,19 +611,15 @@ export class ProjectTemplatesService implements OnModuleInit {
       targetType?: string
     },
   ) {
-    // Confirm the project belongs to this workspace.
-    const [project] = await this.db
-      .select({ id: projects.id })
-      .from(projects)
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(projects.id, dto.projectId), eq(spaces.workspaceId, workspaceId)))
-      .limit(1)
+    // The project, in this workspace, as the saver may open it.
+    const project = isUuid(dto.projectId) ? await readableProject(this.db, workspaceId, dto.projectId, actor) : null
     if (!project) throw new NotFoundException('Project not found in this workspace')
+    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
 
     const projectLists = await this.db
       .select()
       .from(lists)
-      .where(eq(lists.projectId, dto.projectId))
+      .where(and(eq(lists.projectId, dto.projectId), listVisibilityFilter(actor.id, isManager)))
       .orderBy(asc(lists.position))
 
     const payload: TemplatePayload = { lists: [] }
@@ -620,7 +627,7 @@ export class ProjectTemplatesService implements OnModuleInit {
       const listTasks = await this.db
         .select()
         .from(tasks)
-        .where(and(eq(tasks.listId, list.id), eq(tasks.isArchived, false)))
+        .where(and(eq(tasks.listId, list.id), eq(tasks.isArchived, false), taskVisibilityFilter(this.db, actor.id, isManager)))
         .orderBy(asc(tasks.position))
       payload.lists.push({
         name: list.name,
@@ -653,7 +660,7 @@ export class ProjectTemplatesService implements OnModuleInit {
         description: dto.description,
         icon: dto.icon,
         payload,
-        createdById: userId,
+        createdById: actor.id,
         targetType,
         // Read off the snapshot rather than asked of the person saving it.
         complexity: complexityOf(payload),

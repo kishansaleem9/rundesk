@@ -3,7 +3,6 @@ import { ProjectTemplatesService } from './project-templates.service'
 import { ProjectTemplatesController } from './project-templates.controller'
 import { DatabaseModule } from '../../common/database/database.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { SpacesModule } from '../spaces/spaces.module'
 import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
@@ -13,7 +12,7 @@ import { CustomRolesModule } from '../custom-roles/custom-roles.module'
   // a hand-made one does. SpacesModule does not reach back here, so no cycle.
   imports: [DatabaseModule, SpacesModule, CustomRolesModule],
   controllers: [ProjectTemplatesController],
-  providers: [ProjectTemplatesService, WorkspaceMemberGuard, WorkspaceAdminGuard],
+  providers: [ProjectTemplatesService, WorkspaceMemberGuard],
   exports: [ProjectTemplatesService],
 })
 export class ProjectTemplatesModule {}
