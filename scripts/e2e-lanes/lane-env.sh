@@ -42,6 +42,31 @@ lane_store_env () {
   export R2_BUCKET_NAME="$(lane_store_bucket "$k")"
 }
 
+# A LANE'S INTEGRATION KEYS, WHICH ARE NOT REAL, AND WHICH PROVIDERS HAVE THEM.
+#
+#   lane_oauth_env <k>   export an OAuth client id and secret for Google,
+#                        Microsoft and GitHub
+#
+# A grant's start refuses a provider this server holds no keys for
+# (`oauth-start-answers-for-no-application`): it used to answer a consent
+# address with `client_id=` empty, which the provider answers with an error
+# page. The suites that read a grant's state — `personal-calendar-connect`,
+# `app-catalogue`'s scopes, `permission-guards`' GitHub start — need a start
+# that answers, so the lanes hold keys for the providers they start. Each
+# provider refuses them at the code exchange, which is the failure path those
+# suites follow already. Sign-in reads other names (`*_OAUTH_CLIENT_ID`), so no
+# sign-in button appears. Zoom, Linear, GitLab, Salesforce and Dropbox stay
+# keyless, so the refusal is measured on the same lanes (`oauth-start-readiness`,
+# and `calendar-accounts`' Zoom row). CI's API step sets the same six.
+lane_oauth_env () {
+  export GOOGLE_CLIENT_ID=e2e-lane-google-client
+  export GOOGLE_CLIENT_SECRET=e2e-lane-google-secret
+  export MICROSOFT_CLIENT_ID=e2e-lane-microsoft-client
+  export MICROSOFT_CLIENT_SECRET=e2e-lane-microsoft-secret
+  export GITHUB_CLIENT_ID=e2e-lane-github-client
+  export GITHUB_CLIENT_SECRET=e2e-lane-github-secret
+}
+
 # IS THE STUB ON <port> RUNNING THE SOURCE IN <file>? Both stubs report a hash
 # of their own source at `/__control/version`; a stub from before a change, or
 # one too old to have the route at all, answers something else and is

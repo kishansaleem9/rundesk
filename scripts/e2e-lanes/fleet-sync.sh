@@ -63,6 +63,7 @@ for k in $(seq 1 "$N"); do
     # measures the refusal path instead of the real one.
     lane_store_env "$k"
     lane_model_env "$k"
+    lane_oauth_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &

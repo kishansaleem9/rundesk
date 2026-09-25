@@ -22,8 +22,9 @@
  *
  * Found beside it: the Accounts page's own "+ Add account" was a link to the
  * same Settings tab, so the way to a calendar stopped one page later. It
- * starts the connect now, the planner onboarding's own flow; the server here
- * has no calendar keys, so the twin is a server routed to say it has them.
+ * starts the connect now, the planner onboarding's own flow. Both servers are
+ * routed: one says it has no calendar keys and the twin says it has them (the
+ * lanes' own keys are not real, `lane_oauth_env`).
  *
  *   node test/e2e/meetings-connect-calendar.mjs --api 3021 --dist /tmp/claude-0/dist-1
  */
@@ -98,10 +99,23 @@ try {
     const page = await ctx.newPage()
     page.asked = []
     page.on('request', (req) => { if (/\/calendar-sync\/connect\/[^/]+$/.test(new URL(req.url()).pathname)) page.asked.push(req.url()) })
+    // Both answers are routed: the lanes hold calendar keys that are not real
+    // (`lane_oauth_env`), so the server's own status says it can connect.
+    // Whether the server's status and its start agree is `oauth-start-readiness`'s.
+    const unset = (keys) => ({ available: false, reason: `Missing backend configuration: ${keys}` })
+    await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: routed
+            ? [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }]
+            : [{ provider: 'gcal', ...unset('GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET') }, { provider: 'outlook', ...unset('MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET') }],
+          error: null,
+        }),
+      }).catch(() => {}),
+    )
     if (routed) {
-      await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
-        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }], error: null }) }).catch(() => {}),
-      )
       await page.route((u) => /\/calendar-sync\/connect\/[^/]+$/.test(u.pathname), (route) =>
         route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { authUrl: 'about:blank#oauth' }, error: null }) }).catch(() => {}),
       )

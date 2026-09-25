@@ -79,6 +79,7 @@ for k in "${LANES[@]}"; do
     # presign. No product change; `R2Service` has read these all along.
     lane_store_env "$k"
     lane_model_env "$k"
+    lane_oauth_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$k.log" 2>&1 &

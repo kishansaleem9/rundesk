@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { describe, it } from 'node:test'
+import { after, before, describe, it } from 'node:test'
 import { getTableName } from 'drizzle-orm'
 import type { ConfigService } from '@nestjs/config'
 import { IntegrationConnectionsService } from './integration-connections.service'
@@ -70,7 +70,21 @@ function makeSvc() {
 /** The state a start hands out, read back from its consent address. */
 const stateFrom = (authUrl: string) => new URL(authUrl).searchParams.get('state') ?? ''
 
+/**
+ * A start answers only where this server holds the provider's keys
+ * (`oauth-start-answers-for-no-application`), so these grants run with Google
+ * keys that are not real — what is measured is the rows each grant writes.
+ */
+const GOOGLE_KEYS = { GOOGLE_CLIENT_ID: 'unit-google-client', GOOGLE_CLIENT_SECRET: 'unit-google-secret' }
+const withKeys = (keys: Record<string, string>) => {
+  const was: Record<string, string | undefined> = {}
+  before(() => { for (const [k, v] of Object.entries(keys)) { was[k] = process.env[k]; process.env[k] = v } })
+  after(() => { for (const k of Object.keys(keys)) { if (was[k] === undefined) delete process.env[k]; else process.env[k] = was[k] } })
+}
+
 describe('IntegrationConnectionsService: a personal calendar grant', () => {
+  withKeys(GOOGLE_KEYS)
+
   it('writes the person’s own account and nothing of the workspace’s', async () => {
     const { svc, writes, accounts, audits } = makeSvc()
     const { authUrl } = await svc.getOAuthStartUrl('w1', 'u1', 'gcal', { personal: true })
@@ -97,5 +111,24 @@ describe('IntegrationConnectionsService: a personal calendar grant', () => {
   it('is a calendar or nothing: no other provider is connected by one person for themselves', async () => {
     const { svc } = makeSvc()
     await assert.rejects(() => svc.getOAuthStartUrl('w1', 'u1', 'github', { personal: true }), /calendar/i)
+  })
+})
+
+describe('IntegrationConnectionsService: a start where this server holds no keys', () => {
+  it('refuses, naming what is missing, and hands out no consent address', async () => {
+    const was = { id: process.env.ZOOM_CLIENT_ID, secret: process.env.ZOOM_CLIENT_SECRET }
+    delete process.env.ZOOM_CLIENT_ID
+    delete process.env.ZOOM_CLIENT_SECRET
+    try {
+      const { svc } = makeSvc()
+      await assert.rejects(
+        () => svc.getOAuthStartUrl('w1', 'u1', 'zoom'),
+        (err: Error) => /not configured/i.test(err.message) && /ZOOM_CLIENT_ID/.test(err.message),
+        'a start with no Zoom keys answered instead of refusing',
+      )
+    } finally {
+      if (was.id !== undefined) process.env.ZOOM_CLIENT_ID = was.id
+      if (was.secret !== undefined) process.env.ZOOM_CLIENT_SECRET = was.secret
+    }
   })
 })

@@ -2369,13 +2369,54 @@ The new suite `personal-calendar-connect`, 6 checks: a member's and a guest's gr
 
 *Found beside it, not changed:* `found-25-sep/oauth-start-answers-for-no-application` and `found-25-sep/ledger-ids-cited-unchecked`, below.
 
-### `found-25-sep/oauth-start-answers-for-no-application` — open, small (found closing `personal-calendar-connect-needs-integrations-manage`)
+### `found-25-sep/oauth-start-answers-for-no-application` — **closed** (behaviour, small; found closing `personal-calendar-connect-needs-integrations-manage`)
 
 **A grant's start answers a consent address whatever the server's keys: with no client id, one for no application**
 
 *Evidence, measured on lane 5:* `POST …/integrations/connections/gcal/oauth/start` on a server with no Google keys answered 201 with `https://accounts.google.com/o/oauth2/v2/auth?client_id=&…`. Google answers that with an error page. `getOAuthStartUrl` builds the address from `getProviderConfig` and never asks `getMissingProviderEnv`, which `providers/status` does. The web asks `providers/status` before it offers a button (`ledger-rows/defect-planner-connect-empty-consent`), so no button reaches it, but the API does not refuse it either.
 
 *To close:* the start refuses (400, "not set up on this server") where `providers/status` says the provider is unavailable. The suites that read a grant's state on a server with no keys (`personal-calendar-connect`, `app-catalogue`'s scope checks) then need a lane with keys that are not real.
+
+*Measured, lane 5, on `14c789f`* (the suite below, 1 of 2): a start for each of the five providers the lane holds no keys for (GitLab, Linear, Salesforce, Dropbox, Zoom) answered 201 with `client_id=` empty.
+
+*Closed, 25 September:*
+- **The start refuses a provider this server holds no keys for** (400), asking what `providers/status` asks. The refusal says the provider is not configured, names the missing configuration, and answers no consent address. `calendar-accounts`' Zoom check already accepted that answer.
+- **The lanes and CI hold keys that are not real for Google, Microsoft and GitHub** (`lane_oauth_env` in `lane-env.sh`, called by all four launchers; the same six on CI's API step). These are the providers whose starts the suites read. Each provider refuses them at the code exchange, which is the failure path those suites already follow. Sign-in reads other names, so no sign-in button appears. The rest stay keyless, so the refusal is measured on the same lanes.
+- **Two suites said "this server has no calendar keys" and read the server's own status for it.** `planner-gates` and `meetings-connect-calendar` now route that answer, as they already routed the twin that can connect. Whether the server's status and its start agree is the new suite's to measure.
+- **The unit tests** of a personal grant run with Google keys for their duration. A new unit test states the refusal.
+
+The new suite `oauth-start-readiness`, 2 checks. Each provider is judged by what `providers/status` says of it:
+- every provider it calls unavailable is refused, saying why, with no address;
+- every provider it calls available answers an address with a client id and a signed state.
+
+Results:
+- Before (lane 5, `14c789f`): 1 of 2.
+- After: 2/2, on lanes 5 and 4.
+
+Patches `osr-1..4`, each compiled:
+- the start asks for no keys;
+- the refusal says nothing of why;
+- every provider is refused;
+- `osr-4`, which claims the unit test: the start asks for no keys.
+
+*Break run:* queued on lane 1 after the commit (`plan-osr`), with the two restated suites' sets (`pgt`, `mcc`).
+
+Regression on lanes 2 to 5: the 21 suites that start grants, read provider status, or draw the App Center, the planner's connects and the walkthroughs, and the new suite. Result: 22/22.
+- `planner-gates` and `meetings-connect-calendar` failed first: they read the lane's keys as "cannot connect". Restated as above, they passed (3/3, 5/5).
+- `video-regression` missed [A2.3] and [A1.2] under load, as recorded before, and passed alone (93/93).
+
+In CI (198).
+
+### `found-25-sep/lane-scripts-read-as-they-run` — open, test tooling, small (found closing `oauth-start-answers-for-no-application`)
+
+**A lane script edited while it runs breaks the run in flight**
+
+*Measured, 25 September:* `wt-break.sh` was edited in place, one line added, while the break chain ran on lane 1. Bash reads a script by offset as it goes, so the two sets that started around the edit read shifted lines. `share-levels` and `other-task-rules` each stopped at "syntax error near unexpected token `('", at the baseline line, before any patch. Both are queued again.
+
+*To close:*
+- Wrap each long-running lane script's body in a function called on its last line, so bash parses the whole script before running any of it: `wt-break.sh`, `sweep.sh`, `verify.sh`, the fleet scripts and the set runner.
+- Add a preflight check that they stay shaped that way.
+- Until then, change a script that may be running by writing a new file over it, never in place.
 
 ### `found-25-sep/ledger-ids-cited-unchecked` — open, test tooling, small (found closing `personal-calendar-connect-needs-integrations-manage`)
 

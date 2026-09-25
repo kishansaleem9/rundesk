@@ -12,8 +12,13 @@
  * could connect them; without a client id the "consent" address named no
  * application.
  *
- * The settings are the person's own (PATCHed here); the provider status is the
- * server's own, and routed only for the twin that needs it available.
+ * The settings are the person's own (PATCHed here). The provider status is
+ * routed for both twins — unavailable for the first, available for the second —
+ * because the lanes hold calendar keys that are not real (`lane_oauth_env`,
+ * `oauth-start-answers-for-no-application`), so the server's own answer is
+ * "available" there. Whether the server's status and its start agree is
+ * `oauth-start-readiness`'s to measure; this suite measures what the page does
+ * with each answer.
  *
  *   node test/e2e/planner-gates.mjs --api 3021
  */
@@ -84,10 +89,20 @@ try {
       // The person's own grant (`found-24-sep/personal-calendar-connect-needs-integrations-manage`).
       if (/\/calendar-sync\/connect\//.test(u)) asked.push('oauth/start')
     })
+    const unset = { available: false, reason: 'Missing backend configuration: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET' }
+    await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          data: providersAvailable
+            ? [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }]
+            : [{ provider: 'gcal', ...unset }, { provider: 'outlook', ...unset, reason: 'Missing backend configuration: MICROSOFT_CLIENT_ID, MICROSOFT_CLIENT_SECRET' }],
+          error: null,
+        }),
+      }).catch(() => {}),
+    )
     if (providersAvailable) {
-      await page.route((u) => u.pathname.endsWith('/providers/status'), (route) =>
-        route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ data: [{ provider: 'gcal', available: true }, { provider: 'outlook', available: true }], error: null }) }).catch(() => {}),
-      )
       // Somewhere harmless to be sent: the page follows the consent address.
       await page.route((u) => /\/calendar-sync\/connect\/[^/]+$/.test(u.pathname), (route) =>
         route.fulfill({ status: 201, contentType: 'application/json', body: JSON.stringify({ data: { authUrl: 'about:blank#oauth' }, error: null }) }).catch(() => {}),

@@ -210,6 +210,14 @@ export class IntegrationConnectionsService {
     if (opts.personal && provider !== 'gcal' && provider !== 'outlook') {
       throw new BadRequestException('Only a calendar is connected by one person for themselves')
     }
+    // Asked as `providers/status` asks it, so the two answer alike: with no
+    // keys this server has no application at the provider, and the address it
+    // used to answer (`client_id=` empty) was the provider's error page
+    // (`oauth-start-answers-for-no-application`).
+    const missing = this.getMissingProviderEnv(provider)
+    if (missing.length > 0) {
+      throw new BadRequestException(`${provider} is not configured on this server — missing backend configuration: ${missing.join(', ')}`)
+    }
     const cfg = this.getProviderConfig(provider)
     const state = this.signState({ provider, workspaceId, userId, ts: Date.now(), ...(opts.personal ? { personal: true as const } : {}) })
     const redirectUri = this.getRedirectUri(provider)
