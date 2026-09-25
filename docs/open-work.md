@@ -2973,12 +2973,37 @@ The automations page had offered New automation, Use, the toggle and Delete to e
 
 `workspace.delete` has no route, since the only "delete" is the archive, which the catalog files under `workspace.manage`. So the key still gates nothing.
 
+*Partly fixed, 25 September: the third group, time approvals.* Measured on lane 5 (`0b2db8e`), the three rules disagreed as mapped:
+- A manager approved a timesheet (201). The approvals page asked `canModerateApprovals`, which said admins only, so it showed that manager a read-only page with only their own sheets.
+- A member granted `time.approval.manage` by a custom role was refused approving and sending back (403, "Workspace admin or manager role required"). Nobody told them a timesheet awaited approval.
+- The "awaiting approval" notice went to managers and admins by their role.
+
+Measuring it also found that an approver could approve the timesheet of someone outside the workspace (201, with a row written for that person).
+
+ClickUp (help centre "Timesheet approvals", from search snippets; the page is not reachable from here): an owner or admin sets approvals up and names each submitter's approvers. Approvers see the timesheets they review, and approve them or send them back. The "All timesheets" tab is the owner's and the admins'.
+
+Now:
+- Approving and sending back ask `time.approval.manage` through `PermissionsGuard`.
+- The approvals list asks the same key (`mayApprove`). An approver is shown every member's timesheets; anyone else sees their own.
+- An entry on a task the approver may not open is shown by its hours, without its project or its note. The key can be granted to a member who is refused a private list.
+- The notice goes to the key's holders (`CustomRolesService.holdersOf`), custom grants included.
+- Only a member's timesheet is approved (404 otherwise).
+- The Time page's everyone-views stay the admins' (`seesEveryonesTime`), as ClickUp's "All timesheets" is. Those are the team week, the monthly rollup, and anybody's entries.
+- The API says which rule applies (`canModerate`, `seesEveryone`), and the monthly "all members" label follows the second.
+- The approvals page no longer says only admins approve; it names the permission.
+
+`time-approval-rule`, 9 checks:
+- Before: 1 of 9 against the old API (lane 1, at `0b2db8e`). The one that passed pins the everyone-views, which the fix leaves as they were. On lane 5, with the old page as well, the page check read "only workspace admins can approve".
+- After: 9/9 on lanes 5 and 4.
+- Patches `tar-1..10`, each compiled. The break run is queued on lane 1 after the commit.
+- Regression: the 15 suites that touch time, roles, permissions or notices, and the new one. 15 of 16 passed in the sweep; `person-panel` missed "shows their email" under the sweep's load and passed alone (59/59).
+- API unit tests 1652/1652, web 305/305.
+- In CI (201).
+
+Measuring this also found `found-25-sep/time-page-answers-whose-hours-twice` below.
+
 *Still open,* per the map (routes and lines in that item's notes):
 - **`workspace.delete`** — nothing permanently deletes a workspace, so the editor offers a key for an action that does not exist.
-- **`time.approval.manage`** — the three rules disagree:
-  - the catalog gives it to managers;
-  - approve and reject admit managers through the guard;
-  - `canModerateApprovals` answers admins only, which is what the page reads.
 - **`report.export`** — no export route asks it.
 - **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table could not be read here.
 - **The settings page is admin-only for any grant but the integrations and SSO ones** (`use-settings-access`), so a member granted the members keys has them by the API alone.
@@ -3027,6 +3052,14 @@ Patches `mrg-1..6`, each compiled:
 *Break run* (lane 1): at `7a9ff90` five of the six reddened the check they name. `mrg-2` reddened nothing: its role held keys the manager does not have, so `assertMayGive` refused it even with `roles.manage` asked of every member. Check 2 now also asks for a role holding only `members.invite`, a key the manager has, so the refusal it measures can only be the missing `roles.manage`. Re-run at `0b2db8e` (baseline 5/5): all six reddened the check they name.
 
 Regression on lanes 2 to 5: the 23 suites that add, change or remove members, make or grant custom roles, or invite, and the new suite. Result: 24/24. `settings-role-grants` read its tabs before the grants had loaded, under the sweep's load, and passed alone (6/6). API unit tests 1652/1652. In CI (199).
+
+### `found-25-sep/time-page-answers-whose-hours-twice` — open, visible bug, small (found closing the time-approvals group of `role-editor-offers-unenforced-permissions`)
+
+**The Time page shows a manager their team's hours on one tab, and only their own on the next**
+
+*Measured* (lane 5, on the tree of `time-approval-rule`): a manager who is a member of a space was shown a member's hours in that space on the Time page's Reports tab. That tab reads `/reports/time`, whose viewer scope is the manager's spaces and projects. The same manager was not shown those hours on the Team week or Monthly tabs (`time-team-week`, `time-monthly`), which are the admins'. One page answers "whose hours may a manager see" in two ways: the duplicated-rule class.
+
+*To close:* one rule for the page's views. The reports' viewer scope is the finer of the two: admins see everyone, a manager their team's spaces and projects, a member their own. In ClickUp, "All timesheets" is the owner's and the admins', and a custom role's "View time tracked by other users" widens it; that has no key here. Decide which rule, then have the team week and the monthly rollup read through that one scope, with a check for each role.
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

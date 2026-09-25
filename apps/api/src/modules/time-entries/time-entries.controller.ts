@@ -1,8 +1,8 @@
 import { BadRequestException, Body, Controller, Delete, Get, Param, Patch, Post, Query, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { TimeEntriesService } from './time-entries.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import type { CurrentUserPayload } from '../tasks/types'
@@ -24,9 +24,9 @@ export class WorkspaceTimeEntriesController {
     @Query('until') until?: string,
   ) {
     // Members may only see their own time logs; admins can filter by anyone.
-    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
+    const everyone = await this.time.seesEveryonesTime(workspaceId, actor)
     return this.time.listForWorkspace(workspaceId, {
-      userId: canModerate ? userId : actor.id,
+      userId: everyone ? userId : actor.id,
       since: parseInstant(since, 'since'),
       until: parseInstant(until, 'until'),
       actorId: actor.id,
@@ -63,9 +63,9 @@ export class WorkspaceTimeEntriesController {
     @Query('months') months?: string,
   ) {
     const rows = await this.time.getMonthlyTimesheet(workspaceId, months ? parseInt(months, 10) : 6)
-    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
+    const everyone = await this.time.seesEveryonesTime(workspaceId, actor)
     // Members see only their own monthly rows.
-    return canModerate ? rows : rows.filter((r) => r.userId === actor.id)
+    return everyone ? rows : rows.filter((r) => r.userId === actor.id)
   }
 
   // A5.14 — the team timesheet grid: one row per person, seven weekday columns.
@@ -77,26 +77,30 @@ export class WorkspaceTimeEntriesController {
     @Query('weekStart') weekStart?: string,
   ) {
     const rows = await this.time.getTeamWeek(workspaceId, this.time.parseWeekStart(weekStart))
-    const canModerate = await this.time.canModerateApprovals(workspaceId, actor.id)
+    const everyone = await this.time.seesEveryonesTime(workspaceId, actor)
     // Same rule as the monthly rollup: members see only their own row.
-    return canModerate ? rows : rows.filter((r) => r.userId === actor.id)
+    return everyone ? rows : rows.filter((r) => r.userId === actor.id)
   }
 
   @Get('workspaces/:workspaceId/time-approvals')
   @UseGuards(WorkspaceMemberGuard)
-  listApprovals(
+  async listApprovals(
     @Param('workspaceId') workspaceId: string,
     @CurrentUser() actor: CurrentUserPayload,
     @Query('status') status?: 'pending' | 'submitted' | 'approved' | 'rejected',
   ) {
-    return Promise.all([
-      this.time.canModerateApprovals(workspaceId, actor.id),
-      this.time.listApprovals(workspaceId, status),
-    ]).then(([canModerate, items]) => ({
+    const [canModerate, seesEveryone] = await Promise.all([
+      this.time.mayApprove(workspaceId, actor),
+      this.time.seesEveryonesTime(workspaceId, actor),
+    ])
+    return {
+      // Whether this person approves (`time.approval.manage`), and whether the
+      // Time page's team and monthly views are everyone's to them (the admins').
       canModerate,
-      // Non-moderators only see their own timesheet rows.
-      items: canModerate ? items : items.filter((i) => i.userId === actor.id),
-    }))
+      seesEveryone,
+      // An approver is shown every member's timesheets; anyone else, their own.
+      items: await this.time.listApprovals(workspaceId, actor, { status, only: canModerate ? undefined : actor.id }),
+    }
   }
 
   @Post('workspaces/:workspaceId/time-approvals/submit')
@@ -110,7 +114,11 @@ export class WorkspaceTimeEntriesController {
   }
 
   @Post('workspaces/:workspaceId/time-approvals/:userId/:weekStart/approve')
-  @UseGuards(WorkspaceMemberGuard, WorkspaceAdminGuard)
+  // `time.approval.manage`, as the catalog says: managers by default, and whoever
+  // an admin grants it. `WorkspaceAdminGuard` admitted managers and refused the
+  // grant (`role-editor-offers-unenforced-permissions`).
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('time.approval.manage')
   approveTimesheet(
     @Param('workspaceId') workspaceId: string,
     @Param('userId') userId: string,
@@ -121,7 +129,9 @@ export class WorkspaceTimeEntriesController {
   }
 
   @Post('workspaces/:workspaceId/time-approvals/:userId/:weekStart/reject')
-  @UseGuards(WorkspaceMemberGuard, WorkspaceAdminGuard)
+  // `time.approval.manage`, as approving does.
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('time.approval.manage')
   rejectTimesheet(
     @Param('workspaceId') workspaceId: string,
     @Param('userId') userId: string,

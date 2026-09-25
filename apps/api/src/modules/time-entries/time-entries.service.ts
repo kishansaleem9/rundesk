@@ -1,4 +1,4 @@
-import { WS_MANAGER_ROLES } from '../../common/permissions/workspace-roles'
+import { isAdminRole } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { eq, and, desc, isNull, gte, lt, inArray, sql } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
@@ -6,7 +6,13 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { readableTaskIds } from '../../common/permissions/read-access'
+import { isUuid } from '../../common/validation/uuid'
+
+/** Who is asking: their id, and their account-wide role (a platform admin passes, as in every guard). */
+export type TimeActor = { id: string; role?: string | null }
 
 @Injectable()
 export class TimeEntriesService {
@@ -14,15 +20,39 @@ export class TimeEntriesService {
     @Inject(DB_TOKEN) private db: Db,
     private readonly security: SecurityService,
     private readonly notifications: NotificationsService,
+    private readonly roles: CustomRolesService,
   ) {}
 
-  async canModerateApprovals(workspaceId: string, userId: string) {
+  /*
+   * TWO QUESTIONS, TWO RULES (`role-editor-offers-unenforced-permissions`).
+   *
+   * Who approves a timesheet is whoever holds `time.approval.manage`: managers by
+   * default, and anyone an admin grants it by a custom role. The routes ask it
+   * through `PermissionsGuard`; the approvals list and the "awaiting approval"
+   * notice ask the same key here. It had been three rules — the guard let
+   * managers approve, this service told the page admins only, and the notice
+   * went to managers and to no one granted the key.
+   *
+   * Who sees everyone's time on the Time page — the team week, the monthly
+   * rollup, anybody's entries — is the admins', as ClickUp's "All timesheets"
+   * tab is the owner's and the admins'. Approving gives none of that.
+   */
+
+  /** May `actor` approve and send back the workspace's timesheets? */
+  async mayApprove(workspaceId: string, actor: TimeActor): Promise<boolean> {
+    if (actor.role === 'super_admin') return true
+    return this.roles.hasPermission(workspaceId, actor.id, 'time.approval.manage')
+  }
+
+  /** May `actor` see every member's time on the Time page? */
+  async seesEveryonesTime(workspaceId: string, actor: TimeActor): Promise<boolean> {
+    if (actor.role === 'super_admin') return true
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })
       .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
       .limit(1)
-    return membership?.role === 'workspace_admin'
+    return isAdminRole(membership?.role)
   }
 
   /** Guests may not track time (Plan §3.3). Resolves the task's workspace role. */
@@ -140,7 +170,7 @@ export class TimeEntriesService {
 
   /**
    * Member submits their weekly timesheet for approval (§8.7): marks the week
-   * 'submitted' and notifies workspace managers/admins (§10.1 approval_needed).
+   * 'submitted' and notifies whoever may approve it (§10.1 approval_needed).
    */
   async submitTimesheet(workspaceId: string, userId: string, weekStart: string) {
     const normalizedWeekStart = this.normalizeWeekStart(weekStart)
@@ -153,21 +183,13 @@ export class TimeEntriesService {
       })
       .returning()
 
-    // Notify managers/admins that an approval is needed.
+    // Tell whoever may approve it: the holders of `time.approval.manage`.
     const [submitter] = await this.db.select({ name: users.displayName }).from(users).where(eq(users.id, userId)).limit(1)
-    const managers = await this.db
-      .select({ userId: workspaceMembers.userId })
-      .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, [...WS_MANAGER_ROLES]),
-        ),
-      )
-    for (const m of managers) {
-      if (m.userId === userId) continue
+    const approvers = await this.roles.holdersOf(workspaceId, 'time.approval.manage')
+    for (const approverId of approvers) {
+      if (approverId === userId) continue
       void this.notifications.create({
-        userId: m.userId,
+        userId: approverId,
         workspaceId,
         actorId: userId,
         type: 'approval_needed',
@@ -241,12 +263,24 @@ export class TimeEntriesService {
     }))
   }
 
-  async listApprovals(workspaceId: string, status?: 'pending' | 'submitted' | 'approved' | 'rejected') {
+  /**
+   * The weekly timesheets `reader` is shown: every member's for an approver,
+   * only `opts.only`'s for anyone else. An entry on a task the reader may not
+   * open still counts toward its week, and is shown by its hours alone — no
+   * project, no note — since an approver may be a member refused a private list.
+   */
+  async listApprovals(
+    workspaceId: string,
+    reader: TimeActor,
+    opts: { status?: 'pending' | 'submitted' | 'approved' | 'rejected'; only?: string } = {},
+  ) {
+    const { status } = opts
     const since = new Date()
     since.setUTCDate(since.getUTCDate() - 90)
 
     const rows = await this.db
       .select({
+        taskId: timeEntries.taskId,
         userId: timeEntries.userId,
         userName: users.displayName,
         startedAt: timeEntries.startedAt,
@@ -261,13 +295,18 @@ export class TimeEntriesService {
       .leftJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(projects, eq(projects.id, lists.projectId))
       .leftJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(and(eq(spaces.workspaceId, workspaceId), gte(timeEntries.startedAt, since)))
+      .where(and(
+        eq(spaces.workspaceId, workspaceId),
+        gte(timeEntries.startedAt, since),
+        opts.only ? eq(timeEntries.userId, opts.only) : undefined,
+      ))
       .orderBy(desc(timeEntries.startedAt))
+    const readable = await readableTaskIds(this.db, workspaceId, reader.id, rows.map((r) => r.taskId), reader.role)
 
     const approvals = await this.db
       .select()
       .from(timeApprovals)
-      .where(eq(timeApprovals.workspaceId, workspaceId))
+      .where(and(eq(timeApprovals.workspaceId, workspaceId), opts.only ? eq(timeApprovals.userId, opts.only) : undefined))
     const reviewerIds = [...new Set(approvals.map((item) => item.approvedById).filter((id): id is string => Boolean(id)))]
     const reviewerRows =
       reviewerIds.length > 0
@@ -303,7 +342,7 @@ export class TimeEntriesService {
         reviewerName?: string | null
         reviewerEmail?: string | null
         rejectionReason?: string
-        entries: Array<{ project: string; hours: number; billable: boolean; note?: string }>
+        entries: Array<{ project: string | null; hidden?: true; hours: number; billable: boolean; note?: string }>
       }
     >()
 
@@ -338,12 +377,11 @@ export class TimeEntriesService {
       const hours = (row.durationSec ?? 0) / 3600
       sheet.total += hours
       if (row.isBillable) sheet.billable += hours
-      sheet.entries.push({
-        project: row.projectName ?? 'Project',
-        hours: Number(hours.toFixed(2)),
-        billable: row.isBillable,
-        note: row.description ?? undefined,
-      })
+      sheet.entries.push(
+        readable.has(row.taskId)
+          ? { project: row.projectName ?? 'Project', hours: Number(hours.toFixed(2)), billable: row.isBillable, note: row.description ?? undefined }
+          : { project: null, hidden: true, hours: Number(hours.toFixed(2)), billable: row.isBillable },
+      )
     }
 
     const allSheets = [...sheets.values()]
@@ -365,6 +403,15 @@ export class TimeEntriesService {
     input: { status: 'approved' | 'rejected'; reason?: string | null },
   ) {
     const normalizedWeekStart = this.normalizeWeekStart(weekStart)
+    // Only a member's timesheet: an approver approved anybody's id, and wrote a row for it.
+    const [member] = isUuid(userId)
+      ? await this.db
+          .select({ userId: workspaceMembers.userId })
+          .from(workspaceMembers)
+          .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+          .limit(1)
+      : []
+    if (!member) throw new NotFoundException('No member of this workspace has that timesheet')
     const [existing] = await this.db
       .select()
       .from(timeApprovals)

@@ -14,6 +14,7 @@ import {
   effectiveCascade,
   PERMISSION_CATALOG,
   PERMISSION_KEYS,
+  ROLE_RANK,
   isKnownPermission,
   type LegacyWorkspaceRole,
   type Permission,
@@ -413,6 +414,30 @@ export class CustomRolesService {
     const resolution = await this.resolveForUser(workspaceId, userId)
     if (!resolution) return false
     return resolution.permissions.includes(permission)
+  }
+
+  /**
+   * Every member of the workspace who holds `permission`: by their base role's
+   * defaults, or by a custom role — `hasPermission` for a whole workspace, for
+   * a caller that tells the holders something (who approves a timesheet).
+   */
+  async holdersOf(workspaceId: string, permission: Permission): Promise<string[]> {
+    const byDefault = (Object.keys(ROLE_RANK) as LegacyRole[]).filter((r) => effectiveCascade(r).includes(permission))
+    const [byRole, byGrant] = await Promise.all([
+      byDefault.length > 0
+        ? this.db
+            .select({ userId: workspaceMembers.userId })
+            .from(workspaceMembers)
+            .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(workspaceMembers.role, byDefault)))
+        : Promise.resolve([] as { userId: string }[]),
+      this.db
+        .select({ userId: workspaceMembers.userId })
+        .from(workspaceMembers)
+        .innerJoin(workspaceMemberCustomRoles, eq(workspaceMemberCustomRoles.workspaceMemberId, workspaceMembers.id))
+        .innerJoin(customRolePermissions, eq(customRolePermissions.roleId, workspaceMemberCustomRoles.roleId))
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(customRolePermissions.permission, permission))),
+    ])
+    return [...new Set([...byRole, ...byGrant].map((r) => r.userId))]
   }
 
   // ----------------------------------------------------------- helpers

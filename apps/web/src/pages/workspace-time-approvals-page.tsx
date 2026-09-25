@@ -35,7 +35,8 @@ type Timesheet = {
   reviewerName?: string | null
   reviewerEmail?: string | null
   rejectionReason?: string
-  entries: Array<{ project: string; hours: number; billable: boolean; note?: string }>
+  // `hidden`: an entry on a task this reader may not open — its hours, and no project or note.
+  entries: Array<{ project: string | null; hidden?: boolean; hours: number; billable: boolean; note?: string }>
 }
 function parseSheetId(id: string): { userId: string; weekStart: string } | null {
   const split = id.split(':')
@@ -230,7 +231,7 @@ export function TimeApprovalsPage() {
           </span>
           {t('timeApprovals.title')}
           <Badge variant={canModerateApprovals ? 'success' : 'secondary'} className="ml-1 text-[10px] uppercase">
-            {canModerateApprovals ? t('timeApprovals.adminReviewer') : t('timeApprovals.readOnly')}
+            {canModerateApprovals ? t('timeApprovals.reviewer') : t('timeApprovals.readOnly')}
           </Badge>
         </h1>
         <p className="text-sm text-muted-foreground mt-1.5 max-w-2xl">
@@ -327,8 +328,8 @@ export function TimeApprovalsPage() {
         accessDenied || !canModerateApprovals ? (
           <EmptyState
             icon={<ClipboardCheck className="h-6 w-6" />}
-            title={t('timeApprovals.adminRequiredTitle')}
-            description={t('timeApprovals.adminRequiredDesc')}
+            title={t('timeApprovals.approverRequiredTitle')}
+            description={t('timeApprovals.approverRequiredDesc')}
           />
         ) : (
           <EmptyState
@@ -440,7 +441,11 @@ export function TimeApprovalsPage() {
                     {sheet.entries.map((e, i) => (
                       <li key={i} className="flex items-center gap-3 py-2">
                         <div className="flex-1 min-w-0 text-sm">
-                          <div className="truncate">{e.project}</div>
+                          {e.hidden ? (
+                            <div className="truncate italic text-muted-foreground" data-testid="time-approval-hidden-entry">{t('timeApprovals.hiddenEntry')}</div>
+                          ) : (
+                            <div className="truncate">{e.project}</div>
+                          )}
                           {e.note && <div className="text-xs text-muted-foreground truncate">{e.note}</div>}
                         </div>
                         {e.billable && (

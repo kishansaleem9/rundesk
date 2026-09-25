@@ -182,10 +182,11 @@ export function TimePage() {
       try {
         return await api<{
           canModerate: boolean
+          seesEveryone: boolean
           items: Array<{ id: string; userId: string; weekStart: string; status: string }>
         }>(`/workspaces/${workspaceId}/time-approvals`)
       } catch {
-        return { canModerate: false, items: [] }
+        return { canModerate: false, seesEveryone: false, items: [] }
       }
     },
   })
@@ -207,7 +208,10 @@ export function TimePage() {
   })
 
   // Status of THIS week's submission for the current user (drives the submit button).
+  // Two answers from the server: whether this person approves timesheets (the
+  // Approvals link), and whether the monthly rollup is everyone's (the admins').
   const canModerate = approvalStatusQuery.data?.canModerate ?? false
+  const seesEveryone = approvalStatusQuery.data?.seesEveryone ?? false
   const myWeekStatus = (approvalStatusQuery.data?.items ?? []).find(
     (s) => s.weekStart === weekStartIso && s.userId === currentUserId,
   )?.status
@@ -572,11 +576,11 @@ export function TimePage() {
             <div className="flex items-center gap-2 mb-3">
               <CalendarRange className="h-4 w-4 text-accent" />
               <h3 className="text-sm font-semibold text-foreground">{t('time.monthlyTitle')}</h3>
-              <span className="text-xs text-muted-foreground">{t('time.last6Months')}{canModerate ? ` · ${t('time.allMembers')}` : ''}</span>
+              <span className="text-xs text-muted-foreground">{t('time.last6Months')}{seesEveryone ? ` · ${t('time.allMembers')}` : ''}</span>
             </div>
-            <div className={cn('grid grid-cols-4 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider', !canModerate && 'grid-cols-3')}>
+            <div className={cn('grid grid-cols-4 gap-2 border-b border-border pb-2 mb-2 text-xs font-semibold text-muted-foreground uppercase tracking-wider', !seesEveryone && 'grid-cols-3')}>
               <div>{t('time.col.month')}</div>
-              {canModerate && <div>{t('time.member')}</div>}
+              {seesEveryone && <div>{t('time.member')}</div>}
               <div className="text-center">{t('time.col.totalHours')}</div>
               <div className="text-center">{t('time.col.billableHours')}</div>
             </div>
@@ -589,10 +593,10 @@ export function TimePage() {
                 {(monthlyQuery.data ?? []).map((row) => (
                   <div
                     key={`${row.month}:${row.userId}`}
-                    className={cn('grid grid-cols-4 gap-2 py-1.5 text-sm border-b border-border/40', !canModerate && 'grid-cols-3')}
+                    className={cn('grid grid-cols-4 gap-2 py-1.5 text-sm border-b border-border/40', !seesEveryone && 'grid-cols-3')}
                   >
                     <div className="tabular-nums">{formatMonth(row.month)}</div>
-                    {canModerate && <div className="truncate">{row.displayName || t('time.member')}</div>}
+                    {seesEveryone && <div className="truncate">{row.displayName || t('time.member')}</div>}
                     <div className="text-center tabular-nums">{row.totalHours.toFixed(1)}h</div>
                     <div className="text-center tabular-nums text-success">{row.billableHours.toFixed(1)}h</div>
                   </div>
