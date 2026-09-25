@@ -1987,13 +1987,24 @@ try {
       'with an Upcoming Meetings block',
       'no Upcoming Meetings block',
     )
-    // Either meetings, or the Connect Calendar door — never a blank space.
+    // Either meetings, or a sentence saying there are none — never a blank space.
     const upcomingRows = await page.locator('[data-testid^="meeting-upcoming-"]').count()
-    const connect = await page.locator('[data-testid="meetings-connect-calendar"]').count()
+    const emptyUpcoming = await page.locator('[data-testid="meetings-upcoming-empty"]').count()
     chk(
-      upcomingRows + connect > 0,
-      upcomingRows ? `${upcomingRows} upcoming` : 'and a Connect Calendar prompt when there are none',
+      upcomingRows + emptyUpcoming > 0,
+      upcomingRows ? `${upcomingRows} upcoming` : 'and a sentence saying so when there are none',
       'the upcoming block rendered blank',
+    )
+    // The Connect Calendar door, to whoever has no calendar connected, and only
+    // to them. It leads to the planner's Accounts page, where one is connected.
+    const calendars = await apiRead(`/workspaces/${WS}/calendar-sync/accounts`)
+    const noCalendar = calendars.status === 200 && Array.isArray(calendars.data) && calendars.data.length === 0
+    const connect = await page.locator('[data-testid="meetings-connect-calendar"]').count()
+    const connectTo = (await page.locator('[data-testid="meetings-connect-calendar"]').evaluateAll((els) => els.map((e) => e.getAttribute('href'))).catch(() => []))[0] ?? null
+    chk(
+      upcomingRows > 0 || (noCalendar ? connect > 0 && /\/calendar\?settings=accounts$/.test(connectTo ?? '') : connect === 0),
+      upcomingRows ? 'no Connect Calendar needed' : noCalendar ? 'a Connect Calendar door to the planner’s Accounts page, with no calendar connected' : 'no Connect Calendar door, a calendar being connected',
+      `Connect Calendar ${connect ? `offered (to ${connectTo})` : 'not offered'} with ${noCalendar ? 'no calendar' : 'a calendar'} connected (accounts read ${calendars.status})`,
     )
 
     chk(

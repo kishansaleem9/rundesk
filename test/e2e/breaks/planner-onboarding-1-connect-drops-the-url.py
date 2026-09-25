@@ -2,10 +2,12 @@
 # answer away: `oauth/start` is called, the `authUrl` it hands back is never followed, and
 # the person is left on the planner with nothing having happened. The dead control, one
 # step later than usual — frames `12:40`-`12:50`.
+# Re-aimed 25 September: the connect is the hook the onboarding and the Accounts
+# page share (`use-calendar-connect.ts`).
 # Reddens: planner-onboarding: "pressing Google Calendar asks the server to start OAuth for
 #          \"gcal\", and sends the browser to the URL it answers with"
 import io
-p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
+p = '/home/user/rundesk/apps/web/src/hooks/use-calendar-connect.ts'
 a = '    onSuccess: ({ authUrl }) => {\n      window.location.href = authUrl\n    },'
 b = '    onSuccess: () => {\n      /* broken on purpose: the authUrl is dropped on the floor */\n    },'
 s = io.open(p, encoding='utf-8').read()

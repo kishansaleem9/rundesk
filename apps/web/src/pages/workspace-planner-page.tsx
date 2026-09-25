@@ -1,10 +1,13 @@
 import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, cn, toast } from '@rundesk/ui'
 import { CalendarDays, ChevronLeft, ChevronRight, Flag, Search, Settings2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { calendarAccountsQuery } from '../lib/calendar-accounts'
+import { useCalendarConnect } from '../hooks/use-calendar-connect'
 import { useTranslation } from '../lib/i18n'
+import type { PlannerSettingsPage } from '../lib/planner-settings-pages'
 import { localDayKey } from '../lib/local-date'
 import { useAuthStore } from '../store/auth'
 import {
@@ -350,7 +353,27 @@ export function PlannerPage() {
    * arrive on Accounts, and sending somebody to Appearance and asking them to
    * find it is most of the way to not having the link.
    */
-  const [settingsPage, setSettingsPage] = useState<'accounts' | undefined>(undefined)
+  const [settingsPage, setSettingsPage] = useState<PlannerSettingsPage | undefined>(undefined)
+  /*
+   * THE DIALOG'S PAGE HAS AN ADDRESS, `?settings=<page>`: the Meetings page's
+   * "Connect Calendar" opens Accounts by it, where a calendar is connected
+   * (`found-24-sep/meetings-connect-calendar-goes-to-settings`). Arriving on it
+   * opens the dialog there; closing the dialog takes it off the address, so a
+   * reload or a Back does not open it again.
+   */
+  const { settings: settingsFromAddress } = useSearch({ from: '/app/$workspaceId/calendar' })
+  const navigate = useNavigate({ from: '/app/$workspaceId/calendar' })
+  useEffect(() => {
+    if (!settingsFromAddress) return
+    setSettingsPage(settingsFromAddress)
+    setSettingsOpen(true)
+  }, [settingsFromAddress])
+  const changeSettingsOpen = (next: boolean) => {
+    setSettingsOpen(next)
+    if (!next && settingsFromAddress) {
+      void navigate({ search: (prev) => ({ ...prev, settings: undefined }), replace: true })
+    }
+  }
   /*
    * §V2-02 `[14:41]` — "yahan se main SEARCH kar sakti hoon [ke] mujhe kis
    * person ke saath milna hai." Until now this was an input with nothing
@@ -800,11 +823,7 @@ export function PlannerPage() {
    * answered or dismissed.
    */
   const { data: calendarAccounts = [] } = useQuery({
-    queryKey: ['calendar-accounts', workspaceId],
-    queryFn: () =>
-      api<Array<{ id: string; status: string }>>(
-        `/workspaces/${workspaceId}/calendar-sync/accounts`,
-      ),
+    ...calendarAccountsQuery(workspaceId),
     enabled: !!workspaceId,
   })
   const showOnboarding =
@@ -822,36 +841,13 @@ export function PlannerPage() {
     },
   })
   /*
-   * Which calendars this server can connect: the Accounts page's own question
-   * (`providers/status`, under the key the Zoom row reads). The onboarding's
-   * buttons posted `oauth/start` whatever the answer, and without a client id
-   * the "consent" address was a provider page for no application at all
+   * Which calendars this server can connect, and the connect itself: the one
+   * flow the Accounts page's "Add account" uses too. The onboarding's buttons
+   * posted `oauth/start` whatever the answer, and without a client id the
+   * "consent" address was a provider page for no application at all
    * (`ledger-rows/defect-planner-connect-empty-consent`).
    */
-  const { data: providerStatus } = useQuery({
-    queryKey: ['integration-provider-status', workspaceId],
-    queryFn: () =>
-      api<Array<{ provider: string; available: boolean; missingEnvKeys?: string[] }>>(
-        `/workspaces/${workspaceId}/integrations/connections/providers/status`,
-      ),
-    enabled: !!workspaceId,
-  })
-  const canConnect = (provider: 'gcal' | 'outlook') =>
-    providerStatus === undefined ? null : (providerStatus.find((p) => p.provider === provider)?.available ?? false)
-
-  const connectCalendar = useMutation({
-    mutationFn: (provider: 'gcal' | 'outlook') =>
-      api<{ authUrl: string }>(
-        `/workspaces/${workspaceId}/integrations/connections/${provider}/oauth/start`,
-        { method: 'POST' },
-      ),
-    onSuccess: ({ authUrl }) => {
-      window.location.href = authUrl
-    },
-    onError: (err) => {
-      toast.error(err instanceof ApiError ? err.message : t('planner.onboarding.connectFailed'))
-    },
-  })
+  const { canConnect, connect: connectCalendar } = useCalendarConnect(workspaceId)
 
   const meetMatches = useMemo(() => {
     const needle = meetQuery.trim().toLowerCase()
@@ -1243,7 +1239,7 @@ export function PlannerPage() {
           a drag people do not believe is happening. */}
       <PlannerSettingsDialog
         open={settingsOpen}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={changeSettingsOpen}
         workspaceId={workspaceId}
         initialPage={settingsPage}
       />

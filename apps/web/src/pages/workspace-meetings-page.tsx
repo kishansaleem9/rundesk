@@ -15,6 +15,7 @@ import {
 } from 'lucide-react'
 import { useTranslation } from '../lib/i18n'
 import { api } from '../lib/api'
+import { calendarAccountsQuery } from '../lib/calendar-accounts'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { useAuthStore } from '../store/auth'
 import {
@@ -209,6 +210,17 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
   const showTimeLeft = prefs?.upcomingShowTimeLeft !== false
   const quickJoin = prefs?.upcomingQuickJoin !== false
   const desktopNotify = prefs?.upcomingDesktopNotify === true
+  /*
+   * Video 1's row: the Connect Calendar prompt is there "when no calendar is
+   * connected". It was there always, beside a sentence promising that a
+   * connected calendar's meetings would show up here — and nothing reads a
+   * calendar into this list (`found-25-sep/meetings-upcoming-reads-no-calendar`).
+   */
+  const { data: calendarAccounts } = useQuery({
+    ...calendarAccountsQuery(workspaceId),
+    enabled: !!workspaceId,
+  })
+  const offerConnect = calendarAccounts !== undefined && calendarAccounts.length === 0
 
   /*
    * §V2-02e — "Show in desktop".
@@ -259,15 +271,26 @@ function UpcomingMeetings({ meetings }: { meetings: Meeting[] }) {
       {meetings.length === 0 ? (
         <div
           className="rounded-xl border border-dashed border-border/70 px-4 py-4 flex flex-wrap items-center justify-between gap-3"
-          data-testid="meetings-connect-calendar"
+          data-testid="meetings-upcoming-empty"
         >
           <p className="text-sm text-muted-foreground">{t('meetings.noUpcoming')}</p>
-          <Button asChild size="sm" variant="outline">
-            <Link to={'/app/$workspaceId/settings' as never} params={{ workspaceId } as never} search={{ tab: 'integrations' } as never}>
-              <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
-              {t('meetings.connectCalendar')}
-            </Link>
-          </Button>
+          {/* To the planner's Accounts page, where a calendar is connected —
+              it went to Settings → Integrations, which connects none and sends
+              a member back to the start. Offered to whoever has no calendar
+              connected, once their accounts have answered. */}
+          {offerConnect && (
+            <Button asChild size="sm" variant="outline">
+              <Link
+                to="/app/$workspaceId/calendar"
+                params={{ workspaceId }}
+                search={{ settings: 'accounts' }}
+                data-testid="meetings-connect-calendar"
+              >
+                <CalendarPlus className="h-3.5 w-3.5 mr-1.5" />
+                {t('meetings.connectCalendar')}
+              </Link>
+            </Button>
+          )}
         </div>
       ) : (
         <ul className="space-y-2">

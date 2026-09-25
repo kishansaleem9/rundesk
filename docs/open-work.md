@@ -1437,13 +1437,42 @@ Each patch compiles. On lane 1: `form-access` 7/7 and `ai-read-access` 5/5 on th
 
 *To close:* measure a member's connect. Then decide, with ClickUp's model, whether a calendar is a personal connection (asked of the person, not of `integrations.manage`) and what the workspace row then means.
 
-### `found-24-sep/meetings-connect-calendar-goes-to-settings` — open, visible bug, small (found reading `custom-role-permissions-unread-by-web`)
+### `found-24-sep/meetings-connect-calendar-goes-to-settings` — **closed** (visible bug, small; found reading `custom-role-permissions-unread-by-web`)
 
 **"Connect Calendar" on the Meetings page opens Settings → Integrations, which connects no calendar**
 
 *Evidence, read not run:* `workspace-meetings-page.tsx` links the empty "Upcoming" state to `settings?tab=integrations`. That tab holds webhooks, Slack, the importer and data export. Calendars connect in the planner's Accounts page, a tab of the planner's settings dialog, which has no address. A member is sent back to `/app` by the settings route.
 
 *To close:* give the Accounts page an address, aim the link there, and read where it lands.
+
+*Measured, lane 5, on HEAD's bundle:* the admin's "Connect Calendar" landed on Settings → Integrations, and a member's on `/app`. `/calendar?settings=accounts` opened nothing. A member with a calendar connected was still offered Connect Calendar, beside "Connect a calendar and your meetings will show up here". The Accounts page's own "+ Add account" was a link to the same Settings tab (`found-25-sep/add-account-goes-to-settings`, below), so the way to a calendar stopped one page later even with the link aimed right.
+
+ClickUp (help centre, search snippets): the AI Notetaker needs the Planner connected to Google or Outlook, and a calendar connects from the Planner's calendar settings. Video 1's row: the Connect Calendar prompt shows "when no calendar is connected".
+
+*Closed, 25 September:*
+
+- **The planner settings dialog's pages have an address**, `/calendar?settings=<page>`. One list of the pages (`lib/planner-settings-pages.ts`) serves the dialog's nav and the route, and the route takes only a page on it. Arriving on the address opens the dialog on that page; closing the dialog takes it off the address.
+- **"Connect Calendar" goes to `/calendar?settings=accounts`**, for the admin and a member alike. It is offered to whoever has no calendar connected, once their accounts have answered. One read of a person's accounts (`calendarAccountsQuery`) serves the Accounts page, the onboarding panel and the Meetings page.
+- **The empty "Upcoming" says "Nothing scheduled."** (four locales). Its promise that a connected calendar's meetings would show up there was untrue: nothing reads a calendar into this list (`found-25-sep/connected-calendars-read-by-nothing`, under the unbuilt features).
+- **"Add account" connects a calendar.** There is a button per calendar, greyed out with the reason where the server has no keys, and it runs the onboarding panel's own connect (`useCalendarConnect`, one hook for both).
+- `deploy/verify-ui.mjs` took "Connect Calendar or meetings" as the block's contents. It reads the empty sentence now, and checks the door against the person's accounts and where it leads.
+
+The new suite `meetings-connect-calendar`, 5 checks: the admin and a member follow Connect Calendar; the address, after a reload, closed, and naming no page; the empty "Upcoming" with no calendar and with one (planted by SQL); "Add account" on this server, which has no calendar keys, and on one routed to have them.
+
+- Before (HEAD's bundle, lane 5): 0 of 5. The first four were measured before the fifth was added, and failed the same way again with it.
+- After: 5/5.
+
+`mcc-1..11`, each compiled. `planner-settings-1` re-aimed at the page list, which the nav is drawn from; `pgt-4` and `planner-onboarding-1` re-aimed at the connect hook. Regression on lanes 2 to 5, 33/33: `meetings-connect-calendar`, `calendar-accounts`, every planner suite (`planner-appearance-toggles`, `planner-blocks`, `planner-command-bar`, `planner-default-list`, `planner-gates`, `planner-grid`, `planner-onboarding`, `planner-prefix`, `planner-priorities`, `planner-rail`, `planner-settings`, `planner-upcoming-meeting`, `planner-views`), `focus-pill`, `tab-title-countdown`, `team-schedules`, `a61-meeting-record`, `meeting-access`, `meeting-tags`, `local-dates`, `assign-to-priorities`, `object-key-boundaries`, `syncup-live`, `addressability-live`, `workspace-read-access`, `private-list-reach`, `no-dead-ends`, `ui-sweep`, `video-regression`, `video1-acceptance` and `video1-fast-items`. In CI (176).
+
+*Not changed, recorded:* a member's connect is refused, since `oauth/start` asks `integrations.manage`: `found-24-sep/personal-calendar-connect-needs-integrations-manage`.
+
+### `found-25-sep/add-account-goes-to-settings` — **closed** (dead control, small; found closing `meetings-connect-calendar-goes-to-settings`)
+
+**The planner Accounts page's "+ Add account" was a link to Settings → Integrations**
+
+*Evidence, read and measured:* `planner-accounts-page.tsx` drew "+ Add account" as `<a href="/app/:ws/settings?tab=integrations">`. Its comment said the Integrations tab "is where the OAuth grant is done". That tab holds webhooks, Slack, the importer and the export, and connects no calendar. A member is sent back to `/app` by the settings route. The onboarding panel's comment said its connect was "the SAME `oauth/start` the App Center and the Accounts page use"; the Accounts page used none. `calendar-accounts` checked that "Add account" was on the page, and not where it led.
+
+*Closed with it:* see above. "Add account" is a button per calendar running `useCalendarConnect`. Check 5 of `meetings-connect-calendar`; `mcc-9..11`.
 
 ### `found-25-sep/statuses-written-by-readers` — **closed** (security, medium; found probing `project-page-offers-guests-its-managers-buttons`)
 
@@ -1523,6 +1552,8 @@ The new suite `view-only-space-menus`, 3 checks: a member's "+" on a view-only s
 - After: 3/3.
 
 `vsm-1..6`, each compiled: the hook, the endpoint, and each picker. `gcm-1`, `gcm-4`, `gcm-5` and `gcm-10` re-aimed at the rewritten hook. Regression on lane 5, 29/29: `view-only-space-menus`, `guest-create-menu`, `attach-on-create`, `comment-plus-menu`, `create-ai-results`, `create-menu-ai`, `custom-field-progress`, `custom-field-types`, `folder-create`, `folder-dialog`, `home-reminders`, `list-name-taken`, `role-permissions-web`, `sidebar-sections`, `space-create-menu`, `space-wizard-views`, `space-wizard`, `task-depth`, `time-estimate`, `video1-fast-items`, `ai-create-containers`, `project-page-controls`, `space-default-permission`, `form-access`, `clickapps-plan-gating`, `no-dead-ends`, `ui-sweep`, `video-regression` and `video1-acceptance`. In CI.
+
+*Break run, lane 1 (6979047):* `vsm-1..6`, 6 of 6 reddened, on a green baseline (3/3). The re-aimed `gcm-1`, `-4`, `-5` and `-10`, 4 of 4, on a green baseline (6/6).
 
 ### `found-24-sep/project-page-offers-guests-its-managers-buttons` — **closed** (visible bug, small; found closing `create-menu-offers-guests-what-they-cannot-make`)
 
@@ -2556,6 +2587,21 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *Evidence:* `GET /workspaces/:id/audit-logs` and its export are guarded by `WorkspaceAdminGuard`, so a workspace admin may read them. The only page that reads them is `/app/admin/audit`, and `/app/admin` lets in a super-admin only. ClickUp puts the audit log in the workspace's own settings, for its owner and admins (an Enterprise feature there), with filters by date, event and user, and a CSV export.
 
 *To close:* research ClickUp's audit log page — its event categories, filters and export — then give workspace settings an "Audit log" tab for owners and admins that reads the same routes as the console page. A suite: a workspace admin reads their own workspace's events and not another's, and a member is offered no tab.
+
+### `found-25-sep/connected-calendars-read-by-nothing` — open, unbuilt (large; found closing `meetings-connect-calendar-goes-to-settings`)
+
+**A connected calendar's events are read by nothing, and three sentences say they are**
+
+*Evidence, read:* the Meetings page's "Upcoming" reads the `meetings` table, which only calls and `POST /meetings` fill (`MeetingsService.upcoming`). The planner's grid draws `task_time_blocks`. The only reads of a person's calendar accounts are the picker's list and free/busy (`externalBusyWindows`, for the people panel). The inbound pull (`pullEvents`) turns the WORKSPACE connection's events into tasks, and nothing calls it on a schedule (`ledger-rows/row-1874`, the sync button). Nothing writes an event to the default account ("New events go here").
+
+The sentences:
+- Meetings: "Connect a calendar and your meetings will show up here." Corrected with the item above.
+- Accounts page, `plannerAccounts.noneHint`: "Connect one and your events appear on the Planner, and your tasks can go the other way."
+- Accounts page, `plannerAccounts.subtitle`: "One is where new events are created".
+
+ClickUp (help centre, search snippets): the Planner "syncs with your connected Google or Outlook Calendar", two-way, and upcoming meetings come from it (the AI Notetaker joins the meetings on the connected calendar).
+
+*To close:* read each connected account's events for a window (Google `events.list`, Graph `calendarView`), with the providers' base addresses overridable so a lane stub can answer, and draw them on the grid and in "Upcoming". Write a new event to the default account. Until then, correct the two Accounts page sentences.
 
 ## Ledger rows still open — 18
 

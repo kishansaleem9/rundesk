@@ -1,7 +1,9 @@
 # NO CALENDAR IS OFFERED EVEN WHERE THE SERVER CAN CONNECT IT: the gate reads every answer as "no".
+# Re-aimed 25 September: the gate is the connect hook now, which the Accounts page
+# shares with the onboarding.
 # Reddens: planner-gates: "where the server can connect it, Google Calendar is offered and starts the connection"
 import io
-p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
+p = '/home/user/rundesk/apps/web/src/hooks/use-calendar-connect.ts'
 a = '    providerStatus === undefined ? null : (providerStatus.find((p) => p.provider === provider)?.available ?? false)\n'
 b = '    providerStatus === undefined ? null : false\n'
 s = io.open(p, encoding='utf-8').read()

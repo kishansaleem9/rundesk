@@ -24,6 +24,7 @@ import {
 import { PlannerAccountsPage } from './planner-accounts-page'
 import { api, ApiError } from '../lib/api'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
+import { PLANNER_SETTINGS_PAGES, type PlannerSettingsPage } from '../lib/planner-settings-pages'
 
 /**
  * §V2-02 — the Planner's settings, frame `14:10`.
@@ -151,18 +152,19 @@ const ALL_ZONES: string[] = (() => {
   return ['UTC', 'Asia/Karachi', 'Asia/Dubai', 'Europe/London', 'America/New_York', 'America/Los_Angeles']
 })()
 
-type PageKey = 'appearance' | 'accounts' | 'sidebar' | 'upcomingMeeting' | 'timeBlocking'
-/** IN THE FRAME'S ORDER. `14:10` lists them top to bottom and the nav is the
- *  one place a reordering would go unnoticed. */
-const PAGES: Array<{ key: PageKey; icon: typeof Palette; labelKey: TranslationKey }> = [
-  { key: 'appearance', icon: Palette, labelKey: 'plannerSettings.appearance' },
+type PageKey = PlannerSettingsPage
+/** Each page's icon and name. The pages and their order are
+ *  `PLANNER_SETTINGS_PAGES`, the frame's, which the planner's address reads too. */
+const PAGE_META: Record<PageKey, { icon: typeof Palette; labelKey: TranslationKey }> = {
+  appearance: { icon: Palette, labelKey: 'plannerSettings.appearance' },
   // §V2-14, frame `13:50` — a person's own calendar accounts.
-  { key: 'accounts', icon: CalendarPlus, labelKey: 'plannerSettings.accounts' },
-  { key: 'sidebar', icon: PanelLeft, labelKey: 'plannerSettings.sidebar' },
+  accounts: { icon: CalendarPlus, labelKey: 'plannerSettings.accounts' },
+  sidebar: { icon: PanelLeft, labelKey: 'plannerSettings.sidebar' },
   // §V2-02e — the page whose recorded reason for being absent had gone stale.
-  { key: 'upcomingMeeting', icon: Video, labelKey: 'plannerSettings.upcomingMeeting' },
-  { key: 'timeBlocking', icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
-]
+  upcomingMeeting: { icon: Video, labelKey: 'plannerSettings.upcomingMeeting' },
+  timeBlocking: { icon: CalendarClock, labelKey: 'plannerSettings.timeBlocking' },
+}
+const PAGES = PLANNER_SETTINGS_PAGES.map((key) => ({ key, ...PAGE_META[key] }))
 
 /**
  * The footer of frame `14:10`, under the nav: What's new · Report a problem ·

@@ -22,16 +22,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, cn, toast } from '@rundesk/ui'
 import { CalendarPlus, Check, Trash2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { calendarAccountsQuery } from '../lib/calendar-accounts'
+import { CALENDAR_PROVIDERS, useCalendarConnect } from '../hooks/use-calendar-connect'
 import { useTranslation } from '../lib/i18n'
-
-type CalendarAccount = {
-  id: string
-  provider: string
-  externalAccountEmail: string | null
-  status: string
-  isDefault: boolean
-  countsAsBusy: boolean
-}
 
 const PROVIDER_LABEL: Record<string, string> = {
   gcal: 'Google Calendar',
@@ -41,14 +34,12 @@ const PROVIDER_LABEL: Record<string, string> = {
 export function PlannerAccountsPage({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
-  const key = ['calendar-accounts', workspaceId]
+  const accountsQuery = calendarAccountsQuery(workspaceId)
+  const { canConnect, connect } = useCalendarConnect(workspaceId)
 
-  const query = useQuery({
-    queryKey: key,
-    queryFn: () => api<CalendarAccount[]>(`/workspaces/${workspaceId}/calendar-sync/accounts`),
-  })
+  const query = useQuery(accountsQuery)
 
-  const refresh = async () => { await qc.invalidateQueries({ queryKey: key }) }
+  const refresh = async () => { await qc.invalidateQueries({ queryKey: accountsQuery.queryKey }) }
   const fail = (err: unknown) =>
     toast.error(err instanceof ApiError ? err.message : t('plannerAccounts.failed'))
 
@@ -177,20 +168,41 @@ export function PlannerAccountsPage({ workspaceId }: { workspaceId: string }) {
       )}
 
       {/*
-        "+ Add account" goes to the existing integrations connect flow, which is
-        where the OAuth grant is done. It is a link rather than a second flow so
-        there is one place that talks to Google — and the callback now records
-        the grant as this person's own account, which is what makes pressing it
-        twice add a second calendar instead of replacing the first.
+        "+ Add account" starts the connect itself, the planner onboarding's own
+        flow (`useCalendarConnect`), for each calendar this server can connect.
+        It was a link to Settings → Integrations, which connects no calendar
+        and sends a member back to the start — so "Connect Calendar" led here
+        and stopped. The callback records the grant as this person's own
+        account, which is what makes a second press add a second calendar
+        instead of replacing the first.
       */}
-      <a
-        href={`/app/${workspaceId}/settings?tab=integrations`}
-        data-testid="planner-account-add"
-        className="inline-flex items-center gap-1.5 text-sm text-accent hover:underline"
-      >
-        <CalendarPlus className="h-3.5 w-3.5" />
-        {t('plannerAccounts.add')}
-      </a>
+      <div className="space-y-1.5" data-testid="planner-account-add">
+        <p className="inline-flex items-center gap-1.5 text-sm font-medium">
+          <CalendarPlus className="h-3.5 w-3.5" />
+          {t('plannerAccounts.add')}
+        </p>
+        <div className="flex flex-wrap gap-2">
+          {CALENDAR_PROVIDERS.map((provider) => (
+            <Button
+              key={provider}
+              size="sm"
+              variant="outline"
+              className="h-8 text-[12px]"
+              data-testid={`planner-account-add-${provider}`}
+              disabled={connect.isPending || canConnect(provider) !== true}
+              title={canConnect(provider) === false ? t('planner.onboarding.notConfigured') : undefined}
+              onClick={() => connect.mutate(provider)}
+            >
+              {PROVIDER_LABEL[provider]}
+            </Button>
+          ))}
+        </div>
+        {CALENDAR_PROVIDERS.some((provider) => canConnect(provider) === false) && (
+          <p className="text-[11px] text-muted-foreground" data-testid="planner-account-add-not-configured">
+            {t('planner.onboarding.notConfigured')}
+          </p>
+        )}
+      </div>
 
       <p className="text-[11px] text-muted-foreground">{t('plannerAccounts.busyHint')}</p>
     </div>
