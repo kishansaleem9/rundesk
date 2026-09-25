@@ -485,7 +485,8 @@ export class CustomRolesService {
       .select({ permission: customRolePermissions.permission })
       .from(customRolePermissions)
       .where(eq(customRolePermissions.roleId, roleId))
-    return rows.map((r) => r.permission)
+    // Only keys the catalog still has: one that left it gates nothing, so it is nothing to give.
+    return rows.map((r) => r.permission).filter(isKnownPermission)
   }
 
   private async requireRole(workspaceId: string, roleId: string) {

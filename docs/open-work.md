@@ -3018,14 +3018,37 @@ Now:
 `report-export-key`, 5 checks:
 - Before: 1 of 5 on lane 5.
 - After: 5/5 on lanes 5 and 4.
-- Patches `rek-1..5`, each compiled.
+- Patches `rek-1..5`: each reddened the check it names (lane 1, baseline 5/5 at `a382582`).
 - `contribution.pdf` also asks managers or admins, who hold `report.export` by default, so no check can separate the key there.
 - Regression: the 14 suites that open the reports, insights, roles or exports, and the new one. 14 of 15 passed in the sweep; `video-regression` found no list from the space page under the sweep's load and passed alone (93/93).
 - In CI (202).
 
+*Partly fixed, 25 September: the fifth group, `workspace.delete`, and a gate.* The editor offered "Delete workspace — permanently delete the workspace and all data", and nothing asked it. No route deletes a workspace for good, and archiving is `workspace.manage`'s. Measured on lane 5 (`a382582`):
+- the catalog offered it;
+- a role was made with it (201);
+- a member holding it resolved it;
+- the editor listed it.
+
+`retired-permission-keys` was 0 of 4. ClickUp, from search snippets: only the owner deletes a workspace.
+
+Now:
+- The key is out of the catalog until a permanent delete exists (`found-25-sep/workspace-permanent-delete-unbuilt`, below).
+- Its strings are out of the editor, and `pgd-4` is re-aimed onto `workspace.billing`, another admin-only key.
+- The service already ignored a stored key the catalog lacks, except in one place: the grant check (`permissionsOfRole`) read a role's stored keys unfiltered. So a role saved while the key was offered would have been unassignable by anyone, admins included. It filters them now.
+
+`scripts/check-permission-keys-asked.mjs` fails on any key the editor offers that no `@RequirePermissions`, `hasPermission` or `holdersOf` names. It exempts only keys listed with the open item that owns them, and fails on a stale exemption.
+- On `7a9ff90` it names the seven keys these groups wired up. On `a382582` it names `workspace.delete` alone, and on this tree it passes: 25 offered, 19 asked, 6 exempt (the deletion keys and `doc.publish`, owned by this item).
+- `check-permission-keys-asked-cases.mjs --mutate`: 11 cases and 8 of 8 mutations bite. Both are in the preflight and CI.
+
+`retired-permission-keys`, 4 checks:
+- Before: 0 of 4.
+- After: 4/4 on lanes 5 and 2.
+- Patches `rpk-1..4`, each compiled.
+- Regression: the 11 suites that make, grant or ask roles and keys, and the new one: 12/12.
+- In CI (203).
+
 *Still open,* per the map (routes and lines in that item's notes):
-- **`workspace.delete`** — nothing permanently deletes a workspace, so the editor offers a key for an action that does not exist.
-- **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table could not be read here.
+- **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table still cannot be read here (25 September: the help centre is denied, and the snippets carry no table). What the snippets do say: deleting a List or a task takes Full edit on it ("Permissions FAQ"), and only the owner deletes a workspace. `check-permission-keys-asked.mjs` exempts these six keys under this item until then.
 - **The settings page is admin-only for any grant but the integrations and SSO ones** (`use-settings-access`), so a member granted the members keys has them by the API alone.
 
 ### `found-25-sep/managers-grant-themselves-admin` — **closed** (security, HIGH; found mapping `role-editor-offers-unenforced-permissions`)
@@ -3080,6 +3103,16 @@ Regression on lanes 2 to 5: the 23 suites that add, change or remove members, ma
 *Measured* (lane 5, on the tree of `time-approval-rule`): a manager who is a member of a space was shown a member's hours in that space on the Time page's Reports tab. That tab reads `/reports/time`, whose viewer scope is the manager's spaces and projects. The same manager was not shown those hours on the Team week or Monthly tabs (`time-team-week`, `time-monthly`), which are the admins'. One page answers "whose hours may a manager see" in two ways: the duplicated-rule class.
 
 *To close:* one rule for the page's views. The reports' viewer scope is the finer of the two: admins see everyone, a manager their team's spaces and projects, a member their own. In ClickUp, "All timesheets" is the owner's and the admins', and a custom role's "View time tracked by other users" widens it; that has no key here. Decide which rule, then have the team week and the monthly rollup read through that one scope, with a check for each role.
+
+### `found-25-sep/workspace-permanent-delete-unbuilt` — open, feature, medium (found closing the fifth group of `role-editor-offers-unenforced-permissions`)
+
+**Nothing deletes a workspace for good**
+
+*Evidence:* `DELETE /workspaces/:workspaceId` archives the workspace (a soft delete), under `workspace.manage`, and `restore` brings it back. Nothing removes a workspace and its data permanently. The role editor offered `workspace.delete` for that action until it was taken out of the catalog, because nothing asked it.
+
+*ClickUp* (search snippets from "Transfer Workspace ownership"): only the owner deletes a workspace. Here no member is the owner; the creator is recorded, and admins manage the workspace.
+
+*To close:* decide who may delete for good (the creator, or an admin holding a restored `workspace.delete`), and after what — an archive first, and a typed confirmation. Build the route, the cascade, and a check that archived data is gone. The key returns to the catalog with the route that asks it, and `check-permission-keys-asked.mjs` holds the two together.
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

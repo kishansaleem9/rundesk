@@ -13,7 +13,6 @@ export type Permission =
   // Workspace-level
   | 'workspace.manage'
   | 'workspace.billing'
-  | 'workspace.delete'
   | 'workspace.audit.view'
   // Member management
   | 'members.invite'
@@ -64,7 +63,6 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   // Workspace
   { key: 'workspace.manage',     label: 'Manage workspace settings',  description: 'Rename, set logo, change colour, archive', category: 'Workspace' },
   { key: 'workspace.billing',    label: 'Manage billing',             description: 'View invoices, change plan, manage payment method', category: 'Workspace' },
-  { key: 'workspace.delete',     label: 'Delete workspace',           description: 'Permanently delete the workspace and all data', category: 'Workspace' },
   { key: 'workspace.audit.view', label: 'View audit log',             description: 'Read the workspace activity / audit trail', category: 'Workspace' },
   // Members
   { key: 'members.invite',        label: 'Invite members',     description: 'Send invitations and create new accounts', category: 'Members' },

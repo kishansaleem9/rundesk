@@ -49,7 +49,6 @@ type TFunc = (key: TranslationKey, vars?: Record<string, string | number>) => st
 const PERMISSION_LABEL_KEYS: Record<string, TranslationKey> = {
   'workspace.manage': 'rolesTab.perm.workspaceManage',
   'workspace.billing': 'rolesTab.perm.workspaceBilling',
-  'workspace.delete': 'rolesTab.perm.workspaceDelete',
   'workspace.audit.view': 'rolesTab.perm.workspaceAuditView',
   'members.invite': 'rolesTab.perm.membersInvite',
   'members.remove': 'rolesTab.perm.membersRemove',
@@ -78,7 +77,6 @@ const PERMISSION_LABEL_KEYS: Record<string, TranslationKey> = {
 const PERMISSION_DESC_KEYS: Record<string, TranslationKey> = {
   'workspace.manage': 'rolesTab.permDesc.workspaceManage',
   'workspace.billing': 'rolesTab.permDesc.workspaceBilling',
-  'workspace.delete': 'rolesTab.permDesc.workspaceDelete',
   'workspace.audit.view': 'rolesTab.permDesc.workspaceAuditView',
   'members.invite': 'rolesTab.permDesc.membersInvite',
   'members.remove': 'rolesTab.permDesc.membersRemove',
