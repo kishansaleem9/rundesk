@@ -11,7 +11,6 @@ import {
   users,
   workspaceMembers,
   spaceMembers,
-  projectMembers,
   timeEntries,
   sprints,
   sprintTasks,
@@ -28,9 +27,10 @@ import {
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
-import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
+import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { goalReach, goalVisibilityFilter, sprintVisibilityFilter } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
+import { containerScopeCondition, taskReadFilterFor, viewerScopeOf, type ViewerScope } from '../../common/permissions/viewer-scope'
 import { renderReportPdf, tableToLines } from './pdf'
 import { AiService } from '../ai/ai.service'
 
@@ -276,10 +276,8 @@ export function contributionNarrativeFallback(f: {
  *                  projects they belong to (space_members / project_members),
  *                  plus their own rows wherever those live.
  */
-export type ViewerScope =
-  | { kind: 'all' }
-  | { kind: 'user'; userId: string }
-  | { kind: 'containers'; spaceIds: string[]; projectIds: string[]; userId: string }
+// The scope a person reads people-wide views with, stated once (`common/permissions/viewer-scope.ts`).
+export type { ViewerScope } from '../../common/permissions/viewer-scope'
 
 /**
  * Is `d` one of the workspace's working days?
@@ -385,34 +383,7 @@ export class ReportsService {
    *   • everyone else (member/guest)  → { kind: 'user' } (own row only).
    */
   async getViewerScope(workspaceId: string, userId: string): Promise<ViewerScope> {
-    const [m] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
-      .limit(1)
-    if (m && (m.role === 'workspace_admin' || m.role === 'super_admin')) return { kind: 'all' }
-    if (m && m.role === 'manager') {
-      const [spaceRows, projectRows] = await Promise.all([
-        this.db
-          .select({ spaceId: spaceMembers.spaceId })
-          .from(spaceMembers)
-          .innerJoin(spaces, eq(spaces.id, spaceMembers.spaceId))
-          .where(and(eq(spaces.workspaceId, workspaceId), eq(spaceMembers.userId, userId))),
-        this.db
-          .select({ projectId: projectMembers.projectId })
-          .from(projectMembers)
-          .innerJoin(projects, eq(projects.id, projectMembers.projectId))
-          .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-          .where(and(eq(spaces.workspaceId, workspaceId), eq(projectMembers.userId, userId))),
-      ])
-      return {
-        kind: 'containers',
-        spaceIds: [...new Set(spaceRows.map((r) => r.spaceId))],
-        projectIds: [...new Set(projectRows.map((r) => r.projectId))],
-        userId,
-      }
-    }
-    return { kind: 'user', userId }
+    return viewerScopeOf(this.db, workspaceId, userId)
   }
 
   /**
@@ -426,12 +397,7 @@ export class ReportsService {
     viewer: ViewerScope,
     cols: { spaceIdCol: Column; projectIdCol: Column; ownerCol: Column },
   ): SQL | undefined {
-    if (viewer.kind !== 'containers') return undefined
-    const parts: SQL[] = []
-    if (viewer.spaceIds.length) parts.push(inArray(cols.spaceIdCol, viewer.spaceIds))
-    if (viewer.projectIds.length) parts.push(inArray(cols.projectIdCol, viewer.projectIds))
-    parts.push(eq(cols.ownerCol, viewer.userId))
-    return or(...parts)
+    return containerScopeCondition(viewer, cols)
   }
 
   /**
@@ -450,17 +416,7 @@ export class ReportsService {
     workspaceId: string,
     actor?: { id: string; role?: string | null },
   ): Promise<SQL | undefined> {
-    if (!actor) return undefined
-    const isManager = await resolveIsManager(this.db, workspaceId, actor.id, actor.role)
-    /*
-     * The container rule too, which no report applied: measured on lane 1, a
-     * member refused a private space was answered by the overview, completion,
-     * workload and the custom report exactly as the admin was, its tasks
-     * counted, and project health, activity and a day's workload named them.
-     * `taskInReachFilter` needs only `tasks` in scope, so it holds in the left
-     * joins and the time and sprint queries that never join a project.
-     */
-    return and(taskInReachFilter(this.db, workspaceId, actor.id, isManager), taskVisibilityFilter(this.db, actor.id, isManager))
+    return taskReadFilterFor(this.db, workspaceId, actor)
   }
 
   async getProductivity(

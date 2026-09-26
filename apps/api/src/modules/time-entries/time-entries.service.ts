@@ -1,6 +1,6 @@
 import { isAdminRole } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, NotFoundException, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { eq, and, desc, isNull, gte, lt, inArray, sql } from 'drizzle-orm'
+import { eq, and, desc, isNull, gte, lt, inArray, sql, type SQL } from 'drizzle-orm'
 import { timeEntries, tasks, lists, projects, spaces, users, timeApprovals, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -10,6 +10,7 @@ import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { readableTaskIds } from '../../common/permissions/read-access'
 import { isUuid } from '../../common/validation/uuid'
+import { containerScopeCondition, taskReadFilterFor, viewerScopeOf, type ViewerScope } from '../../common/permissions/viewer-scope'
 
 /** Who is asking: their id, and their account-wide role (a platform admin passes, as in every guard). */
 export type TimeActor = { id: string; role?: string | null }
@@ -33,8 +34,10 @@ export class TimeEntriesService {
    * managers approve, this service told the page admins only, and the notice
    * went to managers and to no one granted the key.
    *
-   * Who sees everyone's time on the Time page — the team week, the monthly
-   * rollup, anybody's entries — is the admins', as ClickUp's "All timesheets"
+   * Whose hours the Time page's team week and monthly rollup show is the
+   * people-wide views' rule (`hoursReach`, below): the admins everyone's, a
+   * manager their team's, anyone else their own. Filtering the entry list by
+   * anybody is the admins' (`seesEveryonesTime`), as ClickUp's "All timesheets"
    * tab is the owner's and the admins'. Approving gives none of that.
    */
 
@@ -44,7 +47,7 @@ export class TimeEntriesService {
     return this.roles.hasPermission(workspaceId, actor.id, 'time.approval.manage')
   }
 
-  /** May `actor` see every member's time on the Time page? */
+  /** May `actor` filter the time-entry list by any member? */
   async seesEveryonesTime(workspaceId: string, actor: TimeActor): Promise<boolean> {
     if (actor.role === 'super_admin') return true
     const [membership] = await this.db
@@ -72,13 +75,34 @@ export class TimeEntriesService {
     if (row?.role === 'guest') throw new ForbiddenException('Guests cannot track time')
   }
 
-  /** Per-member monthly timesheet totals over the last `months` (§8.5). */
-  async getMonthlyTimesheet(workspaceId: string, months = 6) {
+  /*
+   * WHOSE HOURS THE TIME PAGE'S TEAM WEEK AND MONTHLY ROLLUP SHOW
+   * (`found-25-sep/time-page-answers-whose-hours-twice`): the people-wide views'
+   * one rule (`viewerScopeOf`) — an admin everyone, a manager their team, anyone
+   * else their own — and only the tasks the reader may open, as the Reports tab
+   * has it. And only this workspace's hours: both summed every entry of the
+   * workspace's members, so hours kept in another workspace were counted here.
+   */
+  async hoursReach(workspaceId: string, reader: TimeActor): Promise<{ where: SQL | undefined; reach: 'all' | 'team' | 'own' }> {
+    const viewer: ViewerScope = reader.role === 'super_admin' ? { kind: 'all' } : await viewerScopeOf(this.db, workspaceId, reader.id)
+    const scope = viewer.kind === 'user'
+      ? eq(timeEntries.userId, viewer.userId)
+      : containerScopeCondition(viewer, { spaceIdCol: projects.spaceId, projectIdCol: lists.projectId, ownerCol: timeEntries.userId })
+    const readable = await taskReadFilterFor(this.db, workspaceId, reader)
+    return {
+      where: and(eq(spaces.workspaceId, workspaceId), scope, readable),
+      reach: viewer.kind === 'all' ? 'all' : viewer.kind === 'containers' ? 'team' : 'own',
+    }
+  }
+
+  /** Per-member monthly timesheet totals over the last `months` (§8.5), as `reader` may see them. */
+  async getMonthlyTimesheet(workspaceId: string, months: number, reader: TimeActor) {
     const since = new Date()
     since.setUTCMonth(since.getUTCMonth() - months)
     since.setUTCDate(1)
     since.setUTCHours(0, 0, 0, 0)
     const monthExpr = sql<string>`to_char(${timeEntries.startedAt} at time zone 'UTC', 'YYYY-MM')`
+    const { where } = await this.hoursReach(workspaceId, reader)
     const rows = await this.db
       .select({
         userId: users.id,
@@ -90,7 +114,11 @@ export class TimeEntriesService {
       .from(users)
       .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
       .innerJoin(timeEntries, and(eq(timeEntries.userId, users.id), gte(timeEntries.startedAt, since)))
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), where))
       .groupBy(users.id, users.displayName, monthExpr)
     return rows
       .map((r) => ({
@@ -113,7 +141,8 @@ export class TimeEntriesService {
     return new Date(`${this.normalizeWeekStart(iso)}T00:00:00.000Z`)
   }
 
-  async getTeamWeek(workspaceId: string, weekStart: Date) {
+  async getTeamWeek(workspaceId: string, weekStart: Date, reader: TimeActor) {
+    const { where } = await this.hoursReach(workspaceId, reader)
     const weekEnd = new Date(weekStart)
     weekEnd.setUTCDate(weekEnd.getUTCDate() + 7)
     // Monday-indexed day-of-week, so column 0 is always the week start.
@@ -136,7 +165,11 @@ export class TimeEntriesService {
           lt(timeEntries.startedAt, weekEnd),
         ),
       )
-      .where(eq(workspaceMembers.workspaceId, workspaceId))
+      .innerJoin(tasks, eq(tasks.id, timeEntries.taskId))
+      .innerJoin(lists, eq(lists.id, tasks.listId))
+      .innerJoin(projects, eq(projects.id, lists.projectId))
+      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), where))
       .groupBy(users.id, users.displayName, dayExpr)
 
     const byUser = new Map<string, { userId: string; displayName: string; daySeconds: number[]; totalSeconds: number; billableSeconds: number }>()

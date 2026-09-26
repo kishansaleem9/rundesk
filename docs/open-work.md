@@ -1,5 +1,7 @@
 # Open work — verified inventory, 23 September 2026
 
+> **Current state and where to start: `docs/resume-2026-09-26.md`** — 293 items, 97 open, 13 partly fixed, 183 closed, counted from this file's headings on 26 September.
+
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
 **The ClickUp research could not reach ClickUp.** help.clickup.com, clickup.com and developer.clickup.com are denied by this environment's network policy, so the build specs below that describe ClickUp behaviour rest on the agents' knowledge, not on fetched pages, and must be re-checked against the docs before an item is closed.
@@ -3120,13 +3122,32 @@ Patches `mrg-1..6`, each compiled:
 
 Regression on lanes 2 to 5: the 23 suites that add, change or remove members, make or grant custom roles, or invite, and the new suite. Result: 24/24. `settings-role-grants` read its tabs before the grants had loaded, under the sweep's load, and passed alone (6/6). API unit tests 1652/1652. In CI (199).
 
-### `found-25-sep/time-page-answers-whose-hours-twice` — open, visible bug, small (found closing the time-approvals group of `role-editor-offers-unenforced-permissions`)
+### `found-25-sep/time-page-answers-whose-hours-twice` — **closed** (visible bug, small; found closing the time-approvals group of `role-editor-offers-unenforced-permissions`)
 
 **The Time page shows a manager their team's hours on one tab, and only their own on the next**
 
 *Measured* (lane 5, on the tree of `time-approval-rule`): a manager who is a member of a space was shown a member's hours in that space on the Time page's Reports tab. That tab reads `/reports/time`, whose viewer scope is the manager's spaces and projects. The same manager was not shown those hours on the Team week or Monthly tabs (`time-team-week`, `time-monthly`), which are the admins'. One page answers "whose hours may a manager see" in two ways: the duplicated-rule class.
 
 *To close:* one rule for the page's views. The reports' viewer scope is the finer of the two: admins see everyone, a manager their team's spaces and projects, a member their own. In ClickUp, "All timesheets" is the owner's and the admins', and a custom role's "View time tracked by other users" widens it; that has no key here. Decide which rule, then have the team week and the monthly rollup read through that one scope, with a check for each role.
+
+*Closed, 26 September.* Measured on lane 5 (`b82dd8a`), `time-page-reach` was 2 of 6; the two that passed pin the Reports tab's rule and the member's and admin's reach:
+- The Team week and Monthly tabs gave a manager their own hours alone (their team's rows missing), while the Reports tab gave them their team's.
+- Measuring showed a second fault under the first: both tabs summed every time entry of the workspace's members, wherever it was logged. A member's five hours in another workspace were counted here (7h shown where 2h were logged).
+
+The rule is stated once now: `common/permissions/viewer-scope.ts` holds `viewerScopeOf`, `containerScopeCondition` and `taskReadFilterFor`. The reports delegate to it, with nothing changed; `reports-scope` passes 18/18. The Time page's team week and monthly rollup read through it (`TimeEntriesService.hoursReach`):
+- an admin sees everyone, a manager their team (the spaces and projects they belong to, and their own), anyone else their own;
+- only tasks the reader may open;
+- only this workspace's projects.
+
+The approvals response says the reach (`timeReach`: all, team or own). The monthly header reads "all members" or "your team" (four locales) and shows the Member column for either. Filtering the entry list by anybody stays the admins' (`seesEveryonesTime`). `rra-1` and `tar-8` are re-aimed onto the moved lines.
+
+`time-page-reach`, 6 checks:
+- Before: 2 of 6.
+- After: 6/6 on lanes 5 and 4.
+- Patches `tpr-1..6`, each compiled. Their break run is owed (`docs/resume-2026-09-26.md` §3).
+- Regression, in two sweeps: the 12 suites that read time or reports, the 6 that read the workload report through the moved helper, and the new one. 19/19.
+- API unit tests 1652/1652.
+- In CI (208).
 
 ### `found-25-sep/workspace-permanent-delete-unbuilt` — open, feature, medium (found closing the fifth group of `role-editor-offers-unenforced-permissions`)
 
@@ -3222,7 +3243,7 @@ Now:
 `data-transfer-keys`, 6 checks:
 - Before: 0 of 5 on lane 5. The sixth, the sample-data card, was measured on an earlier bundle: it offered the manager Load demo data.
 - After: 6/6 on lanes 5 and 4.
-- Patches `dtk-1..9`, each compiled.
+- Patches `dtk-1..9`: each reddened the check it names (lane 1, baseline 6/6 at `b82dd8a`).
 - `check-permission-keys-asked` reads 27 keys offered, 21 asked.
 - Regression: the 13 suites that import, export, open settings or grant roles, and the new one. 13 of 14 passed in the sweep; `list-export` missed its fields request under load and passed alone (30/30), recorded under `three-suites-fail-under-a-full-sweep`.
 - In CI (207).

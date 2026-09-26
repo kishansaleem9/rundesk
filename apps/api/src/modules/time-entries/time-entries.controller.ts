@@ -62,10 +62,8 @@ export class WorkspaceTimeEntriesController {
     @CurrentUser() actor: CurrentUserPayload,
     @Query('months') months?: string,
   ) {
-    const rows = await this.time.getMonthlyTimesheet(workspaceId, months ? parseInt(months, 10) : 6)
-    const everyone = await this.time.seesEveryonesTime(workspaceId, actor)
-    // Members see only their own monthly rows.
-    return everyone ? rows : rows.filter((r) => r.userId === actor.id)
+    // Whose rows: the people-wide views' one rule, which the service applies.
+    return this.time.getMonthlyTimesheet(workspaceId, months ? parseInt(months, 10) : 6, actor)
   }
 
   // A5.14 — the team timesheet grid: one row per person, seven weekday columns.
@@ -76,10 +74,8 @@ export class WorkspaceTimeEntriesController {
     @CurrentUser() actor: CurrentUserPayload,
     @Query('weekStart') weekStart?: string,
   ) {
-    const rows = await this.time.getTeamWeek(workspaceId, this.time.parseWeekStart(weekStart))
-    const everyone = await this.time.seesEveryonesTime(workspaceId, actor)
-    // Same rule as the monthly rollup: members see only their own row.
-    return everyone ? rows : rows.filter((r) => r.userId === actor.id)
+    // The same rule as the monthly rollup, applied by the service.
+    return this.time.getTeamWeek(workspaceId, this.time.parseWeekStart(weekStart), actor)
   }
 
   @Get('workspaces/:workspaceId/time-approvals')
@@ -89,15 +85,16 @@ export class WorkspaceTimeEntriesController {
     @CurrentUser() actor: CurrentUserPayload,
     @Query('status') status?: 'pending' | 'submitted' | 'approved' | 'rejected',
   ) {
-    const [canModerate, seesEveryone] = await Promise.all([
+    const [canModerate, reach] = await Promise.all([
       this.time.mayApprove(workspaceId, actor),
-      this.time.seesEveryonesTime(workspaceId, actor),
+      this.time.hoursReach(workspaceId, actor),
     ])
     return {
-      // Whether this person approves (`time.approval.manage`), and whether the
-      // Time page's team and monthly views are everyone's to them (the admins').
+      // Whether this person approves (`time.approval.manage`), and whose hours the
+      // Time page's team week and monthly rollup show them: everyone's, their
+      // team's, or their own.
       canModerate,
-      seesEveryone,
+      timeReach: reach.reach,
       // An approver is shown every member's timesheets; anyone else, their own.
       items: await this.time.listApprovals(workspaceId, actor, { status, only: canModerate ? undefined : actor.id }),
     }
