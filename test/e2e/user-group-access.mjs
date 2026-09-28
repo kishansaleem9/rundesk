@@ -233,6 +233,11 @@ try {
   const groupsTabOffered = async (page) => {
     await waitUntil(async () => (await page.locator('[data-testid^="settings-tab-"]').count()) > 0 || !page.url().includes('/settings'), { timeoutMs: 15_000 })
     await waitUntil(async () => (await page.getByPlaceholder('New group name').count()) > 0, { timeoutMs: 5000 })
+    // The list is its own read, after the field: wait for what is counted, not
+    // for the field beside it (under four parallel break builds it drew late).
+    if ((await page.getByPlaceholder('New group name').count()) > 0) {
+      await waitUntil(async () => (await page.getByText(`${TAG} renamed by grouper`, { exact: true }).count()) > 0, { timeoutMs: 15_000 })
+    }
     const u = new URL(page.url())
     return {
       url: u.pathname + u.search,
