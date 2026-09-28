@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 311 items, 104 open, 12 partly fixed, 195 closed, counted from this file's headings on 28 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 317 items, 100 open, 11 partly fixed, 206 closed, counted from this file's headings late on 28 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1182,7 +1182,7 @@ Now:
 `doc-trash-level`, 5 checks:
 - Before: 2 of 5 on lane 7.
 - After: 5/5 on lane 7.
-- Patches `dtl-1..5`; their runs follow the commit, with `fel-11` and `dwl-7`.
+- Patches `dtl-1..5` each reddened the check they name (lane 1, at `96305b3`, baseline 5/5). The re-aimed `fel-11` reddened `full-edit-levels`' doc check and `dwl-7` `doc-write-levels`' (lane 2, baselines 8/8 and 5/5).
 - Regression on lane 7, 10/10: `doc-trash-level`, `full-edit-levels`, `doc-write-levels`, `doc-boundaries`, `doc-import`, `doc-task-links`, `share-levels`, `trash-rules`, `undo-delete` and `ui-sweep`, which reads the share dialog's level explanations.
 - API unit tests 1704/1704.
 - In CI (222).
@@ -1229,7 +1229,7 @@ Left beside it, as their own items: the web offers no way to archive or delete a
 - Regression on lane 7, the 8 suites that send to, read or empty the Trash: 8/8.
 - In CI (218).
 
-### `found-28-sep/members-have-no-trash-to-open` — open, feature, small (found closing `trash-deletes-for-good-wider-than-clickup`)
+### `found-28-sep/members-have-no-trash-to-open` — **closed** (feature, small; found closing `trash-deletes-for-good-wider-than-clickup`)
 
 **A member cannot see or restore what they deleted anywhere in the web**
 
@@ -1237,7 +1237,22 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 *To close:* open the Trash tab to every member but a guest (as Archived is), with Restore on their own rows and no Delete forever or Empty. Measure a member and an admin.
 
-### `found-28-sep/delete-and-public-link-offered-to-everyone` — open, visible bug, medium (found by the deletion research)
+*Closed, 28 September,* with `members-see-no-clickapps-list` and `settings-blank-on-a-slow-permission-read` (one suite, `member-settings-tabs`). Measured on lane 7 before the change: a plain member had no Trash tab, and neither did a manager — whom the tab, had they reached it, offered Empty trash (`canEmpty` read the manager role), which the API refuses them since `trash-deletes-for-good-wider-than-clickup`.
+
+Now:
+- Trash opens to every member but a guest (`OPEN_TABS`), listing what they deleted, as the API answers.
+- Delete forever, Empty trash and the Deleted-by filter are an admin's (`isAdmin`); the deleters list is asked only for an admin.
+- A plain member lands on Archived (`landingTab`: General where it opens, else the first tab a key opens, else Archived), in the route and the page alike.
+- `settings-tabs-by-key` and `settings-role-grants` read a plain member's tabs as Features, Archived and Trash now; their two sentences and the eight patches quoting them follow. `ata-6` is re-aimed onto the new list.
+
+`member-settings-tabs`, 7 checks (its Trash, Features and slow-read sections):
+- Before: 1 of 6 on lane 7, the guest's refusal passing (the slow-read check came after; see that item). The suite's first reads were found reading a closing menu's aria-hidden page as "not offered", and were made to wait for the menu to close and the flags to settle before the after run.
+- After: 7/7 on lane 7.
+- Patches `mst-1..7` (`mst-7` against `settings-tabs-by-key`); the web ones typecheck applied. Their runs follow the commit.
+- Regression on lane 7, 22 suites with the menu, Trash, Features, landing and dashboard changes together: `member-settings-tabs`, `menu-offers`, `dashboard-own-copy`, `settings-tabs-by-key`, `settings-role-grants`, `archived-tasks-access`, `trash-rules`, `undo-delete`, `clickapp-flags-access`, `settings-depth`, `teams-destination`, `role-permissions-web`, `workspace-role-controls`, `people-calendar-access`, `user-group-access`, `announcement-access`, `client-access`, `default-dashboard-access`, `container-delete-keys`, `job-title-rule`, `retired-permission-keys` and `admin-only-keys`, 22/22. Three had read the old tab sets and were updated for the three open tabs: `settings-tabs-by-key` and `settings-role-grants` set the open tabs aside as they had set Archived aside, and `clickapp-flags-access` now expects the manager and the plain member on a read-only Features (its sentence changed, and `cka-8`'s claim with it). Twelve runs were refused on the way as a stale build, twice — a rebuild by another session, and the preflight's unit claims patching the API — and passed when re-run.
+- In CI (224).
+
+### `found-28-sep/delete-and-public-link-offered-to-everyone` — **closed** (visible bug, medium; found by the deletion research)
 
 **The sidebar and the space page offer Delete on every space, folder, project and list, and the docs panel offers the public-link switch to readers and guests**
 
@@ -1247,6 +1262,26 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 - Spaces have no capabilities endpoint to ask.
 
 *To close:* each control is offered by the rule its route asks (a capabilities read per container, as projects and tasks have). Measure a member, a guest and an admin on each.
+
+*Closed, 28 September.* Measured on lane 7 at `96305b3`, `menu-offers` passed 1 of 9; the one that passed pins what stays, the admin offered Delete. The eight failures:
+- No capabilities to ask for a space, a folder, a list or a doc (404).
+- A plain member was offered Delete and Rename on the admin's list, Delete on the admin's space and folder and Archive on the admin's project, all of which the routes refuse (403).
+- The space page's menu offered the member Delete, and said nothing about what they may do.
+- The docs panel drew the public-link switch on a doc the member could only view.
+
+Now:
+- `GET /spaces/:id/capabilities`, `/spaces/:id/folders/:folderId/capabilities`, `/lists/:id/capabilities` and `/docs/:id/capabilities` answer with the very checks their routes ask (`allowedBy`, `common/permissions/capability.ts`, now shared with the project page's capabilities). A folder's answer includes `space.create`, which every folder write asks through its guard. A doc's public link has one rule, `assertMayPublish`, for the two routes and the answer; deleting one has `assertMayDelete`.
+- The sidebar's four menus and the space page's ask when they open (`WithMenuOffers`, `components/menu-offers.tsx`): a refused row is not drawn, a row still being asked is drawn disabled, and if the question fails the row is offered and the route answers for itself. Rename, privacy and Move follow `manage`; Delete and Archive follow `delete`. Share is left to the share dialog's own rule.
+- The space page says so when there is nothing for the reader to change ("You can open this space, but not change or delete it", four locales).
+- The docs panel draws its link switch by the doc's `makeLink` / `revokeLink`; the copy button stays for anyone who sees an existing link.
+- Guests: the doc link is measured for a guest at Edit (refused, as ClickUp's guests never share publicly). A guest's container menus follow the same rules, whose guest refusals `container-delete-keys` and `guest-space-level` measure at the routes.
+
+`menu-offers`, 9 checks, read by the rows' visible names so the old build is measured the same way:
+- Before: 1 of 9 on lane 7.
+- After: 9/9 on lane 7.
+- Patches `mno-1..7`; the three web ones typecheck applied. Their runs follow the commit. `dwl-6` is re-aimed onto `assertMayPublish`.
+- API unit tests 1704/1704.
+- In CI (223).
 
 ### `found-28-sep/client-delete-cascades-invoices` — **closed** (data loss, medium; found implementing `client.manage`)
 
@@ -1345,13 +1380,26 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 *To close:* Correct the copy in four locales.
 
-### `found-28-sep/members-see-no-clickapps-list` — open, feature, small (found by the ClickApps research)
+### `found-28-sep/members-see-no-clickapps-list` — **closed** (feature, small; found by the ClickApps research)
 
 **A member cannot see which ClickApps are on**
 
 *Evidence:* ClickUp: "Members can view, but not activate or deactivate ClickApps." RunDesk shows the Features tab to key holders only, so a member learns what is off only when the navigation hides it.
 
 *To close:* Open Features read-only to every member but a guest, with the switches offered by the key.
+
+*Closed, 28 September,* in `member-settings-tabs` with `members-have-no-trash-to-open`. Features opens to every member but a guest; the tab already drew every switch disabled with its reason for someone without `workspace.clickapps.manage`, and live for a holder. Measured: before, a plain member had no Features tab; after, they see all twelve ClickApps with every switch disabled and "Only workspace admins, and members granted Manage ClickApps, can change these settings", and the admin's twelve are live. `mst-5` closes the tab again and `mst-6` makes the switches live for everyone.
+
+### `found-28-sep/settings-blank-on-a-slow-permission-read` — **closed** (visible bug, medium; found by the flaky-suite work on `three-suites-fail-under-a-full-sweep`)
+
+**Opening Settings as a non-admin went blank when the permission read was slow**
+
+*Evidence, measured 28 September:* the settings route's `beforeLoad` awaited `GET /roles/me/permissions` and then threw its redirect (to the landing tab, or away). With the read held back 4.5 s (`page.route`, a scratch probe on lane 7), a plain member's Settings went blank on 6 loads of 6: the URL moved to `?tab=archived`, the body was empty, no tab was drawn, and the page threw a value with no name and no message — the late redirect escaping the router after the load had been superseded. It is one of the reasons `settings-role-grants` missed under a sweep's load; no test-side wait could fix it. Only this route awaited a request before a redirect.
+
+*Closed:* the route decides only from an answer it already holds and asks for the answer without waiting (`prefetchQuery`); the page makes the same decision when the answer lands — nobody with no tab stays, and a tab that is not theirs, or none, takes them to their landing tab. Tab content was already drawn only for a tab the person may open (`shown`), so nothing shows early.
+- The probe after: 0 blank of 6, each load on `?tab=archived` with three tabs and nothing thrown.
+- `member-settings-tabs`' slow-read check: three loads of three land on Archived with the read held back 4.5 s.
+- Patches `sbs-1` (the route awaits again) and `sbs-2` (the page never decides); both typecheck applied. `srg-1` is re-aimed onto `settingsTabsFor`, which both now read.
 
 ### `found-28-sep/own-capacity-not-self-service` — open, feature, small (found by the people-and-calendar research)
 
@@ -1398,7 +1446,7 @@ Now:
 `job-title-rule`, 11 checks:
 - Before: 3 of 11 on lane 7.
 - After: 11/11 on lane 7.
-- Patches `jtr-1..10`; `jtr-10` is a unit claim. `jtr-1..6`, `jtr-8` and `jtr-9` each reddened the check they name (lane 2, at `ad97e31`, baseline 11/11); `jtr-10` reddens its unit test. `jtr-7` did not build — it left `void (…,)` — and is re-aimed to send the reason to the console instead, which compiles; its run follows.
+- Patches `jtr-1..10`; `jtr-10` is a unit claim. `jtr-1..6`, `jtr-8` and `jtr-9` each reddened the check they name (lane 2, at `ad97e31`, baseline 11/11); `jtr-10` reddens its unit test. `jtr-7` did not build — it left `void (…,)` — and, re-aimed to send the reason to the console instead, reddened its check (lane 3, at `96305b3`).
 - Regression on lane 7: `teams-person-cards` 17/17, `user-group-access` 8/8, `people-calendar-access` 8/8.
 - In CI (221).
 
@@ -1421,13 +1469,23 @@ Now:
 
 *Closed:* `verify.sh` prints every FAIL line and the count, names the whole log when the run failed, and keeps one log per suite and lane (`run-<suite>-lane<N>.log`). Nothing reads the old path; `sweep.sh` counts exit statuses, not these lines. Measured on lane 7 with a throwaway suite printing nine failures: all nine lines, the count and the log's path were printed, and the exit was 1.
 
-### `found-28-sep/dashboard-edit-offered-on-others-presets` — open, dead control, small (found by the dashboard research; plausible, not measured)
+### `found-28-sep/dashboard-edit-offered-on-others-presets` — **closed** (dead control, small; found by the dashboard research)
 
 **The widget builder offers Edit and Save layout on a dashboard the viewer does not own**
 
 *Evidence:* `dashboard-widget-builder.tsx:228`, `:178-181` offer it on any active preset, including the workspace default shown to a member. `PUT /dashboards/:id` is the owner's (`dashboards.service.ts:130-135`), so the save answers 404.
 
 *To close:* Measure; offer editing to the owner, and say so otherwise.
+
+*Closed, 28 September.* Measured on lane 7 before the change: on the admin's workspace default (what a member sees before they have a dashboard of their own, in the dashboard's Custom mode), a plain member was offered Edit dashboard, and Save layout answered `PUT 404` "Preset not found", losing the arrangement. ClickUp (from search snippets): a dashboard is changed by those with edit access to it; anybody else duplicates it.
+
+Now the builder knows whose dashboard it shows (`isOwner`, which the list already carried): the owner is offered Edit dashboard and saves to it; anybody else is offered Make my own copy, with a hint that the changes are saved as a dashboard of their own, and Save makes one (`POST /dashboards`, their default). Four locales.
+
+`dashboard-own-copy`, 3 checks:
+- Before: 1 of 3 on lane 7 (the owner's Edit, which stays).
+- After: 3/3 on lane 7. The suite reads the button once the staged dashboard's name is drawn: before the dashboards load, the builder has none and offers Edit.
+- Patches `ddo-1..2`. Their runs follow the commit.
+- In CI (225).
 
 ### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — **closed** (test tooling, small; found stopping a preflight)
 

@@ -1,6 +1,6 @@
 # GENERAL OPENS TO A KEY EVERY MEMBER HOLDS: a plain member is shown General.
 # Re-aimed 28 September: Settings opens to every member on Archived, so the check reads which tabs a plain member is shown.
-# Reddens: settings-tabs-by-key: "a plain member, who holds none of these keys, opens Settings on Archived alone — no tab a key opens"
+# Reddens: settings-tabs-by-key: "a plain member, who holds none of these keys, opens Settings on Archived, with only Trash and Features beside it — no tab a key opens"
 import io
 p = '/home/user/rundesk/apps/web/src/hooks/use-settings-access.ts'
 s = io.open(p, encoding='utf-8').read()

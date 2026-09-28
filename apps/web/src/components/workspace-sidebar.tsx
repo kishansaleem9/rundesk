@@ -100,6 +100,7 @@ import { SPACE_CREATE_TYPES, type CreateKind } from '../lib/create-types'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { FLAGS, type FlagKey } from '@rundesk/feature-flags'
 import { ListSkeleton } from './loading-skeletons'
+import { WithMenuOffers } from './menu-offers'
 /** Shown in the toggle's tooltip so the chord is discoverable, not folklore. */
 const SIDEBAR_CHORD =
   typeof navigator !== 'undefined' && /mac/i.test(navigator.platform) ? '⌘ \\' : 'Ctrl \\'
@@ -2202,11 +2203,22 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                               </button>
                             </DropdownMenuTrigger>
                             <DropdownMenuContent align="end" className="w-44">
-                              <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}>
+                              <WithMenuOffers path={`/lists/${list.id}/capabilities`}>
+                                {(offer) => (
+                                  <>
+                              {offer.manage !== false && (
+                              <DropdownMenuItem
+                                disabled={offer.manage === null}
+                                data-testid={`list-rename-${list.id}`}
+                                onClick={() => setTreeEdit({ kind: 'list', id: list.id, name: list.name })}
+                              >
                                 <Pencil className="h-3.5 w-3.5" />
                                 {t('container.rename')}
                               </DropdownMenuItem>
+                              )}
+                              {offer.manage !== false && (
                               <DropdownMenuItem
+                                disabled={offer.manage === null}
                                 onClick={() =>
                                   void setListVisibility(list.id, list.visibility === 'private' ? 'public' : 'private')
                                 }
@@ -2214,13 +2226,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 {list.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                 {list.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
                               </DropdownMenuItem>
+                              )}
                               <DropdownMenuItem
                                 onClick={() => setShareItem({ type: 'list', id: list.id, name: list.name })}
                               >
                                 <Share2 className="h-3.5 w-3.5" />
                                 {t('share.menuAction')}
                               </DropdownMenuItem>
+                              {offer.manage !== false && (
                               <DropdownMenuItem
+                                disabled={offer.manage === null}
                                 onClick={() =>
                                   setMoveItem({
                                     kind: 'list',
@@ -2234,9 +2249,13 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 <ArrowRightLeft className="h-3.5 w-3.5" />
                                 {t('move.action')}
                               </DropdownMenuItem>
+                              )}
+                              {offer.delete !== false && (
+                                <>
                               <DropdownMenuSeparator />
                               <DropdownMenuItem
                                 className="text-destructive focus:text-destructive"
+                                disabled={offer.delete === null}
                                 data-testid={`list-delete-${list.id}`}
                                 onClick={() => {
                                   if (window.confirm(t('list.deleteConfirm', { name: list.name }))) {
@@ -2247,6 +2266,11 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 <Trash2 className="h-3.5 w-3.5" />
                                 {t('list.deleteAction')}
                               </DropdownMenuItem>
+                                </>
+                              )}
+                                  </>
+                                )}
+                              </WithMenuOffers>
                             </DropdownMenuContent>
                           </DropdownMenu>
                         </div>
@@ -2292,6 +2316,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>
                         <button
+                          data-testid={`project-actions-${project.id}`}
                           className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
                           aria-label={t('nav.actionsFor', { name: project.name })}
                         >
@@ -2299,12 +2324,28 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         </button>
                       </DropdownMenuTrigger>
                       <DropdownMenuContent align="end" className="w-52">
-                        <DropdownMenuItem onClick={() => setTreeEdit({ kind: 'project', id: project.id, name: project.name })}>
+                        {/* The project page's own capabilities: `edit` renames and moves it, `archive` sends it to the Trash. */}
+                        <WithMenuOffers
+                          path={`/projects/${project.id}/capabilities`}
+                          read={(data) => ({ manage: data.edit === true, delete: data.archive === true })}
+                        >
+                          {(offer) => (
+                            <>
+                        {offer.manage !== false && (
+                        <DropdownMenuItem
+                          disabled={offer.manage === null}
+                          data-testid={`project-rename-${project.id}`}
+                          onClick={() => setTreeEdit({ kind: 'project', id: project.id, name: project.name })}
+                        >
                           <Pencil className="h-3.5 w-3.5" />
                           {t('container.rename')}
                         </DropdownMenuItem>
+                        )}
+                        {offer.delete !== false && (
                         <DropdownMenuItem
                           className="text-destructive focus:text-destructive"
+                          disabled={offer.delete === null}
+                          data-testid={`project-archive-${project.id}`}
                           onClick={() => {
                             if (window.confirm(t('project.archiveConfirm', { name: project.name }))) {
                               void archiveProjectFromTree(project.id)
@@ -2314,6 +2355,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <Archive className="h-3.5 w-3.5" />
                           {t('project.archiveAction')}
                         </DropdownMenuItem>
+                        )}
                         <DropdownMenuSeparator />
                         <DropdownMenuItem
                           onClick={() => setShareItem({ type: 'project', id: project.id, name: project.name })}
@@ -2321,7 +2363,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <Share2 className="h-3.5 w-3.5" />
                           {t('share.menuAction')}
                         </DropdownMenuItem>
+                        {offer.manage !== false && (
                         <DropdownMenuItem
+                          disabled={offer.manage === null}
                           onClick={() =>
                             setMoveItem({
                               kind: 'project',
@@ -2335,6 +2379,10 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           <ArrowRightLeft className="h-3.5 w-3.5" />
                           {t('move.action')}
                         </DropdownMenuItem>
+                        )}
+                            </>
+                          )}
+                        </WithMenuOffers>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </div>
@@ -2549,6 +2597,7 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
+                        data-testid={`space-actions-${space.id}`}
                         className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
                         aria-label={t('nav.actionsFor', { name: space.name })}
                       >
@@ -2556,22 +2605,40 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end" className="w-44">
-                      <DropdownMenuItem onClick={() => setSpaceDialog({ mode: 'rename', id: space.id, name: space.name })}>
+                      <WithMenuOffers path={`/spaces/${space.id}/capabilities`}>
+                        {(offer) => (
+                          <>
+                      {offer.manage !== false && (
+                      <DropdownMenuItem
+                        disabled={offer.manage === null}
+                        data-testid={`space-rename-${space.id}`}
+                        onClick={() => setSpaceDialog({ mode: 'rename', id: space.id, name: space.name })}
+                      >
                         <Pencil className="h-3.5 w-3.5" />
                         {t('container.rename')}
                       </DropdownMenuItem>
+                      )}
                       <DropdownMenuItem onClick={() => setShareItem({ type: 'space', id: space.id, name: space.name })}>
                         <Share2 className="h-3.5 w-3.5" />
                         {t('share.menuAction')}
                       </DropdownMenuItem>
+                      {offer.delete !== false && (
+                        <>
                       <DropdownMenuSeparator />
                       <DropdownMenuItem
                         className="text-destructive focus:text-destructive"
+                        disabled={offer.delete === null}
+                        data-testid={`space-delete-${space.id}`}
                         onClick={() => void deleteSpaceFromTree(space.id, space.name)}
                       >
                         <Trash2 className="h-3.5 w-3.5" />
                         {t('space.deleteAction')}
                       </DropdownMenuItem>
+                        </>
+                      )}
+                          </>
+                        )}
+                      </WithMenuOffers>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -2630,6 +2697,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                 </button>
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-44">
+                                <WithMenuOffers path={`/spaces/${space.id}/folders/${folder.id}/capabilities`}>
+                                  {(offer) => (
+                                    <>
                                 {/*
                                   §V2-S09 `08:25` — the shared dialog now edits a
                                   folder's DESCRIPTION as well as its name, so the
@@ -2637,8 +2707,10 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                   menu row naming one of the two things behind it
                                   is the stale reason this audit keeps finding.
                                 */}
+                                {offer.manage !== false && (
                                 <DropdownMenuItem
                                   data-testid="tree-folder-edit"
+                                  disabled={offer.manage === null}
                                   onClick={() =>
                                     setTreeEdit({
                                       kind: 'folder',
@@ -2652,7 +2724,10 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                   <Pencil className="h-3.5 w-3.5" />
                                   {t('folder.edit')}
                                 </DropdownMenuItem>
+                                )}
+                                {offer.manage !== false && (
                                 <DropdownMenuItem
+                                  disabled={offer.manage === null}
                                   onClick={() =>
                                     void setFolderVisibility(
                                       space.id,
@@ -2664,13 +2739,16 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                   {folder.visibility === 'private' ? <Globe className="h-3.5 w-3.5" /> : <Lock className="h-3.5 w-3.5" />}
                                   {folder.visibility === 'private' ? t('nav.makePublic') : t('nav.makePrivate')}
                                 </DropdownMenuItem>
+                                )}
                                 <DropdownMenuItem
                                   onClick={() => setShareItem({ type: 'folder', id: folder.id, name: folder.name })}
                                 >
                                   <Share2 className="h-3.5 w-3.5" />
                                   {t('share.menuAction')}
                                 </DropdownMenuItem>
+                                {offer.manage !== false && (
                                 <DropdownMenuItem
+                                  disabled={offer.manage === null}
                                   onClick={() =>
                                     setMoveItem({
                                       kind: 'folder',
@@ -2684,9 +2762,14 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                   <ArrowRightLeft className="h-3.5 w-3.5" />
                                   {t('move.action')}
                                 </DropdownMenuItem>
+                                )}
+                                {offer.delete !== false && (
+                                  <>
                                 <DropdownMenuSeparator />
                                 <DropdownMenuItem
                                   className="text-destructive focus:text-destructive"
+                                  disabled={offer.delete === null}
+                                  data-testid={`tree-folder-delete-${folder.id}`}
                                   onClick={() => {
                                     if (window.confirm(t('folder.deleteConfirm', { name: folder.name }))) {
                                       void deleteFolder(space.id, folder.id)
@@ -2696,6 +2779,11 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                                   <Trash2 className="h-3.5 w-3.5" />
                                   {t('folder.deleteAction')}
                                 </DropdownMenuItem>
+                                  </>
+                                )}
+                                    </>
+                                  )}
+                                </WithMenuOffers>
                               </DropdownMenuContent>
                             </DropdownMenu>
                           </div>

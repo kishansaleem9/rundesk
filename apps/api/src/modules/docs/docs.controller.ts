@@ -220,6 +220,12 @@ export class DocsController {
     return this.docs.update(docId, user.id, body)
   }
 
+  /** What the caller may do to the doc — the checks its routes ask. */
+  @Get('docs/:docId/capabilities')
+  capabilities(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
+    return this.docs.capabilities(docId, user.id)
+  }
+
   @Delete('docs/:docId')
   remove(@Param('docId') docId: string, @CurrentUser() user: CurrentUserPayload) {
     return this.docs.deleteForUser(docId, user.id)

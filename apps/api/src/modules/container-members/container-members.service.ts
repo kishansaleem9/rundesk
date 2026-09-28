@@ -11,6 +11,7 @@ import { spaceMembers, projectMembers, spaces, projects, lists, workspaceMembers
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { allowedBy } from '../../common/permissions/capability'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import type { WithinStep } from '../../common/permissions/space-default-permission'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
@@ -179,14 +180,7 @@ export class ContainerMembersService {
       .where(eq(projects.id, projectId))
       .limit(1)
     if (!row) throw new NotFoundException('Project not found')
-    const allowed = (check: Promise<unknown>): Promise<boolean> =>
-      check.then(
-        () => true,
-        (e) => {
-          if (e instanceof ForbiddenException || e instanceof NotFoundException) return false
-          throw e
-        },
-      )
+    const allowed = allowedBy
     // The same chain each route passes: a grant on the list, the project or its folder decides first.
     const above: WithinStep[] = [{ type: 'project', id: projectId }, ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : [])]
     const manage = (createdById: string | null, kind: 'project' | 'list', action: 'manage' | 'delete', listId?: string) =>

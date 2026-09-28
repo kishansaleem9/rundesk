@@ -95,6 +95,14 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
   const { t, tCount } = useTranslation()
   const [widgets, setWidgets] = useState<Widget[]>(preset?.layout || DEFAULT_LAYOUT)
   const [editing, setEditing] = useState(false)
+  /*
+   * WHOSE LAYOUT THIS SAVES TO. `PUT /dashboards/:id` is the owner's, so on a
+   * dashboard somebody else made — the workspace default, or one shared with
+   * you — Edit then Save answered "Preset not found" and threw the work away
+   * (found-28-sep/dashboard-edit-offered-on-others-presets). There the builder
+   * offers to make your own copy instead, and saves it as your dashboard.
+   */
+  const owns = !preset?.id || preset.isOwner !== false
   const [paletteFilter, setPaletteFilter] = useState('')
   const [dragId, setDragId] = useState<string | null>(null)
   const [dropTargetId, setDropTargetId] = useState<string | null>(null)
@@ -176,11 +184,11 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
 
   const handleSaveLayout = async () => {
     try {
-      if (preset?.id) {
+      if (preset?.id && owns) {
         await api(`/dashboards/${preset.id}`, { method: 'PUT', body: { layout: widgets } })
       } else {
-        // No preset yet — persist the edited layout as a new default dashboard
-        // instead of silently discarding the changes on remount.
+        // No preset yet, or somebody else's — persist the edited layout as a
+        // new default dashboard of your own instead of discarding the changes.
         await api('/dashboards', {
           method: 'POST',
           body: { workspaceId, name: t('dashboardWidget.myDashboard'), layout: widgets, isDefault: true },
@@ -225,8 +233,14 @@ export function DashboardWidgetBuilder({ preset, workspaceId }: { preset?: any; 
                 <Button variant="gradient" size="sm" onClick={handleSaveLayout}>{t('dashboardWidget.saveLayout')}</Button>
               </div>
             ) : (
-              <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-                <SettingsIcon className="h-3.5 w-3.5" /> {t('dashboardWidget.editDashboard')}
+              <Button
+                variant="outline"
+                size="sm"
+                data-testid="dashboard-edit"
+                title={owns ? undefined : t('dashboardWidget.notYoursHint')}
+                onClick={() => setEditing(true)}
+              >
+                <SettingsIcon className="h-3.5 w-3.5" /> {owns ? t('dashboardWidget.editDashboard') : t('dashboardWidget.makeMyOwn')}
               </Button>
             )}
           </div>

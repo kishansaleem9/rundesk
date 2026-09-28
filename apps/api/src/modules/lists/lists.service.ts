@@ -10,6 +10,7 @@ import { lists, listStatuses, projects, spaces, folders, spaceStatuses } from '@
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
+import { allowedBy } from '../../common/permissions/capability'
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
 import { CustomRolesService } from '../custom-roles/custom-roles.service'
@@ -421,6 +422,21 @@ export class ListsService {
       })
     }
     return row
+  }
+
+  /**
+   * What this person may do to the list from its menus, each answered by the
+   * check its own route asks: `manage` for renaming it, its privacy and moving
+   * it, `delete` for sending it to the Trash.
+   */
+  async capabilities(listId: string, actorId: string) {
+    const [exists] = await this.db.select({ id: lists.id }).from(lists).where(eq(lists.id, listId)).limit(1)
+    if (!exists) throw new NotFoundException('List not found')
+    const [manage, remove] = await Promise.all([
+      allowedBy(this.assertManageable(listId, actorId, 'manage')),
+      allowedBy(this.assertManageable(listId, actorId, 'delete')),
+    ])
+    return { manage, delete: remove }
   }
 
   private async assertManageable(listId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {

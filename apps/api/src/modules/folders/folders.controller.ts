@@ -31,6 +31,12 @@ export class FoldersController {
     return this.folders.create(spaceId, body, user.id)
   }
 
+  /** What the caller may do to the folder from its menus — the checks its routes ask. */
+  @Get(':folderId/capabilities')
+  capabilities(@Param('spaceId') spaceId: string, @Param('folderId') folderId: string, @CurrentUser() user: any) {
+    return this.folders.capabilities(spaceId, folderId, user.id)
+  }
+
   @Patch(':folderId')
   @RequirePermissions('space.create')
   update(

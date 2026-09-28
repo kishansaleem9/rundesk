@@ -36,6 +36,12 @@ export class SpacesController {
     return this.spacesService.moveTargets(workspaceId, user.id)
   }
 
+  /** What the caller may do to the space from its menus — the checks its routes ask. */
+  @Get(':spaceId/capabilities')
+  async capabilities(@Param('spaceId') spaceId: string, @CurrentUser() user: any) {
+    return this.spacesService.capabilities(spaceId, user.id)
+  }
+
   @Get(':spaceId')
   async getSpace(@Param('spaceId') spaceId: string) {
     return this.spacesService.getSpace(spaceId)

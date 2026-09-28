@@ -1971,6 +1971,20 @@ function ShareDocButton({
   const [busy, setBusy] = useState(false)
   const isShared = Boolean(doc.publicShareId)
   const shareUrl = isShared ? `${window.location.origin}/d/${doc.publicShareId}` : null
+  /*
+   * The switch is offered by what `POST` and `DELETE /docs/:id/share` would
+   * accept — Edit on the doc, not a guest, and to make a link a workspace that
+   * allows one — answered by the rule those routes ask. It was drawn for
+   * everyone who could open the doc, guests and readers included
+   * (found-28-sep/delete-and-public-link-offered-to-everyone). The copy button
+   * stays for anyone who can see an existing link.
+   */
+  const caps = useQuery({
+    queryKey: ['doc-capabilities', doc.id],
+    queryFn: () => api<{ makeLink: boolean; revokeLink: boolean }>(`/docs/${doc.id}/capabilities`),
+    staleTime: 30_000,
+  })
+  const mayToggle = caps.isError ? true : caps.data ? (isShared ? caps.data.revokeLink : caps.data.makeLink) : null
 
   const toggle = async () => {
     setBusy(true)
@@ -2002,15 +2016,18 @@ function ShareDocButton({
 
   return (
     <>
-      <Button
-        size="sm"
-        variant={isShared ? 'secondary' : 'ghost'}
-        onClick={toggle}
-        disabled={busy}
-        title={isShared ? t('docs.disablePublicShare') : t('docs.shareDocPublicly')}
-      >
-        {isShared ? <Globe className="h-3.5 w-3.5" /> : <GlobeLock className="h-3.5 w-3.5" />}
-      </Button>
+      {mayToggle !== false && (
+        <Button
+          size="sm"
+          variant={isShared ? 'secondary' : 'ghost'}
+          onClick={toggle}
+          disabled={busy || mayToggle === null}
+          data-testid="doc-public-link-toggle"
+          title={isShared ? t('docs.disablePublicShare') : t('docs.shareDocPublicly')}
+        >
+          {isShared ? <Globe className="h-3.5 w-3.5" /> : <GlobeLock className="h-3.5 w-3.5" />}
+        </Button>
+      )}
       {isShared && (
         <Button size="sm" variant="ghost" onClick={copy} title={t('docs.copyPublicLink')}>
           <Link2 className="h-3.5 w-3.5" />

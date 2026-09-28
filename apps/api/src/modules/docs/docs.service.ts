@@ -8,6 +8,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { resolveIsManager, taskVisibilityFilter, isManagerRole } from '../../common/permissions/item-visibility'
 import { checkContainerAccess } from '../../common/permissions/container-access.guard-helper'
 import { canReadDoc, docLevel, docLevelReaches, type DocLevel, hiddenDocIds } from '../../common/permissions/doc-access'
+import { allowedBy } from '../../common/permissions/capability'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { isUuid } from '../../common/validation/uuid'
 import { pickDocUpdatable } from './doc-update-fields'
@@ -711,13 +712,7 @@ export class DocsService {
   }
 
   async deleteForUser(docId: string, userId: string) {
-    // Edit deletes a doc, as it archives one: docs are ClickUp's exception to
-    // the location rule, where Edit changes and Full edit deletes ("Anyone,
-    // including guests, with Edit permissions can archive and unarchive Docs";
-    // "Guests with edit permissions can edit and delete Docs and pages").
-    // This asked Full edit while archiving through `update` asked Edit, for the
-    // same result (found-28-sep/doc-archive-and-delete-at-two-levels).
-    await this.assertDocLevel(docId, userId, 'edit')
+    await this.assertMayDelete(docId, userId)
     const [row] = await this.db
       .update(docs)
       .set({ isArchived: true, archivedAt: new Date(), archivedById: userId, updatedAt: new Date() })
@@ -728,29 +723,68 @@ export class DocsService {
     return { ok: true }
   }
 
+  private async assertMayDelete(docId: string, userId: string) {
+    // Edit deletes a doc, as it archives one: docs are ClickUp's exception to
+    // the location rule, where Edit changes and Full edit deletes ("Anyone,
+    // including guests, with Edit permissions can archive and unarchive Docs";
+    // "Guests with edit permissions can edit and delete Docs and pages").
+    // This asked Full edit while archiving through `update` asked Edit, for the
+    // same result (found-28-sep/doc-archive-and-delete-at-two-levels).
+    await this.assertDocLevel(docId, userId, 'edit')
+  }
+
   // ─── Public anonymous share ─────────────────────────────────────────────────
 
   /**
    * Turn on public read-only sharing for the doc. Returns the slug for the
    * /d/<slug> route. Idempotent: returns the existing slug if already shared.
    */
-  async enablePublicShare(docId: string, userId: string) {
+  /**
+   * Who may turn a doc's public link on (`making`) or off: Edit on it, and not
+   * a guest (ClickUp: guests never share publicly). Making one also asks the
+   * workspace — §A4.2, it can withdraw the right to mint anonymous links at
+   * all — unless the link already exists. Revoking stays possible, which is why
+   * `making: false` skips it. One rule for the two routes and for what the docs
+   * panel offers (`capabilities`).
+   */
+  private async assertMayPublish(docId: string, userId: string, making: boolean) {
     const { doc, role } = await this.assertDocLevel(docId, userId, 'edit')
     if (role === 'guest') throw new ForbiddenException('Guests cannot share docs')
+    if (making && !doc.publicShareId) {
+      const [workspace] = await this.db
+        .select({ blockPublicSharing: workspaces.blockPublicSharing })
+        .from(workspaces)
+        .where(eq(workspaces.id, doc.workspaceId))
+        .limit(1)
+      if (workspace?.blockPublicSharing) {
+        throw new ForbiddenException('Public sharing is disabled for this workspace')
+      }
+    }
+    return doc
+  }
+
+  /**
+   * What this person may do to the doc, each answered by the check its own
+   * route asks: `edit` (PATCH), `delete` (DELETE, and archiving), and the
+   * public link's `makeLink` and `revokeLink`. The docs panel offers the link
+   * switch by these, not to everyone who can open the doc
+   * (found-28-sep/delete-and-public-link-offered-to-everyone).
+   */
+  async capabilities(docId: string, userId: string) {
+    await this.assertDocAccess(docId, userId)
+    const [edit, remove, makeLink, revokeLink] = await Promise.all([
+      allowedBy(this.assertDocLevel(docId, userId, 'edit')),
+      allowedBy(this.assertMayDelete(docId, userId)),
+      allowedBy(this.assertMayPublish(docId, userId, true)),
+      allowedBy(this.assertMayPublish(docId, userId, false)),
+    ])
+    return { edit, delete: remove, makeLink, revokeLink }
+  }
+
+  async enablePublicShare(docId: string, userId: string) {
+    const doc = await this.assertMayPublish(docId, userId, true)
     if (doc.publicShareId) {
       return { publicShareId: doc.publicShareId, publicShareEnabledAt: doc.publicShareEnabledAt }
-    }
-    // §A4.2 — the workspace can withdraw the right to mint anonymous links at
-    // all. Checked here rather than in the controller so no other caller can
-    // reach the slug generator around it. Revoking an existing link stays
-    // possible, which is why disablePublicShare is not gated.
-    const [workspace] = await this.db
-      .select({ blockPublicSharing: workspaces.blockPublicSharing })
-      .from(workspaces)
-      .where(eq(workspaces.id, doc.workspaceId))
-      .limit(1)
-    if (workspace?.blockPublicSharing) {
-      throw new ForbiddenException('Public sharing is disabled for this workspace')
     }
     const slug = randomBytes(12).toString('base64url')
     const [row] = await this.db
@@ -767,8 +801,7 @@ export class DocsService {
   }
 
   async disablePublicShare(docId: string, userId: string) {
-    const { doc, role } = await this.assertDocLevel(docId, userId, 'edit')
-    if (role === 'guest') throw new ForbiddenException('Guests cannot share docs')
+    const doc = await this.assertMayPublish(docId, userId, false)
     if (!doc.publicShareId) return { ok: true }
     await this.db
       .update(docs)

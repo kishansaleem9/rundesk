@@ -17,7 +17,7 @@ import { TrashTab } from '../components/trash-tab'
 import { useResolvedFlags } from '../lib/use-feature-flags'
 import { useWorkspaceRole, withinRank } from '../hooks/use-workspace-role'
 import { usePermissions } from '../hooks/use-permissions'
-import { useSettingsAccess } from '../hooks/use-settings-access'
+import { landingTab, useSettingsAccess } from '../hooks/use-settings-access'
 import { FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey } from '@rundesk/feature-flags'
 import { InlineSkeleton } from '../components/loading-skeletons'
@@ -162,7 +162,7 @@ export function SettingsPage() {
   // The tabs this person may open: every one for an admin; for anybody else,
   // those a key they hold serves (`useSettingsAccess`, which the route asks too).
   const access = useSettingsAccess(workspaceId)
-  const tab: SettingsTabId = tabFromUrl ?? (access.tabs.includes('general') ? 'general' : (access.tabs[0] ?? 'general'))
+  const tab: SettingsTabId = tabFromUrl ?? landingTab(access.tabs)
   const shown = (id: SettingsTabId) => access.tabs.includes(id)
   const setTab = (next: SettingsTabId) =>
     navigate({
@@ -178,6 +178,29 @@ export function SettingsPage() {
       navigate({ to: '/app/profile' })
     }
   }, [navigate, validWorkspaceId])
+
+  /*
+   * THE ROUTE'S DECISION, WHEN THE PERMISSION ANSWER ARRIVES AFTER IT. The route
+   * decides from an answer it already holds and no longer waits for one (a late
+   * redirect blanked the page); so once the answer lands, the same rule runs
+   * here: nobody with no tab stays, and a tab that is not theirs, or none, takes
+   * them to the one they land on.
+   */
+  useEffect(() => {
+    if (!validWorkspaceId || !access.loaded) return
+    if (!access.mayOpen) {
+      navigate({ to: '/app', replace: true })
+      return
+    }
+    if (tabFromUrl ? !access.tabs.includes(tabFromUrl) : !access.tabs.includes('general')) {
+      navigate({
+        to: '/app/$workspaceId/settings',
+        params: { workspaceId: validWorkspaceId },
+        search: { tab: landingTab(access.tabs) },
+        replace: true,
+      })
+    }
+  }, [navigate, validWorkspaceId, access.loaded, access.mayOpen, access.tabs, tabFromUrl])
 
   if (!validWorkspaceId) {
     return (

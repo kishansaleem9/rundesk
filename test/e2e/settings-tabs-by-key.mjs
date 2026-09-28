@@ -165,13 +165,17 @@ try {
   }
   const on = (seen, tab) => seen.url.includes('/settings') && seen.tabs.includes(tab)
   /*
-   * THE TABS A KEY OPENS, beside Archived, which opens to every member but a
-   * guest: it lists the archived tasks each reader may open
-   * (`admin-guard-admits-managers-where-the-web-says-admin`). So "alone" is
-   * read as the one tab the key opens, and Archived is required with it.
+   * THE TABS A KEY OPENS, beside the three that open to every member but a
+   * guest: Archived (the archived tasks each reader may open), Trash (what
+   * they deleted) and Features (read-only)
+   * (`admin-guard-admits-managers-where-the-web-says-admin`,
+   * `members-have-no-trash-to-open`, `members-see-no-clickapps-list`). So
+   * "alone" is read as the one tab the key opens, and the three are required
+   * with it.
    */
-  const keyTabs = (seen) => seen.tabs.filter((t) => t !== 'archived')
-  const onAlone = (seen, tab) => on(seen, tab) && keyTabs(seen).length === 1 && seen.tabs.includes('archived')
+  const OPEN_TABS = ['features', 'archived', 'trash']
+  const keyTabs = (seen) => seen.tabs.filter((t) => !OPEN_TABS.includes(t))
+  const onAlone = (seen, tab) => on(seen, tab) && keyTabs(seen).length === 1 && OPEN_TABS.every((t) => seen.tabs.includes(t))
 
   console.log('\n▶ the manager, who holds members.invite by default')
   const managerSees = await settingsAs(manager, async (page) => ({
@@ -244,8 +248,8 @@ try {
   console.log('\n▶ a plain member')
   const plainSees = await settingsAs(plain, async () => ({}))
   chk(
-    plainSees.url.includes('tab=archived') && plainSees.tabs.length === 1 && plainSees.tabs[0] === 'archived',
-    'a plain member, who holds none of these keys, opens Settings on Archived alone — no tab a key opens',
+    plainSees.url.includes('tab=archived') && JSON.stringify(plainSees.tabs) === '["features","archived","trash"]',
+    'a plain member, who holds none of these keys, opens Settings on Archived, with only Trash and Features beside it — no tab a key opens',
     JSON.stringify(plainSees),
   )
 } catch (err) {

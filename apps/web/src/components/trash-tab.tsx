@@ -59,8 +59,12 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const { formatDateTime } = useDateFormat()
-  const { isAdmin, isManagerOrAbove } = useWorkspaceRole(workspaceId)
-  const canEmpty = isAdmin || isManagerOrAbove
+  // Deleting for good and emptying are an admin's, as the API answers
+  // (`trash-deletes-for-good-wider-than-clickup`); everybody else lists and
+  // restores what they deleted, so the Deleted-by filter has nobody else to
+  // offer them. This offered Empty to managers, whom the API refuses.
+  const { isAdmin } = useWorkspaceRole(workspaceId)
+  const canEmpty = isAdmin
 
   const [search, setSearch] = useState('')
   const [types, setTypes] = useState<TrashType[]>([])
@@ -76,6 +80,7 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
     queryFn: () => api<TrashResponse>(`/workspaces/${workspaceId}/trash${qs ? `?${qs}` : ''}`),
   })
   const deletersQuery = useQuery({
+    enabled: isAdmin,
     queryKey: ['trash-deleters', workspaceId],
     queryFn: () => api<Deleter[]>(`/workspaces/${workspaceId}/trash/deleters`),
   })
@@ -207,6 +212,7 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
           </DropdownMenuContent>
         </DropdownMenu>
 
+        {isAdmin && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button variant="outline" size="sm" className="h-9 gap-1.5">
@@ -241,6 +247,7 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
             )}
           </DropdownMenuContent>
         </DropdownMenu>
+        )}
 
         {activeFilters > 0 && (
           <Button
@@ -354,10 +361,12 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
                             <RotateCcw className="h-3.5 w-3.5" />
                             {t('trash.restore')}
                           </DropdownMenuItem>
+                          {canEmpty && (
+                            <>
                           <DropdownMenuSeparator />
                           {/* The permanent half of §V2-08's Delete: the bin row
                               goes for good, here or after the retention window,
-                              whichever comes first. */}
+                              whichever comes first. An admin's alone. */}
                           <DropdownMenuItem
                             data-testid={`trash-delete-forever-${item.type}-${item.id}`}
                             className="text-destructive focus:text-destructive"
@@ -371,6 +380,8 @@ export function TrashTab({ workspaceId }: { workspaceId: string }) {
                             <Trash2 className="h-3.5 w-3.5" />
                             {t('trash.deleteForever')}
                           </DropdownMenuItem>
+                            </>
+                          )}
                         </DropdownMenuContent>
                       </DropdownMenu>
                     </td>

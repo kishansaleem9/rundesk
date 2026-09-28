@@ -1,5 +1,5 @@
 # SETTINGS' CLICKAPP SWITCHES ARE THE PLATFORM ADMIN'S ALONE, AS THE CONSOLE'S ARE: a workspace admin is shown every switch dead.
-# Reddens: clickapp-flags-access: "Settings offers the admin every ClickApp switch — and sends the manager and a plain member each to a tab of theirs, offering neither a switch"
+# Reddens: clickapp-flags-access: "Settings offers the admin every ClickApp switch live — and shows the manager and a plain member the same list with every switch disabled and the reason said"
 #   or "Settings opens Features to the member granted workspace.clickapps.manage, every ClickApp switch live and no “admins only” notice"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-settings-page.tsx'

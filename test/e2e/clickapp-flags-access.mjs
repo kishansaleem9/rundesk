@@ -218,13 +218,13 @@ try {
   const adminSees = await pageAs(admin, `/app/${WS}/settings?tab=features`, featuresOffered)
   const managerSees = await pageAs(manager, `/app/${WS}/settings?tab=features`, featuresOffered)
   const memberSees = await pageAs(member, `/app/${WS}/settings?tab=features`, featuresOffered)
-  // A plain member opens Settings too — its Archived tab is every member's
-  // (`archived-tasks-access`) — so "a tab of theirs" is where each is sent.
+  // Features opens read-only to every member but a guest — ClickUp: "Members can
+  // view, but not activate or deactivate ClickApps" (`members-see-no-clickapps-list`).
   chk(
-    adminSees.tab === 1 && adminSees.switches >= 12 && adminSees.live === adminSees.switches
-      && !managerSees.url.includes('tab=features') && managerSees.tab === 0 && managerSees.live === 0
-      && !memberSees.url.includes('tab=features') && memberSees.tab === 0 && memberSees.switches === 0,
-    'Settings offers the admin every ClickApp switch — and sends the manager and a plain member each to a tab of theirs, offering neither a switch',
+    adminSees.tab === 1 && adminSees.switches >= 12 && adminSees.live === adminSees.switches && adminSees.notice === 0
+      && managerSees.url.includes('tab=features') && managerSees.tab === 1 && managerSees.switches >= 12 && managerSees.live === 0 && managerSees.notice > 0
+      && memberSees.url.includes('tab=features') && memberSees.tab === 1 && memberSees.switches >= 12 && memberSees.live === 0 && memberSees.notice > 0,
+    'Settings offers the admin every ClickApp switch live — and shows the manager and a plain member the same list with every switch disabled and the reason said',
     `admin ${JSON.stringify(adminSees)}; manager ${JSON.stringify(managerSees)}; member ${JSON.stringify(memberSees)}`,
   )
 

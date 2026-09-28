@@ -54,6 +54,12 @@ export class ListsController {
     return this.listsService.getListsBySpace(spaceId, { id: user.id, role: user.role })
   }
 
+  /** What the caller may do to the list from its menus — the checks its routes ask. */
+  @Get(':listId/capabilities')
+  async capabilities(@Param('listId') listId: string, @CurrentUser() user: any) {
+    return this.listsService.capabilities(listId, user.id)
+  }
+
   @Get(':listId')
   async getList(@Param('listId') listId: string) {
     return this.listsService.getList(listId)

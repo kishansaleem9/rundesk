@@ -7,12 +7,15 @@ import { SecurityService } from '../security/security.service'
 import { resolveIsManager, folderVisibilityFilter } from '../../common/permissions/item-visibility'
 import { guestFolderFilter } from '../../common/permissions/guest-reach'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
+import { allowedBy } from '../../common/permissions/capability'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 
 @Injectable()
 export class FoldersService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private roles?: CustomRolesService,
   ) {}
 
   async listBySpace(spaceId: string, actor?: { id: string; role?: string }) {
@@ -174,6 +177,29 @@ export class FoldersService {
       .returning()
     if (!row) throw new NotFoundException('Folder not found')
     return row
+  }
+
+  /**
+   * What this person may do to the folder from its menus, each answered by
+   * what its own routes ask: `space.create` (the guard every folder write sits
+   * behind), then the container rule — `manage` to rename it, make it private
+   * or move it, `delete` to send it to the Trash.
+   */
+  async capabilities(spaceId: string, folderId: string, actorId: string) {
+    const [f] = await this.db
+      .select({ workspaceId: spaces.workspaceId })
+      .from(folders)
+      .innerJoin(spaces, eq(spaces.id, folders.spaceId))
+      .where(and(eq(folders.id, folderId), eq(folders.spaceId, spaceId)))
+      .limit(1)
+    if (!f) throw new NotFoundException('Folder not found')
+    const writes = this.roles ? await this.roles.hasPermission(f.workspaceId, actorId, 'space.create') : true
+    if (!writes) return { manage: false, delete: false }
+    const [manage, remove] = await Promise.all([
+      allowedBy(this.assertMayChange(spaceId, folderId, actorId, 'manage')),
+      allowedBy(this.assertMayChange(spaceId, folderId, actorId, 'delete')),
+    ])
+    return { manage, delete: remove }
   }
 
   /** The container rule for this folder, as `move` asks it: `manage` to change it, `delete` to delete it. */

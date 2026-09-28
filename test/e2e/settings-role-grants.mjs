@@ -25,6 +25,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -170,10 +171,37 @@ try {
     await page.keyboard.press('Escape').catch(() => {})
     return n
   }
-  /** Where the settings address leaves this person, and the tabs it shows them. */
+  /**
+   * THIS PERSON'S KEYS ANSWERING — `GET /roles/me/permissions`, which settings'
+   * tabs and the Integrations cards are drawn from. Registered BEFORE the
+   * navigation it is for, so the answer cannot slip past; bounded, and it
+   * resolves either way, leaving the checks to judge whatever is on screen.
+   */
+  const keysAnswered = (page) =>
+    page
+      .waitForResponse((r) => r.url().includes(`/workspaces/${WS}/roles/me/permissions`) && r.ok(), { timeout: 30_000 })
+      .then((r) => r.finished())
+      .catch(() => null)
+  /**
+   * Where the settings address leaves this person, and the tabs it shows them —
+   * read once THEIR KEYS HAVE ANSWERED. The route asks for them before it draws
+   * a tab or sends anybody away, so the tabs are read after that answer and
+   * after the strip is drawn (or the address has left settings), not three
+   * fixed seconds after landing: under a sweep's load the integrations holder's
+   * tabs were read before their grants had loaded
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`). Both waits are
+   * bounded, and whatever is on screen when they end is what the checks judge.
+   */
   const settingsAt = async (page) => {
+    const keys = keysAnswered(page)
     await page.goto(`${B}/app/${WS}/settings`, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3000)
+    await keys
+    await waitUntil(
+      async () =>
+        !new URL(page.url()).pathname.endsWith('/settings') ||
+        (await page.locator('[data-testid^="settings-tab-"]').count()) > 0,
+      { timeoutMs: 20_000 },
+    )
     const url = new URL(page.url())
     const tabs = await page.locator('[data-testid^="settings-tab-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid').replace('settings-tab-', '')))
     return { path: url.pathname, tab: url.searchParams.get('tab'), tabs }
@@ -199,22 +227,32 @@ try {
   const none = (side) => side.dock === 0 && side.links === 0 && side.switcher === 0 && side.rail === 0
   const every = (side) => side.dock === 1 && side.links >= 2 && side.switcher === 1 && side.rail === 1
   chk(
-    // Archived opens to every member but a guest (it lists the archived tasks
-    // each may open), so Settings is offered to a plain member too, on that tab
-    // alone (`admin-guard-admits-managers-where-the-web-says-admin`).
-    pMenu === 1 && pPalette === 1 && every(pSide) && pAt.path.endsWith('/settings') && JSON.stringify(pAt.tabs) === '["archived"]'
+    // Archived, Trash and Features open to every member but a guest (the
+    // archived tasks each may open, what they deleted, and which ClickApps are
+    // on), so Settings is offered to a plain member too, landing on Archived
+    // (`admin-guard-admits-managers-where-the-web-says-admin`,
+    // `members-have-no-trash-to-open`, `members-see-no-clickapps-list`).
+    pMenu === 1 && pPalette === 1 && every(pSide) && pAt.path.endsWith('/settings') && JSON.stringify(pAt.tabs) === '["features","archived","trash"]'
       && hMenu === 1 && hPalette === 1 && every(hSide) && hAt.path.endsWith('/settings') && hAt.tabs.includes('integrations')
       && gMenu === 0 && gPalette === 0 && none(gSide) && !gAt.path.includes('/settings'),
-    'Workspace settings is offered to every member, and a plain member lands on Archived alone (avatar menu, palette, dock, browse list, switcher, rail) — the one tab no key opens; the webhook holder is offered it everywhere too, and lands with Integrations beside it; a guest is offered it nowhere and is sent away from its address',
+    'Workspace settings is offered to every member, and a plain member lands on Archived, with only Trash and Features beside it (avatar menu, palette, dock, browse list, switcher, rail) — the tabs no key opens; the webhook holder is offered it everywhere too, and lands with Integrations beside it; a guest is offered it nowhere and is sent away from its address',
     `the plain member: the menu offers ${pMenu}, the palette ${pPalette}, the sidebar ${JSON.stringify(pSide)}, the address left them at ${pAt.path} with tabs ${JSON.stringify(pAt.tabs)}; the guest: the menu ${gMenu}, the palette ${gPalette}, the sidebar ${JSON.stringify(gSide)}, at ${gAt.path}; the webhook holder: the menu ${hMenu}, the palette ${hPalette}, the sidebar ${JSON.stringify(hSide)}, at ${hAt.path} with tabs ${JSON.stringify(hAt.tabs)}`,
   )
 
   // ══ 2. EACH GRANT, ITS OWN TAB ═══════════════════════════════════════════
   console.log('\n▶ the tabs, and the Integrations cards, each grant opens')
+  /**
+   * The Integrations cards, read once the keys they are drawn from have
+   * answered and had two frames to be drawn in. Webhooks, Slack and Export each
+   * ask a key, while an admin's Import is drawn at once — so "the first card,
+   * then 1.5 fixed seconds" could read an admin's Import alone before the rest.
+   */
   const cards = async (page) => {
+    const keys = keysAnswered(page)
     await page.goto(`${B}/app/${WS}/settings?tab=integrations`, { waitUntil: 'domcontentloaded' })
     await page.locator('[data-testid^="settings-card-"]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
-    await page.waitForTimeout(1500)
+    await keys
+    await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {})
     return page.locator('[data-testid^="settings-card-"]').evaluateAll((els) => els.map((e) => e.getAttribute('data-testid').replace('settings-card-', '')))
   }
   const sPage = await signIn(ssoer)
@@ -226,10 +264,12 @@ try {
   const aPage = await signIn(ADMIN)
   const aAt = await settingsAt(aPage)
   const aCards = await cards(aPage)
-  // Archived opens to every member but a guest, beside whatever a key opens,
-  // so "alone" is read without it (`admin-guard-admits-managers-where-the-web-says-admin`).
+  // Archived, Trash and Features open to every member but a guest, beside
+  // whatever a key opens, so "alone" is read without them
+  // (`admin-guard-admits-managers-where-the-web-says-admin`, `members-have-no-trash-to-open`,
+  // `members-see-no-clickapps-list`).
   const only = (list, want) => {
-    const own = list.filter((t) => t !== 'archived')
+    const own = list.filter((t) => !['features', 'archived', 'trash'].includes(t))
     return own.length === want.length && want.every((w) => own.includes(w))
   }
   chk(

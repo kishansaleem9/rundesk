@@ -4,6 +4,7 @@ import { spaces, spaceMembers, spaceStatuses, folders, projects, lists, workspac
 import type { Db, SpaceDefaultPermission } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { allowedBy } from '../../common/permissions/capability'
 import { isWorkspaceManager, spaceVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import {
   resolveSpaceLevels,
@@ -517,6 +518,20 @@ export class SpacesService {
         ipAddress,
       })
     }
+  }
+
+  /**
+   * What this person may do to the space from its menus, each answered by the
+   * check its own route asks: `manage` for renaming it and its settings
+   * (`PUT /spaces/:id`), `delete` for sending it to the Trash.
+   */
+  async capabilities(spaceId: string, actorId: string) {
+    if (!(await this.getSpaceRow(spaceId))) throw new NotFoundException('Space not found')
+    const [manage, remove] = await Promise.all([
+      allowedBy(this.assertManageable(spaceId, actorId, 'manage')),
+      allowedBy(this.assertManageable(spaceId, actorId, 'delete')),
+    ])
+    return { manage, delete: remove }
   }
 
   private async assertManageable(spaceId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {

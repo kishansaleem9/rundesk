@@ -1,7 +1,7 @@
 import { createFileRoute, redirect } from '@tanstack/react-router'
 import { getWorkspaceRole } from '../hooks/use-workspace-role'
 import { permissionsQuery } from '../hooks/use-permissions'
-import { SETTINGS_TABS, settingsTabsFor, type SettingsTabId } from '../hooks/use-settings-access'
+import { SETTINGS_TABS, landingTab, settingsTabsFor, type SettingsTabId } from '../hooks/use-settings-access'
 
 export const Route = createFileRoute('/app/$workspaceId/settings')({
   // §A4.5 — the workspace panel links straight at People, so the tab has to
@@ -11,7 +11,7 @@ export const Route = createFileRoute('/app/$workspaceId/settings')({
       ? (search.tab as SettingsTabId)
       : undefined,
   }),
-  beforeLoad: async ({ params, search, context }) => {
+  beforeLoad: ({ params, search, context }) => {
     const workspaceId = (params as any)?.workspaceId as string | undefined
     const ok = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
       workspaceId ?? '',
@@ -26,15 +26,30 @@ export const Route = createFileRoute('/app/$workspaceId/settings')({
     // to the start (`product-siblings/custom-role-permissions-unread-by-web`).
     const { isAdmin, role } = getWorkspaceRole(workspaceId)
     if (isAdmin) return
-    const held = await context.queryClient.ensureQueryData(permissionsQuery(workspaceId)).catch(() => null)
-    const tabs = settingsTabsFor(false, new Set(held?.permissions ?? []), role)
+    /*
+     * DECIDED FROM AN ANSWER ALREADY HELD, NEVER AWAITED HERE. This awaited the
+     * permission read and then threw its redirect: with the read slow (a
+     * sweep's load, a slow network), the load was superseded while it waited,
+     * the late redirect escaped the router as an uncaught throw, and the whole
+     * page went blank — every time, with the read held back 4.5 s
+     * (found-28-sep/settings-blank-on-a-slow-permission-read). So the route
+     * asks for the answer without waiting and decides only from a cached one;
+     * the page makes the same decision when the answer lands.
+     */
+    const held = context.queryClient.getQueryData<{ permissions: string[] }>(permissionsQuery(workspaceId).queryKey)
+    if (!held) {
+      void context.queryClient.prefetchQuery(permissionsQuery(workspaceId)).catch(() => undefined)
+      return
+    }
+    const tabs = settingsTabsFor(false, new Set(held.permissions ?? []), role)
     if (tabs.length === 0) {
       throw redirect({ to: '/app' })
     }
     // Arriving on a tab that is not theirs (or on none, which is General), they
-    // are taken to the first that is, not shown an admin's form to be refused.
+    // are taken to the one they land on (`landingTab`), not shown an admin's
+    // form to be refused.
     if (!search.tab || !tabs.includes(search.tab)) {
-      throw redirect({ to: '/app/$workspaceId/settings', params: { workspaceId: workspaceId! }, search: { tab: tabs[0] } })
+      throw redirect({ to: '/app/$workspaceId/settings', params: { workspaceId: workspaceId! }, search: { tab: landingTab(tabs) } })
     }
   },
 })

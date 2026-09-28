@@ -52,9 +52,17 @@ const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
  * THE TABS EVERY MEMBER OPENS, a guest excepted: Archived lists the archived
  * tasks each reader may open, and restores those they may change — the task's
  * own rules, as ClickUp's Show archived is
- * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). Trash
+ * lists what they deleted and restores it, as the API answers them; deleting
+ * for good and emptying it stay an admin's (ClickUp: "Members and guests can
+ * only see and restore items they have deleted";
+ * `found-28-sep/members-have-no-trash-to-open`).
  */
-const OPEN_TABS: readonly SettingsTabId[] = ['archived']
+// Features lists which ClickApps are on, read-only without
+// `workspace.clickapps.manage` (ClickUp: "Members can view, but not activate or
+// deactivate ClickApps"; `found-28-sep/members-see-no-clickapps-list`). In the
+// order a member lands on them.
+const OPEN_TABS: readonly SettingsTabId[] = ['archived', 'trash', 'features']
 
 /**
  * The tabs this person may open: every one for an admin; else those their keys
@@ -66,6 +74,16 @@ export function settingsTabsFor(isAdmin: boolean, granted: ReadonlySet<string>, 
   return SETTINGS_TABS.filter(
     (tab) => (member && OPEN_TABS.includes(tab)) || (TAB_KEYS[tab] ?? []).some((key) => granted.has(key)),
   )
+}
+
+/**
+ * The tab Settings opens on without one in its address: General where it
+ * opens, else the first tab a key opens, else the first open tab — Archived
+ * for a plain member, not whichever open tab the rail happens to draw first.
+ */
+export function landingTab(tabs: readonly SettingsTabId[]): SettingsTabId {
+  if (tabs.includes('general')) return 'general'
+  return tabs.find((tab) => !OPEN_TABS.includes(tab)) ?? OPEN_TABS.find((tab) => tabs.includes(tab)) ?? 'general'
 }
 
 /**

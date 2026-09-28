@@ -34,6 +34,7 @@ import { ContainerEditDialog, type ContainerEditValues } from '../components/con
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 import { SpaceViewsDialog } from '../components/space-views-dialog'
 import { InlineSkeleton } from '../components/loading-skeletons'
+import { WithMenuOffers } from '../components/menu-offers'
 
 type Project = {
   id: string
@@ -207,19 +208,30 @@ function SpaceHome() {
                 size="sm"
                 variant="outline"
                 className="px-2"
+                data-testid="space-page-actions"
                 aria-label={t('nav.actionsFor', { name: space?.name ?? '' })}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => setEditOpen(true)}>
+              {/* Offered by the checks its routes ask, as the sidebar's menu is. */}
+              <WithMenuOffers path={`/spaces/${spaceId}/capabilities`}>
+                {(offer) => (
+                  <>
+              {offer.manage !== false && (
+              <DropdownMenuItem disabled={offer.manage === null} data-testid="space-page-edit" onClick={() => setEditOpen(true)}>
                 <Pencil className="h-3.5 w-3.5" />
                 {t('space.editAction')}
               </DropdownMenuItem>
+              )}
+              {offer.delete !== false && (
+                <>
               <DropdownMenuSeparator />
               <DropdownMenuItem
                 className="text-destructive focus:text-destructive"
+                disabled={offer.delete === null}
+                data-testid="space-page-delete"
                 onClick={() => {
                   if (window.confirm(t('space.deleteConfirm', { name: space?.name ?? '' }))) {
                     deleteSpace.mutate()
@@ -229,6 +241,16 @@ function SpaceHome() {
                 <Trash2 className="h-3.5 w-3.5" />
                 {t('space.deleteAction')}
               </DropdownMenuItem>
+                </>
+              )}
+              {offer.manage === false && offer.delete === false && (
+                <p className="px-2 py-1.5 text-xs text-muted-foreground" data-testid="space-page-nothing">
+                  {t('space.nothingToChange')}
+                </p>
+              )}
+                  </>
+                )}
+              </WithMenuOffers>
             </DropdownMenuContent>
           </DropdownMenu>
         </div>
