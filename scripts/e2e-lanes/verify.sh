@@ -218,11 +218,18 @@ export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 export E2E_EMAIL=admin@rundesk.internal
 export E2E_PASSWORD='Admin@123!'
-OUT="/tmp/claude-0/run-$SUITE.log"
+# ONE LOG PER SUITE AND LANE. It was one per suite, so the same suite run on
+# two lanes at once (a sweep beside a break baseline, or two sessions) wrote
+# into one file, and each summary below read the other's lines.
+OUT="/tmp/claude-0/run-$SUITE-lane$LANE.log"
 timeout 900 node "test/e2e/$SUITE.mjs" --api "$PORT" --dist "$DIST" > "$OUT" 2>&1
 code=$?
 echo "== $SUITE (lane $LANE, dist $DIST) exit=$code"
-grep -E 'passed,|FAIL' "$OUT" | sed 's/\x1b\[[0-9;]*m//g' | tail -8
+# EVERY FAIL LINE. This printed the last eight lines, so a run with eight
+# failures showed seven and its count, and the first — often the cause of the
+# rest — was only in the log (found-28-sep/verify-hides-the-first-failures).
+grep -E 'passed,|FAIL' "$OUT" | sed 's/\x1b\[[0-9;]*m//g'
+[ "$code" -ne 0 ] && echo "   the whole run: $OUT"
 # THE SUITE'S STATUS, NOT THE SUMMARY'S. This ended on the grep|sed|tail above,
 # so it exited 0 for a suite that failed or crashed, and every runner that read
 # its status — sweep.sh and batch.sh among them — counted a red run as green.

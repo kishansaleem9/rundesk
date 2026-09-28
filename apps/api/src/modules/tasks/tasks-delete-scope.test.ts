@@ -5,8 +5,9 @@ import { TasksService } from './tasks.service'
 /**
  * §3.3 Delete Items — a workspace `manager` (not workspace_admin/super_admin)
  * may only archive/delete a task whose Space they belong to (space_members).
- * Admins/super_admins keep delete-any; members are already limited to their own
- * tasks by assertTaskWriteAccess, which the DELETE path runs first.
+ * Admins/super_admins keep delete-any; everybody else is held to the level on
+ * the task's location (Full edit deletes, whoever made the task) by the write
+ * rule, which the DELETE path runs first.
  *
  * The gate lives in a dedicated `assertManagerDeleteScope` so a manager's
  * non-delete writes stay unrestricted — these tests target it directly plus the

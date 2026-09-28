@@ -1,6 +1,22 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
+import { ForbiddenException } from '@nestjs/common'
 import { assertCanManageContainer } from './container-access'
+
+/**
+ * A stand-in for `CustomRolesService.hasPermission`: holds `keys`, and records
+ * every question, so a test says which key a kind asks — and whether any was.
+ */
+const holding = (...keys: string[]) => {
+  const asked: Array<{ workspaceId: string; userId: string; key: string }> = []
+  return {
+    asked,
+    hasPermission: async (workspaceId: string, userId: string, key: string) => {
+      asked.push({ workspaceId, userId, key })
+      return keys.includes(key)
+    },
+  }
+}
 
 const dbWithRole = (rows: any[]) => ({
   select: () => ({
@@ -100,24 +116,28 @@ const gate = (
 }
 
 describe('assertCanManageContainer — delete scoping (plan §3: Manager own-space)', () => {
-  it('lets a workspace admin delete a space', async () => {
+  it('lets a workspace admin delete a space — an admin holds space.delete by default', async () => {
+    const roles = holding('space.delete', 'project.delete', 'list.delete')
     await assertCanManageContainer(
       dbQueue([...gate('edit', 'workspace_admin'), [{ role: 'workspace_admin' }]]),
       {
         workspaceId: 'w1', createdById: 'other', actorId: 'admin', kind: 'space',
-        action: 'delete', adminOnlyDelete: true, spaceId: 's1',
+        action: 'delete', spaceId: 's1', roles,
       },
     )
+    assert.deepEqual(roles.asked.map((q) => q.key), ['space.delete'])
   })
 
-  it('lets the creator delete their own space (short-circuits after the space gate)', async () => {
+  it('lets the creator delete their own space (short-circuits after the space gate) — and asks no key', async () => {
     // The space's default is Full edit — every space's, unless told otherwise —
     // which is what deleting asks, so the gate passes the decision back and the
     // creator branch takes it (`found-25-sep/full-edit-enforced-nowhere`).
+    const roles = holding()
     await assertCanManageContainer(dbQueue([...gate('admin', 'member')]), {
       workspaceId: 'w1', createdById: 'owner', actorId: 'owner', kind: 'space',
-      action: 'delete', adminOnlyDelete: true, spaceId: 's1',
+      action: 'delete', spaceId: 's1', roles,
     })
+    assert.equal(roles.asked.length, 0, 'the maker is asked no key')
   })
 
   it('refuses the creator a delete where the space is Edit — Edit changes and does not delete', async () => {
@@ -137,16 +157,17 @@ describe('assertCanManageContainer — delete scoping (plan §3: Manager own-spa
     })
   })
 
-  it('forbids a manager from deleting an entire space (space.delete is admin-only)', async () => {
+  it('forbids a manager from deleting a space somebody else made — a manager holds no space.delete by default', async () => {
+    // A manager's defaults: project.delete and list.delete, and not space.delete.
     await assert.rejects(
       () => assertCanManageContainer(
-        dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }]]),
+        dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }], [{ userId: 'mgr' }]]),
         {
           workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'space',
-          action: 'delete', adminOnlyDelete: true, spaceId: 's1',
+          action: 'delete', spaceId: 's1', roles: holding('project.delete', 'list.delete'),
         },
       ),
-      /Only the creator or a workspace admin can delete this space/,
+      /Only the creator, or someone granted "Delete spaces", can delete this space/,
     )
   })
 
@@ -156,7 +177,7 @@ describe('assertCanManageContainer — delete scoping (plan §3: Manager own-spa
       dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }], [{ userId: 'mgr' }]]),
       {
         workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'project',
-        action: 'delete', spaceId: 's1',
+        action: 'delete', spaceId: 's1', roles: holding('project.delete', 'list.delete'),
       },
     )
   })
@@ -168,21 +189,137 @@ describe('assertCanManageContainer — delete scoping (plan §3: Manager own-spa
         dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }], []]),
         {
           workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'project',
-          action: 'delete', spaceId: 's1',
+          action: 'delete', spaceId: 's1', roles: holding('project.delete', 'list.delete'),
         },
       ),
       /Managers can only delete projects in their own spaces/,
     )
   })
 
+  it('holds a manager granted space.delete to their own spaces too — their level is their role', async () => {
+    await assert.rejects(
+      () => assertCanManageContainer(
+        dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }], []]),
+        {
+          workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'space',
+          action: 'delete', spaceId: 's1', roles: holding('space.delete', 'project.delete', 'list.delete'),
+        },
+      ),
+      /Managers can only delete spaces in their own spaces/,
+    )
+  })
+
   it('still lets a manager EDIT (manage) any container without space membership — no regression', async () => {
-    // Only the workspaceMembers lookup runs; edits never require space membership.
+    // Only the workspaceMembers lookup runs; edits never require space membership, and ask no key.
+    const roles = holding()
     await assertCanManageContainer(
       dbQueue([...gate('edit', 'manager'), [{ role: 'manager' }]]),
       {
         workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'project',
-        action: 'manage', spaceId: 's1',
+        action: 'manage', spaceId: 's1', roles,
       },
+    )
+    assert.equal(roles.asked.length, 0, 'changing a container asks no delete key')
+  })
+})
+
+/**
+ * THE DELETION KEYS (`role-editor-offers-unenforced-permissions`): deleting a
+ * space, a project or a list somebody else made asks `space.delete`,
+ * `project.delete` or `list.delete` — ANDed with Full edit there, which is
+ * asked first. `test/e2e/container-delete-keys.mjs` proves the same over HTTP.
+ */
+describe('assertCanManageContainer — the deletion keys', () => {
+  it('lets a member granted list.delete delete a list somebody else made, where they hold Full edit', async () => {
+    const roles = holding('list.delete')
+    await assertCanManageContainer(dbQueue([...gate('admin', 'member'), [{ role: 'member' }]]), {
+      workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind: 'list',
+      action: 'delete', spaceId: 's1', roles,
+    })
+    assert.deepEqual(roles.asked, [{ workspaceId: 'w1', userId: 'u9', key: 'list.delete' }])
+  })
+
+  it('refuses a guest a space even with space.delete and Full edit — ClickUp: guests never delete a Space', async () => {
+    const roles = holding('space.delete')
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('admin', 'guest', { share: [{ level: 'admin' }] }), [{ role: 'guest' }]]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'g1', kind: 'space',
+        action: 'delete', spaceId: 's1', roles,
+      }),
+      /A guest cannot delete a space/,
+    )
+    assert.deepEqual(roles.asked, [], 'no key is asked: the refusal is the role\'s')
+  })
+
+  it('refuses a member without the key, and says which permission it takes', async () => {
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('admin', 'member'), [{ role: 'member' }]]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind: 'list',
+        action: 'delete', spaceId: 's1', roles: holding(),
+      }),
+      /Only the creator, or someone granted "Delete lists", can delete this list/,
+    )
+  })
+
+  it('asks each kind its own key: a member holding project.delete alone deletes a project, and no list or space', async () => {
+    const asked: Record<string, string[]> = {}
+    const verdicts: Record<string, boolean> = {}
+    for (const kind of ['space', 'project', 'list']) {
+      const roles = holding('project.delete')
+      verdicts[kind] = await assertCanManageContainer(dbQueue([...gate('admin', 'member'), [{ role: 'member' }]]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind,
+        action: 'delete', spaceId: 's1', roles,
+      }).then(() => true, () => false)
+      asked[kind] = roles.asked.map((q) => q.key)
+    }
+    assert.deepEqual(asked, { space: ['space.delete'], project: ['project.delete'], list: ['list.delete'] })
+    assert.deepEqual(verdicts, { space: false, project: true, list: false })
+  })
+
+  it('asks the level first: a member granted list.delete where the space is Edit is refused by it, and asked no key', async () => {
+    const roles = holding('list.delete')
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('edit', 'member')]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind: 'list',
+        action: 'delete', spaceId: 's1', roles,
+      }),
+      /default permission is "Edit", which does not allow deleting this list/,
+    )
+    assert.equal(roles.asked.length, 0, 'a key never reaches past the level')
+  })
+
+  it('and where it is View only, a member granted space.delete deletes no space', async () => {
+    const roles = holding('space.delete')
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('view', 'member')]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind: 'space',
+        action: 'delete', spaceId: 's1', roles,
+      }),
+      /default permission is "View only", which does not allow deleting this space/,
+    )
+    assert.equal(roles.asked.length, 0)
+  })
+
+  it('a folder has no key: a manager in their own space deletes it and a member does not, as before, with no roles given', async () => {
+    await assertCanManageContainer(
+      dbQueue([...gate('admin', 'manager'), [{ role: 'manager' }], [{ userId: 'mgr' }]]),
+      { workspaceId: 'w1', createdById: 'other', actorId: 'mgr', kind: 'folder', action: 'delete', spaceId: 's1' },
+    )
+    await assert.rejects(
+      () => assertCanManageContainer(
+        dbQueue([...gate('admin', 'member'), [{ role: 'member' }]]),
+        { workspaceId: 'w1', createdById: 'other', actorId: 'u9', kind: 'folder', action: 'delete', spaceId: 's1' },
+      ),
+      /Only the creator or a workspace admin can modify this folder/,
+    )
+  })
+
+  it('a keyed delete with no `roles` is a programming error, not a refusal that reads as a rule', async () => {
+    await assert.rejects(
+      () => assertCanManageContainer(dbQueue([...gate('admin', 'member'), [{ role: 'member' }]]), {
+        workspaceId: 'w1', createdById: 'someone-else', actorId: 'u9', kind: 'list', action: 'delete', spaceId: 's1',
+      }),
+      (err: unknown) => !(err instanceof ForbiddenException) && /pass `roles`/.test(String((err as Error)?.message)),
     )
   })
 })

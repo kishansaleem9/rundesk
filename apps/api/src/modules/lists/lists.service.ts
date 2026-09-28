@@ -12,6 +12,7 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 import { resolveIsManager, listVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { DEFAULT_LIST_STATUSES, seedListStatuses } from './list-statuses.defaults'
 import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { guestListFilter } from '../../common/permissions/guest-reach'
@@ -28,6 +29,7 @@ export class ListsService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private roles: CustomRolesService,
   ) {}
 
   /**
@@ -443,7 +445,8 @@ export class ListsService {
       actorId,
       kind: 'list',
       action,
-      // Managers may delete a list only within a space they belong to.
+      // Deleting a list somebody else made asks `list.delete` (a manager's too, in a space they belong to).
+      roles: this.roles,
       spaceId: row.spaceId,
       // A grant on the list, its project or its folder decides before the space.
       within: [

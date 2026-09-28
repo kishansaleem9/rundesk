@@ -214,7 +214,7 @@ describe('CustomRolesService.resolveForMember — permission union', () => {
     const svc = new CustomRolesService(db, buildSecurity())
     const resolution = await svc.resolveForMember('member-2', 'member')
 
-    // Member legacy grants `space.create`, `doc.publish`, `report.export`.
+    // Member legacy grants `space.create`, `report.export`, `report.view.basic`.
     // Custom role adds `sso.manage` + `workspace.audit.view`. All unioned.
     const set = new Set(resolution.permissions)
     assert.ok(set.has('space.create'))

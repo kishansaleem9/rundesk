@@ -7,9 +7,11 @@ import { ScopedStatusesService } from './scoped-statuses.service'
 import { StatusShapeGuard } from './status-shape.guard'
 import { SpaceStatusesController, ProjectStatusesController } from './scoped-statuses.controller'
 import { SecurityModule } from '../security/security.module'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
 @Module({
-  imports: [SecurityModule],
+  // CustomRolesModule: deleting a list somebody else made asks `list.delete`.
+  imports: [SecurityModule, CustomRolesModule],
   providers: [ListsService, ListStatusesService, ScopedStatusesService, StatusShapeGuard],
   controllers: [
     ListsController,

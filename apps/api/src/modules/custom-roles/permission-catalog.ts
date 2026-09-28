@@ -39,9 +39,6 @@ export type Permission =
   | 'space.delete'
   | 'project.delete'
   | 'list.delete'
-  | 'task.delete.any'
-  | 'doc.publish'
-  | 'doc.delete.any'
   // Automation
   | 'automation.manage'
   | 'webhook.manage'
@@ -93,7 +90,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   { key: 'members.role.change',   label: 'Change member roles', description: 'Promote / demote members (legacy and custom roles)', category: 'Members' },
   { key: 'roles.manage',          label: 'Manage custom roles', description: 'Create / edit / delete custom roles and assign them', category: 'Members' },
   // A member's capacity and who they report to: a manager's for the people they manage, within their rank.
-  { key: 'members.profile.manage', label: 'Set capacity and reporting lines', description: 'Change a member\'s weekly capacity and who they report to', category: 'Members' },
+  { key: 'members.profile.manage', label: 'Set member profiles', description: 'Change a member\'s job title, weekly capacity and who they report to', category: 'Members' },
   // ClickUp: owners and admins create and edit User Groups (Teams); a custom role can grant it.
   { key: 'groups.manage',          label: 'Manage user groups',   description: 'Create, rename and delete groups, and set who is in them', category: 'Members' },
   // Integrations
@@ -105,12 +102,14 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   // Content
   { key: 'space.create',     label: 'Create spaces',             description: 'Spin up new spaces in this workspace', category: 'Content' },
   { key: 'project.create',   label: 'Create projects',           description: 'Create projects inside a space', category: 'Content' },
-  { key: 'space.delete',     label: 'Delete spaces',             description: 'Permanently delete a space and its contents', category: 'Content' },
-  { key: 'project.delete',   label: 'Delete projects',           description: 'Permanently delete projects', category: 'Content' },
-  { key: 'list.delete',      label: 'Delete lists',              description: 'Permanently delete lists', category: 'Content' },
-  { key: 'task.delete.any',  label: 'Delete any task',           description: 'Delete tasks created by anyone (not just your own)', category: 'Content' },
-  { key: 'doc.publish',      label: 'Publish docs externally',   description: 'Toggle public read-only sharing on docs', category: 'Content' },
-  { key: 'doc.delete.any',   label: 'Delete any doc',            description: 'Delete docs created by anyone', category: 'Content' },
+  // Deleting a container somebody else made, ANDed with Full edit there (`assertCanManageContainer`);
+  // its maker deletes it with Full edit alone. ClickUp: deleting follows the location's level.
+  // Deleting sends to the Trash. A task and a doc have no key: their level decides (Full edit),
+  // and publishing a doc is Edit on it, never a guest's — so `task.delete.any`, `doc.delete.any`
+  // and `doc.publish`, which nothing asked, left the catalog (`role-editor-offers-unenforced-permissions`).
+  { key: 'space.delete',     label: 'Delete spaces',             description: 'Move a space someone else made, with everything in it, to the Trash, where you have Full edit', category: 'Content' },
+  { key: 'project.delete',   label: 'Delete projects',           description: 'Move a project someone else made to the Trash, where you have Full edit', category: 'Content' },
+  { key: 'list.delete',      label: 'Delete lists',              description: 'Move a list someone else made to the Trash, where you have Full edit', category: 'Content' },
   // Automation
   { key: 'automation.manage', label: 'Manage automations', description: 'Create / edit / disable workspace automations', category: 'Automation' },
   { key: 'webhook.manage',    label: 'Manage webhooks',    description: 'Create / rotate outbound webhook endpoints', category: 'Automation' },
@@ -140,7 +139,7 @@ export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = WORKSPACE_ROLE_RAN
 // Permissions each lower tier adds. workspace_admin (and super_admin) inherit
 // everything else, so a newly-added catalog permission defaults to admin-only
 // until it is explicitly granted to a lower tier here.
-const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export', 'report.view.basic']
+const MEMBER_DELTA: readonly Permission[] = ['space.create', 'report.export', 'report.view.basic']
 // Managers manage their projects, their people's capacity and reporting lines,
 // clients, and time — but NOT workspace-level infrastructure (user groups,
 // ClickApps, the work schedule and announcements are admins'). `integrations.manage`, `webhook.manage`, and
@@ -151,7 +150,6 @@ const MANAGER_DELTA: readonly Permission[] = [
   'project.create',
   'project.delete',
   'list.delete',
-  'task.delete.any',
   'template.manage',
   'time.approval.manage',
   'members.profile.manage',

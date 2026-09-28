@@ -11,6 +11,7 @@ import { spaceMembers, projectMembers, spaces, projects, lists, workspaceMembers
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { assertCanManageContainer } from '../../common/permissions/container-access'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import type { WithinStep } from '../../common/permissions/space-default-permission'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { isUuid } from '../../common/validation/uuid'
@@ -24,7 +25,10 @@ function assertRole(role: string): asserts role is ContainerRole {
 
 @Injectable()
 export class ContainerMembersService {
-  constructor(@Inject(DB_TOKEN) private db: Db) {}
+  constructor(
+    @Inject(DB_TOKEN) private db: Db,
+    private roles: CustomRolesService,
+  ) {}
 
   private async isWorkspaceManager(workspaceId: string, userId: string) {
     const [wm] = await this.db
@@ -155,13 +159,15 @@ export class ContainerMembersService {
    * accepted (`found-24-sep/project-page-offers-guests-its-managers-buttons`):
    *
    *   - `edit` and `archive`: the project's own manage rule (PUT and DELETE
-   *     `/projects/:id`, `assertCanManageContainer`);
+   *     `/projects/:id`, `assertCanManageContainer`), deleting asking
+   *     `project.delete` of a project somebody else made, as the route does;
    *   - `members`: who may add, re-role or remove its members, and change its
    *     visibility (`assertCanManageProject`);
    *   - `statuses`: who may shape its statuses (`assertMayShapeStatuses`);
    *   - `suggest`: anybody but a guest (the AI routes refuse a guest);
    *   - `lists`: rename and delete for each list the page names (`?lists=`),
-   *     by the list's own manage rule, whose creator is part of the answer.
+   *     by the list's own manage rule, whose creator is part of the answer —
+   *     and `list.delete`, for deleting one somebody else made.
    *
    * A refusal is an answer (false); anything else is not, and is thrown.
    */
@@ -187,6 +193,8 @@ export class ContainerMembersService {
       assertCanManageContainer(this.db, {
         workspaceId: row.workspaceId, createdById, actorId, kind, action, spaceId: row.spaceId,
         within: listId ? [{ type: 'list', id: listId }, ...above] : above,
+        // The keys the DELETE routes ask of what somebody else made.
+        roles: this.roles,
       })
     const [membership] = await this.db
       .select({ role: workspaceMembers.role })

@@ -10,6 +10,7 @@ import { WebhooksService } from '../webhooks/webhooks.service'
 import { SlackService } from '../integrations/slack/slack.service'
 import { PlansService } from '../plans/plans.service'
 import { SecurityService } from '../security/security.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 
 @Injectable()
 export class ProjectsService {
@@ -19,6 +20,7 @@ export class ProjectsService {
     private slack: SlackService,
     private plans: PlansService,
     private security: SecurityService,
+    private roles: CustomRolesService,
   ) {}
 
   /**
@@ -365,7 +367,8 @@ export class ProjectsService {
       actorId,
       kind: 'project',
       action,
-      // Managers may delete a project only within a space they belong to.
+      // Deleting a project somebody else made asks `project.delete` (a manager's too, in a space they belong to).
+      roles: this.roles,
       spaceId: row.spaceId,
       // A grant on the project, or its folder, decides before the space.
       within: [{ type: 'project', id: projectId }, ...(row.folderId ? [{ type: 'folder' as const, id: row.folderId }] : [])],

@@ -31,6 +31,7 @@
  */
 
 import { usePermissions } from '../hooks/use-permissions'
+import { useWorkspaceRole, withinRank } from '../hooks/use-workspace-role'
 import { useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -120,11 +121,20 @@ export function TeamsPage() {
   // it ("Only Workspace owners and admins can create a Team"). The base role
   // offered it to managers, whom the API refuses
   // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
-  const createTeamKey = usePermissions(workspaceId).can('groups.manage')
+  const perms = usePermissions(workspaceId)
+  const createTeamKey = perms.can('groups.manage')
   const mayCreateTeam = createTeamKey === true
   // The reason once the keys are read, so a holder sees no refusal while they load.
   const createTeamRefusal = createTeamKey === false ? t('teams.createTeamNeedsKey') : undefined
   const me = useAuthStore((s) => s.user)
+  // Somebody else's job title takes `members.profile.manage` — an admin's and a
+  // manager's by default — and is never set above your own role, as the API
+  // answers (found-28-sep/job-title-rule-and-message-disagree). ClickUp: you set
+  // your own title, and owners and admins set everyone's.
+  const mayProfile = perms.can('members.profile.manage') === true
+  const { role: myRole } = useWorkspaceRole(workspaceId)
+  const mayRetitle = (userId: string, role?: string | null) =>
+    (!!me && me.id === userId) || (mayProfile && !!role && withinRank(myRole, role))
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabId>('teams')
   /* §V2-12 `20:57`/`21:02` — which card the explainer carousel is showing. */
@@ -135,6 +145,7 @@ export function TeamsPage() {
   const [createError, setCreateError] = useState<string | null>(null)
   const [editingTitleFor, setEditingTitleFor] = useState<string | null>(null)
   const [titleDraft, setTitleDraft] = useState('')
+  const [titleError, setTitleError] = useState<string | null>(null)
 
   const groupsQuery = useQuery({
     enabled: !!workspaceId,
@@ -195,7 +206,17 @@ export function TeamsPage() {
       ),
     onSuccess: async () => {
       setEditingTitleFor(null)
+      setTitleError(null)
       await queryClient.invalidateQueries({ queryKey: ['teams-work-preview', workspaceId] })
+    },
+    // Said on the card, with the draft kept: a save that failed closed nothing
+    // and said nothing, so the old title read as the new one.
+    onError: (err: unknown) => {
+      setTitleError(
+        err instanceof ApiError && err.message
+          ? t('teams.jobTitleSaveFailed', { reason: err.message })
+          : t('teams.jobTitleNotSaved'),
+      )
     },
   })
 
@@ -495,6 +516,7 @@ export function TeamsPage() {
                 {shownMembers.map((m) => {
                   const preview = previewByUser.get(m.userId)
                   const isMe = !!me && me.id === m.userId
+                  const mayEdit = mayRetitle(m.userId, m.role)
                   const editing = editingTitleFor === m.userId
                   return (
                     <Card
@@ -512,32 +534,46 @@ export function TeamsPage() {
                             {m.displayName || m.email}
                           </div>
                           {editing ? (
-                            <div className="mt-1 flex items-center gap-1.5">
-                              <Input
-                                data-testid="teams-person-title-input"
-                                value={titleDraft}
-                                onChange={(e) => setTitleDraft(e.target.value)}
-                                placeholder={t('teams.jobTitlePlaceholder')}
-                                className="h-7 text-xs"
-                              />
-                              <Button
-                                size="sm"
-                                data-testid="teams-person-title-save"
-                                disabled={saveJobTitle.isPending}
-                                onClick={() =>
-                                  saveJobTitle.mutate({ userId: m.userId, jobTitle: titleDraft })
-                                }
-                              >
-                                {t('common.save')}
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                data-testid="teams-person-title-cancel"
-                                onClick={() => setEditingTitleFor(null)}
-                              >
-                                {t('common.cancel')}
-                              </Button>
+                            <div className="mt-1">
+                              <div className="flex items-center gap-1.5">
+                                <Input
+                                  data-testid="teams-person-title-input"
+                                  value={titleDraft}
+                                  onChange={(e) => setTitleDraft(e.target.value)}
+                                  placeholder={t('teams.jobTitlePlaceholder')}
+                                  className="h-7 text-xs"
+                                />
+                                <Button
+                                  size="sm"
+                                  data-testid="teams-person-title-save"
+                                  disabled={saveJobTitle.isPending}
+                                  onClick={() =>
+                                    saveJobTitle.mutate({ userId: m.userId, jobTitle: titleDraft })
+                                  }
+                                >
+                                  {t('common.save')}
+                                </Button>
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  data-testid="teams-person-title-cancel"
+                                  onClick={() => {
+                                    setEditingTitleFor(null)
+                                    setTitleError(null)
+                                  }}
+                                >
+                                  {t('common.cancel')}
+                                </Button>
+                              </div>
+                              {titleError && (
+                                <p
+                                  role="alert"
+                                  data-testid="teams-person-title-error"
+                                  className="mt-1 text-xs text-destructive"
+                                >
+                                  {titleError}
+                                </p>
+                              )}
                             </div>
                           ) : (
                             <div className="flex items-center gap-1.5">
@@ -552,15 +588,16 @@ export function TeamsPage() {
                               >
                                 {preview?.jobTitle || t('teams.noJobTitle')}
                               </span>
-                              {isMe && (
+                              {mayEdit && (
                                 <button
                                   type="button"
                                   data-testid="teams-person-title-edit"
-                                  aria-label={t('teams.editJobTitle')}
-                                  title={t('teams.editJobTitle')}
+                                  aria-label={isMe ? t('teams.editJobTitle') : t('teams.editJobTitleOf', { name: m.displayName || m.email })}
+                                  title={isMe ? t('teams.editJobTitle') : t('teams.editJobTitleOf', { name: m.displayName || m.email })}
                                   className="shrink-0 text-muted-foreground hover:text-foreground"
                                   onClick={() => {
                                     setTitleDraft(preview?.jobTitle ?? '')
+                                    setTitleError(null)
                                     setEditingTitleFor(m.userId)
                                   }}
                                 >

@@ -18,7 +18,9 @@
  * A comment does not ask, and neither does a unit test. A gate that read
  * nothing answers ok as surely as one that read everything, so an empty
  * catalog, or a source tree with no TypeScript, is a failure.
- * `check-permission-keys-asked-cases.mjs` plants trees to fool it.
+ * `check-permission-keys-asked-cases.mjs` plants trees to fool it, each with
+ * exemptions of its own (`PERMISSION_KEYS_EXEMPT`, below), since the real list
+ * is empty.
  *
  *   node scripts/check-permission-keys-asked.mjs [--list]
  *
@@ -34,19 +36,25 @@ const API = join(ROOT, 'apps', 'api', 'src')
 const LEDGER = join(ROOT, 'docs', 'open-work.md')
 
 /**
- * Offered, and asked by nothing yet: each is owned by an open ledger item,
- * which says why. The deletion keys and `doc.publish` meet the location levels
- * (Full edit already lets its holder delete there), and the two models are to
- * be reconciled before any of them gates anything.
+ * Offered, and asked by nothing yet: each would be owned by an open ledger
+ * item, which says why. None is. The last six were the deletion keys and
+ * `doc.publish`: `space.delete`, `project.delete` and `list.delete` are asked
+ * for deleting what somebody else made, after Full edit, and the other three
+ * left the catalog (`role-editor-offers-unenforced-permissions`).
  */
-const EXEMPT = {
-  'space.delete': 'role-editor-offers-unenforced-permissions',
-  'project.delete': 'role-editor-offers-unenforced-permissions',
-  'list.delete': 'role-editor-offers-unenforced-permissions',
-  'task.delete.any': 'role-editor-offers-unenforced-permissions',
-  'doc.delete.any': 'role-editor-offers-unenforced-permissions',
-  'doc.publish': 'role-editor-offers-unenforced-permissions',
-}
+const EXEMPT_HERE = {}
+
+/**
+ * A PLANTED TREE BRINGS ITS OWN: `PERMISSION_KEYS_EXEMPT`, as JSON
+ * (`{ "key": "item-slug" }`), replaces the list above when
+ * `PERMISSION_KEYS_ROOT` points the gate at a planted tree, so the cases can
+ * show the exemption rules biting while the real list is empty. Without a
+ * planted root it is ignored, so a variable left in a shell cannot quieten the
+ * gate over the repository.
+ */
+const EXEMPT = process.env.PERMISSION_KEYS_ROOT && process.env.PERMISSION_KEYS_EXEMPT !== undefined
+  ? JSON.parse(process.env.PERMISSION_KEYS_EXEMPT)
+  : EXEMPT_HERE
 
 /** The calls that ask a key: the route guard's decorator, and the service's two questions. */
 const ASKERS = ['RequirePermissions', 'hasPermission', 'holdersOf']
@@ -155,5 +163,5 @@ if (problems.length > 0) {
   process.exitCode = 1
 } else {
   const exempt = Object.keys(EXEMPT).length
-  console.log(`\x1b[32mok\x1b[0m ${catalog.size} key(s) offered: ${catalog.size - exempt} asked by a route or service, ${exempt} exempt, each owned by an open item (${read} file(s) read)`)
+  console.log(`\x1b[32mok\x1b[0m ${catalog.size} key(s) offered: ${catalog.size - exempt} asked by a route or service, ${exempt ? `${exempt} exempt, each owned by an open item` : 'none exempt'} (${read} file(s) read)`)
 }

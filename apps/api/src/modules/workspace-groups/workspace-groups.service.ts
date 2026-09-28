@@ -1,4 +1,4 @@
-import { isManagerRole } from '../../common/permissions/workspace-roles'
+import { roleRank } from '../../common/permissions/workspace-roles'
 import {
   Injectable,
   Inject,
@@ -25,6 +25,8 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { containerVisibilityFilter } from '../../common/permissions/container-access.guard-helper'
 import { listVisibilityFilter, resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { SecurityService } from '../security/security.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
+import { likeContaining } from '../../common/sql/like'
 
 export type GroupCreateInput = {
   name: string
@@ -66,11 +68,12 @@ export class WorkspaceGroupsService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private security: SecurityService,
+    private roles: CustomRolesService,
   ) {}
 
   async list(workspaceId: string, opts: { search?: string } = {}) {
     const where = opts.search
-      ? and(eq(workspaceGroups.workspaceId, workspaceId), ilike(workspaceGroups.name, `%${opts.search}%`))
+      ? and(eq(workspaceGroups.workspaceId, workspaceId), ilike(workspaceGroups.name, likeContaining(opts.search)))
       : eq(workspaceGroups.workspaceId, workspaceId)
     const groups = await this.db.select().from(workspaceGroups).where(where).orderBy(workspaceGroups.name)
     if (groups.length === 0) return []
@@ -256,18 +259,23 @@ export class WorkspaceGroupsService {
 
   async removeMember(workspaceId: string, groupId: string, actorId: string | null, userId: string) {
     const existing = await this.get(workspaceId, groupId)
-    await this.db
+    const removed = await this.db
       .delete(workspaceGroupMembers)
       .where(and(eq(workspaceGroupMembers.groupId, groupId), eq(workspaceGroupMembers.userId, userId)))
-    await this.security.logAuditEvent({
-      workspaceId,
-      actorId: actorId ?? undefined,
-      action: 'group.member_removed',
-      resourceType: 'workspace_group',
-      resourceId: groupId,
-      description: `Removed member from "${existing.name}"`,
-      metadata: { userId },
-    })
+      .returning({ userId: workspaceGroupMembers.userId })
+    // The audit log records what happened: removing somebody who was not in the
+    // team changes nothing, and wrote a "removed" line all the same.
+    if (removed.length > 0) {
+      await this.security.logAuditEvent({
+        workspaceId,
+        actorId: actorId ?? undefined,
+        action: 'group.member_removed',
+        resourceType: 'workspace_group',
+        resourceId: groupId,
+        description: `Removed member from "${existing.name}"`,
+        metadata: { userId },
+      })
+    }
     return this.get(workspaceId, groupId)
   }
 
@@ -432,9 +440,13 @@ export class WorkspaceGroupsService {
   /**
    * The job title under the name on a person card.
    *
-   * Yours, or anybody's if you administer the workspace. Not a free-for-all:
-   * a title is what the org says you do, and letting any colleague rewrite it
-   * makes the card unusable as an answer to "who is this".
+   * Yours, or somebody else's when you hold `members.profile.manage` — the
+   * permission capacity and reports-to ask, an admin's and a manager's by
+   * default — and they are not above your own role. ClickUp ("Intro to
+   * profiles"): you set your own title, and owners and admins set everyone's.
+   * This asked the manager role and said only an admin could, refused a
+   * member granted the permission, and let a manager retitle an admin
+   * (found-28-sep/job-title-rule-and-message-disagree).
    *
    * Upsert on (workspace, user) so a second save edits rather than duplicates;
    * clearing it back to NULL is a legitimate answer, distinct from never having
@@ -442,22 +454,30 @@ export class WorkspaceGroupsService {
    * simply says nothing.
    */
   async setJobTitle(workspaceId: string, actorId: string, userId: string, rawTitle: string | null) {
-    const [actor] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
-      .limit(1)
-    const isAdmin = !!actor && isManagerRole(actor.role)
-    if (actorId !== userId && !isAdmin) {
-      throw new ForbiddenException('Only a workspace admin may change somebody else’s job title')
+    const someoneElse = actorId !== userId
+    if (someoneElse && !(await this.roles.hasPermission(workspaceId, actorId, 'members.profile.manage'))) {
+      throw new ForbiddenException('Changing somebody else’s job title takes the Set member profiles permission')
     }
 
     const [target] = await this.db
-      .select({ userId: workspaceMembers.userId })
+      .select({ userId: workspaceMembers.userId, role: workspaceMembers.role })
       .from(workspaceMembers)
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
       .limit(1)
     if (!target) throw new NotFoundException('That person is not a member of this workspace')
+
+    if (someoneElse) {
+      const [actor] = await this.db
+        .select({ role: workspaceMembers.role })
+        .from(workspaceMembers)
+        .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actorId)))
+        .limit(1)
+      // As capacity and reports-to: nobody sets the profile of somebody above
+      // their own role, so a manager does not retitle an admin.
+      if (roleRank(target.role) > roleRank(actor?.role)) {
+        throw new ForbiddenException(`You cannot set the job title of somebody who is ${target.role}: it is above your own role`)
+      }
+    }
 
     const trimmed = typeof rawTitle === 'string' ? rawTitle.trim().slice(0, 120) : ''
     const jobTitle = trimmed.length > 0 ? trimmed : null

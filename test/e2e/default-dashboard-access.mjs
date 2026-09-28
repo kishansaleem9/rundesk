@@ -121,7 +121,11 @@ try {
     const now = await current()
     if (now.length === 1 && now[0] === admin.preset) return
     const r = await setAs(admin, admin.preset)
-    if (r.status >= 300) throw new Error(`could not put the admin's dashboard back as the default: ${said(r)}`)
+    if (r.status < 300) return
+    // The route under test may be what is broken (a patch that refuses the
+    // admin, as dda-1 does): put it back by SQL, so that refusal reddens its
+    // own check and does not end the run before the others are measured.
+    await sql`update dashboard_presets set is_workspace_default = (id = ${admin.preset}) where workspace_id = ${WS}`
   }
 
   // ══ 1. THE ADMIN ═════════════════════════════════════════════════════════

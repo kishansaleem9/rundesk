@@ -1156,7 +1156,7 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 - Patches `fcr-1..4`; `fcr-4` is a unit claim.
 - In CI.
 
-*After:* 4/4 on the rebuilt lanes (sweep 18079). `folder-create`, `folder-dialog` and `private-folder-reach` pass in the regression; `folder-dialog`'s one miss under load passed alone. The run of `fcr-1..3` follows the commit.
+*After:* 4/4 on the rebuilt lanes (sweep 18079). `folder-create`, `folder-dialog` and `private-folder-reach` pass in the regression; `folder-dialog`'s one miss under load passed alone. `fcr-1..3` each reddened the check it names (lane 1, at `72a8208`, baseline 4/4).
 
 ### `found-28-sep/doc-archive-and-delete-at-two-levels` — open, permissions, small (found by the deletion research)
 
@@ -1186,7 +1186,7 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 
 `trash-rules`, 4 checks:
 - Before: 1 of 4. After: 4/4 on lane 7.
-- Patches `trr-1..3`.
+- Patches `trr-1..3`: each reddened the check it names (lane 4, at `5086fe0`, baseline 4/4).
 - Regression on lane 7, the 8 suites that send to, read or empty the Trash: 8/8.
 - In CI (218).
 
@@ -1229,7 +1229,7 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 `client-delete-keeps-invoices`, 3 checks:
 - Before: 1 of 3. After: 3/3 on lane 7.
-- Patches `cki-1..2`.
+- Patches `cki-1..2`: each reddened the check it names (lane 4, at `5086fe0`, baseline 3/3).
 - Regression: `client-access` and `oauth-start-readiness` 2/2.
 - In CI (219).
 
@@ -1258,7 +1258,7 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 - `project-folder-home`, 4 checks: before 1 of 4 on lane 5, after 4/4.
 - Unit tests: `projects.service.test.ts` 11/11 (4 new).
-- Patches `pfh-1..3`, and `pfh-4`, a unit claim.
+- Patches `pfh-1..3`, and `pfh-4`, a unit claim. `pfh-1..3` each reddened the check it names (lane 1, at `5086fe0`, baseline 4/4).
 - Regression on lane 5, the 9 suites that make, move or update projects and folders: 9/9.
 - In CI (217).
 
@@ -1272,7 +1272,7 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 *Closed, 28 September.* The clients agent fixed the web in 4ba95d3: `ProjectTimeSettingsSection` locks the switch unless `caps.edit` is true, as it does the client picker. I opened this item from the research notes without seeing that. Nothing checked it, so `client-access` gained a seventh check: the switch is live for the manager, who may change the project, and disabled for a plain member.
 - `client-access` 7/7 on lane 7.
-- Patch `bsw-1` makes the lock ignore the edit rule.
+- Patch `bsw-1` makes the lock ignore the edit rule, and reddened the new check (lane 4, at `5086fe0`, baseline 7/7).
 
 ### `found-28-sep/announcement-views-counted-per-click` — open, small (found by the announcement research)
 
@@ -1330,13 +1330,57 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 *To close:* Offer Unarchive where the row is shown, by `canRestore`, and batch the rule.
 
-### `found-28-sep/job-title-rule-and-message-disagree` — open, permissions, small (found by the user-group research)
+### `found-28-sep/job-title-rule-and-message-disagree` — **closed** (permissions, small; found by the user-group research)
 
 **Changing a colleague's job title asks the manager role and says it is an admin's**
 
 *Evidence:* `setJobTitle` (`workspace-groups.service.ts` near :444-453) asks `isManagerRole`; its message says "Only a workspace admin may change somebody else's job title"; the Teams page offers the edit only to the person themselves. Also: `?search=` goes into `ilike` unescaped, and `removeMember` audits a removal that removed nothing.
 
 *To close:* Choose the rule (ClickUp: a person's own profile), state it once, and measure.
+
+*Closed, 28 September.* ClickUp (help centre "Intro to profiles", from search snippets): "You can add and update your own title on your profile", and "the Workspace owner and admins can edit everyone's titles", from "Add description" under the person's name.
+
+Measured on lane 7 at `5086fe0`, `job-title-rule` passed 3 of 11. The three that passed pin what stays: your own title, an admin setting anyone's, and a plain member offered the pencil on their own card only. The eight failures:
+- The refusal said "Only a workspace admin may change somebody else's job title", while the route let managers through.
+- A member granted `members.profile.manage` was refused (403).
+- A manager retitled an admin (200).
+- The Teams page offered the pencil on your own card only, so an admin or a manager, whom the API allowed, could not set a title from the page.
+- A save that failed said nothing: the draft stayed open with no reason.
+- A team search for "50%" also found "cut 500 now", and "a_b" found "axb": the query went into ILIKE as a pattern.
+- Removing somebody who was not in a team wrote a `group.member_removed` line to the audit log.
+
+Now:
+- Somebody else's title asks `members.profile.manage`, the key capacity and reports-to ask: an admin's and a manager's by default, grantable by a custom role. Its rank rule applies too, so nobody sets the title of somebody above their own role. The refusal names the permission.
+- The key's label is "Set member profiles" and its description names the job title, in the catalog and the four locales.
+- The Teams page offers the pencil by the same rule (`withinRank`, `usePermissions`), labelled with the person's name on another's card. A failed save says why on the card and keeps the draft.
+- The team search is literal through `likeContaining` (`common/sql/like.ts`), with a unit test. The other LIKE sites are `found-28-sep/like-patterns-escaped-four-ways`, below.
+- A removal is audited only when it removed somebody.
+
+`job-title-rule`, 11 checks:
+- Before: 3 of 11 on lane 7.
+- After: 11/11 on lane 7.
+- Patches `jtr-1..10`; `jtr-10` is a unit claim. Their runs follow the commit.
+- Regression on lane 7: `teams-person-cards` 17/17, `user-group-access` 8/8, `people-calendar-access` 8/8.
+- In CI (221).
+
+### `found-28-sep/like-patterns-escaped-four-ways` — open, visible bug, small (found closing `job-title-rule-and-message-disagree`)
+
+**A search containing % or _ matches more than was typed in three places, and the escape is written four different ways**
+
+*Evidence (reading, 28 September):* `%` and `_` are LIKE wildcards, and `\` is the escape.
+- Unescaped: global search (`search.service.ts:499`, every branch that uses `like`: tasks, docs, people, comments, channels, messages, folders, lists, spaces, meetings, attachments) and saved chat messages (`chat.service.ts:2806`). A search for "50%" there finds "500".
+- Escaped four ways: `chat.service.ts` has a private `escapeLike`, `tasks.service.ts:2268` and `activity.service.ts:47` inline copies, and `project-templates.service.ts:485` a copy that leaves the backslash itself unescaped, so a template search ending in `\` escapes the closing `%`.
+- The team search was a third unescaped site; it uses `likeContaining` now.
+
+*To close:* every site through `common/sql/like.ts`, and a suite that searches each surface for a literal `%` and `_`.
+
+### `found-28-sep/verify-hides-the-first-failures` — **closed** (test tooling, small; found measuring `job-title-rule`)
+
+**`verify.sh` printed the last eight lines of a run's failures, so a run with eight failures showed seven**
+
+*Evidence, 28 September:* `job-title-rule` failed 8 checks before its fix. `verify.sh` printed `grep 'passed,|FAIL' | tail -8`, which is seven FAIL lines and the count, so the first failure — the refusal that still said "Only a workspace admin" — was only in the log. The summary did not say lines were missing. The log was also one file per suite (`/tmp/claude-0/run-<suite>.log`), so the same suite run on two lanes at once wrote into one file.
+
+*Closed:* `verify.sh` prints every FAIL line and the count, names the whole log when the run failed, and keeps one log per suite and lane (`run-<suite>-lane<N>.log`). Nothing reads the old path; `sweep.sh` counts exit statuses, not these lines. Measured on lane 7 with a throwaway suite printing nine failures: all nine lines, the count and the log's path were printed, and the exit was 1.
 
 ### `found-28-sep/dashboard-edit-offered-on-others-presets` — open, dead control, small (found by the dashboard research; plausible, not measured)
 
@@ -3251,7 +3295,7 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Closed:* the two task rows are inserted by SQL — the rows the routes write, and the shape the suite's own put-back already uses — with the reason at the site; the view-only project is made inside `withEditable`, as that suite's lists already were. Measured: `tb-30` ran all 45 checks (2 red, its own), `tb-37` 45 (4), `sdp-7` 36 (1) — none short (plan-4 re-measures every one after 5b12a78 changed the shared test libraries).
 
-### `found-23-sep/role-editor-offers-unenforced-permissions` — partly-fixed, large (found reading the custom-role item)
+### `found-23-sep/role-editor-offers-unenforced-permissions` — **closed** (large; found reading the custom-role item)
 
 **Seventeen of the 26 permissions the role editor offers are checked nowhere: granting one changes nothing**
 
@@ -3383,7 +3427,7 @@ Now:
 
 This was the last group the map could close. What stays open below is blocked on ClickUp's deletion table.
 
-*Still open,* per the map (routes and lines in that item's notes):
+*Was still open after the sixth group,* per the map (routes and lines in that item's notes):
 - **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table still cannot be read here (25 September: the help centre is denied, and the snippets carry no table). What the snippets do say: deleting a List or a task takes Full edit on it ("Permissions FAQ"), and only the owner deletes a workspace. `check-permission-keys-asked.mjs` exempts these six keys under this item until then.
 
 *Researched, 28 September: the deletion keys.* The ClickUp help centre is blocked here, so this rests on search snippets, quoted with their queries in the research notes:
@@ -3395,7 +3439,7 @@ This was the last group the map could close. What stays open below is blocked on
   - Guests never share publicly.
 - **No workspace-wide "who can delete" switch** was found among the advanced permissions. No custom-role permission named for deleting spaces, tasks or docs could be confirmed.
 
-Proposal (not built yet):
+The proposal, built as written below:
 - **Keep `space.delete`, `project.delete` and `list.delete`,** asked for deleting a container somebody else made. Each is ANDed with Full edit and replaces the role tests in `container-access.ts`, so no base role changes.
 - **Retire `task.delete.any`.** Deleting a task already asks Full edit with no creator rule, as ClickUp does.
 - **Retire `doc.delete.any`.** A doc's level decides.
@@ -3406,6 +3450,33 @@ Four defects found beside it are items of their own:
 - `found-28-sep/doc-archive-and-delete-at-two-levels`;
 - `found-28-sep/trash-deletes-for-good-wider-than-clickup`;
 - `found-28-sep/delete-and-public-link-offered-to-everyone`.
+
+*Closed, 28 September: the deletion keys.* Measured on lane 6 at `4778778`, before the change, `container-delete-keys` passed 2 of 9. The two that passed pin what stays: a manager deletes only in a space they belong to, and a key never reaches past the level. The seven failures:
+- Members granted `list.delete`, `project.delete` or `space.delete` were refused (403, "Only the creator or a workspace admin can modify this list"), and nothing went to the Trash.
+- The project page's capabilities told those grantees `archive: false` and `deleteList: false`.
+- The catalog still offered `task.delete.any`, `doc.delete.any` and `doc.publish`, and a role naming any of them was made (201).
+- A member holding a role saved with them resolved all three.
+- The editor offered all three, and described the kept keys as "Permanently delete", while every one of those routes sends to the Trash.
+
+Now (`common/permissions/container-access.ts`):
+- Deleting a space, project or list asks the level first, unchanged: Full edit there.
+- The maker deletes what they made. Anyone else needs the kind's key, asked by `CustomRolesService.hasPermission`. That replaces `adminOnlyDelete` and the manager branch, so base roles are unchanged: an admin holds all three keys, a manager `project.delete` and `list.delete`, a member and a guest none.
+- A manager still deletes only in a space they belong to, with or without a key.
+- A guest never deletes a space, whatever a custom role grants and whatever level a share gives (ClickUp: "Guests cannot archive, unarchive, and delete any Space"). This guard was added while integrating: the key alone would have let a guest with Full edit delete one.
+- A folder has no key and keeps the base-role rule (an admin, or a manager in their own space).
+- The services pass their `CustomRolesService`. A keyed delete called without one throws an Error, not a quiet refusal. The project page's capabilities ask through the same rule, so its Archive and each list's Delete follow the routes.
+- `task.delete.any`, `doc.delete.any` and `doc.publish` are out of the catalog, the deltas, the editor and the four locales, as `workspace.delete` went. Stored keys on older roles are filtered as before. The kept keys' descriptions say "Move … to the Trash, where you have Full edit".
+- `check-permission-keys-asked.mjs` exempts nothing now: 31 keys offered, 31 asked. An exemption can be planted only with a planted tree (`PERMISSION_KEYS_EXEMPT` beside `PERMISSION_KEYS_ROOT`). Its cases: 12, with 9 of 9 mutations biting.
+
+`container-delete-keys`, 10 checks:
+- Before: 2 of 9 on lane 6. The tenth, the guest, came with the guard; `cdk-16` removes the guard, and its run follows the commit.
+- After: 9/9 on lane 6, and 10/10 on lane 7 with the guest.
+- API unit tests 1703/1703. 15 are new: 9 in `container-access.test.ts`, and 2 each in the lists, spaces and projects services, which check the key is asked of the service's roles. Web units pass.
+- Patches `cdk-1..16`; `cdk-15` is a unit claim, the guard's twin of `cdk-16`. Their runs follow the commit.
+- Regression, on lane 6 before the guard: the 13 suites that delete, restore, grant or ask roles and keys, 13/13. On lane 7 with it: those, the new suite and the two guest suites.
+- In CI (220).
+
+What the item listed as open is closed; the editor offers no key that nothing asks. Left beside it, as their own items: the sidebar and space page still offer Delete to everyone (`found-28-sep/delete-and-public-link-offered-to-everyone`), and renaming or archiving a container stays its maker's, an admin's or a manager's, even for someone at Full edit.
 
 ### `found-25-sep/managers-grant-themselves-admin` — **closed** (security, HIGH; found mapping `role-editor-offers-unenforced-permissions`)
 
@@ -3611,7 +3682,11 @@ Fixed on the way, each inside its group:
 
 **Managers lose** the work week and holidays, ClickApps, user groups, announcements and the workspace dashboard. They kept all of these only because `WorkspaceAdminGuard` admitted them, and the web offered none of them. An admin can grant each by a custom role. **Every member but a guest is now offered Settings,** landing on Archived: `settings-tabs-by-key` and `settings-role-grants` were rewritten for it, and the latter measures a guest too.
 
-- **Break patches:** `cka-1..9`, `pca-1..10`, `ata-1..10`, `uga-1..14`, `cla-1..13`, `ana-1..11`, `dda-1..9` (five of them unit claims). Re-aimed: `srg-1..7`, `stp-4`, `stp-11`, `wrc-2`, `td-1`. Their runs follow the commit.
+- **Break patches:** `cka-1..9`, `pca-1..10`, `ata-1..10`, `uga-1..14`, `cla-1..13`, `ana-1..11`, `dda-1..9` (four of them unit claims: `uga-13`, `uga-14`, `cla-12`, `cla-13`). Re-aimed: `srg-1..7`, `stp-4`, `stp-11`, `wrc-2`, `td-1`.
+  - Run on lanes 1 to 4, every baseline green: `pca-1..10` and `ata-1..10` at `4ba95d3`; `cka-1..9`, `uga-1..12`, `ana-1..11` and `dda-1..9` at `72a8208`; `cla-1..11` at `4ba95d3`. Each reddened the check it names (61 of 61).
+  - The re-aimed `stp-4`, `stp-11`, `wrc-2` and `td-1` reddened theirs at `5086fe0` (`settings-tabs-by-key` 8/8, `workspace-role-controls` 3/3 and `teams-destination` 14/14 at baseline).
+  - `srg-1..18`, the seven re-aimed among them, reddened theirs at `5086fe0` (lane 3, `settings-role-grants` 6/6 at baseline). The unit claims are measured by `check-unit-claims` in the preflight.
+  - `dda-1` reddened its check, but the run ended there: the suite put the admin's dashboard back through the route `dda-1` breaks, and threw when it was refused, so the gate counted the run as unreadable. The suite restores by SQL when the route refuses now (8/8 on lane 7), and `dda-1` is queued again.
 - **Gates:** `check-permission-keys-asked` reads 34 keys offered, 28 asked and 6 exempt.
 - **Tests:** API unit tests 1684/1684, web 305/305.
 - **In CI:** 216 suites.

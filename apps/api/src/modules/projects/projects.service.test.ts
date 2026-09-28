@@ -60,7 +60,7 @@ describe('ProjectsService project event firing', () => {
     const plans = { assertCanCreateProjects: mock.fn(async () => undefined) } as any
 
     const security = { logAuditEvent: mock.fn(async () => undefined) } as any
-    const svc = new ProjectsService(db, webhooks, slack, plans, security)
+    const svc = new ProjectsService(db, webhooks, slack, plans, security, {} as any)
     const out = await svc.createProject('s-1', { name: 'Apollo' }, 'u-1')
     assert.equal(out.id, 'p-1')
 
@@ -89,7 +89,7 @@ describe('ProjectsService project event firing', () => {
     const webhooks = { fire: mock.fn(async () => undefined) } as any
     const slack = { notify: mock.fn(async () => undefined) } as any
 
-    const svc = new ProjectsService(db, webhooks, slack, {} as any, {} as any) as any
+    const svc = new ProjectsService(db, webhooks, slack, {} as any, {} as any, {} as any) as any
     await svc.fireProjectEvent('project.updated', { id: 'p-9', name: 'Ghost', spaceId: 'missing' }, 'u-1')
 
     assert.equal(webhooks.fire.mock.callCount(), 0)
@@ -108,7 +108,7 @@ describe('ProjectsService.deleteProject — §13.3 audit event', () => {
     }
     const db = { update: mock.fn(() => chain()) } as any
     const security = { logAuditEvent: mock.fn(async () => undefined) } as any
-    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, security) as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, security, {} as any) as any
     // Manage-check is exercised elsewhere; here we assert the audit wiring.
     svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w1', name: 'Apollo', createdById: 'u1' }))
 
@@ -124,6 +124,43 @@ describe('ProjectsService.deleteProject — §13.3 audit event', () => {
     assert.equal(e.actorId, 'actor-1')
     assert.equal(e.ipAddress, '198.51.100.4')
   })
+})
+
+/**
+ * DELETING A PROJECT SOMEBODY ELSE MADE ASKS `project.delete`
+ * (`role-editor-offers-unenforced-permissions`): the service hands the rule its
+ * permissions, and the rule asks that key of them. A manager, whose level is
+ * their role, in a space they belong to.
+ */
+describe('ProjectsService.deleteProject — the project.delete key', () => {
+  /** Each `select()` answers with the next rows, whatever it chains. */
+  const queueDb = (results: unknown[][]) => {
+    const queue = [...results]
+    const chain = (rows: unknown[]) => {
+      const q = Promise.resolve(rows) as any
+      for (const v of ['from', 'innerJoin', 'leftJoin', 'where', 'limit', 'set', 'returning']) q[v] = () => q
+      return q
+    }
+    return { select: mock.fn(() => chain(queue.shift() ?? [])), update: mock.fn(() => chain([])) } as any
+  }
+  for (const held of [true, false]) {
+    it(held ? 'archives a project somebody else made for a holder of project.delete' : 'archives nothing for one without it', async () => {
+      const db = queueDb([
+        [{ createdById: 'maker', workspaceId: 'w1', name: 'Apollo', spaceId: 's1', folderId: null }],
+        [{ workspaceId: 'w1', defaultPermission: 'admin' }], // the level: the space
+        [{ role: 'manager' }], // the level: a manager's is Full edit
+        [{ role: 'manager' }], // the rule: who asks
+        [{ userId: 'mgr' }], // a manager's own space
+      ])
+      const asked: string[] = []
+      const roles = { hasPermission: async (_w: string, _u: string, key: string) => { asked.push(key); return held } }
+      const svc = new ProjectsService(db, {} as any, {} as any, {} as any, { logAuditEvent: mock.fn(async () => undefined) } as any, roles as any)
+      const done = await svc.deleteProject('p1', 'mgr').then(() => true, (e) => String(e?.message))
+      assert.deepEqual(asked, ['project.delete'], 'the rule asks project.delete of the service’s permissions')
+      assert.equal(done, held ? true : 'Only the creator, or someone granted "Delete projects", can delete this project')
+      assert.equal(db.update.mock.callCount(), held ? 1 : 0)
+    })
+  }
 })
 
 /**
@@ -155,7 +192,7 @@ describe('ProjectsService.updateProject — a client of the project\'s own works
         },
       })),
     } as any
-    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any) as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any, {} as any) as any
     svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w-own', name: 'Apollo', createdById: 'u-1' }))
     return { svc, db, wheres, sets }
   }
@@ -213,7 +250,7 @@ describe('ProjectsService — a project\'s folder is one of its own space\'s (fo
         },
       })),
     } as any
-    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any) as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any, {} as any) as any
     svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w-own', name: 'Apollo', createdById: 'u-1' }))
     return { svc, db, sets }
   }

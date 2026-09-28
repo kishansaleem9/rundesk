@@ -38,7 +38,8 @@ function buildDb(opts: {
 function buildSvc(dbOpts?: Parameters<typeof buildDb>[0]) {
   const db = buildDb(dbOpts)
   const security = { logAuditEvent: mock.fn(async () => undefined) } as any
-  return { svc: new WorkspaceGroupsService(db, security), db, security }
+  const roles = { hasPermission: mock.fn(async () => false) } as any
+  return { svc: new WorkspaceGroupsService(db, security, roles), db, security, roles }
 }
 
 describe('WorkspaceGroupsService', () => {

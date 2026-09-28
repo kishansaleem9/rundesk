@@ -8,6 +8,12 @@
  * lacks; an exemption gone stale three ways; an empty catalog and no source.
  * `--mutate` breaks the gate one rule at a time.
  *
+ * THE EXEMPTIONS ARE PLANTED TOO. The gate's own list is empty (the last six
+ * keys it held are asked, or left the catalog), so a case that read it could
+ * no longer show an exemption's rules biting. Each tree is run with its own,
+ * through `PERMISSION_KEYS_EXEMPT`, which the gate honours only in a planted
+ * tree; one case runs with none at all.
+ *
  *   node scripts/check-permission-keys-asked-cases.mjs [--mutate]
  */
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
@@ -27,7 +33,12 @@ const chk = (cond, good, bad) => {
   else { fail += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad ? ` — ${bad}` : ''}`) }
 }
 
-const EXEMPT_KEYS = ['space.delete', 'project.delete', 'list.delete', 'task.delete.any', 'doc.delete.any', 'doc.publish']
+/**
+ * Planted exemptions, owned by the item that last held real ones — open in the
+ * planted ledger, whatever the real one says of it: the gate's own list is empty.
+ */
+const EXEMPT_KEYS = ['kappa.pending', 'lambda.pending', 'mu.pending']
+const EXEMPTIONS = Object.fromEntries(EXEMPT_KEYS.map((k) => [k, 'role-editor-offers-unenforced-permissions']))
 const catalogOf = (keys) =>
   `export const PERMISSION_CATALOG = [\n${keys.map((k) => `  { key: '${k}', label: '${k}', description: '', category: 'X' },`).join('\n')}\n]\n`
 const OPEN_LEDGER = '# Open work\n\n### `found-23-sep/role-editor-offers-unenforced-permissions` — partly-fixed, large\n\nText.\n'
@@ -41,8 +52,8 @@ const ASKS_ALL = [
   "}",
 ].join('\n') + '\n'
 
-/** Plant `files` ({ path: text }) in a throwaway tree and run the gate there. */
-const plant = (files) => {
+/** Plant `files` ({ path: text }) in a throwaway tree and run the gate there, with `exempt` for its exemptions. */
+const plant = (files, exempt = EXEMPTIONS) => {
   const dir = mkdtempSync(join(tmpdir(), 'perm-keys-'))
   try {
     for (const [path, text] of Object.entries(files)) {
@@ -50,7 +61,11 @@ const plant = (files) => {
       mkdirSync(dirname(join(dir, path)), { recursive: true })
       writeFileSync(join(dir, path), text)
     }
-    const r = spawnSync(process.execPath, [GATE], { encoding: 'utf8', cwd: tmpdir(), env: { ...process.env, PERMISSION_KEYS_ROOT: dir } })
+    const r = spawnSync(process.execPath, [GATE], {
+      encoding: 'utf8',
+      cwd: tmpdir(),
+      env: { ...process.env, PERMISSION_KEYS_ROOT: dir, PERMISSION_KEYS_EXEMPT: JSON.stringify(exempt) },
+    })
     return { code: r.status, out: `${r.stdout ?? ''}${r.stderr ?? ''}` }
   } finally {
     rmSync(dir, { recursive: true, force: true })
@@ -66,7 +81,11 @@ const tree = (over = {}) => ({
 console.log('\n▶ what the gate lets be')
 {
   const r = plant(tree())
-  chk(r.code === 0 && /9 key\(s\) offered: 3 asked by a route or service, 6 exempt/.test(r.out), 'every key asked — by the decorator, hasPermission and holdersOf across lines — and the exemptions open: ok, and counted', `it exited ${r.code}: ${r.out.trim()}`)
+  chk(r.code === 0 && /6 key\(s\) offered: 3 asked by a route or service, 3 exempt/.test(r.out), 'every key asked — by the decorator, hasPermission and holdersOf across lines — and the exemptions open: ok, and counted', `it exited ${r.code}: ${r.out.trim()}`)
+}
+{
+  const r = plant(tree({ [CATALOG]: catalogOf(['alpha.manage', 'beta.view', 'gamma.run']) }), {})
+  chk(r.code === 0 && /3 key\(s\) offered: 3 asked by a route or service, none exempt/.test(r.out), 'with no exemption at all, every key asked: ok, and none exempt', `it exited ${r.code}: ${r.out.trim()}`)
 }
 
 console.log('\n▶ what the gate must find')
@@ -90,12 +109,12 @@ console.log('\n▶ what the gate must find')
   chk(r.code === 1 && /the catalog does not have[\s\S]*omega\.typo/.test(r.out), 'a key asked that the catalog lacks is a failure, named with where', `it exited ${r.code}: ${r.out.trim()}`)
 }
 {
-  const r = plant(tree({ [MOD]: `${ASKS_ALL}@RequirePermissions('list.delete')\nexport class Lists {}\n` }))
-  chk(r.code === 1 && /exemption for list\.delete is stale: it is asked now/.test(r.out), 'an exempt key asked now is a stale exemption', `it exited ${r.code}: ${r.out.trim()}`)
+  const r = plant(tree({ [MOD]: `${ASKS_ALL}@RequirePermissions('kappa.pending')\nexport class Pending {}\n` }))
+  chk(r.code === 1 && /exemption for kappa\.pending is stale: it is asked now/.test(r.out), 'an exempt key asked now is a stale exemption', `it exited ${r.code}: ${r.out.trim()}`)
 }
 {
-  const r = plant(tree({ [CATALOG]: catalogOf(['alpha.manage', 'beta.view', 'gamma.run', ...EXEMPT_KEYS.filter((k) => k !== 'doc.publish')]) }))
-  chk(r.code === 1 && /exemption for doc\.publish is stale: the catalog no longer offers it/.test(r.out), 'an exempt key gone from the catalog is a stale exemption', `it exited ${r.code}: ${r.out.trim()}`)
+  const r = plant(tree({ [CATALOG]: catalogOf(['alpha.manage', 'beta.view', 'gamma.run', ...EXEMPT_KEYS.filter((k) => k !== 'mu.pending')]) }))
+  chk(r.code === 1 && /exemption for mu\.pending is stale: the catalog no longer offers it/.test(r.out), 'an exempt key gone from the catalog is a stale exemption', `it exited ${r.code}: ${r.out.trim()}`)
 }
 {
   const r = plant(tree({ 'docs/open-work.md': OPEN_LEDGER.replace('— partly-fixed, large', '— **closed**') }))
@@ -136,6 +155,7 @@ if (process.argv.includes('--mutate') && !process.env.GATE_UNDER_TEST) {
       ['stale-asked-passes', '  if (asked.has(key)) problems.push(', '  if (false) problems.push('],
       ['closed-passes', "  else if (!/^(open|partly)/.test(status)) problems.push(", '  else if (false) problems.push('],
       ['empty-passes', '  if (catalog.size === 0) problems.push(', '  if (false) problems.push('],
+      ['planted-exemptions-ignored', '  ? JSON.parse(process.env.PERMISSION_KEYS_EXEMPT)\n', '  ? {}\n'],
     ],
   })
 }

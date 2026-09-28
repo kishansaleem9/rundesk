@@ -10,6 +10,7 @@ import {
   spaceLevelReaches,
 } from '../../common/permissions/space-default-permission'
 import { SecurityService } from '../security/security.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { ListsService } from '../lists/lists.service'
 import { PlansService } from '../plans/plans.service'
 import { PLAN_TIERS, type PlanId } from '../plans/plans.constants'
@@ -72,6 +73,7 @@ export class SpacesService {
     private security: SecurityService,
     private lists: ListsService,
     private plans: PlansService,
+    private roles: CustomRolesService,
   ) {}
 
   /**
@@ -528,8 +530,8 @@ export class SpacesService {
       actorId,
       kind: 'space',
       action,
-      // Deleting an entire space is admin-only (space.delete not in MANAGER_DELTA).
-      adminOnlyDelete: true,
+      // Deleting a space somebody else made asks `space.delete`, an admin's by default.
+      roles: this.roles,
       // §V2-06 `06:52` — a space is its own owning space, so the Default
       // permission gate applies to editing the space's settings too. Without
       // this the one container whose setting it IS would be the one container

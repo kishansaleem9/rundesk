@@ -908,10 +908,12 @@ export class TasksService {
   /**
    * §3.3 Delete Items — a workspace `manager` (not workspace_admin/super_admin)
    * may only archive/delete a task whose Space they belong to (space_members).
-   * Admins & super_admins keep delete-any; plain members are already limited to
-   * their own tasks by assertTaskWriteAccess. This is deliberately scoped to the
-   * DELETE path (it does NOT loosen or touch assertTaskWriteAccess's other
-   * callers) so a manager's non-delete writes stay unrestricted.
+   * Everybody else is held to the level on the task's location, which the write
+   * rule asks first: Full edit deletes a task, whoever made it, as in ClickUp —
+   * so no key says "delete any task" (`task.delete.any` asked nothing and left
+   * the catalog). This is deliberately scoped to the DELETE path (it does NOT
+   * loosen or touch assertTaskWriteAccess's other callers) so a manager's
+   * non-delete writes stay unrestricted.
    */
   private async assertManagerDeleteScope(taskId: string, actorId: string) {
     // Stated in `task-restore.ts`, where the archived-tasks listing's per-row
