@@ -69,11 +69,19 @@ const claimOf = (text) => {
 const reddened = []
 const green = []
 /*
- * A SIGNAL RESTORES TOO. The restore was a `finally`, which a kill skips: a
- * preflight stopped during this step on 28 September left a patch applied to
- * `tasks.service.ts`, with a fresh mtime that made every lane refuse its API
- * build as stale. The files being patched are restored, bytes and times, on
- * SIGINT, SIGTERM and SIGHUP before the process goes.
+ * A SIGNAL NO LONGER LEAVES A PATCH APPLIED. The restore is a `finally`, and a
+ * default SIGTERM ended the process inside it: a preflight stopped during this
+ * step on 28 September left a patch applied to `tasks.service.ts`, with a fresh
+ * mtime that made every lane refuse its API build as stale.
+ *
+ * With a handler registered, node delivers SIGINT, SIGTERM and SIGHUP on its
+ * event loop — and the loop below is synchronous, so a signal WAITS for it:
+ * every patch is applied, run and restored by its own `finally`, and the
+ * process then exits. Measured on 28 September: SIGTERM sent while
+ * `ai-containers.ts` was patched; the run finished its 37 claims and the tree
+ * was identical, bytes and times. Stopping this step therefore takes as long
+ * as the step. The handler still restores whatever is pending, for the day the
+ * loop gains an `await`. SIGKILL cannot be caught; nothing here helps then.
  */
 let pending = null
 const restore = (files) => {

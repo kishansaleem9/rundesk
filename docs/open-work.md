@@ -1289,7 +1289,7 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 
 *To close:* Measure; offer editing to the owner, and say so otherwise.
 
-### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — partly-fixed, test tooling, small (found stopping a preflight)
+### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — **closed** (test tooling, small; found stopping a preflight)
 
 **A preflight stopped during "the unit claims redden too" left a break patch applied to the product, with a fresh time on the file**
 
@@ -1298,6 +1298,12 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 *Fixed, 28 September:* `check-unit-claims.mjs` holds the files it is patching in `pending` and restores them, bytes and times, on SIGINT, SIGTERM and SIGHUP before exiting. A synchronous child (the unit run) finishes first, and then the restore runs.
 
 *To close:* stop a run mid-patch and read the tree. It must be unchanged in content and in time. Not measured yet: the check patches the shared tree, and agents were editing it.
+
+*Closed, 28 September, measured.* A run was started, and SIGTERM was sent while a patch was applied (`ai-containers.ts` modified). The run finished its 37 claims and exited 0. The tree was identical to before in the contents and times of every tracked file under `apps/` and `packages/`.
+
+This works differently from what the fix first said. With a handler registered, node delivers the signal on its event loop, and the claims loop is synchronous. So the signal waits for the loop, and every file is restored by its own `finally`. Stopping this step now takes as long as the step; it no longer leaves a patch behind. The comment says so. SIGKILL still cannot be caught.
+
+The full run on the clean tree: 37 of 37 unit claims redden, the five new ones included (`cla-12`, `cla-13`, `fcr-4`, `uga-13`, `uga-14`).
 
 ### `found-25-sep/task-sheet-offers-refused-edits` — **closed** (visible bug, medium; found closing `task-edits-narrower-than-clickup`)
 
