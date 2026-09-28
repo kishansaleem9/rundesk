@@ -28,6 +28,7 @@ import type { StandupData } from './standup'
 import { startOfDayIn } from '../../common/time/zone'
 import { CalendarAccountsService } from '../calendar-sync/calendar-accounts.service'
 import { mergeBusy, toBusyWindows } from '../calendar-sync/free-busy'
+import { likeContaining } from '../../common/sql/like'
 
 /**
  * §G06 [05:35–06:35] — the person profile panel.
@@ -459,7 +460,7 @@ export class PeopleService {
     ]
     // The search icon on the frame's feed header. Matched against the task
     // title, which is the only text on an activity row a person would search.
-    if (q) conditions.push(ilike(tasks.title, `%${q}%`))
+    if (q) conditions.push(ilike(tasks.title, likeContaining(q)))
 
     const rows = await this.db
       .select({

@@ -43,6 +43,7 @@ import { SharesService, type ShareLevel } from '../shares/shares.service'
 import { SkillsService } from '../skills/skills.service'
 import { isReservedSlug, resolveSlug } from '../skills/skill-slug'
 import { fetchLinkPreview, type UnfurlResult } from './link-unfurl'
+import { likeContaining } from '../../common/sql/like'
 
 const AI_USER_EMAIL = 'ai-assistant@rundesk.system'
 
@@ -2803,7 +2804,7 @@ export class ChatService {
     const tag = opts.tag?.trim().toLowerCase()
     if (tag) conditions.push(sql`${chatMessageSaves.tags} @> ARRAY[${tag}]::text[]`)
     const q = opts.q?.trim()
-    if (q) conditions.push(ilike(chatMessages.body, `%${q}%`))
+    if (q) conditions.push(ilike(chatMessages.body, likeContaining(q)))
     return this.db
       .select({
         id: chatMessages.id,
@@ -2881,11 +2882,6 @@ export class ChatService {
       .map((c) => c.id)
   }
 
-  /** Escape LIKE wildcards so a user's query is matched literally. */
-  private escapeLike(input: string): string {
-    return input.replace(/[\\%_]/g, (ch) => `\\${ch}`)
-  }
-
   /**
    * Translate a coarse file-type filter (Plan §6.8/§6.11) into a content-type
    * ILIKE pattern. 'image' | 'video' | 'audio' → the MIME top-level; 'pdf' → any
@@ -2897,7 +2893,7 @@ export class ChatService {
     if (!t || t === 'any' || t === 'all') return null
     if (t === 'image' || t === 'video' || t === 'audio') return `${t}/%`
     if (t === 'pdf') return '%pdf%'
-    return `%${this.escapeLike(t)}%`
+    return likeContaining(t)
   }
 
   /**
@@ -2923,7 +2919,7 @@ export class ChatService {
       isNull(chatMessages.deletedAt),
     ]
     const q = (opts.q ?? '').trim()
-    if (q) conds.push(ilike(chatMessageAttachments.fileName, `%${this.escapeLike(q)}%`))
+    if (q) conds.push(ilike(chatMessageAttachments.fileName, likeContaining(q)))
     const typePattern = this.contentTypePattern(opts.type)
     if (typePattern) conds.push(ilike(chatMessageAttachments.contentType, typePattern))
 
@@ -2983,7 +2979,7 @@ export class ChatService {
 
     const conds = [inArray(chatMessages.channelId, channelIds), isNull(chatMessages.deletedAt)]
     const q = (opts.q ?? '').trim()
-    if (q) conds.push(ilike(chatMessages.body, `%${this.escapeLike(q)}%`))
+    if (q) conds.push(ilike(chatMessages.body, likeContaining(q)))
     if (opts.senderId) conds.push(eq(chatMessages.authorId, opts.senderId))
     const after = opts.after ? new Date(opts.after) : null
     if (after && !Number.isNaN(after.getTime())) conds.push(gt(chatMessages.createdAt, after))

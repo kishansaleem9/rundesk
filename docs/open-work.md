@@ -1372,13 +1372,21 @@ Now:
 
 *To close:* Resolve with the workspace role in both, and measure a manager with a role-scoped override.
 
-### `found-28-sep/copy-points-admins-to-the-console` — open, stale reason, small (found by the ClickApps research)
+### `found-28-sep/copy-points-admins-to-the-console` — **closed** (stale reason, small; found by the ClickApps research)
 
 **Sign-up copy and the feature gate's sent message point workspace admins to the platform console**
 
 *Evidence:* `signUp.featuresSubtitle` says "Admin → Features", the super-admin console, where a workspace admin's switches are Settings → Features. `gate.sent` says "Your workspace admins have been asked", though the ask now reaches whoever holds `workspace.clickapps.manage`.
 
 *To close:* Correct the copy in four locales.
+
+*Closed, 28 September.* Sign-up's Features step says the choice is changed later in Settings → Features (Ajustes, الإعدادات, ترتیبات), and the gate's four answers — sent, muted, nobody to ask, failed — name the people who manage ClickApps rather than "your admins", in four locales. The gate opens only on a plan-locked action, so its answers are read by a web unit test (`lib/i18n/clickapps-copy.test.ts`, every locale); the sign-up step by a suite.
+
+`clickapps-copy`, 1 check:
+- Before: 0 of 1 on lane 7, the step reading "…later in Admin → Features".
+- After: 1/1 on lane 7, twice. The suite waits for each step's counter and for step one's fields to leave before filling step two: filling on the counter alone typed into the field sliding out.
+- Patches `cac-1` (the sign-up line) and `cac-2` (a unit claim on the gate's answer). Their runs follow the commit.
+- In CI (227).
 
 ### `found-28-sep/members-see-no-clickapps-list` — **closed** (feature, small; found by the ClickApps research)
 
@@ -1450,7 +1458,7 @@ Now:
 - Regression on lane 7: `teams-person-cards` 17/17, `user-group-access` 8/8, `people-calendar-access` 8/8.
 - In CI (221).
 
-### `found-28-sep/like-patterns-escaped-four-ways` — open, visible bug, small (found closing `job-title-rule-and-message-disagree`)
+### `found-28-sep/like-patterns-escaped-four-ways` — **closed** (visible bug, small; found closing `job-title-rule-and-message-disagree`)
 
 **A search containing % or _ matches more than was typed in three places, and the escape is written four different ways**
 
@@ -1460,6 +1468,15 @@ Now:
 - The team search was a third unescaped site; it uses `likeContaining` now.
 
 *To close:* every site through `common/sql/like.ts`, and a suite that searches each surface for a literal `%` and `_`.
+
+*Closed, 28 September.* Fixing it found four more unescaped sites than the evidence listed: global search's extras path (people, comments, channels, meetings), its custom-field value filter, the platform user directory (`organizations.service.ts`) and a person's activity search (`people.service.ts`). Every LIKE site in the API now goes through `likeContaining`; `chat.service.ts`'s private `escapeLike` and the inline copies in tasks, activity and templates are gone, and no `` `%${…}%` `` remains.
+
+`like-literal`, 5 checks, each surface given two names a pattern cannot tell apart ("cut 50% now", "cut 500 now"):
+- Before: 0 of 5 on lane 7 — the workspace search, saved messages, a person's activity and the user directory each found both names, and a template search ending in `\` found nothing.
+- After: 5/5 on lane 7.
+- Patches `lik-1..5`, one per surface; `taf-4` and `tps-2`, which removed the old inline escapes, are re-aimed onto `likeContaining`. Their runs follow the commit.
+- Regression on lane 7, 20/20 with the copy change: `like-literal`, `clickapps-copy`, `search-read-access`, `task-activity-filter`, `task-pickers-search`, `template-center`, `activity-rail`, `ai-activity-filters`, `guest-chat-scope`, `guest-read-scope`, `private-folder-reach`, `private-list-reach`, `workspace-read-access`, `task-mentions`, `trending-sort`, `clip-library`, `app-catalogue`, `list-under-space`, `job-title-rule` and `clickapp-flags-access`.
+- In CI (226).
 
 ### `found-28-sep/verify-hides-the-first-failures` — **closed** (test tooling, small; found measuring `job-title-rule`)
 

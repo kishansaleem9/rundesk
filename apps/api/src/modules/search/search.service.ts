@@ -29,6 +29,7 @@ import {
 import { containerVisibilityFilter, spaceVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { hiddenDocIds } from '../../common/permissions/doc-access'
 import { readableChannelsFilter } from '../chat/channel-read-filter'
+import { likeContaining } from '../../common/sql/like'
 
 // Every entity the search can return. The Postgres-only ones (user, comment,
 // channel, message) belong here too — leaving them out meant a filter naming
@@ -479,7 +480,7 @@ export class SearchService implements OnModuleInit {
         isManager,
         Boolean(filters.includeArchived),
       )
-      const extras = await this.searchExtras(workspaceId, userId, `%${trimmed}%`, limit, isManager, filters.types)
+      const extras = await this.searchExtras(workspaceId, userId, likeContaining(trimmed), limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
       const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
@@ -496,7 +497,9 @@ export class SearchService implements OnModuleInit {
     }
 
     // Fallback / rich-filter path: Postgres ILIKE + structured filters.
-    const like = trimmed ? `%${trimmed}%` : null
+    // Literal: `%` and `_` are LIKE's wildcards, so "50%" searched as a pattern
+    // found "500" too (found-28-sep/like-patterns-escaped-four-ways).
+    const like = trimmed ? likeContaining(trimmed) : null
 
     const taskHits = wantTasks
       ? await (async () => {
@@ -1608,7 +1611,7 @@ export class SearchService implements OnModuleInit {
     if (!def) return sql`false`
     const valueExpr = sql`${customFieldValues.value} ->> 'v'`
     const match = TEXT_LIKE_FIELD_TYPES.has(def.type)
-      ? sql`${valueExpr} ILIKE ${`%${value}%`}`
+      ? sql`${valueExpr} ILIKE ${likeContaining(value)}`
       : sql`${valueExpr} = ${value}`
     return inArray(
       tasks.id,

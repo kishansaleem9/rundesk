@@ -103,6 +103,7 @@ import { isWorkspaceClipKey } from '../clips/clip-keys'
 import { pickUpdatable } from './task-update-fields'
 import { CustomFieldsService } from '../custom-fields/custom-fields.service'
 import { guestMayRead } from '../../common/permissions/guest-reach'
+import { likeContaining } from '../../common/sql/like'
 
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
 // Custom statuses per List replaced the fixed enum, so we accept any string
@@ -2265,7 +2266,7 @@ export class TasksService {
     }
     const words = (opts.q ?? '').trim().slice(0, 200)
     // `%`, `_` and `\` are LIKE's own syntax; a title containing them is text.
-    const like = words ? `%${words.replace(/[\\%_]/g, (c) => `\\${c}`)}%` : null
+    const like = words ? likeContaining(words) : null
 
     const rawRows = await this.db
       .select({

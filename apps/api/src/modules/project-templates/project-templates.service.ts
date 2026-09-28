@@ -24,6 +24,7 @@ import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import { readableProject } from '../../common/permissions/read-access'
 import { listVisibilityFilter, resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
 import { isUuid } from '../../common/validation/uuid'
+import { likeContaining } from '../../common/sql/like'
 
 type TemplatePayload = NonNullable<typeof projectTemplates.$inferSelect.payload>
 type TaskPriority = 'urgent' | 'high' | 'normal' | 'low'
@@ -482,7 +483,9 @@ export class ProjectTemplatesService implements OnModuleInit {
       isNull(projectTemplates.workspaceId),
       eq(projectTemplates.workspaceId, workspaceId),
     )!
-    const like = q ? `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%` : null
+    // Literal, the backslash included: left unescaped, a query ending in `\`
+    // escaped the closing `%` and found nothing.
+    const like = q ? likeContaining(q) : null
     const qCond = like ? or(ilike(projectTemplates.name, like), ilike(projectTemplates.description, like))! : null
     const scopeCond =
       scope === 'builtin' ? eq(projectTemplates.isBuiltIn, true)

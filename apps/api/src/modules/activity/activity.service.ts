@@ -3,6 +3,7 @@ import { and, desc, eq, ilike, inArray, or, sql, type SQL } from 'drizzle-orm'
 import { taskActivity, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { likeContaining } from '../../common/sql/like'
 
 export type ActivitySearchOptions = {
   /** Free text. Matched against the action, the actor and the entry's meta. */
@@ -45,7 +46,7 @@ export class ActivityService {
    * there are.
    */
   private static likePattern(raw: string): string {
-    return `%${raw.replace(/([\\%_])/g, '\\$1')}%`
+    return likeContaining(raw)
   }
 
   static normalizeActions(raw?: string | string[]): string[] {

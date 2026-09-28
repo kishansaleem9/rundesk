@@ -3,6 +3,7 @@ import { eq, and, or, sql, desc, ilike, inArray } from 'drizzle-orm'
 import { organizations, organizationMembers, workspaceMembers, workspaces, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { likeContaining } from '../../common/sql/like'
 
 export type DirectoryWorkspace = {
   workspaceId: string
@@ -84,7 +85,7 @@ export class OrganizationsService {
 
     const q = opts.q?.trim()
     const where = q
-      ? or(ilike(users.displayName, `%${q}%`), ilike(users.email, `%${q}%`))
+      ? or(ilike(users.displayName, likeContaining(q)), ilike(users.email, likeContaining(q)))
       : undefined
 
     // Unpaginated total for the current filter, so the client can paginate.
