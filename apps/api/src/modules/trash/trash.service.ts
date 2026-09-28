@@ -4,6 +4,7 @@ import { and, eq, lt, isNotNull, sql } from 'drizzle-orm'
 import { spaces, folders, projects, lists, tasks, docs, users, workspaceMembers } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isAdminRole } from '../../common/permissions/workspace-roles'
 import { SecurityService } from '../security/security.service'
 import { SearchService } from '../search/search.service'
 
@@ -57,12 +58,20 @@ export class TrashService {
       .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
       .limit(1)
     if (!member) throw new ForbiddenException('Not a member of this workspace')
-    return { isAdmin: member.role === 'workspace_admin' || member.role === 'manager' }
+    /*
+     * AN ADMIN'S TRASH IS THE WORKSPACE'S; EVERYONE ELSE'S IS THEIR OWN.
+     * ClickUp ("Restore items from the Trash"): "The Workspace owner and admins
+     * can see, restore, or permanently delete any public items. Members and
+     * guests can only see and restore items they have deleted." A manager was
+     * counted as an admin here — listing, restoring and purging everybody's —
+     * and nothing said so anywhere else (`found-28-sep/trash-deletes-for-good-wider-than-clickup`).
+     */
+    return { isAdmin: isAdminRole(member.role) }
   }
 
   private async assertAdmin(workspaceId: string, actor: { id: string; role?: string }) {
     const { isAdmin } = await this.resolveScope(workspaceId, actor)
-    if (!isAdmin) throw new ForbiddenException('Workspace admin or manager required')
+    if (!isAdmin) throw new ForbiddenException('Only a workspace admin deletes from the Trash for good')
   }
 
   // ─── listing ────────────────────────────────────────────────────────────────
@@ -343,6 +352,8 @@ export class TrashService {
   /** Hard-delete a single trashed item. Children cascade via FKs. */
   async deleteForever(workspaceId: string, rawType: string, id: string, actor: { id: string; role?: string }, ip?: string) {
     const type = this.assertType(rawType)
+    // For good is an admin's alone — even for what the caller deleted themselves.
+    await this.assertAdmin(workspaceId, actor)
     const row = await this.assertMayAct(workspaceId, actor, type, id)
 
     if (type === 'space') await this.db.delete(spaces).where(eq(spaces.id, id))

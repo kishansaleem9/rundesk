@@ -1166,13 +1166,37 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 
 *To close:* one level for both. Measure both routes at Edit and at Full edit, before and after.
 
-### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — open, permissions, small (found by the deletion research)
+### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — **closed** (permissions, small; found by the deletion research)
 
 **Members delete for good what they sent to the Trash, and managers act on everything in it**
 
 *Evidence, read not run:* `trash.service.ts:60` and `:235-238`. ClickUp (help centre "Restore items from the Trash", snippet): "The Workspace owner and admins can see, restore, or permanently delete any public items. Members and guests can only see and restore items they have deleted." Guests cannot permanently delete or empty the Trash.
 
 *To close:* permanent deletion is the admins'; members and guests restore their own. Measure each role before and after.
+
+*Measured on lane 7 (build of `b835872`), suite `trash-rules`, before:* 1 of 4.
+- A member deleted for good a task they had deleted (200).
+- A manager listed the admin's deletions, restored one, deleted one for good and emptied the whole Trash (200 each). `resolveScope` counted a manager as an admin.
+
+*Closed, 28 September:*
+- The Trash is the workspace's for an admin (`isAdminRole`); anyone else, a manager included, lists and restores what they deleted.
+- Deleting for good and emptying the Trash are an admin's alone, even for what the caller deleted.
+- The web Trash tab was already an admin's.
+- The web has no Trash for a member, which ClickUp gives them: that is `found-28-sep/members-have-no-trash-to-open`.
+
+`trash-rules`, 4 checks:
+- Before: 1 of 4. After: 4/4 on lane 7.
+- Patches `trr-1..3`.
+- Regression on lane 7, the 8 suites that send to, read or empty the Trash: 8/8.
+- In CI (218).
+
+### `found-28-sep/members-have-no-trash-to-open` — open, feature, small (found closing `trash-deletes-for-good-wider-than-clickup`)
+
+**A member cannot see or restore what they deleted anywhere in the web**
+
+ClickUp: "Members and guests can only see and restore items they have deleted." The API does exactly that (`GET /workspaces/:ws/trash` lists the caller's own; restore of their own is allowed), but Settings → Trash opens to admins alone, so a member who deletes a list has no way back.
+
+*To close:* open the Trash tab to every member but a guest (as Archived is), with Restore on their own rows and no Delete forever or Empty. Measure a member and an admin.
 
 ### `found-28-sep/delete-and-public-link-offered-to-everyone` — open, visible bug, medium (found by the deletion research)
 

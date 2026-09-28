@@ -62,7 +62,7 @@ export class TrashController {
   }
 
   @Delete(':type/:id')
-  @ApiOperation({ summary: 'Delete a trashed item forever' })
+  @ApiOperation({ summary: 'Delete a trashed item forever (a workspace admin only)' })
   async deleteForever(
     @Param('workspaceId') workspaceId: string,
     @Param('type') type: string,
@@ -74,7 +74,7 @@ export class TrashController {
   }
 
   @Delete()
-  @ApiOperation({ summary: 'Empty the trash (workspace admin/manager only)' })
+  @ApiOperation({ summary: 'Empty the trash (a workspace admin only)' })
   async clearAll(@Param('workspaceId') workspaceId: string, @CurrentUser() user: any, @Ip() ip: string) {
     return this.trash.clearAll(workspaceId, user, ip)
   }
