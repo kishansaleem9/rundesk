@@ -40,7 +40,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -202,6 +202,9 @@ try {
       addButton: await page.getByRole('button', { name: 'Add', exact: true }).count(),
       notYours: await notYours.count(),
       pickerOptions: (await picker.count()) > 0 ? await picker.first().locator('option').allInnerTexts() : [],
+      // The switch beside "Billable by default", in the same section and by the same rule.
+      billable: await page.locator('label', { hasText: 'Billable by default' }).getByRole('switch').count(),
+      billableDisabled: await page.locator('label', { hasText: 'Billable by default' }).getByRole('switch').first().isDisabled().catch(() => null),
     }
     await ctx.close().catch(() => {})
     return seen
@@ -232,6 +235,15 @@ try {
       && memberSees.pickerOptions.some((o) => o.includes(`${TAG} admin client`)),
     'the project’s client picker is live for the manager, who may change the project, and disabled — still naming its clients — for a plain member, who may not',
     `manager ${JSON.stringify({ picker: managerSees.picker, disabled: managerSees.pickerDisabled })}; member ${JSON.stringify({ picker: memberSees.picker, disabled: memberSees.pickerDisabled, options: memberSees.pickerOptions })}`,
+  )
+  // `found-28-sep/billable-switch-offered-to-readers`: the switch changes the
+  // project, so it follows the project's edit rule as the picker does; the
+  // member's press was refused (403) and the switch flipped back.
+  chk(
+    managerSees.billable === 1 && managerSees.billableDisabled === false
+      && memberSees.billable === 1 && memberSees.billableDisabled === true,
+    'the Billable by default switch is live for the manager, who may change the project, and disabled for the plain member, who may not',
+    `manager ${JSON.stringify({ switch: managerSees.billable, disabled: managerSees.billableDisabled })}; member ${JSON.stringify({ switch: memberSees.billable, disabled: memberSees.billableDisabled })}`,
   )
 } catch (err) {
   failed += 1

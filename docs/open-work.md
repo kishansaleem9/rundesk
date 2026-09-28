@@ -1262,13 +1262,17 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 - Regression on lane 5, the 9 suites that make, move or update projects and folders: 9/9.
 - In CI (217).
 
-### `found-28-sep/billable-switch-offered-to-readers` — open, visible bug, small (found by the client research)
+### `found-28-sep/billable-switch-offered-to-readers` — **closed** (visible bug, small; found by the client research)
 
 **The project page's "Billable by default" switch is offered to a member who may not change the project**
 
 *Evidence:* `workspace-project-shell-page.tsx:1165-1170`: the PUT answers 403 (`container-access.ts:120`) and the switch quietly flips back.
 
 *To close:* Offer it by the project's capabilities, as the page's other controls are.
+
+*Closed, 28 September.* The clients agent fixed the web in 4ba95d3: `ProjectTimeSettingsSection` locks the switch unless `caps.edit` is true, as it does the client picker. I opened this item from the research notes without seeing that. Nothing checked it, so `client-access` gained a seventh check: the switch is live for the manager, who may change the project, and disabled for a plain member.
+- `client-access` 7/7 on lane 7.
+- Patch `bsw-1` makes the lock ignore the edit rule.
 
 ### `found-28-sep/announcement-views-counted-per-click` — open, small (found by the announcement research)
 
