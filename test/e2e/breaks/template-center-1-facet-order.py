@@ -2,7 +2,7 @@
 # Shuffled here, so a rail that renders "whatever came back" stops matching the
 # frame while still rendering three plausible checkboxes.
 #
-# Reddens: template-center: "order — Space, Folder, List"
+# Reddens: template-center: "and in the frame's order — Space, Folder, List"
 import io
 p='/home/user/rundesk/packages/db/src/schema/templates.ts'
 s=io.open(p,encoding='utf-8').read()

@@ -1,6 +1,6 @@
 # The same shape for "Show empty fields": the switch works end to end and
 # the card simply never draws an unfilled field.
-# Reddens: "a task with nothing set still draws its three fields",
+# Reddens: ").sort(), ) chk( JSON.stringify(bareShown) === JSON.stringify([ 'board-card-field-assignees:false', 'board-card-field-due:false', 'board-card-field-subtasks:false', ]), 'a task with nothing set still draws its three fields, each marked empty',",
 #          "the card shrinks by them".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'

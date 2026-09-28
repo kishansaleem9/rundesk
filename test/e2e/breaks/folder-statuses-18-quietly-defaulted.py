@@ -2,7 +2,7 @@
 # instead of being named as wrong. The caller gets a 201 and a folder whose
 # `status_scope` no reader will ever match — the stale-reason defect, where the
 # only record of the mistake is a value nothing looks at.
-# Reddens: folder-dialog: "a scope it does not have is refused in words"
+# Reddens: folder-dialog: "and a scope it does not have is refused in words, not quietly defaulted"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = """    if (data.statusScope !== undefined && data.statusScope !== 'space' && data.statusScope !== 'list') {

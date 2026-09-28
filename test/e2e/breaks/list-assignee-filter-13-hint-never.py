@@ -1,7 +1,7 @@
 # The "these need a person" hint is dropped, so with Anyone selected the
 # three switches visibly move and the grid never changes, with nothing on
 # screen saying why.
-# Reddens: "says out loud that they need a person before they do anything".
+# Reddens: "and says out loud that they need a person before they do anything".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

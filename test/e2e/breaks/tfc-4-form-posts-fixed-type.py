@@ -1,6 +1,6 @@
 # The form renders the whole picker and posts `text` whatever was chosen: the
 # control looks complete and can only ever say one thing.
-# Reddens: task-field-create — "submitting the form writes the field the form described"
+# Reddens: task-field-create — "submitting the form writes the field the form described — type and scope included"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """        createField.mutate({

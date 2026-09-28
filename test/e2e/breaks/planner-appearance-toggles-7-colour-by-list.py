@@ -2,7 +2,7 @@
 # duplicated-list defect restored to exactly how it was found: a value the server
 # accepts, the picker offers, and the grid renders identically to 'Nothing'.
 #
-# Reddens: planner-appearance-toggles: "and choosing it repaints the grid"
+# Reddens: planner-appearance-toggles: "the picker offers `list`, and choosing it repaints the grid"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 s = io.open(p, encoding='utf-8').read()

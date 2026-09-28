@@ -1,5 +1,5 @@
 # Every folder is privatised whether or not it was asked for — the same defect with the opposite sign.
-# Reddens: folder-dialog: "with the toggle off nothing follows it"
+# Reddens: folder-dialog: "and with the toggle off nothing follows it — no visibility patch is sent"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '      if (isPrivate && folder?.id) {\n'

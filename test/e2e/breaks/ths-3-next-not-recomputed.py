@@ -1,8 +1,8 @@
 # "Next" is taken from the start of the pipeline rather than from where the task
 # actually is. The FIRST press is right, so a suite that only presses once
 # cannot tell; the second press is where it shows.
-# Reddens: task-header-status — "from `cooking` the same button now offers `shipped`"
-#          and "pressing it again really writes `shipped`"
+# Reddens: task-header-status — "from `cooking` the same button now offers `shipped` — it reads the current status, not a constant"
+#          and "and pressing it again really writes `shipped`"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """      ? orderedStatuses[currentStatusIndex + 1]

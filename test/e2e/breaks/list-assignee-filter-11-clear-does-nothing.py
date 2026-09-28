@@ -1,6 +1,6 @@
 # The frame's ✕ on the chosen face is wired to nothing — it is still drawn,
 # still hoverable, and pressing it leaves the filter exactly where it was.
-# Reddens: "clearing the face restores every row", "both surfaces know it".
+# Reddens: "clearing the face restores every row", "and both surfaces know it — no face on the chip, nothing in the select".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -1,6 +1,6 @@
 # THE CHANNEL AS IT WAS WHILE ITS FIRST PAGE LOADED: an empty array, drawn as "the start of the
 # conversation".
-# Reddens: chat-history: "while the first page loads the list is shapes — not "the start of the conversation""
+# Reddens: chat-history: "while the first page loads the list is shapes — not \"the start of the conversation\""the start of the conversation""
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
 a = '          {selectedId && messagesQuery.isPending ? (\n'

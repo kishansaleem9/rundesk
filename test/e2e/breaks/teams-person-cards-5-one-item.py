@@ -2,7 +2,7 @@
 # frame shows, truncated to a single row, while the count beside it still says
 # the real number.
 # Reddens: teams-person-cards "the first card lists the first person's work",
-#   "the second card lists the second person's", "the numbered rows are that many".
+#   "the second card lists the second person's", "and the numbered rows are that many".
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx'
 s=io.open(p,encoding='utf-8').read()

@@ -1,7 +1,7 @@
 # Check 12 — seed half the status pipeline. A list with three of six statuses is
 # the shape `db.insert(lists)` leaves behind when nobody seeds list_statuses.
 #
-# Reddens: imports: "the list it created is a usable list, not a bare row"
+# Reddens: imports: "\\n▶ the list it created is a usable list, not a bare row"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,5 @@
 # The result row prints the plan's own sentence, so it claims a container without ever reading one back.
-# Reddens: create-menu-ai: "the result names the container the SERVER made"
+# Reddens: create-menu-ai: "and the result names the container the SERVER made, not the sentence that asked for it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '                {r.container ? r.container.path : r.humanLabel} — {t(`quickCreate.aiStatus.${r.status}` as TranslationKey)}\n'

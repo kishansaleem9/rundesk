@@ -1,6 +1,6 @@
 # A TASK'S ADDRESS IS READ FOR ITS ID ALONE AGAIN; THE LIST'S ALIAS IS NOT COMPARED.
 # Re-aimed 25 September: a task's address carries a tag of its list's alias now (`taskAddressTag`), compared by `taskAddressMatches` (`list-address-read-by-those-who-may-not-add`).
-# Reddens: mail-comments-by-level: "a task’s address is its list’s: its id under another list’s alias, or a made-up one, lands no comment — even from somebody who may comment on it"
+# Reddens: mail-comments-by-level: ", text: 'under a made-up alias' }) chk( x1.outcome !== 'comment_added' && x1.author === null && x2.outcome !== 'comment_added' && x2.author === null, 'a task’s address is its list’s: its id under another list’s alias, or a made-up one, lands no comment — even from somebody who may comment on it',"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/email-to-task/email-to-task.service.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,5 @@
 # "MAY THIS PERSON OPEN THESE TASKS" ASKS THE SPACE AND THE PROJECT ONLY: a related task of a private list is named.
-# Reddens: private-list-reach: "the member’s task names no blocker of the private list, and counts it as one left out — the admin’s names it"
+# Reddens: private-list-reach: ")]) chk( mTask.status === 200 && !names(mTask) && (mTask.data?.hiddenDependencies ?? 0) === 1 && names(aTask), 'the member’s task names no blocker of the private list, and counts it as one left out — the admin’s names it',"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/read-access.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -2,7 +2,7 @@
 # queried. Every switch appears to work because all three widen the list
 # by everything, always.
 # Reddens: "asked for Comments alone it returns Comments alone",
-#          "with all three off it finds nothing at all",
+#          "and with all three off it finds nothing at all",
 #          and the three one-at-a-time grid checks.
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'

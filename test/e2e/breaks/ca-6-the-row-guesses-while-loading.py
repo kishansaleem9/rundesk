@@ -1,6 +1,6 @@
 # THE ZOOM ROW CLAIMS A STATE BEFORE ITS LIST ANSWERS: "not connected", with Connect,
 # for a person who has connected Zoom.
-# Reddens: calendar-accounts: "while its connections list loads, the Zoom row claims neither state and offers no action"
+# Reddens: calendar-accounts: "while its connections list loads, the Zoom row claims neither state and offers no action — then says what the App Center says"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 a = '  const known = connections.isSuccess\n'

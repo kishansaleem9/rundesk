@@ -31,6 +31,13 @@ step "each lane script is read whole"   node scripts/check-lane-scripts-whole.mj
 step "and an edit mid-run is harmless"  node scripts/check-lane-scripts-whole-cases.mjs --mutate
 step "every offered permission is asked" node scripts/check-permission-keys-asked.mjs
 step "and that gate bites too"         node scripts/check-permission-keys-asked-cases.mjs --mutate
+step "every ledger id cited is an item" node scripts/check-ledger-ids.mjs
+step "and that gate bites as well"      node scripts/check-ledger-ids-cases.mjs --mutate
+step "the sweep fixture builds where it picked" node scripts/check-sweep-fixture-cases.mjs --mutate
+step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-selfcheck.sh
+step "a routing suite says what its worker does" node scripts/check-suite-routes.mjs
+step "and that gate bites, case by case"  node scripts/check-suite-routes-cases.mjs --mutate
+step "two sweeps at once keep two records" bash scripts/e2e-lanes/sweep-selfcheck.sh
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "and that guard actually looks"    node scripts/check-patch-guard.mjs --mutate
 step "re-audit ledger adds up"          node scripts/check-video2-counts.mjs

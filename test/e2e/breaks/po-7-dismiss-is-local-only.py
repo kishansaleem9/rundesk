@@ -1,6 +1,6 @@
 # Dismissal hides the panel for this tab and is never stored, so it returns on the
 # next device and on the next load. Postponed, not dismissed.
-# Reddens: planner-onboarding: "dismissing it stores the dismissal on the account"
+# Reddens: planner-onboarding: "dismissing it stores the dismissal on the account and takes the panel away"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '            onDismiss={() => dismissOnboarding.mutate()}\n'

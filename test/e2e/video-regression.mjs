@@ -180,7 +180,9 @@ const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${
 const area = (n) => console.log(`\n\x1b[1;35m${'═'.repeat(66)}\n  ${n}\n${'═'.repeat(66)}\x1b[0m`)
 
 const browser = await chromium.launch(launchOptions())
-const page = await (await browser.newContext({ viewport: { width: 1600, height: 1100 } })).newPage()
+// Nothing is routed on this context (the AI section opens its own, which
+// blocks), so the worker is the product's, as a user has it.
+const page = await (await browser.newContext({ viewport: { width: 1600, height: 1100 }, serviceWorkers: 'allow' })).newPage()
 
 /** Text of the page as a user would read it. */
 const seen = async () => (await page.locator('body').innerText()).replace(/\s+/g, ' ')

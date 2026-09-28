@@ -2,7 +2,7 @@
 # open a real ticket, and the one field that routes it to a human is now the same for
 # both — which nothing but a check on the request itself would notice.
 #
-# Reddens: planner-settings: "files a DIFFERENT one — a wish is not an outage"
+# Reddens: planner-settings: "and \"Feature requests\" files a DIFFERENT one — a wish is not an outage"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 s = io.open(p, encoding='utf-8').read()

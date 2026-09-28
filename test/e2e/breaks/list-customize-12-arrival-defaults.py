@@ -1,6 +1,6 @@
 # The three arrive at the wrong positions. Frame `10:35` reads off / ON / off
 # and this build opens ON / off / ON — every switch still works.
-# Reddens: "at the frame's own positions".
+# Reddens: ", ) const arrival = await page .locator('[data-testid=\"list-board-settings\"] [role=\"switch\"]') .evaluateAll((els) => els.map((e) => e.getAttribute('data-checked'))) chk( JSON.stringify(arrival) === JSON.stringify(['false', 'true', 'false']), 'and at the frame’s own positions — stack off, empties shown, columns open',".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

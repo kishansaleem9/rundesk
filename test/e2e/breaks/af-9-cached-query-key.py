@@ -1,5 +1,5 @@
 # A filter change served from cache, so the list never refetches.
-# Reddens: ai-activity-filters: "every row on screen is a failed one" / "switching to Succeeded drops it"
+# Reddens: ai-activity-filters: "and every row on screen is a failed one" / "switching to Succeeded drops it, and does not empty the list"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-value-panel.tsx'
 a = "    queryKey: ['ai-activity', activityParams],"

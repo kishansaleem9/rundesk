@@ -1,5 +1,5 @@
 # EARLIER REPLIES WITH NO WAY TO THEM: the panel is never handed the pages.
-# Reddens: chat-history: "the thread panel shows r130, not r001, with "Load earlier replies" above them"
+# Reddens: chat-history: "the thread panel shows r130, not r001, with \"Load earlier replies\" above them"Load earlier replies"the thread panel shows r130, not r001, with \"Load earlier replies\" above them"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-chat-page.tsx'
 a = '            olderReplies={threadQuery.hasNextPage ? threadQuery : null}\n'

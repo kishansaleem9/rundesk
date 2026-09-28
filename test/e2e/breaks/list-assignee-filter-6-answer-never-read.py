@@ -1,7 +1,7 @@
 # THE MIRROR DEFECT, exactly. The server answers correctly, the request goes
 # out with the right flags, the query caches it — and `filterTasks` is never
 # told about it, so the grid never changes. Every API check still passes.
-# Reddens: the three one-at-a-time grid checks and "all three together".
+# Reddens: the three one-at-a-time grid checks and "and all three together add all three, while the task none of them touches stays out".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

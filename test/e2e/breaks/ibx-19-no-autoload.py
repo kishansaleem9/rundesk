@@ -1,5 +1,5 @@
 # A LOAD BUTTON THAT ONLY LOADS WHEN CLICKED: scrolling to it loads nothing.
-# Reddens: inbox-scope: "scrolling to the end loads the rest — 59 rows, the oldest included — and "Load older" goes away"
+# Reddens: inbox-scope: "scrolling to the end loads the rest — 59 rows, the oldest included — and \"Load older\" goes away"Load older"scrolling to the end loads the rest — 59 rows, the oldest included — and \"Load older\" goes away"
 import io
 p = '/home/user/rundesk/apps/web/src/components/load-older.tsx'
 a = "    if (!el || !auto || failed || loading || typeof IntersectionObserver === 'undefined') return\n"

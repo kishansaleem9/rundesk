@@ -2,7 +2,7 @@
 # back. The control is there, it expands, and its number is wrong — the frame's
 # "See 92 more" is a number, not a word.
 #
-# Reddens: template-center: "the number it is actually holding back"
+# Reddens: template-center: "and offers \"See 1 more\" — the number it is actually holding back"
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-templates-page.tsx'
 s=io.open(p,encoding='utf-8').read()

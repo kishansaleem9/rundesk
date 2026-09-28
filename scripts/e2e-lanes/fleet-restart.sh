@@ -128,6 +128,16 @@ for k in "${LANES[@]}"; do
   else
     echo "lane $k: no migration names a column or a table to check — schema NOT verified"
   fi
+  # AND THE WHOLE SCHEMA, not only the newest migration's column: an index, a
+  # default or a constraint the lane lacks is invisible to the witness above
+  # (`found-25-sep/lane-databases-drift-from-the-migrations`).
+  if ! DRIFT=$(lane_schema_drift "$DB"); then
+    echo "lane $k: $DB does not have the schema the source says —"
+    printf '%s\n' "$DRIFT" | head -6 | sed 's/^/         /'
+    echo "         REFUSING; push the schema to it (fleet-sync.sh) and restart"
+    REFUSED[$k]=1
+    continue
+  fi
   # Kill by PORT, never by `pkill -f` on an environment variable: PORTMARK is
   # not in any command line, so that pattern matches nothing (and a looser one
   # matches this script). And WAIT for it to go: relaunching at once let the

@@ -22,7 +22,7 @@
 # and the testid all still exist, which is the mistake worth modelling — a
 # provider nobody can press, rather than a provider nobody wrote.
 #
-# Reddens: planner-onboarding: "exactly the frame's two providers, in its order"
+# Reddens: planner-onboarding: "over \"Get started with\" and exactly the frame's two providers, in its order"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '              data-testid="planner-onboarding-connect-outlook"\n'

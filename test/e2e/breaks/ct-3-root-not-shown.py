@@ -1,6 +1,6 @@
 # THE THREAD WITHOUT ITS COMMENT. Replies and a composer, and the thing they
 # are about is one panel away — which is the split this panel exists to close.
-# Reddens: comment-thread: "the comment itself is in the panel"
+# Reddens: comment-thread: "and the comment itself is in the panel, not just its replies"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = "        <MentionText markdown text={root.body} namesById={namesById} className=\"mt-1 text-sm\" />"

@@ -363,6 +363,41 @@ jobs:
       - name: And that gate can fail, and each case bites
         run: node scripts/check-permission-keys-asked-cases.mjs --mutate
 
+      # Comments, suites and scripts cite the ledger by id so a reader can find
+      # why a line is the way it is. One named no item and nothing noticed
+      # (ledger-ids-cited-unchecked). Every id cited under apps, test, scripts,
+      # deploy, packages and .github is a heading of docs/open-work.md; a
+      # citation wrapped at a hyphen is joined first.
+      - name: Every ledger id cited in the code is an item of the ledger
+        run: node scripts/check-ledger-ids.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-ledger-ids-cases.mjs --mutate
+
+      # The sweep fixture picked a workspace by walking every space and then
+      # built in spaces[0] whatever it held; a space left empty by an
+      # interrupted run ended nine suites before their first check
+      # (fixture-builds-in-a-space-it-did-not-check). One walk now, for both.
+      - name: The sweep fixture builds where it picked, and each case bites
+        run: node scripts/check-sweep-fixture-cases.mjs --mutate
+
+      # Playwright's route never sees a request the service worker answers,
+      # and the app's worker answers every API GET; a held request could be
+      # one that had already arrived (routes-bypassed-by-the-service-worker).
+      # Every context of a suite that routes says serviceWorkers: 'block', or
+      # 'allow' where the worker is what is tested.
+      - name: A suite that routes requests says what its service worker does
+        run: node scripts/check-suite-routes.mjs
+
+      - name: And that gate can fail, and each case bites
+        run: node scripts/check-suite-routes-cases.mjs --mutate
+
+      # Two sweeps at once shared one status, results and queue file; the
+      # second truncated the first's record and could hand its suites to the
+      # first's workers (two-sweeps-share-one-record). Stand-in suites, no lanes.
+      - name: Two sweeps at once keep two records
+        run: bash scripts/e2e-lanes/sweep-selfcheck.sh
+
       # A suite that is not registered is verified once on a lane and never
       # again. `doc-import` was in that state while the resume doc said every
       # suite was registered, and nothing compared the directory with this

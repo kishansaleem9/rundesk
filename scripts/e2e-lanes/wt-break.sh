@@ -272,9 +272,16 @@ if [ "$(git -C "$WT" rev-parse HEAD)" != "$REV" ] || [ "$(cat "$STAMP" 2>/dev/nu
     exit 4
   fi
   link_own_packages
-  ( cd "$WT/packages/db"
+  # THE SCHEMA PUSH IS CHECKED like the builds below. Unchecked, a push that
+  # failed left the lane's database on an older schema while the baseline and
+  # every patch ran against it (`harness/wt-break-unchecked-restart-and-restore`).
+  if ! ( cd "$WT/packages/db"
     export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
-    yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 )
+    yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 ); then
+    { echo "== SCHEMA PUSH FAILED for rundesk_v$LANE — refusing, the baseline would measure an older schema"
+      tail -5 "/tmp/claude-0/wt$LANE-push.log"; } >> "$OUT"
+    exit 4
+  fi
   # CHECKED, because an unchecked build is a silent one. This ran without `||`
   # and a build killed part-way — by a stray `pkill vite`, as it happens — left
   # the worktree with no `dist` at all. The next run then died inside the suite
@@ -469,7 +476,21 @@ for b in "$@"; do
   if [ "$OK" = yes ]; then
     # Restart when this patch touched the API, or when the previous one did and
     # the lane is therefore still serving that patch's binary.
-    if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then rm -f "$STAMP"; restart; fi
+    #
+    # AND THE RESTART IS CHECKED. Its answer was ignored here, so a lane that did
+    # not come back (Postgres out of clients, say) ran the suite against a dead
+    # port: every check failed, and the reddened checker credited the claim.
+    # A patch whose API never came up is not measured, and says so in a line the
+    # log readers count as not run (`NOT_RUN`, `classify-break-log.awk`). The
+    # lane is left dirty, so the next patch rebuilds and restarts it.
+    if [ "$NEEDS_API" = yes ] || [ "$API_DIRTY" = yes ]; then
+      rm -f "$STAMP"
+      if ! restart; then
+        echo "== $b API DID NOT COME UP on $PORT — not measured" >> "$OUT"
+        API_DIRTY=yes
+        continue
+      fi
+    fi
     API_DIRTY="$NEEDS_API"
     timeout 900 node "$WT/test/e2e/$SUITE.mjs" --api "$PORT" --dist "$WT/apps/web/dist" \
       > "/tmp/claude-0/brk-$b.log" 2>&1
@@ -525,10 +546,19 @@ done
 git -C "$WT" checkout -- . 2>/dev/null
 echo "== restoring $WT" >> "$OUT"
 # The lane's database may be carrying a patched schema; put it back.
+#
+# EACH RESTORE STEP IS CHECKED. Unchecked, a push or a build that died left the
+# lane on the last patch's schema or binary, and the next set at the same sha
+# skipped the sync block. The stamp is not written unless all of it worked, so
+# the next run syncs; and a failed restore says so and exits 4, as a failed sync
+# does, rather than printing DONE.
+RESTORED=yes
 ( cd "$WT/packages/db"
   export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
-  yes | pnpm exec drizzle-kit push --force > /dev/null 2>&1 )
-pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
+  yes | pnpm exec drizzle-kit push --force > "/tmp/claude-0/wt$LANE-push.log" 2>&1 ) || {
+  echo "== RESTORE FAILED: the schema push for rundesk_v$LANE" >> "$OUT"; RESTORED=no; }
+pnpm -C apps/api exec tsc -p tsconfig.build.json > "/tmp/claude-0/wt$LANE-api.log" 2>&1 || {
+  echo "== RESTORE FAILED: the API build in $WT" >> "$OUT"; RESTORED=no; }
 # AND THE BUNDLE, WHICH `git checkout -- .` DOES NOT TOUCH.
 #
 # `dist/` is not tracked, so restoring the sources leaves the last patch's
@@ -538,9 +568,16 @@ pnpm -C apps/api exec tsc -p tsconfig.build.json > /dev/null 2>&1
 # for one suite rarely reddens another, which is exactly what makes it silent:
 # the baseline comes back green and every result in the run is about a tree
 # nobody described.
-pnpm -C apps/web exec vite build > /dev/null 2>&1
-pnpm -C apps/web exec vite build > /dev/null 2>&1
-restart && echo "$SERVING" > "$STAMP"
+# Once: it ran twice here, an extra build per set (`harness/wt-break-double-vite-build`).
+pnpm -C apps/web exec vite build > "/tmp/claude-0/wt$LANE-web.log" 2>&1 || {
+  echo "== RESTORE FAILED: the web build in $WT" >> "$OUT"; RESTORED=no; }
+if [ "$RESTORED" = yes ] && restart; then
+  echo "$SERVING" > "$STAMP"
+else
+  [ "$RESTORED" = yes ] && echo "== RESTORE FAILED: the API did not come up on $PORT" >> "$OUT"
+  echo "== the lane is not restored; the next run on it syncs first" >> "$OUT"
+  exit 4
+fi
 echo "DONE $SUITE" >> "$OUT"
 exit
 }

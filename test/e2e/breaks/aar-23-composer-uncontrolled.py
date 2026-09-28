@@ -6,7 +6,7 @@
 #
 # Reddens: ai-answer-rendering:
 #   'after "create a " it offers the frame's own three: new · list · list of'
-#   'and after "…name as " it offers the frame's other three: the · a · you'
+#   'and after "and after \"…name as \" it offers the frame’s other three: the · a · you" it offers the frame's other three: the · a · you'
 #   'a half-typed word is COMPLETED from what the product can be asked to do'
 #   'pressing a word REPLACES the half-typed stem rather than appending to it'
 import io

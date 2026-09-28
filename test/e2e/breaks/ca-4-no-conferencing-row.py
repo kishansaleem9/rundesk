@@ -1,6 +1,6 @@
 # The Conferencing section leaves the Accounts page, which is the state the ledger
 # recorded as `M | Conferencing / Zoom connect row`.
-# Reddens: calendar-accounts: "the Accounts page ends in a Conferencing section with a Zoom row"
+# Reddens: calendar-accounts: "the Accounts page ends in a Conferencing section with a Zoom row and exactly one action"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 a = '                <ConferencingRow workspaceId={workspaceId} />\n'

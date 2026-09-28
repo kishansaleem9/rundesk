@@ -1,7 +1,7 @@
 # Clamp instead of wrap. The arrow stays live-looking and stops responding at
 # the end — a control that reads as broken rather than finished, and an end
 # state no frame in the video ever draws.
-# Reddens: teams-empty-state: "and it wraps rather than stopping dead"
+# Reddens: teams-empty-state: "and it wraps rather than stopping dead on an arrow that still looks live"
 import io
 p = "/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx"
 a = "                      onClick={() => setCardIndex((i) => (i + 1) % EMPTY_CARDS.length)}"

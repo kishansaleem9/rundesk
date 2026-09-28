@@ -1,5 +1,5 @@
 # "ALL CAUGHT UP" AS IT WAS: nothing unread among the rows loaded.
-# Reddens: inbox-scope: "every row on screen is read, ten behind them are not — so it is not "all caught up", and says 10 new"
+# Reddens: inbox-scope: "every row on screen is read, ten behind them are not — so it is not \"all caught up\", and says 10 new"all caught up"every row on screen is read, ten behind them are not — so it is not \"all caught up\", and says 10 new"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-inbox-page.tsx'
 a = "  const unreadUnderChip = (filter === 'primary' ? primaryCountsQuery.data : counts)?.unread\n"

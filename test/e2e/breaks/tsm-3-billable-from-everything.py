@@ -1,5 +1,5 @@
 # "BILLABLE" SUMMED OVER EVERY ENTRY FETCHED.
-# Reddens: timesheet-mine: "and "Billable" is the admin’s billable hour alone"
+# Reddens: timesheet-mine: "and "and \"Billable\" is the admin’s billable hour alone" is the admin’s billable hour alone"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-time-page.tsx'
 a = '  const billableSeconds = weekEntries.filter((e) => e.billable).reduce((sum, e) => sum + e.durationSeconds, 0)'

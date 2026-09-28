@@ -1,5 +1,5 @@
 # The frame’s 2×4 collapsed to a 4×2, at a width where four fit.
-# Reddens: ai-action-categories: "the grid is four columns wide at 1440px" / "two rows of four"
+# Reddens: ai-action-categories: "the grid is four columns wide at 1440px" / "and lays the eight tiles out as two rows of four"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-value-panel.tsx'
 a = '              className="grid grid-cols-2 gap-px bg-border xl:grid-cols-4"'

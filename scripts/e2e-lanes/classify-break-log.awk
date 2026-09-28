@@ -44,7 +44,7 @@ function flush(   name) {
   if (!inpatch) return
   name = substr(hdr, 4)
   if      (hdr ~ / MISSING/)              { missing++; verdict = "MISSING" }
-  else if (hdr ~ /(BUILD|PATCH) FAILED/)  { unbuilt++; verdict = "UNBUILT" }
+  else if (hdr ~ /(BUILD|PATCH) FAILED|API DID NOT COME UP/) { unbuilt++; verdict = "UNBUILT" }
   else if (hdr ~ /PATCH CHANGED NOTHING/) { nochange++; verdict = "NOCHANGE" }
   else if (nosummary)                     { crashed++; verdict = "CRASHED" }
   else if (isshort)                       { short++; verdict = "SHORT" }

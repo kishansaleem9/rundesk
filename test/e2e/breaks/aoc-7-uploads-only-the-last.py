@@ -1,5 +1,5 @@
 # Only the last staged file is uploaded — the single-file behaviour hiding behind a multi-file list.
-# Reddens: attach-on-create: "both staged files are uploaded"
+# Reddens: attach-on-create: "both staged files are uploaded — not just the last one picked"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "      for (const file of attachments) {\n        try {\n          const contentType = file.type || 'application/octet-stream'\n"

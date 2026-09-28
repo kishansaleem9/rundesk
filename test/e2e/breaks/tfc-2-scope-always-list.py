@@ -1,7 +1,7 @@
 # The opposite drift: every field created from a task is pinned to that task's
 # list, so asking for one across the project silently gets a narrower field
 # than the person chose.
-# Reddens: task-field-create — "`scope: project` leaves the definition unscoped to any one list",
+# Reddens: task-field-create — "and `scope: project` leaves the definition unscoped to any one list",
 #          "the new field appears on the task that made it AND on a task in the sibling list"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/custom-fields/custom-fields.service.ts'

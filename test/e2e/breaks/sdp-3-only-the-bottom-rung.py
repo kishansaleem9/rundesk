@@ -2,7 +2,7 @@
 # and "Comment" — the rung the wizard offers between view and edit — silently
 # means edit. A check written as `=== 'view'` passes every one-sided test.
 # Reddens: space-default-permission:
-#   "`comment` — the rung between — is refused as well, so the gate is a ladder"
+#   "`comment` — the rung between — is refused as well, so the gate is a ladder and not an `=== \"view\"`"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/space-default-permission.ts'
 a = """  if (spaceLevelReaches(resolved.level, params.required)) return

@@ -3,7 +3,7 @@
 # private toggle. Every other check about it still passes — which is the point:
 # a screenshot of this dialog and a screenshot of the frame are different
 # dialogs, and nothing but position says so.
-# Reddens: folder-dialog: "it is drawn between Name and Select a Location"
+# Reddens: folder-dialog: "and it is drawn between Name and Select a Location, as the frame stacks them"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 s = io.open(p, encoding='utf-8').read()

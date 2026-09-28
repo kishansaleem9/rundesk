@@ -2,7 +2,7 @@
 # which takes the task out of the Trash and leaves it invisible everywhere —
 # worse than the state it was in.
 #
-# Reddens: task-delete: "and the task is back in the list"
+# Reddens: task-delete: "Restore in the Trash clears deleted_at AND is_archived, and the task is back in the list"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/trash/trash.service.ts'
 s = io.open(p, encoding='utf-8').read()

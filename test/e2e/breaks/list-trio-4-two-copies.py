@@ -3,7 +3,7 @@
 # the chip moves and the rows change and the first direction looks perfect —
 # and pressing the CHIP leaves the panel showing the old answer. Two controls,
 # one question, two answers, and only the second direction can see it.
-# Reddens: list-customize: "pressing the toolbar chip moves the panel switch back"
+# Reddens: list-customize: "+ 'group(s) remain after — a switch whose only effect is its own state is the mirror defect this ' + 'panel has produced once already', ) await page.getByTestId('list-toggle-closed').click() await page.waitForTimeout(500) await openPanel() const panelAfterChip = await checkedOf('closed') chk( panelAfterChip === 'true', 'and pressing the toolbar chip moves the panel switch back, which is the other direction',"
 import io
 p = "/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx"
 s = io.open(p, encoding='utf-8').read()

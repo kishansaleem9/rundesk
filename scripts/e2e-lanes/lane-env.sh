@@ -445,3 +445,90 @@ break_locks_drop () {
   lock_drop "$dir/break-$2.lock"
   lock_drop "$dir/wt$1.lock"
 }
+
+# ── A LANE'S DATABASE HAS THE SCHEMA THE SOURCE SAYS ────────────────────────
+#
+#   schema_describe <db>      one sorted line per column (type, nullability,
+#                             default), index, constraint and enum
+#   schema_ref_ensure         the reference database is current; 1 if it
+#                             could not be built
+#   lane_schema_drift <db>    nothing and 0 when <db> matches the reference;
+#                             `missing: …` / `extra: …` lines and 1 when it
+#                             does not; 2 when there is no reference to ask
+#
+# Lanes 2 to 4 lacked four unique indexes and a dropped default, and lanes 6 to
+# 10 two migrations, while every run on them reported on "the product"
+# (`found-25-sep/lane-databases-drift-from-the-migrations`). The newest
+# migration's column or table — `newest_schema_witness` — says nothing of an
+# index, a default or a constraint.
+#
+# THE REFERENCE is `rundesk_schema_ref`: the pristine dump every lane is
+# restored from, with the CURRENT schema source pushed onto it — exactly what
+# `fleet-sync.sh` does to a lane, and what CI builds its database with. Not the
+# pristine database itself: on 28 September it was the one behind (0164's
+# default), with lanes 6 to 10 beside it. The reference is rebuilt when the
+# schema source or the migrations change, keyed by their hash, under a lock.
+#
+# Names are left out of indexes and constraints: `drizzle-kit push` names a
+# foreign key `…_fk` where a migration's `REFERENCES` makes `…_fkey`, and the
+# same key under two names is not drift. What it constrains is.
+SCHEMA_REF_DB=rundesk_schema_ref
+schema_describe () {
+  # psql's own status, not `sort`'s: piped straight into sort, a database that
+  # could not be read described as nothing, and every line of the reference
+  # read as missing from it (found by schema-drift-selfcheck.sh).
+  local rows
+  rows=$(PGPASSWORD=rundesk psql -h 127.0.0.1 -U rundesk -d "$1" -tAq -v ON_ERROR_STOP=1 -c "
+    select 'column '||table_name||'.'||column_name||' '||data_type||' '||is_nullable||' default '||coalesce(column_default,'none')
+      from information_schema.columns where table_schema='public'
+    union all
+    select 'index '||tablename||' '||regexp_replace(indexdef, '^CREATE (UNIQUE )?INDEX \S+ ON ', 'CREATE \1INDEX ON ')
+      from pg_indexes where schemaname='public'
+    union all
+    select 'constraint '||conrelid::regclass::text||' '||pg_get_constraintdef(oid)
+      from pg_constraint where connamespace='public'::regnamespace
+    union all
+    select 'enum '||t.typname||' '||string_agg(e.enumlabel, ',' order by e.enumsortorder)
+      from pg_type t join pg_enum e on e.enumtypid=t.oid join pg_namespace n on n.oid=t.typnamespace
+      where n.nspname='public' group by t.typname") || return 1
+  [ -n "$rows" ] || return 1
+  printf '%s\n' "$rows" | sort
+}
+schema_ref_ensure () {
+  local R=/home/user/rundesk dir="${SCHEMA_REF_DIR:-/tmp/claude-0}" key i
+  key=$( { find "$R/packages/db/src/schema" -type f -name '*.ts' -print0 | sort -z | xargs -0 cat
+           ls "$R/packages/db/src/migrations"/*.sql; } | sha1sum | cut -c1-16)
+  [ "$(cat "$dir/schema-ref.key" 2>/dev/null)" = "$key" ] && [ -s "$dir/schema-ref.txt" ] && return 0
+  for i in $(seq 1 180); do lock_take "$dir/schema-ref.lock" && break; sleep 1; done
+  lock_held "$dir/schema-ref.lock" || { echo "schema reference: could not take $dir/schema-ref.lock" >&2; return 1; }
+  # Another shell may have built it while this one waited.
+  if [ "$(cat "$dir/schema-ref.key" 2>/dev/null)" = "$key" ] && [ -s "$dir/schema-ref.txt" ]; then
+    lock_drop "$dir/schema-ref.lock"; return 0
+  fi
+  echo "schema reference: building $SCHEMA_REF_DB from the pristine dump and the schema source (key $key)" >&2
+  export PGPASSWORD=rundesk
+  [ -s "$dir/pristine.dump" ] || pg_dump -h 127.0.0.1 -U rundesk -d rundesk_pristine -Fc -f "$dir/pristine.dump"
+  if ! { sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS $SCHEMA_REF_DB WITH (FORCE)" >/dev/null 2>&1 \
+           && sudo -u postgres psql -q -c "CREATE DATABASE $SCHEMA_REF_DB OWNER rundesk" >/dev/null 2>&1 \
+           && pg_restore -h 127.0.0.1 -U rundesk -d "$SCHEMA_REF_DB" --no-owner --role=rundesk "$dir/pristine.dump" >"$dir/schema-ref-restore.log" 2>&1; true; } \
+     || ! ( cd "$R/packages/db" && export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/$SCHEMA_REF_DB" \
+            && yes | pnpm exec drizzle-kit push --force > "$dir/schema-ref-push.log" 2>&1 ) \
+     || ! schema_describe "$SCHEMA_REF_DB" > "$dir/schema-ref.txt.new" \
+     || [ ! -s "$dir/schema-ref.txt.new" ]; then
+    echo "schema reference: could not build it — see $dir/schema-ref-push.log" >&2
+    rm -f "$dir/schema-ref.txt.new" "$dir/schema-ref.key"
+    lock_drop "$dir/schema-ref.lock"; return 1
+  fi
+  mv "$dir/schema-ref.txt.new" "$dir/schema-ref.txt"
+  echo "$key" > "$dir/schema-ref.key"
+  lock_drop "$dir/schema-ref.lock"
+}
+lane_schema_drift () {
+  local db="$1" dir="${SCHEMA_REF_DIR:-/tmp/claude-0}" out
+  schema_ref_ensure || return 2
+  out=$(schema_describe "$db" 2>&1) || { echo "cannot read $db: $out"; return 2; }
+  out=$(diff <(cat "$dir/schema-ref.txt") <(printf '%s\n' "$out") | sed -n 's/^< /missing: /p; s/^> /extra: /p')
+  [ -z "$out" ] && return 0
+  printf '%s\n' "$out"
+  return 1
+}

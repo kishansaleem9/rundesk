@@ -1,7 +1,7 @@
 # A mid-word suggestion APPENDS instead of replacing the stem: "create a fol" plus
 # "folder" becomes "create a fol folder". Invisible in a screenshot of the bar,
 # obvious the first time anybody presses one.
-# Reddens: ai-answer-rendering: "pressing it REPLACES the stem rather than appending after it"
+# Reddens: ai-answer-rendering: "and pressing it REPLACES the stem rather than appending after it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 a = """  if (/\\s$/.test(text) || text === '') return `${text}${word} `

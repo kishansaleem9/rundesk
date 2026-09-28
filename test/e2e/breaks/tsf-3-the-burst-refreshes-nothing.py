@@ -1,6 +1,6 @@
 # A BURST THAT IS NOT ONLY ACTIVITY REFRESHES NOTHING: another open sheet keeps
 # showing the old priority.
-# Reddens: task-sheet-fetches: "in another sheet open on the task, it refetches the task and each open panel once, and that sheet shows the new priority"
+# Reddens: task-sheet-fetches: ", ) chk( shown && least(watcher.counts) >= 1 && most(watcher.counts) <= 1, 'in another sheet open on the task, it refetches the task and each open panel once, and that sheet shows the new priority',"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = "      if (scope === 'all') void qc.invalidateQueries({ queryKey: ['task', taskId] })\n"

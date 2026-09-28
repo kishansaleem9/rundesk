@@ -196,7 +196,9 @@ try {
   )
 
   browser = await chromium.launch(launchOptions())
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } })
+  // The plan below is stood in by a route, which the worker would bypass
+  // (`found-23-sep/routes-bypassed-by-the-service-worker`).
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 }, serviceWorkers: 'block' })
   page = await ctx.newPage()
 
   const planCalls = []
@@ -352,14 +354,19 @@ try {
     readOnlyResults: [],
     warnings: [],
   }
+  // HELD, AND SHOWN TO HAVE HELD: a route that never fired would leave the
+  // panel on the real planner's answer, and the check below says so.
+  let planServed = 0
   await ctx.route(
     (url) => url.pathname.endsWith('/ai/command'),
-    (route) =>
-      route.fulfill({
+    (route) => {
+      planServed += 1
+      return route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({ data: PLAN, error: null }),
-      }),
+      }).catch(() => {})
+    },
   )
 
   // `cma-16-no-search-box` renames the testid this section needs, so the panel
@@ -367,10 +374,13 @@ try {
   await page.getByTestId('create-ai-open').click({ timeout: 8000 }).catch(() => {})
   await appears('[data-testid="create-ai-confirm"]')
   chk(
-    (await readText(page.getByTestId('create-ai-step-0'))).includes('Set that up') &&
+    planServed > 0 &&
+      (await readText(page.getByTestId('create-ai-step-0'))).includes('Set that up') &&
       (await page.locator('[data-testid="create-ai-step-1"]').count()) === 0,
     'the panel lists one line per planned action, in the planner\'s own words',
-    `it drew ${JSON.stringify(await readText(page.getByTestId('create-ai-step-0')))} for a one-action plan`,
+    planServed === 0
+      ? 'the stood-in plan was never asked for: the route did not fire'
+      : `it drew ${JSON.stringify(await readText(page.getByTestId('create-ai-step-0')))} for a one-action plan`,
   )
 
   // And the press under it, for the same patch: bounding one step of a

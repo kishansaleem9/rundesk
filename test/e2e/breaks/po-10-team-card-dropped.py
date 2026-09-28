@@ -1,6 +1,6 @@
 # The Team schedules card leaves the carousel. The panel still pages and still
 # reads correctly — it simply stops naming the feature §V2-15b builds.
-# Reddens: planner-onboarding: "the card frame `12:48` ends on is Team schedules"
+# Reddens: planner-onboarding: "and the card frame `12:48` ends on is Team schedules, which §V2-15b builds"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = "  const CARDS = ['joinMeeting', 'meetingNotes', 'blockTime', 'teamSchedules'] as const\n"

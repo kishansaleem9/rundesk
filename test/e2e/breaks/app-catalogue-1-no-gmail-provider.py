@@ -1,7 +1,7 @@
 # Gmail goes back to being a name the product uses and cannot connect: the tab
 # stays, the "Connect" link stays, and there is no provider behind either.
 # Reddens: app-catalogue: "Gmail is a provider a workspace can actually connect"
-#          and "pressing Connect on Gmail opens the connect flow for Gmail"
+#          and "and pressing Connect on Gmail opens the connect flow for Gmail"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/connections/integration-connections.service.ts'
 a = """      'google-drive',

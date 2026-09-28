@@ -1,7 +1,7 @@
 # Check 4 — the toast's Undo really restores the task. Point the offer at the
 # wrong trash type, so the button still appears and its restore 404s.
 #
-# Reddens: task-delete: "Undo was pressed and the task stayed in the bin"
+# Reddens: task-delete: "Undo was pressed and the task stayed in the bin — a button wired to nothing is worse than no button"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 s = io.open(p, encoding='utf-8').read()

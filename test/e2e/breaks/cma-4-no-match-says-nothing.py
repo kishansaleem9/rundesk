@@ -1,5 +1,5 @@
 # A query that matches nothing draws an empty strip instead of saying so.
-# Reddens: create-menu-ai: "a query that matches nothing SAYS so"
+# Reddens: create-menu-ai: "a query that matches nothing SAYS so, instead of drawing an empty strip"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          {typeMatchCount === 0 && (\n'

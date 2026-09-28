@@ -1,6 +1,6 @@
 # The gate fires on create only — so you create on one plan and edit on another.
 #
-# Reddens: clickapps-plan-gating: "id cannot switch a gated ClickApp on either"
+# Reddens: clickapps-plan-gating: "PUT /spaces/:id cannot switch a gated ClickApp on either"
 import io
 p='/home/user/rundesk/apps/api/src/modules/spaces/spaces.service.ts'
 s=io.open(p,encoding='utf-8').read()

@@ -1,6 +1,6 @@
 # `%` and `_` go straight into LIKE, so a search for "pct50%" also matches
 # "pct50x" and the reader is told there are more hits than there are.
-# Reddens: task-activity-filter — "searching \"pct50%\" finds one row, not two"
+# Reddens: task-activity-filter — "searching \"pct50%\" finds one row, not two — the `%` is escaped rather than passed to LIKE"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/activity/activity.service.ts'
 a = "    return `%${raw.replace(/([\\\\%_])/g, '\\\\$1')}%`"

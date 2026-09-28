@@ -4,7 +4,7 @@
 # facets in the frame at all.
 # Reddens: integration-error-card:
 #   "and so is every one of the fourteen category chips frame `19:07` draws"
-#   "and every one of them can return something"
+#   "and every one of them can return something — no chip that only empties the grid"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-integrations-page.tsx'
 a = """const FACETS = FRAME_FACETS.filter((facet) => INTEGRATIONS.some((i) => matchesFacet(i, facet.id)))

@@ -1,6 +1,6 @@
 # A dropdown can be created with no options, so the field exists and can never
 # hold a value — the task door skipping a rule the project door applies.
-# Reddens: task-field-create — "a dropdown with no options is refused"
+# Reddens: task-field-create — "a dropdown with no options is refused — the same rule the project-scoped POST applies"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/custom-fields/custom-fields.service.ts'
 a = "    if ((dto.type === 'dropdown' || dto.type === 'labels') && (!dto.options || dto.options.length === 0)) {"

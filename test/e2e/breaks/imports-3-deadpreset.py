@@ -3,7 +3,7 @@
 # Software' changes nothing but the highlight. (Cascades: the Jira file then has
 # no Title column, so the later checks go with it — check 3 is the gate.)
 #
-# Reddens: imports: "a hand-edited mapping is what the server is actually asked to use"
+# Reddens: imports: "\\n▶ a hand-edited mapping is what the server is actually asked to use"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.util.ts'
 s = io.open(p, encoding='utf-8').read()

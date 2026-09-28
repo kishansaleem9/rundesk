@@ -1,5 +1,5 @@
 # "ENTRIES" COUNTING EVERY ENTRY FETCHED.
-# Reddens: timesheet-mine: "and "Entries" counts the one entry the admin made this week"
+# Reddens: timesheet-mine: "and "Entries"and \"Entries\" counts the one entry the admin made this week"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-time-page.tsx'
 a = 'value={`${weekEntries.length}`} testId="time-stat-entries"'

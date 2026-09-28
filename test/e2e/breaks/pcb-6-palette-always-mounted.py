@@ -1,7 +1,7 @@
 # The palette is mounted whether or not the bar was pressed. It registers its own
 # window-level ⌘K listener, so a second always-mounted copy makes one keypress
 # toggle two palettes.
-# Reddens: planner-command-bar: "nothing is mounted before the bar is pressed"
+# Reddens: planner-command-bar: "nothing is mounted before the bar is pressed, and ⌘K opens exactly one palette"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '        {paletteOpen && (\n          <Suspense fallback={null}>\n'

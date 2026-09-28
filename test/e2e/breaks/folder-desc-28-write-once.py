@@ -2,7 +2,7 @@
 # words can be set at birth and never altered. The edit dialog draws the box,
 # accepts the typing and saves without complaint — the PATCH goes out, the
 # server answers 200, and the column does not move.
-# Reddens: folder-dialog: "editing it there writes the new words back"
+# Reddens: folder-dialog: "and editing it there writes the new words back"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = "    if (patch.description !== undefined) set.description = patch.description?.trim() || null"

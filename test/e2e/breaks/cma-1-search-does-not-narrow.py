@@ -1,5 +1,5 @@
 # The strip goes back to rendering the whole list, so the box is a text field over nothing.
-# Reddens: create-menu-ai: "typing \"fold\" leaves Folder"
+# Reddens: create-menu-ai: "typing \"fold\" leaves Folder — and the tab that is open, so the form on screen stays reachable"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          {shownTypes.map((tab) => (\n'

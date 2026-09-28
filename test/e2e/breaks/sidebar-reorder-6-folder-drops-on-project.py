@@ -2,7 +2,7 @@
 # flight — which is what it did the moment `folder` joined the drag union. A
 # folder dropped on a project row is then accepted, and `dropOn`'s else-branch
 # posts it to `/lists/<folderId>/move`: a real route, an id that is not a list.
-# Reddens: sidebar-reorder "and a folder dropped on a project sends nothing"
+# Reddens: sidebar-reorder "and a folder dropped on a project sends nothing — there is no route that re-parents one"
 #
 # REWRITTEN 21 September, AFTER IT RAN GREEN. The first version deleted the LIST
 # rule:

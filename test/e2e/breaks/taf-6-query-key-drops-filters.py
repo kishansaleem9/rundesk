@@ -1,6 +1,6 @@
 # The filters leave the React Query key, so switching one is served from the
 # 30-second cache and no request goes out at all.
-# Reddens: task-activity-filter — "it went out as a request carrying `q=`",
+# Reddens: task-activity-filter — "and it went out as a request carrying `q=` — the server did the narrowing",
 #          "typing the needle narrows the feed to the single matching entry"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

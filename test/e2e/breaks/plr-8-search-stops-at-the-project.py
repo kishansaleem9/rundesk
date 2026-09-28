@@ -1,5 +1,5 @@
 # SEARCH'S TASK BRANCH ASKS THE SPACE AND THE PROJECT ONLY: a private list's task is found by its words.
-# Reddens: private-list-reach: "search finds the member nothing of the private list — its task, its comment, its name — and finds the admin them"
+# Reddens: private-list-reach: ")]) chk( mSearch.status === 200 && !names(mSearch) && names(aSearch), 'search finds the member nothing of the private list — its task, its comment, its name — and finds the admin them',"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
 s = io.open(p, encoding='utf-8').read()

@@ -1,7 +1,7 @@
 # The category drill-in done as a client-side slice: the section still expands
 # to seven, and the server was never told which category anybody was looking at.
 #
-# Reddens: template-center: "it is a query, not a client-side slice"
+# Reddens: template-center: "and category=engineering went to the server — it is a query, not a client-side slice"
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-templates-page.tsx'
 s=io.open(p,encoding='utf-8').read()

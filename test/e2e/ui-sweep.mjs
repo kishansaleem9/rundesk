@@ -137,7 +137,9 @@ const openAnyTask = async () => {
 }
 
 const browser = await chromium.launch(launchOptions())
-const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 } })
+// The worker would answer API GETs before the route below saw them
+// (`found-23-sep/routes-bypassed-by-the-service-worker`).
+const ctx = await browser.newContext({ viewport: { width: 1600, height: 1000 }, serviceWorkers: 'block' })
 await ctx.route('**/*', (r) => (/127\.0\.0\.1|localhost/.test(r.request().url()) ? r.continue() : r.abort()))
 const page = await ctx.newPage()
 const consoleErrors = []

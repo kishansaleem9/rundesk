@@ -1,7 +1,7 @@
 # The "More" row reports a constant instead of the real hidden count, so it
 # cannot tell you whether it is holding one conversation back or forty.
 # Every other AI-chats check still passes.
-# Reddens: sidebar-sections: "a "More" that does not know how many cannot tell you whether it is holding one "
+# Reddens: sidebar-sections: "a "More"a \"More\" that does not know how many cannot tell you whether it is holding one "
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 s = io.open(p, encoding='utf-8').read()

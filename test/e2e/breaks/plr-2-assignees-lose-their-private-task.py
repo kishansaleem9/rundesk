@@ -1,5 +1,5 @@
 # THE WORKSPACE LIST'S PRIVATE-ITEM RULE IS THE CREATOR'S ALONE, as its copy was: a private task disappears from its assignee's list.
-# Reddens: private-list-reach: "the member’s workspace list has no task of the private list, even searched for, and has the private task assigned to them — the admin’s has it"
+# Reddens: private-list-reach: "), ]) chk( mAll.status === 200 && !names(mAll) && ids(mAll).includes(OT) && ids(mAll).includes(PA) && ids(aAll).includes(PT) && mFind.status === 200 && ids(mFind).length === 0 && ids(aFind).includes(PT), 'the member’s workspace list has no task of the private list, even searched for, and has the private task assigned to them — the admin’s has it',"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

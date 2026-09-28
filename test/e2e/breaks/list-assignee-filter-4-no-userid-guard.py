@@ -1,6 +1,6 @@
 # The missing-person guard is gone, so a call with no `userId` answers 200
 # with an empty result — indistinguishable from "this person has nothing".
-# Reddens: "asking without a person is refused".
+# Reddens: "asking without a person is refused, and the refusal says what is missing".
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

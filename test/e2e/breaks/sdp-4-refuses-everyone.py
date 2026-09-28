@@ -5,7 +5,7 @@
 # Re-aimed 25 September: managing asks Edit and deleting Full edit now (`full-edit-enforced-nowhere`); the patch asks Full edit of managing too, so an Edit space refuses renames it allows.
 # Reddens: space-default-permission:
 #   "the SAME member renaming the SAME kind of list succeeds where the default is `edit`"
-#   "while the Full edit space still is — the filter is the permission"
+#   "while the Full edit space still is — the filter is the permission, not an empty answer"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = "      required: action === 'delete' ? 'admin' : 'edit',\n      kind: params.kind,\n"

@@ -1,5 +1,5 @@
 # The open tab is no longer kept, so a query can strand a form under a strip that does not contain it.
-# Reddens: create-menu-ai: "typing \"fold\" leaves Folder — and the tab that is open"
+# Reddens: create-menu-ai: "typing \"fold\" leaves Folder — and the tab that is open, so the form on screen stays reachable"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '    keep.add(mode)\n'

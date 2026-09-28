@@ -1,5 +1,5 @@
 # The planner is asked a constant question instead of the one the person typed.
-# Reddens: create-menu-ai: "carrying the TYPED TEXT as the message"
+# Reddens: create-menu-ai: "carrying the TYPED TEXT as the message — the box is the prompt, not a label over a filter"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "      api<AiPlan>('/ai/command', { method: 'POST', body: { workspaceId, message: text } }),\n"

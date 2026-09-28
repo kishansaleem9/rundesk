@@ -2,7 +2,7 @@
 # names first, in its smallest form. The reply is written in the thread, stored
 # with the right parent, drawn in the panel, and the list beside it still says
 # one, for ever.
-# Reddens: comment-thread: "the list counts the reply that was written in the thread"
+# Reddens: comment-thread: "and the list counts the reply that was written in the thread"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = "                    <span className=\"text-xs text-accent ml-auto\">{tCount('taskDetail.repliesCount', replies.length)}</span>"

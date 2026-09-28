@@ -149,6 +149,7 @@ log(
     '== gone-2-typo MISSING (not in /home/user/rundesk/test/e2e/breaks nor /tmp/claude-0/breaks)',
     '== gone-3-noop PATCH CHANGED NOTHING',
     '== gone-4-unbuilt BUILD FAILED',
+    '== gone-5-dead-port API DID NOT COME UP on 3022 — not measured',
     '',
   ].join('\n'),
   1_700_009_000,
@@ -160,8 +161,8 @@ log(
 )
 at = measuredAt(dir)
 ok(
-  ['gone-1-rotted', 'gone-2-typo', 'gone-3-noop', 'gone-4-unbuilt'].every((n) => !at.has(n)),
-  'a patch that failed to apply, was missing, changed nothing or did not build was not measured',
+  ['gone-1-rotted', 'gone-2-typo', 'gone-3-noop', 'gone-4-unbuilt', 'gone-5-dead-port'].every((n) => !at.has(n)),
+  'a patch that failed to apply, was missing, changed nothing, did not build, or whose API did not come up was not measured',
 )
 ok(
   at.get('kept-1-real')?.sha === '4444444',

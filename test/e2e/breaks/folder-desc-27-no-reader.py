@@ -3,7 +3,7 @@
 # it back, because `fields.description` is off for folders. Every check about
 # the write still passes. The words are in the database for ever and nobody can
 # see them.
-# Reddens: folder-dialog: "reopening the folder shows the description back"
+# Reddens: folder-dialog: "reopening the folder shows the description back — the column has a reader, not just a writer"
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 a = "        fields={treeEdit?.kind === 'folder' ? { description: true } : undefined}"

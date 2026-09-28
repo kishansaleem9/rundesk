@@ -2,7 +2,7 @@
 # set to "Own statuses" then produces lists with an empty set, which refuses
 # every status a task tries to take — the override that leaves you with
 # nothing, and it looks like a working setting until somebody drags a card.
-# Reddens: folder-dialog: "a list in the other kind of folder has a usable set of its own"
+# Reddens: folder-dialog: "and a list in the other kind of folder has a usable set of its own"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/lists/lists.service.ts'
 a = "    await seedListStatuses(this.db, list.id)"

@@ -1,5 +1,5 @@
 # The server stops refusing the Team rollup: the paywall becomes a <div>.
-# Reddens: "the blocked workspace is refused outright" + "the refusal says which plan".
+# Reddens: "the blocked workspace is refused outright" + "and the refusal says which plan refused it".
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.controller.ts'
 s = io.open(p, encoding='utf-8').read()

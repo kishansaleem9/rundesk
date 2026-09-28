@@ -1,7 +1,7 @@
 # THE PATCH THIS ROW EXISTS FOR — the ✓ always writes the default pipeline's
 # `done`, whatever this list's statuses actually are. It demos perfectly on a
 # fresh list and is wrong on every renamed one: the facade.
-# Reddens: task-header-status — "the ✓ will write `shipped`" and
+# Reddens: task-header-status — "and the ✓ will write `shipped` — the FIRST status in the closed category" and
 #          "a list with no closed status disables the ✓ rather than inventing `done`"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

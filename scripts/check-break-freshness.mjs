@@ -123,7 +123,7 @@ for (const log of logs) {
   // zero, produced by the very script written to catch confident numbers.
   const patchLines = text.split('\n').filter((l) => l.startsWith('== ') && !CONTROL.test(l))
   const patches = patchLines.length
-  const buildFailed = patchLines.filter((l) => /BUILD FAILED|PATCH FAILED/.test(l)).length
+  const buildFailed = patchLines.filter((l) => /BUILD FAILED|PATCH FAILED|API DID NOT COME UP/.test(l)).length
   // A PATCH FILE THAT WAS NEVER FOUND IS THE SAME KIND OF NOTHING AS ONE THAT
   // NEVER BUILT, and it hid for longer because its line is quieter. `wt-break.sh`
   // read patches from `/tmp/claude-0/breaks` long after the tracked copy became

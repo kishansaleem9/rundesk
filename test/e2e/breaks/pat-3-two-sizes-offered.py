@@ -1,6 +1,6 @@
 # XL is dropped from the row. Frame `14:05` draws three previews, and a check
 # that only asserted "a size picker exists" would pass on two.
-# Reddens: planner-appearance-toggles: "it offers the frame's three sizes in the frame's order"
+# Reddens: planner-appearance-toggles: "it offers the frame's three sizes in the frame's order, with exactly one chosen"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 a = 'export const GRID_SIZE_PREVIEW_PX = (Object.keys(GRID_SIZES) as PlannerGridSize[]).map((key) => ({\n'

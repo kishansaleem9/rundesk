@@ -3,7 +3,7 @@
 # List tab beside it. The server still refuses; the dialog says nothing and
 # sits there with the button looking un-pressed.
 # Reddens: folder-create: "the refusal reaches the person as a toast" /
-#          "and it reads \"Folder name taken\"" / "and it sits bottom-left"
+#          "and it reads \"Folder name taken\", the frame's shape of words" / "and it sits bottom-left, where frame `08:55` stacks them"
 #   or "the sidebar path reports the refusal with the same words"
 #   (the sidebar opens this form since `commit-log/log-a0b4108-1`, so its
 #   refusal is this onError's too)

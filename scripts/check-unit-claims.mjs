@@ -68,6 +68,28 @@ const claimOf = (text) => {
 
 const reddened = []
 const green = []
+/*
+ * A SIGNAL RESTORES TOO. The restore was a `finally`, which a kill skips: a
+ * preflight stopped during this step on 28 September left a patch applied to
+ * `tasks.service.ts`, with a fresh mtime that made every lane refuse its API
+ * build as stale. The files being patched are restored, bytes and times, on
+ * SIGINT, SIGTERM and SIGHUP before the process goes.
+ */
+let pending = null
+const restore = (files) => {
+  for (const [abs, was] of files) {
+    writeFileSync(abs, was.bytes)
+    utimesSync(abs, was.atime, was.mtime)
+  }
+}
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    if (pending) restore(pending)
+    console.error(`check-unit-claims: ${sig} — ${pending ? `restored ${pending.size} patched file(s)` : 'nothing was patched'}`)
+    process.exit(130)
+  })
+}
+
 const unknown = []
 
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
@@ -108,6 +130,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
     unknown.push(`${name} — names no file under apps/ or packages/, so nothing could be applied`)
     continue
   }
+  pending = backup
 
   let applied = false
   let out = ''
@@ -138,10 +161,8 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
      * 23 September: `person-panel.tsx`, `ai-cost.ts` and four more, all
      * written in the same second this ran).
      */
-    for (const [abs, was] of backup) {
-      writeFileSync(abs, was.bytes)
-      utimesSync(abs, was.atime, was.mtime)
-    }
+    restore(backup)
+    pending = null
   }
   if (!applied) continue
 

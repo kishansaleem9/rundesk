@@ -5,7 +5,7 @@
 # allow (`spaceCreateTypes`), so the rule reads the filtered list's previous item.
 # RE-AIMED 24 September: each create type now declares what a guest may do with it
 # (`guests`), and both menus ask one hook (`useCreatable`); the mistake is the same.
-# Reddens: space-create-menu: "the rule falls where the containers begin"
+# Reddens: space-create-menu: "and the rule falls where the containers begin, immediately above List"
 import io
 p = "/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx"
 a = "                          {i > 0 && type.isContainer && !shown[i - 1].isContainer && (\n                            <DropdownMenuSeparator data-testid=\"create-menu-container-rule\" />\n                          )}"

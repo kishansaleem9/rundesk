@@ -1,5 +1,5 @@
 # Create just dismisses the plan — the facade: a create button that creates nothing.
-# Reddens: create-menu-ai: "Create posts once to /ai/command/execute"
+# Reddens: create-menu-ai: "Create posts once to /ai/command/execute — the door that makes no model call"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '              onClick={() => run.mutate()}\n'

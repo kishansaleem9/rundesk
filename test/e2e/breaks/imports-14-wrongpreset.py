@@ -1,7 +1,7 @@
 # Check 14 — record every run as the generic preset, so the job cannot say which
 # of the frame's named tools it actually read. (Also fails check 18's badge.)
 #
-# Reddens: imports: "and records WHICH importer ran, and under which preset"
+# Reddens: imports: "\\n▶ …and records WHICH importer ran, and under which preset"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/integrations/clickup-import/spreadsheet-import.service.ts'
 s = io.open(p, encoding='utf-8').read()

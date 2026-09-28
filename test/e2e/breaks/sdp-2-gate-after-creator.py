@@ -6,9 +6,9 @@
 # Re-aimed 25 September: Full edit is asked where it was offered (`full-edit-enforced-nowhere`).
 # Reddens: space-default-permission:
 #   "renaming their OWN list in a view-only space is refused with 403"
-#   "and the list really is unchanged"
-#   "deleting it is refused too"
-#   "`comment` — the rung between — is refused as well"
+#   "and the list really is unchanged — the refusal was not cosmetic"
+#   "deleting it is refused too, not only renaming it"
+#   "`comment` — the rung between — is refused as well, so the gate is a ladder and not an `=== \"view\"`"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = "  if (params.spaceId) {\n    await assertSpaceLevel(db, {\n      spaceId: params.spaceId,\n      actorId: params.actorId,\n      required: action === 'delete' ? 'admin' : 'edit',\n      kind: params.kind,\n      within: params.within,\n      ...(action === 'delete' ? { act: 'deleting this' } : {}),\n    })\n  }\n\n  // The creator may always manage / delete their own container.\n  if (params.createdById && params.createdById === params.actorId) return\n"

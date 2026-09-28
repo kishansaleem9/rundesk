@@ -2,8 +2,8 @@
 # draws the FIRST person's preview, under everybody else's name and face. Each
 # card is individually plausible; only reading two of them shows it.
 # Reddens: teams-person-cards "the second card lists the second person's",
-#   "neither card is showing the other person's work", "each card's count is its
-#   own person's (2 and 3)", "the numbered rows are that many", and the empty
+#   "and neither card is showing the other person’s work", "each card's count is its
+#   own person's (2 and 3)", "and the numbered rows are that many", and the empty
 #   card for somebody with nothing on.
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx'

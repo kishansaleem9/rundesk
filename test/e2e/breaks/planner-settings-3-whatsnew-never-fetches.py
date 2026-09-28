@@ -2,7 +2,7 @@
 # pane opens, the empty state renders, and the link is a dead control wearing a
 # reasonable explanation.
 #
-# Reddens: planner-settings: "lists what the workspace actually published, both of them"
+# Reddens: planner-settings: "\"What's new\" lists what the workspace actually published, both of them"
 import io
 p = '/home/user/rundesk/apps/web/src/components/planner-settings-dialog.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -1,5 +1,5 @@
 # A Statuses chip joins the bar — the frame's fourth chip, over a create body that has no statuses parameter.
-# Reddens: space-wizard: "the bar offers the two parts Rundesk can really copy"
+# Reddens: space-wizard: "the bar offers the two parts Rundesk can really copy, and a Space to copy them from"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = "const COPYABLE = ['views', 'features'] as const\n"

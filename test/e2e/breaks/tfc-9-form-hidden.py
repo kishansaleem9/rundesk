@@ -1,6 +1,6 @@
 # The Fields panel goes back to setting values only — no create control
 # anywhere on the task, which is the state the row was opened against.
-# Reddens: task-field-create — "Add fields sits under the description",
+# Reddens: task-field-create — "frame `15:20` — \"Add fields\" sits under the description with the rest of the action row",
 #          "pressing it lands on the Fields tab with the create form already open"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

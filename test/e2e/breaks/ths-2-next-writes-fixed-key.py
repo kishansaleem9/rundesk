@@ -1,8 +1,8 @@
 # The ▶ advances to a fixed key instead of to this list's next status.
-# Reddens: task-header-status — "the advance button will write `cooking`",
-#          "the task is `cooking` when read back", "its category moved with it",
-#          "from `cooking` the same button now offers `shipped`",
-#          "pressing it again really writes `shipped`"
+# Reddens: task-header-status — "the advance button will write `cooking` — the list's own second status",
+#          "the task is `cooking` when read back from the API", "and its category moved with it, so reports and Workload agree with the pill",
+#          "from `cooking` the same button now offers `shipped` — it reads the current status, not a constant",
+#          "and pressing it again really writes `shipped`"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """  const nextStatus =

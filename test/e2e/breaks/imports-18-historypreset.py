@@ -1,7 +1,7 @@
 # Check 18 — the history row stops carrying the preset it ran under, so the list
 # cannot tell a Trello import from a Jira one.
 #
-# Reddens: imports: "the history lists this run under its own source"
+# Reddens: imports: "\\n▶ the history lists this run under its own source"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-import-page.tsx'
 s = io.open(p, encoding='utf-8').read()

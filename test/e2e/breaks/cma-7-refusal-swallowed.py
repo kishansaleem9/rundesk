@@ -1,5 +1,5 @@
 # The provider's own words are replaced by a house sentence, so 503-no-key and 503-rate-limited read alike.
-# Reddens: create-menu-ai: "the 503 is shown with the provider's own words"
+# Reddens: create-menu-ai: "the 503 is shown with the provider's own words, not swallowed and not reduced to a code"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '    onError: (e) => { setPlan(null); setResults(null); setError(describe(e)) },\n'

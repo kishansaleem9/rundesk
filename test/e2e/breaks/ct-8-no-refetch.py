@@ -30,7 +30,7 @@
 # queries stale and refetches nothing, and the sheet's handler makes one pass
 # per burst (`product-siblings/task-sheet-refetch-storm`). So the live refresh
 # is two places now, the panel's own and the sheet's pass, and this takes both.
-# Reddens: comment-thread: "it appears in the thread without leaving it"
+# Reddens: comment-thread: "and it appears in the thread without leaving it"
 import io
 tds = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 

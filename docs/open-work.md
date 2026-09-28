@@ -770,7 +770,7 @@ The new suite `dependency-read-access`, 3/3 on lane 1 (3 of 3 failed before). It
 
 Every report's task set now takes the container rule, not only the private-item rule. `taskInReachFilter` (next to `containerVisibilityFilter`) states it as a predicate over `tasks.list_id` alone, because three of the report queries apply their filter in a left join's ON clause, or never join a project at all. Project health lists only projects the reader may open. A saved report is its owner's (or a manager's) to edit, send and delete; anyone else gets not-found. The mailer runs each report as its owner, and sends nothing, stamped, for an owner who has left or been deleted.
 
-The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the member's own report passed both times). The mailer's half is two unit tests in `scheduled-reports.service.test.ts`, because lanes log a sent email's subject and not its body: it runs a report as its owner, and sends nothing for a departed or deleted one. `rra-1..5`, each compiled; `rra-6..7` are unit claims shown to fail their tests. API unit tests 1627/1627. Five reports still answer a member as the admin in the probe (productivity trend, status durations, time by project, sprints, goals). The first four go through the same filter and had nothing of the space to count (no completions, status changes, time or sprints). Goals take no reader at all and are not measured. Regression on lane 1, 16/16: the new suite, the suites that read reports or the workload (`addressability-live`, `person-panel`, `ai-assign`, `ai-answer-rendering`, `create-menu-ai`), the ones built on the container rule's helper (`request-access`, `space-create-menu`, `space-wizard-views`, `doc-task-links`, `task-depth`, `malformed-ids`, `panel-collapse`), `video1-fast-items`, `video-regression` and `ui-sweep`. In CI.
+The new suite `report-read-access`, 6/6 on lane 1 (5 of 6 failed before; the member's own report passed both times). The mailer's half is two unit tests in `scheduled-reports.service.test.ts`, because lanes log a sent email's subject and not its body: it runs a report as its owner, and sends nothing for a departed or deleted one. `rra-1..5`, each compiled; `rra-6..7` are unit claims shown to fail their tests. `rra-1`, re-aimed onto `taskReadFilterFor` in `viewer-scope.ts` by `time-page-answers-whose-hours-twice`, reddened the overview check at `818f919` (lane 3, baseline 6/6, 28 September). API unit tests 1627/1627. Five reports still answer a member as the admin in the probe (productivity trend, status durations, time by project, sprints, goals). The first four go through the same filter and had nothing of the space to count (no completions, status changes, time or sprints). Goals take no reader at all and are not measured. Regression on lane 1, 16/16: the new suite, the suites that read reports or the workload (`addressability-live`, `person-panel`, `ai-assign`, `ai-answer-rendering`, `create-menu-ai`), the ones built on the container rule's helper (`request-access`, `space-create-menu`, `space-wizard-views`, `doc-task-links`, `task-depth`, `malformed-ids`, `panel-collapse`), `video1-fast-items`, `video-regression` and `ui-sweep`. In CI.
 
 *Fixed next: goals,* a HIGH item of their own below (`found-24-sep/goals-open-across-workspaces`): measured, they were open across organisations as well.
 
@@ -1100,7 +1100,7 @@ The new suite `project-member-levels`, 5 checks: View on a project in an ordinar
 
 *Not changed, recorded:* a member given Full on a project still cannot rename or archive it unless they made it: the container rule asks its maker, an admin or a manager after the level. ClickUp's full edit on a folder allows it. This is the container rule's own question, left as it is here.
 
-### `found-25-sep/lane-databases-drift-from-the-migrations` — open, test tooling, small (found closing `project-roles-narrow-nothing`)
+### `found-25-sep/lane-databases-drift-from-the-migrations` — **closed** (test tooling, small; found closing `project-roles-narrow-nothing`)
 
 **Lanes 2 to 4's databases lacked four unique indexes and a dropped default; lanes 6 to 10 lacked two migrations**
 
@@ -1109,6 +1109,46 @@ The new suite `project-member-levels`, 5 checks: View on a project in an ordinar
 *Repaired by hand, 25 September:* the four constraints (no duplicates on any lane) and the default on lanes 2 to 4, and 0160 and 0162 on lanes 6 to 10. Every lane database now matches lane 5's and the pristine database's indexes, columns and defaults.
 
 *To close:* a gate before a lane is used (`fleet-restart.sh`, and `verify.sh`'s staleness refusal) that compares the lane's indexes, constraints, columns and defaults with the pristine database, and refuses one that differs. Show that it catches a dropped index.
+
+*Closed, 28 September.* Measured first: the pristine database was not a sound reference. It lacked 0164's default (`spaces.default_permission` `'edit'`, where the source and 0164 say `'admin'`), and so did lanes 6 to 10, which were restored from it. Lanes 2 and 4 had lost two foreign keys (`skill_connections.connection_id`, `workspace_member_custom_roles.workspace_member_id`).
+
+The reference is `rundesk_schema_ref` instead: the pristine dump with the current schema source pushed onto it. That is what `fleet-sync.sh` does to a lane, and how CI builds its database. It is rebuilt, under a lock, when the schema source or the migrations change (16s).
+
+`lane_schema_drift` (`lane-env.sh`) compares a database with the reference, line by line:
+- columns (type, nullability, default), indexes, constraints and enums;
+- leaving out index and constraint names, since push's `…_fk` and a migration's `…_fkey` are the same key.
+
+It prints each `missing:` / `extra:` line. The gate is used in three places:
+- `verify.sh` refuses a drifted lane with exit 9, naming what differs.
+- `fleet-restart.sh` refuses to start one.
+- The sweep's summary and the README list the new exit code.
+
+Repaired on 28 September:
+- lanes 2 and 4: the two foreign keys (no orphans);
+- pristine and lanes 8 to 10: 0164 applied;
+- lanes 6 and 7: the default (their rows' 0164 update waited for the suites running on them).
+
+All eleven databases then read as no drift, and `pristine.dump` was re-dumped.
+
+`schema-drift-selfcheck.sh`, in preflight: 6/6 on copies of the reference.
+- The copy itself: no drift.
+- A dropped `uq_folders_space_name_active`: named as missing.
+- `pinned_links`'s `'[]'` default put back: named as extra.
+- A foreign key dropped: named as missing.
+- The same key renamed: not drift.
+- A database that cannot be read: exit 2, not a pass. The first run of the self-check found the gate reading such a database as "everything missing", because `psql` was piped straight into `sort`. It reads psql's own status now.
+
+End to end, the case this item was found by: with `uq_folders_space_name_active` dropped on lane 10, `verify.sh folder-create 10` refused with exit 9, naming the index, before the suite ran. The index was put back and lane 10 reads as no drift again.
+
+### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — partly-fixed, test tooling, small (found stopping a preflight)
+
+**A preflight stopped during "the unit claims redden too" left a break patch applied to the product, with a fresh time on the file**
+
+*Evidence, 28 September:* the preflight was stopped during `check-unit-claims.mjs`. `apps/api/src/modules/tasks/tasks.service.ts` was left with a unit patch applied: the dependency read had lost its workspace condition. The patch also gave the file a new mtime, so every lane then refused its API build as stale (`verify.sh` exit 7). `video-regression` was refused that way in a sweep. The restore was a `finally`, which a signal skips. The file was restored by hand, with its old time.
+
+*Fixed, 28 September:* `check-unit-claims.mjs` holds the files it is patching in `pending` and restores them, bytes and times, on SIGINT, SIGTERM and SIGHUP before exiting. A synchronous child (the unit run) finishes first, and then the restore runs.
+
+*To close:* stop a run mid-patch and read the tree. It must be unchanged in content and in time. Not measured yet: the check patches the shared tree, and agents were editing it.
 
 ### `found-25-sep/task-sheet-offers-refused-edits` — **closed** (visible bug, medium; found closing `task-edits-narrower-than-clickup`)
 
@@ -1949,13 +1989,21 @@ Results:
 
 Regression on lanes 2 to 5: the 12 suites that open the sheet's subtasks, its menu, the Trash or archiving, and the new suite. Result: 13/13. In CI (191).
 
-### `found-25-sep/fixture-builds-in-a-space-it-did-not-check` — open, test tooling, small (found closing `full-edit-enforced-nowhere`)
+### `found-25-sep/fixture-builds-in-a-space-it-did-not-check` — **closed** (test tooling, small; found closing `full-edit-enforced-nowhere`)
 
 **The sweep fixture picks a workspace by walking every space, then builds in the first space whatever it holds**
 
 *Evidence:* `pickWorkspace` (`test/e2e/lib/fixture.mjs`) accepts a workspace when any of its spaces has a project with a list. `ensureSweepFixture` then takes `spaces[0]` and throws "space has no projects" when that one is empty. On lane 4 a space left by an interrupted `space-default-permission` run came first, and nine suites died before their first check. The two helpers answer one question two ways.
 
 *To close:* one walk for both, so the fixture builds where the workspace was picked for. A leftover empty space should not end a run.
+
+*Closed, 28 September:* `firstSweepList` (`test/e2e/lib/fixture.mjs`) walks spaces, their projects and their lists in order and returns the first list found. `pickWorkspace` accepts a workspace by it, and `ensureSweepFixture` builds in what it returns. So a space or project left empty is passed over by both. A workspace with nothing to build in says so ("no space of this workspace has a project with a list") instead of failing on its first space.
+
+`scripts/check-sweep-fixture-cases.mjs` drives the fixture against an in-memory API, 5 cases:
+- HEAD's fixture: 2 of 5. It failed on "space has no projects" and "project has no lists".
+- Now: 5/5, and `--mutate` 4 of 4 bite.
+- In preflight and CI.
+- The 11 suites that build with it ran in the regression sweep of 28 September.
 
 ### `found-24-sep/sprints-open-to-any-member` — **closed** (security, HIGH; found measuring the last four reports of `workspace-reads-skip-the-container-rule`)
 
@@ -2461,13 +2509,36 @@ An exact scan of every suite's latest report counted 305 of 990 claims not found
 - For a claim with no interpolation in its check, require the whole normalised sentence: in `check-break-claims`, and in the reddened checker against FAIL lines. Keep the fragment rule only where the suite's sentence is a template.
 - Then re-aim what that finds.
 
-### `found-25-sep/ledger-ids-cited-unchecked` — open, test tooling, small (found closing `personal-calendar-connect-needs-integrations-manage`)
+*Measured, 28 September (all 2,002 quoted claims of every patch against its suite's source, with continuation markers stripped):*
+- **The five-word rule** confirms all but 1.
+- **The claim as a substring of the suite's normalised text:** 1,943 match exactly and 54 fully match a template sentence. Only 4 are confirmed by a fragment alone:
+  - `ac-3`, "laid out as two rows of four", where the check says "and lays the eight tiles out…";
+  - `list-customize-4`, whose claim writes `\u2019` where the suite has the apostrophe itself;
+  - `app-catalogue-5` and `-6`, which do match their template.
+- **Whole-sentence equality** (the claim equals one of the suite's string literals, or fully matches one of its template literals, a template with at least 16 literal characters): 392 fail. These are patches that quote a clause of a longer check sentence ("each opening its OWN tab of that list"), or a label the page shows ("Find Blockers").
+
+That is the size of the re-aim this item asks for.
+
+*Progress, 28 September:* 241 claims in 209 patches were re-aimed mechanically. A clause found in exactly one of its suite's literal sentences is rewritten to that whole sentence. Only headers changed, and a header is a comment, so no measurement moves:
+- `check-break-claims` still verifies every claim;
+- `check-break-patches` still applies the same patches;
+- `check-break-reddened` reads 746 reddened before and after.
+
+84 are left for reading: 74 that no single sentence holds, and 10 fragments of template sentences under five words. The gate itself (whole sentences only) comes with them.
+
+### `found-25-sep/ledger-ids-cited-unchecked` — **closed** (test tooling, small; found closing `personal-calendar-connect-needs-integrations-manage`)
 
 **A ledger id cited in the code is never checked against the ledger**
 
 *Evidence, measured:* I cited `found-25-sep/meetings-upcoming-reads-no-calendar` in `workspace-meetings-page.tsx` and in `meetings-connect-calendar`, and named the ledger item `found-25-sep/connected-calendars-read-by-nothing`. Nothing noticed, and it was committed in `080102d`; it is corrected in the next commit. Across `apps/`, `test/`, `scripts/`, `deploy/` and `packages/`, 74 distinct ids are cited. That one named no ledger item, and one more is a citation wrapped over two comment lines (`found-23-sep/clip-library-lists-the-` / `oldest-200`).
 
 *To close:* a gate, in preflight and CI, that reads every id cited in the code against the ledger's headings, joining a citation wrapped at a hyphen. Show that it catches a misnamed id.
+
+*Closed, 28 September:* `scripts/check-ledger-ids.mjs` reads every id cited under `apps/`, `test/`, `scripts/`, `deploy/`, `packages/` and `.github/` and fails on one that is no heading of this ledger. It joins a citation wrapped at a hyphen over two comment lines before reading it. A path running through a section name (`test/harness/…`) is not a citation, and `node_modules` and `dist` are not read. A ledger with no headings, or a tree citing nothing, fails rather than passes.
+- On this tree: ok, 101 ids cited, all among the 293 headings. The wrapped `clip-library-lists-the-` / `oldest-200` joins and passes.
+- On `080102d`'s tree: it fails, naming `found-25-sep/meetings-upcoming-reads-no-calendar` at `workspace-meetings-page.tsx:217` and `meetings-connect-calendar.mjs:17`. That is the miss this item was found by.
+- `check-ledger-ids-cases.mjs`: 9 cases; `--mutate` 8 of 8 bite.
+- Both are in preflight and CI.
 
 ### `found-24-sep/meetings-connect-calendar-goes-to-settings` — **closed** (visible bug, small; found reading `custom-role-permissions-unread-by-web`)
 
@@ -2878,7 +2949,7 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *To close:* Add packages/feature-flags/src to the API scan. Compare the build stamp against the lane API's start time, e.g. `ps -o lstart` of the PID listening on 302k, or a stamp fleet-restart and wt-break touch on launch, and refuse when the process predates the stamp. Add the apps/web root config files and index.html to the web scan. Correct build-api.sh:34-36 and README.
 
-### `harness/wt-break-double-vite-build` — open, small
+### `harness/wt-break-double-vite-build` — **closed** (small)
 
 **wt-break.sh builds the web bundle twice on every restore**
 
@@ -2886,13 +2957,21 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *To close:* Delete one of the two lines.
 
-### `harness/wt-break-unchecked-restart-and-restore` — open, small
+*Closed, 28 September:* the restore builds the bundle once, and that build is checked now (below).
+
+### `harness/wt-break-unchecked-restart-and-restore` — **closed** (small)
 
 **wt-break.sh ignores restart failures and the restore/sync build and push steps**
 
 *Evidence:* restart() returns 1 when the lane API never answers health (wt-break.sh:121-125). Its return value is ignored at :431, before each API patch's suite run, and also at :261 and :499. A lane that failed to come up for environmental reasons (for example 'too many clients', verify.sh:20-22) then runs the suite against a dead port. Every check fails, and check-break-reddened.mjs:473-479 credits the claim as REDDENED. The sync-block schema push at :243-245 is unchecked, while the per-patch push at :411-415 is checked. The restore steps at :484-487 (push, API tsc) are unchecked, which leaves the lane on the last patch's binary if tsc dies. A same-sha next set then skips the sync block at :236, so nothing rebuilds the API before its baseline.
 
 *To close:* `restart || { echo "== $b API DID NOT COME UP" >> "$OUT"; continue; }`, and add that suffix to the non-measurement list in measuredAt. Check the sync push and the restore tsc, and on failure refuse with exit 4 the way the builds do.
+
+*Closed, 28 September:* the line numbers above had moved, and the three gaps were as described.
+- **The sync block's schema push** is checked: `== SCHEMA PUSH FAILED`, exit 4.
+- **A patch's restart** is checked. If the API does not come up, the patch is recorded as `== <patch> API DID NOT COME UP on <port> — not measured` and the suite does not run. The lane stays dirty, so the next patch rebuilds and restarts it. `NOT_RUN` (`scripts/lib/log-tree.mjs`), `classify-break-log.awk` (UNBUILT) and `check-break-freshness.mjs` count that line as a patch that never ran. `check-log-tree.mjs` gained the case: 48 cases, 15 of 15 mutations bite.
+- **The restore** checks the push, the API build, the one bundle build and the restart. On any failure it writes `== RESTORE FAILED: …`, leaves the stamp unwritten (so the next run syncs) and exits 4 instead of printing DONE.
+- `bash -n` passes and `check-lane-scripts-whole` still reads it whole. The set runs of 28 September went through the new restore; the failure branches are verified by reading only.
 
 ### `found-23-sep/doc-import-never-exits` — **closed**
 
@@ -2999,7 +3078,7 @@ Now:
 `time-approval-rule`, 9 checks:
 - Before: 1 of 9 against the old API (lane 1, at `0b2db8e`). The one that passed pins the everyone-views, which the fix leaves as they were. On lane 5, with the old page as well, the page check read "only workspace admins can approve".
 - After: 9/9 on lanes 5 and 4.
-- Patches `tar-1..10`: each reddened the check it names (lane 1, baseline 9/9 at `9588fa0`).
+- Patches `tar-1..10`: each reddened the check it names (lane 1, baseline 9/9 at `9588fa0`). `tar-8`, re-aimed onto `timeReach` by `time-page-answers-whose-hours-twice`, reddened it again at `818f919` (lane 3, 28 September).
 - Regression: the 15 suites that touch time, roles, permissions or notices, and the new one. 15 of 16 passed in the sweep; `person-panel` missed "shows their email" under the sweep's load and passed alone (59/59).
 - API unit tests 1652/1652, web 305/305.
 - In CI (201).
@@ -3144,7 +3223,7 @@ The approvals response says the reach (`timeReach`: all, team or own). The month
 `time-page-reach`, 6 checks:
 - Before: 2 of 6.
 - After: 6/6 on lanes 5 and 4.
-- Patches `tpr-1..6`, each compiled. Their break run is owed (`docs/resume-2026-09-26.md` §3).
+- Patches `tpr-1..6`: each reddened the check it names (lane 1, baseline 6/6 at `818f919`, 28 September). The re-aimed `rra-1` reddened `report-read-access`'s overview check (lane 3, baseline 6/6), and `tar-8` reddened `time-approval-rule`'s rollup label (lane 3, baseline 9/9).
 - Regression, in two sweeps: the 12 suites that read time or reports, the 6 that read the workload report through the moved helper, and the new one. 19/19.
 - API unit tests 1652/1652.
 - In CI (208).
@@ -3290,7 +3369,7 @@ Now:
 
 *Closed:* both the content and the sub-content are capped at Radix's `--radix-dropdown-menu-content-available-height` and scroll (`overflow-y-auto`), so every menu fits the space on its side; the topbar check in `sw-api-cache` asserts the menu's bottom is inside the window before it signs out. Every dropdown in the app uses this component, so the suites that drive menus were re-run on lane 1, 16/16: comment-plus-menu, person-panel, planner-priorities, settings-depth, video1-fast-items, ai-activity-filters, ai-model-picker, create-menu-ai, space-create-menu, task-menu, task-menu-favorite-archive, task-delete, task-field-create, template-center, list-under-space and sw-api-cache.
 
-### `found-23-sep/routes-bypassed-by-the-service-worker` — open, medium (test tooling; found with the item above)
+### `found-23-sep/routes-bypassed-by-the-service-worker` — **closed** (medium, test tooling; found with the item above)
 
 **A page route never sees a request the service worker answers, so a suite that holds or fails an API call by route can be looking at an answer that already arrived**
 
@@ -3299,6 +3378,23 @@ Now:
 *To close:* `serviceWorkers: 'block'` in each of the four, and every hold asserts that it held (a flag set in the handler, as `webhook-access` does), so a route that never fires fails its check instead of passing it. A rule in the suite checkers: a `.route(` in a file whose contexts do not block service workers.
 
 *Progress:* `clip-created-card` blocks the worker now (with `clip-create-task-persists-24h-url`), and its handlers catch their own errors. It holds nothing. Its routes stand in for presign and share, and its checks count them, so a route that never fired would fail them rather than pass. `chat-history` too, found when its run died on "route.continue: Route is already handled!": the held first page's handler did not catch, and the route was taken down straight after the release, so Playwright settled the request first. It blocks the worker, its handler catches, the check requires that the hold fired, and the route comes down once the rows are in (18/18 in the chat sweep). Two to go: `create-menu-ai`, `ui-sweep`.
+
+*Closed, 28 September.*
+- `create-menu-ai` blocks the worker. Its stood-in plan counts the times it was served, and the plan check requires that it was.
+- `ui-sweep` blocks the worker too; its route is a filter, not a hold.
+
+The rule is `scripts/check-suite-routes.mjs`. Every `newContext(…)` / `browser.newPage(…)` of a suite that calls `.route(` says what the worker does: `serviceWorkers: 'block'`, or `'allow'` where the worker is meant. Options held in a variable are followed.
+
+It found three contexts the grep had not counted:
+- two in `stale-chunk-recovery`, which keeps the worker because the worker is part of what it tests (`'allow'`, said now);
+- `video-regression`'s main context, which routes nothing (`'allow'`); its AI section already opened a blocking one.
+
+Measured:
+- On HEAD's suites the gate names all five contexts. Now: ok, 34 routing suites, 38 contexts.
+- `check-suite-routes-cases.mjs`: 11 cases, 8 of 8 mutations bite.
+- The four suites on lanes 1 and 3: `create-menu-ai` 24/24, `stale-chunk-recovery` 27/27, `ui-sweep` 107/107, `video-regression` 93/93.
+- `create-menu-ai` with its route aimed at a path nobody asks for: the plan check fails, "the stood-in plan was never asked for: the route did not fire".
+- In preflight and CI.
 
 ### `found-23-sep/secret-and-credential-reads` — **closed** (from a read-only sweep of every credential column, each measured before it was fixed)
 
@@ -3467,13 +3563,22 @@ Measured:
 
 *Closed:* `lane_api_down` (lane-env.sh) is the one stop path of `fleet-up.sh` and `fleet-restart.sh`, and it now removes the lane's stamp first, whether or not anything was listening. `fleet-sync.sh` stops every API with `pkill`, so it removes every stamp. `wt-break.sh` stops its own API without that function and, as before, rewrites the stamp once its restart is up. `check-lane-api-down.sh` now requires the stamp to be gone after the polite, stubborn and empty cases, and it catches a mutation that keeps the stamp (4 of 4 mutations caught). The next `build-api.sh "1 2 3 4"` removed all three stale stamps.
 
-### `found-24-sep/two-sweeps-share-one-record` — open, medium (found running the search regression)
+### `found-24-sep/two-sweeps-share-one-record` — **closed** (medium; found running the search regression)
 
 **Two sweeps at once write one status file and one results file, and the second truncates the first's**
 
 *Evidence:* `sweep.sh` writes `/tmp/claude-0/sweep-status.txt` and `sweep-results.txt`, fixed paths, and truncates both when it starts. With a sweep running on lane 1 (14 suites recorded passed), a second one started on lanes 3 and 4 for the last two suites emptied both files. The first sweep's end-of-run summary is computed from that status file, so it would report on a mixture. The results survived only because `verify.sh` keeps each suite's own log (`/tmp/claude-0/run-<suite>.log`). This is the same shape as `one-suite-two-lanes-share-a-results-file`, one level up.
 
 *To close:* each sweep writes its own status and results (named by its pid), and the canonical paths become links to the newest, or the script refuses to start while a live sweep holds a lock. Add a self-check that runs two sweeps of stand-in suites at once and requires each summary to count only its own.
+
+*Closed, 28 September.* Reading it again found a third shared file: the QUEUE. A second sweep overwrote the first's, so the first sweep's workers could take the second's suites.
+
+Now each sweep keeps its status, results, queue and lock in `sweeps/<pid>/`, and says so on its first line. `sweep-status.txt` and `sweep-results.txt` are links to the newest sweep's files.
+
+`sweep-selfcheck.sh` runs two sweeps of stand-in suites at once in a scratch directory: six passing on two lanes, and three (one passing) on a third lane, started under the first. Nothing is shared between them, and no lane is touched.
+- HEAD's `sweep.sh`, its fixed paths moved into the scratch directory: 0 of 6. The first sweep summed "3 of 5 passed" and "5 of 6 suites reported", the second "2 of 3".
+- Now: 6/6.
+- In preflight and CI.
 
 ### `found-24-sep/killed-suite-left-a-second-web-package` — **closed** (found by preflight after a container restart)
 

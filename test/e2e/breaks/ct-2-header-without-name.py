@@ -1,7 +1,7 @@
 # A PANEL HEADED "THREAD". Every other thing about it is right and the one
 # fact the frame's header exists to give — whose comment you are reading —
 # is gone. In a task with twelve comments that header orients nobody.
-# Reddens: comment-thread: "the header reads \"Thread by <name>\""
+# Reddens: comment-thread: "the header reads \"Thread by <name>\", with the comment author's real name in it"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = "  'taskDetail.threadBy': 'Thread by {{name}}',"

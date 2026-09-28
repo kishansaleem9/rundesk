@@ -263,7 +263,8 @@ const browser = await chromium.launch(LAUNCH)
 
 /** Open a tab on release A and wait for the shell. */
 async function openTab() {
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // The worker is part of what recovers a stale tab, so it stays.
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'allow' })
   await ctx.route('**/api/**', (route) =>
     route.fulfill({
       status: 200,
@@ -546,7 +547,8 @@ console.log('\n5. a tab that is only out of date, with nothing broken')
   keepOldAssets = true
   breakPalette = false
 
-  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 } })
+  // The worker is part of what recovers a stale tab, so it stays.
+  const ctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, serviceWorkers: 'allow' })
   await ctx.route('**/api/**', (route) =>
     route.fulfill({
       status: 200,

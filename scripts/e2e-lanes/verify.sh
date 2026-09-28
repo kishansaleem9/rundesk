@@ -51,6 +51,8 @@ set -u
 cd /home/user/rundesk
 SUITE="$1"; LANE="${2:-1}"
 PORT=$((3020 + LANE))
+# The lane helpers (`lane_schema_drift`); it defines functions and sets nothing else.
+. /home/user/rundesk/scripts/e2e-lanes/lane-env.sh
 DIST="/tmp/claude-0/dist-$LANE"
 [ -f "$DIST/index.html" ] || DIST="apps/web/dist"
 
@@ -193,6 +195,23 @@ if [ -n "$LANE_PID" ]; then
     echo "   bash scripts/e2e-lanes/build-api.sh \"$LANE\""
     exit 7
   fi
+fi
+
+# ── AND THE LANE'S DATABASE HAS THE SCHEMA THE SOURCE SAYS. ─────────────────
+#
+# Lanes 2 to 4 lacked four unique indexes and a dropped default, and lanes 6 to
+# 10 two migrations, and every suite run on them reported on "the product"
+# (`found-25-sep/lane-databases-drift-from-the-migrations`). On 28 September
+# this found lanes 6 to 10 still on 0164's old default and lanes 2 and 4 without
+# two foreign keys. `lane_schema_drift` (lane-env.sh) compares the lane with the
+# pristine dump plus the current schema source, and a lane that differs is
+# refused, naming what differs.
+if ! DRIFT=$(lane_schema_drift "rundesk_v$LANE"); then
+  echo "== $SUITE (lane $LANE) REFUSING — rundesk_v$LANE does not have the schema the source says:"
+  printf '%s\n' "$DRIFT" | head -8 | sed 's/^/   /'
+  echo "   push the schema to it (and apply any data migration it lacks), then run again:"
+  echo "   (cd packages/db && DATABASE_URL=postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE pnpm exec drizzle-kit push --force)"
+  exit 9
 fi
 
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers

@@ -2,7 +2,7 @@
 # truthiness test, so every edit is accepted except the one that erases: empty
 # the box, press Save, get a 200, reopen it and the old words are back. No
 # error, no failing check, nothing on screen to say the edit was refused.
-# Reddens: folder-dialog: "emptying the box really deletes it"
+# Reddens: folder-dialog: "and emptying the box really deletes it — the field works in both directions"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = "    if (patch.description !== undefined) set.description = patch.description?.trim() || null"

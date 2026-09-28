@@ -1,5 +1,5 @@
 # The picker takes one file again, so a second pick silently replaces the first.
-# Reddens: attach-on-create: "the file input accepts several files at once"
+# Reddens: attach-on-create: "the file input accepts several files at once, behind a paperclip a person can press"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '            type="file"\n            multiple\n'

@@ -1,7 +1,7 @@
 # Leave the slot empty on the List view — which is what it was before frame
 # `11:00` was read: the board's three correctly absent, and nothing in their
 # place. The "board switches are not here" check passes on exactly this.
-# Reddens: list-customize: "the List view carries its own trio there"
+# Reddens: list-customize: ") const listTrio = await Promise.all( ['task-locations', 'subtask-parents', 'closed'].map((n) => listSwitch(n).count()), ) const trioBlock = await page.getByTestId('list-list-settings').count() chk( trioBlock === 1 && listTrio.every((n) => n === 1), 'the List view carries its own trio there — task locations, subtask parent names, closed tasks',"
 import io
 p = "/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx"
 a = "        {isList && (\n"

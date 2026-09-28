@@ -2,7 +2,7 @@
 # own search box instead. A check asserting "a search field appeared" passes on
 # this; only looking for the palette's OWN controls catches it. This is the
 # defect that gave this codebase three field-type pickers.
-# Reddens: planner-command-bar: "what opened is the shared palette"
+# Reddens: planner-command-bar: "and what opened is the shared palette — its source tabs and type picker are both there"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '            <CommandPalette open={paletteOpen} onOpenChange={setPaletteOpen} />\n'

@@ -55,6 +55,30 @@ export function apiClient(base, token) {
 export const login = signInApi
 
 /**
+ * The first list of `workspaceId` a sweep can use, walking its spaces, their
+ * projects and their lists in order: `{ spaceId, projectId, listId }`, or null.
+ *
+ * ONE WALK, for picking a workspace and for building in it. They were two:
+ * `pickWorkspace` accepted a workspace when ANY space had a project with a
+ * list, and `ensureSweepFixture` then took `spaces[0]` whatever it held. On
+ * lane 4 a space left empty by an interrupted run came first, and nine suites
+ * died on "space has no projects" before their first check
+ * (`found-25-sep/fixture-builds-in-a-space-it-did-not-check`). A leftover empty
+ * space is passed over now, by both.
+ */
+export async function firstSweepList(api, workspaceId) {
+  const spaces = (await api(`/spaces/workspace/${workspaceId}`)).data ?? []
+  for (const space of spaces) {
+    const projects = (await api(`/projects/space/${space.id}`)).data ?? []
+    for (const project of projects) {
+      const lists = (await api(`/lists/project/${project.id}`)).data ?? []
+      if (lists.length) return { spaceId: space.id, projectId: project.id, listId: lists[0].id }
+    }
+  }
+  return null
+}
+
+/**
  * The workspace a sweep should run against.
  *
  * Not simply `workspaces[0]`: an account can carry throwaway workspaces from
@@ -67,14 +91,7 @@ export async function pickWorkspace(api) {
   const candidates = rows.map((r) => r.workspace ?? r).filter((w) => w?.id)
   if (!candidates.length) throw new Error('this account can see no workspace')
   for (const ws of candidates) {
-    const spaces = (await api(`/spaces/workspace/${ws.id}`)).data ?? []
-    for (const space of spaces) {
-      const projects = (await api(`/projects/space/${space.id}`)).data ?? []
-      for (const project of projects) {
-        const lists = (await api(`/lists/project/${project.id}`)).data ?? []
-        if (lists.length) return ws
-      }
-    }
+    if (await firstSweepList(api, ws.id)) return ws
   }
   return candidates[0]
 }
@@ -85,17 +102,9 @@ export async function pickWorkspace(api) {
  * @returns {{ spaceId, projectId, listId, listPath, created: number }}
  */
 export async function ensureSweepFixture(api, workspaceId, { minTasks = 6 } = {}) {
-  const spaces = (await api(`/spaces/workspace/${workspaceId}`)).data ?? []
-  if (!spaces.length) throw new Error('workspace has no spaces — nothing to build a fixture in')
-  const spaceId = spaces[0].id
-
-  const projects = (await api(`/projects/space/${spaceId}`)).data ?? []
-  if (!projects.length) throw new Error('space has no projects')
-  const projectId = projects[0].id
-
-  const lists = (await api(`/lists/project/${projectId}`)).data ?? []
-  if (!lists.length) throw new Error('project has no lists')
-  const listId = lists[0].id
+  const found = await firstSweepList(api, workspaceId)
+  if (!found) throw new Error('no space of this workspace has a project with a list — nothing to build a fixture in')
+  const { spaceId, projectId, listId } = found
 
   const existing = (await api(`/tasks/list/${listId}`)).data ?? []
   const already = Array.isArray(existing) ? existing : (existing.tasks ?? [])

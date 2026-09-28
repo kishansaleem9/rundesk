@@ -1,5 +1,5 @@
 # A Clear filters that clears one of three.
-# Reddens: ai-activity-filters: "Clear filters clears all three, not just the one it used to know about"
+# Reddens: ai-activity-filters: "and Clear filters clears all three, not just the one it used to know about"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-value-panel.tsx'
 a = '                    setMineOnly(false)\n'

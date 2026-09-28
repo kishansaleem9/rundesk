@@ -42,13 +42,27 @@ if [ "${#SUITES[@]}" -eq 0 ]; then
   mapfile -t SUITES < <(ls test/e2e/*.mjs | xargs -n1 basename | sed 's/\.mjs$//')
 fi
 
-OUT=/tmp/claude-0/sweep-results.txt
-STATUS=/tmp/claude-0/sweep-status.txt
-QUEUE=/tmp/claude-0/sweep-queue.txt
-LOCK=/tmp/claude-0/sweep-queue.lock
+# EACH SWEEP HAS ITS OWN RECORD. The status, results, queue and lock were four
+# fixed paths, truncated when a sweep started: a second sweep emptied the
+# first's status and results mid-run, so the first's summary counted a mixture,
+# and it overwrote the first's QUEUE, so the first's workers could take the
+# second's suites (`found-24-sep/two-sweeps-share-one-record`). Now they live in
+# `sweeps/<pid>/`, and the familiar paths are links to the newest sweep's files
+# for a reader who wants "the last sweep". `SWEEP_DIR` and `SWEEP_VERIFY` move
+# the record and stand in for verify.sh, for `sweep-selfcheck.sh`.
+BASE="${SWEEP_DIR:-/tmp/claude-0}"
+RUN="$BASE/sweeps/$$"
+mkdir -p "$RUN"
+OUT="$RUN/sweep-results.txt"
+STATUS="$RUN/sweep-status.txt"
+QUEUE="$RUN/sweep-queue.txt"
+LOCK="$RUN/sweep-queue.lock"
+VERIFY="${SWEEP_VERIFY:-$HERE/verify.sh}"
 : > "$OUT"
 : > "$STATUS"
 printf '%s\n' "${SUITES[@]}" > "$QUEUE"
+ln -sfn "$OUT" "$BASE/sweep-results.txt"
+ln -sfn "$STATUS" "$BASE/sweep-status.txt"
 
 # Take the next suite off the queue, under a lock, so two lanes never run one.
 next_suite() {
@@ -66,13 +80,13 @@ worker() {
   while :; do
     suite="$(next_suite)"
     [ -z "$suite" ] && return 0
-    bash "$HERE/verify.sh" "$suite" "$lane" >> "$OUT" 2>&1
+    bash "$VERIFY" "$suite" "$lane" >> "$OUT" 2>&1
     code=$?
     ( flock 9; echo "$code $suite lane$lane" >> "$STATUS" ) 9> "$LOCK"
   done
 }
 
-echo "sweep: ${#SUITES[@]} suite(s) across lanes ${LANES[*]} at $(git rev-parse --short HEAD)"
+echo "sweep: ${#SUITES[@]} suite(s) across lanes ${LANES[*]} at $(git rev-parse --short HEAD) — its record is $RUN"
 PIDS=()
 for lane in "${LANES[@]}"; do
   worker "$lane" &
@@ -89,7 +103,7 @@ if [ "$total" -ne "${#SUITES[@]}" ]; then
   exit 1
 fi
 if [ "$bad" -gt 0 ]; then
-  echo "sweep: these did not pass (exit, suite, lane) — 6 and 7 are verify.sh refusing a stale build:"
+  echo "sweep: these did not pass (exit, suite, lane) — 6 to 9 are verify.sh refusing: a stale bundle or build, another tree on the port, or a database whose schema differs:"
   awk '$1 != 0' "$STATUS" | sort -k2
   exit 1
 fi

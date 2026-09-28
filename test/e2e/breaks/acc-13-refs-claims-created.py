@@ -2,7 +2,7 @@
 # chips in an answer announces "Created" on every render — wrong in the access log,
 # wrong for any client branching on the status, and indistinguishable from the
 # create path this suite is about. This is the defect the suite actually found.
-# Reddens: ai-create-containers: "the list the AI made resolves through /ai/refs, and the read answers 200 rather than "Created""
+# Reddens: ai-create-containers: "the list the AI made resolves through /ai/refs, and the read answers 200 rather than \"Created\""Created""
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.controller.ts'
 a = "  @HttpCode(HttpStatus.OK)\n  @ApiOperation({ summary: 'Resolve task/list references in an AI answer (live titles and statuses)' })\n"

@@ -1,5 +1,5 @@
 # Create with AI becomes pressable with nothing in the box, so it would send an empty prompt.
-# Reddens: create-menu-ai: "with the box empty the button is not pressable"
+# Reddens: create-menu-ai: "with the box empty the button is not pressable, and says why"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          disabled={!text || busy}\n'

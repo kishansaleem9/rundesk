@@ -2,7 +2,7 @@
 # list actually draws. The endpoint answers, the array is the right length,
 # and the id it contains matches nothing on screen — a confident answer to
 # a question nobody can act on.
-# Reddens: "the Subtasks source is the PARENT of the child assigned to me",
+# Reddens: "the Subtasks source is the PARENT of the child assigned to me, not the child",
 #          "Subtasks adds the PARENT of the child assigned to me".
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'

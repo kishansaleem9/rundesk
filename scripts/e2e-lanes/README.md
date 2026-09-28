@@ -56,6 +56,7 @@ into a thundering herd.
 | 6 | the lane's bundle is older than a web source file — anything under `apps/web/src`, `packages/ui/src`, `packages/feature-flags/src`, or `apps/web/index.html`, the Vite/Tailwind/PostCSS configs and `public/` |
 | 7 | the API build is older than `apps/api/src`, `packages/db/src` or `packages/feature-flags/src` — or the lane's API process started BEFORE the last build, so it still serves the previous one (`build-api.sh` with no lanes named builds and restarts nothing) |
 | 8 | the process on the lane's port is not serving this tree at all — a break worktree's API left running by `wt-break.sh` |
+| 9 | the lane's database does not have the schema the source says — an index, a constraint, a column or a default differs from `rundesk_schema_ref` (the pristine dump with the current schema source pushed onto it; `lane_schema_drift` in `lane-env.sh`) |
 
 The scans use `find -newer`, so a file with `$` in its name (TanStack routes:
 77 of them) is seen like any other; an earlier `xargs sh -c` expanded the `$`

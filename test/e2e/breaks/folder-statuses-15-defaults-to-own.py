@@ -2,7 +2,7 @@
 # control still works; it just starts on the value the frame does not show, so
 # every folder made by somebody who did not touch the row gets the opposite of
 # what the product promises.
-# Reddens: folder-dialog: "and it starts on Use Space statuses"
+# Reddens: folder-dialog: "and it starts on Use Space statuses, which is the value the frame shows"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = "const [statusScope, setStatusScope] = useState<'space' | 'list'>('space')"

@@ -5,10 +5,10 @@
 # a check that cannot say no.
 # Reddens: space-default-permission:
 #   "renaming their OWN list in a view-only space is refused with 403"
-#   "and the refusal says WHY"
-#   "and the list really is unchanged"
-#   "deleting it is refused too"
-#   "`comment` — the rung between — is refused as well"
+#   "and the refusal says WHY — the space's default permission, not a generic denial"
+#   "and the list really is unchanged — the refusal was not cosmetic"
+#   "deleting it is refused too, not only renaming it"
+#   "`comment` — the rung between — is refused as well, so the gate is a ladder and not an `=== \"view\"`"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/space-default-permission.ts'
 a = """): Promise<void> {

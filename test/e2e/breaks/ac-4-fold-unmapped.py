@@ -1,5 +1,5 @@
 # An unmapped feature folded into a plausible neighbour instead of reported.
-# Reddens: ai-action-categories: "nine of the ten seeded runs are in a tile" / "the tenth is REPORTED rather than dropped"
+# Reddens: ai-action-categories: "nine of the ten seeded runs are in a tile — the tenth has no category" / "and the tenth is REPORTED rather than dropped"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai-categories.ts'
 a = '    const category = categoryOf(feature)'

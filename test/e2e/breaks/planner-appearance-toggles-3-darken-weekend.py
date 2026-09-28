@@ -2,7 +2,7 @@
 # for a Monday-to-Friday team the two sets coincide exactly, so it demos perfectly and
 # is wrong for every team whose week is not Monday to Friday, and for every holiday.
 #
-# Reddens: planner-appearance-toggles: "is dimmed, so the dimming below is the switch"
+# Reddens: planner-appearance-toggles: "is dimmed, so the dimming below is the switch's doing and not the data's"
 #   and "outside the schedule are dimmed" — the second was named only by a legacy
 #   uppercase REDDENS line that no checker ever read.
 import io

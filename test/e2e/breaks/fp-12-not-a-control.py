@@ -1,7 +1,7 @@
 # The pill made inert. Frame `16:10` draws a hover fill and a pointer cursor on
 # it, so it is a control; a button wired to nothing is the dead-control defect,
 # and it is invisible until somebody clicks.
-# Reddens: focus-pill: "clicking it opens the planner"
+# Reddens: focus-pill: "clicking it opens the planner — the frame draws a hover fill and a pointer on it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/app-topbar.tsx'
 a = """          onClick={() => navigate({ to: '/app/$workspaceId/calendar', params: { workspaceId } })}

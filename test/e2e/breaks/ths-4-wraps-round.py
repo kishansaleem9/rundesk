@@ -1,6 +1,6 @@
 # The ▶ wraps from the last status back to the first, so a finished task can be
 # sent to the top of the pipeline by pressing "next".
-# Reddens: task-header-status — "on the last status the ▶ resolves to nothing and is disabled"
+# Reddens: task-header-status — "on the last status the ▶ resolves to nothing and is disabled — it does not wrap round to the start"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """  const nextStatus =

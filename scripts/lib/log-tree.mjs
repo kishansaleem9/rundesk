@@ -60,7 +60,11 @@ export const CONTROL = /^== (syncing|BASELINE|restoring|REFUSING)\b/
 // the new sha. It went live on 23 September: five "refuses everything" patches
 // failed to build in both of their runs and were on record as measured.
 // `classify-break-log.awk` already knew these four; this module did not.
-export const NOT_RUN = /^== \S+ (MISSING|PATCH FAILED|PATCH CHANGED NOTHING|BUILD FAILED)\b/
+//
+// And a fifth, `API DID NOT COME UP`: the patch built, but the lane's API did not
+// answer after its restart, so the suite would have measured a dead port
+// (`harness/wt-break-unchecked-restart-and-restore`).
+export const NOT_RUN = /^== \S+ (MISSING|PATCH FAILED|PATCH CHANGED NOTHING|BUILD FAILED|API DID NOT COME UP)\b/
 
 // The sha in force at each patch's line, from the NEWEST log that names it.
 //

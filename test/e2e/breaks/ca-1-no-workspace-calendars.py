@@ -1,7 +1,7 @@
 # The workspace group empties, so Time off and Holidays vanish from the picker.
 # The popover still opens and still groups by account, which is the half the
 # ledger row already had.
-# Reddens: calendar-accounts: "the workspace group holds exactly Time off and Holidays"
+# Reddens: calendar-accounts: "and the workspace group holds exactly Time off and Holidays"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/planner/planner.service.ts'
 a = "export const WORKSPACE_CALENDAR_IDS = ['workspace:timeOff', 'workspace:holidays'] as const\n"

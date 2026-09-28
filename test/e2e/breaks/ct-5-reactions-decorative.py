@@ -1,7 +1,7 @@
 # THREE BUTTONS THAT LIGHT UP AND STORE NOTHING. The row is in the right
 # place, it has the frame's three emoji, it takes the press — and the press
 # goes nowhere. Indistinguishable from the real thing in any screenshot.
-# Reddens: comment-thread: "pressing a reaction in the thread really records one"
+# Reddens: comment-thread: "pressing a reaction in the thread really records one against THIS comment"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = "              onClick={() => onReact(root.id, emoji)}"

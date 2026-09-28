@@ -2,7 +2,7 @@
 # instead of a control — the value is still shown, the chevron's claim that it
 # can be changed is not honoured. This is the frame's own words on a dead
 # control, and in a screenshot it is indistinguishable from the real thing.
-# Reddens: folder-dialog: "the dialog carries a Statuses control"
+# Reddens: folder-dialog: "the dialog carries a Statuses control, as the frame's Settings block draws"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = """          <select

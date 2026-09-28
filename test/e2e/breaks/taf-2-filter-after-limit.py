@@ -1,6 +1,6 @@
 # The free-text match moves out of SQL and runs on the rows the LIMIT already
 # cut down to — the server-side version of the same confident zero.
-# Reddens: task-activity-filter — "searching for it finds exactly the one entry"
+# Reddens: task-activity-filter — "searching for it finds exactly the one entry, from below a hundred and twenty newer ones"
 import io
 p = '/home/user/rundesk/apps/src/nonexistent'
 p = '/home/user/rundesk/apps/api/src/modules/activity/activity.service.ts'

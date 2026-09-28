@@ -1,5 +1,5 @@
 # THE @ TASKS TAB ASKS FOR THE NEWEST TASKS AND FILTERS THEM HERE, as it did.
-# Reddens: task-pickers-search: "typing @@ and its word in a comment shows the search in flight, not "no matching tasks" — and then offers the oldest task"
+# Reddens: task-pickers-search: "typing @@ and its word in a comment shows the search in flight, not \"no matching tasks\" — and then offers the oldest task"no matching tasks"typing @@ and its word in a comment shows the search in flight, not \"no matching tasks\" — and then offers the oldest task"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = '  const mentionTasksQuery = useTaskSearch<MentionTaskLite>(workspaceId, mentionQuery, {\n'

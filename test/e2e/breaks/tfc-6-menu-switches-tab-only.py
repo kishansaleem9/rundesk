@@ -2,7 +2,7 @@
 # leaving the reader to find the create control themselves — which is what the
 # frame's missing chevron says it should not do.
 # Re-aimed 25 September: the line reads the sheet's capabilities now (`task-sheet-offers-refused-edits`).
-# Reddens: task-field-create — "choosing it opens the same create form"
+# Reddens: task-field-create — "and choosing it opens the same create form — it is an action, not a submenu"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                          data-testid="task-menu-custom-fields"

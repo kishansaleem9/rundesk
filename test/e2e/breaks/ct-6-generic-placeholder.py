@@ -1,7 +1,7 @@
 # THE FRAME'S WORDS, replaced with a house string. "Reply to comment…" is the
 # one line saying what this composer answers, which is precisely what the page
 # composer at the bottom of the list cannot say about itself.
-# Reddens: comment-thread: "the composer carries the frame's own words"
+# Reddens: comment-thread: "the composer carries the frame's own words, \"Reply to comment…\""
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = "  'taskDetail.threadReplyPlaceholder': 'Reply to comment…',"

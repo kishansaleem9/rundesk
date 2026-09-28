@@ -2,7 +2,7 @@
 # somebody out of it, so the faces and the native select beside them offer
 # different people — each individually plausible, which is how the
 # field-type picker ended up offering ten of nineteen types.
-# Reddens: "offers exactly the same people, in the same order".
+# Reddens: "and offers exactly the same people, in the same order, as the native select beside it".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

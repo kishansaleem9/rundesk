@@ -3,7 +3,7 @@
 # draws a filled box containing no words, which reads as an answer somebody
 # gave. Absent and empty are the same thing to every reader here, and this
 # makes a third spelling that only the database can tell apart.
-# Reddens: folder-dialog: "a folder made without one stores nothing"
+# Reddens: folder-dialog: "and a folder made without one stores nothing, rather than an empty string standing in for an answer"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = "        description: data.description?.trim() || null,"

@@ -1,6 +1,6 @@
 # Hovering any row opens EVERY card. Three overlapping panels, and the one under the
 # cursor is whichever happens to be painted last.
-# Reddens: ai-model-cards: "exactly one card is up" / "and closes the first — one card at a time"
+# Reddens: ai-model-cards: "exactly one card is up — two would overlap illegibly, and the frame has one" / "and closes the first — one card at a time"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 # Anchored on the whole prop block, because the `hovered=` line alone also appears

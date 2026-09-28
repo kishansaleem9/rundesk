@@ -3,7 +3,7 @@
 # the fourth axis quietly stays on, and the only thing on screen that says so
 # is the heading's own pressed state.
 #
-# Reddens: template-center: "and every one of the four axes reads cleared"
+# Reddens: template-center: "and every one of the four axes reads cleared — the rail, the dropdown and the category heading, not just the grid"
 import io
 p='/home/user/rundesk/apps/web/src/pages/workspace-templates-page.tsx'
 s=io.open(p,encoding='utf-8').read()

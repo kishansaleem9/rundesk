@@ -1,6 +1,6 @@
 # A view offered by the server that no surface renders — the mirror defect.
 #
-# Reddens: space-wizard-views: "none of Map, Activity, Mind Map, Timeline or Workload is offered"
+# Reddens: space-wizard-views: "none of Map, Activity, Mind Map, Timeline or Workload is offered — Rundesk cannot render them"
 import io
 p='/home/user/rundesk/apps/api/src/modules/spaces/space-presets.ts'
 s=io.open(p,encoding='utf-8').read()

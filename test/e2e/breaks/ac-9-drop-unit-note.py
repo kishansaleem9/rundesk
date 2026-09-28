@@ -1,5 +1,5 @@
 # The unit left unstated, so "runs" quietly becomes "actions".
-# Reddens: ai-action-categories: "the heading says the unit is a run, as `ai-value.ts` insists"
+# Reddens: ai-action-categories: "and the heading says the unit is a run, as `ai-value.ts` insists"
 #
 # AN ANCHOR THAT BEGINS WITH SPACES CANNOT PIN INDENTATION. This one matched
 # twice: the loading skeleton repeats the card's header, and the skeleton's copy
