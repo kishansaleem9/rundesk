@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { BadRequestException } from '@nestjs/common'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { ProjectsService } from './projects.service'
 
 /**
@@ -121,5 +123,77 @@ describe('ProjectsService.deleteProject — §13.3 audit event', () => {
     assert.equal(e.workspaceId, 'w1')
     assert.equal(e.actorId, 'actor-1')
     assert.equal(e.ipAddress, '198.51.100.4')
+  })
+})
+
+/**
+ * A PROJECT'S TIME IS BILLED ONLY TO A CLIENT OF ITS OWN WORKSPACE. `PUT
+ * /projects/:id` copied `clientId` into the row and only the foreign key looked
+ * at it, so another workspace's client could be set; the time report then printed
+ * that workspace's client name. The lookup is rendered, so a check that asks for
+ * the client by id alone does not pass for one that asks for it in this workspace.
+ */
+describe('ProjectsService.updateProject — a client of the project\'s own workspace', () => {
+  const dialect = new PgDialect()
+  const CLIENT = '11111111-1111-4111-8111-111111111111'
+  const setUp = (clientRows: unknown[]) => {
+    const wheres: unknown[] = []
+    const sets: Record<string, unknown>[] = []
+    const db = {
+      select: mock.fn(() => ({
+        from: () => ({
+          where: (w: unknown) => {
+            wheres.push(w)
+            return { limit: async () => clientRows }
+          },
+        }),
+      })),
+      update: mock.fn(() => ({
+        set: (s: Record<string, unknown>) => {
+          sets.push(s)
+          return { where: () => ({ returning: async () => [] }) }
+        },
+      })),
+    } as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any) as any
+    svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w-own', name: 'Apollo', createdById: 'u-1' }))
+    return { svc, db, wheres, sets }
+  }
+
+  it('refuses a client that is not one of the project\'s workspace\'s clients (400), and writes nothing', async () => {
+    const { svc, db } = setUp([])
+    await assert.rejects(
+      () => svc.updateProject('p-1', { clientId: CLIENT }, 'u-1'),
+      (err: any) => err instanceof BadRequestException,
+    )
+    assert.equal(db.update.mock.callCount(), 0, 'the project was not changed')
+  })
+
+  it('looks the client up among the project\'s workspace\'s clients only, then sets it', async () => {
+    const { svc, db, wheres, sets } = setUp([{ id: CLIENT }])
+    await svc.updateProject('p-1', { clientId: CLIENT }, 'u-1')
+    assert.equal(wheres.length, 1, 'one lookup of the client')
+    const params = dialect.sqlToQuery(wheres[0] as never).params
+    assert.ok(params.includes(CLIENT), 'asks for the client by its id')
+    assert.ok(params.includes('w-own'), 'and in the project\'s own workspace')
+    assert.equal(db.update.mock.callCount(), 1)
+    assert.equal(sets[0].clientId, CLIENT)
+  })
+
+  it('refuses a clientId that is not an id (400) without asking the database', async () => {
+    const { svc, db } = setUp([{ id: CLIENT }])
+    await assert.rejects(
+      () => svc.updateProject('p-1', { clientId: 'not-an-id' }, 'u-1'),
+      (err: any) => err instanceof BadRequestException,
+    )
+    assert.equal(db.select.mock.callCount(), 0)
+    assert.equal(db.update.mock.callCount(), 0)
+  })
+
+  it('clears the client (null) without a lookup', async () => {
+    const { svc, db, sets } = setUp([])
+    await svc.updateProject('p-1', { clientId: null }, 'u-1')
+    assert.equal(db.select.mock.callCount(), 0)
+    assert.equal(sets[0].clientId, null)
   })
 })

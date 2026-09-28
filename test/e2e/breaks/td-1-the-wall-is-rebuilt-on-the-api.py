@@ -12,9 +12,12 @@
 # indistinguishable from "you are in no teams", which is the message the frame
 # puts on this very page.
 #
-# `WorkspaceAdminGuard` is already imported in this file and used on every
-# write below, so adding it to the read is one line that looks like
-# consistency.
+# `PermissionsGuard` asking `groups.manage` is already on every write below, so
+# adding it to the read is two lines that look like consistency. (Re-aimed when
+# the writes moved off `WorkspaceAdminGuard` onto that key,
+# `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`: the guard
+# this patch added is no longer imported here, so it would have broken the
+# build rather than rebuilt the wall.)
 #
 # AND IT MATTERS THAT THE SUITE RUNS AS A MEMBER. Its header: "the check that
 # matters is driven as somebody who is NOT an admin. Run as the seeded admin it
@@ -35,10 +38,11 @@ a = """  @Get()
   list(@Param('workspaceId') workspaceId: string, @Query('search') search?: string) {
 """
 b = """  @Get()
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   list(@Param('workspaceId') workspaceId: string, @Query('search') search?: string) {
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))
-print('workspace-groups.controller.ts: listing the teams requires admin again.')
+print('workspace-groups.controller.ts: listing the teams asks groups.manage, an admin key.')

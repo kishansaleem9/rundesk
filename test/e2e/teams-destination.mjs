@@ -113,7 +113,7 @@ try {
   )
 
   // ── The wall this item removes ───────────────────────────────────────────
-  console.log('\n▶ the wall: settings is admin-only, and always was')
+  console.log('\n▶ the wall: settings shows a member no people')
   const page = await (await browser.newContext({ viewport: { width: 1440, height: 1000 } })).newPage()
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', memberEmail)
@@ -121,16 +121,23 @@ try {
   await page.click('button[type=submit]')
   await page.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS })
 
-  await page.goto(`${stack.base}/app/${workspaceId}/settings`, { waitUntil: 'domcontentloaded' })
-  const bounced = await waitUntil(
-    async () => !(await page.url()).includes('/settings'),
+  /*
+   * Settings opens to every member on Archived now (it lists the archived
+   * tasks each may open), so the wall this item is about is that a member finds
+   * NO PEOPLE there: no Members tab, and the address of it moves them on
+   * (`admin-guard-admits-managers-where-the-web-says-admin`).
+   */
+  await page.goto(`${stack.base}/app/${workspaceId}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
+  const walled = await waitUntil(
+    async () => !(await page.url()).includes('tab=members')
+      && (await page.getByTestId('settings-tab-members').count()) === 0,
     { timeoutMs: 10_000 },
   )
   chk(
-    bounced,
-    'a member sent to workspace settings is turned away',
-    `they landed on ${await page.url()} — if settings were open to members this item would be unnecessary, ` +
-      'and the checks below would prove nothing',
+    walled,
+    'a member sent to workspace settings finds no people there — no Members tab, and its address moves them on',
+    `they landed on ${await page.url()}, with ${await page.getByTestId('settings-tab-members').count()} Members tab(s) — ` +
+      'if settings showed members their colleagues this item would be unnecessary, and the checks below would prove nothing',
   )
 
   console.log('\n▶ but the Teams destination lets them in')

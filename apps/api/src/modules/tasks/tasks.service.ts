@@ -93,6 +93,7 @@ import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
+import { assertManagerTaskScope } from '../../common/permissions/task-restore'
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
@@ -913,32 +914,9 @@ export class TasksService {
    * callers) so a manager's non-delete writes stay unrestricted.
    */
   private async assertManagerDeleteScope(taskId: string, actorId: string) {
-    const [ctx] = await this.db
-      .select({ spaceId: spaces.id, workspaceId: spaces.workspaceId })
-      .from(tasks)
-      .innerJoin(lists, eq(lists.id, tasks.listId))
-      .innerJoin(projects, eq(projects.id, lists.projectId))
-      .innerJoin(spaces, eq(spaces.id, projects.spaceId))
-      .where(eq(tasks.id, taskId))
-      .limit(1)
-    if (!ctx) throw new NotFoundException('Task not found')
-
-    const [membership] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(and(eq(workspaceMembers.workspaceId, ctx.workspaceId), eq(workspaceMembers.userId, actorId)))
-      .limit(1)
-    // Only managers are further restricted here. workspace_admin / super_admin
-    // keep delete-any; members/guests were already gated by the write-access
-    // check the caller ran first.
-    if (membership?.role !== 'manager') return
-
-    const [member] = await this.db
-      .select({ userId: spaceMembers.userId })
-      .from(spaceMembers)
-      .where(and(eq(spaceMembers.spaceId, ctx.spaceId), eq(spaceMembers.userId, actorId)))
-      .limit(1)
-    if (!member) throw new ForbiddenException('Managers can only delete tasks in their own spaces')
+    // Stated in `task-restore.ts`, where the archived-tasks listing's per-row
+    // `canRestore` (`taskRestorable`) asks the very same rule.
+    return assertManagerTaskScope(this.db, taskId, actorId)
   }
 
   /**
@@ -4137,7 +4115,8 @@ export class TasksService {
     await this.assertTaskWriteAccess(taskId, actorId, { allowArchived: true })
     // §3.3 — restore is the inverse of delete, so a manager must be scoped to
     // their own spaces here too; otherwise they could un-archive a task outside
-    // their space that they were correctly blocked from deleting.
+    // their space that they were correctly blocked from deleting. These two are
+    // the rules `taskRestorable` answers for each row of Settings → Archived.
     await this.assertManagerDeleteScope(taskId, actorId)
     const [before] = await this.db.select().from(tasks).where(eq(tasks.id, taskId))
     if (!before) throw new NotFoundException('Task not found')

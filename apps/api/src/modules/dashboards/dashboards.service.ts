@@ -1,7 +1,6 @@
-import { isAdminRole } from '../../common/permissions/workspace-roles'
-import { Injectable, Inject, NotFoundException, ForbiddenException } from '@nestjs/common'
+import { Injectable, Inject, NotFoundException } from '@nestjs/common'
 import { eq, and, or, ne, inArray, sql } from 'drizzle-orm'
-import { dashboardPresets, userDockConfigs, workspaceMembers, objectShares, users } from '@rundesk/db'
+import { dashboardPresets, userDockConfigs, objectShares, users } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { CreateDashboardPresetDto, UpdateDashboardPresetDto } from './dto/dashboard-preset.dto'
@@ -173,15 +172,23 @@ export class DashboardsService {
       )
   }
 
-  // --- Workspace-default dashboard (admin) — §5.7 --------------------------
+  // --- Workspace-default dashboard — §5.7 ----------------------------------
   /**
    * Mark `presetId` as the workspace-wide default and clear the flag on every
-   * other preset, keeping at most one workspace-default per workspace. Only a
-   * workspace_admin (or super_admin) may do this.
+   * other preset, keeping at most one workspace-default per workspace.
+   *
+   * Who may is the route's: `dashboard.workspace_default.manage`, an admin's by
+   * default and grantable (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   * A role check here would refuse the member a custom role granted it.
+   *
+   * WHICH PRESET is asked here. The default is listed to every member
+   * (`listPresets`), so making one the default publishes its name and layout to
+   * the whole workspace. Its setter may promote only a preset they read
+   * themselves — their own, one shared with them, or the one already the
+   * default, the rule `listPresets` lists by — and any other is not found for
+   * them (404), so a colleague's unshared dashboard is never published by id.
    */
   async setWorkspaceDefault(workspaceId: string, presetId: string, actor: DashboardActor) {
-    await this.assertWorkspaceAdmin(workspaceId, actor)
-
     const [preset] = await this.db
       .select()
       .from(dashboardPresets)
@@ -192,7 +199,9 @@ export class DashboardsService {
         )
       )
       .limit(1)
-    if (!preset) throw new NotFoundException('Preset not found')
+    if (!preset || !(await this.mayReadPreset(preset, workspaceId, actor.id))) {
+      throw new NotFoundException('Preset not found')
+    }
 
     // Clear the flag on whichever other preset currently holds it, so the
     // "at most one workspace-default per workspace" invariant is preserved.
@@ -230,27 +239,19 @@ export class DashboardsService {
   }
 
   /**
-   * Authorize a workspace-default mutation. A global super_admin bypasses the
-   * per-workspace lookup (matching the guards); otherwise the actor must be a
-   * workspace_admin (or workspace-level super_admin) member. §5.7
+   * The preset read rule, one row at a time: what `listPresets` lists to
+   * `userId` — their own, the workspace default, or one shared with them.
+   * The share lookup runs only when the first two do not already answer.
    */
-  private async assertWorkspaceAdmin(workspaceId: string, actor: DashboardActor) {
-    if (actor.role === 'super_admin') return
-
-    const [member] = await this.db
-      .select({ role: workspaceMembers.role })
-      .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, workspaceId),
-          eq(workspaceMembers.userId, actor.id)
-        )
-      )
-      .limit(1)
-
-    if (!member || !isAdminRole(member.role)) {
-      throw new ForbiddenException('Only workspace admins can manage the workspace-default dashboard')
-    }
+  private async mayReadPreset(
+    preset: { id: string; userId: string; isWorkspaceDefault: boolean },
+    workspaceId: string,
+    userId: string,
+  ): Promise<boolean> {
+    if (preset.userId === userId) return true
+    if (preset.isWorkspaceDefault === true) return true
+    const shared = await this.presetIdsSharedWith(workspaceId, userId)
+    return shared.includes(preset.id)
   }
 
   // --- User Dock Config ----------------------------------------------------

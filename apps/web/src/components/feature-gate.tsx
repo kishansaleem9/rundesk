@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState, type ReactNode } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useNavigate } from '@tanstack/react-router'
 import { Button, cn } from '@rundesk/ui'
 import { Lock, Loader2, Check, X } from 'lucide-react'
 import type { FlagKey } from '@rundesk/feature-flags'
@@ -7,6 +8,7 @@ import { api } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import type { TranslationKey } from '../lib/i18n'
 import { useResolvedFlags } from '../lib/use-feature-flags'
+import { usePermissions } from '../hooks/use-permissions'
 import { canAskAgain, gateMessageKey, type GateResult } from '../lib/feature-gate'
 
 /**
@@ -194,9 +196,17 @@ export function FeatureGateDialog({
 }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const { plan } = useWorkspacePlan(workspaceId)
   const [asking, setAsking] = useState(false)
   const [result, setResult] = useState<GateResult | null>(null)
+  /*
+   * WHOEVER MAY SWITCH IT ON IS TAKEN TO THE SWITCH, not told to ask somebody
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). The
+   * ask reaches the holders of `workspace.clickapps.manage` and leads them to
+   * this workspace's Settings → Features; a holder meeting the lock goes there.
+   */
+  const maySwitch = usePermissions(workspaceId ?? undefined).can('workspace.clickapps.manage') === true
 
   /*
    * A PLAN gate only when the plan is what is actually missing. A feature that
@@ -206,6 +216,12 @@ export function FeatureGateDialog({
    */
   const planBlocked = !!feature.planFeature && plan?.features?.[feature.planFeature] === false
   const target = planBlocked ? upgradeTarget(plan, feature.planFeature) : null
+  const switchHere = !planBlocked && !!feature.flag && !!workspaceId && maySwitch
+  const openFeatures = () => {
+    if (!workspaceId) return
+    onClose()
+    navigate({ to: '/app/$workspaceId/settings', params: { workspaceId }, search: { tab: 'features' } })
+  }
 
   /*
    * What the offered tier adds ON TOP of what this workspace already has — the
@@ -341,7 +357,11 @@ export function FeatureGateDialog({
         </div>
 
         <p className="text-sm">
-          {planBlocked ? t('gate.contactBodyPlan', { feature: feature.name }) : t('gate.contactBody', { feature: feature.name })}
+          {planBlocked
+            ? t('gate.contactBodyPlan', { feature: feature.name })
+            : switchHere
+              ? t('gate.switchBody', { feature: feature.name })
+              : t('gate.contactBody', { feature: feature.name })}
         </p>
 
         {result && (
@@ -362,14 +382,20 @@ export function FeatureGateDialog({
           <Button variant="ghost" onClick={onClose} data-testid="feature-gate-close">
             {t('common.close')}
           </Button>
-          <Button
-            onClick={contactAdmin}
-            disabled={asking || !canAskAgain(result)}
-            data-testid="feature-gate-contact"
-          >
-            {asking && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-            {t('gate.contact')}
-          </Button>
+          {switchHere ? (
+            <Button onClick={openFeatures} data-testid="feature-gate-open-features">
+              {t('gate.openFeatures')}
+            </Button>
+          ) : (
+            <Button
+              onClick={contactAdmin}
+              disabled={asking || !canAskAgain(result)}
+              data-testid="feature-gate-contact"
+            >
+              {asking && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+              {t('gate.contact')}
+            </Button>
+          )}
         </div>
       </div>
     </div>

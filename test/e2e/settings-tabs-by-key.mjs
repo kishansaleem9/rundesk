@@ -164,6 +164,14 @@ try {
     return seen
   }
   const on = (seen, tab) => seen.url.includes('/settings') && seen.tabs.includes(tab)
+  /*
+   * THE TABS A KEY OPENS, beside Archived, which opens to every member but a
+   * guest: it lists the archived tasks each reader may open
+   * (`admin-guard-admits-managers-where-the-web-says-admin`). So "alone" is
+   * read as the one tab the key opens, and Archived is required with it.
+   */
+  const keyTabs = (seen) => seen.tabs.filter((t) => t !== 'archived')
+  const onAlone = (seen, tab) => on(seen, tab) && keyTabs(seen).length === 1 && seen.tabs.includes('archived')
 
   console.log('\n▶ the manager, who holds members.invite by default')
   const managerSees = await settingsAs(manager, async (page) => ({
@@ -172,7 +180,7 @@ try {
     removes: await page.getByTitle('Remove member').count(),
   }))
   chk(
-    on(managerSees, 'members') && managerSees.tabs.length === 1 && managerSees.url.includes('tab=members') && managerSees.invite === 1 && managerSees.roleSelects === 0 && managerSees.removes === 0,
+    onAlone(managerSees, 'members') && managerSees.url.includes('tab=members') && managerSees.invite === 1 && managerSees.roleSelects === 0 && managerSees.removes === 0,
     'the manager opens Settings on Members alone, offered the invite form — and no member’s role to change nor anyone to remove, keys a manager does not hold',
     JSON.stringify(managerSees),
   )
@@ -180,7 +188,7 @@ try {
   console.log('\n▶ the member granted roles.manage')
   const keeperSees = await settingsAs(keeper, async (page) => ({ newRole: await page.getByTitle('New role').count() }))
   chk(
-    on(keeperSees, 'roles') && keeperSees.tabs.length === 1 && keeperSees.newRole >= 1,
+    onAlone(keeperSees, 'roles') && keeperSees.newRole >= 1,
     'a member granted roles.manage opens Settings on Roles, offered New role',
     JSON.stringify(keeperSees),
   )
@@ -191,7 +199,7 @@ try {
     billing: await page.getByRole('heading', { name: /^Billing$/ }).count(),
   }))
   chk(
-    on(stewardSees, 'general') && stewardSees.tabs.length === 1 && stewardSees.name === 1 && stewardSees.billing === 0,
+    onAlone(stewardSees, 'general') && stewardSees.name === 1 && stewardSees.billing === 0,
     'a member granted workspace.manage opens Settings on General, offered the workspace’s name — and no billing, which is workspace.billing’s',
     JSON.stringify(stewardSees),
   )
@@ -199,7 +207,7 @@ try {
   console.log('\n▶ the member granted security.policy.manage')
   const wardenSees = await settingsAs(warden, async (page) => ({ apiKeys: await page.getByText('API keys', { exact: true }).count() }))
   chk(
-    on(wardenSees, 'security') && wardenSees.tabs.length === 1 && wardenSees.apiKeys >= 1,
+    onAlone(wardenSees, 'security') && wardenSees.apiKeys >= 1,
     'a member granted security.policy.manage opens Settings on Security, offered its API keys',
     JSON.stringify(wardenSees),
   )
@@ -236,8 +244,8 @@ try {
   console.log('\n▶ a plain member')
   const plainSees = await settingsAs(plain, async () => ({}))
   chk(
-    !plainSees.url.includes('/settings') && plainSees.tabs.length === 0,
-    'a plain member, who holds none of these keys, is still not shown Settings',
+    plainSees.url.includes('tab=archived') && plainSees.tabs.length === 1 && plainSees.tabs[0] === 'archived',
+    'a plain member, who holds none of these keys, opens Settings on Archived alone — no tab a key opens',
     JSON.stringify(plainSees),
   )
 } catch (err) {

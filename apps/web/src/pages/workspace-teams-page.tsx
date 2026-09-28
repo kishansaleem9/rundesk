@@ -16,8 +16,9 @@
  *
  * This is therefore a DESTINATION over things that already worked, not four new
  * screens. The APIs needed no change either — `GET /workspaces/:id/groups` and
- * `…/members` are both behind `WorkspaceMemberGuard`, with admin required only
- * for the mutations. The gate was the web route and nothing else.
+ * `…/members` are both behind `WorkspaceMemberGuard`, with a key required only
+ * for the mutations (`groups.manage` for a group's). The gate was the web route
+ * and nothing else.
  *
  * ANALYTICS IS DELIBERATELY ABSENT. The frame lists it; nothing exists behind
  * it, and she never opens it, so there is no way to know what a team's
@@ -29,7 +30,7 @@
  * was missing.
  */
 
-import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { useMemo, useState } from 'react'
 import { useParams } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
@@ -114,10 +115,15 @@ type PersonPreview = {
 export function TeamsPage() {
   const { t } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string }
-  // Who may create a team is who manages the workspace, as the API's
-  // `WorkspaceAdminGuard` has it — the role hook's own answer, not a copy of
-  // its list (`role-lists-copied-per-module`).
-  const { isManagerOrAbove: mayCreateTeam } = useWorkspaceRole(workspaceId)
+  // Who may create a team is who holds `groups.manage`, the key `POST /groups`
+  // asks: an admin's by default and grantable by a custom role, as ClickUp has
+  // it ("Only Workspace owners and admins can create a Team"). The base role
+  // offered it to managers, whom the API refuses
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  const createTeamKey = usePermissions(workspaceId).can('groups.manage')
+  const mayCreateTeam = createTeamKey === true
+  // The reason once the keys are read, so a holder sees no refusal while they load.
+  const createTeamRefusal = createTeamKey === false ? t('teams.createTeamNeedsKey') : undefined
   const me = useAuthStore((s) => s.user)
   const queryClient = useQueryClient()
   const [tab, setTab] = useState<TabId>('teams')
@@ -306,8 +312,8 @@ export function TeamsPage() {
                       variant="outline"
                       data-testid="teams-empty-create"
                       disabled={!mayCreateTeam}
-                      data-disabled-reason={mayCreateTeam ? undefined : 'admin-only'}
-                      title={mayCreateTeam ? undefined : t('teams.createTeamAdminOnly')}
+                      data-disabled-reason={createTeamRefusal ? 'needs-groups-manage' : undefined}
+                      title={createTeamRefusal}
                       onClick={() => {
                         setCreateError(null)
                         setCreateName('')
@@ -318,9 +324,9 @@ export function TeamsPage() {
                       {t('teams.createTeam')}
                     </Button>
                   </div>
-                  {!mayCreateTeam && (
+                  {createTeamRefusal && (
                     <p className="text-xs text-muted-foreground" data-testid="teams-empty-create-note">
-                      {t('teams.createTeamAdminOnly')}
+                      {createTeamRefusal}
                     </p>
                   )}
                 </div>
@@ -410,8 +416,8 @@ export function TeamsPage() {
                   className="ml-auto"
                   data-testid="teams-create-open"
                   disabled={!mayCreateTeam}
-                  data-disabled-reason={mayCreateTeam ? undefined : 'admin-only'}
-                  title={mayCreateTeam ? undefined : t('teams.createTeamAdminOnly')}
+                  data-disabled-reason={createTeamRefusal ? 'needs-groups-manage' : undefined}
+                  title={createTeamRefusal}
                   onClick={() => {
                     setCreateError(null)
                     setCreateName('')

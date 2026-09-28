@@ -6,6 +6,8 @@ import { PlansService } from '../plans/plans.service'
 import type { PlanLimitsOverride } from '../plans/plans.constants'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+// No route here asks it any more; break patches `mrg-1` and `td-4` put it back
+// on one to prove their checks, and must still compile.
 import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
 import { isManagerRole } from '../../common/permissions/item-visibility'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -116,7 +118,12 @@ export class WorkspacesController {
   }
 
   @Get(':workspaceId/archived-tasks')
-  @UseGuards(WorkspaceAdminGuard)
+  // Every member's, each reading the archived tasks they may open, each row
+  // saying whether they may restore it: ClickUp's "Show archived" shows a
+  // location's archived tasks to whoever can open it, and Edit on it unarchives.
+  // `WorkspaceAdminGuard` let managers in and refused the member who archived
+  // the task (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'List archived tasks in the workspace (Plan §13.4)' })
   async getArchivedTasks(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
@@ -259,8 +266,18 @@ export class WorkspacesController {
     })
   }
 
+  /*
+   * A member's weekly capacity and whom they report to ask
+   * `members.profile.manage`: a manager's and up by default, and a custom role
+   * grants it. ClickUp: "Admins, Workspace owners, and managers can set
+   * capacity for themselves and others", and the org chart's manager field is
+   * set "for yourself or other people". The service adds the rank rule: nobody
+   * sets these for somebody above their own role
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   */
   @Patch(':workspaceId/members/:userId/capacity')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.profile.manage')
   async updateMemberCapacity(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -270,13 +287,15 @@ export class WorkspacesController {
     return this.workspacesService.updateMemberCapacity(workspaceId, userId, body.weeklyCapacityHours, {
       id: user.id,
       email: user.email,
+      role: user.role,
     })
   }
 
-  // Reporting line. Admin-only: who reports to whom drives the org tree and
-  // (in time) approval routing, so it is not a self-service field.
+  // Reporting line: who reports to whom draws the org tree. `members.profile.manage`,
+  // as capacity is — it was never admin-only: `WorkspaceAdminGuard` admitted managers.
   @Patch(':workspaceId/members/:userId/manager')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('members.profile.manage')
   async updateMemberManager(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
@@ -288,17 +307,28 @@ export class WorkspacesController {
       id: user.id,
       email: user.email,
       ip,
+      role: user.role,
     })
   }
 
+  // Every member reads the working week and the holidays: the planner draws them.
   @Get(':workspaceId/work-schedule')
   @UseGuards(WorkspaceMemberGuard)
   async getWorkSchedule(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.workspacesService.getWorkSchedule(workspaceId)
   }
 
+  /*
+   * The workspace's calendar — its working days and its holidays — asks
+   * `workspace.schedule.manage`: an admin's by default, and a custom role
+   * grants it. ClickUp: "Only owners and admins can set up work schedules",
+   * holidays and exceptions included. `WorkspaceAdminGuard` admitted managers
+   * while Settings offered the Work schedule tab to admins alone
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   */
   @Patch(':workspaceId/work-schedule')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.schedule.manage')
   async setWorkDays(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { workDays: number[] },
@@ -313,7 +343,8 @@ export class WorkspacesController {
   }
 
   @Post(':workspaceId/holidays')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.schedule.manage')
   async addHoliday(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Body() body: { day: string; name: string },
@@ -328,7 +359,8 @@ export class WorkspacesController {
   }
 
   @Delete(':workspaceId/holidays/:holidayId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.schedule.manage')
   async removeHoliday(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('holidayId', new ParseUUIDPipe()) holidayId: string,

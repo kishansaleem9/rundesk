@@ -429,3 +429,50 @@ describe('WorkspacesService.setWorkDays validation', () => {
     )
   })
 })
+
+/*
+ * `members.profile.manage` — capacity and reports-to — reaches no one above
+ * the setter's own role, as `members.role.change` does not
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`): a
+ * manager made an admin report to themself, and set an admin's hours.
+ */
+describe('WorkspacesService capacity and reports-to keep to the setter’s rank', () => {
+  function build(roles: Record<string, string>) {
+    const writes: Array<Record<string, unknown>> = []
+    const db = {
+      update: () => ({ set: (v: Record<string, unknown>) => (writes.push(v), { where: async () => undefined }) }),
+      select: () => ({ from: () => ({ where: async () => Object.entries(roles).map(([userId]) => ({ userId, managerId: null })) }) }),
+    } as any
+    const security = { logAuditEvent: async () => undefined }
+    const svc = new WorkspacesService(db, security as any, {} as any, {} as any, {} as any)
+    ;(svc as any).getMembership = async (_ws: string, userId: string) =>
+      roles[userId] ? { userId, role: roles[userId], weeklyCapacityHours: 40, managerId: null } : null
+    return { svc, writes }
+  }
+  const people = { adm: 'workspace_admin', mgr: 'manager', mem: 'member', peer: 'member' }
+
+  it('refuses a manager setting an admin’s capacity, and writes nothing', async () => {
+    const { svc, writes } = build(people)
+    await assert.rejects(() => svc.updateMemberCapacity('ws', 'adm', 20, { id: 'mgr' }), /above your own role/)
+    assert.equal(writes.length, 0)
+  })
+
+  it('refuses a manager making an admin report to them, and writes nothing', async () => {
+    const { svc, writes } = build(people)
+    await assert.rejects(() => svc.updateMemberManager('ws', 'adm', 'mgr', { id: 'mgr' }), /above your own role/)
+    assert.equal(writes.length, 0)
+  })
+
+  it('lets a member granted the key set a fellow member’s capacity and reporting line', async () => {
+    const { svc, writes } = build(people)
+    await svc.updateMemberCapacity('ws', 'peer', 24, { id: 'mem' })
+    await svc.updateMemberManager('ws', 'peer', 'mgr', { id: 'mem' })
+    assert.deepEqual(writes, [{ weeklyCapacityHours: 24 }, { managerId: 'mgr' }])
+  })
+
+  it('lets a platform admin set anybody’s, whatever their membership', async () => {
+    const { svc, writes } = build(people)
+    await svc.updateMemberCapacity('ws', 'adm', 30, { id: 'root', role: 'super_admin' })
+    assert.deepEqual(writes, [{ weeklyCapacityHours: 30 }])
+  })
+})

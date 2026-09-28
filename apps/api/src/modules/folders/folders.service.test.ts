@@ -40,8 +40,13 @@ describe('FoldersService.remove — soft delete + §13.3 audit event', () => {
     } as any
     const security = { logAuditEvent: mock.fn(async () => undefined) } as any
     const svc = new FoldersService(db, security)
+    // The container rule is its own concern (below, and the e2e suite
+    // `folder-change-rule`); this test is about the soft delete.
+    const asked: string[] = []
+    ;(svc as any).assertMayChange = async (_s: string, _f: string, _a: string, action: string) => { asked.push(action) }
 
     const res = await svc.remove('s1', 'f1', 'actor-1', '198.51.100.22')
+    assert.deepEqual(asked, ['delete'], 'deleting asks the container rule at its delete level (Full edit)')
 
     assert.deepEqual(res, { ok: true })
     assert.equal(db.update.mock.callCount(), 1, 'the folder row is archived')
@@ -87,5 +92,30 @@ describe('FoldersService.remove — soft delete + §13.3 audit event', () => {
     assert.equal(db.update.mock.callCount(), 1)
     assert.equal(captured.set.archivedById, null, 'no actor → unknown deleter')
     assert.equal(security.logAuditEvent.mock.callCount(), 0, 'no actor → no audit row')
+  })
+})
+
+describe('FoldersService — changing a folder asks the container rule (found-28-sep/folders-changed-by-any-reader)', () => {
+  it('update asks it at its manage level before writing, and a refusal writes nothing', async () => {
+    const db = { select: mock.fn(() => selectChain([])), update: mock.fn(() => updateChain({})) } as any
+    const svc = new FoldersService(db, {} as any)
+    const asked: string[] = []
+    ;(svc as any).assertMayChange = async (_s: string, _f: string, _a: string, action: string) => {
+      asked.push(action)
+      throw new Error('refused')
+    }
+    await assert.rejects(() => svc.update('s1', 'f1', { color: '#fff' }, 'reader-1'), /refused/)
+    assert.deepEqual(asked, ['manage'])
+    assert.equal(db.update.mock.callCount(), 0, 'nothing is written for a refused change')
+  })
+
+  it('remove refused by the rule archives nothing and audits nothing', async () => {
+    const db = { select: mock.fn(() => selectChain([{ name: 'Sprints', workspaceId: 'w1' }])), update: mock.fn(() => updateChain({})) } as any
+    const security = { logAuditEvent: mock.fn(async () => undefined) } as any
+    const svc = new FoldersService(db, security)
+    ;(svc as any).assertMayChange = async () => { throw new Error('refused') }
+    await assert.rejects(() => svc.remove('s1', 'f1', 'reader-1'), /refused/)
+    assert.equal(db.update.mock.callCount(), 0)
+    assert.equal(security.logAuditEvent.mock.callCount(), 0)
   })
 })

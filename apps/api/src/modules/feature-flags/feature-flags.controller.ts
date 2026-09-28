@@ -1,9 +1,10 @@
-import { Controller, Get, Post, Put, Body, Param, Query, UseGuards, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common'
+import { Controller, Get, Post, Put, Body, Param, ParseUUIDPipe, Query, UseGuards, HttpCode, HttpStatus, BadRequestException } from '@nestjs/common'
 import { ApiTags, ApiBearerAuth } from '@nestjs/swagger'
 import { FeatureFlagsService } from './feature-flags.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import type { FlagKey } from '@rundesk/feature-flags'
 
 @ApiTags('feature-flags')
@@ -20,18 +21,28 @@ export class FeatureFlagsController {
     return this.featureFlagsService.resolveForUserRequest(user, workspaceId)
   }
 
+  /*
+   * The workspace's raw overrides — who switched which ClickApp, and when —
+   * serve the person switching them, so they ask the switch's key,
+   * `workspace.clickapps.manage`: an admin's by default, and a custom role
+   * grants it. ClickUp ("Intro to ClickApps"): "Only Workspace owners and admins
+   * can activate or deactivate ClickApps. Members can view" — which every member
+   * does through `resolved`, above. `WorkspaceAdminGuard` admitted managers
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   */
   @Get('workspace/:workspaceId')
-  @UseGuards(WorkspaceAdminGuard)
-  async listWorkspaceOverrides(@Param('workspaceId') workspaceId: string) {
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('workspace.clickapps.manage')
+  async listWorkspaceOverrides(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.featureFlagsService.listOverrides(workspaceId)
   }
 
   /**
-   * §2.8 gap 11 — ask the workspace admins to turn a feature on.
+   * §2.8 gap 11 — ask whoever may switch a feature on to turn it on.
    *
-   * Deliberately not under WorkspaceAdminGuard: the entire point is that the
-   * caller is NOT an admin. The service checks membership and refuses to ask
-   * for something already on.
+   * Deliberately under no key: the entire point is that the caller does not
+   * hold `workspace.clickapps.manage`. The service checks membership, refuses to
+   * ask for something already on, and tells the key's holders.
    */
   @Post('request/:flagKey')
   @HttpCode(HttpStatus.OK)
@@ -66,7 +77,7 @@ export class FeatureFlagsController {
       throw new BadRequestException(`scope "${body.scope}" requires the corresponding id`)
     }
     // Authorization is enforced in the service: super_admin for global/role/user
-    // scopes, workspace_admin of the target workspace for workspace scope.
+    // scopes, `workspace.clickapps.manage` in the target workspace for workspace scope.
     await this.featureFlagsService.setFlag(
       flagKey,
       body.enabled,

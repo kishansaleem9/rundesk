@@ -46,8 +46,9 @@ export class FoldersController {
       position?: number
       visibility?: 'public' | 'private'
     },
+    @CurrentUser() user: any,
   ) {
-    return this.folders.update(spaceId, folderId, body)
+    return this.folders.update(spaceId, folderId, body, user.id)
   }
 
   /** Move the folder (and the projects it groups) into another space. */

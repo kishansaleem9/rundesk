@@ -16,11 +16,17 @@ export type Permission =
   | 'workspace.export'
   | 'workspace.import'
   | 'workspace.audit.view'
+  | 'workspace.clickapps.manage'
+  | 'workspace.schedule.manage'
+  | 'announcement.manage'
+  | 'client.manage'
   // Member management
   | 'members.invite'
   | 'members.remove'
   | 'members.role.change'
   | 'roles.manage'
+  | 'members.profile.manage'
+  | 'groups.manage'
   // Integrations
   | 'integrations.manage'
   | 'integrations.access_requests.manage'
@@ -44,6 +50,7 @@ export type Permission =
   | 'report.view.basic'
   | 'report.export'
   | 'time.approval.manage'
+  | 'dashboard.workspace_default.manage'
 
 export type PermissionCategory =
   | 'Workspace'
@@ -70,11 +77,25 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   { key: 'workspace.export',     label: 'Export workspace data',      description: 'Download every task and the people list as CSV or JSON', category: 'Workspace' },
   { key: 'workspace.import',     label: 'Import data',                description: 'Import from ClickUp or a spreadsheet, and load sample data', category: 'Workspace' },
   { key: 'workspace.audit.view', label: 'View audit log',             description: 'Read the workspace activity / audit trail', category: 'Workspace' },
+  // The rest of `WorkspaceAdminGuard`'s routes, each on a key of its own
+  // (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  // ClickUp (help centre "Intro to ClickApps"): only owners and admins turn Workspace
+  // ClickApps on or off; members see which are on. The switch is the admins'.
+  { key: 'workspace.clickapps.manage', label: 'Manage ClickApps',       description: 'Turn the workspace\'s features on or off', category: 'Workspace' },
+  // ClickUp: the Workspace's work week and time off are set by owners and admins.
+  { key: 'workspace.schedule.manage',  label: 'Manage the work schedule', description: 'Set the working days and the holidays', category: 'Workspace' },
+  { key: 'announcement.manage',        label: 'Post announcements',     description: 'Publish, pause and delete workspace announcements', category: 'Workspace' },
+  // Clients are a workspace's shared record for billing time; a manager bills their projects' time.
+  { key: 'client.manage',              label: 'Manage clients',         description: 'Add and remove the workspace\'s clients', category: 'Workspace' },
   // Members
   { key: 'members.invite',        label: 'Invite members',     description: 'Send invitations and create new accounts', category: 'Members' },
   { key: 'members.remove',        label: 'Remove members',     description: 'Revoke a member’s workspace access', category: 'Members' },
   { key: 'members.role.change',   label: 'Change member roles', description: 'Promote / demote members (legacy and custom roles)', category: 'Members' },
   { key: 'roles.manage',          label: 'Manage custom roles', description: 'Create / edit / delete custom roles and assign them', category: 'Members' },
+  // A member's capacity and who they report to: a manager's for the people they manage, within their rank.
+  { key: 'members.profile.manage', label: 'Set capacity and reporting lines', description: 'Change a member\'s weekly capacity and who they report to', category: 'Members' },
+  // ClickUp: owners and admins create and edit User Groups (Teams); a custom role can grant it.
+  { key: 'groups.manage',          label: 'Manage user groups',   description: 'Create, rename and delete groups, and set who is in them', category: 'Members' },
   // Integrations
   { key: 'integrations.manage',                 label: 'Manage integrations',          description: 'Connect / disconnect Slack, GitHub, Google, etc.', category: 'Integrations' },
   { key: 'integrations.access_requests.manage', label: 'Approve access requests',      description: 'Approve / deny member requests to use integrations', category: 'Integrations' },
@@ -98,6 +119,7 @@ export const PERMISSION_CATALOG: readonly PermissionDef[] = [
   { key: 'report.view.basic',     label: 'View reports',             description: 'Open dashboards and reports', category: 'Reporting' },
   { key: 'report.export',         label: 'Export reports',           description: 'Download dashboards / reports as CSV or PDF', category: 'Reporting' },
   { key: 'time.approval.manage',  label: 'Manage time approvals',    description: 'Approve or reject time entries submitted by others', category: 'Reporting' },
+  { key: 'dashboard.workspace_default.manage', label: 'Set the workspace dashboard', description: 'Choose the dashboard members land on when they have none of their own', category: 'Reporting' },
 ]
 
 export const PERMISSION_KEYS: ReadonlySet<Permission> = new Set(
@@ -119,8 +141,9 @@ export const ROLE_RANK: Record<LegacyWorkspaceRole, number> = WORKSPACE_ROLE_RAN
 // everything else, so a newly-added catalog permission defaults to admin-only
 // until it is explicitly granted to a lower tier here.
 const MEMBER_DELTA: readonly Permission[] = ['space.create', 'doc.publish', 'report.export', 'report.view.basic']
-// Managers manage their projects, teams, and time — but NOT workspace-level
-// infrastructure. `integrations.manage`, `webhook.manage`, and
+// Managers manage their projects, their people's capacity and reporting lines,
+// clients, and time — but NOT workspace-level infrastructure (user groups,
+// ClickApps, the work schedule and announcements are admins'). `integrations.manage`, `webhook.manage`, and
 // `automation.manage` were demoted to workspace_admin (0037); existing managers
 // keep them via the grandfather custom role created in that migration.
 const MANAGER_DELTA: readonly Permission[] = [
@@ -131,6 +154,8 @@ const MANAGER_DELTA: readonly Permission[] = [
   'task.delete.any',
   'template.manage',
   'time.approval.manage',
+  'members.profile.manage',
+  'client.manage',
 ]
 const LOWER_TIER_KEYS = new Set<Permission>([...MEMBER_DELTA, ...MANAGER_DELTA])
 

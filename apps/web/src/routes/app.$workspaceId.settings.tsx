@@ -24,9 +24,10 @@ export const Route = createFileRoute('/app/$workspaceId/settings')({
     // custom role can grant (`useSettingsAccess`): webhooks, integrations, SSO.
     // The API already honoured those grants; this route sent their holders back
     // to the start (`product-siblings/custom-role-permissions-unread-by-web`).
-    if (getWorkspaceRole(workspaceId).isAdmin) return
+    const { isAdmin, role } = getWorkspaceRole(workspaceId)
+    if (isAdmin) return
     const held = await context.queryClient.ensureQueryData(permissionsQuery(workspaceId)).catch(() => null)
-    const tabs = settingsTabsFor(false, new Set(held?.permissions ?? []))
+    const tabs = settingsTabsFor(false, new Set(held?.permissions ?? []), role)
     if (tabs.length === 0) {
       throw redirect({ to: '/app' })
     }

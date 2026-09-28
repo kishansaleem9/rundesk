@@ -1,12 +1,14 @@
 import { Module } from '@nestjs/common'
 import { AnnouncementsController } from './announcements.controller'
 import { AnnouncementsService } from './announcements.service'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 import { SecurityModule } from '../security/security.module'
 
 @Module({
-  imports: [SecurityModule],
+  // `PermissionsGuard` resolves `announcement.manage` through CustomRolesService.
+  imports: [SecurityModule, CustomRolesModule],
   controllers: [AnnouncementsController],
-  providers: [AnnouncementsService, WorkspaceAdminGuard],
+  providers: [AnnouncementsService, WorkspaceMemberGuard],
 })
 export class AnnouncementsModule {}

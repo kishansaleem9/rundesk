@@ -1,6 +1,6 @@
 import { createFileRoute, Link, useNavigate } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Badge, Button, Card, cn, Input } from '@rundesk/ui'
+import { Badge, Button, Card, cn, Input, toast } from '@rundesk/ui'
 import { useState } from 'react'
 import {
   Activity,
@@ -16,9 +16,9 @@ import {
   Users,
 } from 'lucide-react'
 import { format, formatDistanceToNowStrict, isAfter, isBefore, isToday, startOfWeek } from 'date-fns'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useAuthStore } from '../store/auth'
-import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { DashboardWidgetBuilder } from '../components/dashboard-widget-builder'
 import { FreshnessControls, REFRESH_INTERVALS } from '../components/freshness-controls'
 import { DashboardTemplateCards } from '../components/dashboard-templates'
@@ -145,24 +145,30 @@ function Dashboard() {
   const userId = user?.id
   const qc = useQueryClient()
 
-  // §5.7 — only workspace admins (or a global super_admin) may set/clear the
-  // workspace-wide default dashboard. Mirrors the role gate used across the app
-  // (app.admin gates on the auth-store role; workspace pages read the per-
-  // workspace role from the workspace store).
-  // A workspace admin (or a super-admin) sets the workspace's default. This read
-  // a store nothing ever wrote to, so only a super-admin was ever offered it
-  // (`found-24-sep/workspace-store-never-filled`).
-  const { isAdmin: canManageWorkspaceDefault } = useWorkspaceRole(workspaceId)
+  /*
+   * §5.7 — setting and clearing the workspace's default dashboard ask
+   * `dashboard.workspace_default.manage`, as the API does: an admin's by default,
+   * not a manager's, and grantable by a custom role
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). This
+   * asked the admin role, so a member granted the key was offered neither.
+   * Everybody else sees the "Workspace default" badge and no control.
+   */
+  const canManageWorkspaceDefault = usePermissions(workspaceId).can('dashboard.workspace_default.manage') === true
 
+  // A refused or failed set or clear says so, rather than doing nothing.
+  const workspaceDefaultFailed = (err: unknown) =>
+    toast.error(t('dashboard.workspaceDefaultError'), err instanceof ApiError ? { description: err.message } : undefined)
   const setWorkspaceDefault = useMutation({
     mutationFn: (presetId: string) =>
       api(`/dashboards/workspace/${workspaceId}/preset/${presetId}/workspace-default`, { method: 'PUT' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] }),
+    onError: workspaceDefaultFailed,
   })
   const clearWorkspaceDefault = useMutation({
     mutationFn: () =>
       api(`/dashboards/workspace/${workspaceId}/workspace-default`, { method: 'DELETE' }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['dashboard-presets', workspaceId] }),
+    onError: workspaceDefaultFailed,
   })
 
   const { data: workspace } = useQuery({
@@ -175,7 +181,20 @@ function Dashboard() {
     queryFn: () => api<Preset[]>(`/dashboards/workspace/${workspaceId}`),
   })
 
-  const activePreset = presets.find((p) => p.id === activePresetId) || presets.find((p) => p.isDefault) || presets[0]
+  /*
+   * The one asked for, else your own default, else the workspace's — "Members
+   * without their own default dashboard land on the workspace default", as the
+   * controls' hint says and `GET /dashboards/workspace/:id/default` answers — and
+   * only then the first row. The list has no order, so without the workspace
+   * default in between a member landed on whichever preset came back first.
+   * `isDefault` is its OWNER's personal default, so it counts only on your own:
+   * a colleague's shared preset that is their default is not yours.
+   */
+  const activePreset =
+    presets.find((p) => p.id === activePresetId) ||
+    presets.find((p) => p.isDefault && p.isOwner) ||
+    presets.find((p) => p.isWorkspaceDefault) ||
+    presets[0]
 
   /*
    * Two reads, because the page asks two different questions.
@@ -285,7 +304,7 @@ function Dashboard() {
                   {t('dashboard.workspaceDefaultBadge')}
                 </Badge>
               )}
-              {/* §5.7 — admin-only: set/clear the workspace-wide default. */}
+              {/* §5.7 — set/clear the workspace-wide default: `dashboard.workspace_default.manage`. */}
               {canManageWorkspaceDefault && activePreset?.id && (
                 activePreset.isWorkspaceDefault ? (
                   <Button

@@ -77,14 +77,14 @@ try {
   if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
 
-  const person = async (who) => {
+  const person = async (who, role = 'member') => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const password = 'Granted@12345!'
     const signed = await signUpApi(API, {
       fullName: `Granted ${who}`, email, password,
       organizationName: `Granted ${who} ${stamp}`, organizationSlug: `granted-${who}-${stamp}`,
     })
-    const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
+    const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
     if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
     return { id: signed.user?.id, email, password, as: apiAs(signed.accessToken) }
   }
@@ -99,12 +99,15 @@ try {
   const hooker = await person('hooker')
   const ssoer = await person('ssoer')
   const connector = await person('connector')
+  // A guest: Settings opens to every member but a guest, so a gate that offers
+  // it to everyone shows here.
+  const guest = await person('guest', 'guest')
   await grant(hooker, 'webhook.manage')
   await grant(ssoer, 'sso.manage')
   await grant(connector, 'integrations.manage')
   // Both members' docks carry Settings by their own choice, so the dock's answer
   // is the gate's alone: the plain member's choice must be filtered out.
-  for (const who of [plain, hooker]) {
+  for (const who of [plain, hooker, guest]) {
     const dock = await who.as(`/dashboards/dock/${WS}`, { method: 'POST', body: { pinnedLinks: ['home', 'settings'] } })
     if (dock.status >= 300) throw new Error(`could not arrange the dock: ${dock.status}`)
   }
@@ -188,13 +191,22 @@ try {
   const hPalette = await paletteOffers(hPage)
   const hSide = await sidebarOffers(hPage)
   const hAt = await settingsAt(hPage)
+  const gPage = await signIn(guest)
+  const gMenu = await menuOffers(gPage)
+  const gPalette = await paletteOffers(gPage)
+  const gSide = await sidebarOffers(gPage)
+  const gAt = await settingsAt(gPage)
   const none = (side) => side.dock === 0 && side.links === 0 && side.switcher === 0 && side.rail === 0
   const every = (side) => side.dock === 1 && side.links >= 2 && side.switcher === 1 && side.rail === 1
   chk(
-    pMenu === 0 && pPalette === 0 && none(pSide) && !pAt.path.includes('/settings')
-      && hMenu === 1 && hPalette === 1 && every(hSide) && hAt.path.endsWith('/settings') && hAt.tabs.includes('integrations'),
-    'Workspace settings is offered to a member only once a role grants a key one of its tabs serves — the plain member is offered it nowhere (avatar menu, palette, dock, browse list, switcher, rail) and is sent away from its address; the webhook holder is offered it everywhere, and lands in it',
-    `the plain member: the menu offers ${pMenu}, the palette ${pPalette}, the sidebar ${JSON.stringify(pSide)}, the address left them at ${pAt.path}; the webhook holder: the menu ${hMenu}, the palette ${hPalette}, the sidebar ${JSON.stringify(hSide)}, at ${hAt.path} with tabs ${JSON.stringify(hAt.tabs)}`,
+    // Archived opens to every member but a guest (it lists the archived tasks
+    // each may open), so Settings is offered to a plain member too, on that tab
+    // alone (`admin-guard-admits-managers-where-the-web-says-admin`).
+    pMenu === 1 && pPalette === 1 && every(pSide) && pAt.path.endsWith('/settings') && JSON.stringify(pAt.tabs) === '["archived"]'
+      && hMenu === 1 && hPalette === 1 && every(hSide) && hAt.path.endsWith('/settings') && hAt.tabs.includes('integrations')
+      && gMenu === 0 && gPalette === 0 && none(gSide) && !gAt.path.includes('/settings'),
+    'Workspace settings is offered to every member, and a plain member lands on Archived alone (avatar menu, palette, dock, browse list, switcher, rail) — the one tab no key opens; the webhook holder is offered it everywhere too, and lands with Integrations beside it; a guest is offered it nowhere and is sent away from its address',
+    `the plain member: the menu offers ${pMenu}, the palette ${pPalette}, the sidebar ${JSON.stringify(pSide)}, the address left them at ${pAt.path} with tabs ${JSON.stringify(pAt.tabs)}; the guest: the menu ${gMenu}, the palette ${gPalette}, the sidebar ${JSON.stringify(gSide)}, at ${gAt.path}; the webhook holder: the menu ${hMenu}, the palette ${hPalette}, the sidebar ${JSON.stringify(hSide)}, at ${hAt.path} with tabs ${JSON.stringify(hAt.tabs)}`,
   )
 
   // ══ 2. EACH GRANT, ITS OWN TAB ═══════════════════════════════════════════
@@ -214,7 +226,12 @@ try {
   const aPage = await signIn(ADMIN)
   const aAt = await settingsAt(aPage)
   const aCards = await cards(aPage)
-  const only = (list, want) => list.length === want.length && want.every((w) => list.includes(w))
+  // Archived opens to every member but a guest, beside whatever a key opens,
+  // so "alone" is read without it (`admin-guard-admits-managers-where-the-web-says-admin`).
+  const only = (list, want) => {
+    const own = list.filter((t) => t !== 'archived')
+    return own.length === want.length && want.every((w) => own.includes(w))
+  }
   chk(
     only(hAt.tabs, ['integrations']) && only(hCards, ['webhooks']) && only(sAt.tabs, ['sso']) && only(cAt.tabs, ['integrations']) && only(cCards, ['slack'])
       && aAt.tabs.length > 10 && ['webhooks', 'slack', 'import', 'export'].every((k) => aCards.includes(k)),

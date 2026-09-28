@@ -13,6 +13,7 @@ export const SETTINGS_TABS = [
   'security',
   'sso',
   'features',
+  'announcements',
   'integrations',
   'labels',
   'taskTypes',
@@ -34,18 +35,37 @@ export type SettingsTabId = (typeof SETTINGS_TABS)[number]
  */
 const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
   general: ['workspace.manage'],
-  members: ['members.invite', 'members.remove', 'members.role.change'],
+  // A member's capacity and reporting line are set on the roster.
+  members: ['members.invite', 'members.remove', 'members.role.change', 'members.profile.manage'],
+  groups: ['groups.manage'],
   roles: ['roles.manage'],
+  workSchedule: ['workspace.schedule.manage'],
   security: ['security.policy.manage'],
+  features: ['workspace.clickapps.manage'],
+  announcements: ['announcement.manage'],
   // The workspace's data export sits on Integrations.
   integrations: ['webhook.manage', 'integrations.manage', 'workspace.export'],
   sso: ['sso.manage'],
 }
 
-/** The tabs this person may open: every one for an admin, else those their keys open. */
-export function settingsTabsFor(isAdmin: boolean, granted: ReadonlySet<string>): SettingsTabId[] {
+/**
+ * THE TABS EVERY MEMBER OPENS, a guest excepted: Archived lists the archived
+ * tasks each reader may open, and restores those they may change — the task's
+ * own rules, as ClickUp's Show archived is
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+ */
+const OPEN_TABS: readonly SettingsTabId[] = ['archived']
+
+/**
+ * The tabs this person may open: every one for an admin; else those their keys
+ * open, and the open tabs unless they are a guest.
+ */
+export function settingsTabsFor(isAdmin: boolean, granted: ReadonlySet<string>, role?: string | null): SettingsTabId[] {
   if (isAdmin) return [...SETTINGS_TABS]
-  return SETTINGS_TABS.filter((tab) => (TAB_KEYS[tab] ?? []).some((key) => granted.has(key)))
+  const member = !!role && role !== 'guest'
+  return SETTINGS_TABS.filter(
+    (tab) => (member && OPEN_TABS.includes(tab)) || (TAB_KEYS[tab] ?? []).some((key) => granted.has(key)),
+  )
 }
 
 /**
@@ -54,8 +74,8 @@ export function settingsTabsFor(isAdmin: boolean, granted: ReadonlySet<string>):
  * way in that the route then refuses.
  */
 export function useSettingsAccess(workspaceId: string | undefined) {
-  const { isAdmin } = useWorkspaceRole(workspaceId)
+  const { isAdmin, role } = useWorkspaceRole(workspaceId)
   const { loaded, granted } = usePermissions(workspaceId)
-  const tabs = useMemo(() => settingsTabsFor(isAdmin, granted), [isAdmin, granted])
+  const tabs = useMemo(() => settingsTabsFor(isAdmin, granted, role), [isAdmin, granted, role])
   return { loaded: isAdmin || loaded, tabs, mayOpen: tabs.length > 0 }
 }

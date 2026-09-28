@@ -13,12 +13,49 @@ import {
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
-import { WorkspaceGroupsService } from './workspace-groups.service'
+import { WorkspaceGroupsService, type GroupCreateInput, type GroupUpdateInput } from './workspace-groups.service'
 
 type CurrentUserPayload = { id: string }
 
+/**
+ * WHAT A PERSON MAY SET ON A GROUP FROM HERE: its name, description, handle and
+ * first members. Not its `externalId` — that is the IdP's key, which SCIM
+ * resolves groups by (`findByIdOrExternal`) and sets through its own path
+ * (`scim.service.ts`). Passing the body whole let whoever manages groups set or
+ * overwrite it, so a SCIM call could be pointed at another group, or an
+ * IdP-synced group detached from its IdP.
+ */
+export function groupCreateInput(body: unknown): GroupCreateInput {
+  const b = (body ?? {}) as Record<string, unknown>
+  return {
+    name: b.name as string,
+    description: b.description as string | null | undefined,
+    alias: b.alias as string | null | undefined,
+    memberIds: b.memberIds as string[] | undefined,
+  }
+}
+
+/** A rename's fields, as `groupCreateInput`: never the SCIM `externalId`. */
+export function groupUpdateInput(body: unknown): GroupUpdateInput {
+  const b = (body ?? {}) as Record<string, unknown>
+  const patch: GroupUpdateInput = {}
+  if (b.name !== undefined) patch.name = b.name as string
+  if (b.description !== undefined) patch.description = b.description as string | null
+  if (b.alias !== undefined) patch.alias = b.alias as string | null
+  return patch
+}
+
+/**
+ * Reading the groups is every member's: chat's @team picker, the Teams page and
+ * My Teams read them, and a group holds people, not content — a directory like
+ * `GET /members`. Making, renaming and deleting a group and setting its members
+ * ask `groups.manage`, an admin's by default and grantable by a custom role, as
+ * ClickUp has it ("Only Workspace owners and admins can create a Team"). The
+ * admin guard these stood behind admitted managers, and no key could hand them
+ * to anyone (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+ */
 @ApiTags('workspace-groups')
 @ApiBearerAuth()
 @Controller('workspaces/:workspaceId/groups')
@@ -37,28 +74,31 @@ export class WorkspaceGroupsController {
   }
 
   @Post()
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   create(
     @Param('workspaceId') workspaceId: string,
     @Body() body: { name: string; description?: string; alias?: string | null; memberIds?: string[] },
     @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.groups.create(workspaceId, user.id, body)
+    return this.groups.create(workspaceId, user.id, groupCreateInput(body))
   }
 
   @Patch(':groupId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   update(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,
     @Body() body: { name?: string; description?: string | null; alias?: string | null },
     @CurrentUser() user: CurrentUserPayload,
   ) {
-    return this.groups.update(workspaceId, groupId, user.id, body)
+    return this.groups.update(workspaceId, groupId, user.id, groupUpdateInput(body))
   }
 
   @Delete(':groupId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   remove(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,
@@ -68,7 +108,8 @@ export class WorkspaceGroupsController {
   }
 
   @Post(':groupId/members')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   addMembers(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,
@@ -79,7 +120,8 @@ export class WorkspaceGroupsController {
   }
 
   @Put(':groupId/members')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   replaceMembers(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,
@@ -90,7 +132,8 @@ export class WorkspaceGroupsController {
   }
 
   @Delete(':groupId/members/:userId')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(PermissionsGuard)
+  @RequirePermissions('groups.manage')
   removeMember(
     @Param('workspaceId') workspaceId: string,
     @Param('groupId') groupId: string,

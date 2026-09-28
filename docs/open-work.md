@@ -1140,6 +1140,155 @@ All eleven databases then read as no drift, and `pristine.dump` was re-dumped.
 
 End to end, the case this item was found by: with `uq_folders_space_name_active` dropped on lane 10, `verify.sh folder-create 10` refused with exit 9, naming the index, before the suite ran. The index was put back and lane 10 reads as no drift again.
 
+### `found-28-sep/folders-changed-by-any-reader` — **closed** (security, HIGH; found by the deletion research for `role-editor-offers-unenforced-permissions`)
+
+**Any reader of a space renamed, made private and deleted its folders, whoever made them and whatever the space's level**
+
+*Evidence, measured on lane 1 (the build of `818f919`), probe then suite:* folders are changed through `spaces/:spaceId/folders`, guarded by `ResourceMemberGuard` (can read the space) and `space.create`, which every member holds. `FoldersService.update` took no actor, and `remove` asked no rule. So a member of a view-only space renamed an admin's folder, made it private and deleted it (200 each). A member in a space at Full edit did the same to folders an admin made. Only moving a folder asked the container rule ("This space's default permission is "View only"…", "Only the creator or a workspace admin can modify this folder"). Making a folder private hides its projects from everyone not named on it, so a reader could hide an admin's work from the rest of the workspace.
+
+ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations", search snippets): View changes nothing, Edit changes a location, Full edit deletes it.
+
+*Fixed, 28 September:* `update` and `remove` ask the container rule as `move` did (`assertMayChange`). That is Edit to change a folder and Full edit to delete it; a grant on the folder decides before the space; the creator rule and managers' own spaces apply as for projects and lists. The route passes the actor.
+
+`folder-change-rule`, 4 checks:
+- Before: 2 of 4 on lane 1. The member's changes in the view-only space and to an admin's folder at Full edit were all 200.
+- Unit tests: `folders.service.test.ts` 5/5. The delete test now asserts that the rule is asked at its delete level; update and remove refused by the rule write and audit nothing.
+- Patches `fcr-1..4`; `fcr-4` is a unit claim.
+- In CI.
+
+*After:* 4/4 on the rebuilt lanes (sweep 18079). `folder-create`, `folder-dialog` and `private-folder-reach` pass in the regression; `folder-dialog`'s one miss under load passed alone. The run of `fcr-1..3` follows the commit.
+
+### `found-28-sep/doc-archive-and-delete-at-two-levels` — open, permissions, small (found by the deletion research)
+
+**A doc reaches the Trash at Edit through one route and at Full edit through the other**
+
+*Evidence, read not run:* `PATCH /docs/:id {isArchived: true}` is allowed at Edit (`doc-update-fields.ts:29`, `docs.service.ts:595-616`) and lands the doc in the Trash (`trash.service.ts:171`). `DELETE /docs/:id` asks Full edit for the same result. ClickUp's snippets put archiving and deleting a Doc at Edit ("Anyone, including guests, with Edit permissions can archive and unarchive Docs"; "Guests with edit permissions can edit and delete Docs and pages").
+
+*To close:* one level for both. Measure both routes at Edit and at Full edit, before and after.
+
+### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — open, permissions, small (found by the deletion research)
+
+**Members delete for good what they sent to the Trash, and managers act on everything in it**
+
+*Evidence, read not run:* `trash.service.ts:60` and `:235-238`. ClickUp (help centre "Restore items from the Trash", snippet): "The Workspace owner and admins can see, restore, or permanently delete any public items. Members and guests can only see and restore items they have deleted." Guests cannot permanently delete or empty the Trash.
+
+*To close:* permanent deletion is the admins'; members and guests restore their own. Measure each role before and after.
+
+### `found-28-sep/delete-and-public-link-offered-to-everyone` — open, visible bug, medium (found by the deletion research)
+
+**The sidebar and the space page offer Delete on every space, folder, project and list, and the docs panel offers the public-link switch to readers and guests**
+
+*Evidence, read not run:*
+- The sidebar offers Delete with no permission read (`workspace-sidebar.tsx` near 2248 list, 2315 project, 2573 space, 2697 folder), and so does the space page (`workspace-space-shell-page.tsx:219-230`). The API refuses most of those people, so the control is dead for them. Only the project page asks first.
+- The docs panel shows its public-link toggle to everyone, guests and view-only readers included (`docs-panel.tsx:824`, `:1963`). The API refuses them.
+- Spaces have no capabilities endpoint to ask.
+
+*To close:* each control is offered by the rule its route asks (a capabilities read per container, as projects and tasks have). Measure a member, a guest and an admin on each.
+
+### `found-28-sep/client-delete-cascades-invoices` — open, data loss, medium (found implementing `client.manage`)
+
+**Deleting a client deletes its invoices and their lines, and returns their time to unbilled**
+
+*Evidence:* `client_invoices.client_id` is `ON DELETE CASCADE`, and so are the line items (`0077_client_invoices.sql:6,27`). The invoices' time entries go back to unbilled (`client_invoice_id` set null, `:39-43`). A holder of `client.manage` (every manager, by default) who does not hold `workspace.billing` can therefore destroy billing records. `DELETE /clients/:id` also answers `{ok:true}` for an id that matched nothing.
+
+*To close:* Refuse to delete a client with invoices, or archive it, and ask `workspace.billing` for anything that touches invoices. A missing id is a 404. Measure a manager and an admin before and after.
+
+### `found-28-sep/clients-cannot-be-edited` — open, feature, small (found implementing `client.manage`)
+
+**No page renames a client, changes its contact email or deletes it**
+
+*Evidence:* There is no update route. The contact email the invoice prints (`client-invoicing.service.ts:125`) can only be set through the API.
+
+*To close:* An edit and a delete in the web, asking `client.manage`.
+
+### `found-28-sep/project-folder-unchecked-across-workspaces` — open, security, small (found implementing `client.manage`)
+
+**`PUT /projects/:id` copies a `folderId` without asking that the folder is in the project's workspace**
+
+*Evidence:* Read, not run: `projects.service.ts` `updateProject` takes the body's `folderId` as it takes `clientId` (now checked). A folder of another workspace would be accepted, with only the foreign key checking it.
+
+*To close:* Measure it; refuse a folder that is not in the project's space (400).
+
+### `found-28-sep/billable-switch-offered-to-readers` — open, visible bug, small (found by the client research)
+
+**The project page's "Billable by default" switch is offered to a member who may not change the project**
+
+*Evidence:* `workspace-project-shell-page.tsx:1165-1170`: the PUT answers 403 (`container-access.ts:120`) and the switch quietly flips back.
+
+*To close:* Offer it by the project's capabilities, as the page's other controls are.
+
+### `found-28-sep/announcement-views-counted-per-click` — open, small (found by the announcement research)
+
+**An announcement's views count every call, and paused or expired ones accept views and dismissals**
+
+*Evidence:* `POST /announcements/:id/view` adds 1 per call with no per-user record, and the home page's "Mark seen" adds 1 per click and changes nothing visible. `view` and `dismiss` check only the workspace and the id.
+
+*To close:* One view per person; refuse paused and expired announcements; give Mark seen an effect or remove it.
+
+### `found-28-sep/announcements-flag-gates-nothing` — open, facade, small (found by the announcement research)
+
+**The `chat.announcements` feature flag gates nothing**
+
+*Evidence:* `packages/feature-flags/src/registry.ts:52` declares it; no announcements route or page reads it. The platform console's workspace picker also lists only the workspaces the super admin belongs to.
+
+*To close:* Gate announcements by the flag, or remove it from the registry.
+
+### `found-28-sep/role-flags-read-the-account-role` — open, small (found by the ClickApps research)
+
+**A role-scoped feature flag matches the account's role in the navigation and the workspace role in the ask**
+
+*Evidence:* `resolveForUserRequest` passes `user.role` (`feature-flags.service.ts:70`), while `requestFlag` resolves with the membership's role (`:215-219`). A role-scoped flag can therefore read differently in the nav and in "Contact your admin".
+
+*To close:* Resolve with the workspace role in both, and measure a manager with a role-scoped override.
+
+### `found-28-sep/copy-points-admins-to-the-console` — open, stale reason, small (found by the ClickApps research)
+
+**Sign-up copy and the feature gate's sent message point workspace admins to the platform console**
+
+*Evidence:* `signUp.featuresSubtitle` says "Admin → Features", the super-admin console, where a workspace admin's switches are Settings → Features. `gate.sent` says "Your workspace admins have been asked", though the ask now reaches whoever holds `workspace.clickapps.manage`.
+
+*To close:* Correct the copy in four locales.
+
+### `found-28-sep/members-see-no-clickapps-list` — open, feature, small (found by the ClickApps research)
+
+**A member cannot see which ClickApps are on**
+
+*Evidence:* ClickUp: "Members can view, but not activate or deactivate ClickApps." RunDesk shows the Features tab to key holders only, so a member learns what is off only when the navigation hides it.
+
+*To close:* Open Features read-only to every member but a guest, with the switches offered by the key.
+
+### `found-28-sep/own-capacity-not-self-service` — open, feature, small (found by the people-and-calendar research)
+
+**A member cannot set their own weekly capacity**
+
+*Evidence:* ClickUp lets every member set their own capacity in Workload. `PATCH members/:userId/capacity` refuses a member even for themselves (it asks `members.profile.manage`), and no page offers it.
+
+*To close:* Let a member set their own, and keep others' behind the key.
+
+### `found-28-sep/archived-tasks-unarchived-in-place` — open, feature, small (found by the archived-tasks research)
+
+**An archived task is restored only from Settings → Archived**
+
+*Evidence:* The task sheet and the list page's archived rows offer no Unarchive, though the API lets whoever may change the task restore it. ClickUp puts Unarchive on the task. `listArchivedTasks` also asks the write rule once per row (up to 200).
+
+*To close:* Offer Unarchive where the row is shown, by `canRestore`, and batch the rule.
+
+### `found-28-sep/job-title-rule-and-message-disagree` — open, permissions, small (found by the user-group research)
+
+**Changing a colleague's job title asks the manager role and says it is an admin's**
+
+*Evidence:* `setJobTitle` (`workspace-groups.service.ts` near :444-453) asks `isManagerRole`; its message says "Only a workspace admin may change somebody else's job title"; the Teams page offers the edit only to the person themselves. Also: `?search=` goes into `ilike` unescaped, and `removeMember` audits a removal that removed nothing.
+
+*To close:* Choose the rule (ClickUp: a person's own profile), state it once, and measure.
+
+### `found-28-sep/dashboard-edit-offered-on-others-presets` — open, dead control, small (found by the dashboard research; plausible, not measured)
+
+**The widget builder offers Edit and Save layout on a dashboard the viewer does not own**
+
+*Evidence:* `dashboard-widget-builder.tsx:228`, `:178-181` offer it on any active preset, including the workspace default shown to a member. `PUT /dashboards/:id` is the owner's (`dashboards.service.ts:130-135`), so the save answers 404.
+
+*To close:* Measure; offer editing to the owner, and say so otherwise.
+
 ### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — partly-fixed, test tooling, small (found stopping a preflight)
 
 **A preflight stopped during "the unit claims redden too" left a break patch applied to the product, with a fresh time on the file**
@@ -2328,6 +2477,7 @@ Each is its own question.
 - `a61-meeting-record`, `chat-message-actions`, `list-empty-states` and `addressability-live`, 25 September, the full sweep for `full-edit-enforced-nowhere` and its re-run. `a61-meeting-record` had no attendee chips, twice. `chat-message-actions` found no thread panel, and once no reaction. `list-empty-states` had a fetch that failed mid-run. `addressability-live` showed quick actions for a word no title held. Each passed on its own on lane 3 right after (25/25, 73/73, 23/23, 28/28). Two in both sweeps is no longer chance: they read fixed waits, like the rest here.
 - `task-menu`, 25 September, the sweep for `inbound-email-comments-skip-the-comment-rule`, and once alone on lane 3 while lane 1's break runs held the machine (load 5): Copy ID, New tab, Convert to and Send email to task were not yet in the menu when it was read. It passed alone on lane 4 right after (37/37).
 - `person-panel`, 25 September, the sweep for the time-approvals group: "shows their email" missed under load. It passed alone (59/59).
+- `folder-dialog`, `settings-depth` and `addressability-live`, 28 September, the five-lane regression of `admin-guard-admits-managers-where-the-web-says-admin`. The folder's edit dialog did not open while the sidebar tree drew late (the same run's second attempt opened it). A note did not survive a reload. Landing on docs did not name the doc. Each passed on its own right after (28/28 for `addressability-live`).
 - `list-export`, 25 September, twice: in the sweeps for `billing-open-to-managers-and-every-member` and for the data slice of `admin-guard-admits-managers-where-the-web-says-admin`. "In the table it asks for the custom fields the table shows" saw no request under load, both times. It passed alone both times (30/30).
 
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
@@ -2988,6 +3138,7 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 - **A patch's restart** is checked. If the API does not come up, the patch is recorded as `== <patch> API DID NOT COME UP on <port> — not measured` and the suite does not run. The lane stays dirty, so the next patch rebuilds and restarts it. `NOT_RUN` (`scripts/lib/log-tree.mjs`), `classify-break-log.awk` (UNBUILT) and `check-break-freshness.mjs` count that line as a patch that never ran. `check-log-tree.mjs` gained the case: 48 cases, 15 of 15 mutations bite.
 - **The restore** checks the push, the API build, the one bundle build and the restart. On any failure it writes `== RESTORE FAILED: …`, leaves the stamp unwritten (so the next run syncs) and exits 4 instead of printing DONE.
 - `bash -n` passes and `check-lane-scripts-whole` still reads it whole. The set runs of 28 September went through the new restore; the failure branches are verified by reading only.
+- **The full preflight found what the single gates had not.** `check-model-lanes.sh`'s mutation 5 was anchored on the restore's old last line, `restart && echo "$SERVING" > "$STAMP"`, so after 8e398c1 it changed nothing and the step failed. It is re-aimed onto the stamp line itself: 5 of 5 caught.
 
 ### `found-23-sep/doc-import-never-exits` — **closed**
 
@@ -3172,6 +3323,27 @@ This was the last group the map could close. What stays open below is blocked on
 *Still open,* per the map (routes and lines in that item's notes):
 - **The content deletion keys, and `doc.publish`, meet the location levels.** `space.delete`, `project.delete`, `list.delete`, `task.delete.any` and `doc.delete.any` say "delete any", while Full edit on a location already lets its holder delete there (`full-edit-enforced-nowhere`). Those two models have to be reconciled before any of them gates anything. ClickUp's own table still cannot be read here (25 September: the help centre is denied, and the snippets carry no table). What the snippets do say: deleting a List or a task takes Full edit on it ("Permissions FAQ"), and only the owner deletes a workspace. `check-permission-keys-asked.mjs` exempts these six keys under this item until then.
 
+*Researched, 28 September: the deletion keys.* The ClickUp help centre is blocked here, so this rests on search snippets, quoted with their queries in the research notes:
+- **Deletion follows the location level, not the creator.**
+  - Full edit deletes; Edit changes and archives (Permissions FAQ: "no permission level that lets users delete a task but doesn't let them delete a List … set … the List to edit so they are prevented from deleting it, then … each task … to full edit").
+  - Members and admins have Full edit on public locations by default.
+  - Guests never delete a Space.
+  - Deleting a Doc takes Edit ("Guests with edit permissions can edit and delete Docs").
+  - Guests never share publicly.
+- **No workspace-wide "who can delete" switch** was found among the advanced permissions. No custom-role permission named for deleting spaces, tasks or docs could be confirmed.
+
+Proposal (not built yet):
+- **Keep `space.delete`, `project.delete` and `list.delete`,** asked for deleting a container somebody else made. Each is ANDed with Full edit and replaces the role tests in `container-access.ts`, so no base role changes.
+- **Retire `task.delete.any`.** Deleting a task already asks Full edit with no creator rule, as ClickUp does.
+- **Retire `doc.delete.any`.** A doc's level decides.
+- **Retire `doc.publish`.** It is a member default, and the only thing it could add is letting a guest publish, which ClickUp forbids.
+
+Four defects found beside it are items of their own:
+- `found-28-sep/folders-changed-by-any-reader` (security, HIGH);
+- `found-28-sep/doc-archive-and-delete-at-two-levels`;
+- `found-28-sep/trash-deletes-for-good-wider-than-clickup`;
+- `found-28-sep/delete-and-public-link-offered-to-everyone`.
+
 ### `found-25-sep/managers-grant-themselves-admin` — **closed** (security, HIGH; found mapping `role-editor-offers-unenforced-permissions`)
 
 **A manager could make themself a workspace admin, and give themself every permission**
@@ -3278,7 +3450,7 @@ The new suite `billing-key`, 3 checks:
 - Regression: the 9 suites that read plans, billing, settings or roles, and the new one. 9 of 10 passed in the sweep; `list-export` saw no fields request under the sweep's load and passed alone (30/30).
 - In CI (204).
 
-### `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` — partly-fixed, permissions, medium (found closing `billing-open-to-managers-and-every-member`)
+### `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin` — **closed** (permissions, medium; found closing `billing-open-to-managers-and-every-member`)
 
 **Thirty-one routes still stand behind `WorkspaceAdminGuard`, which admits managers, where the web or the catalog says admin**
 
@@ -3342,6 +3514,49 @@ Now:
 - `check-permission-keys-asked` reads 27 keys offered, 21 asked.
 - Regression: the 13 suites that import, export, open settings or grant roles, and the new one. 13 of 14 passed in the sweep; `list-export` missed its fields request under load and passed alone (30/30), recorded under `three-suites-fail-under-a-full-sweep`.
 - In CI (207).
+
+
+*Closed, 28 September: the remaining groups.* Each group was researched and measured by its own agent. Each has a suite written for the AFTER state and run BEFORE the change. The rule was then built, and the suites run AFTER on lanes 1 to 5 (sweep 18079). The seven new keys are in the catalog, the role editor (four locales) and the web's permission type; each is an admin's by default unless noted, and a custom role can grant each.
+
+| Group | Rule now | ClickUp | Suite: before → after |
+|---|---|---|---|
+| ClickApps | `GET /feature-flags/workspace/:id` and the workspace-scope `PUT` ask `workspace.clickapps.manage`, not the role spelled out by hand. What is on (`/resolved`) stays every member's. | "Only Workspace owners and admins can activate or deactivate ClickApps. Members can view…" | `clickapp-flags-access` 3/7 → 7/7 |
+| The work week and holidays | `PATCH work-schedule`, `POST`/`DELETE holidays` ask `workspace.schedule.manage`; reading them stays open. | The work week is set by owners and admins | `people-calendar-access` 3/8 → 8/8 |
+| A member's capacity and reports-to | Ask `members.profile.manage` (managers and up by default). The holder may not touch someone who outranks them (`assertWithinRank`, unit-tested). | — | (same suite) |
+| Archived tasks | `GET archived-tasks` is every member's, filtered by `taskReadFilterFor`. Each row says `canRestore` from the task write rule (`common/permissions/task-restore.ts`). Settings → Archived opens to every member but a guest. Archived workspaces stay an admin's. | Show archived follows the location's access | `archived-tasks-access` 2/7 → 7/7 |
+| User groups | Making, renaming and deleting groups, and setting their members, ask `groups.manage`; reading stays open. | Owners and admins manage User Groups; a custom role can grant it | `user-group-access` 1/8 → 8/8 |
+| Clients | Making and deleting ask `client.manage` (managers and up); a guest reads no client list. | No clients object; reasoned from what the web promises | `client-access` 0/6 → 6/6 |
+| Announcements | Publishing, pausing, deleting and the full list ask `announcement.manage`, from Settings → Announcements (a new tab). The live banner stays every member's. | Posting to everyone is an admin's | `announcement-access` 3/8 → 8/8 |
+| The workspace dashboard | Setting and clearing ask `dashboard.workspace_default.manage`. They disagreed before: a manager cleared what they could not set. | Default views for everyone are an owner's and admins' | `default-dashboard-access` 4/8 → 8/8 |
+
+Fixed on the way, each inside its group:
+- **ClickApps:**
+  - `PUT /feature-flags` refuses an unknown key (400) and a scope that is not its workspace.
+  - "Contact your admin" reaches the holders of the key and opens Settings → Features, not the platform console. A holder is offered the switch itself.
+- **Clients:** `PUT /projects/:id` takes a client of its own workspace only (unit-tested).
+- **User groups:**
+  - The web API no longer writes a group's `externalId`; provisioning keeps its own path.
+  - Removing a group or a member reports a failure.
+- **Announcements:**
+  - A title is required (400, not a 500), and so are a valid tone and date.
+  - Save draft saves the announcement paused instead of doing nothing.
+  - "No expiry" replaces "Invalid Date".
+  - Every action reports a failure.
+- **Dashboard:**
+  - Only a dashboard its setter may read can become the workspace default, so a colleague's unshared one is never published by id.
+  - A member with no dashboard of their own lands on the workspace default, as the page promised.
+
+**Managers lose** the work week and holidays, ClickApps, user groups, announcements and the workspace dashboard. They kept all of these only because `WorkspaceAdminGuard` admitted them, and the web offered none of them. An admin can grant each by a custom role. **Every member but a guest is now offered Settings,** landing on Archived: `settings-tabs-by-key` and `settings-role-grants` were rewritten for it, and the latter measures a guest too.
+
+- **Break patches:** `cka-1..9`, `pca-1..10`, `ata-1..10`, `uga-1..14`, `cla-1..13`, `ana-1..11`, `dda-1..9` (five of them unit claims). Re-aimed: `srg-1..7`, `stp-4`, `stp-11`, `wrc-2`, `td-1`. Their runs follow the commit.
+- **Gates:** `check-permission-keys-asked` reads 34 keys offered, 28 asked and 6 exempt.
+- **Tests:** API unit tests 1684/1684, web 305/305.
+- **In CI:** 216 suites.
+- **Regression, 63 suites** (every suite that opens settings, grants roles, reads archived tasks, flags, groups, clients, announcements or dashboards, or edits folders), on lanes 1 to 5:
+  - 57 passed in the sweep.
+  - Three failed because of this change and pass after it. `teams-destination` and `settings-role-grants` assumed a member reaches no Settings, and are rewritten for Archived (Settings still shows a member no people). `loading-states` refused the new panel's "Loading…" text, which is skeletons now.
+  - `folder-dialog`, `settings-depth` and `addressability-live` passed alone. They are load flakes, recorded under `three-suites-fail-under-a-full-sweep`.
+- **Preflight:** every step passes except the three that wait on the break runs.
 
 ### `found-23-sep/bail-returns-and-the-checker-runs-on` — **closed** (found closing `process-exit-remaining`)
 

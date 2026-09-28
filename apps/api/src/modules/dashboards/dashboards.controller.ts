@@ -1,7 +1,8 @@
 import { Controller, Get, Post, Put, Delete, Body, Param, UseGuards, Request, ParseUUIDPipe } from '@nestjs/common'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { ResourceMemberGuard } from '../auth/guards/resource-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
+import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { DashboardsService } from './dashboards.service'
 import { CreateDashboardPresetDto, UpdateDashboardPresetDto } from './dto/dashboard-preset.dto'
 
@@ -16,7 +17,8 @@ export class DashboardsController {
     return this.dashboardsService.listPresets(req.user.id, workspaceId)
   }
 
-  // Effective default: the user's own default, else the admin-set workspace default. §5.7
+  // Effective default: the user's own default, else the workspace default. §5.7
+  // Every member's read: what each widget shows is read as its viewer.
   @Get('workspace/:workspaceId/default')
   @UseGuards(ResourceMemberGuard)
   getDefaultPreset(
@@ -26,9 +28,18 @@ export class DashboardsController {
     return this.dashboardsService.getDefaultPreset(req.user.id, workspaceId)
   }
 
-  // Admin-gated: set/clear the workspace-wide default dashboard. §5.7
+  /*
+   * Setting and clearing the workspace-wide default dashboard (§5.7) both ask
+   * `dashboard.workspace_default.manage`, an admin's by default and grantable, as
+   * ClickUp gives "default views for everyone" to owners and admins. They stood
+   * behind `WorkspaceAdminGuard`, which admits managers: setting then asked the
+   * admin role in the service and clearing asked nothing more, so a manager
+   * cleared what they could not set
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   */
   @Put('workspace/:workspaceId/preset/:presetId/workspace-default')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('dashboard.workspace_default.manage')
   setWorkspaceDefault(
     @Request() req: { user: { id: string; role?: string } },
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
@@ -38,7 +49,8 @@ export class DashboardsController {
   }
 
   @Delete('workspace/:workspaceId/workspace-default')
-  @UseGuards(WorkspaceAdminGuard)
+  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
+  @RequirePermissions('dashboard.workspace_default.manage')
   clearWorkspaceDefault(@Param('workspaceId', new ParseUUIDPipe()) workspaceId: string) {
     return this.dashboardsService.clearWorkspaceDefault(workspaceId)
   }

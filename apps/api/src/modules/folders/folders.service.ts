@@ -135,10 +135,20 @@ export class FoldersService {
       position?: number
       visibility?: 'public' | 'private'
     },
+    actorId?: string,
   ) {
     if (patch.visibility !== undefined && patch.visibility !== 'public' && patch.visibility !== 'private') {
       throw new BadRequestException('visibility must be public or private')
     }
+    /*
+     * THE CONTAINER RULE, AS MOVING ALREADY ASKED IT. Renaming, recolouring and
+     * making a folder private asked only that the caller could read its space
+     * and held `space.create`, which every member does: a member of a
+     * view-only space renamed an admin's folder, made it private and deleted
+     * it (200 each), while moving it was refused
+     * (`found-28-sep/folders-changed-by-any-reader`).
+     */
+    if (actorId) await this.assertMayChange(spaceId, folderId, actorId, 'manage')
     // Rename is the other door onto the same namespace. Guarding only `create`
     // would leave the rule reachable-around: make "Clients 2", rename it to
     // "Clients", and the index — not the API — answers, with a 500.
@@ -164,6 +174,27 @@ export class FoldersService {
       .returning()
     if (!row) throw new NotFoundException('Folder not found')
     return row
+  }
+
+  /** The container rule for this folder, as `move` asks it: `manage` to change it, `delete` to delete it. */
+  private async assertMayChange(spaceId: string, folderId: string, actorId: string, action: 'manage' | 'delete') {
+    const [f] = await this.db
+      .select({ createdById: folders.createdById, workspaceId: spaces.workspaceId })
+      .from(folders)
+      .innerJoin(spaces, eq(spaces.id, folders.spaceId))
+      .where(and(eq(folders.id, folderId), eq(folders.spaceId, spaceId)))
+      .limit(1)
+    if (!f) throw new NotFoundException('Folder not found')
+    await assertCanManageContainer(this.db, {
+      workspaceId: f.workspaceId,
+      createdById: f.createdById,
+      actorId,
+      kind: 'folder',
+      spaceId,
+      action,
+      // A grant on the folder itself decides before the space.
+      within: [{ type: 'folder', id: folderId }],
+    })
   }
 
   /**
@@ -261,6 +292,9 @@ export class FoldersService {
       .where(and(eq(folders.id, folderId), eq(folders.spaceId, spaceId)))
       .limit(1)
     if (!ctx) throw new NotFoundException('Folder not found')
+    // Deleting asks the stricter half of the same rule: Full edit, as for a
+    // project or a list (`found-28-sep/folders-changed-by-any-reader`).
+    if (actorId) await this.assertMayChange(spaceId, folderId, actorId, 'delete')
 
     await this.db
       .update(folders)

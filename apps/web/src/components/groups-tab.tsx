@@ -13,6 +13,7 @@ import {
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
+import { usePermissions } from '../hooks/use-permissions'
 import { InlineSkeleton } from './loading-skeletons'
 
 type Member = {
@@ -46,6 +47,13 @@ type WorkspaceGroup = {
 export function GroupsTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  // Making, renaming and deleting a group and setting its members ask
+  // `groups.manage`, as the API does — an admin's by default, grantable by a
+  // custom role (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+  // Settings opens this tab by the same key; asking it here too keeps a control
+  // the API refuses from ever being offered.
+  const groupsKey = usePermissions(workspaceId).can('groups.manage')
+  const mayManage = groupsKey === true
   const [search, setSearch] = useState('')
   const [activeGroupId, setActiveGroupId] = useState<string | null>(null)
   const [newName, setNewName] = useState('')
@@ -116,6 +124,8 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
       setActiveGroupId(null)
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
     },
+    // A refused or failed delete said nothing: the group simply stayed.
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('groupsTab.deleteFailed')),
   })
 
   const addMembers = useMutation({
@@ -136,6 +146,7 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['workspace-groups', workspaceId] })
     },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('groupsTab.removeMemberFailed')),
   })
 
   // When switching active group, prime the edit fields.
@@ -161,6 +172,11 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
             <p className="text-sm text-muted-foreground mt-0.5">
               {t('groupsTab.subtitle')}
             </p>
+            {groupsKey === false && (
+              <p className="text-xs text-muted-foreground mt-2" data-testid="groups-tab-read-only">
+                {t('groupsTab.readOnly')}
+              </p>
+            )}
           </div>
         </div>
       </Card>
@@ -177,22 +193,24 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
               className="h-8"
             />
           </div>
-          <div className="flex items-center gap-2">
-            <Input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder={t('groupsTab.newGroupPlaceholder')}
-              className="h-8"
-            />
-            <Button
-              size="sm"
-              variant="gradient"
-              disabled={!newName.trim() || create.isPending}
-              onClick={() => create.mutate(newName.trim())}
-            >
-              <Plus className="h-3.5 w-3.5" />
-            </Button>
-          </div>
+          {mayManage && (
+            <div className="flex items-center gap-2">
+              <Input
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                placeholder={t('groupsTab.newGroupPlaceholder')}
+                className="h-8"
+              />
+              <Button
+                size="sm"
+                variant="gradient"
+                disabled={!newName.trim() || create.isPending}
+                onClick={() => create.mutate(newName.trim())}
+              >
+                <Plus className="h-3.5 w-3.5" />
+              </Button>
+            </div>
+          )}
 
           <div className="space-y-1 max-h-[420px] overflow-auto">
             {groupsQuery.isLoading && (
@@ -287,44 +305,47 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
                     )}
                   </div>
                 )}
-                <div className="flex items-center gap-1">
-                  {editingMeta ? (
+                {mayManage && (
+                  <div className="flex items-center gap-1">
+                    {editingMeta ? (
+                      <Button
+                        size="sm"
+                        onClick={() =>
+                          updateGroup.mutate({
+                            groupId: activeGroup.id,
+                            patch: {
+                              name: draftName,
+                              description: draftDescription || null,
+                              alias: draftAlias.trim() || null,
+                            },
+                          })
+                        }
+                        disabled={updateGroup.isPending || !draftName.trim()}
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                      </Button>
+                    ) : (
+                      <Button size="sm" variant="ghost" onClick={() => enterEditMode(activeGroup)}>
+                        <Edit3 className="h-3.5 w-3.5" />
+                      </Button>
+                    )}
                     <Button
                       size="sm"
-                      onClick={() =>
-                        updateGroup.mutate({
-                          groupId: activeGroup.id,
-                          patch: {
-                            name: draftName,
-                            description: draftDescription || null,
-                            alias: draftAlias.trim() || null,
-                          },
-                        })
-                      }
-                      disabled={updateGroup.isPending || !draftName.trim()}
+                      variant="ghost"
+                      onClick={() => {
+                        if (confirm(t('groupsTab.confirmDelete', { name: activeGroup.name }))) {
+                          removeGroup.mutate(activeGroup.id)
+                        }
+                      }}
                     >
-                      <Save className="h-3.5 w-3.5" />
+                      <Trash2 className="h-3.5 w-3.5 text-red-400" />
                     </Button>
-                  ) : (
-                    <Button size="sm" variant="ghost" onClick={() => enterEditMode(activeGroup)}>
-                      <Edit3 className="h-3.5 w-3.5" />
-                    </Button>
-                  )}
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onClick={() => {
-                      if (confirm(t('groupsTab.confirmDelete', { name: activeGroup.name }))) {
-                        removeGroup.mutate(activeGroup.id)
-                      }
-                    }}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 text-red-400" />
-                  </Button>
-                </div>
+                  </div>
+                )}
               </div>
 
               <GroupMemberManager
+                mayManage={mayManage}
                 allMembers={allMembers}
                 currentMembers={activeGroup.members}
                 onAdd={(userIds) =>
@@ -343,11 +364,14 @@ export function GroupsTab({ workspaceId }: { workspaceId: string }) {
 }
 
 function GroupMemberManager({
+  mayManage,
   allMembers,
   currentMembers,
   onAdd,
   onRemove,
 }: {
+  /** Whether this person may set the group's members (`groups.manage`); else the list is read-only. */
+  mayManage: boolean
   allMembers: Member[]
   currentMembers: GroupMember[]
   onAdd: (userIds: string[]) => void
@@ -395,14 +419,16 @@ function GroupMemberManager({
                     )}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onRemove(m.userId)}
-                  aria-label={t('groupsTab.removeFromGroup')}
-                >
-                  <UserMinus className="h-3.5 w-3.5 text-red-400" />
-                </Button>
+                {mayManage && (
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onRemove(m.userId)}
+                    aria-label={t('groupsTab.removeFromGroup')}
+                  >
+                    <UserMinus className="h-3.5 w-3.5 text-red-400" />
+                  </Button>
+                )}
               </div>
             ))
           )}
@@ -410,44 +436,46 @@ function GroupMemberManager({
       </div>
 
       {/* Add members */}
-      <div>
-        <div className="flex items-center justify-between mb-2">
-          <Label className="text-xs uppercase tracking-wider">{t('groupsTab.addMembers')}</Label>
-        </div>
-        <Input
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('groupsTab.searchMembersPlaceholder')}
-          className="h-8 mb-2"
-        />
-        <div className="rounded-md border border-border/40 bg-card/40 divide-y divide-border/40 max-h-[280px] overflow-auto">
-          {candidates.length === 0 ? (
-            <p className="px-3 py-3 text-xs text-muted-foreground italic">
-              {t('groupsTab.noMoreMembers')}
-            </p>
-          ) : (
-            candidates.map((m) => (
-              <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2">
-                <div className="flex items-center gap-2 min-w-0">
-                  <Avatar email={m.email} displayName={m.displayName} />
-                  <div className="min-w-0">
-                    <div className="text-sm font-medium truncate">{m.displayName}</div>
-                    <div className="text-[10px] text-muted-foreground truncate">{m.email}</div>
+      {mayManage && (
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <Label className="text-xs uppercase tracking-wider">{t('groupsTab.addMembers')}</Label>
+          </div>
+          <Input
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder={t('groupsTab.searchMembersPlaceholder')}
+            className="h-8 mb-2"
+          />
+          <div className="rounded-md border border-border/40 bg-card/40 divide-y divide-border/40 max-h-[280px] overflow-auto">
+            {candidates.length === 0 ? (
+              <p className="px-3 py-3 text-xs text-muted-foreground italic">
+                {t('groupsTab.noMoreMembers')}
+              </p>
+            ) : (
+              candidates.map((m) => (
+                <div key={m.userId} className="flex items-center justify-between gap-2 px-3 py-2">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <Avatar email={m.email} displayName={m.displayName} />
+                    <div className="min-w-0">
+                      <div className="text-sm font-medium truncate">{m.displayName}</div>
+                      <div className="text-[10px] text-muted-foreground truncate">{m.email}</div>
+                    </div>
                   </div>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() => onAdd([m.userId])}
+                    aria-label={t('groupsTab.addToGroup')}
+                  >
+                    <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
+                  </Button>
                 </div>
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onClick={() => onAdd([m.userId])}
-                  aria-label={t('groupsTab.addToGroup')}
-                >
-                  <UserPlus className="h-3.5 w-3.5 text-emerald-400" />
-                </Button>
-              </div>
-            ))
-          )}
+              ))
+            )}
+          </div>
         </div>
-      </div>
+      )}
     </div>
   )
 }

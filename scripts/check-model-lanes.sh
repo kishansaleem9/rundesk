@@ -85,8 +85,9 @@ MUTANTS=(
   "env|s/^  if lane_has_model \"\\\$k\"; then echo \"\\\$rev \\+model\"; else echo \"\\\$rev\"; fi\$/  echo \"\\\$rev\"/"
   # The runner never adds the lane.
   "runner|s/^\\[ -n \"\\\$NEEDS_MODEL\" \\] \\&\\& lane_model_add \"\\\$LANE\"\$/:/"
-  # The runner stamps the revision alone at the end of a set.
-  "runner|s/^restart \\&\\& echo \"\\\$SERVING\" > \"\\\$STAMP\"\$/restart \\&\\& echo \"\\\$REV\" > \"\\\$STAMP\"/"
+  # The runner stamps the revision alone, after the sync and at the end of a
+  # set (the restore's stamp moved inside its checked branch in 8e398c1).
+  "runner|s/^  echo \"\\\$SERVING\" > \"\\\$STAMP\"\$/  echo \"\\\$REV\" > \"\\\$STAMP\"/"
 )
 caught=0
 for i in "${!MUTANTS[@]}"; do

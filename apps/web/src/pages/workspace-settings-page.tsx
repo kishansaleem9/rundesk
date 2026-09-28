@@ -2,10 +2,11 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, Switch, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
+import { AnnouncementsPanel } from '../components/announcements-panel'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
@@ -81,6 +82,8 @@ type ArchivedTask = {
   listName: string
   projectName: string
   updatedAt: string
+  /** Whether `POST /tasks/:id/restore` would accept it from this reader: the task's write rule. */
+  canRestore: boolean
 }
 type ArchivedWorkspaceEntry = { workspace: Workspace; role: string }
 
@@ -114,6 +117,7 @@ const TAB_GROUPS = [
     headingKey: 'settings.groupFeatures',
     tabs: [
       { id: 'features', labelKey: 'settings.tabFeatures', icon: ToggleRight },
+      { id: 'announcements', labelKey: 'settings.tabAnnouncements', icon: Megaphone },
       { id: 'integrations', labelKey: 'settings.tabIntegrations', icon: Plug },
       { id: 'labels', labelKey: 'settings.tabLabels', icon: Tag },
       { id: 'taskTypes', labelKey: 'settings.tabTaskTypes', icon: Shapes },
@@ -262,6 +266,7 @@ export function SettingsPage() {
                 {tab === 'groups' && <GroupsTab workspaceId={validWorkspaceId} />}
                 {tab === 'roles' && <RolesTab workspaceId={validWorkspaceId} />}
                 {tab === 'features' && <FeaturesTab workspaceId={validWorkspaceId} />}
+                {tab === 'announcements' && <AnnouncementsPanel workspaceId={validWorkspaceId} />}
                 {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
                 {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
                 {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
@@ -571,7 +576,16 @@ const CLICKAPPS: { flag: FlagKey; nameKey: TranslationKey; descKey: TranslationK
 function FeaturesTab({ workspaceId }: { workspaceId: string }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
+  /*
+   * The switches ask `workspace.clickapps.manage`, as `PUT /feature-flags/:flag`
+   * does: an admin's by default, and a custom role's where one grants it
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). They
+   * asked `isAdmin`, so a member granted the key was shown every switch dead.
+   */
   const { isAdmin } = useWorkspaceRole(workspaceId)
+  const held = usePermissions(workspaceId).can('workspace.clickapps.manage')
+  const mayManage = isAdmin || held === true
+  const refused = !isAdmin && held === false
   const { flags, isLoading } = useResolvedFlags(workspaceId)
 
   const setFlag = useMutation({
@@ -596,9 +610,9 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
         <h2 className="text-lg font-semibold">{t('settings.featuresTitle')}</h2>
         <p className="text-sm text-muted-foreground mt-0.5">{t('settings.featuresSubtitle')}</p>
       </div>
-      {!isAdmin && (
+      {refused && (
         <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px] text-amber-700 dark:text-amber-300">
-          {t('settings.featuresAdminOnly')}
+          {t('settings.featuresKeyOnly')}
         </div>
       )}
       <Card className="overflow-hidden divide-y divide-border/70">
@@ -615,7 +629,7 @@ function FeaturesTab({ workspaceId }: { workspaceId: string }) {
                 role="switch"
                 aria-checked={on}
                 aria-label={t(nameKey)}
-                disabled={!isAdmin || isLoading || setFlag.isPending}
+                disabled={!mayManage || isLoading || setFlag.isPending}
                 onClick={() => setFlag.mutate({ flag, enabled: !on })}
                 className={cn(
                   'relative h-6 w-11 shrink-0 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed',
@@ -910,16 +924,20 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
    * EACH CONTROL ASKS THE KEY ITS ROUTE ASKS (`role-editor-offers-unenforced-permissions`):
    * the tab opens to any of the three members keys, so a manager (who holds
    * `members.invite`) sees the invite form and not a member's role to change.
-   * No one is offered a role above their own, which the API refuses. Capacity,
-   * reports-to and the roster's CSV stand behind `WorkspaceAdminGuard`: a
-   * manager's and up.
+   * No one is offered a role above their own, which the API refuses. Capacity
+   * and reports-to ask `members.profile.manage` — a manager's and up by
+   * default, and a custom role grants it — and, as roles do, reach nobody
+   * above the setter's own role: such a row shows them, not to be changed
+   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). The
+   * roster's CSV asks `workspace.export`.
    */
   const perms = usePermissions(workspaceId)
-  const { role: workspaceRole, isSuperAdmin, isManagerOrAbove } = useWorkspaceRole(workspaceId)
+  const { role: workspaceRole, isSuperAdmin } = useWorkspaceRole(workspaceId)
   const own = isSuperAdmin ? 'super_admin' : workspaceRole
   const mayInvite = perms.can('members.invite') === true
   const mayChangeRole = perms.can('members.role.change') === true
   const mayRemove = perms.can('members.remove') === true
+  const mayProfile = perms.can('members.profile.manage') === true
   const givable = ROLES.filter((r) => withinRank(own, r.value))
 
   const membersQuery = useQuery({
@@ -990,6 +1008,7 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
       qc.invalidateQueries({ queryKey: ['workspace-members', workspaceId] })
       qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
     },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.capacityUpdateFailed')),
   })
 
   // Who each person reports to. The server rejects self-reporting and cycles;
@@ -1178,34 +1197,42 @@ function MembersTab({ workspaceId }: { workspaceId: string }) {
                     : t('settings.invitedNoRecord')}
                 </div>
               </div>
-              {isManagerOrAbove && (<>
-              <CapacityInput
-                value={m.weeklyCapacityHours ?? 40}
-                pending={updateCapacity.isPending && updateCapacity.variables?.userId === m.userId}
-                onCommit={(weeklyCapacityHours) =>
-                  updateCapacity.mutate({ userId: m.userId, weeklyCapacityHours })
-                }
-              />
-              {/* Reports to. Everyone except this person is a candidate; the
-                  server is what actually rejects a cycle. */}
-              <select
-                value={m.managerId ?? ''}
-                aria-label={t('settings.reportsToFor', { name: m.displayName })}
-                title={t('settings.reportsTo')}
-                disabled={updateManager.isPending && updateManager.variables?.userId === m.userId}
-                onChange={(e) =>
-                  updateManager.mutate({ userId: m.userId, managerId: e.target.value || null })
-                }
-                className="hidden lg:block w-36 text-xs px-2 py-1 rounded border border-border bg-card"
-              >
-                <option value="">{t('settings.reportsToNobody')}</option>
-                {(membersQuery.data ?? [])
-                  .filter((c) => c.userId !== m.userId)
-                  .map((c) => (
-                    <option key={c.userId} value={c.userId}>{c.displayName}</option>
-                  ))}
-              </select>
-              </>)}
+              {mayProfile && (() => {
+                // Somebody above the setter's own role is shown, not offered:
+                // the API refuses it (`assertWithinRank`), and the row says so.
+                const aboveMe = !withinRank(own, m.role)
+                return (
+                  <>
+                    <CapacityInput
+                      value={m.weeklyCapacityHours ?? 40}
+                      pending={updateCapacity.isPending && updateCapacity.variables?.userId === m.userId}
+                      lockedReason={aboveMe ? t('settings.profileAboveYourRole') : undefined}
+                      onCommit={(weeklyCapacityHours) =>
+                        updateCapacity.mutate({ userId: m.userId, weeklyCapacityHours })
+                      }
+                    />
+                    {/* Reports to. Everyone except this person is a candidate; the
+                        server is what actually rejects a cycle. */}
+                    <select
+                      value={m.managerId ?? ''}
+                      aria-label={t('settings.reportsToFor', { name: m.displayName })}
+                      title={aboveMe ? t('settings.profileAboveYourRole') : t('settings.reportsTo')}
+                      disabled={aboveMe || (updateManager.isPending && updateManager.variables?.userId === m.userId)}
+                      onChange={(e) =>
+                        updateManager.mutate({ userId: m.userId, managerId: e.target.value || null })
+                      }
+                      className="hidden lg:block w-36 text-xs px-2 py-1 rounded border border-border bg-card disabled:opacity-60 disabled:cursor-not-allowed"
+                    >
+                      <option value="">{t('settings.reportsToNobody')}</option>
+                      {(membersQuery.data ?? [])
+                        .filter((c) => c.userId !== m.userId)
+                        .map((c) => (
+                          <option key={c.userId} value={c.userId}>{c.displayName}</option>
+                        ))}
+                    </select>
+                  </>
+                )
+              })()}
               {mayChangeRole && withinRank(own, m.role) ? (
                 <select
                   value={m.role}
@@ -2212,6 +2239,12 @@ const WEEKDAYS: { iso: number; labelKey: TranslationKey }[] = [
  * how those hours are spread. A Sun–Thu team was previously read as two days of
  * overtime and two days idle.
  */
+/*
+ * The workspace's calendar asks `workspace.schedule.manage`, as its routes do:
+ * the tab opens to its holders alone (`TAB_KEYS`), an admin's by default and a
+ * custom role's where one grants it — a manager is sent to a tab of theirs.
+ * Every member still reads the week and the holidays on the planner.
+ */
 function WorkScheduleTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
@@ -2473,10 +2506,13 @@ function LabelsTab({ workspaceId }: { workspaceId: string }) {
 function CapacityInput({
   value,
   pending,
+  lockedReason,
   onCommit,
 }: {
   value: number
   pending: boolean
+  /** Why this person's hours are shown and not offered — somebody above the setter's role. */
+  lockedReason?: string
   onCommit: (next: number) => void
 }) {
   const { t } = useTranslation()
@@ -2485,14 +2521,21 @@ function CapacityInput({
     setLocal(String(value))
   }, [value])
   return (
-    <div className="flex items-center gap-1 text-xs">
+    <div className="flex items-center gap-1 text-xs" title={lockedReason}>
+      {lockedReason && (
+        <Lock
+          className="h-3 w-3 text-muted-foreground"
+          aria-label={lockedReason}
+          data-testid="settings-member-profile-above-rank"
+        />
+      )}
       <input
         type="number"
         min={0}
         max={168}
         step={1}
         value={local}
-        disabled={pending}
+        disabled={pending || !!lockedReason}
         onChange={(e) => setLocal(e.target.value)}
         onBlur={() => {
           const next = parseInt(local, 10)
@@ -2511,13 +2554,22 @@ function CapacityInput({
   )
 }
 
-// §13.4 — Restore UI. Surfaces archived tasks (workspace-wide) and archived
-// workspaces the admin belongs to, each with a Restore action wired to the
-// existing restore endpoints.
-
+/*
+ * §13.4 — Restore UI. Archived tasks, workspace-wide, and — for an admin —
+ * archived workspaces, each with a Restore action wired to its restore route.
+ *
+ * EVERY MEMBER'S TAB, a guest excepted (`OPEN_TABS`): each reads the archived
+ * tasks they may open, and each row says whether its reader may restore it
+ * (`canRestore`, the task's write rule and a manager's own spaces), so Restore
+ * is offered where the route accepts it and "View only" said elsewhere
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). ClickUp
+ * shows a location's archived tasks to whoever opens it; Edit unarchives.
+ */
 function ArchivedTab({ workspaceId }: { workspaceId: string }) {
   const qc = useQueryClient()
   const { t } = useTranslation()
+  // Restoring a workspace asks `workspace.manage` there: the card is an admin's.
+  const { isAdmin, isSuperAdmin } = useWorkspaceRole(workspaceId)
 
   const tasksQuery = useQuery({
     queryKey: ['archived-tasks', workspaceId],
@@ -2526,6 +2578,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
   const workspacesQuery = useQuery({
     queryKey: ['archived-workspaces'],
     queryFn: () => api<ArchivedWorkspaceEntry[]>(`/workspaces/archived`),
+    enabled: isAdmin,
   })
 
   const restoreTask = useMutation({
@@ -2534,7 +2587,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
       toast.success(t('settings.restoredTask'))
       qc.invalidateQueries({ queryKey: ['archived-tasks', workspaceId] })
     },
-    onError: () => toast.error(t('settings.restoreFailed')),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.restoreFailed')),
   })
 
   const restoreWorkspace = useMutation({
@@ -2544,7 +2597,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
       qc.invalidateQueries({ queryKey: ['archived-workspaces'] })
       qc.invalidateQueries({ queryKey: ['workspaces'] })
     },
-    onError: () => toast.error(t('settings.restoreFailed')),
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.restoreFailed')),
   })
 
   const tasks = tasksQuery.data ?? []
@@ -2574,21 +2627,32 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
                   {task.projectName} · {task.listName}
                 </div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                disabled={restoreTask.isPending}
-                onClick={() => restoreTask.mutate(task.id)}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {restoreTask.isPending ? t('settings.restoring') : t('settings.restore')}
-              </Button>
+              {task.canRestore ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  disabled={restoreTask.isPending}
+                  onClick={() => restoreTask.mutate(task.id)}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {restoreTask.isPending ? t('settings.restoring') : t('settings.restore')}
+                </Button>
+              ) : (
+                <span
+                  className="shrink-0 text-xs text-muted-foreground"
+                  title={t('settings.archivedViewOnlyHint')}
+                  data-testid="archived-task-view-only"
+                >
+                  {t('share.levelView')}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       </Card>
 
+      {isAdmin && (
       <Card className="overflow-hidden">
         <div className="flex items-center gap-2 px-4 py-3 border-b border-border">
           <Building2 className="h-4 w-4 text-muted-foreground" />
@@ -2607,20 +2671,29 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
                 <div className="text-sm font-medium truncate">{entry.workspace.name}</div>
                 <div className="text-xs text-muted-foreground truncate font-mono">{entry.workspace.slug}</div>
               </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="gap-1.5 shrink-0"
-                disabled={restoreWorkspace.isPending}
-                onClick={() => restoreWorkspace.mutate(entry.workspace.id)}
-              >
-                <RotateCcw className="h-3.5 w-3.5" />
-                {restoreWorkspace.isPending ? t('settings.restoring') : t('settings.restore')}
-              </Button>
+              {/* Its restore asks `workspace.manage` in THAT workspace: offered
+                  where this person is its admin, said otherwise. */}
+              {isSuperAdmin || entry.role === 'workspace_admin' ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5 shrink-0"
+                  disabled={restoreWorkspace.isPending}
+                  onClick={() => restoreWorkspace.mutate(entry.workspace.id)}
+                >
+                  <RotateCcw className="h-3.5 w-3.5" />
+                  {restoreWorkspace.isPending ? t('settings.restoring') : t('settings.restore')}
+                </Button>
+              ) : (
+                <span className="shrink-0 text-xs text-muted-foreground" data-testid="archived-workspace-admins-only">
+                  {t('settings.archivedWorkspaceAdminsOnly')}
+                </span>
+              )}
             </li>
           ))}
         </ul>
       </Card>
+      )}
     </div>
   )
 }

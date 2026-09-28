@@ -3,11 +3,12 @@ import { ClientsService } from './clients.service'
 import { ClientsController } from './clients.controller'
 import { DatabaseModule } from '../../common/database/database.module'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
-import { WorkspaceAdminGuard } from '../auth/guards/workspace-admin.guard'
+import { CustomRolesModule } from '../custom-roles/custom-roles.module'
 
 @Module({
-  imports: [DatabaseModule],
+  // `PermissionsGuard` resolves `client.manage` through CustomRolesService.
+  imports: [DatabaseModule, CustomRolesModule],
   controllers: [ClientsController],
-  providers: [ClientsService, WorkspaceMemberGuard, WorkspaceAdminGuard],
+  providers: [ClientsService, WorkspaceMemberGuard],
 })
 export class ClientsModule {}

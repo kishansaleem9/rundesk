@@ -1,9 +1,21 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
 import { and, desc, eq, gt, isNull, or } from 'drizzle-orm'
 import { announcementDismissals, announcements } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
+import type { AnnouncementTone } from './dto/announcement.dto'
+
+/**
+ * A title, trimmed, or a 400. The DTO refuses an empty one on the way in; this
+ * holds for every other caller, so `input.title.trim()` on no title is never
+ * again a 500.
+ */
+function titleOf(raw: unknown): string {
+  const title = typeof raw === 'string' ? raw.trim() : ''
+  if (!title) throw new BadRequestException('An announcement needs a title')
+  return title
+}
 
 @Injectable()
 export class AnnouncementsService {
@@ -44,14 +56,15 @@ export class AnnouncementsService {
   async create(
     workspaceId: string,
     userId: string,
-    input: { title: string; body?: string; tone?: 'info' | 'celebrate' | 'warn'; expiresAt?: string | null; isActive?: boolean },
+    input: { title: string; body?: string; tone?: AnnouncementTone; expiresAt?: string | null; isActive?: boolean },
   ) {
+    const title = titleOf(input.title)
     const [created] = await this.db
       .insert(announcements)
       .values({
         workspaceId,
         createdById: userId,
-        title: input.title.trim(),
+        title,
         body: input.body?.trim() ?? '',
         tone: input.tone ?? 'info',
         isActive: input.isActive ?? true,
@@ -73,13 +86,15 @@ export class AnnouncementsService {
   async update(
     workspaceId: string,
     announcementId: string,
-    patch: Partial<{ title: string; body: string; tone: 'info' | 'celebrate' | 'warn'; isActive: boolean; expiresAt: string | null }>,
+    patch: Partial<{ title: string | null; body: string; tone: AnnouncementTone; isActive: boolean; expiresAt: string | null }>,
     actorId?: string,
   ) {
+    // A title sent is a title: "" or null would blank a live banner, so it is refused.
+    const title = patch.title === undefined ? undefined : titleOf(patch.title)
     const [updated] = await this.db
       .update(announcements)
       .set({
-        title: patch.title?.trim(),
+        title,
         body: patch.body?.trim(),
         tone: patch.tone,
         isActive: patch.isActive,

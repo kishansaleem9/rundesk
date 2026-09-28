@@ -1,6 +1,5 @@
-import { WS_ADMIN_ROLES } from '../../common/permissions/workspace-roles'
 import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, inArray, isNull } from 'drizzle-orm'
+import { and, eq, gte, isNull } from 'drizzle-orm'
 import { featureFlagRequests, featureFlags, workspaceMembers } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS, FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
@@ -8,8 +7,23 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { SecurityService } from '../security/security.service'
 import { NotificationsService } from '../notifications/notifications.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 
 const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
+
+/**
+ * WHO TURNS A WORKSPACE'S CLICKAPPS ON AND OFF, and is asked to
+ * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`). ClickUp
+ * ("Intro to ClickApps"): "Only Workspace owners and admins can activate or
+ * deactivate ClickApps. Members can view". An admin's by default; a custom
+ * role grants it.
+ */
+const CLICKAPPS_KEY = 'workspace.clickapps.manage' as const
+
+/** A flag this build knows — the switch and the ask refuse anything else. */
+function isKnownFlag(flagKey: string): boolean {
+  return (Object.values(FLAGS) as string[]).includes(flagKey)
+}
 
 @Injectable()
 export class FeatureFlagsService {
@@ -20,6 +34,7 @@ export class FeatureFlagsService {
     @Inject(DB_TOKEN) private db: Db,
     private readonly security: SecurityService,
     private readonly notifications: NotificationsService,
+    private readonly customRoles: CustomRolesService,
   ) {}
 
   async isEnabled(flagKey: FlagKey, ctx: Partial<FlagResolutionContext>): Promise<boolean> {
@@ -142,25 +157,29 @@ export class FeatureFlagsService {
     actor: { id: string; role?: string },
   ) {
     // Authorization: global / role / user overrides are platform-wide and
-    // require super_admin; workspace overrides require workspace_admin of the
-    // target workspace. (The @Roles decorator was never enforced — no RolesGuard
-    // existed — so this is the real gate.)
+    // require super_admin; a workspace override asks `workspace.clickapps.manage`
+    // in the target workspace — the key, by default an admin's, where this read
+    // the membership row for `workspace_admin` and nothing a custom role could
+    // grant. (The @Roles decorator was never enforced — no RolesGuard existed —
+    // so this is the real gate.)
     const isSuperAdmin = actor.role === 'super_admin'
     if (scope === 'workspace') {
-      if (!isSuperAdmin) {
-        if (!workspaceId) throw new ForbiddenException('workspaceId is required for workspace-scoped flags')
-        const [membership] = await this.db
-          .select({ role: workspaceMembers.role })
-          .from(workspaceMembers)
-          .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, actor.id)))
-          .limit(1)
-        if (!membership || membership.role !== 'workspace_admin') {
-          throw new ForbiddenException('Workspace admin required to change workspace feature flags')
-        }
+      if (!workspaceId) throw new ForbiddenException('workspaceId is required for workspace-scoped flags')
+      if (!isSuperAdmin && !(await this.customRoles.hasPermission(workspaceId, actor.id, CLICKAPPS_KEY))) {
+        throw new ForbiddenException(`Missing required permission: ${CLICKAPPS_KEY}`)
       }
+      // A workspace's override is that workspace's: a row whose scopeId named
+      // another was stored, never applied (`resolveFromDb` matches scopeId to
+      // the workspace), and answered as if it had been.
+      if (scopeId != null && scopeId !== workspaceId) {
+        throw new BadRequestException('A workspace-scoped flag is scoped to its own workspace: scopeId must be the workspaceId')
+      }
+      scopeId = workspaceId
     } else if (!isSuperAdmin) {
       throw new ForbiddenException('Only a super admin can change global, role, or user feature flags')
     }
+    // An override for a flag no build reads is a row that changes nothing.
+    if (!isKnownFlag(flagKey)) throw new BadRequestException(`Unknown feature "${flagKey}"`)
     const updatedBy = actor.id
     await this.db.insert(featureFlags).values({
       flagKey, scope, scopeId, workspaceId: workspaceId ?? undefined, enabled, updatedBy,
@@ -183,6 +202,12 @@ export class FeatureFlagsService {
   /**
    * §2.8 gap 11 — "Contact your admin", made into something that happens.
    *
+   * It asks whoever may switch the feature on — the holders of
+   * `workspace.clickapps.manage`, a custom role's included — and takes them to
+   * this workspace's Settings → Features, where they can. It told the
+   * base-role admins alone, and linked them to the platform console, which
+   * sends anybody but a platform admin away.
+   *
    *   `[20:45]` recording "back end se on karna parta hai" — the capability is
    *   off until an admin turns it on, and the person who wants it is not that
    *   admin.
@@ -200,7 +225,7 @@ export class FeatureFlagsService {
     workspaceId: string,
     requester: { id: string; name?: string | null; email?: string | null },
   ): Promise<{ status: 'sent' | 'already_enabled' | 'already_asked' | 'no_admins'; notified: number }> {
-    if (!(Object.values(FLAGS) as string[]).includes(flagKey)) {
+    if (!isKnownFlag(flagKey)) {
       throw new BadRequestException(`Unknown feature "${flagKey}"`)
     }
     const [membership] = await this.db
@@ -219,16 +244,8 @@ export class FeatureFlagsService {
     })
     if (resolved[flagKey] === true) return { status: 'already_enabled', notified: 0 }
 
-    const admins = await this.db
-      .select({ userId: workspaceMembers.userId })
-      .from(workspaceMembers)
-      .where(
-        and(
-          eq(workspaceMembers.workspaceId, workspaceId),
-          inArray(workspaceMembers.role, [...WS_ADMIN_ROLES]),
-        ),
-      )
-    const recipients = admins.map((a) => a.userId).filter((id) => id !== requester.id)
+    const holders = await this.customRoles.holdersOf(workspaceId, CLICKAPPS_KEY)
+    const recipients = holders.filter((id) => id !== requester.id)
     if (recipients.length === 0) return { status: 'no_admins', notified: 0 }
 
     /*
@@ -273,8 +290,8 @@ export class FeatureFlagsService {
         actorId: requester.id,
         type: 'access_requested',
         title: `${who} asked for ${flagKey}`,
-        body: `${who} tried to use a feature this workspace has turned off. You can turn "${flagKey}" on in Admin → Features.`,
-        target: { entityType: 'feature_flag', entityId: flagKey, url: `/app/admin/features` },
+        body: `${who} tried to use a feature this workspace has turned off. You can turn "${flagKey}" on in Settings → Features.`,
+        target: { entityType: 'feature_flag', entityId: flagKey, url: `/app/${workspaceId}/settings?tab=features` },
       })
       /*
        * DELIVERY, not the row.

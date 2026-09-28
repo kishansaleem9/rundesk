@@ -30,6 +30,7 @@ import { ContainerEditDialog, type ContainerEditValues } from '../components/con
 import { ScopedStatusesManager } from '../components/list-statuses-manager'
 import { InlineSkeleton } from '../components/loading-skeletons'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { useCreatable } from '../hooks/use-creatable'
 import { CREATE_TYPES } from '../lib/create-types'
 
@@ -418,7 +419,7 @@ function ProjectHome() {
 
       <ProjectActivitySection projectId={projectId} workspaceId={workspaceId} projectName={project?.name} />
 
-      <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} />
+      <ProjectTimeSettingsSection projectId={projectId} workspaceId={workspaceId} canEdit={caps ? caps.edit === true : null} />
 
       <ClientInvoicesSection workspaceId={workspaceId} projectId={projectId} />
 
@@ -1106,10 +1107,25 @@ function ProjectActivitySection({
   )
 }
 
-function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: string; workspaceId: string }) {
+/*
+ * THE TIME TRACKING SECTION OFFERS WHAT THIS PERSON MAY DO. The billable switch
+ * and the client picker change the project, so they follow the project's own
+ * edit rule (`caps.edit`, from `GET /projects/:id/capabilities`; null until it
+ * has answered); for anybody else the picker still names the project's client
+ * and its choices, disabled, and the section says whose they are to change.
+ * Adding a client is `client.manage`'s, a manager's and an admin's by default
+ * and grantable (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`):
+ * the "+ New client name" form was offered to everybody and the API refused a
+ * plain member. A guest reads no workspace's client list, so a guest is shown no
+ * client row at all.
+ */
+function ProjectTimeSettingsSection({ projectId, workspaceId, canEdit }: { projectId: string; workspaceId: string; canEdit: boolean | null }) {
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [newClientName, setNewClientName] = useState('')
+  const { role } = useWorkspaceRole(workspaceId)
+  const readsClients = role !== 'guest'
+  const mayAddClient = usePermissions(workspaceId).can('client.manage')
   const projectQuery = useQuery({
     queryKey: ['project', projectId],
     queryFn: () => api<{ id: string; defaultBillable?: boolean; clientId?: string | null }>(`/projects/${projectId}`),
@@ -1117,6 +1133,7 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
   const clientsQuery = useQuery({
     queryKey: ['clients', workspaceId],
     queryFn: () => api<Array<{ id: string; name: string }>>(`/workspaces/${workspaceId}/clients`),
+    enabled: readsClients,
   })
   const defaultBillable = projectQuery.data?.defaultBillable ?? false
   const clientId = projectQuery.data?.clientId ?? ''
@@ -1126,11 +1143,13 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
     mutationFn: (next: boolean) =>
       api(`/projects/${projectId}`, { method: 'PUT', body: { defaultBillable: next } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('container.saveError')),
   })
   const setClient = useMutation({
     mutationFn: (nextClientId: string | null) =>
       api(`/projects/${projectId}`, { method: 'PUT', body: { clientId: nextClientId } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['project', projectId] }),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('container.saveError')),
   })
   const createClient = useMutation({
     mutationFn: (name: string) =>
@@ -1138,10 +1157,13 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
     onSuccess: async (row) => {
       setNewClientName('')
       await qc.invalidateQueries({ queryKey: ['clients', workspaceId] })
-      setClient.mutate(row.id)
+      // Linking it changes the project: only for one who may. A member granted the
+      // key on a project they may not change still makes the client.
+      if (canEdit) setClient.mutate(row.id)
     },
-    onError: (err) => window.alert(err instanceof Error ? err.message : t('projectShell.createClientError')),
+    onError: (err) => toast.error(err instanceof Error ? err.message : t('projectShell.createClientError')),
   })
+  const billableLocked = canEdit !== true || projectQuery.isLoading || toggle.isPending
 
   return (
     <section>
@@ -1155,7 +1177,12 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
         {t('projectShell.timeTrackingDesc')}
       </p>
       <Card className="p-4 border-border/80">
-        <label className="flex items-center justify-between gap-4 cursor-pointer">
+        {canEdit === false && (
+          <p data-testid="project-time-settings-not-yours" className="text-[12px] text-muted-foreground mb-3">
+            {t('projectShell.timeSettingsNotYours')}
+          </p>
+        )}
+        <label className={cn('flex items-center justify-between gap-4', canEdit === true ? 'cursor-pointer' : 'cursor-default')}>
           <div>
             <div className="text-[14px] font-medium">{t('projectShell.billableByDefault')}</div>
             <div className="text-[12px] text-muted-foreground">
@@ -1166,12 +1193,12 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
             type="button"
             role="switch"
             aria-checked={defaultBillable}
-            disabled={projectQuery.isLoading || toggle.isPending}
+            disabled={billableLocked}
             onClick={() => toggle.mutate(!defaultBillable)}
             className={cn(
               'relative h-6 w-11 shrink-0 rounded-full transition-colors',
               defaultBillable ? 'bg-brand-700' : 'bg-muted',
-              (projectQuery.isLoading || toggle.isPending) && 'opacity-60',
+              billableLocked && 'opacity-60',
             )}
           >
             <span
@@ -1183,44 +1210,52 @@ function ProjectTimeSettingsSection({ projectId, workspaceId }: { projectId: str
           </button>
         </label>
 
-        <div className="mt-4 pt-4 border-t border-border/60">
-          <div className="text-[14px] font-medium">{t('projectShell.client')}</div>
-          <div className="text-[12px] text-muted-foreground mb-2">
-            {t('projectShell.clientDesc')}
+        {readsClients && (
+          <div className="mt-4 pt-4 border-t border-border/60">
+            <div className="text-[14px] font-medium">{t('projectShell.client')}</div>
+            <div className="text-[12px] text-muted-foreground mb-2">
+              {t('projectShell.clientDesc')}
+            </div>
+            <div className="flex items-center gap-2">
+              <select
+                value={clientId}
+                onChange={(e) => setClient.mutate(e.target.value || null)}
+                disabled={canEdit !== true || setClient.isPending}
+                className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm disabled:opacity-60"
+              >
+                <option value="">{t('projectShell.noClient')}</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            {mayAddClient === true ? (
+              <form
+                className="mt-2 flex items-center gap-2"
+                onSubmit={(e) => {
+                  e.preventDefault()
+                  if (newClientName.trim()) createClient.mutate(newClientName.trim())
+                }}
+              >
+                <Input
+                  value={newClientName}
+                  onChange={(e) => setNewClientName(e.target.value)}
+                  placeholder={t('projectShell.newClientPlaceholder')}
+                  className="h-8 flex-1"
+                />
+                <Button type="submit" size="sm" variant="outline" disabled={!newClientName.trim() || createClient.isPending}>
+                  {t('projectShell.add')}
+                </Button>
+              </form>
+            ) : mayAddClient === false ? (
+              <p data-testid="project-client-add-not-yours" className="mt-2 text-[12px] text-muted-foreground">
+                {t('projectShell.clientAddNotYours')}
+              </p>
+            ) : null}
           </div>
-          <div className="flex items-center gap-2">
-            <select
-              value={clientId}
-              onChange={(e) => setClient.mutate(e.target.value || null)}
-              disabled={setClient.isPending}
-              className="h-8 flex-1 rounded-md border border-border bg-background px-2 text-sm"
-            >
-              <option value="">{t('projectShell.noClient')}</option>
-              {clients.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <form
-            className="mt-2 flex items-center gap-2"
-            onSubmit={(e) => {
-              e.preventDefault()
-              if (newClientName.trim()) createClient.mutate(newClientName.trim())
-            }}
-          >
-            <Input
-              value={newClientName}
-              onChange={(e) => setNewClientName(e.target.value)}
-              placeholder={t('projectShell.newClientPlaceholder')}
-              className="h-8 flex-1"
-            />
-            <Button type="submit" size="sm" variant="outline" disabled={!newClientName.trim() || createClient.isPending}>
-              {t('projectShell.add')}
-            </Button>
-          </form>
-        </div>
+        )}
       </Card>
     </section>
   )

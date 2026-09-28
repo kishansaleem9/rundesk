@@ -9,7 +9,9 @@ import { organizationMembers, organizations, workspaces, workspaceMembers, users
 import type { Db } from '@rundesk/db'
 
 import { DB_TOKEN } from '../../common/database/database.module'
-import { resolveIsManager, taskVisibilityFilter } from '../../common/permissions/item-visibility'
+import { resolveIsManager } from '../../common/permissions/item-visibility'
+import { taskReadFilterFor } from '../../common/permissions/viewer-scope'
+import { taskRestorable } from '../../common/permissions/task-restore'
 import { R2Service } from '../../common/storage/r2.service'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
@@ -271,18 +273,19 @@ export class WorkspacesService {
    * Archived (soft-deleted) tasks across a workspace (Plan §13.4). Joined up the
    * task → list → project → space tree so we can scope by workspace and show the
    * list/project a task belongs to. Restore uses the existing task-restore route.
+   *
+   * EVERY MEMBER READS THOSE THEY MAY OPEN, and each row says whether they may
+   * restore it (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   * ClickUp has no permission of its own for either: "Show archived" shows a
+   * location's archived tasks to whoever can open it, and unarchiving needs Edit
+   * on the location. So the listing asks the task read rule — the container
+   * rule (private spaces, projects, folders, lists) and the private-task rule,
+   * where it asked only the second while admins and managers alone were let in
+   * — and `canRestore` asks the rules `POST /tasks/:id/restore` asks.
    */
   async listArchivedTasks(workspaceId: string, actor?: { id: string; role?: string }) {
-    // §2 per-item privacy: drop private tasks the actor may not see. Admin /
-    // super-admin callers resolve as managers (undefined filter) and still see all.
-    const visFilter = actor
-      ? taskVisibilityFilter(
-          this.db,
-          actor.id,
-          await resolveIsManager(this.db, workspaceId, actor.id, actor.role),
-        )
-      : undefined
-    return this.db
+    const readable = await taskReadFilterFor(this.db, workspaceId, actor)
+    const rows = await this.db
       .select({
         id: tasks.id,
         title: tasks.title,
@@ -309,11 +312,14 @@ export class WorkspacesService {
           eq(spaces.workspaceId, workspaceId),
           eq(tasks.isArchived, true),
           isNull(tasks.deletedAt),
-          visFilter,
+          readable,
         ),
       )
       .orderBy(desc(tasks.updatedAt))
       .limit(200)
+    // A trusted caller with no actor restores nothing on anybody's behalf.
+    const restorable = await Promise.all(rows.map((row) => (actor ? taskRestorable(this.db, row.id, actor.id) : false)))
+    return rows.map((row, i) => ({ ...row, canRestore: restorable[i] }))
   }
 
   /**
@@ -752,6 +758,9 @@ export class WorkspacesService {
   ) {
     const member = await this.getMembership(workspaceId, userId)
     if (!member) throw new NotFoundException('Member not found')
+    // `members.profile.manage` sets a colleague's reporting line, not a senior's:
+    // a manager does not make an admin report to them.
+    await this.assertWithinRank(workspaceId, actor, [member.role], 'set whom somebody reports to when they are')
 
     if (managerId) {
       if (managerId === userId) throw new BadRequestException('A member cannot report to themselves')
@@ -926,6 +935,9 @@ export class WorkspacesService {
     const rounded = Math.round(weeklyCapacityHours)
     const previous = await this.getMembership(workspaceId, userId)
     if (!previous) throw new NotFoundException('Member not found')
+    // As for roles: nobody holding `members.profile.manage` sets the hours of
+    // somebody above their own role.
+    await this.assertWithinRank(workspaceId, actor, [previous.role], 'set the capacity of somebody who is')
     await this.db
       .update(workspaceMembers)
       .set({ weeklyCapacityHours: rounded })

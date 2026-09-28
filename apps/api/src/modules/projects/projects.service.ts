@@ -1,8 +1,9 @@
 import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common'
 import { eq, and, or, asc, getTableColumns } from 'drizzle-orm'
-import { projects, spaces, projectMembers, folders } from '@rundesk/db'
+import { projects, spaces, projectMembers, folders, clients } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { isUuid } from '../../common/validation/uuid'
 import { assertCanManageContainer, assertCanCreateInSpace, assertCanPlaceIn } from '../../common/permissions/container-access'
 import { containerVisibilityFilter, isWorkspaceManager } from '../../common/permissions/container-access.guard-helper'
 import { WebhooksService } from '../webhooks/webhooks.service'
@@ -167,7 +168,10 @@ export class ProjectsService {
     data: Partial<{ name: string; description: string; color: string; icon: string; folderId: string | null; defaultBillable: boolean; clientId: string | null }>,
     actorId?: string,
   ) {
-    if (actorId) await this.assertManageable(projectId, actorId)
+    const managed = actorId ? await this.assertManageable(projectId, actorId) : null
+    if (data.clientId !== undefined && data.clientId !== null) {
+      await this.assertClientOfWorkspace(projectId, data.clientId, managed?.workspaceId)
+    }
     // Whitelist the updatable columns instead of spreading the raw body: the
     // controller body is untyped at runtime, so a stray field like `position: true`
     // would otherwise reach the integer column (500) and any real column could be
@@ -298,6 +302,34 @@ export class ProjectsService {
       })
     }
     return row
+  }
+
+  /**
+   * A PROJECT'S TIME IS BILLED ONLY TO A CLIENT OF ITS OWN WORKSPACE. The foreign
+   * key asks only that the client exist, so any workspace's client could be set,
+   * and the time report then printed another workspace's client name while
+   * invoicing refused the project. The portal already asked this
+   * (`client-portal.service.ts`); the project's own update did not.
+   */
+  private async assertClientOfWorkspace(projectId: string, clientId: unknown, workspaceId?: string) {
+    if (typeof clientId !== 'string' || !isUuid(clientId)) throw new BadRequestException('Client not found in this workspace')
+    let ws = workspaceId
+    if (!ws) {
+      const [row] = await this.db
+        .select({ workspaceId: spaces.workspaceId })
+        .from(projects)
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(eq(projects.id, projectId))
+        .limit(1)
+      if (!row) throw new NotFoundException('Project not found')
+      ws = row.workspaceId
+    }
+    const [client] = await this.db
+      .select({ id: clients.id })
+      .from(clients)
+      .where(and(eq(clients.id, clientId), eq(clients.workspaceId, ws)))
+      .limit(1)
+    if (!client) throw new BadRequestException('Client not found in this workspace')
   }
 
   private async assertManageable(projectId: string, actorId: string, action: 'manage' | 'delete' = 'manage') {
