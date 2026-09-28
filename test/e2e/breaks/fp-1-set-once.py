@@ -1,9 +1,8 @@
 # The pill painted once on mount and never again. In a screenshot this is
 # indistinguishable from a live countdown, which is exactly why "2h 55m left"
 # frozen forever is worse than no countdown at all — it is read as current.
-# Reddens: focus-pill:
-#   "the pill MOVES while you watch it"
-#   "and counts DOWN"
+# Reddens: focus-pill: "the pill MOVES while you watch it (${JSON.stringify(firstText)} → ${JSON.stringify(secondText)})"
+#   or "and counts DOWN (${firstLeft}s → ${secondLeft}s left)"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 a = """    paint()

@@ -1,5 +1,5 @@
 # THE MINE TIMESHEET AS IT WAS: every entry the caller can see, filtered by day only.
-# Reddens: timesheet-mine: ""Total this week" is the admin’s own hour — not the member’s two added to it"
+# Reddens: timesheet-mine: ""\"Total this week\" is the admin’s own hour — not the member’s two added to it" is the admin’s own hour — not the member’s two added to it"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-time-page.tsx'
 a = "  const weekEntries = useMemo(\n    () =>\n      (mineWeekQuery.data ?? []).filter(\n        (e) => e.userId === currentUserId && weekDayKeys.has(format(new Date(e.loggedAt), 'yyyy-MM-dd')),\n      ),\n    [mineWeekQuery.data, currentUserId, weekDayKeys],\n  )\n"

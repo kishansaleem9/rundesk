@@ -18,13 +18,16 @@
 # four-way `||` chain of string literals, and losing one of them is a
 # merge-conflict resolution, not a decision.
 #
-# IT NAMED A CHECK THAT PASSES.
-# Its claim did not appear in the suite verbatim — the fragment fallback matched
-# it. What falls is the check that holds the two modes apart: with the workspace
-# mode not whitelisted it falls back to MINE, so "for you" and "the workspace"
-# answer the same list and the second surface silently becomes the first.
+# IT NAMED A CHECK THAT PASSES — AND THEN, RE-AIMED, NAMED ANOTHER.
+# Its first claim did not appear in the suite verbatim — the fragment fallback
+# matched it. The re-aim of 22 September moved it to "and leave mine alone",
+# reasoning the workspace mode falls back to MINE; it does not, it falls back to
+# relevance, and the runs of 22 and 24 September both show "and leave mine alone"
+# PASSING under this patch beside the two workspace checks failing — which is
+# what the paragraph above predicted. Re-aimed 28 September to those two.
 #
-# Reddens: trending-sort: "and leave mine alone \u2014 \"for you\" is my opens, not everybody\u2019s"
+# Reddens: trending-sort: "a colleague's opens move the workspace list"
+#   or "opening the least relevant hit five times puts it first"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.controller.ts'
 a = "    if (sort === 'updated' || sort === 'created' || sort === 'trending' || sort === 'trending_me') {"

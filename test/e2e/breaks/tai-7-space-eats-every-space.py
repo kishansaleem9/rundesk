@@ -2,7 +2,7 @@
 # anywhere in a comment opens the AI panel and swallows the character.
 # planner-views shipped this exact bug and its check passed anyway until it
 # asserted the TEXT THAT ARRIVED.
-# Reddens: task-ai-bar -- 'with words in the box a space is just a space'
+# Reddens: task-ai-bar: "and with words in the box a space is just a space — the panel stays shut and the character lands"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """            if (e.key === ' ' && text === '' && !aiOpen) {"""

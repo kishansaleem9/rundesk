@@ -2,10 +2,8 @@
 # nobody. This is the shipped bug, restored — no notification, no task.assigned
 # event, no task.assignee_changed automation, nothing for watchers.
 #
-# Reddens: video1-acceptance:
-#   "the peer assigning a task puts something in this account's inbox"
-#   and, downstream of an empty inbox:
-#   "§G10-12 Clear all is there even with nothing unread"
+# Reddens: video1-acceptance: "the peer assigning a task puts THAT task in this account's inbox"
+#   or "§G10-12 Clear all is there even with nothing unread" (downstream of an empty inbox)
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 a = """    for (const userId of bornAssignees) {

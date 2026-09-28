@@ -2,8 +2,9 @@
 # endpoint and narrows the array it already has. That array is the hundred most
 # recent entries, so every older match reads as "nothing matches": the
 # confident zero, indistinguishable in the UI from a true absence.
-# Reddens: task-activity-filter — "typing the needle narrows the feed to the single matching entry",
-#          "it went out as a request carrying `q=`", "the single row drawn is the year-old entry"
+# Reddens: task-activity-filter: "typing the needle narrows the feed to the single matching entry"
+#   or "and it went out as a request carrying `q=` — the server did the narrowing"
+#   or "and the single row drawn is the year-old `commented` entry the search was for"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """        const params = new URLSearchParams()

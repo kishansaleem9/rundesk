@@ -1,6 +1,6 @@
 # "+ Add Channel" posts without the name the person typed. The request leaves,
 # the section refreshes, and the name never reaches the server.
-# Reddens: sidebar-sections: '"+ Add Channel" really creates one'
+# Reddens: sidebar-sections: '"\"+ Add Channel\" really creates one — the name left the browser in a POST" really creates one'
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 s = io.open(p, encoding='utf-8').read()

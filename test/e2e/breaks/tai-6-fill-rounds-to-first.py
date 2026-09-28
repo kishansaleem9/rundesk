@@ -23,7 +23,7 @@
 #
 # PREDICTED ONE.
 #
-# Reddens: task-ai-bar -- 'a refused classification changes the task type to NOTHING'
+# Reddens: task-ai-bar: "and a refused classification changes the task type to NOTHING — it does not fall back to the first type"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """    onError: (e) => toast.error(e instanceof ApiError ? e.message : e instanceof Error ? e.message : t('taskTypes.failed')),"""

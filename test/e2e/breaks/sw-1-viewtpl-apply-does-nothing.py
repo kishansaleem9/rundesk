@@ -4,7 +4,7 @@
 # The Use button on a Default-View-Template card stops moving anything: its
 # `onClick` no longer calls `setViews`/`setDefaultView`, so the tab becomes four
 # named cards over nothing — the dead control, one per workflow.
-# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them back to Calendar on and Gantt off"
+# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them "
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'

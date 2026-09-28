@@ -2,7 +2,8 @@
 # presentation and prototype look pressable while nothing in Rundesk can save a
 # slide deck or generate a mock. The facade in its purest form: it photographs
 # perfectly and cannot do two of the three things it says.
-# Reddens: task-ai-bar -- 'exactly one of the three is offered for real', 'the two it cannot make each print their OWN reason'
+# Reddens: task-ai-bar: "exactly one of the three is offered for real, and it is the one Rundesk can make: a doc"
+#   or "and the two it cannot make each print their OWN reason on the surface"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """    { id: 'presentation', labelKey: 'taskAiBar.presentation', reasonKey: 'taskAiBar.noPresentation' },

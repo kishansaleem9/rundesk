@@ -2497,7 +2497,7 @@ Measured with the wrapped scripts:
 - The next break set, `space-default-permission`'s, was the first started from the wrapped `wt-break.sh`.
 - `build-api.sh`, `refresh-dists.sh` and the fleet scripts are run by the next build.
 
-### `found-25-sep/claims-confirmed-by-a-fragment` — open, test tooling, medium (found reading `gcm-11`'s run)
+### `found-25-sep/claims-confirmed-by-a-fragment` — **closed** (test tooling, medium; found reading `gcm-11`'s run)
 
 **A claim whose check has changed still reads as verified, and as reddened, on a five-word fragment**
 
@@ -2525,6 +2525,22 @@ That is the size of the re-aim this item asks for.
 - `check-break-reddened` reads 746 reddened before and after.
 
 84 are left for reading: 74 that no single sentence holds, and 10 fragments of template sentences under five words. The gate itself (whole sentences only) comes with them.
+
+*Closed, 28 September.* The 84 were re-aimed by reading, headers only. Some of the mechanical rewrites were wrong, and the tokenizer below found them. The old regex scanner lost its place in suites with an unbalanced backtick or apostrophe in a comment. So 45 of the committed rewrites (8e398c1) had replaced a clause with a run of code. They were restored and re-aimed.
+
+- **`sentencesOf` (`scripts/lib/claim-match.mjs`)** is a small tokenizer now:
+  - it skips comments and regex literals;
+  - it reads string and template literals;
+  - it joins a sentence built with `+`;
+  - it keeps a template's source form too.
+- **`claimedWhole`** accepts only:
+  - a whole literal sentence;
+  - a template sentence matched with its values, where the template has at least 16 literal characters;
+  - a template quoted in its source form;
+  - five or more words of a template sentence, whose values cannot be quoted in advance.
+- **`check-break-claims`** asks `claimedWhole`: 1,785 verified, 7 in another suite, 0 not found.
+- **`check-break-reddened`** counts a claimed sentence missing from the passes only when it is one of the suite's whole sentences. Many suites print only the failure's detail on a FAIL line, so "not among the passes" is how most reddenings are read, and it is evidence only for a sentence the suite still says. 0 unproven.
+- **`check-claim-match.mjs`:** 31 assertions (a clause of a literal sentence refused, `+` joined, a comment's lone backtick harmless, template values and source form accepted, four template words refused). 13 of 13 mutations bite.
 
 ### `found-25-sep/ledger-ids-cited-unchecked` — **closed** (test tooling, small; found closing `personal-calendar-connect-needs-integrations-manage`)
 

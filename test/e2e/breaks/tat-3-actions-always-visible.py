@@ -1,7 +1,7 @@
 # HOVER ACTIONS THAT ARE NOT HOVER ACTIONS. The opacity transition goes, so
 # three icons sit permanently on every card. toBeVisible would pass either
 # way, which is why the check measures the computed opacity.
-# Reddens: task-attachments -- 'the actions are invisible at rest and come up on hover'
+# Reddens: task-attachments: "the actions are invisible at rest (opacity 1) and come up on hover (opacity 1)"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """        className="absolute right-1.5 top-1.5 flex items-center gap-0.5 rounded-md border border-border bg-card/95 p-0.5 opacity-0 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100\""""

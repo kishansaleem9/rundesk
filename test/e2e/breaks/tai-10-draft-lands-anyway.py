@@ -1,7 +1,7 @@
 # WRITING WITHOUT KEEP. A failed ask drops the instruction into the comment
 # box, so the box is changed by a run that produced nothing -- the chat
 # composer's first version, which rewrote your draft the moment you pressed.
-# Reddens: task-ai-bar -- 'a failed ask leaves the comment box exactly as it was'
+# Reddens: task-ai-bar: "and a failed ask leaves the comment box exactly as it was — nothing is written without Keep"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                    setAiError(

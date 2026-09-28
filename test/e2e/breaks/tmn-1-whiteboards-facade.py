@@ -2,7 +2,7 @@
 # fetches, so the tab renders, the empty state renders, and the section can
 # only ever say no-matches. It photographs as finished and is the facade this
 # audit names first.
-# Reddens: task-mentions -- 'narrowing to this runs tag leaves exactly the whiteboard this run made'
+# Reddens: task-mentions: "and narrowing to this run's tag leaves exactly the whiteboard this run made"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """    enabled: !!workspaceId && mentionTab === 'whiteboards',"""

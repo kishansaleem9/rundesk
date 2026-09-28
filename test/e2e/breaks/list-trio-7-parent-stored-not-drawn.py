@@ -1,5 +1,5 @@
 # The same for "Show subtask parent names". The title is found and dropped.
-# Reddens: list-customize: ", 'a subtask row says which task it belongs to',"
+# Reddens: list-customize: "a subtask row says which task it belongs to"
 import io
 p = "/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx"
 a = "        if (title) parent.set(task.id, title)"

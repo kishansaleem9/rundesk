@@ -1,6 +1,5 @@
 # Uploads are attempted before the task exists, against an id that is not a task.
-# Reddens: attach-on-create: "the task is created first and the uploads hang off its
-#   id"
+# Reddens: attach-on-create: "the task is created first and the uploads hang off its id — there is no id to presign against before it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '      const task = templateId\n'

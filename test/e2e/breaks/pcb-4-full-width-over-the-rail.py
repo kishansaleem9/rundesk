@@ -27,7 +27,7 @@
 # at ~960px against a grid middle of ~1000px, inside that check's 50px
 # tolerance, which is the tolerance being a tolerance rather than a hole.
 #
-# Reddens: planner-command-bar: "its left edge is clear of the rail"
+# Reddens: planner-command-bar: "is clear of the rail, which ends at"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '        <div className="pointer-events-none absolute inset-x-0 bottom-4 z-30 flex justify-center px-4">'

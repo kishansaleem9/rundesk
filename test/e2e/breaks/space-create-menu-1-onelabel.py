@@ -12,7 +12,11 @@
 # against the SOURCE. The stable literal between the two holes is what both
 # checkers can see: it is in the source at that line and in every rendered
 # failure, which is the only sentence that satisfies both.
-# Reddens: space-create-menu: "item reads"
+# 28 September: quoted WHOLE now, as the source writes it, `${…}` holes and all,
+# because a claim must be the whole check sentence. `check-break-claims.mjs` can
+# not confirm it yet: the sentence has 12 literal characters, under the 16 a
+# template needs to count as a sentence (`TEMPLATE_MIN_CHARS`).
+# Reddens: space-create-menu: "the ${kind} item reads \"${EXPECTED_LABEL[kind]}\""
 import io
 p='/home/user/rundesk/apps/web/src/lib/create-types.ts'
 s=io.open(p,encoding='utf-8').read()

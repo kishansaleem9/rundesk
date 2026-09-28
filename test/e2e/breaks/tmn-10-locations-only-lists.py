@@ -6,7 +6,7 @@
 # this run's, still narrowed, still a server answer), so this patch isolates the
 # request row: it proves that row asserts WHICH types were sent rather than
 # merely that some `types=` was present.
-# Reddens: task-mentions -- 'the narrowing went to the SERVER carrying types=space,folder,list and this runs own word'
+# Reddens: task-mentions: "and the narrowing went to the SERVER carrying `types=space,folder,list` and this run's own word"
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

@@ -1,6 +1,6 @@
 # The pager clamps instead of wrapping, so → dies on the last card. An arrow that
 # stops dead is one people press twice and conclude is broken.
-# Reddens: planner-onboarding: "→ walks all four cards and wraps back to the first"
+# Reddens: planner-onboarding: "→ walks all four cards [\"Join your next meeting\",\"Automate your meeting notes\",\"Block time for your tasks\",\"Team schedules\"] and wraps back to the first"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '  const step = (delta: number) => setCard((c) => (c + delta + CARDS.length) % CARDS.length)\n'

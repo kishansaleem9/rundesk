@@ -1,7 +1,7 @@
 # Every Use button applies the FIRST view set, whatever card it sits on: the
 # facade that a count check and a per-card label both survive, because the cards
 # still read right — only what they DO is one shared answer.
-# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them back to Calendar on and Gantt off"
+# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them "
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'

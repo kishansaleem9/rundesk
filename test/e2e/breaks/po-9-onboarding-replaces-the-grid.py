@@ -1,7 +1,7 @@
 # The panel takes the whole surface, hiding a calendar that works without any
 # external account — a feature removed in order to advertise another. This is
 # the recorded decision, so it needs a patch holding it.
-# Reddens: planner-onboarding: "the panel sits above the grid and the calendar still draws"
+# Reddens: planner-onboarding: "the panel sits above the grid (panel ends at y="
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = "        {view === 'month' ? (\n          <MonthGrid\n"

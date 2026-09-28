@@ -9,7 +9,7 @@
 # PREDICTED ONE. The cover is genuinely left alone, so the check after it still
 # passes — that is the point of having both.
 #
-# Reddens: task-cover: "choosing a file when storage is unconfigured SAYS so, rather than doing nothing visible"
+# Reddens: task-cover: "an upload that FAILS says so in words, rather than doing nothing visible"
 import io
 p = '/home/user/rundesk/apps/web/src/components/cover-image-picker.tsx'
 a = "      setUploadError(err instanceof Error ? err.message : t('coverImage.uploadFailed'))\n"

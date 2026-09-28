@@ -26,8 +26,8 @@
 # and names the iteration outside the quotes. Writing out the rendered sentence
 # instead is a claim no suite contains, and `check-break-claims.mjs` says so.
 #
-# Reddens: stale-chunk-recovery, the deploy-prod.sh iteration of
-#   "publishes through publish_web_dist"
+# Reddens: stale-chunk-recovery: "${script} publishes through publish_web_dist"
+#   (its deploy/deploy-prod.sh iteration; the deploy/deploy.sh one stays green)
 import io
 p = '/home/user/rundesk/deploy/deploy-prod.sh'
 a = """# shellcheck source=lib/publish-web-dist.sh

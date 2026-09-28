@@ -1,7 +1,7 @@
 # The pill shows time ELAPSED instead of time remaining, so the number moves
 # every second and moves the wrong way. A check that only asserts "the text
 # changed" passes on this; the frames count 2h 56m down to 2h 55m.
-# Reddens: focus-pill: "and counts DOWN"
+# Reddens: focus-pill: "and counts DOWN (${firstLeft}s → ${secondLeft}s left)"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 a = """            remaining: formatRemaining(new Date(block.endsAt).getTime() - now),

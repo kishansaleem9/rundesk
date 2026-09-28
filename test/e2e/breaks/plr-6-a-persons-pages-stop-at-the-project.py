@@ -1,5 +1,5 @@
 # A PERSON'S PAGES ASK THE SPACE AND THE PROJECT ONLY: their profile and calendar name a private list's task.
-# Reddens: private-list-reach: "), A(person), ]) chk( [mProfile, mCalendar, mShared].every((r) => r.status === 200 && !names(r)) && mProfile.text.includes(OT) && names(aProfile), 'the admin’s profile, calendar and shared tasks, read by the member, name none of the private list’s — the profile has the open one, and the admin’s own has it',"
+# Reddens: private-list-reach: "the admin’s profile, calendar and shared tasks, read by the member, name none of the private list’s — the profile has the open one, and the admin’s own has it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/people/people.service.ts'
 s = io.open(p, encoding='utf-8').read()

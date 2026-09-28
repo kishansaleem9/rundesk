@@ -1,7 +1,7 @@
 # The caption is removed entirely — the state the export-paywall row was in
 # before this commit: the refusal exists, the padlock is on a summary that
 # is off screen once the section is open, and the dialog says nothing.
-# Reddens: "— and on a plan that does not, it names the tier') await openPanel() await openDetails(page.getByTestId('list-export-section'), 300) const note = page.getByTestId('list-export-plan-note') chk( await waitUntil(() => note.count().then((n) => n === 1), { timeoutMs: 8_000 }), 'the open export dialog carries the plan caption, beside the button it is about', 'the board export dialog offered a Download and no word about why it cannot work — ' + 'the padlock is on the summary, which is not on screen once the section is open', ) /* * READ THE CAPTION ONLY IF THERE IS ONE, because the check above is allowed * to fail and the two below have to survive it. * *" and the two after it.
+# Reddens: "the open export dialog carries the plan caption, beside the button it is about" and the two after it.
 #
 # THE WHOLE BLOCK GOES, rather than `{false && (…)}`. The first version of
 # this patch did that and DID NOT COMPILE: TypeScript runs no control-flow

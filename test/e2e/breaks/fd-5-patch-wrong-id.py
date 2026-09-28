@@ -1,6 +1,5 @@
 # The visibility patch goes to the space rather than to the folder that was just made.
-# Reddens: folder-dialog: "the patch went to THAT folder's id carrying visibility:
-#   private"
+# Reddens: folder-dialog: "and the patch went to THAT folder's id carrying visibility: private"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          await api(`/spaces/${spaceId}/folders/${folder.id}`, {\n'

@@ -3,7 +3,7 @@
 # it passes the plain "a subtask says which task it belongs to" check, and it
 # is wrong the moment a filter hides the parent — the child then draws no name
 # at all, which is indistinguishable from a task that has no parent.
-# Reddens: list-customize: ", 'and it still says so when the parent itself has been filtered off the screen',"
+# Reddens: list-customize: "and it still says so when the parent itself has been filtered off the screen"
 import io
 p = "/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx"
 a = "      for (const task of tasks) titleById.set(task.id, task.title)"

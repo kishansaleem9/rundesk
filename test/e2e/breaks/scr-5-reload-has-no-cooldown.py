@@ -33,7 +33,7 @@
 # loses its bound.
 #
 # Reddens: stale-chunk-recovery: "the error boundary is shown once reloading has not helped"
-#   ("no reload loop" stays green — see the paragraph above)
+#   (`no reload loop (${reloads} document loads)` stays green — see the paragraph above)
 import io
 p = '/home/user/rundesk/apps/web/src/lib/chunk-reload.ts'
 a = """export function reloadForStaleChunks(force = false): boolean {

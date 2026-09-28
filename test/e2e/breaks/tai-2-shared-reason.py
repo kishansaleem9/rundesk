@@ -2,7 +2,7 @@
 # nothing-generates-a-prototype become the same line, so a reader cannot tell
 # which thing is missing. The clips guard caught its own author doing exactly
 # this with two storage errors.
-# Reddens: task-ai-bar -- 'the two it cannot make each print their OWN reason'
+# Reddens: task-ai-bar: "and the two it cannot make each print their OWN reason on the surface"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """    { id: 'prototype', labelKey: 'taskAiBar.prototype', reasonKey: 'taskAiBar.noPrototype' },"""

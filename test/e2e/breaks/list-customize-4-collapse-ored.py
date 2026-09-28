@@ -9,7 +9,7 @@
 # lane’s own chevron, outvoted by the switch on every press, which is what an
 # OR between the two settings does to a person trying to open one lane.
 #
-# Reddens: list-customize: "and the lane\u2019s own chevron still opens it, rather than being outvoted by the switch"
+# Reddens: list-customize: "and the lane’s own chevron still opens it, rather than being outvoted by the switch"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

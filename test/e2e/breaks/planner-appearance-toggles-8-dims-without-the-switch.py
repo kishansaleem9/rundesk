@@ -2,8 +2,7 @@
 # as soon as it has a schedule, whether or not the switch is on. The setting is still
 # written, still read back and still moves - it just no longer decides anything, which is
 # the SS-V2-02e defect in its original form with the reader added.
-# Reddens: planner-appearance-toggles: "the schedule is already on the page - the Holidays
-#          calendar reads it - and not one column is dimmed"
+# Reddens: planner-appearance-toggles: "the schedule is already on the page — the Holidays calendar reads it — and not one column "
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-planner-page.tsx'
 a = '    if (!darkenNonWorking || !workSchedule) return false'

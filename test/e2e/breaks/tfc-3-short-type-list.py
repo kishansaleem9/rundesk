@@ -6,8 +6,8 @@
 # hostage. It said 19 and the run printed 22 — three types were added after it
 # was written, and the claim survived only because the matcher compares against
 # the literal part of the template.
-# Reddens: task-field-create — "the type picker offers all",
-#          "including the five that only the long list has"
+# Reddens: task-field-create: "the type picker offers all"
+#   or "including the eight that only the long list has, so it is not the drifted six-item copy"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = "const CREATABLE_TYPES_FROM_LABELS = Object.keys(FIELD_TYPE_LABEL_KEYS)"

@@ -2,7 +2,7 @@
 # applied, so a set that IS in effect still offers "Apply" and the panel can no
 # longer tell you where you are. This is the half of the check that asserts the
 # Marketing card knows its own set is already in effect — the stale reason.
-# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them back to Calendar on and Gantt off"
+# Reddens: space-wizard: "applying a view set moves the switches underneath it — Project brings Gantt on, and Marketing moves them "
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'

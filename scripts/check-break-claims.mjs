@@ -53,7 +53,7 @@
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { norm, findsClaim, quotedIn } from './lib/claim-match.mjs'
+import { norm, quotedIn, sentencesOf, claimedWhole } from './lib/claim-match.mjs'
 import { makeSuiteOf } from './lib/suite-of-patch.mjs'
 import { bail } from './lib/bail.mjs'
 
@@ -125,10 +125,12 @@ const reddensBlock = (lines) => {
  * else whichever suite actually contains the sentence.
  */
 const suiteFiles = readdirSync(SUITES).filter((f) => f.endsWith('.mjs'))
-const hayOf = new Map()
-const hayFor = (s) => {
-  if (!hayOf.has(s)) hayOf.set(s, norm(readFileSync(join(SUITES, `${s}.mjs`), 'utf8')))
-  return hayOf.get(s)
+// The suite's SENTENCES, not its text: a claim is a whole check sentence
+// (`claimedWhole`, `found-25-sep/claims-confirmed-by-a-fragment`).
+const sentencesOfSuite = new Map()
+const sentencesFor = (s) => {
+  if (!sentencesOfSuite.has(s)) sentencesOfSuite.set(s, sentencesOf(readFileSync(join(SUITES, `${s}.mjs`), 'utf8')))
+  return sentencesOfSuite.get(s)
 }
 // Steps one and two of the attribution, shared with coverage and freshness —
 // `scripts/lib/suite-of-patch.mjs`. There were four copies of this question and
@@ -136,7 +138,7 @@ const hayFor = (s) => {
 // here, because the cross-suite report below is this file's own answer to it.
 const suiteOf = makeSuiteOf({ suiteDir: SUITES })
 const suitesContaining = (q) =>
-  suiteFiles.map((f) => f.slice(0, -4)).filter((s) => findsClaim(hayFor(s), q))
+  suiteFiles.map((f) => f.slice(0, -4)).filter((s) => claimedWhole(sentencesFor(s), q))
 
 const files = readdirSync(BREAKS).filter((f) => f.endsWith('.py')).sort()
 const cutOff = []
@@ -175,8 +177,7 @@ for (const f of files) {
   const suite = suiteOf(name, lines.join('\n'))
 
   if (suite) {
-    const hay = hayFor(suite)
-    const absent = quoted.filter((q) => !findsClaim(hay, q))
+    const absent = quoted.filter((q) => !claimedWhole(sentencesFor(suite), q))
     /*
      * A PATCH CAN REDDEN CHECKS IN MORE THAN ONE SUITE, and this had no model
      * for it. `paywall-sites-3-gate-list-export` widens an export gate, and its

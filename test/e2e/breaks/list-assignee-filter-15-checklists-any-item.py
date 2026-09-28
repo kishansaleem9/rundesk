@@ -1,8 +1,7 @@
 # The Checklists source drops the assignee condition, so any task with a
 # checklist item on it counts as one assigned to you.
-# Reddens: "the Checklists source is the task whose checklist item is
-#          assigned to me", "Checklists adds the task whose checklist item
-#          is assigned to me".
+# Reddens: list-assignee-filter: "and the Checklists source is the task whose checklist item is assigned to me"
+#   or "Checklists adds the task whose checklist item is assigned to me"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

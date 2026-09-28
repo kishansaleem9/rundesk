@@ -1,5 +1,5 @@
 # "Collapse empty columns" collapses EVERY column.
-# Reddens: ", ) chk( await lane(fullLane).getAttribute('data-collapsed') === 'false', 'and leaves the lane that has cards alone', 'the lane with cards in it was collapsed too — \"collapse empty columns\" collapsed every column', ) /* * DRAWN as well as reported.".
+# Reddens: "and leaves the lane that has cards alone".
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

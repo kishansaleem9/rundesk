@@ -1,8 +1,8 @@
 # The picker stops reading the shared filter state and keeps its own idea of
 # what is selected, so the faces and the select disagree about what is on
 # screen — the exact bug the one-state design exists to make impossible.
-# Reddens: "the chosen face sits beside the chip", "choosing in the select
-#          moves the picker too".
+# Reddens: list-assignee-filter: "the chosen face sits beside the chip with the frame’s ✕ on it"
+#   or "and choosing in the select moves the picker too"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

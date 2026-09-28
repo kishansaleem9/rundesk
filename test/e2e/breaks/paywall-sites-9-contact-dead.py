@@ -1,5 +1,5 @@
 # "Contact your admin" becomes a dead control: pressed, it says nothing back.
-# Reddens: 'and "Contact your admin" answers instead of doing nothing'.
+# Reddens: paywall-sites: "and \"Contact your admin\" answers instead of doing nothing"
 import io
 p = '/home/user/rundesk/apps/web/src/components/feature-gate.tsx'
 s = io.open(p, encoding='utf-8').read()

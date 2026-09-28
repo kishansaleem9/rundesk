@@ -147,3 +147,135 @@ export const quotedIn = (block) => {
   if (found.length) return found
   return [...block.matchAll(SINGLE)].map((m) => norm(m[2]))
 }
+
+/*
+ * THE WHOLE SENTENCE, NOT A FRAGMENT OF ONE (`found-25-sep/claims-confirmed-by-a-fragment`).
+ *
+ * `findsClaim` accepts any five consecutive words of a claim found anywhere in
+ * the suite. `gcm-11` claimed a check as it read BEFORE it was restated; the old
+ * sentence was in no suite, yet eight of its words were, so the claim counted as
+ * verified — and a run of the patch as a reddening. Only reading the report
+ * exactly showed it.
+ *
+ * So a claim is read against the suite's SENTENCES, not its text:
+ *   - equal to one of its string literals (normalised as `norm` does), or
+ *   - fully matching one of its template literals, each `${…}` standing for any
+ *     text — a template with fewer than 16 literal characters is not a
+ *     sentence, since `${a}` alone would match anything — or
+ *   - at least MIN_WORDS consecutive words of a template sentence's literal
+ *     text, because what a template prints cannot be quoted in advance.
+ * A clause of a longer literal sentence, a label the page shows, or a sentence
+ * the suite no longer has, is none of these. Measured 28 September: 392 of
+ * 2,002 claims were clauses; 241 were re-aimed mechanically and the rest by
+ * reading.
+ */
+// `norm`, keeping one space where the piece began or ended with one, so pieces
+// between interpolations join as the sentence does.
+const innerNorm = (s) => `${/^\s/.test(s) ? ' ' : ''}${norm(s)}${/\s$/.test(s) && norm(s) ? ' ' : ''}`
+const escRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const INTERPOLATION = /\$\{(?:[^{}]|\{(?:[^{}]|\{[^{}]*\})*\})*\}/
+export const TEMPLATE_MIN_CHARS = 16
+
+/**
+ * The string and template literals of JavaScript source, in order, with the
+ * text between them — a small tokenizer, because a regex over the raw source is
+ * derailed by the first apostrophe in a comment (`panel's` in `list-customize`
+ * paired with a later quote, and no sentence after it was seen) or a quote in a
+ * regex literal. Comments are skipped; a `/` after an operator or bracket opens
+ * a regex literal, read to its closing `/` outside a character class.
+ */
+const tokensOf = (src) => {
+  const out = []
+  let i = 0
+  let prev = ''
+  const n = src.length
+  while (i < n) {
+    const c = src[i]
+    if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\n', i); i = e < 0 ? n : e; continue }
+    if (c === '/' && src[i + 1] === '*') { const e = src.indexOf('*/', i + 2); i = e < 0 ? n : e + 2; continue }
+    if (c === "'" || c === '"') {
+      let j = i + 1
+      while (j < n && src[j] !== c && src[j] !== '\n') j += src[j] === '\\' ? 2 : 1
+      out.push({ kind: 'str', body: src.slice(i + 1, j) }); prev = 'x'; i = j + 1; continue
+    }
+    if (c === '`') {
+      let j = i + 1
+      let depth = 0
+      while (j < n) {
+        if (src[j] === '\\') { j += 2; continue }
+        if (depth === 0 && src[j] === '`') break
+        if (src[j] === '$' && src[j + 1] === '{') { depth++; j += 2; continue }
+        if (depth > 0 && src[j] === '{') depth++
+        else if (depth > 0 && src[j] === '}') depth--
+        j++
+      }
+      out.push({ kind: 'tpl', body: src.slice(i + 1, j) }); prev = 'x'; i = j + 1; continue
+    }
+    if (c === '/' && (prev === '' || /[(,=:[!&|?{};+\-*%<>~^]/.test(prev))) {
+      let j = i + 1
+      let cls = false
+      while (j < n && src[j] !== '\n') {
+        if (src[j] === '\\') { j += 2; continue }
+        if (src[j] === '[') cls = true
+        else if (src[j] === ']') cls = false
+        else if (src[j] === '/' && !cls) break
+        j++
+      }
+      prev = 'x'; i = j + 1; continue
+    }
+    if (c === '+') out.push({ kind: 'plus' })
+    else if (!/\s/.test(c)) out.push({ kind: 'other' })
+    if (!/\s/.test(c)) prev = /[A-Za-z0-9_$)\]]/.test(c) ? 'x' : c
+    i++
+  }
+  return out
+}
+
+/**
+ * A suite's sentences: its string literals, its template literals as patterns,
+ * and a sentence built by `+` from pieces, joined — `'the first half ' + 'and
+ * the rest'` is one check sentence.
+ */
+export const sentencesOf = (src) => {
+  const literals = new Set()
+  const templates = []
+  // Each literal's text as the source writes it, for a tool that quotes it.
+  const raw = new Map()
+  const add = (body, isTemplate) => {
+    if (!raw.has(norm(body))) raw.set(norm(body), body.replace(/\\(['"`\\])/g, '$1'))
+    if (isTemplate && INTERPOLATION.test(body)) {
+      const parts = body.split(new RegExp(INTERPOLATION.source)).map(innerNorm)
+      // The source form, `${…}` and all, is how a claim quotes a sentence whose
+      // values change from run to run.
+      literals.add(norm(body))
+      if (parts.join('').replace(/\s/g, '').length < TEMPLATE_MIN_CHARS) return
+      templates.push({ re: new RegExp(`^${parts.map(escRe).join('.+?')}$`), text: norm(parts.join(' ')) })
+    } else {
+      literals.add(norm(body))
+    }
+  }
+  const toks = tokensOf(src)
+  for (let k = 0; k < toks.length; k++) {
+    const t = toks[k]
+    if (t.kind !== 'str' && t.kind !== 'tpl') continue
+    add(t.body, t.kind === 'tpl')
+    // A run of pieces joined by `+`: the whole is a sentence too.
+    let body = t.body
+    let tpl = t.kind === 'tpl'
+    let m = k
+    while (toks[m + 1]?.kind === 'plus' && (toks[m + 2]?.kind === 'str' || toks[m + 2]?.kind === 'tpl')) {
+      body += toks[m + 2].body
+      tpl = tpl || toks[m + 2].kind === 'tpl'
+      m += 2
+      add(body, tpl)
+    }
+  }
+  return { literals, templates, raw }
+}
+
+/** Whether the normalised claim `q` is one of these sentences, whole — see above. */
+export const claimedWhole = (sentences, q) => {
+  if (sentences.literals.has(q)) return true
+  const long = q.split(' ').length >= MIN_WORDS
+  return sentences.templates.some((t) => t.re.test(q) || (long && t.text.includes(q)))
+}

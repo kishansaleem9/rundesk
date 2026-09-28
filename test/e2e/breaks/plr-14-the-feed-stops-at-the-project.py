@@ -1,5 +1,5 @@
 # A PERSON'S OWN CALENDAR FEED ASKS THE SPACE AND THE PROJECT ONLY: a private list's task assigned to them is served.
-# Reddens: private-list-reach: "), 'the member’s own feed carries none of the private list’s tasks, even one assigned to them — and carries their own',"
+# Reddens: private-list-reach: "the member’s own feed carries none of the private list’s tasks, even one assigned to them — and carries their own"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/calendar-sync/calendar-sync.service.ts'
 s = io.open(p, encoding='utf-8').read()

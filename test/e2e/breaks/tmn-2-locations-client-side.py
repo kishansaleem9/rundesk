@@ -3,7 +3,8 @@
 # and everything else and the section offers them under a Location label.
 # The search entity-types file's own header warns about exactly this: an
 # unfiltered search is a wrong answer, not an empty one.
-# Reddens: task-mentions -- 'every row shown is one of this runs containers', 'the narrowing went to the SERVER carrying types=space,folder,list'
+# Reddens: task-mentions: "typing `@/` moves to Locations and every row shown (${await locRowsUi.count()}) is one of this run's containers"
+#   or "and the narrowing went to the SERVER carrying `types=space,folder,list` and this run's own word"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """        `/search/${workspaceId}?q=${encodeURIComponent(mentionQuery)}&types=space,folder,list&limit=20`,"""

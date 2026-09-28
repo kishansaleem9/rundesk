@@ -2,7 +2,7 @@
 # control still animates, because PanelSwitch draws from `checked`.
 # Reddens ONLY: "switching it back off returns the card to the height it was".
 #
-# Reddens: list-customize: "+ 'the rows are drawn on top of each other, which is a layout that photographs as working', ) await flip('list-board-stack-fields') chk( Math.abs((await heightOf(fullId)) - flatHeight) <= 4, 'and switching it back off returns the card to the height it was',"
+# Reddens: list-customize: "and switching it back off returns the card to the height it was"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

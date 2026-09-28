@@ -1,5 +1,5 @@
 # Leave the THIRD door open: carrying a name into a space that already has it.
-# Reddens: folder-create: "moving a folder into a space that already has that name is refused with a 409"
+# Reddens: folder-create: "and moving a folder into a space that already has that name is refused by the SERVICE"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = "    await this.assertFolderNameFree(targetSpaceId, src.name, folderId)\n"

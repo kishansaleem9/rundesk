@@ -1,7 +1,8 @@
 # THE ANTI-DRIFT PATCH. The caption resolves its tier from the plan catalog
 # by a DIFFERENT rule than `feature-gate.tsx`'s `upgradeTarget`, so the
 # label says Pro while the dialog behind it offers Business.
-# Reddens: "it names Business", "the caption names the same tier the gate offers".
+# Reddens: list-customize: "it names Business, the cheapest tier that includes the board export (read \"Pro feature\")"
+#   or "and the caption names the same tier the gate offers"
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 s = io.open(p, encoding='utf-8').read()

@@ -4,9 +4,8 @@
 # Re-anchored 23 September: `listSources` now tells each person whose account a
 # grant is (`heldBy`), so the line this patched is two lines now. Same break.
 #
-# Reddens: app-catalogue: "a SharePoint credential holding only Files.ReadWrite
-#          reports itself unconnected" and "a SharePoint credential that cannot
-#          answer the query says the same"
+# Reddens: app-catalogue: "and a SharePoint credential holding only Files.ReadWrite reports itself unconnected"
+#   or "and a SharePoint credential that cannot answer the query says the same"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/search/search.service.ts'
 a = '      if (!grant || !grantCoversSource(id, grant.scopes)) return { id, provider, connected: false, heldBy: null }\n'

@@ -23,7 +23,8 @@
 # so it passes. The check that could see the cost most directly is the one
 # least able to.
 #
-# Reddens: video1-fast-items: "collapses to a rail" and "and it is still narrow"
+# Reddens: video1-fast-items: "collapses to a rail (${Math.round(collapsed)}px)"
+#   or "and it is still narrow (${Math.round(collapsed)}px)"
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 a = """        collapsed && !drawer ? 'w-[72px]' : 'w-72',

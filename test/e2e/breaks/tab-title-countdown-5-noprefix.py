@@ -5,7 +5,7 @@
 # what tells you the line is about a plan rather than about the task. Losing it
 # is a one-word regression that no screenshot comparison would catch.
 #
-# Reddens: tab-title-countdown: "runningTitle.includes(expectedLabel)"
+# Reddens: tab-title-countdown: "the tab names the block: ${JSON.stringify(runningTitle)}"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/use-focus-tab-title.ts'
 s = io.open(p, encoding='utf-8').read()

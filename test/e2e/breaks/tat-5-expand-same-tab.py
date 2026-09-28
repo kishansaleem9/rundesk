@@ -1,7 +1,7 @@
 # EXPAND THAT REPLACES THE TASK. The new-tab target goes, so opening an
 # attachment full size navigates away from the task you were reading and
 # loses the sheet's state.
-# Reddens: task-attachments -- 'Expand opens the same file in a new tab'
+# Reddens: task-attachments: "and Expand opens the same file in a new tab"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                    target="_blank"

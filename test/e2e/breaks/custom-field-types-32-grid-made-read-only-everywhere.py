@@ -1,6 +1,6 @@
 # The narrowing goes too far and takes the working editors with it: every custom
 # column becomes read-only, which is not a fix, it is the feature removed.
-# Reddens: custom-field-types: "while the money column in the same row is still editable in place, so this narrowed the grid rather than disabling it"
+# Reddens: custom-field-types: "while the money column in the same row is still editable in place, so this narrowed the "
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'
 a = "  'number', 'money', 'date', 'checkbox', 'dropdown', 'tshirt_size',\n"

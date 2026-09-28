@@ -1,6 +1,6 @@
 # Leave the rename path unguarded — the second door onto the namespace.
 # Create still refuses; renaming onto a taken name reaches the index and 500s.
-# Reddens: folder-create: "renaming a folder onto a taken name is refused with a 409"
+# Reddens: folder-create: "renaming a folder onto a taken name is refused by the SERVICE, in its own words"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/folders/folders.service.ts'
 a = "    if (patch.name !== undefined) await this.assertFolderNameFree(spaceId, patch.name, folderId)\n"

@@ -1,7 +1,8 @@
 # A COUNT THAT CAN ONLY EVER SAY ONE THING. The header reports a literal, so
 # it is right for a task with one attachment and wrong for every other task,
 # in a way nobody notices from a screenshot.
-# Reddens: task-attachments -- 'the header carries the frames count', 'the headers count follows the removal'
+# Reddens: task-attachments: "the header carries the frame's count — 3, drawn as well as recorded"
+#   or "and the header's count follows the removal rather than staying where it was drawn"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """        data-count={attachments.length}

@@ -4,8 +4,7 @@
 # step later than usual — frames `12:40`-`12:50`.
 # Re-aimed 25 September: the connect is the hook the onboarding and the Accounts
 # page share (`use-calendar-connect.ts`).
-# Reddens: planner-onboarding: "pressing Google Calendar asks the server to start OAuth for
-#          \"gcal\", and sends the browser to the URL it answers with"
+# Reddens: planner-onboarding: "pressing Google Calendar asks the server to start OAuth for"
 import io
 p = '/home/user/rundesk/apps/web/src/hooks/use-calendar-connect.ts'
 a = '    onSuccess: ({ authUrl }) => {\n      window.location.href = authUrl\n    },'

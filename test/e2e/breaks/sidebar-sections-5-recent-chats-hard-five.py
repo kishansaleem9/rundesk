@@ -2,8 +2,8 @@
 # `expanded` is ignored, so the "More" row still renders and still says the
 # right number — and pressing it changes nothing. The sixth conversation is
 # unreachable from the UI again, exactly as `workspace-sidebar.tsx:2724` had it.
-# Reddens: sidebar-sections: "pressing it reaches every conversation, including the
-#          sixth" / "and it folds back to the preview"
+# Reddens: sidebar-sections: "and pressing it reaches every conversation, including the sixth"
+#   or "and it folds back to the preview"
 import io
 p = '/home/user/rundesk/apps/web/src/components/workspace-sidebar.tsx'
 s = io.open(p, encoding='utf-8').read()

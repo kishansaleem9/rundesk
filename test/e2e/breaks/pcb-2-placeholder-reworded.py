@@ -1,6 +1,6 @@
 # The placeholder becomes a generic "Search…". The bar still opens the palette;
 # it just stops promising the three things frame `14:45` promises.
-# Reddens: planner-command-bar: "reading the frame's own three promises"
+# Reddens: planner-command-bar: "reading \"Search events, teammates, commands…\", the frame's own three promises"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/i18n/catalogs.ts'
 a = '  \'planner.commandBar\': "Search events, teammates, commands…",\n'

@@ -1,7 +1,7 @@
 # Both meters drawn from the SAME score. Two bars at one length, one of them labelled
 # Intelligence: a decoration with two captions, and nothing on screen looks wrong.
-# Reddens: ai-model-cards: "its Speed and Intelligence are visibly DIFFERENT lengths"
-#          ai-model-picker: "the Max tier's Intelligence bar is visibly longer than the Fast tier's"
+# Reddens: ai-model-cards: "and its Speed and Intelligence are visibly DIFFERENT lengths, as the frame draws them"
+#          ai-model-picker: "and the Max tier’s Intelligence bar is visibly longer than the Fast tier’s"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
 a = """                ['speed', model.speed, t('aiModels.speed')],

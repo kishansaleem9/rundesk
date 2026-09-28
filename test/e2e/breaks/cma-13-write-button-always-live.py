@@ -1,5 +1,5 @@
 # The AI writer becomes pressable with no title, so it asks the model to write about nothing.
-# Reddens: create-menu-ai: "the AI control is dead until the task has a title"
+# Reddens: create-menu-ai: "and the ⚡AI control is dead until the task has a title — that title IS the prompt"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
 a = '          disabled={!title.trim() || writeDescription.isPending}\n'

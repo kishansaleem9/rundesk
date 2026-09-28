@@ -1,5 +1,5 @@
 # A LIST'S ADDRESS IS ANSWERED TO EVERY READER OF THE LIST, as it was.
-# Reddens: list-address-readers: ") return { status: r.status, holds: JSON.stringify(r.data ?? null).includes(p.address.split('@')[0]) } } const mv = await read(member, VIEW) const mf = await read(member, FULL) const gf = await read(guest, FULL) chk( mv.status === 403 && !mv.holds && gf.status === 403 && !gf.holds && mf.status === 200 && mf.holds, 'a list’s address is read by those who may add tasks to it: refused to a member of a view-only space and to a guest with a view share (403, no address in either answer), given to a member at Full edit',"
+# Reddens: list-address-readers: "a list’s address is read by those who may add tasks to it: refused to a member of a view-only space and to a guest with a view share (403, no address in either answer), given to a member at Full edit"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/email-to-task/email-to-task.service.ts'
 a = "    if (!(await canCreateTaskIn(this.db, listId, readerId))) {\n      throw new ForbiddenException('Only those who may add tasks to this list see its email address')\n    }\n"

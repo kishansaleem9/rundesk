@@ -1,6 +1,6 @@
 # One of the three is missing from the panel — the commonest way a row of
 # this shape ships "done" with two thirds of it built.
-# Reddens: "— three switches, under Card size and Card cover') await openPanel() const order = await page .locator('[data-testid=\"list-board-settings\"] [role=\"switch\"]') .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid'))) chk( JSON.stringify(order) === JSON.stringify(['list-board-stack-fields', 'list-board-show-empty-fields', 'list-board-collapse-empty']), 'the three switches are there, in the frame’s order'," and
+# Reddens: "the three switches are there, in the frame's order" and
 #          everything that drives the missing one.
 import io
 p = '/home/user/rundesk/apps/web/src/routes/app.$workspaceId.$spaceId.$projectId.$listId.tsx'

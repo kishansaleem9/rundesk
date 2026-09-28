@@ -38,7 +38,7 @@ import { proveMutationsBite } from './lib/mutate.mjs'
  */
 const HERE = dirname(fileURLToPath(import.meta.url))
 const SUBJECT = process.env.CLAIM_MATCH_LIB ?? './lib/claim-match.mjs'
-const { norm, findsClaim, quotedIn, MIN_WORDS } = await import(SUBJECT)
+const { norm, findsClaim, quotedIn, MIN_WORDS, sentencesOf, claimedWhole } = await import(SUBJECT)
 
 let failed = 0
 let ran = 0
@@ -150,6 +150,30 @@ is(
   'while a real span containing an escaped apostrophe still reads',
 )
 
+console.log('\n7. a claim is a WHOLE sentence of the suite (claims-confirmed-by-a-fragment)')
+{
+  const SUITE = [
+    "// one `summary backtick, never closed on this line, in a comment",
+    "const re = /[‘’']/g",
+    "chk(a, 'given a space with Full edit, a guest is offered a list in the Create menu', x)",
+    "chk(b, 'the first half of a sentence ' + 'and the rest of it', y)",
+    "chk(c, `every one of the ${n} tiles is offered in the grid`, z)",
+    "chk(d, `the ${kind} item reads ${label}`, w)",
+    "/* it's a comment */ chk(e, 'after the comment and the regex', v)",
+  ].join('\n')
+  const S = sentencesOf(SUITE)
+  const w = (q) => claimedWhole(S, norm(q))
+  is(w('given a space with Full edit, a guest is offered a list in the Create menu'), true, 'the whole literal sentence is claimed')
+  is(w('a guest is offered a list in the Create menu'), false, 'a clause of it is not — eight words that also sit in a restated check (gcm-11)')
+  is(w('the first half of a sentence and the rest of it'), true, 'a sentence built with + is read whole')
+  is(w('every one of the 8 tiles is offered in the grid'), true, 'a template sentence matches with its values filled in')
+  is(w('tiles is offered in the grid'), true, 'five or more words of a template sentence stand, since its values cannot be quoted in advance')
+  is(w('offered in the grid'), false, 'but four words of it do not')
+  is(w('the ${kind} item reads ${label}'), true, 'a template quoted in its source form is claimed')
+  is(w('after the comment and the regex'), true, 'a quote inside a comment or a regex literal does not throw the reading off')
+  is(w('summary backtick, never closed on this line, in a comment'), false, 'and a comment is not a sentence of the suite')
+}
+
 /*
  * AND A FLOOR ON HOW MANY ASSERTIONS RAN, because "all assertions hold" is true
  * of no assertions at all.
@@ -191,6 +215,11 @@ if (process.argv.includes('--mutate')) {
       ['escaped quotes stop being unescaped', '/\\\\(["\'`\\\\])/g', '/__never_matches__()/g'],
       ['runs of whitespace stop collapsing', '/\\s+/g', '/__never_matches__/g'],
       ['single-quoted claims stop being read', 'return [...block.matchAll(SINGLE)].map((m) => norm(m[2]))', 'return []'],
+      ['a clause of a literal sentence is claimed again', '  if (sentences.literals.has(q)) return true\n', '  if ([...sentences.literals].some((l) => l.includes(q))) return true\n'],
+      ['template fragments lose their five-word floor', '  const long = q.split(\' \').length >= MIN_WORDS\n', '  const long = true\n'],
+      ['comments are read as source again', "    if (c === '/' && src[i + 1] === '/') { const e = src.indexOf('\\n', i); i = e < 0 ? n : e; continue }\n", ''],
+      ['sentences joined by + are not joined', '      add(body, tpl)\n    }', '    }'],
+      ['a template quoted in its source form is refused', '      literals.add(norm(body))\n      if (parts', '      if (parts'],
       ['a possessive apostrophe opens a quote again', "/(^|[\\s([<\\u2014-])'((?:[^'\\\\]|\\\\.){8,}?)'(?=$|[\\s,.;:!?)\\]>\\u2014-])/g", "/()'((?:[^'\\\\]|\\\\.){8,}?)'()/g"],
     ],
   })

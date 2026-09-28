@@ -1,6 +1,5 @@
 # The views panel goes back to one tab, which is what Rundesk drew before this row.
-# Reddens: space-wizard: "the panel is tabbed Required views | Default View
-#   Templates"
+# Reddens: space-wizard: "the panel is tabbed Required views | Default View Templates, as the frame draws"
 import io
 p = '/home/user/rundesk/apps/web/src/components/create-space-wizard.tsx'
 a = "          {(['required', 'templates'] as const).map((tab) => (\n"

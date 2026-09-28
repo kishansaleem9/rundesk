@@ -6,7 +6,7 @@
 # says "no matches" for containers that exist and were simply never loaded.
 # That is the confident zero this row exists to catch, and it leaves the page
 # without a single request going out (the key is already warm from the sidebar).
-# Reddens: task-mentions -- 'the narrowing went to the SERVER carrying types=space,folder,list and this runs own word'
+# Reddens: task-mentions: "and the narrowing went to the SERVER carrying `types=space,folder,list` and this run's own word"
 import io
 
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'

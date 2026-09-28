@@ -2,8 +2,7 @@
 # bell. Every frame from `15:20` to `19:05` puts it at the LEFT of the header,
 # immediately right of the workspace switcher — which is where you read it
 # without looking for it.
-# Reddens: focus-pill:
-#   "it sits in the app header, right of the workspace identity and in its left half"
+# Reddens: focus-pill: "it sits in the app header, immediately right of the workspace identity"
 import io
 p = '/home/user/rundesk/apps/web/src/components/app-topbar.tsx'
 a = """      {isUuidLike(params.workspaceId) && <FocusBlockPill workspaceId={params.workspaceId} />}

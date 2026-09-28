@@ -1,5 +1,5 @@
 # THE AI'S STATUS COUNT ASKS THE SPACE AND THE PROJECT ONLY: a private list's tasks are counted.
-# Reddens: private-list-reach: ")]) const total = (res) => Number(res.data?.total ?? NaN) chk( mCount.status === 200 && total(mCount) === total(aCount) - 2, 'the AI’s status count leaves the private list’s two tasks out of the member’s total — and counts them in the admin’s',"
+# Reddens: private-list-reach: "the AI’s status count leaves the private list’s two tasks out of the member’s total — and counts them in the admin’s"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/ai/ai.service.ts'
 s = io.open(p, encoding='utf-8').read()

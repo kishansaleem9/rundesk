@@ -1,7 +1,7 @@
 # A TOOLTIP OVER A DEAD CONTROL. The rail icon keeps its label and stops
 # opening the panel -- the shape half the controls in this audit were found
 # in.
-# Reddens: task-attachments -- 'pressing it opens the one Related Items panel the tab already opens'
+# Reddens: task-attachments: "pressing it opens the one Related Items panel the tab already opens — one panel in the document, not two"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                    onClick={() => setActiveTab('dependencies')}"""

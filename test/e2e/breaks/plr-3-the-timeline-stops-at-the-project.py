@@ -1,5 +1,5 @@
 # THE TIMELINE ASKS THE SPACE AND THE PROJECT ONLY: a private list's dated tasks are drawn.
-# Reddens: private-list-reach: ")]) chk( mLine.status === 200 && !names(mLine) && mLine.text.includes(OT) && names(aLine), 'the timeline gives the member no task of the private list, and the open one — the admin’s has it',"
+# Reddens: private-list-reach: "the timeline gives the member no task of the private list, and the open one — the admin’s has it"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/tasks/tasks.service.ts'
 s = io.open(p, encoding='utf-8').read()

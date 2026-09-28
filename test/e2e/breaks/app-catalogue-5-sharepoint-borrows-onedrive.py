@@ -11,11 +11,10 @@
 # Re-anchored 23 September: `listSources` now tells each person whose account a
 # grant is (`heldBy`); the second half drops the scope test there. Same break.
 #
-# Reddens: app-catalogue: "the SharePoint source names its own credential",
-#          "a connected OneDrive no longer makes SharePoint say it is
-#          connected", "a SharePoint credential holding only Files.ReadWrite
-#          reports itself unconnected", and "a SharePoint credential that cannot
-#          answer the query says the same"
+# Reddens: app-catalogue: "the SharePoint source names its own credential"
+#   or "a connected OneDrive no longer makes SharePoint say it is connected"
+#   or "and a SharePoint credential holding only Files.ReadWrite reports itself unconnected"
+#   or "and a SharePoint credential that cannot answer the query says the same"
 import io
 
 a1 = """  'google-drive': 'google-drive',

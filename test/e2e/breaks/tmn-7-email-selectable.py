@@ -1,7 +1,8 @@
 # A MODE WITH NO SEND BEHIND IT. Email becomes selectable, so the composer
 # can be put into a state it cannot post from -- the dead control, which is
 # worse than the absence this row started as.
-# Reddens: task-mentions -- 'Comment carries the tick and Email is not selectable', 'pressing Email leaves the composer in Comment mode'
+# Reddens: task-mentions: "Comment carries the tick and Email is not selectable"
+#   or "and pressing Email leaves the composer in Comment mode rather than a mode with no send behind it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                  data-testid="comment-mode-item-email"

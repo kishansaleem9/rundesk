@@ -1,6 +1,7 @@
 # A PAPERCLIP POINTING NOWHERE. Download becomes href=# exact defect the comment clip player shipped: a link that looks right,
 # clicks, and does nothing at all.
-# Reddens: task-attachments -- 'Download is a real anchor with a download attribute pointing at THIS attachments url', 'all links on the cards point somewhere'
+# Reddens: task-attachments: "Download is a real anchor with a `download` attribute, pointing at THIS attachment's url"
+#   or "all 6 links on the cards point somewhere — none is a paperclip over \"#\""
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                    href={a.url}

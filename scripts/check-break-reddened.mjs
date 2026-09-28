@@ -56,7 +56,7 @@
 import { readdirSync, readFileSync, existsSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { norm, quotedIn } from './lib/claim-match.mjs'
+import { norm, quotedIn, sentencesOf, claimedWhole } from './lib/claim-match.mjs'
 import { reddensText, makeSuiteOf, declaresShortRun } from './lib/suite-of-patch.mjs'
 import { measuredAt, patchDeps, makeMeasurementCheck } from './lib/log-tree.mjs'
 import { bail } from './lib/bail.mjs'
@@ -64,6 +64,14 @@ import { bail } from './lib/bail.mjs'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
 const SUITES = join(ROOT, 'test/e2e')
+const suiteSentences = new Map()
+const sentencesOfSuite = (suite) => {
+  if (!suiteSentences.has(suite)) {
+    const f = join(SUITES, `${suite}.mjs`)
+    suiteSentences.set(suite, existsSync(f) ? sentencesOf(readFileSync(f, 'utf8')) : { literals: new Set(), templates: [] })
+  }
+  return suiteSentences.get(suite)
+}
 const LOGS = '/tmp/claude-0'
 
 const suiteNames = readdirSync(SUITES).filter((f) => f.endsWith('.mjs')).map((f) => f.slice(0, -4))
@@ -470,8 +478,21 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
    * `folder-create-6-rename-door-open`, into the reddened column where the logs
    * plainly put them.
    */
+  /*
+   * AND "NOT AMONG THE PASSES" COUNTS ONLY FOR A SENTENCE THE SUITE HAS.
+   *
+   * Many suites print only the failure's detail on a FAIL line
+   * (`a39-dm-tabs`: "FAIL a channel showed 3 tabs"), so a claimed sentence
+   * missing from the passes is how most reddenings are read — and that is
+   * evidence only if the suite still says that sentence. `gcm-11` claimed a
+   * check as it read BEFORE it was restated: the old sentence was, trivially,
+   * among no passes, and the run counted as a reddening
+   * (`found-25-sep/claims-confirmed-by-a-fragment`). A claim that is not one of
+   * the suite's whole sentences (`claimedWhole`) proves nothing by its absence.
+   */
+  const inSuite = (c) => claimedWhole(sentencesOfSuite(suite), c)
   const inFails = claims.filter((c) => lines(raw, 'FAIL').includes(c))
-  const notInPasses = claims.filter((c) => !lines(raw, 'PASS').includes(c))
+  const notInPasses = claims.filter((c) => inSuite(c) && !lines(raw, 'PASS').includes(c))
   if (inFails.length || notInPasses.length) {
     reddened += 1
     reddenedNames.push(name)

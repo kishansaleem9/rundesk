@@ -47,7 +47,7 @@
 # RE-AIMED 24 September: the readers are `{ workspace, users }` now — the workspace's
 # room, and each guest a public channel reaches told in their own
 # (`found-24-sep/guests-read-every-open-channel`); the mistake is the same.
-# Reddens: syncup-live: "and it arrives without a reload"
+# Reddens: syncup-live: "and it arrives without a reload — a card you have to refresh for is a log entry"
 import io
 
 # Re-anchored when the card stopped going to the whole workspace and went to
