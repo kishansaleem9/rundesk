@@ -83,6 +83,7 @@ export class ProjectsService {
     // cap above says nothing about: one is "how many may exist", the other is
     // "may YOU add one here".
     await assertCanCreateInSpace(this.db, { spaceId, actorId, kind: 'project' })
+    if (data.folderId) await this.assertFolderOfSpace(data.folderId, spaceId)
 
     const result = await this.db
       .insert(projects)
@@ -171,6 +172,11 @@ export class ProjectsService {
     const managed = actorId ? await this.assertManageable(projectId, actorId) : null
     if (data.clientId !== undefined && data.clientId !== null) {
       await this.assertClientOfWorkspace(projectId, data.clientId, managed?.workspaceId)
+    }
+    if (data.folderId !== undefined && data.folderId !== null) {
+      const [own] = await this.db.select({ spaceId: projects.spaceId }).from(projects).where(eq(projects.id, projectId)).limit(1)
+      if (!own) throw new NotFoundException('Project not found')
+      await this.assertFolderOfSpace(data.folderId, own.spaceId)
     }
     // Whitelist the updatable columns instead of spreading the raw body: the
     // controller body is untyped at runtime, so a stray field like `position: true`
@@ -264,18 +270,7 @@ export class ProjectsService {
 
     // A folder target must actually live in the destination space, otherwise the
     // project would be grouped under a folder from a different space.
-    if (target.folderId) {
-      const [folder] = await this.db
-        .select({ spaceId: folders.spaceId, isArchived: folders.isArchived })
-        .from(folders)
-        .where(eq(folders.id, target.folderId))
-        .limit(1)
-      if (!folder) throw new NotFoundException('Target folder not found')
-      if (folder.isArchived) throw new BadRequestException('Cannot move into a deleted folder')
-      if (folder.spaceId !== destSpaceId) {
-        throw new BadRequestException('That folder does not belong to the destination space')
-      }
-    }
+    if (target.folderId) await this.assertFolderOfSpace(target.folderId, destSpaceId)
 
     // Resolve the destination folder explicitly so it can be both persisted and
     // audited without reading back through an untyped record.
@@ -311,6 +306,24 @@ export class ProjectsService {
    * invoicing refused the project. The portal already asked this
    * (`client-portal.service.ts`); the project's own update did not.
    */
+  /**
+   * A project's folder is one of its own space's, not deleted. Moving asked
+   * this; making a project with a `folderId` and `PUT /projects/:id` did not,
+   * and accepted a folder of another space or another workspace (200 each),
+   * leaving the project in one space under a folder in another
+   * (`found-28-sep/project-folder-unchecked-across-workspaces`).
+   */
+  private async assertFolderOfSpace(folderId: unknown, spaceId: string) {
+    if (typeof folderId !== 'string' || !isUuid(folderId)) throw new BadRequestException('That folder does not belong to this space')
+    const [folder] = await this.db
+      .select({ spaceId: folders.spaceId, isArchived: folders.isArchived })
+      .from(folders)
+      .where(eq(folders.id, folderId))
+      .limit(1)
+    if (!folder || folder.spaceId !== spaceId) throw new BadRequestException('That folder does not belong to this space')
+    if (folder.isArchived) throw new BadRequestException('Cannot move into a deleted folder')
+  }
+
   private async assertClientOfWorkspace(projectId: string, clientId: unknown, workspaceId?: string) {
     if (typeof clientId !== 'string' || !isUuid(clientId)) throw new BadRequestException('Client not found in this workspace')
     let ws = workspaceId

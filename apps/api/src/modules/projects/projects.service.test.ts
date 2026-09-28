@@ -197,3 +197,49 @@ describe('ProjectsService.updateProject — a client of the project\'s own works
     assert.equal(sets[0].clientId, null)
   })
 })
+
+describe('ProjectsService — a project\'s folder is one of its own space\'s (found-28-sep/project-folder-unchecked-across-workspaces)', () => {
+  const FOLDER = '22222222-2222-4222-8222-222222222222'
+  /** Select answers in order: the project's space, then the folder. */
+  const setUp = (answers: unknown[][]) => {
+    const sets: Record<string, unknown>[] = []
+    const queue = [...answers]
+    const db = {
+      select: mock.fn(() => ({ from: () => ({ where: () => ({ limit: async () => queue.shift() ?? [] }) }) })),
+      update: mock.fn(() => ({
+        set: (s: Record<string, unknown>) => {
+          sets.push(s)
+          return { where: () => ({ returning: async () => [] }) }
+        },
+      })),
+    } as any
+    const svc = new ProjectsService(db, {} as any, {} as any, {} as any, {} as any) as any
+    svc.assertManageable = mock.fn(async () => ({ workspaceId: 'w-own', name: 'Apollo', createdById: 'u-1' }))
+    return { svc, db, sets }
+  }
+
+  it('refuses a folder of another space — or another workspace — (400), and writes nothing', async () => {
+    const { svc, db } = setUp([[{ spaceId: 's-own' }], [{ spaceId: 's-elsewhere', isArchived: false }]])
+    await assert.rejects(() => svc.updateProject('p-1', { folderId: FOLDER }, 'u-1'), (err: any) => err instanceof BadRequestException)
+    assert.equal(db.update.mock.callCount(), 0, 'the project was not changed')
+  })
+
+  it('refuses a deleted folder of its own space (400)', async () => {
+    const { svc, db } = setUp([[{ spaceId: 's-own' }], [{ spaceId: 's-own', isArchived: true }]])
+    await assert.rejects(() => svc.updateProject('p-1', { folderId: FOLDER }, 'u-1'), (err: any) => err instanceof BadRequestException)
+    assert.equal(db.update.mock.callCount(), 0)
+  })
+
+  it('sets a folder of its own space', async () => {
+    const { svc, sets } = setUp([[{ spaceId: 's-own' }], [{ spaceId: 's-own', isArchived: false }]])
+    await svc.updateProject('p-1', { folderId: FOLDER }, 'u-1')
+    assert.equal(sets[0].folderId, FOLDER)
+  })
+
+  it('takes a project out of its folder (null) without a lookup', async () => {
+    const { svc, db, sets } = setUp([])
+    await svc.updateProject('p-1', { folderId: null }, 'u-1')
+    assert.equal(db.select.mock.callCount(), 0)
+    assert.equal(sets[0].folderId, null)
+  })
+})

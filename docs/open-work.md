@@ -1201,13 +1201,26 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 
 *To close:* An edit and a delete in the web, asking `client.manage`.
 
-### `found-28-sep/project-folder-unchecked-across-workspaces` — open, security, small (found implementing `client.manage`)
+### `found-28-sep/project-folder-unchecked-across-workspaces` — **closed** (security, small; found implementing `client.manage`)
 
 **`PUT /projects/:id` copies a `folderId` without asking that the folder is in the project's workspace**
 
 *Evidence:* Read, not run: `projects.service.ts` `updateProject` takes the body's `folderId` as it takes `clientId` (now checked). A folder of another workspace would be accepted, with only the foreign key checking it.
 
 *To close:* Measure it; refuse a folder that is not in the project's space (400).
+
+*Measured on lane 5 (build of `4ba95d3`), probe then suite:*
+- `PUT /projects/:id` took another workspace's folder, and another space's of the same workspace, and set it (200 each). The project stayed in its space under a folder that lives elsewhere, and the other tenant's folder's privacy then read as the project's.
+- `POST /projects` with another workspace's `folderId` made the project (201).
+- Only moving a project asked where its folder was.
+
+*Closed, 28 September:* `assertFolderOfSpace` (`projects.service.ts`) asks that the folder exist, sit in the project's space and not be deleted. It is asked on make, update and move, which had its own copy. `null` takes a project out of its folder without a lookup.
+
+- `project-folder-home`, 4 checks: before 1 of 4 on lane 5, after 4/4.
+- Unit tests: `projects.service.test.ts` 11/11 (4 new).
+- Patches `pfh-1..3`, and `pfh-4`, a unit claim.
+- Regression on lane 5, the 9 suites that make, move or update projects and folders: 9/9.
+- In CI (217).
 
 ### `found-28-sep/billable-switch-offered-to-readers` — open, visible bug, small (found by the client research)
 
