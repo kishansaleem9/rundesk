@@ -1,6 +1,6 @@
 # Where this stands, and how to pick it up
 
-> **Superseded for current state by `docs/resume-2026-09-26.md`** (the counts, what closed on 25–26 September, the break runs still owed, and what comes next). This file is an earlier session's; its process notes still hold.
+> **Superseded for current state by `docs/resume-2026-09-28.md`** (and before it `docs/resume-2026-09-26.md`, whose process and rebuilding notes still hold) (the counts, what closed on 25–26 September, the break runs still owed, and what comes next). This file is an earlier session's; its process notes still hold.
 
 Written at the end of a session that was itself a recovery: a container was
 reclaimed with about eighty-six unpushed commits on it, and a week of work went

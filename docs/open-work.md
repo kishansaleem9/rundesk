@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-26.md`** — 293 items, 97 open, 13 partly fixed, 183 closed, counted from this file's headings on 26 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 311 items, 104 open, 12 partly fixed, 195 closed, counted from this file's headings on 28 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
