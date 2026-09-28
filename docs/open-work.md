@@ -1209,13 +1209,29 @@ ClickUp: "Members and guests can only see and restore items they have deleted." 
 
 *To close:* each control is offered by the rule its route asks (a capabilities read per container, as projects and tasks have). Measure a member, a guest and an admin on each.
 
-### `found-28-sep/client-delete-cascades-invoices` — open, data loss, medium (found implementing `client.manage`)
+### `found-28-sep/client-delete-cascades-invoices` — **closed** (data loss, medium; found implementing `client.manage`)
 
 **Deleting a client deletes its invoices and their lines, and returns their time to unbilled**
 
 *Evidence:* `client_invoices.client_id` is `ON DELETE CASCADE`, and so are the line items (`0077_client_invoices.sql:6,27`). The invoices' time entries go back to unbilled (`client_invoice_id` set null, `:39-43`). A holder of `client.manage` (every manager, by default) who does not hold `workspace.billing` can therefore destroy billing records. `DELETE /clients/:id` also answers `{ok:true}` for an id that matched nothing.
 
 *To close:* Refuse to delete a client with invoices, or archive it, and ask `workspace.billing` for anything that touches invoices. A missing id is a 404. Measure a manager and an admin before and after.
+
+*Measured on lane 7 (build of `0aea7f6`), suite `client-delete-keeps-invoices`, before:* 1 of 3.
+- A manager deleted a client with an invoice, and the invoice went with it (200).
+- A client that is not there answered 200.
+
+*Closed, 28 September:*
+- A client with invoices is not deleted: 409, naming how many invoices and that they must be voided or removed first.
+- A client that is not in the workspace is 404.
+- A client without invoices is deleted as before.
+- Nothing that touches invoices is reachable by `client.manage` alone any more, so `workspace.billing` stays the invoices' key.
+
+`client-delete-keeps-invoices`, 3 checks:
+- Before: 1 of 3. After: 3/3 on lane 7.
+- Patches `cki-1..2`.
+- Regression: `client-access` and `oauth-start-readiness` 2/2.
+- In CI (219).
 
 ### `found-28-sep/clients-cannot-be-edited` — open, feature, small (found implementing `client.manage`)
 
