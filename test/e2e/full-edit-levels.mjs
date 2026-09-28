@@ -269,6 +269,9 @@ try {
   )
 
   // ══ 8. A DOC ═════════════════════════════════════════════════════════════
+  // Docs are ClickUp's exception: Edit archives and deletes a Doc
+  // (found-28-sep/doc-archive-and-delete-at-two-levels), so the line a doc
+  // draws is between Comment and Edit, which `doc-trash-level` measures.
   console.log('\n▶ docs of the admin’s in the view-only space, shared with the member at Edit and at Full edit')
   const adminId = (await A('/users/me')).data?.id
   const doc = async (title) => (await sql`insert into docs (workspace_id, space_id, title, created_by_id) values (${WS}, ${VIEW.space}, ${`${TAG} ${title}`}, ${adminId}) returning id`)[0].id
@@ -282,9 +285,9 @@ try {
   const docRow = async (id) => (await sql`select title, is_archived from docs where id = ${id}`)[0] ?? null
   const [rEdit, rFull] = [await docRow(dEdit), await docRow(dFull)]
   chk(
-    dRename.status === 200 && rEdit?.title === `${TAG} doc renamed at edit` && dDelEdit.status === 403 && rEdit?.is_archived === false
+    dRename.status === 200 && rEdit?.title === `${TAG} doc renamed at edit` && dDelEdit.status < 300 && rEdit?.is_archived === true
       && dDelFull.status < 300 && rFull?.is_archived === true,
-    'a doc shared at Edit is renamed and not deleted (403, still there); one shared at Full edit is deleted',
+    'a doc shared at Edit is renamed and deleted, as ClickUp’s Edit deletes a Doc, and one shared at Full edit is deleted too — in a space that is view-only for the member',
     `edit: rename ${said(dRename)}, delete ${said(dDelEdit)}, now ${JSON.stringify(rEdit)}; full edit: delete ${said(dDelFull)}, now ${JSON.stringify(rFull)}`,
   )
 } catch (err) {

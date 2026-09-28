@@ -223,7 +223,7 @@ export class DocsService {
 
   /**
    * The read rule, and then the LEVEL the write needs (`docLevel`): "edit" to
-   * change or delete a doc, "comment" to comment. A doc the caller may read
+   * change, archive or delete a doc, "comment" to comment. A doc the caller may read
    * but not write this way is refused with 403 — they can see it, so saying
    * so hides nothing.
    */
@@ -239,9 +239,7 @@ export class DocsService {
       throw new ForbiddenException(
         need === 'comment'
           ? 'Your access to this doc does not allow commenting'
-          : need === 'admin'
-            ? 'Your access to this doc does not allow deleting it: that takes "Full edit"'
-            : 'Your access to this doc does not allow changing it',
+          : 'Your access to this doc does not allow changing it',
       )
     }
     return { doc, level, role: membership?.role as string | undefined }
@@ -613,6 +611,17 @@ export class DocsService {
     }
     const set: Record<string, unknown> = { ...writable, updatedAt: new Date() }
     if (writable.content) set.plaintext = extractPlaintext(writable.content)
+    // Archiving here is deleting: the Trash lists a doc by who sent it there and
+    // when, as `deleteForUser` records. The flag alone left it in the Trash as
+    // nobody's, out of the archiver's own Trash and past their restore.
+    if (writable.isArchived === true && !doc.isArchived) {
+      set.archivedAt = new Date()
+      set.archivedById = userId
+    }
+    if (writable.isArchived === false) {
+      set.archivedAt = null
+      set.archivedById = null
+    }
     const [row] = await this.db.update(docs).set(set).where(eq(docs.id, docId)).returning()
     if (!row) throw new NotFoundException('Doc not found')
     if (patch.content) await this.snapshotRevision(row, userId)
@@ -702,8 +711,13 @@ export class DocsService {
   }
 
   async deleteForUser(docId: string, userId: string) {
-    // Full edit deletes a doc; Edit changes it (`found-25-sep/full-edit-enforced-nowhere`).
-    await this.assertDocLevel(docId, userId, 'admin')
+    // Edit deletes a doc, as it archives one: docs are ClickUp's exception to
+    // the location rule, where Edit changes and Full edit deletes ("Anyone,
+    // including guests, with Edit permissions can archive and unarchive Docs";
+    // "Guests with edit permissions can edit and delete Docs and pages").
+    // This asked Full edit while archiving through `update` asked Edit, for the
+    // same result (found-28-sep/doc-archive-and-delete-at-two-levels).
+    await this.assertDocLevel(docId, userId, 'edit')
     const [row] = await this.db
       .update(docs)
       .set({ isArchived: true, archivedAt: new Date(), archivedById: userId, updatedAt: new Date() })

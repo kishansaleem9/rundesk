@@ -1158,13 +1158,52 @@ ClickUp (help centre "Permissions FAQ", "Set permissions on individual locations
 
 *After:* 4/4 on the rebuilt lanes (sweep 18079). `folder-create`, `folder-dialog` and `private-folder-reach` pass in the regression; `folder-dialog`'s one miss under load passed alone. `fcr-1..3` each reddened the check it names (lane 1, at `72a8208`, baseline 4/4).
 
-### `found-28-sep/doc-archive-and-delete-at-two-levels` — open, permissions, small (found by the deletion research)
+### `found-28-sep/doc-archive-and-delete-at-two-levels` — **closed** (permissions, small; found by the deletion research)
 
 **A doc reaches the Trash at Edit through one route and at Full edit through the other**
 
 *Evidence, read not run:* `PATCH /docs/:id {isArchived: true}` is allowed at Edit (`doc-update-fields.ts:29`, `docs.service.ts:595-616`) and lands the doc in the Trash (`trash.service.ts:171`). `DELETE /docs/:id` asks Full edit for the same result. ClickUp's snippets put archiving and deleting a Doc at Edit ("Anyone, including guests, with Edit permissions can archive and unarchive Docs"; "Guests with edit permissions can edit and delete Docs and pages").
 
 *To close:* one level for both. Measure both routes at Edit and at Full edit, before and after.
+
+*Closed, 28 September.* ClickUp (help centre "Archive and unarchive a Doc", from search snippets): "Anyone, including guests, with Edit permissions can archive and unarchive Docs", and "Guests with edit permissions can edit and delete Docs and pages". Docs are the exception to the location rule, where Edit changes and Full edit deletes. `full-edit-enforced-nowhere` had put a doc's delete at Full edit with the rest; this corrects it for docs.
+
+Measured on lane 7 at `ad97e31`, `doc-trash-level` passed 2 of 5. The two that passed pin what stays: a Comment share neither deletes nor archives, and unarchiving at Edit works. The three failures:
+- A member with an Edit share was refused deleting the doc (403, "that takes Full edit"), while archiving it through the doc was allowed.
+- Archiving through the doc (`PATCH {isArchived: true}`) wrote the flag alone, with no date and no archiver. The doc sat in the Trash as nobody's, out of the archiver's own Trash and past their restore.
+- A guest with an Edit share was refused deleting it.
+
+Now:
+- `DELETE /docs/:id` asks Edit, as archiving does. The "takes Full edit" refusal is gone with its only caller.
+- Archiving through the doc records who and when, as deleting does, and unarchiving clears both.
+- The share dialog explains a doc's Edit as "can change it, archive it and delete it", in the four locales.
+- `full-edit-levels`' doc check is rewritten for the rule: a doc shared at Edit is renamed and deleted. `fel-11`, which made deleting ask Edit, is re-aimed to restore Full edit, and `dwl-7` onto the new line.
+
+`doc-trash-level`, 5 checks:
+- Before: 2 of 5 on lane 7.
+- After: 5/5 on lane 7.
+- Patches `dtl-1..5`; their runs follow the commit, with `fel-11` and `dwl-7`.
+- Regression on lane 7, 10/10: `doc-trash-level`, `full-edit-levels`, `doc-write-levels`, `doc-boundaries`, `doc-import`, `doc-task-links`, `share-levels`, `trash-rules`, `undo-delete` and `ui-sweep`, which reads the share dialog's level explanations.
+- API unit tests 1704/1704.
+- In CI (222).
+
+Left beside it, as their own items: the web offers no way to archive or delete a doc (`found-28-sep/docs-offer-no-archive-or-delete`), and the doc editor takes typing from people who may only read or comment (`found-28-sep/doc-editor-open-to-readers`).
+
+### `found-28-sep/docs-offer-no-archive-or-delete` — open, feature, small (found closing `doc-archive-and-delete-at-two-levels`)
+
+**The docs panel has an Archived scope and no control that archives or deletes a doc**
+
+*Evidence (reading, 28 September):* `docs-panel.tsx` lists "Archived" docs in its rail and offers nothing that sends a doc there: no Archive or Delete in the doc's header, the rail or a menu. The API has both routes, at Edit. ClickUp archives a Doc "from Docs Hub, the Home Sidebar and Spaces Sidebar, Doc views, or from Docs Home".
+
+*To close:* an Archive (and Delete) in the doc's menu, offered at Edit — which needs the caller's level on the doc in its payload — and Unarchive on an archived one. Measure a member at Edit and at Comment.
+
+### `found-28-sep/doc-editor-open-to-readers` — open, mirror, small (found closing `doc-archive-and-delete-at-two-levels`; read, not run)
+
+**The doc editor takes typing from someone who may only read or comment, and a refused save says nothing**
+
+*Evidence (reading, 28 September):* the docs panel knows nothing of the caller's level: the editor is editable for everyone who can open the doc. `saveDoc`'s `onError` speaks only for a 409 (a teammate's edit); the 403 a View or Comment share gets is dropped, so the typing looks saved until the doc reloads.
+
+*To close:* the caller's level in the doc payload, a read-only editor below Edit, and a refused save said. Measure a View share typing.
 
 ### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — **closed** (permissions, small; found by the deletion research)
 
@@ -1359,7 +1398,7 @@ Now:
 `job-title-rule`, 11 checks:
 - Before: 3 of 11 on lane 7.
 - After: 11/11 on lane 7.
-- Patches `jtr-1..10`; `jtr-10` is a unit claim. Their runs follow the commit.
+- Patches `jtr-1..10`; `jtr-10` is a unit claim. `jtr-1..6`, `jtr-8` and `jtr-9` each reddened the check they name (lane 2, at `ad97e31`, baseline 11/11); `jtr-10` reddens its unit test. `jtr-7` did not build — it left `void (…,)` — and is re-aimed to send the reason to the console instead, which compiles; its run follows.
 - Regression on lane 7: `teams-person-cards` 17/17, `user-group-access` 8/8, `people-calendar-access` 8/8.
 - In CI (221).
 
@@ -3472,7 +3511,7 @@ Now (`common/permissions/container-access.ts`):
 - Before: 2 of 9 on lane 6. The tenth, the guest, came with the guard; `cdk-16` removes the guard, and its run follows the commit.
 - After: 9/9 on lane 6, and 10/10 on lane 7 with the guest.
 - API unit tests 1703/1703. 15 are new: 9 in `container-access.test.ts`, and 2 each in the lists, spaces and projects services, which check the key is asked of the service's roles. Web units pass.
-- Patches `cdk-1..16`; `cdk-15` is a unit claim, the guard's twin of `cdk-16`. Their runs follow the commit.
+- Patches `cdk-1..16`; `cdk-15` is a unit claim, the guard's twin of `cdk-16`. The fifteen e2e patches each reddened the check they name (lane 1, at `ad97e31`, baseline 10/10), and `cdk-15` reddens its unit test (`check-unit-claims`, 40 of 40).
 - Regression, on lane 6 before the guard: the 13 suites that delete, restore, grant or ask roles and keys, 13/13. On lane 7 with it: those, the new suite and the two guest suites.
 - In CI (220).
 
@@ -3686,7 +3725,7 @@ Fixed on the way, each inside its group:
   - Run on lanes 1 to 4, every baseline green: `pca-1..10` and `ata-1..10` at `4ba95d3`; `cka-1..9`, `uga-1..12`, `ana-1..11` and `dda-1..9` at `72a8208`; `cla-1..11` at `4ba95d3`. Each reddened the check it names (61 of 61).
   - The re-aimed `stp-4`, `stp-11`, `wrc-2` and `td-1` reddened theirs at `5086fe0` (`settings-tabs-by-key` 8/8, `workspace-role-controls` 3/3 and `teams-destination` 14/14 at baseline).
   - `srg-1..18`, the seven re-aimed among them, reddened theirs at `5086fe0` (lane 3, `settings-role-grants` 6/6 at baseline). The unit claims are measured by `check-unit-claims` in the preflight.
-  - `dda-1` reddened its check, but the run ended there: the suite put the admin's dashboard back through the route `dda-1` breaks, and threw when it was refused, so the gate counted the run as unreadable. The suite restores by SQL when the route refuses now (8/8 on lane 7), and `dda-1` is queued again.
+  - `dda-1` reddened its check, but the run ended there: the suite put the admin's dashboard back through the route `dda-1` breaks, and threw when it was refused, so the gate counted the run as unreadable. The suite restores by SQL when the route refuses now (8/8 on lane 7), and `dda-1` reddened its check again in a full run of all eight (lane 3, at `ad97e31`).
 - **Gates:** `check-permission-keys-asked` reads 34 keys offered, 28 asked and 6 exempt.
 - **Tests:** API unit tests 1684/1684, web 305/305.
 - **In CI:** 216 suites.

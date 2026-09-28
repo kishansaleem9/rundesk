@@ -30,13 +30,21 @@ type ShareRow = {
 type ShareResponse = { items: ShareRow[]; myLevel: ShareLevel | null; canShare: boolean; levels: ShareLevel[] }
 
 // Weakest → strongest, matching ClickUp: view < comment < edit < full edit.
-// `admin` is ClickUp's "Full edit" — the only level that may delete the item.
+// `admin` is ClickUp's "Full edit" — the only level that may delete the item,
+// except a doc, which Edit archives and deletes as ClickUp's Docs do
+// (found-28-sep/doc-archive-and-delete-at-two-levels).
 const LEVELS: { value: ShareLevel; labelKey: TranslationKey; hintKey: TranslationKey }[] = [
   { value: 'view', labelKey: 'share.levelView', hintKey: 'share.levelViewHint' },
   { value: 'comment', labelKey: 'share.levelComment', hintKey: 'share.levelCommentHint' },
   { value: 'edit', labelKey: 'share.levelEdit', hintKey: 'share.levelEditHint' },
   { value: 'admin', labelKey: 'share.levelFull', hintKey: 'share.levelFullHint' },
 ]
+
+/** The levels as this kind of item explains them: a doc's Edit also deletes. */
+const levelsFor = (objectType: ShareObjectType) =>
+  objectType === 'doc'
+    ? LEVELS.map((l) => (l.value === 'edit' ? { ...l, hintKey: 'share.levelEditHintDoc' as TranslationKey } : l))
+    : LEVELS
 
 const RANK: Record<ShareLevel, number> = { view: 0, comment: 1, edit: 2, admin: 3 }
 
@@ -220,7 +228,7 @@ export function SharePanel({
         {/* What each level actually means — the client asked for the levels to be
             explained the way ClickUp's permissions article does. */}
         <div className="rounded-md border border-border/70 bg-card/40 px-3 py-2 space-y-0.5">
-          {LEVELS.map((l) => (
+          {levelsFor(objectType).map((l) => (
             <p key={l.value} className="text-[11px] text-muted-foreground">
               <span className="font-medium text-foreground">{t(l.labelKey)}</span> — {t(l.hintKey)}
             </p>
