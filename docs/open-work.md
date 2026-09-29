@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 346 items, 40 open, 8 partly fixed, 298 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 346 items, 40 open, 7 partly fixed, 299 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1519,6 +1519,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Regression on lane 2, 34 suites that open the comment composer, its "+", the space "+", Brain or the create modal: every suite ran its full count; 725 of 726 checks passed, the one failure being `brain-entry-points` check 16 on lane 2's stale API.
 - In CI already.
 - In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
+- Break verdicts at `15e2681`: `scf-1` 31/32, `scf-2` 30/32, `scf-3` 31/32, each reddening what it names; `space-create-menu-1..5` and `form-1..5` redden too, against a 32/32 baseline.
 
 ### `found-29-sep/brain-loses-early-typing` — **closed** (visible bug, small; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
 
@@ -1537,6 +1538,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Regression: as above.
 - In CI already.
 - In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
+- Break verdict at `15e2681`: `blt-1` 19/20, against a 20/20 baseline. The rest of `brain-entry-points` measured again there: `bep-1..21` each redden (`bep-17` with a model; `bep-7`, `bep-13` and `bep-14` without).
 
 ### `found-29-sep/create-modal-returns-focus-to-nothing` — **closed** (accessibility, small; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
 
@@ -1555,6 +1557,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Regression: as above.
 - In CI already.
 - In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
+- Break verdicts at `15e2681`: `cmr-1` and `cmr-2` 18/19 each, against a 19/19 baseline; `cpf-1..5` and `cpm-1..4` measured again there, each reddening.
 
 ### `found-29-sep/no-model-patches-run-with-a-model` — **closed** (test tooling, small; found by the break runs for `0e4f0c0`)
 
@@ -1742,6 +1745,7 @@ After:
 - Three copies at once on lane 5: 73/73 each.
 - Four lanes at once in main (lanes 1, 2, 4 and 5, load ~19): 73/73 on each.
 - `cma-1..5` each redden exactly what they claim (67, 70, 72, 72 and 68 of 73, lane 5).
+- Measured again at `15e2681` on lane 1: baseline 73/73; `cma-1..5` 67, 70, 72, 72 and 68 of 73.
 
 ### `found-29-sep/ai-chat-takes-no-task` — **closed** (feature, small; found closing `ledger-rows/row-743`)
 
@@ -4862,13 +4866,21 @@ offers, the panel that drew, the picker that comes first, the palette's own empt
 element. Where the product gives the fact no testid, the check's comment says so
 and it reads the structure instead.
 
-### `commit-log/log-1e7f092-1` — partly-fixed, small
+### `commit-log/log-1e7f092-1` — **closed** (test tooling, small)
 
 **team-schedules stubs every API call yet is cited as closing its row, against the 'real API' rule**
 
 *Evidence:* Commit 1e7f092: ts-9 'patched a line nothing in the repository executes'. De-duplication is now unit-tested (team-schedule-columns.test.ts). team-schedules.mjs:162 still intercepts every **/api/** call, so the server endpoint never runs in e2e. Ledger row 821 says 'closed by team-schedules.mjs', while resume :36-37 says a row closes only against a real API and Postgres.
 
 *To close:* Add a real-API section, or a small real-API suite, for the team schedules endpoint, or record on row 821 that it is closed by the browser suite plus the unit test.
+
+*Closed, 29 September:* a small real-API suite, `team-schedules-api`, asks the endpoint the page calls (`GET /planner/:workspaceId/team-schedules`) through the real API and Postgres, with the browser suite's fixture: Sara with three dated tasks, Omar with one.
+- One column per person, in the order asked: Sara, Omar, Sara answers Sara then Omar.
+- Each column is its own person's day, by task id.
+- Someone outside the workspace is refused in their own column, with a reason, while the others draw.
+- Nine people are a 400 that names the limit of eight, and Sara named nine times is one column, not a refusal.
+- 5/5 on lane 5. Registered in CI's `postgres-harnesses` job, which now runs 243 suites; the comment that counts them had stayed at 241.
+- `tsa-1..4` are API patches: the de-duplication dropped (as `ts-9`, which the browser suite could never redden), every column read as the first person's, one refused column failing the whole schedule, and the limit gone. Their runs come with this commit.
 
 ### `commit-log/log-30183c3-1` — **closed** (test tooling, small)
 
@@ -5926,7 +5938,7 @@ longer claims a schedule.
 
 *To close:* Check whether the bundles contain any break patch, git rm them, and add dist-* to .gitignore.
 
-### `commit-log/log-b7ee313-1` — **closed**, break run pending (small)
+### `commit-log/log-b7ee313-1` — **closed** (small)
 
 **Whether a subtask may be merged into its own parent is still an unanswered product question**
 
@@ -5938,7 +5950,7 @@ longer claims a schedule.
 - The refusal went. Its reason had described the opposite merge since it was written, and nothing points into the bin when a subtask is merged into its parent: its comments, files and the rest land on the parent, and the binned subtask was the parent's child anyway. Merging a task into its OWN subtask is still refused, by the nesting rule, as before.
 - `mergeRefusal` loses the rule and its now-unused argument; the unit test holds that the merge is allowed.
 - `task-merge`: the check that asserted the refusal ("and a subtask merged into its parent is refused in those words") became "and a subtask merged into its own parent is merged, as in ClickUp: its comment lands on the parent and the subtask goes to the bin", on a pair of its own so the fixtures the rest of the suite reads are untouched. Before 27/28 on lane 6 (400, "A subtask cannot be merged into its own parent"); after 28/28 on lane 7.
-- `task-merge-2`, re-aimed, puts a refusal back: break run pending.
+- `task-merge-2`, re-aimed, puts a refusal back: 27/28 at `15e2681` on lane 1, reddening the merge check alone. `task-merge-1` 16/28 and `task-merge-3` 27/28 there, against a 28/28 baseline.
 
 ### `product-siblings/other-get-routes-without-reader` — **closed** (unread routes, small)
 
