@@ -252,6 +252,11 @@ try {
   console.log('\n▶ …and answers what she asked it to')
   // ---------------------------------------------------------------------
   check(await page.getByTestId('person-name').isVisible().catch(() => false), 'it names the person')
+  // The email is drawn only once the person's profile has answered (the name's
+  // slot is there from the start, holding a skeleton), so it is waited for —
+  // bounded — rather than read the moment the panel opens, which a sweep's load
+  // outran (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+  await page.getByTestId('person-email').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   check(await page.getByTestId('person-email').isVisible().catch(() => false), 'shows their email')
   // §G06 [05:46] — "mera TIME ZONE kya chal raha hai".
   const clock = await page.getByTestId('person-local-time').innerText().catch(() => '')
@@ -707,7 +712,10 @@ try {
   await page.getByTestId('user-menu').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(900)
   await page.getByTestId('menu-my-profile').click({ timeout: 10_000 }).catch(() => {})
-  await page.waitForTimeout(2200)
+  // The buckets are drawn from the same profile answer as the email, in the same
+  // render — so they are counted once the email is there (bounded), not 2.2
+  // fixed seconds after the panel opened.
+  await page.getByTestId('person-email').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   check((await page.locator('[data-testid^=person-bucket-]').count()) >= 4,
     'and the panel draws them as separate sections')
   await page.keyboard.press('Escape')

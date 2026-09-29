@@ -26,6 +26,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -1045,10 +1046,18 @@ try {
     try {
       if (madeSpaces.length === 3 && listMade) {
         await page.reload({ waitUntil: 'domcontentloaded' })
-        await page.waitForTimeout(4000)
 
         const rows = () => page.locator('[data-testid^="space-link-"]').count()
         const box = page.getByTestId('tree-filter')
+        /*
+         * The tree is read once it has drawn — its search box, and the spaces the
+         * three above joined — not four fixed seconds after the reload, after
+         * which a sweep's load once counted 0
+         * (`found-24-sep/three-suites-fail-under-a-full-sweep`). Bounded: a tree
+         * that never lists them still fails below, with the count it had.
+         */
+        await box.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+        await waitUntil(async () => (await rows()) >= 3, { timeoutMs: 20_000 })
         check(await box.isVisible().catch(() => false), 'the tree has a search box')
 
         const before = await rows()

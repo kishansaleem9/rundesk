@@ -16,6 +16,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -713,9 +714,13 @@ try {
 
     const jotted = `scratch ${Date.now()}`
     await page.getByTestId('notepad-text').fill(jotted)
-    // Longer than the 800ms debounce, so this measures the save rather than
-    // the keystroke.
-    await page.waitForTimeout(2200)
+    // The save lands after the 800ms debounce, so the server is asked until it
+    // holds the words (bounded) — which also keeps the reload below from
+    // overtaking a save still on its way.
+    await waitUntil(async () => ((await A('/users/me/notepad')).data?.content ?? '') === jotted, {
+      timeoutMs: 15_000,
+      stepMs: 300,
+    })
     check(
       ((await A('/users/me/notepad')).data?.content ?? '') === jotted,
       'what you type is on the server, not just in the box',
@@ -723,10 +728,21 @@ try {
     )
 
     // And it is still there on the next visit — the whole point of a pad.
+    /*
+     * READ ONCE THE PAD HAS FETCHED IT. The pad asks for its note only when it
+     * is opened, and says "Saved" once the answer is in; the box was read 1.2
+     * fixed seconds after opening, and under a sweep's load it was still empty
+     * — "the note did not survive a reload" about a note that had
+     * (`found-24-sep/three-suites-fail-under-a-full-sweep`). Bounded: a pad
+     * that never loads its note still fails.
+     */
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(2500)
+    await page.getByTestId('notepad-open').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     await page.getByTestId('notepad-open').click({ timeout: 10_000 }).catch(() => {})
-    await page.waitForTimeout(1200)
+    await waitUntil(
+      async () => (await page.getByTestId('notepad-status').innerText({ timeout: 2000 })).trim().length > 0,
+      { timeoutMs: 15_000 },
+    )
     check(
       (await page.getByTestId('notepad-text').inputValue().catch(() => '')) === jotted,
       'and it is still there when you come back',

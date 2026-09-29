@@ -22,6 +22,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -214,7 +215,13 @@ try {
   await page.goto(`${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`, {
     waitUntil: 'domcontentloaded',
   })
-  await page.waitForTimeout(6000)
+  /*
+   * The card is drawn once the task's read has come back refused, so it is
+   * waited for — bounded, and the checks below still fail when it never comes.
+   * It was six fixed seconds, and a sweep's load outran them
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+   */
+  await page.getByTestId('request-access-card').waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
 
   chk(
     await page.getByTestId('request-access-card').isVisible().catch(() => false),
@@ -230,7 +237,8 @@ try {
   // Bounded and caught: the check above it is allowed to fail, and an unbounded
   // press on a control that is not there ends the section instead (ledger §10).
   await page.getByTestId('request-access-button').click({ timeout: 10_000 }).catch(() => {})
-  await page.waitForTimeout(2500)
+  // The confirmation replaces the button once the ask has been answered.
+  await page.getByTestId('request-access-sent').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   chk(
     await page.getByTestId('request-access-sent').isVisible().catch(() => false),
     'pressing it says so',
@@ -248,10 +256,22 @@ try {
    * so matching on it is the difference between "somebody once asked for
    * something" and "this click asked for this".
    */
-  const owned = (await A('/notifications')).data ?? []
-  const mine = owned.filter(
-    (n) => n.type === 'access_requested' && (n.target?.entityId ?? n.entityId) === taskId,
-  )
+  /*
+   * READ AMONG THE ADMIN'S ACCESS REQUESTS, AND UNTIL IT ARRIVES. A bare
+   * `GET /notifications` is the newest 50 of every kind, and under a sweep the
+   * other suites filled those 50 before this one read them: the row was there,
+   * below the page. `types=access_requested` asks only for the kind this row is
+   * (the route's own filter), which leaves out only rows that could never match.
+   */
+  let owned = []
+  let mine = []
+  await waitUntil(async () => {
+    owned = (await A('/notifications?types=access_requested&limit=100')).data ?? []
+    mine = owned.filter(
+      (n) => n.type === 'access_requested' && (n.target?.entityId ?? n.entityId) === taskId,
+    )
+    return mine.length > 0
+  }, { timeoutMs: 15_000, stepMs: 300 })
   chk(
     mine.length > 0,
     'and whoever can grant it hears about THIS object',
@@ -271,7 +291,10 @@ try {
     `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=00000000-0000-4000-8000-000000000000`,
     { waitUntil: 'domcontentloaded' },
   )
-  await page.waitForTimeout(6000)
+  // Read once the sheet has answered for this task — its "not found" line, which
+  // it draws in the same place as the card — so an absence is not read before
+  // anything could have been drawn.
+  await page.getByText('Task not found.').first().waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
   chk(
     !(await page.getByTestId('request-access-card').isVisible().catch(() => false)),
     'but a task that does not exist offers nothing to ask for',

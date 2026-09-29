@@ -80,6 +80,31 @@ const openTaskMenu = async (page) => {
   return waitUntil(() => menuIsOpen(page), { timeoutMs: 10_000 })
 }
 
+/**
+ * Whether one row is on the menu, read WITH THE MENU OPEN, and waited for.
+ *
+ * The rows were read one after another off a menu opened once, and under a
+ * sweep's load a prefix of them passed and the rest were "not in the menu" —
+ * Copy link and then nothing, or Copy link and Copy ID and then nothing
+ * (`found-24-sep/three-suites-fail-under-a-full-sweep`). The menu draws every
+ * one of these rows in the same render, so a row gone after its neighbours were
+ * read is the menu having shut in between, not a row drawn late. So each row is
+ * read while the trigger says the menu is open (`aria-expanded`, Radix's own),
+ * opening it again if something shut it, until the row shows — bounded, so a
+ * row the menu does not carry still fails, with its own sentence.
+ */
+const rowInOpenMenu = (page, testId) =>
+  waitUntil(async () => {
+    const trigger = page.getByTestId('task-more-menu')
+    if ((await trigger.getAttribute('aria-expanded', { timeout: 2000 })) !== 'true') {
+      await trigger.click({ timeout: 5000 })
+      await waitUntil(async () => (await trigger.getAttribute('aria-expanded', { timeout: 2000 })) === 'true', {
+        timeoutMs: 5000,
+      })
+    }
+    return page.getByTestId(testId).isVisible()
+  }, { timeoutMs: 20_000 })
+
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
   if (init.body) headers['content-type'] = 'application/json'
@@ -407,7 +432,7 @@ try {
     ['task-menu-email', 'Send email to task'],
   ]) {
     chk(
-      await page.getByTestId(id).isVisible().catch(() => false),
+      await rowInOpenMenu(page, id),
       `${what} is in the menu`,
       `${what} is not in the menu — frame \`15:32\` has it and Rundesk had nowhere to put it`,
     )

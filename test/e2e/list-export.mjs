@@ -371,16 +371,26 @@ try {
   await page.goto(`${stack.base}/app/${workspaceId}/${spaceId}/${listRow?.projectId}/${list.id}`, { waitUntil: 'domcontentloaded' })
   /** Open Customize, choose Visible columns, press Download — and return the `fields` it asked for. */
   const exportedFields = async () => {
-    const asked = page.waitForRequest((r) => r.url().includes(`/tasks/list/${list.id}/export?`), { timeout: 20_000 }).catch(() => null)
     // Customize, then its Export view section — each a <details> of its own,
-    // opened only when shut (a click on an open one would close it).
-    for (const id of ['list-customize', 'list-export-section']) {
-      const details = page.getByTestId(id)
-      if (!(await details.evaluate((el) => el.open).catch(() => true))) {
-        await details.locator(':scope > summary').click({ timeout: 15_000 }).catch(() => {})
+    // opened only when shut (a click on an open one would close it) — until the
+    // Download button is on screen. Bounded; the press below still goes out.
+    await waitUntil(async () => {
+      for (const id of ['list-customize', 'list-export-section']) {
+        const details = page.getByTestId(id)
+        if (!(await details.evaluate((el) => el.open, undefined, { timeout: 5000 }))) {
+          await details.locator(':scope > summary').click({ timeout: 5000 })
+        }
       }
-    }
+      return page.getByTestId('list-export-download').isVisible()
+    }, { timeoutMs: 30_000 })
     await page.getByTestId('list-export-visible').click({ timeout: 10_000 }).catch(() => {})
+    /*
+     * THE REQUEST IS WAITED FOR FROM THE PRESS THAT MAKES IT. Its twenty
+     * seconds used to start before the panel was opened, and under a sweep's
+     * load the opening ate them: the list's download read "(no request)"
+     * (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+     */
+    const asked = page.waitForRequest((r) => r.url().includes(`/tasks/list/${list.id}/export?`), { timeout: 20_000 }).catch(() => null)
     await page.getByTestId('list-export-download').click({ timeout: 10_000 }).catch(() => {})
     const request = await asked
     await page.keyboard.press('Escape').catch(() => {})
@@ -396,7 +406,24 @@ try {
     `it asked for fields=${listFields}`,
   )
   await page.getByTestId('work-view-tab-type-table').click({ timeout: 15_000 }).catch(() => {})
-  await waitUntil(async () => (await page.getByTestId('list-customize').count()) > 0, { timeoutMs: 10_000 })
+  /*
+   * THE TABLE'S DOWNLOAD IS ASKED FOR ONCE THE TABLE IS THE VIEW ON SCREEN AND
+   * THE PANEL IS FREE. This waited for a Customize panel to exist, which the
+   * list's already did, so it waited for nothing. The panel is the same one in
+   * both views: while the list's download is still running its button is
+   * disabled, and when that download ends the panel closes itself. Under a
+   * sweep's load the table's press landed in between — on a disabled button, or
+   * on one that then vanished — and no request went out, twice
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`). So: the table tab is
+   * current (`aria-current`), and the Download button is enabled again. Bounded;
+   * `exportedFields` still reports "(no request)" when none is made.
+   */
+  await waitUntil(
+    async () =>
+      (await page.getByTestId('work-view-tab-type-table').getAttribute('aria-current', { timeout: 2000 })) === 'true' &&
+      (await page.getByTestId('list-export-download').isEnabled({ timeout: 2000 })),
+    { timeoutMs: 30_000 },
+  )
   const tableFields = await exportedFields()
   chk(
     tableFields.split(',').includes(`cf:${stage.data.id}`) && tableFields.startsWith('title,'),

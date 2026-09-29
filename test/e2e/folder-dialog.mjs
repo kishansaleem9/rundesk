@@ -636,12 +636,25 @@ try {
      * seconds and three checks read "the edit dialog never opened" when the
      * dialog was fine and the folder was simply not on screen yet.
      */
-    await page.getByTestId(`tree-space-${SPACE}`).click({ timeout: 15_000 }).catch(() => {})
-    const drawn = await page
-      .getByTestId(`tree-folder-${fid}`)
-      .waitFor({ timeout: 25_000 })
-      .then(() => true)
-      .catch(() => false)
+    /*
+     * AND IT IS OPENED UNTIL THE FOLDER IS DRAWN, not pressed once. Under a
+     * sweep's load the tree drew late: the one press found no space row in its
+     * fifteen seconds, nothing opened, and the first attempt timed out while the
+     * run's second found the folder at once
+     * (`found-24-sep/three-suites-fail-under-a-full-sweep`). So the folder's row
+     * is what is waited for, and the space is pressed again whenever its toggle
+     * does not read open — the press lands on the space's name, which only ever
+     * opens a space, never shuts one. Bounded; a folder the tree never draws
+     * still answers false.
+     */
+    const folderRow = page.getByTestId(`tree-folder-${fid}`)
+    const drawn = await waitUntil(async () => {
+      if (await folderRow.isVisible()) return true
+      if ((await page.getByTestId(`space-toggle-${SPACE}`).getAttribute('aria-expanded', { timeout: 2000 })) !== 'true') {
+        await page.getByTestId(`tree-space-${SPACE}`).click({ timeout: 5000 })
+      }
+      return folderRow.isVisible()
+    }, { timeoutMs: 45_000, stepMs: 300 })
     if (!drawn) return false
     await page.getByTestId(`tree-folder-${fid}`).hover({ timeout: 8000 }).catch(() => {})
     await page.getByTestId(`tree-folder-actions-${fid}`).click({ timeout: 10_000 }).catch(() => {})

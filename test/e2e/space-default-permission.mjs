@@ -39,7 +39,7 @@
  *
  *   node test/e2e/space-default-permission.mjs --api 3011
  */
-import { signInApi } from './lib/signin.mjs'
+import { signInApi, signUpApi } from './lib/signin.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -111,19 +111,23 @@ try {
     email: `sdp-${stamp}@rundesk.invalid`,
     password: 'Member@12345!',
   }
-  const signup = await apiAs(null)('/auth/signup', {
-    method: 'POST',
-    body: {
-      fullName: `Default Perm ${stamp}`,
-      email: member.email,
-      password: member.password,
-      organizationName: `DefaultPerm ${stamp}`,
-      organizationSlug: `defaultperm-${stamp}`,
-    },
+  /*
+   * THROUGH `signUpApi`, which waits out the sign-up rate limit the way the
+   * server tells it to (`Retry-After`) and retries only a 429 — a sweep's other
+   * suites had spent the window, and a bare POST here died on that 429 before
+   * the first check (`found-24-sep/three-suites-fail-under-a-full-sweep`). A 429
+   * is refused before the handler runs, so a retry makes no second account; any
+   * other refusal throws at once, as before.
+   */
+  const signup = await signUpApi(API, {
+    fullName: `Default Perm ${stamp}`,
+    email: member.email,
+    password: member.password,
+    organizationName: `DefaultPerm ${stamp}`,
+    organizationSlug: `defaultperm-${stamp}`,
   })
-  if (!signup.data?.accessToken) throw new Error(`signup failed: ${signup.status} ${JSON.stringify(signup.error)}`)
-  const memberId = signup.data?.user?.id ?? signup.data?.id
-  const M = apiAs(signup.data.accessToken)
+  const memberId = signup.user?.id ?? signup.id
+  const M = apiAs(signup.accessToken)
 
   const added = await A(`/workspaces/${workspaceId}/members`, {
     method: 'POST',

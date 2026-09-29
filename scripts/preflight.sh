@@ -37,6 +37,7 @@ step "the sweep fixture builds where it picked" node scripts/check-sweep-fixture
 step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-selfcheck.sh
 step "a routing suite says what its worker does" node scripts/check-suite-routes.mjs
 step "and that gate bites, case by case"  node scripts/check-suite-routes-cases.mjs --mutate
+step "the e2e proxy keeps what it advertises" node scripts/check-local-stack-keepalive.mjs --mutate
 step "two sweeps at once keep two records" bash scripts/e2e-lanes/sweep-selfcheck.sh
 step "no break patches in the tree"     node scripts/check-no-break-patches.mjs
 step "and that guard actually looks"    node scripts/check-patch-guard.mjs --mutate

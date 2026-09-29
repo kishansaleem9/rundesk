@@ -15,6 +15,7 @@ import { pathToFileURL } from 'node:url'
 import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -134,13 +135,30 @@ try {
     method: 'POST',
     body: { listId, title: 'Quarterly planning', description: `we must migrate the ${NEEDLE} cluster` },
   })
-  await new Promise((r) => setTimeout(r, 2500))
+  /*
+   * WAITED FOR, NOT SLEPT (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+   * This was 2.5 fixed seconds after the create, then 2.5 more after typing, and
+   * under a sweep's load neither was enough: the palette was read showing only
+   * its quick actions, which it draws the moment there is a query — the search's
+   * answer had not arrived. So: the index is asked the palette's own question
+   * until it finds the task (the palette asks once per query, so a search run
+   * before the index had the task would never be repeated), and the palette is
+   * read once its list holds the answer. Both are bounded; when the task never
+   * comes, the checks below fail as they always did.
+   */
+  await waitUntil(async () => {
+    const hits = (await A(`/search/${WS}?q=${encodeURIComponent(NEEDLE)}`)).data ?? []
+    return hits.some((h) => String(h?.id ?? '').endsWith(bodyTask.data?.id) || (h?.url ?? '').includes(`task=${bodyTask.data?.id}`))
+  }, { timeoutMs: 20_000, stepMs: 400 })
   await page.goto(`${origin}/app/${WS}/inbox`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2500)
   await page.keyboard.press('Control+k')
-  await page.waitForTimeout(900)
+  await page.locator('[cmdk-input]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   await page.locator('[cmdk-input]').first().fill(NEEDLE)
-  await page.waitForTimeout(2500)
+  await waitUntil(
+    async () => (await page.locator('[cmdk-list]').first().innerText({ timeout: 2000 })).includes('Quarterly planning'),
+    { timeoutMs: 20_000 },
+  )
   const paletteText = (await page.locator('[cmdk-list]').first().innerText()).replace(/\s+/g, ' ')
   check(
     paletteText.includes('Quarterly planning'),
@@ -299,7 +317,9 @@ try {
   const SECOND_DOC = `live probe doc ${Date.now()}`
   const secondDoc = await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: SECOND_DOC } })
   await page.goto(`${origin}/app/${WS}/docs`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(4000)
+  // The address is written once the docs list has answered and one is opened —
+  // read then, not four fixed seconds after landing, which a sweep's load outran.
+  await waitUntil(() => /[?&]doc=/.test(page.url()), { timeoutMs: 20_000 })
   check(/[?&]doc=/.test(page.url()), 'landing on docs names the doc it opened', page.url())
   if (!secondDoc.data?.id) {
     // Two checks, not one — see the note on the back link above. Without the
@@ -319,7 +339,12 @@ try {
     await page.goto(`${origin}/app/${WS}/inbox`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1500)
     await page.goto(docUrl, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(4000)
+    // The title is drawn once the docs have answered; read it when it names the
+    // doc (bounded — a page that reopens another doc still fails, naming it).
+    await waitUntil(
+      async () => (await page.getByTestId('docs-active-title').innerText({ timeout: 2000 })).includes(SECOND_DOC),
+      { timeoutMs: 20_000 },
+    )
     const reopened = await page.getByTestId('docs-active-title').innerText().catch(() => '')
     check(
       reopened.includes(SECOND_DOC),

@@ -31,6 +31,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -475,14 +476,24 @@ try {
   )
 
   // An open thread survives a reload and can be sent to somebody.
+  /*
+   * WAITED FOR, NOT SLEPT (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+   * Under a sweep's load this found no thread panel: the address was taken
+   * 1.8 fixed seconds after the press, before `thread=` had been written into
+   * it, so the address reopened below named no thread at all; and the panel was
+   * counted 3.5 fixed seconds after that. Now the thread control is waited for,
+   * the address is taken once it names the thread, and the panel is waited for
+   * on the reopened page — each bounded, so a missing one still fails here.
+   */
   const openThread = page.locator('[data-testid^="view-thread-"]').first()
+  await openThread.waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
   if ((await openThread.count()) > 0) {
     await openThread.click()
-    await page.waitForTimeout(1800)
+    await waitUntil(() => /[?&]thread=/.test(page.url()), { timeoutMs: 15_000 })
     check(/[?&]thread=/.test(page.url()), 'opening a thread puts it in the address', page.url())
     const threadUrl = page.url()
     await page.goto(threadUrl, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3500)
+    await page.locator('[data-testid="chat-thread-panel"]').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
     check(
       /[?&]thread=/.test(page.url()) &&
         (await page.locator('[data-testid="chat-thread-panel"]').count()) > 0,
@@ -611,11 +622,13 @@ try {
     }
   }
   check(clicked, 'the toolbar offers Save', 'no save control on the message')
-  await page.waitForTimeout(2000)
 
-  // Pointer deliberately moved off the row before looking.
+  // Pointer deliberately moved off the row before looking — and then the badge
+  // is waited for, bounded: it is drawn once the save has been answered, which
+  // under a sweep's load came after the 2.6 fixed seconds this used to allow.
+  // A marker that lives only in the hover toolbar is still not visible here.
   await page.mouse.move(5, 5)
-  await page.waitForTimeout(600)
+  await page.getByTestId(`message-saved-badge-${saveId}`).waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   check(
     await page.getByTestId(`message-saved-badge-${saveId}`).isVisible().catch(() => false),
     'and once saved the row says so without hovering',
@@ -640,7 +653,8 @@ try {
     .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
     .catch(() => null)
   await reactRow.hover()
-  await page.waitForTimeout(400)
+  // The hover toolbar, once drawn (bounded) — its reactions are read below.
+  await page.getByTestId(`message-quick-👍-${reactId}`).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
   for (const emoji of ['👍', '✅', '🔥']) {
     check(
       await page.getByTestId(`message-quick-${emoji}-${reactId}`).isVisible().catch(() => false),
@@ -649,8 +663,14 @@ try {
     )
   }
   await page.getByTestId(`message-quick-✅-${reactId}`).click().catch(() => {})
-  await page.waitForTimeout(1800)
-  const reacted = await A(`/chat/channels/${channelId}/messages?limit=50`)
+  // Read back off the server until the reaction is there — bounded, so a click
+  // that posts nothing still fails — not 1.8 fixed seconds after the press, which
+  // under a sweep's load read the message before the reaction had been written.
+  let reacted = await A(`/chat/channels/${channelId}/messages?limit=50`)
+  await waitUntil(async () => {
+    reacted = await A(`/chat/channels/${channelId}/messages?limit=50`)
+    return ((reacted.data ?? []).find((m) => m.id === reactId)?.reactions ?? []).some((r) => r.emoji === '✅')
+  }, { timeoutMs: 15_000, stepMs: 300 })
   const target = (reacted.data ?? []).find((m) => m.id === reactId)
   check(
     (target?.reactions ?? []).some((r) => r.emoji === '✅'),

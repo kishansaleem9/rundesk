@@ -25,6 +25,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -492,7 +493,6 @@ try {
    * is about, arriving through a `.` rather than through an `if`.
    */
   await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3800)
   const removal = chain(
     'the badge carries its own remove control',
     'and pressing it takes the tag off',
@@ -500,15 +500,26 @@ try {
   if (!applied?.id) {
     removal.rest('skipped: the tag was never attached, so there is no badge to remove')
   } else {
+    /*
+     * WAITED FOR, NOT SLEPT (`found-24-sep/three-suites-fail-under-a-full-sweep`):
+     * the badge's control once the reloaded sheet draws it, and then the task's
+     * labels — the read the check makes — until the tag has gone from them. It
+     * was 3.8 and 2.2 fixed seconds, and under a sweep's load the task still
+     * listed the tag when it was read. Both bounded; a tag that stays still fails.
+     */
     const removeBtn = page.getByTestId(`task-tag-remove-${applied.id}`)
+    await removeBtn.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     const haveRemove = await removeBtn.isVisible().catch(() => false)
     removal.step(haveRemove, 'no remove control on the badge')
     if (!haveRemove) {
       removal.rest('skipped: there was no remove control to press')
     } else {
       await removeBtn.click()
-      await page.waitForTimeout(2200)
-      const after = await A(`/tasks/${taskId}`)
+      let after = await A(`/tasks/${taskId}`)
+      await waitUntil(async () => {
+        after = await A(`/tasks/${taskId}`)
+        return !(after.data?.labels ?? []).some((l) => l.id === applied.id)
+      }, { timeoutMs: 15_000, stepMs: 300 })
       removal.step(
         !(after.data?.labels ?? []).some((l) => l.id === applied.id),
         JSON.stringify(after.data?.labels),

@@ -103,10 +103,28 @@ try {
   await page.getByTestId('bookmark-add-open').click()
   await page.getByTestId('bookmark-url').fill(`https://example.com/acceptance-${stamp}`)
   await page.getByTestId('bookmark-title').fill(`Acceptance ${stamp}`)
+  /*
+   * The reload comes after the save has been ANSWERED, not two fixed seconds
+   * after the press — under a sweep's load the reload could land first, and the
+   * bookmark "did not come back" because it had not been written
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`). After the reload the
+   * list is read once it holds the bookmark, bounded: one never saved still fails.
+   */
+  const saved = page
+    .waitForResponse(
+      (r) => r.url().includes(`/workspaces/${workspaceId}/bookmarks`) && r.request().method() === 'POST',
+      { timeout: 20_000 },
+    )
+    .then((r) => r.finished())
+    .catch(() => null)
   await page.getByTestId('bookmark-save').click()
-  await page.waitForTimeout(2000)
+  await saved
   await page.reload({ waitUntil: 'domcontentloaded' })
   const kept = await appears(page.getByTestId('bookmarks-list'))
+  await waitUntil(
+    async () => (await page.getByTestId('bookmarks-list').innerText({ timeout: 2000 })).includes(`Acceptance ${stamp}`),
+    { timeoutMs: 15_000 },
+  )
   const listed = kept ? await page.getByTestId('bookmarks-list').innerText() : ''
   chk(listed.includes(`Acceptance ${stamp}`), 'and a bookmark saved there survives a reload',
     'the bookmark did not come back')
@@ -158,8 +176,11 @@ try {
   await page.locator('[cmdk-input]').first().pressSequentially(`zqq-nothing-${stamp}`, { delay: 30 })
   const answered = await appears(page.getByTestId('palette-ai-answer'), 20000)
   chk(answered, '§G02 a query that matches nothing gets an answer', 'the dead end is still a dead end')
+  // The answer's box is drawn while it is still being fetched, and its controls
+  // only once it has arrived — so the way forward is waited for itself (bounded),
+  // not read the moment the box appears, which under load was mid-fetch.
   chk(
-    answered && (await page.getByTestId('palette-ai-continue').isVisible().catch(() => false)),
+    answered && (await appears(page.getByTestId('palette-ai-continue'), 20000)),
     'and offers a way to continue with the assistant',
     'the answer has no way forward',
   )

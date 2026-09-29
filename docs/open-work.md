@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 317 items, 100 open, 11 partly fixed, 206 closed, counted from this file's headings late on 28 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 318 items, 96 open, 12 partly fixed, 210 closed, counted from this file's headings early on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1248,7 +1248,7 @@ Now:
 `member-settings-tabs`, 7 checks (its Trash, Features and slow-read sections):
 - Before: 1 of 6 on lane 7, the guest's refusal passing (the slow-read check came after; see that item). The suite's first reads were found reading a closing menu's aria-hidden page as "not offered", and were made to wait for the menu to close and the flags to settle before the after run.
 - After: 7/7 on lane 7.
-- Patches `mst-1..7` (`mst-7` against `settings-tabs-by-key`); the web ones typecheck applied. Their runs follow the commit.
+- Patches `mst-1..7` (`mst-7` against `settings-tabs-by-key`); the web ones typecheck applied. Each reddened the check it names (lanes 2 and 3, at `ebe20cf`, baselines 7/7 and 8/8), and so did `ata-6`, re-aimed onto the three open tabs (baseline 7/7), `cka-8` on its rewritten sentence (7/7), and `stp-11` and `srg-1..7` on theirs (8/8 and 6/6).
 - Regression on lane 7, 22 suites with the menu, Trash, Features, landing and dashboard changes together: `member-settings-tabs`, `menu-offers`, `dashboard-own-copy`, `settings-tabs-by-key`, `settings-role-grants`, `archived-tasks-access`, `trash-rules`, `undo-delete`, `clickapp-flags-access`, `settings-depth`, `teams-destination`, `role-permissions-web`, `workspace-role-controls`, `people-calendar-access`, `user-group-access`, `announcement-access`, `client-access`, `default-dashboard-access`, `container-delete-keys`, `job-title-rule`, `retired-permission-keys` and `admin-only-keys`, 22/22. Three had read the old tab sets and were updated for the three open tabs: `settings-tabs-by-key` and `settings-role-grants` set the open tabs aside as they had set Archived aside, and `clickapp-flags-access` now expects the manager and the plain member on a read-only Features (its sentence changed, and `cka-8`'s claim with it). Twelve runs were refused on the way as a stale build, twice — a rebuild by another session, and the preflight's unit claims patching the API — and passed when re-run.
 - In CI (224).
 
@@ -1279,7 +1279,7 @@ Now:
 `menu-offers`, 9 checks, read by the rows' visible names so the old build is measured the same way:
 - Before: 1 of 9 on lane 7.
 - After: 9/9 on lane 7.
-- Patches `mno-1..7`; the three web ones typecheck applied. Their runs follow the commit. `dwl-6` is re-aimed onto `assertMayPublish`.
+- Patches `mno-1..7`; the three web ones typecheck applied. Each reddened the check it names (lane 1, at `ebe20cf`, baseline 9/9). `dwl-6`, re-aimed onto `assertMayPublish`, reddened `doc-write-levels` again (lane 4, baseline 5/5).
 - API unit tests 1704/1704.
 - In CI (223).
 
@@ -1385,7 +1385,7 @@ Now:
 `clickapps-copy`, 1 check:
 - Before: 0 of 1 on lane 7, the step reading "…later in Admin → Features".
 - After: 1/1 on lane 7, twice. The suite waits for each step's counter and for step one's fields to leave before filling step two: filling on the counter alone typed into the field sliding out.
-- Patches `cac-1` (the sign-up line) and `cac-2` (a unit claim on the gate's answer). Their runs follow the commit.
+- Patches `cac-1` (the sign-up line) and `cac-2` (a unit claim on the gate's answer). Both redden: `cac-1` on lane 1 at `f8a799d` (0/1, the step said "Admin → Features" again), and `cac-2` in the unit claims.
 - In CI (227).
 
 ### `found-28-sep/members-see-no-clickapps-list` — **closed** (feature, small; found by the ClickApps research)
@@ -1407,7 +1407,7 @@ Now:
 *Closed:* the route decides only from an answer it already holds and asks for the answer without waiting (`prefetchQuery`); the page makes the same decision when the answer lands — nobody with no tab stays, and a tab that is not theirs, or none, takes them to their landing tab. Tab content was already drawn only for a tab the person may open (`shown`), so nothing shows early.
 - The probe after: 0 blank of 6, each load on `?tab=archived` with three tabs and nothing thrown.
 - `member-settings-tabs`' slow-read check: three loads of three land on Archived with the read held back 4.5 s.
-- Patches `sbs-1` (the route awaits again) and `sbs-2` (the page never decides); both typecheck applied. `srg-1` is re-aimed onto `settingsTabsFor`, which both now read.
+- Patches `sbs-1` (the route awaits again) and `sbs-2` (the page never decides); both typecheck applied, and both reddened the slow-read check (lane 2, at `ebe20cf`). `srg-1` is re-aimed onto `settingsTabsFor`, which both now read, and reddened its check.
 
 ### `found-28-sep/own-capacity-not-self-service` — open, feature, small (found by the people-and-calendar research)
 
@@ -1474,7 +1474,7 @@ Now:
 `like-literal`, 5 checks, each surface given two names a pattern cannot tell apart ("cut 50% now", "cut 500 now"):
 - Before: 0 of 5 on lane 7 — the workspace search, saved messages, a person's activity and the user directory each found both names, and a template search ending in `\` found nothing.
 - After: 5/5 on lane 7.
-- Patches `lik-1..5`, one per surface; `taf-4` and `tps-2`, which removed the old inline escapes, are re-aimed onto `likeContaining`. Their runs follow the commit.
+- Patches `lik-1..5`, one per surface; `taf-4` and `tps-2`, which removed the old inline escapes, are re-aimed onto `likeContaining`. Run on lane 1 at `f8a799d`, all seven redden: `like-literal` 4/5 under each of `lik-1..5` (the search, saved messages and a person's activity found the 500 row beside the 50% one, the directory both people, and the template search ending in `\` nothing), `task-activity-filter` 15/16 under `taf-4`, `task-pickers-search` 7/8 under `tps-2`.
 - Regression on lane 7, 20/20 with the copy change: `like-literal`, `clickapps-copy`, `search-read-access`, `task-activity-filter`, `task-pickers-search`, `template-center`, `activity-rail`, `ai-activity-filters`, `guest-chat-scope`, `guest-read-scope`, `private-folder-reach`, `private-list-reach`, `workspace-read-access`, `task-mentions`, `trending-sort`, `clip-library`, `app-catalogue`, `list-under-space`, `job-title-rule` and `clickapp-flags-access`.
 - In CI (226).
 
@@ -1485,6 +1485,16 @@ Now:
 *Evidence, 28 September:* `job-title-rule` failed 8 checks before its fix. `verify.sh` printed `grep 'passed,|FAIL' | tail -8`, which is seven FAIL lines and the count, so the first failure — the refusal that still said "Only a workspace admin" — was only in the log. The summary did not say lines were missing. The log was also one file per suite (`/tmp/claude-0/run-<suite>.log`), so the same suite run on two lanes at once wrote into one file.
 
 *Closed:* `verify.sh` prints every FAIL line and the count, names the whole log when the run failed, and keeps one log per suite and lane (`run-<suite>-lane<N>.log`). Nothing reads the old path; `sweep.sh` counts exit statuses, not these lines. Measured on lane 7 with a throwaway suite printing nine failures: all nine lines, the count and the log's path were printed, and the exit was 1.
+
+### `found-28-sep/e2e-proxy-advertises-the-apis-keep-alive` — **closed** (test tooling, small; found by the flaky-suite work on `three-suites-fail-under-a-full-sweep`)
+
+**The e2e proxy told clients to keep a socket for 72 s and closed it after 5, so a suite's own request after a pause died with "fetch failed"**
+
+*Evidence, measured 28 September:* `test/e2e/lib/local-stack.mjs` serves the bundle and proxies `/api` to a lane, forwarding the API's response headers as they came, `Keep-Alive: timeout=72` among them, while its own `http.Server` closes an idle socket after Node's default 5 s. A client keeps a socket as long as it is told, so a suite's `fetch` through the proxy after a pause of 5–72 s went out on a socket the proxy had closed: with a stand-in API saying `timeout=72` and 6 s idle gaps, 1 of 4 requests died with `UND_ERR_SOCKET`. `list-empty-states`, `ai-answer-rendering` and `create-menu-ai` each recorded a `fetch failed` of this shape in sweeps, with nothing wrong in the API's log.
+
+*Closed:* the proxy passes only end-to-end headers (`endToEndHeaders`, RFC 9110 §7.6.1): `Connection`, `Keep-Alive` and the other hop-by-hop headers — and any the `Connection` header names — describe the connection they arrived on and are not forwarded, so a client sees the proxy's own keep-alive. The same stand-in after: `timeout=5` advertised, 0 of 4 failed.
+- `scripts/check-local-stack-keepalive.mjs --mutate` (preflight, and CI's verify job): three requests 6 s apart through the proxy, each advertising no longer a keep-alive than the proxy keeps; and a copy of the proxy that forwards the upstream headers, which it must catch ("advertised a 72 s keep-alive, and this proxy keeps 5 s").
+- Every browser suite goes through this proxy. The sweep on lane 7 with it (`three-suites-fail-under-a-full-sweep`) passed 19/19, the three suites that had died with `fetch failed` among them (23/23, 51/51, 24/24).
 
 ### `found-28-sep/dashboard-edit-offered-on-others-presets` — **closed** (dead control, small; found by the dashboard research)
 
@@ -1501,7 +1511,7 @@ Now the builder knows whose dashboard it shows (`isOwner`, which the list alread
 `dashboard-own-copy`, 3 checks:
 - Before: 1 of 3 on lane 7 (the owner's Edit, which stays).
 - After: 3/3 on lane 7. The suite reads the button once the staged dashboard's name is drawn: before the dashboards load, the builder has none and offers Edit.
-- Patches `ddo-1..2`. Their runs follow the commit.
+- Patches `ddo-1..2`: each reddened the check it names (lane 4, at `ebe20cf`, baseline 3/3).
 - In CI (225).
 
 ### `found-28-sep/unit-claims-leave-a-patch-on-a-kill` — **closed** (test tooling, small; found stopping a preflight)
@@ -2678,7 +2688,7 @@ Each is its own question.
 
 *Closed:* the expected day is the meeting instant's own day in the zone (`todayIn(ZONE, at)`). 3/3 at 20:40 UTC, the hour it failed.
 
-### `found-24-sep/three-suites-fail-under-a-full-sweep` — open, test tooling, small (found by the full sweep)
+### `found-24-sep/three-suites-fail-under-a-full-sweep` — partly-fixed, small (test tooling; found by the full sweep)
 
 **`addressability-live`, `request-access` and `task-menu` failed during a four-lane full sweep and passed on their own**
 
@@ -2704,6 +2714,28 @@ Each is its own question.
 Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing checks read the page after fixed waits.
 
 *To close:* make each wait for what it reads (the search's answer, the task's refusal, the menu's full render), not a fixed time, and prove it under a full sweep's load.
+
+*Partly fixed, 28 September:* the 17 suites named here wait for what they read, each bounded so a check still fails with its own sentence when the thing never comes:
+
+- `addressability-live`: the palette's answer for the typed word, not 2.5 fixed seconds twice.
+- `request-access`: the card, drawn once the task's read has come back refused, not six fixed seconds; its notification by id rather than among the admin's latest 50.
+- `task-menu`: each row read with the menu open (`aria-expanded`), opening it again if something shut it.
+- `video-regression`: each hop's link on the page that draws it, not 3.5 seconds after landing; the Ask AI row once the search has answered.
+- `panel-collapse`: the tree once it has drawn its search box and the spaces joined.
+- `role-permissions-web`: Save as template counted once the member's keys have answered.
+- `ai-activity-filters`: a filter's rows once the list has drawn its answer, rows or empty state.
+- `a61-meeting-record`: the attendee chip, and the save's answer before Save is read again.
+- `task-depth`: the badge's control on the reloaded sheet, then the task's labels until the tag has gone.
+- `space-default-permission`: signs up through `signUpApi`, which waits out the rate limit (`Retry-After`) instead of dying on a 429.
+- `video1-acceptance`: the reload after the bookmark's save has been answered; the assistant's way forward once its answer is drawn.
+- `chat-message-actions`: the thread panel once `thread=` is in the address, and the reaction once drawn.
+- `list-empty-states`: its own calls go straight to the API; the browser keeps the proxy.
+- `person-panel`: the email once the person's profile has answered.
+- `list-export`: the Download button on screen, and the request waited for from the press that makes it.
+- `folder-dialog`: the edit dialog opened until the folder is drawn, not pressed once.
+- `settings-depth`: the note asked of the server until it holds the words, before the reload.
+
+The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-menu-ai` was the proxy's keep-alive, closed as `e2e-proxy-advertises-the-apis-keep-alive`. Each suite passed alone on lane 5, and a sweep of the 17 with `ai-answer-rendering` and `create-menu-ai` on lane 7 at `f8a799d` passed 19/19 (28/28, 9/9, 37/37, 93/93, 56/56, 5/5, 34/34, 25/25, 91/91, 36/36, 18/18, 73/73, 23/23, 59/59, 30/30, 29/29, 61/61, 51/51, 24/24). **Still owed:** the same under a multi-lane sweep's load, which is where they failed.
 
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)

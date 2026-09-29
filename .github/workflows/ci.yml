@@ -392,6 +392,12 @@ jobs:
       - name: And that gate can fail, and each case bites
         run: node scripts/check-suite-routes-cases.mjs --mutate
 
+      # The e2e proxy forwarded the API's 72 s keep-alive while it closes an
+      # idle socket after 5 s, so a suite's fetch after a pause died with
+      # "fetch failed" (e2e-proxy-advertises-the-apis-keep-alive).
+      - name: The e2e proxy keeps what it advertises, and that check bites
+        run: node scripts/check-local-stack-keepalive.mjs --mutate
+
       # Two sweeps at once shared one status, results and queue file; the
       # second truncated the first's record and could hand its suites to the
       # first's workers (two-sweeps-share-one-record). Stand-in suites, no lanes.

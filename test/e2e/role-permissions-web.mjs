@@ -133,12 +133,33 @@ try {
     await page.waitForTimeout(800)
     return { open, row: await page.getByTestId(`space-new-folder-${SPACE}`).count() }
   }
-  /** Is "Save as template" offered on the member's own task? */
+  /**
+   * Is "Save as template" offered on the member's own task?
+   *
+   * COUNTED ONCE THEIR KEYS HAVE ANSWERED. The button is drawn from
+   * `GET /roles/me/permissions` (`can('template.manage') === true`), and under a
+   * sweep's load it was counted 1.5 fixed seconds after the sheet opened, before
+   * that answer had arrived — "not offered after the grant"
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`). When the answer holds
+   * the key, the button it draws is waited for (bounded, so a sheet that never
+   * draws it still fails); when it does not, the count is taken once the answer
+   * has had a frame to be drawn in — an absence read after the data, not before.
+   */
   const saveAsTemplate = async (page) => {
+    const keys = page
+      .waitForResponse((r) => r.url().includes(`/workspaces/${WS}/roles/me/permissions`) && r.ok(), { timeout: 30_000 })
+      .then(async (r) => (await r.json().catch(() => null))?.data?.permissions ?? null)
+      .catch(() => null)
     await page.goto(`${B}/app/${WS}/${SPACE}/${PROJECT}/${LIST}?task=${TASK}`, { waitUntil: 'domcontentloaded' })
     await page.getByTestId('task-sheet').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-    await page.waitForTimeout(1500)
-    return page.getByTestId('task-sheet').getByRole('button', { name: /Save as template/ }).count()
+    const held = await keys
+    const button = page.getByTestId('task-sheet').getByRole('button', { name: /Save as template/ })
+    if (Array.isArray(held) && held.includes('template.manage')) {
+      await waitUntil(async () => (await button.count()) > 0, { timeoutMs: 15_000 })
+    } else {
+      await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {})
+    }
+    return button.count()
   }
 
   // ══ 1. A MEMBER ══════════════════════════════════════════════════════════

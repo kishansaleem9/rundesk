@@ -4,6 +4,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { waitUntil } from './lib/wait.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -92,6 +93,11 @@ try {
   await p.locator('input[type=datetime-local]').fill('2026-08-04T09:30')
   await p.getByPlaceholder('https://…').fill('https://example.com/rec/a61.mp4')
   const chip = p.locator('button[aria-pressed]').filter({ hasText: new RegExp(DM_NAME) }).first()
+  // The chips are drawn from the workspace's members once they arrive, so the
+  // chip is waited for (bounded) rather than counted on arrival — under a
+  // sweep's load there were none yet, twice
+  // (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+  await chip.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   const haveChip = (await chip.count()) > 0
   chk(haveChip, 'workspace members are offered as attendees', 'no attendee chips')
   // A PRESS AND A READ ON A CHIP THAT IS NOT THERE END THE SECTION. The check
@@ -107,7 +113,14 @@ try {
 
   await p.locator('textarea').first().fill(NOTES)
   await p.getByRole('button', { name: /^Save meeting$/ }).click()
-  await p.waitForTimeout(3000)
+  /*
+   * The button reads "Update meeting" once the save AND its re-read of the
+   * meetings have come back, and the recording's link is drawn in that same
+   * render (from the re-read row). So the page is read once it says so —
+   * bounded — not three fixed seconds after the press, which under a sweep's
+   * load still showed Save and no link.
+   */
+  await waitUntil(async () => /Update meeting/.test(await p.locator('body').innerText()), { timeoutMs: 20_000 })
   const afterSave = await p.locator('body').innerText()
   chk(/Update meeting/.test(afterSave), 'saving switches the button to Update — the row exists now',
     'still offering Save after a save')

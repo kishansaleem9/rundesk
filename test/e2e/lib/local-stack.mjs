@@ -100,7 +100,7 @@ async function proxyLogin(req, res, apiPort) {
     for (let attempt = 1; ; attempt++) {
       const up = await forward({ apiPort, path: req.url, method: req.method, headers, body })
       if (up.statusCode !== 429 || attempt >= LOGIN_ATTEMPTS) {
-        res.writeHead(up.statusCode ?? 502, up.headers)
+        res.writeHead(up.statusCode ?? 502, endToEndHeaders(up.headers))
         up.pipe(res)
         return
       }
@@ -184,6 +184,31 @@ function refuseStaleBundle(dist) {
   )
 }
 
+/**
+ * THE HEADERS A PROXY PASSES ON: the response's own, without the hop-by-hop
+ * ones (RFC 9110 §7.6.1), which describe the connection they arrived on.
+ *
+ * The API says `Keep-Alive: timeout=72`, and this server closes an idle socket
+ * after 5 s (Node's default). Forwarding the API's header told every client it
+ * could hold a socket for 72 s, so a suite's own `fetch` through the proxy,
+ * after a pause of a few seconds, went out on a socket this server had already
+ * closed and died with "fetch failed" (`UND_ERR_SOCKET`) mid-run — measured, 1
+ * of 4 requests after 6 s idle gaps. Stripped, the client sees this server's
+ * own keep-alive and never outlives it.
+ */
+export function endToEndHeaders(headers) {
+  const hop = new Set(['connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization', 'te', 'trailer', 'upgrade'])
+  for (const named of String(headers.connection ?? '').split(',')) {
+    const name = named.trim().toLowerCase()
+    if (name) hop.add(name)
+  }
+  const out = {}
+  for (const [name, value] of Object.entries(headers)) {
+    if (!hop.has(name.toLowerCase())) out[name] = value
+  }
+  return out
+}
+
 export async function startLocalStack({ dist, apiPort, port: bindPort = 0 }) {
   refuseStaleBundle(dist)
   const server = http.createServer((req, res) => {
@@ -195,7 +220,7 @@ export async function startLocalStack({ dist, apiPort, port: bindPort = 0 }) {
       const upstream = http.request(
         { host: '127.0.0.1', port: apiPort, path: req.url, method: req.method, headers: req.headers },
         (up) => {
-          res.writeHead(up.statusCode ?? 502, up.headers)
+          res.writeHead(up.statusCode ?? 502, endToEndHeaders(up.headers))
           up.pipe(res)
         },
       )

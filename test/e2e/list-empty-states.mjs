@@ -69,8 +69,23 @@ const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
 
-const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
-const api = apiClient(`${B}/api/v1`, auth.accessToken)
+/*
+ * THIS SUITE'S OWN CALLS GO STRAIGHT TO THE API; the browser keeps the proxy.
+ *
+ * Under a sweep's load this run ended in section 2 on `threw: fetch failed`
+ * (4 of 23 checks) while lane 2's API logged nothing wrong
+ * (`found-24-sep/three-suites-fail-under-a-full-sweep`): the seeding POST never
+ * got an answer at all. Those calls went through the in-process proxy in
+ * `local-stack.mjs`, which hands this client the API's `Keep-Alive: timeout=72`
+ * while its own server drops an idle socket after 5 seconds — so after the
+ * browser part of section 1, the client could pick a socket the proxy had
+ * already closed, and a starved process sends before it notices. Most suites
+ * already call the API's own port; now this one does too. Given `BASE` (a
+ * deployment, no local API port), it still calls through `BASE`.
+ */
+const API_BASE = stack ? `http://127.0.0.1:${Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))}/api/v1` : `${B}/api/v1`
+const auth = await login(API_BASE, EMAIL, PASSWORD)
+const api = apiClient(API_BASE, auth.accessToken)
 const WS = process.env.E2E_WS ?? (await pickWorkspace(api)).id
 const fixture = await ensureSweepFixture(api, WS)
 

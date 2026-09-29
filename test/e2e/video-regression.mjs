@@ -14,6 +14,7 @@ import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureNo
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { waitUntil } from './lib/wait.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -244,10 +245,6 @@ try {
   // The named routes (/inbox, /chat, …) are the same shape as a space, so match
   // on the id itself rather than on how many segments there are.
   const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}'
-  const spaceHref = await page.locator('a[href]').evaluateAll((as, u) => {
-    const re = new RegExp(`^/app/${u}/${u}$`)
-    return as.map((a) => a.getAttribute('href') ?? '').find((h) => re.test(h)) ?? null
-  }, UUID)
   // Workspace → space → project → list. The space page links to projects, not
   // straight to lists, so this is three hops rather than two.
   const firstHrefOfDepth = (depth) =>
@@ -255,14 +252,27 @@ try {
       const re = new RegExp(`^/app/${u}${`/${u}`.repeat(d)}$`)
       return as.map((a) => a.getAttribute('href') ?? '').find((h) => re.test(h)) ?? null
     }, { u: UUID, d: depth })
+  /*
+   * EACH HOP'S LINK IS WAITED FOR ON THE PAGE THAT DRAWS IT, not read a fixed
+   * 3.5 seconds after landing. Under a sweep's load the space page had not drawn
+   * its projects by then, and this reported "no list reachable from the space
+   * page" twice (`found-24-sep/three-suites-fail-under-a-full-sweep`). Bounded:
+   * a page that never links onward still ends at the same failure below.
+   */
+  const hrefOfDepthOnceDrawn = async (depth) => {
+    let href = null
+    await waitUntil(async () => (href = await firstHrefOfDepth(depth)) !== null, { timeoutMs: 20_000 })
+    return href
+  }
+  const spaceHref = await hrefOfDepthOnceDrawn(1)
 
   let listHref = null
   if (spaceHref) {
-    await go(spaceHref, 3500)
-    const projectHref = await firstHrefOfDepth(2)
+    await page.goto(`${BASE}${spaceHref}`, { waitUntil: 'domcontentloaded' })
+    const projectHref = await hrefOfDepthOnceDrawn(2)
     if (projectHref) {
-      await go(projectHref, 3500)
-      listHref = await firstHrefOfDepth(3)
+      await page.goto(`${BASE}${projectHref}`, { waitUntil: 'domcontentloaded' })
+      listHref = await hrefOfDepthOnceDrawn(3)
     }
   }
   if (listHref) {
@@ -336,7 +346,9 @@ try {
   ref('A2.1', 'Search is also a command bar')
   await go(`/app/${WS}`)
   await page.keyboard.press('Control+k')
-  await page.waitForTimeout(1500)
+  // The palette's own box, once it is open — not a fixed 1.5 seconds, after
+  // which the first visible input could be one the palette had not yet covered.
+  await page.locator('[cmdk-input]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   const palette = page.locator('input:visible').first()
   const cmdBar = chain(
     'Cmd/Ctrl-K opens a search box',
@@ -350,7 +362,10 @@ try {
   } else {
     ref('A2.3', 'Ask AI from the search box')
     await palette.fill('regr')
-    await page.waitForTimeout(2500)
+    // The row the check reads, waited for (bounded) rather than 2.5 fixed
+    // seconds after typing, which a sweep's load outran twice
+    // (`found-24-sep/three-suites-fail-under-a-full-sweep`).
+    await waitUntil(async () => /Ask AI/i.test(await seen()), { timeoutMs: 15_000 })
     const p = await seen()
     cmdBar.step(/Ask AI/i.test(p), 'no Ask AI row in search')
 
@@ -445,7 +460,10 @@ try {
       const before = (await API('/notifications?unreadOnly=true')).data ?? []
       await API('/notifications/mark-all-read', { method: 'POST' })
       await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(2500)
+      // The control is drawn with the inbox's rows, so it is waited for (bounded)
+      // rather than counted 2.5 fixed seconds after the reload — the same shape
+      // as [A1.2], and it missed the same way on a loaded machine.
+      await page.getByTestId('inbox-clear-all').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
       chk(
         (await page.getByTestId('inbox-clear-all').count()) > 0,
         'and Clear all survives having read everything',

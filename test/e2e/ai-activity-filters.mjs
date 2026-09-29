@@ -380,6 +380,24 @@ try {
       : 'no activity request fired even after a guaranteed cache miss, so this proved nothing',
   )
 
+  /*
+   * A NEW FILTER'S LIST IS A SKELETON UNTIL ITS ANSWER ARRIVES — no rows and no
+   * empty state (`activityQuery.isPending`; nothing keeps the previous rows). So
+   * the rows are read once the list has drawn the answer, rows or empty state,
+   * after the request for it has gone out. They were read 1.2 fixed seconds
+   * after the choice, and under a sweep's load that was the skeleton: no row
+   * under Failed, though the same filter's API read had found one
+   * (`found-24-sep/three-suites-fail-under-a-full-sweep`). Bounded; what is on
+   * screen when it ends is what the checks judge.
+   */
+  const answerDrawn = () =>
+    waitUntil(
+      async () =>
+        (await page.getByTestId('ai-activity-row').count()) > 0 ||
+        (await page.getByTestId('ai-activity-empty').count()) > 0,
+      { timeoutMs: 20_000 },
+    )
+
   const beforeStatus = calls.length
   await page.getByTestId('ai-activity-status').selectOption('failed')
   const sentStatus = await waitUntil(
@@ -391,7 +409,7 @@ try {
     'choosing Failed puts `status=failed` in the query string',
     `the requests after choosing Failed were ${JSON.stringify(calls.slice(beforeStatus))}`,
   )
-  await page.waitForTimeout(1200)
+  await answerDrawn()
   const shownRows = page.getByTestId('ai-activity-row')
   const failedCount = await shownRows.count()
   chk(
@@ -442,8 +460,10 @@ try {
       'tells somebody a thing went wrong and nothing they can act on',
   )
 
+  const beforeSucceeded = calls.length
   await page.getByTestId('ai-activity-status').selectOption('succeeded')
-  await page.waitForTimeout(1200)
+  await waitUntil(() => calls.slice(beforeSucceeded).some((u) => u.includes('status=succeeded')), { timeoutMs: 10_000 })
+  await answerDrawn()
   chk(
     (await page.locator(`[data-run-id="${forcedFailureId}"]`).count()) === 0 &&
       (await page.getByTestId('ai-activity-row').count()) > 0,
