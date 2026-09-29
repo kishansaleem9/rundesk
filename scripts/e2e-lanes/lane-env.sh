@@ -281,6 +281,61 @@ patches_needing_model () {
   return 0
 }
 
+# WHAT A SUITE NEEDS OF A LANE'S MODEL, from its header (`harness/model-lane-routing-unbuilt`):
+#
+#     // Lane: no-model — it asserts the assistant's "not configured" answer
+#     // Lane: model — it stages the stub's answers
+#
+# A suite that stands on the refusal cannot pass where a model answers, and one
+# that stages the stub cannot pass where none does; a lane with the wrong one is
+# refused by `verify.sh` and re-synced by the break runner. Prints no-model,
+# model, or any.
+suite_lane_need () {
+  local need
+  need=$(grep -m1 -oE '^// Lane: (no-model|model)\b' "$1" 2>/dev/null | sed 's#^// Lane: ##')
+  echo "${need:-any}"
+}
+
+# The refusal a suite's need and a lane's answer make, or nothing when they
+# agree: `lane_need_refusal <need> <yes|no|unknown>`. Unknown refuses nothing:
+# a lane that cannot say is not assumed either way.
+lane_need_refusal () {
+  local need="$1" has="$2"
+  if [ "$need" = "no-model" ] && [ "$has" = "yes" ]; then
+    echo "it stands on the assistant's refusal, and this lane's API has a model"
+  elif [ "$need" = "model" ] && [ "$has" = "no" ]; then
+    echo "it needs a model's answers, and this lane's API has none"
+  fi
+}
+
+# Whether the API on <port> answers with a model: yes, no, or unknown. Asked of
+# the running API (`/ai/status`, signed in as the lane's admin), not of
+# `RUNDESK_LANE_MODEL`, which says what the launcher meant rather than what runs.
+lane_api_has_model () {
+  local port="$1" token body
+  token=$(curl -s --max-time 10 -H 'content-type: application/json' \
+    -d "{\"email\":\"${E2E_EMAIL:-admin@rundesk.internal}\",\"password\":\"${E2E_PASSWORD:-Admin@123!}\"}" \
+    "http://127.0.0.1:$port/api/v1/auth/login" | sed -n 's/.*"accessToken":"\([^"]*\)".*/\1/p')
+  [ -n "$token" ] || { echo unknown; return 0; }
+  body=$(curl -s --max-time 10 -H "authorization: Bearer $token" "http://127.0.0.1:$port/api/v1/ai/status")
+  case "$body" in
+    *'"available":true'*) echo yes ;;
+    *'"available":false'*) echo no ;;
+    *) echo unknown ;;
+  esac
+}
+
+# This lane, taken out of the lanes with a model, for this process and its
+# children: the break runner's answer to a suite that needs none.
+lane_model_remove () {
+  local k="$1" out="" n all
+  lane_has_model "$k" || return 0
+  all="${RUNDESK_LANE_MODEL:-}"
+  [ "$all" = "all" ] && all="1 2 3 4 5 6 7 8 9 10"
+  for n in $all; do [ "$n" = "$k" ] || out="$out $n"; done
+  export RUNDESK_LANE_MODEL="${out# }"
+}
+
 # This lane, added to the lanes with a model, for this process and its children.
 lane_model_add () {
   local k="$1"

@@ -103,7 +103,7 @@ if [ "$total" -ne "${#SUITES[@]}" ]; then
   exit 1
 fi
 if [ "$bad" -gt 0 ]; then
-  echo "sweep: these did not pass (exit, suite, lane) — 6 to 9 are verify.sh refusing: a stale bundle or build, another tree on the port, or a database whose schema differs:"
+  echo "sweep: these did not pass (exit, suite, lane) — 6 to 10 are verify.sh refusing: a stale bundle or build, another tree on the port, a database whose schema differs, or a lane whose model the suite cannot pass on:"
   awk '$1 != 0' "$STATUS" | sort -k2
   exit 1
 fi

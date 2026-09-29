@@ -1,3 +1,4 @@
+// Lane: no-model — it asserts the planner's "AI features are not configured" answer; `verify.sh` refuses a lane whose API has a model.
 /**
  * §V2-S07 frame `06:40` — THE CREATE MENU'S SEARCH BOX AND ITS AI ROW.
  *

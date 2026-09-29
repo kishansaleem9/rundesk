@@ -1,3 +1,4 @@
+// Lane: no-model — it asserts the bar reports the server's "not configured" sentence; `verify.sh` refuses a lane whose API has a model.
 /**
  * §V2-S02 / §V2-S04 / §V2-S05d — THE THREE AI SURFACES ON A TASK.
  *

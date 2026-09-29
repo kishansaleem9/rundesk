@@ -155,6 +155,20 @@ trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; break_locks_drop "$LANE" "$SUITE"' EXIT
 # not a `== ` header, so every reader of these logs passes over it.
 NEEDS_MODEL=$(patches_needing_model "$REPO/test/e2e/breaks" "$@" | tr '\n' ' ' | sed 's/ *$//')
 [ -n "$NEEDS_MODEL" ] && lane_model_add "$LANE"
+# AND THE SUITE'S OWN NEED (`suite_lane_need`, lane-env.sh): one that stands on
+# the assistant's refusal runs without a model, and one that stages the stub
+# with one. A set whose patches need a model its suite refuses cannot be
+# measured, and is refused rather than run.
+SUITE_NEED=$(suite_lane_need "$REPO/test/e2e/$SUITE.mjs")
+if [ "$SUITE_NEED" = "no-model" ]; then
+  if [ -n "$NEEDS_MODEL" ]; then
+    echo "== REFUSING — $SUITE runs without a model (its header), and $NEEDS_MODEL need one" >> "$OUT"
+    exit 4
+  fi
+  lane_model_remove "$LANE"
+elif [ "$SUITE_NEED" = "model" ]; then
+  lane_model_add "$LANE"
+fi
 
 # ── AND THE WORKTREE HAS TO RESOLVE ITS OWN WORKSPACE PACKAGES. ───────────
 #

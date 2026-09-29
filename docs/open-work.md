@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 51 open, 10 partly fixed, 263 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 51 open, 8 partly fixed, 265 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -3294,7 +3294,7 @@ complete its chain on every path.
 
 *To close:* Give the lanes a search stub or a real Meilisearch the way s3-stub and model-stub work. Then aim doc-import-2 at indexing again and check indexDocInSearch across docs, tasks and the rest.
 
-### `commit-log/log-ad00a7c-1` — partly-fixed, medium (the same work as `harness/model-lane-routing-unbuilt`)
+### `commit-log/log-ad00a7c-1` — **closed** (test tooling, medium; the same work as `harness/model-lane-routing-unbuilt`)
 
 **The model stub is wired but off by default, and nothing routes each suite to a lane with or without a model**
 
@@ -3303,6 +3303,8 @@ complete its chain on every path.
 *To close:* Give the plan a per-suite requirement: model, no-model, or either. Have run-plan.sh and sweep-until-clean.sh start a mixed fleet (for example RUNDESK_LANE_MODEL='3 4') and send each set to a matching lane. Then write model-lane checks and break patches for the AI surfaces that today are measured only by their refusal.
 
 *Partly fixed, 24 September:* a break set whose patch needs a model now gets one, and the runner's stamp re-syncs a lane whose model differs from what the set asked for. See `harness/model-lane-routing-unbuilt`, which records what is left: routing by suite.
+
+*Closed, 29 September,* with `harness/model-lane-routing-unbuilt`: suites declare their lane need, `verify.sh` asks the running API and refuses a mismatch, and the break runner takes the model away from a no-model suite's lane.
 
 ### `harness/section-enders-blind-to-check-spelling` — **closed** (with its duplicate `suite-hygiene/section-enders-blind-to-check-suites`)
 
@@ -4805,7 +4807,7 @@ FAILs. video-regression 94/94.
 
 *To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
 
-### `harness/model-lane-routing-unbuilt` — partly-fixed, medium
+### `harness/model-lane-routing-unbuilt` — **closed** (test tooling, medium)
 
 **No suite can be routed to a lane with or without a model; the model stub is wired but no suite exercises it**
 
@@ -4814,6 +4816,12 @@ FAILs. video-regression 94/94.
 *To close:* Smallest correct routing: (1) each suite declares its need in a greppable header, e.g. `// Lane: no-model` on create-menu-ai and task-ai-bar, and `// Lane: model` on any suite that stages __control/next. (2) run-plan.sh sources lane-env.sh and skips a lane whose lane_has_model answer differs from the suite's declared need. If no lane in $LANES matches, it refuses loudly with a new exit code, so the plan is never silently burned. (3) wt-break.sh, before the baseline, asks the lane's GET /api/v1/ai/status and refuses (new exit) when `available` differs from lane_has_model, or else restarts. (4) A checker asserts that every suite asserting 'not configured' in a chk declares no-model. Then write the model-path checks against model-stub's __control/next, since the frames-do-not-specify reason is no longer accepted.
 
 *Partly fixed, 24 September (with `found-24-sep/model-patches-measured-without-a-model`):* the break runner now chooses for a SET. A set with a patch whose header says it reddens only where a model answers runs with one, baseline included. The runner's stamp of what a lane serves carries the model, so a lane is re-synced whenever its model differs from what the set asked for, and no longer keeps its last launcher's configuration. `check-model-lanes.sh`, 5 of 5 mutations. What is left is routing by SUITE: (1), (2) and (4) above, so that an invoker who puts every lane on a model (`RUNDESK_LANE_MODEL=all`) cannot send `create-menu-ai` or `task-ai-bar` to one. And the model-path checks against `__control/next`. Since this row was written, `create-ai-results` stages the planner's answer by route rather than through the stub, and `workspace-read-access` reads the stub's `__control/seen`.
+
+*Closed, 29 September:* routing by suite, (1), (2) and (4) above, with the refusal placed where every runner passes rather than in `run-plan.sh` alone.
+- (1) A suite declares its need in its header: `// Lane: no-model — <why>` on `create-menu-ai` and `task-ai-bar`, the two that assert the assistant's refusal; `// Lane: model` for one that stages the stub. `suite_lane_need` (lane-env.sh) reads it.
+- (2) `verify.sh` asks the RUNNING API — `/ai/status`, signed in as the lane's admin (`lane_api_has_model`), not `RUNDESK_LANE_MODEL`, which says what the launcher meant — and refuses a lane whose model the suite cannot pass on (exit 10; `sweep.sh` counts 6 to 10 as refusals). The break runner takes the model away from a set's lane when its suite declares no-model (`lane_model_remove`), and refuses a set whose patches need a model its suite refuses.
+- (4) `scripts/check-suite-lane-need.mjs --mutate` (preflight, CI's verify job): a suite that tests an `/ai/` route's answer for "not configured" and never reads `/ai/status` must declare no-model; a declared need is one of the two; a no-model header over a suite that asserts no refusal is stale. On the suites before the headers: 2, `create-menu-ai` and `task-ai-bar`; now 0; 7 of 7 cases hold. `scripts/e2e-lanes/lane-need-selfcheck.sh --mutate` (the same two places): 14 cases — the need read from a header and not from an inline comment, every pair of need and lane answer, a lane taken out of a list and out of `all` — and 3 of 3 mutations caught.
+- On lane 7 restarted with the model stub: `create-menu-ai` and `task-ai-bar` refused (exit 10), and the model paths measured for the first time — `ai-activity-filters` 34/34 (a provider failure staged through `__control/next`), `ai-create-containers` 33/33 and `ai-answer-rendering` 51/51, each reading `/ai/status` as configured. Lane 7 without a model again: `create-menu-ai` 24/24.
 
 ### `ledger-rows/row-1962` — open, medium
 

@@ -37,6 +37,7 @@ step "the sweep fixture builds where it picked" node scripts/check-sweep-fixture
 step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-selfcheck.sh
 step "a push that stops is not read as synced" bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate
 step "one writer or many readers per lane bundle" bash scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate
+step "a suite runs where its model need is met" bash scripts/e2e-lanes/lane-need-selfcheck.sh --mutate
 step "a routing suite says what its worker does" node scripts/check-suite-routes.mjs
 step "and that gate bites, case by case"  node scripts/check-suite-routes-cases.mjs --mutate
 step "the e2e proxy keeps what it advertises" node scripts/check-local-stack-keepalive.mjs --mutate
@@ -63,6 +64,7 @@ step "and every ender rule bites"        node scripts/check-suite-enders.mjs --m
 step "a check of shown text reads what is drawn" node scripts/check-suite-text-reads.mjs --mutate
 step "no silent catch on an API client" node scripts/check-suite-api-catches.mjs --mutate
 step "no new process.exit in a suite"   node scripts/check-suite-process-exit.mjs --mutate
+step "a refusal-standing suite declares it" node scripts/check-suite-lane-need.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
 step "a lane's old API stops before reuse" bash scripts/check-lane-api-down.sh --mutate
 step "a failed planner is never 'nothing left'" bash scripts/check-build-plan.sh --mutate

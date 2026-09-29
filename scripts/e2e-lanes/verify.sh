@@ -225,6 +225,19 @@ if ! DRIFT=$(lane_schema_drift "rundesk_v$LANE"); then
   exit 9
 fi
 
+# A SUITE RUNS ON A LANE WHOSE MODEL IT CAN PASS ON (`suite_lane_need`,
+# lane-env.sh; `harness/model-lane-routing-unbuilt`). `create-menu-ai` and
+# `task-ai-bar` assert the assistant's refusal: on a lane whose API has a model
+# they fail over the lane, not the product. Asked of the running API.
+NEED=$(suite_lane_need "test/e2e/$SUITE.mjs")
+if [ "$NEED" != "any" ]; then
+  WHY=$(lane_need_refusal "$NEED" "$(lane_api_has_model "$PORT")")
+  if [ -n "$WHY" ]; then
+    echo "== $SUITE (lane $LANE) REFUSING — $WHY; run it on a lane $([ "$NEED" = model ] && echo with || echo without) one"
+    exit 10
+  fi
+fi
+
 export PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/rundesk_v$LANE"
 export E2E_EMAIL=admin@rundesk.internal

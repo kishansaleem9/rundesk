@@ -306,6 +306,9 @@ jobs:
       - name: No new process.exit in a suite
         run: node scripts/check-suite-process-exit.mjs --mutate
 
+      - name: A suite that stands on the assistant's refusal declares it
+        run: node scripts/check-suite-lane-need.mjs --mutate
+
       # Rule six of that checker, which is a gate over a tree with zero sites
       # left in it — and zero is the number this audit has learnt not to take on
       # trust. The rule turns on two things that can be wrong without looking
@@ -428,6 +431,11 @@ jobs:
       # shared, a build exclusive (log-d92d58f-1).
       - name: One writer or many readers per lane bundle
         run: bash scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate
+
+      # A suite that stands on the assistant's refusal declares it, and the
+      # lanes refuse a model it cannot pass on (model-lane-routing-unbuilt).
+      - name: A suite runs where its model need is met
+        run: bash scripts/e2e-lanes/lane-need-selfcheck.sh --mutate
 
       # The unit claims found their test files by walking the repository, and
       # took an agent worktree's unpatched copy under .claude/ for this tree's
