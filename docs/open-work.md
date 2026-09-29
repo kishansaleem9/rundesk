@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 334 items, 46 open, 8 partly fixed, 280 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 335 items, 46 open, 8 partly fixed, 281 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1483,6 +1483,24 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 *Evidence, 29 September:* `updateSettings` (planner.service) validated every other planner setting and had no rule for `railSections`, which `PlannerSettings` did not declare. The web passes over a name that is no section and a repeat when it draws the rail, but the server stored them: measured on lane 5, a PATCH of `["priorities","nonsense"]` and one of `["backlog","backlog"]` each answered 200, and Postgres held `["backlog","backlog"]`.
 
 *Closed, 29 September:* the planner service stores the rail's five sections (`RAIL_SECTIONS`, the web's list), each at most once, and refuses anything else with the reason ("The rail's sections are …", "The rail names a section twice"). `PlannerSettings` declares `railSections`. Every value the Sidebar page has ever written is a subset of the five, so no stored order is made unwritable. `rail-reorder` check 13: before 12/13, after 13/13 on lane 5; patch `rro-10` reddens it (12/13; lane 1, `096fa62`, baseline 13/13).
+
+### `found-29-sep/ui-sweep-stars-the-wrong-type` — **closed** (test tooling, small; raised as a suggested task from this session's sweeps)
+
+**`ui-sweep` starred the wrong task type, passed whichever it starred, and read its settings writes after fixed sleeps**
+
+*Evidence, 29 September:*
+- Section 13 pressed `getByRole('button', { name: /Make this the default/i }).first()`. That is the first row not already the default, not the type the section had just made. It then counted any `aria-pressed="true"` button on the page.
+- Measured with `us-5`, which makes every star make the first type the default: the old check passed ("PASS and marked it the default", 107/107 on lane 5), and the workspace's default moved to the first type. Every run did that to the shared workspace.
+- Sections 12, 13, 13b, 14, 16 and 16b read what they had written after fixed sleeps of 1.3–3.2 s. Four runs at once:
+  - section 12 counted 0 member rows on lanes 1 and 6 (three checks);
+  - section 13b's click after its reload landed on the task sheet the address was bringing back, and the run threw on lane 7.
+
+*Closed, 29 September:*
+- Section 13 finds the new type's row by its rename box and presses that row's star. It waits for the star to read pressed, and for the server to hold the new type as the only default (`GET /workspaces/:ws/task-types`).
+- The default it found is put back before 16b deletes the type. A failed put-back is printed as cleanup left behind.
+- Every read in sections 12, 13, 13b, 14, 16 and 16b waits for what it reads. A deleted type is gone before the next is read, and the member count waits for the list to stop growing. `openAnyTask` waits for a sheet the address brings back, and Saturday's toggle, when it fails, says what the server's week holds.
+- After: 107/107 on lanes 1, 5 and 7, three runs at once. `us-5` reddens "and marked it the default" alone (106/107, lane 6).
+- Sections 1–11 and 15 still wait fixed times. They were not seen failing, and they are not claimed here.
 
 ### `found-29-sep/task-brain-offers-list-starters` — open, small (feature; found closing `found-29-sep/ai-chat-takes-no-task`)
 

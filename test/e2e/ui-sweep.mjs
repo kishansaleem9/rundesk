@@ -73,6 +73,9 @@ if (!WS || !LIST_PATH) {
       (fixture.created ? `\x1b[2m, created ${fixture.created} task(s) to sweep\x1b[0m` : ''),
   )
 }
+// The API as the sweep's user, for what the UI's writes left on the server
+// (section 13 reads the workspace's default task type back through it).
+const sweepApi = apiClient(API, (await login(API, EMAIL, PASSWORD)).accessToken)
 
 const results = []
 let section = ''
@@ -132,9 +135,16 @@ const openAnyTask = async () => {
    * because closing used to be invisible to the URL and a reload dropped the
    * sheet. Already open is already done.
    */
-  if ((await page.locator('button[aria-label="Close sheet overlay"]').count()) > 0) return
+  const overlay = page.locator('button[aria-label="Close sheet overlay"]')
+  // An address that names a task brings its sheet back after a reload, a
+  // moment after the list: clicked in that moment, the card's click lands on
+  // the arriving sheet's overlay (13b, after its reload). So wait for it.
+  if (new URL(page.url()).searchParams.get('task')) {
+    await overlay.first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
+  }
+  if ((await overlay.count()) > 0) return
   await firstTaskCard().click()
-  await page.waitForTimeout(2000)
+  await overlay.first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
 }
 
 const browser = await chromium.launch(launchOptions())
@@ -741,9 +751,16 @@ try {
 
   say('12. Members: reports-to picker')
   await page.goto(`${B}/app/${WS}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2400)
   const pickers = page.locator('select[title="Reports to"]')
-  const n = await pickers.count()
+  // Counted once the member list has answered and stopped growing: counted
+  // after a fixed 2.4 s, a loaded lane read 0 rows in a workspace that has more.
+  let n = 0
+  await waitUntil(async () => {
+    const now = await pickers.count()
+    const settled = now > 0 && now === n
+    n = now
+    return settled
+  }, { timeoutMs: 20_000, stepMs: 700 })
   const reportsTo = chain(
     'a reports-to picker on each member row',
     'the reporting tree appears once someone has a manager',
@@ -837,52 +854,79 @@ try {
   }
 
   say('13. Task types + work schedule, end to end from the UI')
+  /*
+   * STARRED BY ITS OWN ROW, AND READ BACK FROM THE SERVER. This clicked the
+   * first "Make this the default" button on the page — the first row that was
+   * not already the default, not the type it had just made — and then counted
+   * any pressed button, so it passed whichever type it starred and moved the
+   * shared workspace's default every run. And it read each write back after a
+   * fixed 1.3–1.6 s, which a loaded lane outlasts
+   * (`found-29-sep/ui-sweep-stars-the-wrong-type`). The default it found is put
+   * back in 16b.
+   */
+  const typesNow = async () => {
+    const res = await sweepApi(`/workspaces/${WS}/task-types`).catch(() => null)
+    return Array.isArray(res?.data) ? res.data : []
+  }
+  const defaultBefore = (await typesNow()).find((tt) => tt.isDefault)?.id ?? null
   await page.goto(`${B}/app/${WS}/settings?tab=taskTypes`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
   const TYPE = uniq('E2EType')
-  await page.getByLabel('Icon').fill('🚀')
-  await page.getByLabel('Type name').fill(TYPE)
-  await page.getByRole('button', { name: /Add type/i }).click()
-  await page.waitForTimeout(1500)
+  await page.getByLabel('Icon').fill('🚀', { timeout: 20_000 }).catch(() => {})
+  await page.getByLabel('Type name').fill(TYPE, { timeout: 10_000 }).catch(() => {})
+  await page.getByRole('button', { name: /Add type/i }).click({ timeout: 10_000 }).catch(() => {})
+  const typeRow = page.locator('li', { has: page.locator(`input[aria-label="Rename task type ${TYPE}"]`) })
+  const typeDrawn = await waitUntil(async () => (await typeRow.count()) === 1, { timeoutMs: 15_000 })
   let names = await page.locator('input[aria-label^="Rename task type"]').evaluateAll((e) => e.map((x) => x.value))
-  check(names.includes(TYPE), `created "${TYPE}" from the settings UI`, `rows: ${JSON.stringify(names)}`)
-  await page.getByRole('button', { name: /Make this the default/i }).first().click()
-  await page.waitForTimeout(1400)
-  check(await page.locator('button[aria-pressed="true"]').count() >= 1, 'and marked it the default',
-    'the default star did not set')
+  check(typeDrawn && names.includes(TYPE), `created "${TYPE}" from the settings UI`, `rows: ${JSON.stringify(names)}`)
+  const typeStar = typeRow.getByRole('button', { name: /Make this the default|Default for new tasks/i })
+  await typeStar.click({ timeout: 10_000 }).catch(() => {})
+  const starPressed = await waitUntil(async () => (await typeStar.getAttribute('aria-pressed').catch(() => null)) === 'true', { timeoutMs: 10_000 })
+  let defaultsNow = []
+  const defaultStored = await waitUntil(async () => {
+    defaultsNow = (await typesNow()).filter((tt) => tt.isDefault).map((tt) => tt.name)
+    return defaultsNow.length === 1 && defaultsNow[0] === TYPE
+  }, { timeoutMs: 10_000 })
+  check(starPressed && defaultStored, 'and marked it the default',
+    `its own star pressed ${starPressed}; the workspace's default type(s) now ${JSON.stringify(defaultsNow)}`)
 
   say('13b. The new type reaches the task header picker')
   await page.goto(`${B}/app/${WS}/${LIST_PATH}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
   await openAnyTask()
-  await page.waitForTimeout(2400)
   const tp = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
   const typePicker = chain(
     'the type picker appears in the task header now that a type exists',
     'the new type is offered',
     'the applied type survives a reload',
   )
-  const haveTp = (await tp.count()) > 0
+  const haveTp = await waitUntil(async () => (await tp.count()) > 0, { timeoutMs: 20_000 })
   typePicker.step(haveTp, 'no type picker in the task header')
   if (!haveTp) {
     typePicker.rest('skipped: there was no picker to read options from or apply')
   } else {
     // Offered only while the picker is shown itself (an option's innerText is its textContent).
-    const opts = await tp.filter({ visible: true }).locator('option').allTextContents()
+    let opts = []
+    await waitUntil(async () => {
+      opts = await tp.filter({ visible: true }).locator('option').allTextContents().catch(() => [])
+      return opts.some((o) => o.includes(TYPE))
+    }, { timeoutMs: 10_000 })
     typePicker.step(opts.some((o) => o.includes(TYPE)), `the new type is not offered: ${JSON.stringify(opts)}`,
       `the new type is offered: ${JSON.stringify(opts)}`)
-    await tp.selectOption({ label: `🚀 ${TYPE}` })
-    await page.waitForTimeout(1800)
+    await tp.selectOption({ label: `🚀 ${TYPE}` }).catch(() => {})
+    // Reloaded once the choice is stored, not after a guess at how long that takes.
+    await waitUntil(async () => (await tp.locator('option:checked').innerText().catch(() => '')).includes(TYPE), { timeoutMs: 10_000 })
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3200)
     await openAnyTask()
-    await page.waitForTimeout(2400)
     const after = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
-    const sel = await after.locator('option:checked').innerText().catch(() => '')
+    let sel = ''
+    await waitUntil(async () => {
+      sel = await after.locator('option:checked').innerText().catch(() => '')
+      return sel.includes(TYPE)
+    }, { timeoutMs: 20_000 })
     typePicker.step(sel.includes(TYPE), `after reload the picker shows "${sel.trim()}"`,
       `the applied type survives a reload (${sel.trim()})`)
-    await after.selectOption({ label: 'No type' })
-    await page.waitForTimeout(1200)
+    await after.selectOption({ label: 'No type' }).catch(() => {})
+    await waitUntil(async () => (await after.locator('option:checked').innerText().catch(() => '')).trim() === 'No type', { timeoutMs: 10_000 })
   }
   await closeSheet()
 
@@ -894,13 +938,14 @@ try {
   const sat = page.getByRole('button', { name: 'Sat', exact: true })
   await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   await sat.click({ timeout: 10_000 }).catch(() => {})
-  await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 10_000 })
-  check(await sat.getAttribute('aria-pressed', { timeout: 5000 }).catch(() => null) === 'true',
-    'Saturday toggled on', 'Saturday did not toggle')
+  // The press is a write, then a re-read: 10 s was outlasted on a loaded lane
+  // (29 September, lane 6), so 20, and a failure says what the server holds.
+  const satOn = await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 20_000 })
+  const weekHeld = satOn ? null : (await sweepApi(`/workspaces/${WS}/work-schedule`).catch(() => null))?.data?.workDays ?? null
+  check(satOn, 'Saturday toggled on', `Saturday did not toggle; the server's week reads ${JSON.stringify(weekHeld)}`)
   await page.goto(`${B}/app/${WS}/workload`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
-  check(/Workload/i.test(await page.locator('body').innerText()),
-    'the workload report still renders with a six-day week', 'workload failed to render')
+  const workloadDrawn = await waitUntil(async () => /Workload/i.test(await page.locator('body').innerText().catch(() => '')), { timeoutMs: 20_000 })
+  check(workloadDrawn, 'the workload report still renders with a six-day week', 'workload failed to render')
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
   await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   if ((await sat.getAttribute('aria-pressed', { timeout: 5000 }).catch(() => null)) === 'true') {
@@ -927,53 +972,76 @@ try {
    * keeps it. This section still looked for it beside the work schedule and
    * hung thirty seconds on a control that had moved two releases ago.
    *
-   * Switch it where it lives, then go and read the strings where they render.
+   * Switch it where it lives, then go and read the strings where they render —
+   * each read waiting for the language it expects, not for a fixed 2 s.
    */
   const setLanguage = async (label) => {
     await page.goto(`${B}/app/profile`, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(2000)
-    await page.getByLabel('Language').selectOption({ label })
-    await page.waitForTimeout(1500)
+    const picker = page.getByLabel('Language')
+    await picker.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+    await picker.selectOption({ label }).catch(() => {})
+    await waitUntil(async () => (await picker.locator('option:checked').innerText().catch(() => '')).trim() === label, { timeoutMs: 10_000 })
+    await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
+  }
+  const scheduleText = async (expect) => {
+    await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
+    let body = ''
+    await waitUntil(async () => {
+      body = await page.locator('body').innerText().catch(() => '')
+      return expect.test(body)
+    }, { timeoutMs: 20_000 })
+    return body
   }
   await setLanguage('Español')
-  await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  const es = await page.locator('body').innerText()
+  const es = await scheduleText(/Días laborables|Horario laboral/)
   check(/Días laborables|Horario laboral/.test(es),
     'the new Work schedule strings are translated in Spanish',
     `Spanish body did not show translated schedule strings: ${es.slice(0, 160)}`)
   check(!/\{\{|\{name\}|\{count\}/.test(es), 'no untranslated placeholders leak through',
     'a raw {{placeholder}} rendered on screen')
   await setLanguage('العربية')
-  await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  const ar = await page.locator('body').innerText()
+  const ar = await scheduleText(/أيام العمل|جدول العمل/)
   check(/أيام العمل|جدول العمل/.test(ar), 'and in Arabic', `Arabic body: ${ar.slice(0, 120)}`)
   check(!/\{\{|\{name\}/.test(ar), 'no placeholders in Arabic either', 'a raw placeholder rendered in Arabic')
   await setLanguage('English')
-  await page.waitForTimeout(1500)
 
   say('16b. Teardown — leave the workspace as we found it')
   // The UI suite creates real rows. Left behind, they accumulate across runs and
-  // eventually make an assertion pass for the wrong reason.
+  // eventually make an assertion pass for the wrong reason. The workspace's
+  // default type goes back first: section 13 moved it to ours.
+  const restore = defaultBefore
+    ? await sweepApi(`/workspaces/${WS}/task-types/${defaultBefore}`, { method: 'PATCH', body: { isDefault: true } }).catch(() => null)
+    : await (async () => {
+        const ours = (await typesNow()).find((tt) => tt.isDefault && String(tt.name).startsWith('E2EType-'))
+        return ours ? sweepApi(`/workspaces/${WS}/task-types/${ours.id}`, { method: 'PATCH', body: { isDefault: false } }).catch(() => null) : { status: 200 }
+      })()
+  if (!restore || restore.status >= 300) console.log(`  cleanup left behind: the workspace's default task type was not put back (${restore?.status ?? 'no answer'})`)
   await page.goto(`${B}/app/${WS}/settings?tab=taskTypes`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2200)
+  const typeNames = () => page.locator('input[aria-label^="Rename task type"]').evaluateAll((e) => e.map((x) => x.value)).catch(() => [])
+  await waitUntil(async () => (await typeNames()).length > 0, { timeoutMs: 20_000 })
   page.on('dialog', (d) => d.accept())
   for (let i = 0; i < 12; i++) {
-    const rows = await page.locator('input[aria-label^="Rename task type"]').evaluateAll((e) => e.map((x) => x.value))
-    const idx = rows.findIndex((r) => r.startsWith('E2EType-'))
-    if (idx < 0) break
-    await page.getByRole('button', { name: `Delete task type ${rows[idx]}` }).click()
-    await page.waitForTimeout(1300)
+    const rows = await typeNames()
+    const ours = rows.find((r) => r.startsWith('E2EType-'))
+    if (!ours) break
+    await page.getByRole('button', { name: `Delete task type ${ours}` }).click({ timeout: 10_000 }).catch(() => {})
+    // Gone from the list before the next is read: a read after a fixed wait
+    // found the row still there on a loaded lane and pressed it twice.
+    await waitUntil(async () => !(await typeNames()).includes(ours), { timeoutMs: 10_000 })
   }
-  const leftover = await page.locator('input[aria-label^="Rename task type"]').evaluateAll((e) => e.map((x) => x.value))
+  const leftover = await typeNames()
   check(!leftover.some((r) => r.startsWith('E2EType-')),
     `no test task types left behind (${leftover.length} type(s) remain, none ours)`,
     `test types survived teardown: ${JSON.stringify(leftover)}`)
 
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  const satState = await page.getByRole('button', { name: 'Sat', exact: true }).getAttribute('aria-pressed')
+  const satBack = page.getByRole('button', { name: 'Sat', exact: true })
+  await satBack.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  let satState = null
+  await waitUntil(async () => {
+    satState = await satBack.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)
+    return satState === 'false'
+  }, { timeoutMs: 10_000 })
   check(satState === 'false', 'the working week is back to Mon–Fri',
     `Saturday left as aria-pressed=${satState}`)
 
