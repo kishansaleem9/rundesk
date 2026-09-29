@@ -41,17 +41,16 @@
 /**
  * Where the panel was opened from. The surface is context too, and cheap.
  *
- * TWO, NOT THREE. A `task` surface was drafted and removed: the panel is given
- * `describeCurrentView(routeId)`, a task opens as a sheet over the list route
- * rather than as a route of its own, and nothing in the shell could ever have
- * produced it. A third surface the server accepts and no caller can send is a
- * branch that exists only in this file — the mirror defect, one layer up from
- * a column nobody reads.
+ * THREE SINCE 29 SEPTEMBER. A `task` surface was drafted and removed while
+ * nothing could send it: a task opens as a sheet over the list route, and the
+ * panel was told only the route. Brain² in the task header now points the dock
+ * at its task (`ledger-rows/row-743`), so the dock knows it is over one task
+ * and says so (`found-29-sep/task-brain-offers-list-starters`).
  */
-export type StarterSurface = 'workspace' | 'list'
+export type StarterSurface = 'workspace' | 'list' | 'task'
 
 export function isStarterSurface(value: unknown): value is StarterSurface {
-  return value === 'workspace' || value === 'list'
+  return value === 'workspace' || value === 'list' || value === 'task'
 }
 
 /**
@@ -122,6 +121,38 @@ type Candidate = {
  * starter cards is the one state the frame never shows.
  */
 const STARTER_CATALOGUE: Candidate[] = [
+  // ── Brain² from a task: what ClickUp's task Brain offers there (help centre,
+  // "Use Brain AI on tasks" and "Summarize task and location activity with
+  // Brain AI") — Summarize, Progress update, Find similar tasks. First, because
+  // the dock is pointed at one task and these three are about it; the turn
+  // carries the task, so the answer can read it.
+  {
+    card: {
+      id: 'thisTask',
+      titleKey: 'aiStarters.thisTask',
+      subtitleKey: 'aiStarters.thisTaskSub',
+      promptKey: 'aiStarters.thisTaskPrompt',
+    },
+    when: (f) => (f.surface === 'task' ? 'surface:task' : null),
+  },
+  {
+    card: {
+      id: 'taskProgress',
+      titleKey: 'aiStarters.taskProgress',
+      subtitleKey: 'aiStarters.taskProgressSub',
+      promptKey: 'aiStarters.taskProgressPrompt',
+    },
+    when: (f) => (f.surface === 'task' ? 'surface:task' : null),
+  },
+  {
+    card: {
+      id: 'similarTasks',
+      titleKey: 'aiStarters.similarTasks',
+      subtitleKey: 'aiStarters.similarTasksSub',
+      promptKey: 'aiStarters.similarTasksPrompt',
+    },
+    when: (f) => (f.surface === 'task' ? 'surface:task' : null),
+  },
   {
     // `21:15` "Find Blockers — Search overdue tasks". Offered when there ARE
     // overdue tasks; a card promising to find blockers on a clean board finds

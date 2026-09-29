@@ -121,9 +121,20 @@ describe('§V2-S22 `21:15` — the cards are chosen, not listed', () => {
     assert.equal(isStarterSurface('list'), true)
     assert.equal(isStarterSurface('workspace'), true)
     assert.equal(isStarterSurface('dashboard'), false)
-    // `task` was drafted and dropped: no route in the shell can produce it, so
-    // accepting it would be a branch only this file could ever reach.
-    assert.equal(isStarterSurface('task'), false)
+    // `task` was drafted and dropped while nothing could send it; the dock
+    // pointed at a task by Brain² sends it now.
+    assert.equal(isStarterSurface('task'), true)
     assert.equal(isStarterSurface(undefined), false)
+  })
+
+  it('a dock pointed at a task offers the task\'s three first, and the fourth by the facts', () => {
+    const cards = starterCards({ surface: 'task', overdue: 2, assignedOpen: 5, workspaceOpen: 9 })
+    assert.deepEqual(cards.map((c) => c.id), ['thisTask', 'taskProgress', 'similarTasks', 'findBlockers'])
+    assert.deepEqual(cards.slice(0, 3).map((c) => c.because), ['surface:task', 'surface:task', 'surface:task'])
+    // And never on another surface.
+    for (const surface of ['workspace', 'list'] as const) {
+      const ids = starterCards({ surface, overdue: 2, assignedOpen: 5, workspaceOpen: 9 }).map((c) => c.id)
+      assert.equal(ids.some((id) => ['thisTask', 'taskProgress', 'similarTasks'].includes(id)), false, surface)
+    }
   })
 })

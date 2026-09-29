@@ -130,6 +130,7 @@ export const FEATURE_CATEGORY: Readonly<Record<string, AiCategory>> = {
 
   // Comments or chats sent
   'chat.mention':           'comments',
+  'comment.reply':          'comments',
   'chat.title':             'comments',
   'chat':                   'comments',
 

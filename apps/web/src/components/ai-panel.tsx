@@ -951,20 +951,20 @@ export function AiPanel({
    * it is mapped to the server's two surfaces here rather than sent raw, so a
    * new view string cannot silently become a surface the server does not know.
    *
-   * TWO surfaces, because two is what the shell can produce. The list route's
-   * segments are all parameters, so the hint there is the literal `'list'`; the
-   * /ai page passes no hint at all. A task is a sheet over the list route, not
-   * a route, and the dock opened from one (its header's Brain²,
-   * `ledger-rows/row-743`) is still over that list: the task goes to the
-   * server as `scope`, inside the view hint a turn carries, and the cards stay
-   * the list's. The server knows no task surface, and a third surface it could
-   * not serve would be a branch that exists only to be listed.
+   * THREE surfaces. The list route's segments are all parameters, so the hint
+   * there is the literal `'list'`; the /ai page passes no hint at all. A task
+   * is a sheet over the list route, not a route, but the dock opened from one
+   * (its header's Brain², `ledger-rows/row-743`) is pointed at it, and then
+   * the cards are the task's — Summarize, Progress update, Find similar tasks,
+   * what ClickUp's task Brain offers (`found-29-sep/task-brain-offers-list-starters`).
+   * Until 29 September they stayed the list's, because the server knew no task
+   * surface.
    *
    * `staleTime` is the global 30s. That is right for this: the overdue count
    * moves over a day, not over a keystroke, and a starter row that re-fetched
    * on every render would flicker between two sets while somebody read it.
    */
-  const starterSurface: 'workspace' | 'list' = currentView === 'list' ? 'list' : 'workspace'
+  const starterSurface: 'workspace' | 'list' | 'task' = scope ? 'task' : currentView === 'list' ? 'list' : 'workspace'
   const { data: starters } = useQuery({
     queryKey: ['ai-starters', workspaceId, starterSurface],
     queryFn: () =>

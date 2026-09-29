@@ -6298,7 +6298,7 @@ function CommentsPanel({
    */
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format' | 'summarize'>('expand')
+  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format' | 'summarize' | 'reply'>('expand')
   const [aiDraft, setAiDraft] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
@@ -7420,7 +7420,11 @@ function CommentsPanel({
               onChange={(e) => setAiPrompt(e.target.value)}
               disabled={aiMode === 'summarize'}
               placeholder={
-                aiMode === 'summarize' ? t('taskDetail.aiSummarizePlaceholder') : t('taskDetail.aiComposerPlaceholder')
+                aiMode === 'summarize'
+                  ? t('taskDetail.aiSummarizePlaceholder')
+                  : aiMode === 'reply'
+                    ? t('taskDetail.aiReplyPlaceholder')
+                    : t('taskDetail.aiComposerPlaceholder')
               }
               data-testid="comment-ai-prompt"
               className="text-xs"
@@ -7443,11 +7447,16 @@ function CommentsPanel({
                 <option value="shorten">{t('taskDetail.aiModeShorten')}</option>
                 <option value="format">{t('taskDetail.aiModeFormat')}</option>
                 <option value="summarize">{t('taskDetail.aiModeSummarize')}</option>
+                {/* ClickUp's Brain on a comment also crafts a reply
+                    (`found-29-sep/task-brain-offers-list-starters`):
+                    `POST /ai/comment-reply` drafts it from the task and its
+                    thread, and what is typed here says what it should say. */}
+                <option value="reply">{t('taskDetail.aiModeReply')}</option>
               </select>
               <Button
                 size="sm"
                 data-testid="comment-ai-run"
-                disabled={(aiMode !== 'summarize' && !aiPrompt.trim()) || aiBusy}
+                disabled={(aiMode !== 'summarize' && aiMode !== 'reply' && !aiPrompt.trim()) || aiBusy}
                 onClick={async () => {
                   setAiBusy(true)
                   setAiError(null)
@@ -7461,7 +7470,14 @@ function CommentsPanel({
                               body: { taskId, type: 'task', workspaceId },
                             })
                           )?.summary
-                        : (
+                        : aiMode === 'reply'
+                          ? (
+                              await api<{ reply: string }>('/ai/comment-reply', {
+                                method: 'POST',
+                                body: { taskId, workspaceId, instruction: aiPrompt.trim() || undefined },
+                              })
+                            )?.reply
+                          : (
                             await api<{ improved: string }>('/ai/writing/improve', {
                               method: 'POST',
                               body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },

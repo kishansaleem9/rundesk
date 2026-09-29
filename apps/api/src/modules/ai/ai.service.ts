@@ -1595,6 +1595,25 @@ Focus on the key goals, current status, and any blockers.`,
     return response.content[0].type === 'text' ? response.content[0].text : ''
   }
 
+  /**
+   * A reply to a task's comment thread, drafted from the task — its
+   * description, activity and comments, what Summarize reads — for the reader
+   * to keep or not. What they want it to say, if anything, goes with the task,
+   * not into the instructions (`found-29-sep/task-brain-offers-list-starters`).
+   */
+  async draftCommentReply(content: string, instruction: string, ctx: AiCtx = {}): Promise<string> {
+    const response = await this.complete('comment.reply', ctx, {
+      model: 'claude-haiku-4-5',
+      max_tokens: 512,
+      system: `You draft replies to a task's comment thread in Rundesk.
+Write one reply in plain text, one to three sentences, answering the most recent comments in the thread, in the voice of the person asking. No greeting and no sign-off.`,
+      messages: [
+        { role: 'user', content: instruction ? `${content}\n\nWhat the reply should say: ${instruction}` : content },
+      ],
+    })
+    return response.content[0].type === 'text' ? response.content[0].text : ''
+  }
+
   // ─── Writing assistant ────────────────────────────────────────────────────
   async improveWriting(
     text: string,

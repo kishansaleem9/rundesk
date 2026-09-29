@@ -59,7 +59,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 16
+const EXPECTED_CHECKS = 19
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -194,6 +194,27 @@ try {
     chipShown && chipText.includes(TITLE) && chipId === TASK,
     'and the dock is pointed at this task: the chip over its composer names the task and carries its id',
     `chip shown ${chipShown}, reading ${JSON.stringify(chipText)}, id ${JSON.stringify(chipId)} (the task is ${TASK})`,
+  )
+
+  /*
+   * AND IT OFFERS WHAT CLICKUP'S TASK BRAIN OFFERS, FIRST: Summarize, Progress
+   * update, Find similar tasks (`found-29-sep/task-brain-offers-list-starters`).
+   * The list's cards stood here while the server knew no task surface. Read
+   * once the cards have come, in the order drawn.
+   */
+  const TASK_CARDS = ['thisTask', 'taskProgress', 'similarTasks']
+  let cardsDrawn = []
+  const taskCardsFirst = await waitUntil(async () => {
+    cardsDrawn = await page
+      .locator('[data-testid="ai-dock"] [data-testid^="ai-starter-"]')
+      .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid').replace('ai-starter-', '')))
+      .catch(() => [])
+    return JSON.stringify(cardsDrawn.slice(0, 3)) === JSON.stringify(TASK_CARDS)
+  }, { timeoutMs: 15_000 })
+  chk(
+    taskCardsFirst,
+    'and the dock offers the task’s own actions first — Summarize this task, Progress update, Find similar tasks — not the list’s',
+    `the cards drawn: ${JSON.stringify(cardsDrawn)}`,
   )
 
   /*
@@ -534,6 +555,54 @@ try {
     replied && (modelOn ? sumStatus === 201 && draftSaid.length > 0 && draftSaid === sumDraft : sumStatus === 503 && errorSaid === REFUSAL),
     'and the panel shows what the server answered, as /ai/status says it will — with no model, its own words: “AI features are not configured”',
     `/ai/summarize answered ${sumStatus}${modelOn ? ` with ${JSON.stringify(sumDraft.slice(0, 80))}` : ''}; the panel said ${JSON.stringify(errorSaid || draftSaid)}`,
+  )
+
+  // ══ 17–18. AND A REPLY DRAFTED FROM THE THREAD ════════════════════════════
+  /*
+   * ClickUp's Brain on a comment also crafts a reply
+   * (`found-29-sep/task-brain-offers-list-starters`). Draft a reply sends the
+   * task, and what is typed, to /ai/comment-reply, which drafts from the task
+   * and its comments; the answer is shown as /ai/status says, and still only
+   * Keep puts it in the box (the check after this one).
+   */
+  console.log('\n▶ Draft a reply sends the task and the ask, and shows what the server answered')
+  await page.getByTestId('comment-ai-mode').selectOption('reply', { timeout: 8000 }).catch(() => {})
+  await page.getByTestId('comment-ai-prompt').fill('agree and suggest Friday', { timeout: 5000 }).catch(() => {})
+  const replyCall = page
+    .waitForResponse(
+      (r) => new URL(r.url()).pathname === '/api/v1/ai/comment-reply' && r.request().method() === 'POST',
+      { timeout: 20_000 },
+    )
+    .catch(() => null)
+  await page.getByTestId('comment-ai-run').click({ timeout: 8000 }).catch(() => {})
+  const replyRes = await replyCall
+  let replySent = null
+  try {
+    replySent = JSON.parse(replyRes?.request().postData() ?? 'null')
+  } catch {
+    replySent = null
+  }
+  const replyStatus = replyRes?.status() ?? 0
+  const replyDraft = modelOn ? String((await replyRes?.json().catch(() => null))?.data?.reply ?? '').trim() : ''
+  const replyShown = await waitUntil(async () => {
+    const shown = (await readText((modelOn ? draftBox : errorBox).filter({ visible: true }), { timeoutMs: 1000 })).trim()
+    return modelOn ? shown.length > 0 && shown === replyDraft : shown === REFUSAL
+  }, { timeoutMs: 20_000 })
+  const replySaid = (await readText((modelOn ? draftBox : errorBox).filter({ visible: true }), { timeoutMs: 2000 })).trim()
+  chk(
+    replySent?.taskId === TASK && replySent?.instruction === 'agree and suggest Friday'
+      && replyShown && (modelOn ? replyStatus === 201 : replyStatus === 503),
+    'Draft a reply sends the task and what was asked to /ai/comment-reply, and the panel shows what the server answered, as /ai/status says it will',
+    `the request carried ${JSON.stringify(replySent)} and answered ${replyStatus}${modelOn ? ` with ${JSON.stringify(replyDraft.slice(0, 80))}` : ''}; the panel said ${JSON.stringify(replySaid)}`,
+  )
+  // A reply is drafted only for a task its asker may open: asked before
+  // whether a model is configured, so it reads the same on every lane.
+  const replyNotThere = await A('/ai/comment-reply', { method: 'POST', body: { taskId: '00000000-0000-4000-8000-000000000000', workspaceId: WS } })
+  const replyNoTask = await A('/ai/comment-reply', { method: 'POST', body: { workspaceId: WS } })
+  chk(
+    replyNotThere.status === 404 && replyNoTask.status === 400,
+    'and a reply is drafted only for a task that is there: one that is not is refused (404), and none named is refused (400), with or without a model',
+    `a task that is not there answered ${said(replyNotThere)}; no task answered ${said(replyNoTask)}`,
   )
 
   const composerNow = await page.getByTestId('comment-input').inputValue({ timeout: 5000 }).catch(() => null)

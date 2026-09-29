@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 48 open, 8 partly fixed, 283 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 47 open, 8 partly fixed, 284 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1540,13 +1540,23 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Measured: the mixed set is refused on lane 4. Without the model at `d15081f`, `bep-7` reddens (14/16) and `bep-13` and `bep-14` (15/16 each), against a 16/16 baseline.
 - Only these three are marked. Other patches aimed at a refusal in a suite that holds either way would still run with a model if their set holds one that needs it; none is known.
 
-### `found-29-sep/task-brain-offers-list-starters` — open, small (feature; found closing `found-29-sep/ai-chat-takes-no-task`)
+### `found-29-sep/task-brain-offers-list-starters` — **closed**, break run pending (feature, small; found closing `found-29-sep/ai-chat-takes-no-task`)
 
 **Brain opened from a task offers the list's starters, and Brain in a comment drafts no reply from the thread**
 
 *Evidence, 29 September:* with the dock pointed at a task, the starter cards are the list's (`starterSurface` maps any view but `list` to the workspace's, and `isStarterSurface` refuses `task`, a surface its comment says no caller could send — Brain² sends one now). ClickUp offers Summarize, Progress update and Find similar tasks from a task's Brain, and from a comment's Brain a reply drafted from the thread (help centre, search summaries). The comment AI panel's modes are four writing modes over a typed instruction, and Summarize this task.
 
 *To close:* a `task` starter surface (Summarize this task, Write a progress update, Find similar tasks, and a floor card), chosen when the dock is pointed at a task, each sending through the turn that now carries the task; and a "Draft a reply" mode in the comment panel that sends the task (its comments are in `buildTaskSummaryInput`) and lands in the box only by Keep. Checks for both, on a lane with a model and one without.
+
+*Closed, 29 September.* ClickUp, read through search summaries of the help centre ("Use Brain AI on tasks", "Summarize task and location activity with Brain AI", "Use Brain on task comments"): a task's Brain offers Summarize, Progress update and Find similar tasks, and Brain on a comment crafts a reply.
+- The starters have a `task` surface. `isStarterSurface` accepts it, and its catalogue puts Summarize this task, Progress update and Find similar tasks first; the fourth card is chosen by the facts, as on any surface. The dock asks for it when it is pointed at a task. Each card's prompt goes out through the turn that carries the task (`found-29-sep/ai-chat-takes-no-task`), so the answer reads the task. The starters' unit test holds the order, and holds that the three are never offered elsewhere.
+- The comment AI panel has a sixth mode, Draft a reply. `POST /ai/comment-reply` checks the task first, before whether a model is configured: none named is 400, a task that is not there 404, one the reader may not open 403. It then drafts one plain-text reply from the task and its thread (`buildTaskSummaryInput`, which holds the comments), with what was typed going along as what the reply should say. The draft reaches the box only by Keep. It is metered as `comment.reply`, a comment. Four locales.
+
+`brain-entry-points` checks 4, 17 and 18 (19 checks now):
+- Before 16/19 on lanes 6 and 7: the list's cards were drawn, there was no reply mode, and there was no route.
+- After 19/19 on both lanes. On lane 7 the draft shown is the one the server sent.
+- `bep-19` (the task surface never asked for) and `bep-20` (the ask dropped) each redden their check alone (18/19, lanes 6 and 7). `bep-21` (a reply for any task): break run pending.
+- Regression, 8 suites on lanes 6 and 7 (the comment menu, the task's AI bar, the palette, AI reads, the create menu's AI, the dock's answers, the activity filters, AI value): all green.
 
 ### `found-29-sep/model-stub-never-streams` — **closed** (test tooling, small; found measuring `ledger-rows/row-743` on a model lane)
 
@@ -1631,6 +1641,7 @@ the whole name in it, and one Escape closing it.
   or the create modal: 33/33, 694 checks.
 - In CI already.
 - In main after the merge: `comment-plus-menu` 18/18 on lane 5, and 10 suites that open the composer, its "+", the create modal or Brain green on lanes 5 and 6.
+- On the committed tree (lane 4, `e5501c8`, baseline 18/18): `cpf-1..5` and `cpm-1..4` each redden again.
 - Found beside it: the sidebar's space "+" menu hands the creator's cursor on the same way (`found-29-sep/space-create-menu-keeps-focus-after-create`); Brain loses what is typed before its prompt has the cursor (`found-29-sep/brain-loses-early-typing`); the creator gives the cursor back to nobody when it closes (`found-29-sep/create-modal-returns-focus-to-nothing`).
 
 ### `found-29-sep/chat-message-actions-reads-after-fixed-waits` — open, medium (test tooling; found by this batch's regression sweep)

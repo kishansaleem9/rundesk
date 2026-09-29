@@ -280,6 +280,27 @@ export class AiController {
     return this.ai.suggestAutomations(body.workspaceId, { userId: user.id, workspaceId: body.workspaceId })
   }
 
+  /**
+   * Brain on a task's comments, "craft a reply" (help centre, "Use Brain on
+   * task comments"; `found-29-sep/task-brain-offers-list-starters`): a reply
+   * drafted from the task and its thread. The task rule first, before whether
+   * a model is configured, as Summarize asks it.
+   */
+  @Post('comment-reply')
+  @ApiOperation({ summary: 'Draft a reply to a task comment thread' })
+  async commentReply(
+    @CurrentUser() user: any,
+    @Body() body: { taskId?: string; workspaceId?: string; instruction?: string },
+  ) {
+    if (!body.taskId) throw new HttpException('taskId is required', HttpStatus.BAD_REQUEST)
+    await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
+    await this.ai.assertAvailable('comment.reply', { userId: user.id, workspaceId: body.workspaceId })
+    const content = await this.ai.buildTaskSummaryInput(body.taskId)
+    const instruction = typeof body.instruction === 'string' ? body.instruction.trim().slice(0, 500) : ''
+    const reply = await this.ai.draftCommentReply(content, instruction, { userId: user.id, workspaceId: body.workspaceId })
+    return { reply }
+  }
+
   @Post('summarize')
   @ApiOperation({ summary: 'Summarize a task or project' })
   async summarize(
