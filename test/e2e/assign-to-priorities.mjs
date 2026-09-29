@@ -53,7 +53,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 25
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -456,6 +456,25 @@ try {
     'the toast\'s link opens their priorities, where the task says who added it',
     `the panel's row read "${panelSays}"${theirEntry ? '' : ' — there was no entry to read'}`,
   )
+  /*
+   * AND WHEN, DRAWN. ClickUp's expanded Priorities has "Added at" beside "Added
+   * by". This was a hover title, which a touch screen never shows
+   * (`found-29-sep/priority-added-at-on-hover-only`). The time drawn has to be
+   * the entry's own: its `datetime` is the server's `createdAt` for that row.
+   */
+  const whenOf = async (at) => ({
+    text: (await readText(at.filter({ visible: true }), { timeoutMs: 1000 })).trim(),
+    at: await at.getAttribute('datetime', { timeout: 1000 }).catch(() => null),
+  })
+  let panelWhen = null
+  chk(
+    await waitUntil(async () => {
+      panelWhen = await whenOf(page.getByTestId(`priority-added-at-${theirEntry?.id}`))
+      return panelWhen.text.length > 0 && !!theirEntry?.createdAt && panelWhen.at === theirEntry.createdAt
+    }, { timeoutMs: 10_000 }),
+    'and when it was added, drawn beside who rather than left to a hover',
+    `the panel's time read ${JSON.stringify(panelWhen)}; the entry was added at ${theirEntry?.createdAt ?? 'no time'}`,
+  )
 
   // -------------------------------------------------------------------------
   console.log('\n▶ and the teammate, in their own Planner, sees who put it there')
@@ -483,6 +502,15 @@ try {
     }, { timeoutMs: 20_000 }),
     'in their Planner\'s Priorities, the task says "Added by" and who',
     `the row's label read "${railSays}"`,
+  )
+  let railWhen = null
+  chk(
+    await waitUntil(async () => {
+      railWhen = await whenOf(theirRow.getByTestId('planner-priority-added-at'))
+      return railWhen.text.length > 0 && !!theirEntry?.createdAt && railWhen.at === theirEntry.createdAt
+    }, { timeoutMs: 10_000 }),
+    'and when, drawn in the rail as well',
+    `the rail's time read ${JSON.stringify(railWhen)}; the entry was added at ${theirEntry?.createdAt ?? 'no time'}`,
   )
   await mateContext.close().catch(() => {})
 
@@ -541,6 +569,34 @@ try {
     pulled.status === 404 && rowsAfterPull === 1,
     'and it is theirs now: the one who added it cannot take it off (404)',
     `the adder's DELETE answered ${pulled.status}; ${rowsAfterPull} row(s) left for the task`,
+  )
+
+  /*
+   * TICKED OFF, IT HAS LEFT THEIR RAIL, so adding it again puts it back
+   * (`found-29-sep/priority-readd-answers-a-ticked-off-row`). The add answered
+   * with the done row, so the toast said "added" and the task stayed off the
+   * rail. It has to come back open, at the end of their list, as added by
+   * whoever put it back, and still as one row. Put back by its owner, whose
+   * own add it was not, so "who" has to change for the check to pass.
+   */
+  const ticked = once.data?.id
+    ? await M(`/workspaces/${workspaceId}/priorities/${once.data.id}`, { method: 'PATCH', body: { done: true } })
+    : { status: 0 }
+  const putBack = await M(`/workspaces/${workspaceId}/priorities`, { method: 'POST', body: { taskId: routed.id } })
+  const [back] = await sql`
+    select done_at, position, added_by_id from user_priorities
+    where user_id = ${mateId} and workspace_id = ${workspaceId} and task_id = ${routed.id}`
+  const [{ last }] = await sql`
+    select max(position)::int as last from user_priorities
+    where user_id = ${mateId} and workspace_id = ${workspaceId}`
+  const rowsAfterPutBack = await rowsFor(mateId, routed.id)
+  chk(
+    ticked.status < 300 && putBack.status < 300 && !!back && back.done_at === null && back.position === last &&
+      back.added_by_id === mateId && rowsAfterPutBack === 1,
+    'a task they ticked off, added again, is back on their open list, at the end, as added by whoever put it back',
+    `ticking it off answered ${ticked.status}, adding it again ${putBack.status}; the row is ` +
+      `${back ? `${back.done_at === null ? 'open' : 'still done'}, at ${back.position} of ${last}, added by ${back.added_by_id === mateId ? 'the one who put it back' : back.added_by_id === me.id ? 'the first adder still' : back.added_by_id}` : 'gone'}` +
+      `; ${rowsAfterPutBack} row(s) for the task`,
   )
 } catch (err) {
   failed += 1

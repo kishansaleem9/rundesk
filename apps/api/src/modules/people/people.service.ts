@@ -963,8 +963,9 @@ export class PeopleService {
   }
 
   /**
-   * One row at the end of `ownerId`'s list, recording who added it; a task
-   * already on the list answers with the row that is there.
+   * One row at the end of `ownerId`'s list, recording who added it. A task
+   * already open on the list answers with the row that is there; one ticked
+   * off is put back, at the end, as added now by whoever added it again.
    */
   private async insertPriority(
     workspaceId: string,
@@ -1011,6 +1012,23 @@ export class PeopleService {
             ),
           )
           .limit(1)
+        /*
+         * TICKED OFF, IT HAS LEFT THE RAIL, so adding it again means putting it
+         * back (`found-29-sep/priority-readd-answers-a-ticked-off-row`). This
+         * answered with the done row, so the toast said "added" while the task
+         * stayed off the rail. In ClickUp a finished task is cleared from
+         * priorities by the toast that follows finishing it, and adding it
+         * again is a new add. So the row reopens at the end of the list, and
+         * says who added it this time and when.
+         */
+        if (existing?.doneAt) {
+          const [reopened] = await this.db
+            .update(userPriorities)
+            .set({ doneAt: null, position: (last?.position ?? -1) + 1, addedById, createdAt: new Date() })
+            .where(eq(userPriorities.id, existing.id))
+            .returning()
+          return reopened
+        }
         if (existing) return existing
       }
       throw err

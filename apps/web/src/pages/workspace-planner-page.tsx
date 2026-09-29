@@ -17,7 +17,7 @@ import {
   type PlannerGridSize,
 } from '../components/planner-settings-dialog'
 import { usePriorities, usePriorityActions, addedByOther } from '../lib/use-priorities'
-import { exactTime } from '../lib/relative-time'
+import { exactTime, relativeTime } from '../lib/relative-time'
 import {
   plannerRange,
   plannerStep,
@@ -1406,16 +1406,30 @@ export function PlannerPage() {
                     <span className="block truncate">{p.title}</span>
                     {/*
                       `ledger-rows/row-850` — a task a colleague put on your
-                      list says who, as ClickUp's "Added by" does, and when on
-                      hover. Your own choices say nothing: they are the list.
+                      list says who and when, ClickUp's "Added by" and "Added
+                      at". The when was a hover title, which a touch screen
+                      never shows (`found-29-sep/priority-added-at-on-hover-only`);
+                      it is drawn now, with the exact time on hover. Your own
+                      choices say nothing: they are the list.
                     */}
                     {addedByOther(p, currentUserId) && (
                       <span
                         data-testid="planner-priority-added-by"
-                        title={p.createdAt ? exactTime(p.createdAt, locale) : undefined}
                         className="block truncate text-[10px] text-muted-foreground"
                       >
                         {t('planner.priorityAddedBy', { name: addedByOther(p, currentUserId) ?? '' })}
+                        {p.createdAt && (
+                          <>
+                            {' · '}
+                            <time
+                              data-testid="planner-priority-added-at"
+                              dateTime={p.createdAt}
+                              title={exactTime(p.createdAt, locale)}
+                            >
+                              {relativeTime(p.createdAt, locale)}
+                            </time>
+                          </>
+                        )}
                       </span>
                     )}
                   </span>

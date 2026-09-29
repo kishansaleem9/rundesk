@@ -44,7 +44,7 @@ import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePersonPanel } from '../store/person-panel'
 import { usePriorities, usePriorityActions, addedByOther } from '../lib/use-priorities'
-import { exactTime } from '../lib/relative-time'
+import { exactTime, relativeTime } from '../lib/relative-time'
 import { InlineSkeleton } from './loading-skeletons'
 
 type Person = {
@@ -191,16 +191,29 @@ function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId
             </span>
             {/*
               `ledger-rows/row-850` — a task a colleague put on this person's
-              list says who, and when on hover: ClickUp's "Added by" and "Added
-              at". What they chose themselves says nothing.
+              list says who and when: ClickUp's "Added by" and "Added at", the
+              when drawn rather than left to a hover title
+              (`found-29-sep/priority-added-at-on-hover-only`). What they chose
+              themselves says nothing.
             */}
             {addedByOther(p, userId) && (
               <span
                 data-testid={`priority-added-by-${p.id}`}
-                title={p.createdAt ? exactTime(p.createdAt, locale) : undefined}
                 className="block text-[11px] text-muted-foreground"
               >
                 {t('person.priorityAddedBy', { name: addedByOther(p, userId) ?? '' })}
+                {p.createdAt && (
+                  <>
+                    {' · '}
+                    <time
+                      data-testid={`priority-added-at-${p.id}`}
+                      dateTime={p.createdAt}
+                      title={exactTime(p.createdAt, locale)}
+                    >
+                      {relativeTime(p.createdAt, locale)}
+                    </time>
+                  </>
+                )}
               </span>
             )}
           </span>

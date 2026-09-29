@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 41 open, 7 partly fixed, 306 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 39 open, 7 partly fixed, 308 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1584,7 +1584,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
 
-### `found-29-sep/priority-readd-answers-a-ticked-off-row` — open (visible bug, small; found closing `ledger-rows/row-850`)
+### `found-29-sep/priority-readd-answers-a-ticked-off-row` — **closed** (visible bug, small; found closing `ledger-rows/row-850`)
 
 **Adding a task that is on a list but ticked off says it was added, and it stays off the rail**
 
@@ -1592,13 +1592,26 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* find out from ClickUp what adding a task already done on a priorities list does, and make the add do that, whether reopening the row or saying it is done. Check it from the prompt and from the route.
 
-### `found-29-sep/priority-added-at-on-hover-only` — open (parity, small; found closing `ledger-rows/row-850`)
+*Closed, 29 September.* ClickUp's priorities point at tasks. A task finished stays listed until the toast that follows finishing it clears it ("When you mark a task as done, we'll now gently nudge you with a toast asking if you want to remove it from your priorities — one click, gone", the LineUp feedback thread that became Personal Priorities). So adding it after that is a new add. Here a ticked-off row has already left the rail, so adding its task again puts it back:
+- The row opens again, moves to the end of the list, and records who added it this time and when (`insertPriority`). A row still open is answered as it was, unmoved.
+- `people.service.test.ts` has two new tests, one for each case: 10 of 10 pass.
+- `assign-to-priorities` has a new check: the owner ticks the task off, adds it again, and the row is read back from the database. Before the fix it failed, "still done, at 1 of 1, added by the first adder still". After it, the row is open, last, and added by the owner.
+- `acp-30` (the done row answered as it was) is 24/25, reddening that check. `acp-33` is its unit claim: the new test fails, 9 of 10.
+- Regression on lanes 5–7: 14 suites that read priorities, the Planner or the person panel, all green, 257 checks.
+
+### `found-29-sep/priority-added-at-on-hover-only` — **closed** (parity, small; found closing `ledger-rows/row-850`)
 
 **When a colleague added a priority is shown only on hover**
 
 *Evidence, 29 September:* ClickUp's expanded Personal Priorities view has "Added by" and "Added at" columns. The Planner rail and the person panel draw "Added by <name>" and give the time only as the row's `title` attribute, which a touch screen cannot show.
 
 *To close:* draw when a row was added, beside who added it, in the rail and the panel. The time is the row's `createdAt`, in the viewer's locale. Check that it is drawn, not only present.
+
+*Closed, 29 September.* ClickUp's expanded Personal Priorities has "Added by" and "Added at" columns ("Expand to view Personal Priorities in detail").
+- The rail and the panel draw "Added by <name> · <when>". The when is a `<time>` element: its `datetime` is the row's `createdAt`, its text is the relative time in the reader's language (`relativeTime`, as the rest of the app has it), and its title is the exact time. Your own rows still say nothing.
+- `assign-to-priorities` has two new checks, one for the panel and one for the teammate's rail. Each reads the time drawn, with a visibility filter, and requires its `datetime` to be the server's `createdAt` for that entry. Before the change both failed, with nothing drawn.
+- `acp-31` and `acp-32` leave the time to the hover title again. Each is 24/25, reddening its own check.
+- Regression on lanes 5–7: 14 suites that read priorities, the Planner or the person panel, all green, 257 checks.
 
 ### `found-29-sep/priority-field-adds-to-nobody-else` — open (feature, small; found closing `ledger-rows/row-850`)
 

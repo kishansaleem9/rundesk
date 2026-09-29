@@ -30,10 +30,16 @@ function selectChain(rows: unknown[]) {
  * `conflict` fails the insert as the unique index on (owner, workspace, task) does.
  */
 function fakeDb(selects: unknown[][], conflict: boolean) {
-  const written: { values?: Record<string, unknown> } = {}
+  const written: { values?: Record<string, unknown>; set?: Record<string, unknown> } = {}
   const queue = [...selects]
   const db = {
     select: mock.fn(() => selectChain(queue.shift() ?? [])),
+    update: mock.fn(() => ({
+      set: (set: Record<string, unknown>) => {
+        written.set = set
+        return { where: () => ({ returning: async () => [{ id: 'row-there', ...set }] }) }
+      },
+    })),
     insert: mock.fn(() => ({
       values: (values: Record<string, unknown>) => {
         written.values = values
@@ -145,6 +151,27 @@ describe("PeopleService.addPriorityFor — a task on a colleague's priorities (l
     const row = await svc.addPriorityFor(WS, { id: ME }, MATE, { taskId: TASK })
     assert.deepEqual(row, existing)
     assert.equal(db.insert.mock.callCount(), 1, 'one attempt, refused by the unique index, and no other')
+  })
+
+  it('puts a ticked-off row back: open, at the end, added by the one adding it now', async () => {
+    const existing = { id: 'row-there', userId: MATE, workspaceId: WS, taskId: TASK, addedById: MATE, doneAt: new Date('2026-09-28T10:00:00Z') }
+    const before = Date.now()
+    const { svc, db, written } = service({ members: both, conflict: true, selects: [[{ position: 6 }], [existing]] })
+    const row = await svc.addPriorityFor(WS, { id: ME }, MATE, { taskId: TASK })
+    assert.equal(db.update.mock.callCount(), 1, 'the done row is changed, not answered as it was')
+    assert.equal(written.set?.doneAt, null, 'open again')
+    assert.equal(written.set?.position, 7, 'at the end of the list')
+    assert.equal(written.set?.addedById, ME, 'added by the one who put it back')
+    assert.ok((written.set?.createdAt as Date)?.getTime() >= before, 'and added now')
+    assert.equal((row as { doneAt: unknown }).doneAt, null)
+  })
+
+  it('leaves a row that is still open as it is', async () => {
+    const existing = { id: 'row-there', userId: MATE, workspaceId: WS, taskId: TASK, addedById: MATE, doneAt: null }
+    const { svc, db } = service({ members: both, conflict: true, selects: [[{ position: 6 }], [existing]] })
+    const row = await svc.addPriorityFor(WS, { id: ME }, MATE, { taskId: TASK })
+    assert.deepEqual(row, existing)
+    assert.equal(db.update.mock.callCount(), 0, 'an open row is not moved or re-attributed')
   })
 
   it("takes your own id as your own add — a guest's typed line too — and records you as its adder", async () => {
