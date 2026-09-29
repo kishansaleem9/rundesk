@@ -201,7 +201,9 @@ try {
       add: await addField.count(),
       addButton: await page.getByRole('button', { name: 'Add', exact: true }).count(),
       notYours: await notYours.count(),
-      pickerOptions: (await picker.count()) > 0 ? await picker.first().locator('option').allInnerTexts() : [],
+      // Offered by the DRAWN picker: Playwright counts no <option> as visible, so the
+      // guard is on the select (`found-29-sep/innertext-reads-hidden-leaves`).
+      pickerOptions: (await picker.count()) > 0 ? await picker.first().filter({ visible: true }).locator('option').allInnerTexts() : [],
       // The switch beside "Billable by default", in the same section and by the same rule.
       billable: await page.locator('label', { hasText: 'Billable by default' }).getByRole('switch').count(),
       billableDisabled: await page.locator('label', { hasText: 'Billable by default' }).getByRole('switch').first().isDisabled().catch(() => null),

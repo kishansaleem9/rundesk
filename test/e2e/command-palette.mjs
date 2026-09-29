@@ -273,7 +273,8 @@ try {
   await input.fill(QUERY)
   await page.waitForTimeout(1500)
 
-  const seen = (await page.locator('[cmdk-list]').first().innerText()).replace(/\s+/g, ' ')
+  // Caught: filtered to what is drawn, a hidden list waits out the timeout and would throw.
+  const seen = (await page.locator('[cmdk-list]').first().filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ')
 
   // Each hit is checked by its TITLE, which does not contain the query — so a
   // title-scoring filter cannot let these through.
@@ -361,7 +362,7 @@ try {
     'the Assignee picker is not rendered',
   )
   chk(
-    (await page.locator('[data-testid="palette-assignee-value"]').innerText().catch(() => '')).trim() ===
+    (await page.locator('[data-testid="palette-assignee-value"]').filter({ visible: true }).innerText().catch(() => '')).trim() ===
       'Anyone',
     'and it says "Anyone" inline, the way her frame does',
     'the current value is not shown on the row',
@@ -402,7 +403,7 @@ try {
   await page.getByTestId('palette-assignee-option-u3').click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(1500)
   chk(
-    (await page.locator('[data-testid="palette-assignee-value"]').innerText().catch(() => '')).trim() ===
+    (await page.locator('[data-testid="palette-assignee-value"]').filter({ visible: true }).innerText().catch(() => '')).trim() ===
       'Hamda Raza',
     'choosing somebody puts their name on the row',
     'the row still says "Anyone" after choosing a person',
@@ -568,7 +569,7 @@ try {
     'a query that matches nothing gets an answer rather than a dead end',
     'no AI answer on a zero-result query',
   )
-  const answerText = (await page.getByTestId('palette-ai-text').innerText().catch(() => '')).trim()
+  const answerText = (await page.getByTestId('palette-ai-text').filter({ visible: true }).innerText().catch(() => '')).trim()
   chk(answerText === AI_ANSWER, 'and the answer it renders is the one the server sent',
     `rendered ${JSON.stringify(answerText)}`)
   chk(knowledgeStubCalls.length === 1, `asked the assistant once, not per keystroke (${knowledgeStubCalls.length})`,
@@ -587,7 +588,7 @@ try {
     'the answer can be copied',
     'no copy control under the answer',
   )
-  const sourceLabel = (await page.getByTestId('palette-ai-source').first().innerText().catch(() => '')).trim()
+  const sourceLabel = (await page.getByTestId('palette-ai-source').first().filter({ visible: true }).innerText().catch(() => '')).trim()
   chk(sourceLabel === AI_SOURCE_TITLE, 'and it cites the source it was grounded in',
     `source chip read ${JSON.stringify(sourceLabel)}`)
 

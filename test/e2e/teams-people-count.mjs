@@ -108,7 +108,7 @@ try {
   await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
 
   const badge = page.getByTestId('teams-people-count')
-  const badgeText = async () => (await badge.innerText({ timeout: 3000 }).catch(() => '')).trim()
+  const badgeText = async () => (await badge.filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')).trim()
   const cards = () => page.getByTestId('teams-person').filter({ visible: true }).count()
 
   // ══ 1. WHILE THE LIST IS ON ITS WAY ═══════════════════════════════════════
@@ -128,7 +128,9 @@ try {
   const tabDrawn = await waitUntil(() => page.getByTestId('teams-tab-people').isVisible().catch(() => false), { timeoutMs: 20_000 })
   const caught = await waitUntil(() => held > 0, { timeoutMs: 10_000 })
   const drawnWhileHeld = await badge.count()
-  const tabWhileHeld = await page.getByTestId('teams-tab-people').innerText({ timeout: 3000 }).catch(() => '')
+  // Unfiltered, like the two tab reads below: the claim is that NO number is drawn, and a
+  // hidden tab read whole is the stricter read (`found-29-sep/innertext-reads-hidden-leaves`).
+  const tabWhileHeld = await page.getByTestId('teams-tab-people').innerText({ timeout: 3000 }).catch(() => '') // text-read: absence — no digit on the tab
   chk(
     tabDrawn && caught && drawnWhileHeld === 0 && tabWhileHeld !== '' && !/\d/.test(tabWhileHeld),
     'while the member list is still on its way, the People tab draws no number — not a 0',
@@ -147,8 +149,8 @@ try {
     'the People tab carries the workspace’s head count, 3, the number of members the API lists',
     `the tab read ${JSON.stringify(first)}; the API listed ${listed.count} (${said(listed.res)})`,
   )
-  const teamsTab = await page.getByTestId('teams-tab-teams').innerText({ timeout: 3000 }).catch(() => '')
-  const chartTab = await page.getByTestId('teams-tab-chart').innerText({ timeout: 3000 }).catch(() => '')
+  const teamsTab = await page.getByTestId('teams-tab-teams').innerText({ timeout: 3000 }).catch(() => '') // text-read: absence — no digit on the tab
+  const chartTab = await page.getByTestId('teams-tab-chart').innerText({ timeout: 3000 }).catch(() => '') // text-read: absence — no digit on the tab
   chk(
     teamsTab !== '' && chartTab !== '' && !/\d/.test(teamsTab) && !/\d/.test(chartTab),
     'and it is the only tab that carries a number, as in the frame',

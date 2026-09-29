@@ -324,7 +324,7 @@ try {
     `the body was ${JSON.stringify(sentPlan)}`,
   )
 
-  const shownError = await readText(page.getByTestId('create-ai-error'))
+  const shownError = await readText(page.getByTestId('create-ai-error').filter({ visible: true }))
   chk(
     /503/.test(shownError) && /not configured/i.test(shownError),
     'the 503 is shown with the provider\'s own words, not swallowed and not reduced to a code',
@@ -379,7 +379,7 @@ try {
   await appears('[data-testid="create-ai-confirm"]')
   chk(
     planServed > 0 &&
-      (await readText(page.getByTestId('create-ai-step-0'))).includes('Set that up') &&
+      (await readText(page.getByTestId('create-ai-step-0').filter({ visible: true }))).includes('Set that up') &&
       (await page.locator('[data-testid="create-ai-step-1"]').count()) === 0,
     'the panel lists one line per planned action, in the planner\'s own words',
     planServed === 0
@@ -455,7 +455,7 @@ try {
   chk(
     // `${SPACE_NAME} > ${LIST_NAME}` is the server's `container.path`; the plan's
     // own wording is "Set that up", so this cannot pass by echoing the plan.
-    (await readText(page.getByTestId('create-ai-result-0'))).includes(`${SPACE_NAME} > ${LIST_NAME}`),
+    (await readText(page.getByTestId('create-ai-result-0').filter({ visible: true }))).includes(`${SPACE_NAME} > ${LIST_NAME}`),
     'and the result names the container the SERVER made, not the sentence that asked for it',
     `the result row read ${JSON.stringify(await readText(page.getByTestId('create-ai-result-0')))}`,
   )
@@ -500,7 +500,7 @@ try {
   )
   chk(
     await waitUntil(
-      async () => /not configured/i.test(await readText(page.locator('[data-sonner-toast]').first())),
+      async () => /not configured/i.test(await readText(page.locator('[data-sonner-toast]').first().filter({ visible: true }))),
       { timeoutMs: 20_000 },
     ),
     'and a refused write reaches the person as a toast, in the provider\'s words',

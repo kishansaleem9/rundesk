@@ -234,7 +234,7 @@ try {
   chk(shown, 'and choosing it draws the view', 'the Team tab rendered nothing')
 
   const rows = () => page.locator('[data-testid="team-view-row"]')
-  const names = () => page.locator('[data-testid="team-view-name"]').allInnerTexts()
+  const names = () => page.locator('[data-testid="team-view-name"]').filter({ visible: true }).allInnerTexts()
 
   chk(
     (await rows().count()) === 3,
@@ -256,7 +256,7 @@ try {
    * closed. A view that grouped correctly but counted the whole list would
    * report the same number on every row.
    */
-  const loads = await page.locator('[data-testid="team-view-load"]').allInnerTexts()
+  const loads = await page.locator('[data-testid="team-view-load"]').filter({ visible: true }).allInnerTexts()
   chk(
     loads.some((x) => x.includes('2 of 4')),
     'the busiest person’s row counts only their work',
@@ -278,7 +278,7 @@ try {
     `the loads read ${JSON.stringify(loads)} — expected one saying "0 of 1"`,
   )
 
-  const first = await readText(rows().first())
+  const first = await readText(rows().first().filter({ visible: true }))
   chk(
     /Admin/.test(first),
     'the busiest person is first',
@@ -292,7 +292,7 @@ try {
    * and only it: so the last row's tasks are read, and must be exactly that.
    */
   const unowned = `Nobody wants this ${TAG}`
-  const lastTasks = (await rows().last().locator('[data-testid="team-view-task"]').allInnerTexts())
+  const lastTasks = (await rows().last().locator('[data-testid="team-view-task"]').filter({ visible: true }).allInnerTexts())
     .map((t) => t.trim())
   chk(
     lastTasks.length === 1 && lastTasks[0] === unowned,

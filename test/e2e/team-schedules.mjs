@@ -270,7 +270,7 @@ try {
 
   await page.locator('[data-testid="planner-team-search"]').fill(`Sara ${TAG}`)
   const narrowed = await waitUntil(async () => {
-    const names = await page.locator('[data-testid="planner-team-result"]').allInnerTexts()
+    const names = await page.locator('[data-testid="planner-team-result"]').filter({ visible: true }).allInnerTexts()
     return names.length === 1 && names[0].includes(SARA.displayName)
   }, { timeoutMs: 10_000 })
   chk(
@@ -329,6 +329,7 @@ try {
 
   const names = await page
     .locator('[data-testid="planner-team-column-name"]')
+    .filter({ visible: true })
     .allInnerTexts()
   chk(
     names.length === 2 &&

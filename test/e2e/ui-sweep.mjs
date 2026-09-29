@@ -5,6 +5,20 @@
  * guessed. Where a control turned out to be a <select> rather than a button,
  * this drives the select — an earlier version clicked a button that did not
  * exist and silently proved nothing.
+ *
+ * IT WAITS FOR WHAT IT READS, THE WHOLE FILE
+ * (`found-29-sep/ui-sweep-reads-after-fixed-waits`). Sections 12–16b were
+ * converted first; 0–11 and 15 still slept 0.5–3.2 s and then read, forty-one
+ * `waitForTimeout`s, with four more left in section 12. A loaded machine
+ * outlasts a fixed sleep, and twice on 29 September the break-run baseline
+ * went red that way: 16b read the Saturday button once, as soon as it was
+ * drawn; and section 9 counted the palette 1.2 s after Ctrl+K, which beside
+ * three other break runs had not drawn it yet, so it reported "Ctrl+K did not
+ * open the palette" and failed its other sixteen checks unread. Every read now
+ * waits, bounded at 10–20 s, for the thing it reads: an element drawn or gone,
+ * a count reached, a search answered and drawn, the server holding what was
+ * written, a dialog shut before the next hotkey. A wait that runs out decides
+ * nothing. The check after it reads once more and fails in its own words.
  */
 import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
@@ -118,7 +132,8 @@ const seedSweepTask = async () => {
   if (await quick.count()) {
     await quick.fill(SWEEP_TASK)
     await page.getByRole('button', { name: /^Add task$/ }).first().click()
-    await page.waitForTimeout(2500)
+    // The row is drawn once the server has made it and the list has re-read it.
+    await firstTaskCard().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   }
   sweepTaskSeeded = true
 }
@@ -160,13 +175,24 @@ page.on('pageerror', (e) => consoleErrors.push(`pageerror: ${e.message}`))
 /** The column header cells of the list table, as text. */
 const columns = () => page.evaluate(() => {
   const all = [...document.querySelectorAll('div,tr')]
-  const row = all.find((e) => /^\s*Title\b/.test(e.innerText || '') && (e.innerText || '').length < 120)
-  return row ? row.innerText.split('\n').map((s) => s.trim()).filter((s) => s && s !== '▲' && s !== '▼') : []
+  // Drawn rows only: a hidden row answers innerText with its whole text
+  // (`found-29-sep/innertext-reads-hidden-leaves`).
+  const row = all.find((e) => e.checkVisibility() && /^\s*Title\b/.test(e.innerText || '') && (e.innerText || '').length < 120)
+  return row && row.checkVisibility() ? row.innerText.split('\n').map((s) => s.trim()).filter((s) => s && s !== '▲' && s !== '▼') : []
 })
 
 /** The select whose options include the given text. */
 const selectWith = (text) =>
   page.locator('select').filter({ has: page.locator(`option:text-is("${text}")`) }).first()
+
+/**
+ * The label a `<select>` draws: its chosen option's text, read off the select
+ * and only while the select itself is shown. An `<option>` of a closed select
+ * has no box of its own, so the guard goes on the element that draws it
+ * (`found-29-sep/innertext-reads-hidden-leaves`).
+ */
+const chosenLabel = (select) =>
+  select.filter({ visible: true }).evaluate((el) => el.selectedOptions?.[0]?.textContent ?? '', undefined, { timeout: 2000 }).catch(() => '')
 
 /*
  * The grouping control, BY TESTID rather than by the words in its options.
@@ -196,13 +222,55 @@ const GROUP_LABELS = {
  * which reads as "the button is missing" rather than "the sheet is still open".
  */
 const closeSheet = async () => {
+  const overlay = page.locator('button[aria-label="Close sheet overlay"]')
   for (let i = 0; i < 3; i++) {
-    if (await page.locator('button[aria-label="Close sheet overlay"]').count() === 0) return
-    await page.locator('button[aria-label="Close sheet overlay"]').first().click({ force: true }).catch(() => {})
-    await page.waitForTimeout(600)
+    if (await overlay.count() === 0) return
+    await overlay.first().click({ force: true }).catch(() => {})
+    // Closing drops `?task=` from the address and the sheet goes with the
+    // re-render, so it is gone when the overlay is, not 600 ms after the press.
+    await waitUntil(async () => (await overlay.count()) === 0, { timeoutMs: 10_000 })
   }
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(600)
+  await waitUntil(async () => (await overlay.count()) === 0, { timeoutMs: 10_000 })
+}
+
+/*
+ * THE LIST, ONCE IT HAS APPLIED THE VIEW IT OPENS WITH. A list with saved views
+ * applies its default one when they arrive, and that sets the grouping — so a
+ * grouping chosen before it lands is undone under the check that reads it. The
+ * sweep's list has twenty. The 3.2 s this replaced was a bet that it had landed;
+ * now it is the view's own tab, current (`aria-current`).
+ */
+const LIST_ID = LIST_PATH.split('/').pop()
+const listSettled = async () => {
+  const views = (await sweepApi(`/lists/${LIST_ID}/views`).catch(() => null))?.data
+  if (Array.isArray(views) && views.length > 0) {
+    await page.locator('[data-testid^="work-view-tab-view-"][aria-current="true"]').first()
+      .waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
+  }
+  await grouperSelect().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+}
+
+/*
+ * A SURFACE, DRAWN AND SETTLED, or showing the crash screen. Each draws a blank
+ * page first, then the app's shell and its own heading, then its data over the
+ * next few seconds (measured on lane 5: 16 characters for up to 1.6 s, then
+ * 600–900, then growing until 5–7 s) — and the shell alone is past the 200
+ * characters section 15 asks for. So its text is read once it has stopped
+ * changing between two reads 0.7 s apart, the way section 12 counts its rows.
+ * `networkidle` was measured too, and is not this: on Docs it fired at 1.7 s,
+ * in the gap while the app boots, before anything was drawn.
+ */
+const BROKEN = /Something went wrong|Unexpected error|Cannot read propert/i
+const pageSettled = async () => {
+  let was = -1
+  await waitUntil(async () => {
+    const now = await page.locator('body').innerText()
+    if (BROKEN.test(now)) return true
+    const settled = now.length > 200 && now.length === was
+    was = now.length
+    return settled
+  }, { timeoutMs: 20_000, stepMs: 700 })
 }
 
 const groupHeadings = async () => {
@@ -226,13 +294,18 @@ try {
   // ═══════════════════════════════════ V1/V2 — list view chrome ═══════
   say('1. List view: the grouped-by column is dropped (V1)')
   await page.goto(`${B}/app/${WS}/${LIST_PATH}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3200)
+  await listSettled()
   const grouper = grouperSelect()
   check(await grouper.count() > 0, 'the grouping control is present', 'no grouping control found')
 
   for (const [label, hidden] of [[GROUP_LABELS.status, 'Status'], [GROUP_LABELS.priority, 'Priority'], [GROUP_LABELS.assignee, 'Assignees']]) {
     await grouper.selectOption({ label })
-    await page.waitForTimeout(1400)
+    // Read once the header shows the grouping — its column gone, Title there —
+    // or the bound has passed; then once more, so a failure says what it saw.
+    await waitUntil(async () => {
+      const now = await columns()
+      return !now.includes(hidden) && now.includes('Title')
+    }, { timeoutMs: 15_000 })
     const cols = await columns()
     check(!cols.includes(hidden),
       `grouped ${label.toLowerCase()}: the ${hidden} column is dropped — columns are ${JSON.stringify(cols)}`,
@@ -241,14 +314,25 @@ try {
   }
 
   say('1b. Grouping actually regroups the rows')
+  /*
+   * Each grouping read once it is drawn, not a guessed 1.5–1.8 s after the
+   * press: status draws sections of its own (`list-group`), priority draws
+   * buckets that are not the status ones, and assignee an Unassigned bucket.
+   * Read before that, a bucket list is the last grouping's. Each wait is
+   * bounded, and a grouping that never comes is read anyway, so the checks
+   * below still fail saying what they saw (`us-2` does that to priority).
+   */
   await grouper.selectOption({ label: GROUP_LABELS.status })
-  await page.waitForTimeout(1500)
+  await waitUntil(async () => (await page.getByTestId('list-group').count()) > 0 && (await groupHeadings()).length > 0, { timeoutMs: 15_000 })
   const byStatus = await groupHeadings()
   await grouper.selectOption({ label: GROUP_LABELS.priority })
-  await page.waitForTimeout(1800)
+  await waitUntil(async () => {
+    const now = await groupHeadings()
+    return now.length > 0 && JSON.stringify(now) !== JSON.stringify(byStatus)
+  }, { timeoutMs: 15_000 })
   const byPriority = await groupHeadings()
   await grouper.selectOption({ label: GROUP_LABELS.assignee })
-  await page.waitForTimeout(1800)
+  await waitUntil(async () => (await groupHeadings()).some((h) => /Unassigned/i.test(h)), { timeoutMs: 15_000 })
   const byAssignee = await groupHeadings()
   check(byStatus.length > 0 && byPriority.length > 0,
     `status buckets ${JSON.stringify(byStatus.slice(0, 4))} become priority buckets ${JSON.stringify(byPriority.slice(0, 4))}`,
@@ -259,12 +343,15 @@ try {
     `grouping by assignee produces people buckets: ${JSON.stringify(byAssignee.slice(0, 4))}`,
     `no assignee buckets: ${JSON.stringify(byAssignee)}`)
   await grouper.selectOption({ label: GROUP_LABELS.status })
-  await page.waitForTimeout(1200)
+  await waitUntil(async () => (await page.getByTestId('list-group').count()) > 0, { timeoutMs: 15_000 })
 
   say('2. Fields picker with search (V2)')
   // "Fields (8/8)" renders as a clickable div, not a <button>.
   await page.getByText(/^Fields \(\d+\/\d+\)$/).last().click()
-  await page.waitForTimeout(900)
+  // Open is the <details>' own state, and its search box and rows are drawn
+  // with it. Waited for as itself: the page has other search boxes showing.
+  const fieldsOpen = page.locator('details[open]').filter({ has: page.getByText(/^Fields \(\d+\/\d+\)$/) })
+  await fieldsOpen.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
   const searchBox = page.locator('input[placeholder*="earch" i]:visible').last()
   const fieldsPicker = chain(
     'the fields picker opens with a search box',
@@ -298,7 +385,8 @@ try {
         if (await nameBox.count()) {
           await nameBox.fill(seeded)
           await page.getByRole('button', { name: /^Add$|^Create$/ }).last().click().catch(() => {})
-          await page.waitForTimeout(1800)
+          // Listed once the server has made it, before the next one is named.
+          await waitUntil(async () => (await page.locator('label:visible').allInnerTexts()).some((l) => l.includes(seeded)), { timeoutMs: 15_000 })
         }
       }
       before = await page.locator('label:visible').allInnerTexts()
@@ -350,18 +438,26 @@ try {
     fieldsPicker.step(term.length > 0, `no term distinguishes these fields: ${JSON.stringify(before)}`,
       `found a term unique to one field ("${term}")`)
     await searchBox.fill(term)
-    await page.waitForTimeout(800)
+    // Narrowed to the term, or the bound has passed; then read once more for
+    // the check (`us-4` leaves the list whole, and the check says so).
+    await waitUntil(async () => {
+      const now = await page.locator('label:visible').allInnerTexts()
+      return now.length > 0 && now.length < before.length && now.every((f) => f.toLowerCase().includes(term.toLowerCase()))
+    }, { timeoutMs: 10_000 })
     const after = await page.locator('label:visible').allInnerTexts()
     fieldsPicker.step(
       after.length > 0 && after.length < before.length && after.every((f) => f.toLowerCase().includes(term.toLowerCase())),
       `search for "${term}" gave ${JSON.stringify(after)} out of ${JSON.stringify(before)}`,
       `searching "${term}" narrows ${before.length} fields to ${after.length}: ${JSON.stringify(after)}`)
     await searchBox.fill('zzzznomatch')
-    await page.waitForTimeout(700)
+    await waitUntil(async () => (await page.locator('label:visible').count()) === 0, { timeoutMs: 10_000 })
     fieldsPicker.step((await page.locator('label:visible').allInnerTexts()).length === 0,
       'a non-matching term still listed fields')
     await searchBox.fill('')
-    await page.waitForTimeout(600)
+    // Every field back and the create-new half drawn, before the text is read.
+    await waitUntil(async () =>
+      (await page.locator('label:visible').count()) >= before.length &&
+        /CREATE NEW FIELD/i.test(await page.locator('body').innerText()), { timeoutMs: 10_000 })
     // V2's other half: create a new field without leaving the picker.
     const picker = await page.locator('body').innerText()
     fieldsPicker.step(/CREATE NEW FIELD/i.test(picker), 'no create-new section in the fields picker')
@@ -370,16 +466,23 @@ try {
     }
   }
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(600)
+  // Shut before the task sheet is opened from the rows under it.
+  await fieldsOpen.first().waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
 
   // ═════════════════════════════════════ Task detail ═══════════════════
   say('3. Task detail opens with every tab (V3/V5)')
   await openAnyTask()
-  await page.waitForTimeout(2600)
   const sheet = page.locator('div.shadow-2xl.border-l')
+  const SHEET_TABS = ['Overview', 'Subtasks', 'Checklists', 'Related Items', 'Attachments', 'Comments', 'Activity', 'Time']
+  // The sheet draws a skeleton until the task and what this reader may do with
+  // it have loaded, and its tab strip after that: the strip is what is read.
+  await waitUntil(async () => {
+    const drawn = await sheet.locator('button:visible').allInnerTexts()
+    return SHEET_TABS.every((t) => drawn.includes(t))
+  }, { timeoutMs: 20_000 })
   check(await sheet.count() > 0, 'the task detail sheet opens from the list', 'the sheet did not open')
   const tabs = await sheet.locator('button:visible').allInnerTexts()
-  for (const t of ['Overview', 'Subtasks', 'Checklists', 'Related Items', 'Attachments', 'Comments', 'Activity', 'Time']) {
+  for (const t of SHEET_TABS) {
     check(tabs.includes(t), `the ${t} tab is present`, `the ${t} tab is missing`)
   }
   /*
@@ -396,7 +499,7 @@ try {
    */
   const related = sheet.locator('button:visible', { hasText: 'Related Items' }).first()
   if (await related.count()) await related.click().catch(() => {})
-  await page.waitForTimeout(500)
+  await sheet.locator('[data-testid="related-tab-relationships"]').first().waitFor({ state: 'attached', timeout: 10_000 }).catch(() => {})
   check(
     (await sheet.locator('[data-testid="related-tab-relationships"]').count()) > 0,
     'and Related Items still carries the dependency half, under its new name',
@@ -415,13 +518,19 @@ try {
   )
   if (await bell.count()) {
     await bell.click()
-    await page.waitForTimeout(1200)
     const dlg = page.locator('[role=dialog]:visible')
+    await dlg.first().waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
     const haveDlg = (await dlg.count()) > 0
     followers.step(haveDlg, 'no followers dialog')
     if (!haveDlg) {
       followers.rest('skipped: the dialog never opened, so nothing in it could be read')
     } else {
+      // Read once the panel shows its count and both controls, or the bound
+      // has passed; then once more for the checks.
+      await waitUntil(async () => {
+        const now = await dlg.innerText({ timeout: 2000 }).catch(() => '')
+        return /\d+ watcher/i.test(now) && /Watch task|Unwatch/i.test(now) && /Add teammate/i.test(now)
+      }, { timeoutMs: 10_000 })
       const body = await dlg.innerText({ timeout: 5000 }).catch(() => '')
       followers.step(/\d+ watcher/i.test(body), `no watcher count in the dialog: ${body.slice(0, 120)}`,
         `it shows the follower count: ${(body.match(/\d+ watchers?/i) || [])[0]}`)
@@ -430,7 +539,8 @@ try {
         `and a control to change your own follow state (${(body.match(/Watch task|Unwatch/i) || [])[0]})`)
       followers.step(/Add teammate/i.test(body), `no add-teammate control: ${body.slice(0, 140)}`)
       await page.keyboard.press('Escape')
-      await page.waitForTimeout(800)
+      // Shut before the sheet's tabs are pressed under it.
+      await dlg.first().waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
     }
   } else {
     followers.rest('no watchers control in the task header')
@@ -438,9 +548,6 @@ try {
 
   say('5. Checklists tab (V4)')
   await sheet.getByRole('button', { name: 'Checklists', exact: true }).click()
-  await page.waitForTimeout(1400)
-  const clText = await sheet.innerText({ timeout: 5000 }).catch(() => '')
-  check(/checklist/i.test(clText), 'the checklists tab renders', `tab body: ${clText.slice(0, 140)}`)
   /*
    * THE CONTROL ITSELF, NOT THE ABSENCE OF A PHRASE. `!/Due date.*checklist
    * item/` passed on any date control labelled any other way, and on a tab
@@ -449,18 +556,29 @@ try {
    * picker — a select whose first option is nobody and whose others are the
    * workspace's people — so that is what is read, off the add-item form.
    */
-  const itemForm = await sheet
-    .locator('[data-testid="checklist-item-form"]')
-    .first()
-    .evaluate((form) => {
-      const fields = [...form.querySelectorAll('input, select, textarea')]
-        .filter((el) => el.dataset.testid !== 'checklist-item-input')
-      const first = fields[0]
-      if (!first) return { first: null, options: [] }
-      const options = first.tagName === 'SELECT' ? [...first.options].map((o) => o.value) : []
-      return { first: first.tagName === 'INPUT' ? `input[type=${first.type}]` : first.tagName.toLowerCase(), options }
-    }, undefined, { timeout: 5000 })
-    .catch(() => null)
+  const readItemForm = (timeout) =>
+    sheet
+      .locator('[data-testid="checklist-item-form"]')
+      .first()
+      .evaluate((form) => {
+        const fields = [...form.querySelectorAll('input, select, textarea')]
+          .filter((el) => el.dataset.testid !== 'checklist-item-input')
+        const first = fields[0]
+        if (!first) return { first: null, options: [] }
+        const options = first.tagName === 'SELECT' ? [...first.options].map((o) => o.value) : []
+        return { first: first.tagName === 'INPUT' ? `input[type=${first.type}]` : first.tagName.toLowerCase(), options }
+      }, undefined, { timeout })
+      .catch(() => null)
+  // The form is drawn with the panel, and its picker fills in when the
+  // workspace's people arrive: both are read once they are there, or the bound
+  // has passed.
+  await waitUntil(async () => {
+    const drawn = await readItemForm(2000)
+    return drawn?.first === 'select' && drawn.options[0] === '' && drawn.options.length > 1
+  }, { timeoutMs: 15_000 })
+  const clText = await sheet.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')
+  check(/checklist/i.test(clText), 'the checklists tab renders', `tab body: ${clText.slice(0, 140)}`)
+  const itemForm = await readItemForm(5000)
   check(
     itemForm?.first === 'select' && itemForm.options[0] === '' && itemForm.options.length > 1,
     'checklist items are not date-first (V4 replaced the date with an assignee)',
@@ -472,8 +590,12 @@ try {
 
   say('6. Subtasks tab (V5)')
   await sheet.getByRole('button', { name: 'Subtasks', exact: true }).click()
-  await page.waitForTimeout(1400)
-  check(/subtask/i.test(await sheet.innerText()), 'the subtasks tab renders', 'the subtasks tab is empty')
+  // The strip says "Subtasks" whichever tab is open, so wait for the panel
+  // under it: the Checklists one gone and the tab panel talking about subtasks.
+  await waitUntil(async () =>
+    (await sheet.getByTestId('checklists-panel').count()) === 0 &&
+      /subtask/i.test(await sheet.getByTestId('task-tab-panel').filter({ visible: true }).innerText({ timeout: 2000 })), { timeoutMs: 15_000 })
+  check(/subtask/i.test(await sheet.filter({ visible: true }).innerText().catch(() => '')), 'the subtasks tab renders', 'the subtasks tab is empty')
 
   await closeSheet()
 
@@ -499,13 +621,20 @@ try {
   const viewTab = page.getByRole('button', { name: 'Board', exact: true }).first()
   if (await viewTab.count()) {
     await viewTab.click()
-    await page.waitForTimeout(2600)
+    /*
+     * The board's own columns, and this run's card on them. The list the board
+     * replaces shows the same status names and the same task, so read before
+     * the board is drawn, the first check passes on the list and the click
+     * opens the list's row — which proves nothing about drag-and-drop.
+     */
+    await page.getByTestId('board-column').first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+    await page.getByTestId('board-task-card').filter({ hasText: SWEEP_TASK }).first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
     const body = await page.locator('body').innerText()
     board.step(/Backlog|To do|In progress/.test(body), `board body: ${body.slice(0, 160)}`)
     const card = firstTaskCard()
     if (await card.count()) {
       await card.click()
-      await page.waitForTimeout(2200)
+      await page.locator('div.shadow-2xl.border-l').first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
       board.step(await page.locator('div.shadow-2xl.border-l').count() > 0, 'clicking a board card did not open the task')
       await closeSheet()
     } else {
@@ -521,10 +650,12 @@ try {
   // ═══════════════════════════════════════ Share panel ═════════════════
   say('8. Share & permissions panel')
   await page.goto(`${B}/app/${WS}/${LIST_PATH}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2800)
+  await page.getByRole('button', { name: 'Share', exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   await page.getByRole('button', { name: 'Share', exact: true }).first().click()
-  await page.waitForTimeout(1400)
   const shareDlg = page.locator('[role=dialog]:visible')
+  // The levels' explanations are drawn with the dialog, the last of them
+  // "Full edit": read once it is there, or the bound has passed.
+  await waitUntil(async () => /Full edit/.test(await shareDlg.innerText({ timeout: 2000 }).catch(() => '')), { timeoutMs: 15_000 })
   const share = chain(
     'the share dialog opens',
     'the View level is offered with an explanation',
@@ -580,14 +711,44 @@ try {
     }
     share.step(bare.length === 0, `listed without an explanation: ${bare.join(', ') || '(none)'}`)
     await page.keyboard.press('Escape')
-    await page.waitForTimeout(700)
+    // Shut before section 9's Ctrl+K: the palette is a dialog of its own.
+    await shareDlg.first().waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
   }
 
   // ═══════════════════════════════════ Search palette ══════════════════
   say('9. Command palette: type filter and sort')
+  /*
+   * ONE PRESS, ONCE NOTHING ELSE IS OPEN, THEN THE PALETTE'S OWN INPUT. This
+   * counted the palette 1.2 s after the press, and beside three other break
+   * runs it had not drawn yet: "Ctrl+K did not open the palette", and sixteen
+   * checks failed unread (29 September). Ctrl+K TOGGLES it
+   * (`command-palette.tsx`), so the press is never repeated to retry — a
+   * second one would shut a palette that was only slow to draw.
+   */
+  await page.locator('[role=dialog]:visible').first().waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
   await page.keyboard.press('Control+k')
-  await page.waitForTimeout(1200)
+  await page.locator('[cmdk-input]').first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   const palette = page.locator('[role=dialog]:visible, [cmdk-root]').first()
+  /*
+   * A SEARCH, ANSWERED AND DRAWN. A chip changes what is asked, and the rows
+   * empty while the new search is in flight — so "no task group" is true in
+   * that gap too, and a read there passes a chip that narrowed nothing. Each
+   * read waits for the answer to the search its press caused (`GET
+   * /search/:ws`, told apart by its parameters), then for a hit of that answer
+   * to be drawn: cmdk keeps each row's value, `<type>-<id>-<title>`, in
+   * `data-value`. An answer with no hits draws none, and is read as it stands.
+   */
+  const searchAnswer = (asked) =>
+    page.waitForResponse((r) => {
+      const u = new URL(r.url())
+      return r.request().method() === 'GET' && u.pathname.endsWith(`/search/${WS}`) && asked(u.searchParams)
+    }, { timeout: 15_000 }).catch(() => null)
+  const answerDrawn = async (answer) => {
+    const hits = (await answer?.json().catch(() => null))?.data
+    const rows = (Array.isArray(hits) ? hits : []).slice(0, 8)
+      .map((h) => `[cmdk-item][data-value^="${`${h.entityType}-${h.id}-`.replace(/["\\]/g, '\\$&')}"]`)
+    if (rows.length) await waitUntil(async () => (await palette.locator(rows.join(', ')).count()) > 0, { timeoutMs: 10_000 })
+  }
   /*
    * THREE CHAINS, IN THE ORDER THEY RUN, and the middle one is the ⋯'s own.
    * This was one seventeen-sentence chain, and a missing ⋯ filled its section
@@ -627,14 +788,16 @@ try {
     }
   } else {
     const input = page.locator('input:visible').last()
+    const firstAnswer = searchAnswer((q) => q.get('q') === 'task' && !q.has('types') && !q.has('sort'))
     await input.fill('task')
-    await page.waitForTimeout(1800)
+    await answerDrawn(await firstAnswer)
     const pt = await palette.innerText({ timeout: 5000 }).catch(() => '')
     pal.step(pt.length > 40, `palette body: ${pt.slice(0, 120)}`)
     // The type and sort chips live behind a "Filters" toggle rather than
     // always-on chrome — open it before asserting they exist.
     await palette.getByRole('button', { name: 'Filters', exact: true }).click()
-    await page.waitForTimeout(1200)
+    // The sort chips are drawn as the panel opens, the last of them this one.
+    await palette.getByRole('button', { name: 'Last created', exact: true }).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
     const chips = await palette.locator('button:visible').allInnerTexts()
     /*
      * §2 [02:01] — "yeh 3 DOTS dekh rahe hain? … to folders yahan pe appear ho
@@ -659,7 +822,8 @@ try {
       palMore.rest('skipped: there was no ⋯ to open')
     } else {
       await more.click()
-      await page.waitForTimeout(900)
+      // Its entries are drawn with the menu.
+      await palette.getByTestId('palette-more-types-menu').waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
       for (const ty of ['comment', 'channel', 'message']) {
         const entry = palette.locator(`[data-testid=palette-add-type-${ty}]`)
         palMore.step((await entry.count()) > 0, `${ty} is offered nowhere`)
@@ -667,7 +831,10 @@ try {
       // Promoting one has to actually put it on the bar, or the ⋯ is a menu
       // that leads nowhere — which is the failure this section exists to catch.
       await palette.locator('[data-testid=palette-add-type-comment]').first().click().catch(() => {})
-      await page.waitForTimeout(1200)
+      // Choosing shuts the menu and draws the chip on the bar, in one render.
+      await waitUntil(async () =>
+        (await palette.getByTestId('palette-more-types-menu').count()) === 0 &&
+          (await palette.getByTestId('palette-type-comment').count()) > 0, { timeoutMs: 10_000 })
       const promoted = await palette.locator('button:visible').allInnerTexts()
       palMore.step(promoted.includes('Comments'),
         `Comments never appeared: ${JSON.stringify(promoted.slice(0, 14))}`)
@@ -679,37 +846,54 @@ try {
     // Multi-select is the case that was broken in production — prove the chips
     // actually narrow, and that two of them together return both types.
     const before = (await palette.innerText({ timeout: 5000 }).catch(() => '')).match(/^[A-Z ]{3,}$/gm) || []
+    const docsAnswer = searchAnswer((q) => q.get('q') === 'task' && q.get('types') === 'doc')
     await palette.getByRole('button', { name: 'Docs', exact: true }).click({ timeout: 10_000 }).catch(() => {})
-    await page.waitForTimeout(1600)
+    await answerDrawn(await docsAnswer)
     const afterDocs = await palette.innerText({ timeout: 5000 }).catch(() => '')
     palSort.step(!/^TASKS$/m.test(afterDocs), 'tasks still listed with only Docs selected')
+    const bothAnswer = searchAnswer((q) => q.get('q') === 'task' && (q.get('types') ?? '').split(',').sort().join(',') === 'doc,task')
     await palette.getByRole('button', { name: 'Tasks', exact: true }).click({ timeout: 10_000 }).catch(() => {})
-    await page.waitForTimeout(1600)
+    await answerDrawn(await bothAnswer)
     const both = await palette.innerText({ timeout: 5000 }).catch(() => '')
     palSort.step(/^TASKS$/m.test(both), `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
     // By testid: Status and Priority now offer their own "All" chip, so a
     // click matched on the visible label alone is ambiguous between three
     // buttons and throws on strict mode. This one means the TYPE group.
     await palette.locator('[data-testid="palette-type-all"]').click()
-    await page.waitForTimeout(1200)
+    // Pressed next is a chip of the open Filters panel; what is read is the
+    // sorted search after it, waited for below.
+    await palette.getByRole('button', { name: 'Last updated', exact: true }).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
 
+    const sortedAnswer = searchAnswer((q) => q.get('q') === 'task' && !q.has('types') && q.get('sort') === 'updated')
     await palette.getByRole('button', { name: 'Last updated', exact: true }).click()
-    await page.waitForTimeout(1600)
+    await answerDrawn(await sortedAnswer)
     palSort.step((await palette.innerText()).length > 60, 'sorting emptied the palette')
     await page.keyboard.press('Escape')
-    await page.waitForTimeout(700)
+    // Shut before the next section navigates away from it.
+    await page.locator('[cmdk-input]').first().waitFor({ state: 'hidden', timeout: 10_000 }).catch(() => {})
   }
 
   // ═══════════════════════════════════════ Inbox ═══════════════════════
   say('10. Inbox: triage buckets, and Other being gone')
   await page.goto(`${B}/app/${WS}/inbox`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2600)
-  for (const b of ['Inbox', 'Later', 'Cleared']) {
+  /*
+   * The triage row, once its counts have answered: the tabs are read for being
+   * shown, the chips for their numbers, and "no Other chip" says something only
+   * once the row it would sit in is drawn.
+   */
+  const BUCKETS = ['Inbox', 'Later', 'Cleared']
+  await waitUntil(async () => {
+    for (const name of [...BUCKETS.map((b) => new RegExp(`^${b}`)), /^All\s*\d+$/, /^Primary\s*\d+$/]) {
+      if (!(await page.getByRole('button', { name }).first().isVisible())) return false
+    }
+    return true
+  }, { timeoutMs: 20_000 })
+  for (const b of BUCKETS) {
     check(await page.getByRole('button', { name: new RegExp(`^${b}`) }).first().isVisible().catch(() => false),
       `the ${b} bucket tab is present`, `the ${b} bucket tab is missing`)
   }
   const chipNum = async (l) => {
-    const txt = await page.getByRole('button', { name: new RegExp(`^${l}\\s*\\d+$`) }).innerText()
+    const txt = await page.getByRole('button', { name: new RegExp(`^${l}\\s*\\d+$`) }).filter({ visible: true }).innerText().catch(() => '')
     return parseInt(txt.replace(/\D+/g, ''), 10)
   }
   /*
@@ -727,10 +911,12 @@ try {
   const [cA, cP] = [await chipNum('All'), await chipNum('Primary')]
   check(cP <= cA, `Primary is a subset of All (${cP} <= ${cA})`, `${cP} > ${cA}`)
   await page.getByRole('button', { name: /^Primary/ }).click()
-  await page.waitForTimeout(1200)
+  await page.waitForURL(/filter=primary/, { timeout: 10_000 }).catch(() => {})
   check(/filter=primary/.test(page.url()), 'the filter is in the URL', `URL: ${page.url()}`)
   await page.goto(`${B}/app/${WS}/inbox?filter=mentions`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(1800)
+  // Pressed from its first render (the route maps the old name as it parses the
+  // address), so this waits for the chip to be drawn, then reads it once more.
+  await waitUntil(async () => (await page.getByRole('button', { name: /^Primary/ }).getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 15_000 })
   check(await page.getByRole('button', { name: /^Primary/ }).getAttribute('aria-pressed') === 'true',
     'an old ?filter=mentions bookmark still lands on Primary', 'the legacy filter name broke')
 
@@ -740,7 +926,12 @@ try {
                                ['spaces', 'Space'], ['features', ''], ['groups', ''],
                                ['taskTypes', 'Task types'], ['workSchedule', 'Working days']]) {
     await page.goto(`${B}/app/${WS}/settings?tab=${tab}`, { waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(1900)
+    // The tab's own heading, not only the page's: "Settings" is drawn first. A
+    // tab with no heading asked of it is read once it has drawn one of its own.
+    await waitUntil(async () => {
+      const now = (await page.locator('h1:visible,h2:visible,h3:visible').allInnerTexts()).join(' | ')
+      return expect ? now.includes(expect) : now.includes(' | ')
+    }, { timeoutMs: 20_000 })
     const heads = (await page.locator('h1:visible,h2:visible,h3:visible').allInnerTexts()).join(' | ')
     const landed = !expect || heads.includes(expect)
     check(landed, `?tab=${tab} deep-links correctly (${heads.slice(0, 70)})`,
@@ -807,10 +998,13 @@ try {
 
     // Start from nobody-reports-to-anybody: selectOption on a value that is
     // already selected fires no change event, and so no request at all.
+    // Each picker is held to what the server stores (its value is the member's
+    // `managerId`), so it reads "No manager" once the write has landed and the
+    // list has re-read it — and the next row is pressed after that, not 0.9 s on.
     for (const who of rows) {
       if (!who.email) continue
       await pickerFor(who).selectOption({ index: 0 }).catch(() => {})
-      await page.waitForTimeout(900)
+      await waitUntil(async () => (await pickerFor(who).inputValue({ timeout: 2000 })) === '', { timeoutMs: 10_000 })
     }
 
     if (distinct.length < 2) {
@@ -833,23 +1027,29 @@ try {
       const [personA, personB] = distinct
 
       await pickerFor(personA).selectOption({ label: personB.name })
-      await page.waitForTimeout(2000)
+      // A → B stored and re-read (A's picker holds it), and the tree drawn, which
+      // it is only once somebody has a manager. B → A below is a cycle only
+      // once A → B is stored, so it is not pressed before.
+      await waitUntil(async () =>
+        (await pickerFor(personA).inputValue({ timeout: 2000 })) !== '' &&
+          (await page.getByText('Reporting structure').first().isVisible()), { timeoutMs: 15_000 })
       reportsTo.step(await page.getByText('Reporting structure').first().isVisible().catch(() => false),
         'the tree did not appear')
       await pickerFor(personB).selectOption({ label: personA.name })
       // The refusal arrives as a toast, which is gone a few seconds later —
-      // sampling the page once races it.
+      // sampling the page once races it. Polled every 250 ms for up to 15 s.
       let cycleMsg = ''
-      for (let i = 0; i < 12; i++) {
-        const body = await page.locator('body').innerText()
-        const hit = body.match(/[^.\n]*\b(loop|themselves|cycle)\b[^.\n]*/i)
-        if (hit) { cycleMsg = hit[0].trim(); break }
-        await page.waitForTimeout(500)
-      }
+      await waitUntil(async () => {
+        const hit = (await page.locator('body').innerText()).match(/[^.\n]*\b(loop|themselves|cycle)\b[^.\n]*/i)
+        if (hit) cycleMsg = hit[0].trim()
+        return Boolean(hit)
+      }, { timeoutMs: 15_000, stepMs: 250 })
       reportsTo.step(Boolean(cycleMsg), 'the cycle produced no message',
         `a reporting cycle is refused with a message: "${cycleMsg.slice(0, 60)}"`)
       await pickerFor(personA).selectOption({ label: 'No manager' }).catch(() => {})
-      await page.waitForTimeout(1400)
+      // Put back, and stored, before the next section: a missed press would
+      // leave the shared workspace with a reporting line.
+      await waitUntil(async () => (await pickerFor(personA).inputValue({ timeout: 2000 })) === '', { timeoutMs: 10_000 })
     }
   }
 
@@ -913,20 +1113,20 @@ try {
       `the new type is offered: ${JSON.stringify(opts)}`)
     await tp.selectOption({ label: `🚀 ${TYPE}` }).catch(() => {})
     // Reloaded once the choice is stored, not after a guess at how long that takes.
-    await waitUntil(async () => (await tp.locator('option:checked').innerText().catch(() => '')).includes(TYPE), { timeoutMs: 10_000 })
+    await waitUntil(async () => (await chosenLabel(tp)).includes(TYPE), { timeoutMs: 10_000 })
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
     await page.reload({ waitUntil: 'domcontentloaded' })
     await openAnyTask()
     const after = page.locator('div.shadow-2xl.border-l select[title="Task type"]')
     let sel = ''
     await waitUntil(async () => {
-      sel = await after.locator('option:checked').innerText().catch(() => '')
+      sel = await chosenLabel(after)
       return sel.includes(TYPE)
     }, { timeoutMs: 20_000 })
     typePicker.step(sel.includes(TYPE), `after reload the picker shows "${sel.trim()}"`,
       `the applied type survives a reload (${sel.trim()})`)
     await after.selectOption({ label: 'No type' }).catch(() => {})
-    await waitUntil(async () => (await after.locator('option:checked').innerText().catch(() => '')).trim() === 'No type', { timeoutMs: 10_000 })
+    await waitUntil(async () => (await chosenLabel(after)).trim() === 'No type', { timeoutMs: 10_000 })
   }
   await closeSheet()
 
@@ -970,9 +1170,11 @@ try {
                               ['Timeline', 'timeline'], ['Automations', 'automations'],
                               ['Forms', 'forms'], ['Dashboards', 'dashboards']]) {
     await page.goto(`${B}/app/${WS}/${path}`, { waitUntil: 'domcontentloaded' }).catch(() => {})
-    await page.waitForTimeout(1900)
+    // Read once drawn and settled, or broken (`pageSettled`): at a fixed 1.9 s a
+    // loaded lane can still be showing the blank page every surface starts on.
+    await pageSettled()
     const txt = await page.locator('body').innerText()
-    const broke = /Something went wrong|Unexpected error|Cannot read propert/i.test(txt)
+    const broke = BROKEN.test(txt)
     check(!broke && txt.length > 200, `${name} renders`, `${name} looks broken: ${txt.slice(0, 130)}`)
   }
 
@@ -991,7 +1193,7 @@ try {
     const picker = page.getByLabel('Language')
     await picker.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     await picker.selectOption({ label }).catch(() => {})
-    await waitUntil(async () => (await picker.locator('option:checked').innerText().catch(() => '')).trim() === label, { timeoutMs: 10_000 })
+    await waitUntil(async () => (await chosenLabel(picker)).trim() === label, { timeoutMs: 10_000 })
     await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {})
   }
   const scheduleText = async (expect) => {

@@ -216,7 +216,7 @@ try {
     // Every viewer is shown the bystander's sheet (their own, or one to review), so the page has drawn.
     await page.getByText('Approvals bystander', { exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     await page.waitForTimeout(800)
-    const body = (await page.locator('main').innerText().catch(() => '')) || (await page.locator('body').innerText().catch(() => ''))
+    const body = (await page.locator('main').filter({ visible: true }).innerText().catch(() => '')) || (await page.locator('body').innerText().catch(() => ''))
     // The submitter's sheet, where there is one, shows its private entry by its hours. The page opens
     // the first pending sheet by itself, and a click on an open one closes it — so click only a closed one.
     const submitterRow = page.getByText('Approvals submitter', { exact: true }).first()

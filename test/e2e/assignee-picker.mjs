@@ -181,7 +181,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ Me comes first, as the frame has it')
 
-  const firstRow = await readText(page.locator('[data-testid^="assign-member-"]').first())
+  const firstRow = await readText(page.locator('[data-testid^="assign-member-"]').first().filter({ visible: true }))
   chk(
     firstRow.toLowerCase().includes((me.displayName || me.email).toLowerCase()),
     'the first person offered is you',

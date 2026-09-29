@@ -385,7 +385,7 @@ try {
     await page.waitForTimeout(1500)
     await page.goto(opened, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3500)
-    const activeTitle = await page.getByTestId('docs-active-title').innerText().catch(() => '')
+    const activeTitle = await page.getByTestId('docs-active-title').filter({ visible: true }).innerText().catch(() => '')
     docAddress.step(
       activeTitle.includes(DOC_B),
       `the editor opened "${activeTitle.trim()}" instead`,
@@ -959,6 +959,7 @@ try {
      */
     const freshFavorites = (await fresh
       .getByTestId('nav-favorites-list')
+      .filter({ visible: true })
       .innerText()
       .catch(() => '')).replace(/\s+/g, ' ')
     favourites.step(
@@ -991,7 +992,7 @@ try {
      */
     const favList = page.getByTestId('nav-favorites-list')
     const favListCount = await favList.count()
-    const emptied = (await favList.innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
+    const emptied = (await favList.filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
     favourites.step(
       favListCount === 1 && emptied.length > 0 && !/Dashboards/i.test(emptied) && !/Templates/i.test(emptied),
       favListCount === 1 && emptied.length > 0
@@ -1021,6 +1022,7 @@ try {
     await page.waitForTimeout(3500)
     const restored = (await page
       .getByTestId('nav-favorites-list')
+      .filter({ visible: true })
       .innerText()
       .catch(() => '')).replace(/\s+/g, ' ')
     favourites.step(
@@ -1133,7 +1135,7 @@ try {
          * only reason that showed up.
          */
         const emptyText = (
-          await page.getByTestId('tree-filter-empty').innerText().catch(() => '')
+          await page.getByTestId('tree-filter-empty').filter({ visible: true }).innerText().catch(() => '')
         ).trim()
         treeSearch.step(
           emptyText.length > 0,

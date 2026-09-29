@@ -302,7 +302,7 @@ try {
     async () => (await page.getByTestId('description-revision-body').count()) > 0,
     { timeoutMs: 10_000 },
   )
-  const body = await page.getByTestId('description-revision-body').first().innerText().catch(() => '')
+  const body = await page.getByTestId('description-revision-body').first().filter({ visible: true }).innerText().catch(() => '')
   chk(
     shown && body.trim().length > 0,
     'and an entry can be read, not just dated',
@@ -321,24 +321,14 @@ try {
    */
   await page.evaluate(() => {
     window.__printCalls = 0
-    /*
-     * The stub FIRES `afterprint`, because a real browser does — that event is
-     * how the app knows the dialog closed and puts itself back. A stub that
-     * only counted calls left the printable copy mounted for the rest of the
-     * run, which kept the menu's popper repositioning and made every later
-     * click fail with "element is not stable". The test artifact looked
-     * exactly like a broken menu.
-     */
     window.print = () => {
       window.__printCalls += 1
-      // Snapshot what the printer would receive, at the moment it would
-      // receive it. Reading the document afterwards is impossible now that the
-      // app puts itself back — and this is the more faithful question anyway.
+      // What the SCREEN shows at the moment the dialog opens: the copy is
+      // `display: none` there by design (checked below).
       const root = document.getElementById('task-print-root')
-      // The copy is `display: none` on SCREEN by design (checked below), and a hidden element's
-      // innerText is its whole text: both reads say what the copy holds, not what paper shows.
-      window.__printed = root ? { text: root.innerText, id: root.querySelector('[data-testid="task-print-id"]')?.textContent ?? '', display: getComputedStyle(root).display } : null // text-read: not-rendered — hidden on screen by design
-      window.dispatchEvent(new Event('afterprint'))
+      window.__printed = root ? { display: getComputedStyle(root).display } : null
+      // No `afterprint` here: the dialog is still open while the suite reads the
+      // paper, and the suite fires it once it has read (below).
     }
   })
 
@@ -360,17 +350,39 @@ try {
   )
 
   /*
-   * WHAT IS ON THE PAPER. These are the checks that a print stylesheet hiding
-   * everything would fail. The description is the one that matters most: it is
-   * the reason to print a task at all.
+   * WHAT IS ON THE PAPER, read under PRINT MEDIA while the dialog is open. These
+   * are the checks that a print stylesheet hiding everything would fail. The
+   * description is the one that matters most: it is the reason to print a task
+   * at all.
+   *
+   * They used to read the copy on screen, where it is `display: none` by design,
+   * and a hidden element answers innerText with its whole text: they said what
+   * the copy HOLDS, and an id hidden on paper passed them. Under print media the
+   * print rules draw the copy and hide the app, so each read is filtered to what
+   * is drawn and its innerText leaves out whatever paper would not show
+   * (`found-29-sep/innertext-reads-hidden-leaves`).
    */
-  const paper = printed?.text ?? ''
+  await page.emulateMedia({ media: 'print' })
+  const onPaper = async (testId) =>
+    (await page.getByTestId(testId).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => null)) ?? ''
+  const paper = await onPaper('task-print-root')
+  const paperId = await onPaper('task-print-id')
+  /*
+   * Screen again (no emulation, as the page had it), then the dialog closes.
+   * `afterprint` is how the app knows to put itself back, so it has to fire: a
+   * stub that never fired it left the printable copy mounted for the rest of the
+   * run, which kept the menu's popper repositioning and made every later click
+   * fail with "element is not stable" — a test artifact that looked exactly like
+   * a broken menu. The stub fired it itself until the paper had to be read first.
+   */
+  await page.emulateMedia({ media: null })
+  await page.evaluate(() => window.dispatchEvent(new Event('afterprint'))).catch(() => {})
   chk(paper.includes(ORIGINAL), 'the description is on it',
     `the printed page reads ${JSON.stringify(paper.slice(0, 160))}`)
   chk(paper.includes(`History check ${stamp}`), 'and the title',
     'the printed page has no title on it')
   chk(
-    (printed?.id ?? '').includes(task.id),
+    paperId.includes(task.id),
     'and the id, so a printed task can be found again',
     'the printed page does not say which task it is',
   )

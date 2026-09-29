@@ -179,9 +179,10 @@ try {
   const catalog = (await api(`/workspaces/${WS}/webhooks/events`)).data ?? []
   if (catalog.length < 10) throw new Error(`the server's event catalog came back with ${catalog.length} events`)
   // What a form offers: every chip's event id, and any chip that reads as an id.
+  // The text is read for an absence (no chip labelled with a raw id), so every chip, hidden ones too.
   const offered = async (prefix) => {
     const chips = await tab.locator(`[data-testid^="${prefix}"]`).evaluateAll(
-      (els, pre) => els.map((el) => ({ id: el.getAttribute('data-testid').slice(pre.length), text: el.innerText.trim() })),
+      (els, pre) => els.map((el) => ({ id: el.getAttribute('data-testid').slice(pre.length), text: el.innerText.trim() })), // text-read: absence — no chip labelled with a raw id
       prefix,
     ).catch(() => [])
     const ids = chips.map((c) => c.id).sort()
@@ -249,7 +250,7 @@ try {
   await tab.route(LIST, fail)
   await tab.reload({ waitUntil: 'domcontentloaded' })
   await waitUntil(async () => (await tab.getByTestId('webhooks-load-failed').count()) > 0, { timeoutMs: 20_000 })
-  const failedSays = ((await tab.getByTestId('webhooks-load-failed').innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const failedSays = ((await tab.getByTestId('webhooks-load-failed').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   chk(
     failedSays === 'Could not load webhooks.' && (await noneShown()) === 0 && (await rowsShown()) === 0,
     'a list that fails says so — and not that there are none',
@@ -272,7 +273,7 @@ try {
   await tab.getByTestId('webhook-form-url').fill('https://example.com/made-on-the-page', { timeout: 10_000 }).catch(() => {})
   await tab.getByTestId('webhook-form-save').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(async () => (await tab.getByTestId('webhook-secret-once').count()) > 0, { timeoutMs: 15_000 })
-  const shown = ((await tab.getByTestId('webhook-secret-value').innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const shown = ((await tab.getByTestId('webhook-secret-value').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const [stored] = await sql`select id, secret from webhooks where workspace_id = ${WS} and name = ${MADE}`
   const madeRow = stored ? tab.getByTestId(`webhook-row-${stored.id}`) : null
   await waitUntil(async () => !madeRow || (await madeRow.count()) > 0, { timeoutMs: 10_000 })
@@ -317,7 +318,7 @@ try {
   await tab.getByTestId('admin-webhook-event-task.created').click({ timeout: 10_000 }).catch(() => {})
   await tab.getByTestId('admin-webhook-create').click({ timeout: 10_000 }).catch(() => {})
   await waitUntil(async () => (await tab.getByTestId('webhook-secret-once').count()) > 0, { timeoutMs: 15_000 })
-  const adminShown = ((await tab.getByTestId('webhook-secret-value').innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const adminShown = ((await tab.getByTestId('webhook-secret-value').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const [adminStored] = await sql`select secret from webhooks where workspace_id = ${WS} and name = ${ADMIN_MADE}`
   chk(
     Boolean(adminStored?.secret) && adminShown.length >= 32 && adminShown === adminStored.secret,

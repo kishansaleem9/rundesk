@@ -117,7 +117,7 @@ try {
     await waitUntil(() => page.getByText(`${TAG} the admin’s dashboard`).first().isVisible().catch(() => false), { timeoutMs: 20_000 })
     const button = page.getByRole('button', { name: /^(Edit dashboard|Make my own copy)$/ })
     await waitUntil(() => button.first().isVisible().catch(() => false), { timeoutMs: 20_000 })
-    return (await button.first().innerText().catch(() => '')).trim()
+    return (await button.first().filter({ visible: true }).innerText().catch(() => '')).trim()
   }
   /** Enter edit mode by that button, then Save layout, and answer the save's request. */
   const saveThrough = async (page) => {

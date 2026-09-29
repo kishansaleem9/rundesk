@@ -304,8 +304,8 @@ try {
     async () => (await cardOf(userA).getByTestId('teams-person-item').count()) === 2,
     { timeoutMs: 15_000 },
   )
-  const textA = flat(await readText(cardOf(userA)))
-  const textB = flat(await readText(cardOf(userB)))
+  const textA = flat(await readText(cardOf(userA).filter({ visible: true })))
+  const textB = flat(await readText(cardOf(userB).filter({ visible: true })))
   chk(
     itemsShown && aWork.every((title) => textA.includes(title)),
     'the first card lists the first person’s work',
@@ -338,7 +338,7 @@ try {
     'the row counts did not match the work each person has',
   )
 
-  const titleText = flat(await readText(cardOf(userA).getByTestId('teams-person-title')))
+  const titleText = flat(await readText(cardOf(userA).getByTestId('teams-person-title').filter({ visible: true })))
   chk(
     titleText === 'UI designer',
     'the job title is under the name, as the frame draws it',

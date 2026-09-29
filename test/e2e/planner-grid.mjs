@@ -186,7 +186,7 @@ try {
   }
 
   console.log('\n▶ and it is drawing what the API returned, not a picture of a week')
-  const blockTexts = await page.locator('[data-testid="planner-block"]').allInnerTexts()
+  const blockTexts = await page.locator('[data-testid="planner-block"]').filter({ visible: true }).allInnerTexts()
   chk(
     blockTexts.some((b) => b.includes('The scheduled one')),
     'a timed block from the API is on the grid',
@@ -229,7 +229,7 @@ try {
   )
 
   console.log('\n▶ the Backlog is what is NOT on the grid `[14:52]`')
-  const backlog = await page.locator('[data-testid="planner-backlog-item"]').allInnerTexts()
+  const backlog = await page.locator('[data-testid="planner-backlog-item"]').filter({ visible: true }).allInnerTexts()
   chk(
     backlog.some((b) => b.includes('The unscheduled one')),
     'an unscheduled assigned task waits in the Backlog',
@@ -343,7 +343,7 @@ try {
   )
   await page.locator('[data-testid="planner-meet-with"]').fill('sar')
   const matched = await waitUntil(async () => {
-    const names = await page.locator('[data-testid="planner-meet-result"]').allInnerTexts()
+    const names = await page.locator('[data-testid="planner-meet-result"]').filter({ visible: true }).allInnerTexts()
     return names.some((n) => n.includes('Sara Ahmed')) && !names.some((n) => n.includes('Omar'))
   }, { timeoutMs: 8000 })
   chk(
@@ -363,7 +363,7 @@ try {
     'no busy block appeared — searching a person that changes nothing is the facade this replaced',
   )
   chk(
-    (await readText(page.locator('[data-testid="planner-meet-selected"]'))).includes('Sara Ahmed'),
+    (await readText(page.locator('[data-testid="planner-meet-selected"]').filter({ visible: true }))).includes('Sara Ahmed'),
     'with a chip saying whose calendar you are seeing',
     'the hatched blocks had no explanation on screen',
   )

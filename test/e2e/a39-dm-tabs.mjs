@@ -126,7 +126,10 @@ try {
   console.log('\n▶ Calendar')
   await p.getByRole('button', { name: 'Calendar', exact: true }).click()
   await p.waitForTimeout(2200)
-  let body = await p.locator('main, body').first().innerText()
+  // The page's own text. This read `main, body` and took the first, which is always
+  // the <body> (document order); the body is drawn by definition, and its innerText
+  // leaves out whatever is hidden inside it (`found-29-sep/innertext-reads-hidden-leaves`).
+  let body = await p.locator('body').innerText()
   chk(/Meetings with/i.test(body), 'Calendar names whose meetings these are', `no heading: ${body.slice(0, 120)}`)
   chk(body.includes(SHARED_MEETING), 'the meeting both attended is listed',
     'the shared meeting is not on screen')
@@ -140,7 +143,7 @@ try {
   console.log('\n▶ Tasks')
   await p.getByRole('button', { name: 'Tasks', exact: true }).click()
   await p.waitForTimeout(2200)
-  body = await p.locator('main, body').first().innerText()
+  body = await p.locator('body').innerText()
   chk(/Open tasks with/i.test(body), 'Tasks names whose tasks these are', `no heading: ${body.slice(0, 120)}`)
   chk(body.includes(SHARED_TASK), 'the shared open task is listed', 'the shared task is missing')
   chk(!body.includes(CLOSED_TASK), 'a closed task is not listed under "open tasks"',

@@ -197,7 +197,7 @@ try {
   console.log('\n▶ what the Meetings page draws before any of this can be turned off')
 
   await openMeetings()
-  const soonBadge = await page.locator(`[data-testid="meeting-until-${SOON.id}"]`).innerText().catch(() => '')
+  const soonBadge = await page.locator(`[data-testid="meeting-until-${SOON.id}"]`).filter({ visible: true }).innerText().catch(() => '')
   chk(
     (await countdowns().count()) === UPCOMING.length && /^(now|in \d+[mhd])$/.test(soonBadge.trim()),
     `both upcoming meetings carry a countdown, and the near one reads ${JSON.stringify(soonBadge.trim())}`,

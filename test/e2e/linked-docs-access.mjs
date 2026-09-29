@@ -145,7 +145,7 @@ try {
     await page.getByTestId('related-tab-references').click({ timeout: 15_000 }).catch(() => {})
   }
   const panel = () => page.getByTestId('related-items-panel')
-  const panelText = async () => ((await panel().innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ')
+  const panelText = async () => ((await panel().filter({ visible: true }).innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ')
   await openReferences()
   await waitUntil(async () => (await panelText()).includes(OPEN) || (await panelText()).includes('No linked docs.'), { timeoutMs: 20_000 })
   const shown = await panelText()
@@ -192,7 +192,7 @@ try {
   await page.route(LINKED, failList)
   await openReferences()
   await waitUntil(async () => (await page.getByTestId('task-linked-docs-failed').count()) > 0 || (await panelText()).includes('No linked docs.'), { timeoutMs: 20_000 })
-  const failedSays = ((await page.getByTestId('task-linked-docs-failed').innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim()
+  const failedSays = ((await page.getByTestId('task-linked-docs-failed').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim()
   const saidNone = (await panelText()).includes('No linked docs.')
   await page.unroute(LINKED, failList).catch(() => {})
   chk(

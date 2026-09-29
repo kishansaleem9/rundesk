@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 348 items, 41 open, 7 partly fixed, 300 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 350 items, 40 open, 7 partly fixed, 303 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1584,13 +1584,50 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
 
-### `found-29-sep/ui-sweep-reads-after-fixed-waits` — open (test tooling, medium; found by the break run for `6a31a5f`)
+### `found-29-sep/innertext-reads-left-for-later` — open (test tooling, small; left by `found-29-sep/innertext-reads-hidden-leaves`)
+
+**15 `innerText` reads in four suites still decide a "shown" check with nothing on the read**
+
+*Evidence, 29 September:* `assign-to-priorities` (4), `doc-import` (3), `person-panel` (4) and `planner-priorities` (4) were being changed by other work while the rest were converted, so they were left. `check-suite-text-reads.mjs` holds each at its count (`LEFT_FOR_LATER`): a new unguarded read there fails the gate, and a conversion has to lower the number with it. The notes of the conversion list each line and the edit that closes it. `ui-sweep`'s ten, left with them, were converted once its fixed waits were (`found-29-sep/ui-sweep-reads-after-fixed-waits`).
+
+*To close:* guard each read as the other 197 were (`.filter({ visible: true })` on the element read), measure each suite before and after, and take the suites out of `LEFT_FOR_LATER`.
+
+### `found-29-sep/video-regression-finds-the-composer-by-its-old-words` — **closed** (test tooling, small; found by the `innerText` conversion's runs on lane 6 and the priorities work's on lane 7)
+
+**video-regression looked for the AI composer by the placeholder "Ask Rundesk", which `2c78436` retired, so seven of its checks failed on every lane**
+
+*Evidence, 29 September:* `video-regression` 87/94 on lanes 1, 6 and 7, the same seven each time. G13-10 found the composer with `input[placeholder*="Ask Rundesk" i]`. Since `2c78436` (`commit-log/log-4ad25f6-1`) the resting composer turns through four invitations, none of them "Ask Rundesk", so the locator matched nothing. Asked whether nothing was disabled, the read's catch answered yes: the chain reported "the composer stayed disabled" and skipped its other six checks. The regression for `2c78436` ran the 16 suites that open the dock and not this one, which reaches it from the video's G13 row.
+
+*Closed, 29 September:*
+- The composer is found by its own `data-testid="ai-composer-input"`, and waited for until it is shown, instead of a fixed 1.5 s.
+- Before 87/94, after 94/94, on lane 1.
+- `vr-5` (the composer disabled whatever `/ai/status` says) is new: 87/94 with a scratch build, reddening the check it names; the six after it are skipped by the chain. Nothing claimed that check before. While the chain stopped there, `vr-2` and `vr-3`, which claim checks after it, could only redden by the skip; their runs come with this commit.
+
+### `found-29-sep/ui-sweep-reads-after-fixed-waits` — **closed** (test tooling, medium; found by the break run for `6a31a5f`)
 
 **ui-sweep still reads after 45 fixed sleeps in sections 0–11 and 15, and a loaded lane outlasts them**
 
 *Evidence, 29 September:* the break set for `ui-sweep` on lane 3 at `6a31a5f`, beside three other break runs, stopped at its baseline, 90/107. Section 9 pressed Ctrl+K, slept 1.2 s and counted the palette once; it had not drawn yet, so the section reported "Ctrl+K did not open the palette" and skipped its other 16 checks. The run before stopped on 16b's teardown for the same kind of read (`found-29-sep/ui-sweep-teardown-skips-the-press`). Sections 12–16b wait for what they read since `d15081f`; sections 0–11 and 15 still hold 45 `waitForTimeout` calls, each a guess at how long the next read needs.
 
 *To close:* every remaining fixed wait becomes a bounded wait for what the next line reads or presses. The palette hotkey toggles, so it is pressed once, after the dialog before it has gone. The check count and every sentence stay as they are. Measure before and after under load, and let the `ui-sweep` break set run to its verdicts.
+
+*Closed, 29 September:*
+- All 45 fixed waits are gone; `waitForTimeout` is left only in the header comment. Each became a wait of 10–20 s for what the next line reads or presses. Where a value decides a check, the wait is for the value the check expects, and the check reads once more, so a wait that runs out decides nothing and the check fails in its own words. 107 checks, the same chains and every sentence as before.
+- What the sleeps had been covering:
+  - The list opens with its default saved view, which resets the grouping when it lands, so §1 waits for that view's own tab to be current.
+  - A chip press empties the palette while its search is in flight, and "No task group" is true in that gap. So §9 waits for the response its own press caused, told apart by `q`, `types` and `sort`, and then for one of its hits to be drawn.
+  - The list shows the board's statuses and task, so §7 waits for the board's own columns and this run's card on them.
+  - §15's "more than 200 characters" was met by the app's shell alone, so each surface is read once its text stops changing. `networkidle` was measured and fired on Docs before anything was drawn.
+  - The palette hotkey is pressed once, after the dialog before it has gone.
+- With the waits gone, its `innerText` reads were guarded: the ten left for later by `found-29-sep/innertext-reads-hidden-leaves`, and one the conversion added (the wait for the subtasks panel). The header row is guarded by `checkVisibility()` in page code. The tab bodies, the panel and a chip's count are guarded by `.filter({ visible: true })`. A select's chosen option is read off the select, only while the select is shown (`chosenLabel`, as `full-edit-levels` does). `ui-sweep` has left `LEFT_FOR_LATER`.
+- Measured by an agent on lane 5, 4 CPUs, other lanes busy:
+  - The committed file was 107/107 at every load it chose: 6 and 8 burners in one session, 8 in sessions of their own, and the sweep confined to two CPUs beside them.
+  - It was 106/107 once, at load 44: §11 read `?tab=archived` 1.9 s after its `goto` and found the page still blank. That is the failure this removes.
+  - It also passed early where it passed: `?tab=spaces` on "Spaces · 0", a heading drawn before its count loaded.
+  - The converted file was 107/107 in all 13 runs, under the same loads.
+  - Under the confined load: §1b 13.7 → 5.9 s, §9 24.2 → 15.3 s, §12 32.3 → 23.2 s. §15 is slower (102.8 → 168.2 s), because it now reads a finished page, not one 1.9 s after its address changed.
+- On the integrated tree: 107/107 on lane 5, in 90 s.
+- The `ui-sweep` break set runs on this commit; its verdicts come with the next.
 
 ### `found-29-sep/ui-sweep-teardown-skips-the-press` — **closed** (test tooling, small; found by the break run for `15e2681`)
 
@@ -1793,13 +1830,25 @@ After:
 
 What ClickUp offers from a task beyond reading it — its own actions, and a reply drafted from the thread — is `found-29-sep/task-brain-offers-list-starters`.
 
-### `found-29-sep/innertext-reads-hidden-leaves` — open, medium (test tooling; found closing `checks-read-textContent-not-what-is-shown`)
+### `found-29-sep/innertext-reads-hidden-leaves` — **closed** (test tooling, medium; found closing `checks-read-textContent-not-what-is-shown`)
 
 **A check that reads an element's `innerText` still reads a hidden element's whole text**
 
 *Evidence, measured 29 September in the lanes' Chromium:* `innerText` leaves out hidden text inside an element that is drawn, but an element that is itself hidden (`hidden`, `display: none`) answers with its whole text, as `textContent` does; only `visibility: hidden` answers empty. There are 252 `innerText` / `allInnerTexts` reads in 86 suites, and about 35 have a visibility check on the same line. A read of a leaf — a count, a chip, a label — that stands for "shown" cannot fail on a patch that hides the leaf rather than removing it. `task-menu`'s print checks read the printed id out of a copy that is hidden on screen by design, so they say what the copy holds, not what paper shows.
 
 *To close:* measure which `innerText` reads decide a check that text is shown, and give `check-suite-text-reads.mjs` the same three outs for them (a message, a visibility guard on the read, a marker with a reason); convert; and read `task-menu`'s print checks under print media.
+
+*Closed, 29 September.* Measured first, at `15e2681`, each suite lexed with its comments stripped: 266 `innerText` / `allInnerTexts` / `.innerText` reads in 90 suites (the ledger's 252 in 86, counted on an earlier tree), and 130 more through `readText(locator)`, which is `lib/wait.mjs`'s `innerText` and which no grep for `innerText` sees: 396 reads in 115 suites. 121 already had an out; 32 read the page's own body and 10 asked the same element's visibility first, both of which do read what is drawn. 197 decided a check that text is SHOWN with nothing on the read (counts, chips, toasts, labels, rows, panels, 6 of them `<option>`s), 10 asserted an absence, 1 was page code already guarded by its own box, and 25 sat in five suites other work was changing.
+
+In the lanes' Chromium a hidden leaf (`hidden`, `display: none`) answers `innerText` with its whole text, `visibility: hidden` and a closed `<details>` answer empty, the body answers with only what is drawn, and Playwright counts no `<option>` as visible.
+
+- `check-suite-text-reads.mjs --mutate` (preflight, and CI's verify job) reads `innerText`, `allInnerTexts`, the `.innerText` property and `readText(locator)` with the same three outs as `textContent`. The visibility guard has to be on the element read, not an ancestor (`<option>`s excepted, guarded on their select). For `innerText` alone, the page's body and the same element asked first (`isVisible()`, or a `waitFor` for it shown, gating the read) count as guards too. 42 planted cases; 28 of 28 mutations bite.
+- 197 reads guarded in 84 suites: `.filter({ visible: true })` on the element read or on the locator handed to `readText`, and on the `<select>` for the six option reads. 7 of them got the catch a hidden element now needs. 12 reads carry a marker: the 10 absence reads, and the two reads `ai-answer-rendering`'s helper used to make unfiltered, its answer (`absence`) and a card's label (`key`). `a39-dm-tabs`'s `main, body` is written as the body it always was, and `loading-states` names `checkVisibility()` beside its box check. Every check sentence is byte-for-byte as before: 1802 check calls in 86 suites.
+- `task-menu`'s print checks read under print media: the `print()` stub leaves the dialog open; the suite reads the copy and its id filtered to visible under `emulateMedia({ media: 'print' })`, restores screen media, then fires `afterprint` itself.
+- Lane 6, the git original and then this tree: 85 of the 86 changed suites green both times with their full counts (1763 checks). `video-regression` is 87/94 both times with the same seven: its G13-10 chain looks for the composer by "Ask Rundesk", a placeholder `2c78436` retired.
+- Six leaves hidden in scratch builds: `task-menu`'s printed id, `activity-rail`'s created chip, `checklists`' open count, `planner-grid`'s backlog rows, `bookmarks`' list, and an integration's error title. Each check stayed green on the git original with its leaf hidden and reddened after the change.
+- Left for later: 25 reads in `assign-to-priorities` (4), `doc-import` (3), `person-panel` (4), `planner-priorities` (4) and `ui-sweep` (10), which other work was changing. The gate holds each suite at that count (`LEFT_FOR_LATER`): a new unguarded read fails, and a conversion has to bring the number down with it.
+- Integrated at `15049dd` with the rest of the tree since `15e2681`; the regression on the integrated tree ran on lanes 1–3. 85 of the 86 changed suites were green on the first run (1856 checks), among them `video-regression` at 94/94 with its composer fix. `task-cover` failed 1 of 42 there, a check this change does not touch (its 12 s wait for the cover band, at load 15), and was 42/42 run again on lane 2. `ui-sweep`, the 87th, was 107/107 on lane 5. Of the 25 reads left for later, `ui-sweep`'s ten were converted in the same batch, after its fixed waits (`found-29-sep/ui-sweep-reads-after-fixed-waits`); the other 15 are `found-29-sep/innertext-reads-left-for-later`.
 
 ### `found-29-sep/unit-claims-read-a-nested-checkout` — **closed** (test tooling, small; found by the preflight for `workspace-audit-log-not-in-settings`)
 

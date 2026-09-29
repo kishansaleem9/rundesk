@@ -112,7 +112,7 @@ try {
   await page.getByTestId('create-ai-confirm').click({ timeout: 10_000 }).catch(() => {})
   const result = page.getByTestId('create-ai-result-0')
   await result.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-  const line = ((await result.innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim()
+  const line = ((await result.filter({ visible: true }).innerText().catch(() => '')) ?? '').replace(/\s+/g, ' ').trim()
   chk(
     line.includes(REFUSAL) && !line.includes('unknown_space'),
     'a refused step says why, in the sentence the server gives — not its code',

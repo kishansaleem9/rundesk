@@ -596,7 +596,7 @@ try {
   await page.waitForTimeout(800)
   const slashMenu = page.getByTestId('description-slash-menu')
   check(await slashMenu.isVisible().catch(() => false), 'typing "/" opens the block menu')
-  const slashText = await slashMenu.innerText().catch(() => '')
+  const slashText = await slashMenu.filter({ visible: true }).innerText().catch(() => '')
   check(/Table/i.test(slashText), 'the menu offers a Table — the block she names', slashText.slice(0, 140))
   check(/Banner/i.test(slashText), 'and a Banner — the other one she names')
 
@@ -810,7 +810,7 @@ try {
   await page.keyboard.press('End')
   await page.keyboard.type('\n/')
   await page.waitForTimeout(900)
-  const slashBlocks = await page.locator('[data-testid=description-slash-menu] button').allInnerTexts().catch(() => [])
+  const slashBlocks = await page.locator('[data-testid=description-slash-menu] button').filter({ visible: true }).allInnerTexts().catch(() => [])
   check(slashBlocks.some((b) => /image/i.test(b)), 'and the slash menu offers an Image block',
     JSON.stringify(slashBlocks))
   await page.keyboard.press('Escape')
@@ -834,7 +834,7 @@ try {
     { waitUntil: 'domcontentloaded' },
   )
   await page.waitForTimeout(4000)
-  const presetLabels = await page.locator('[data-testid=task-due-presets] button').allInnerTexts().catch(() => [])
+  const presetLabels = await page.locator('[data-testid=task-due-presets] button').filter({ visible: true }).allInnerTexts().catch(() => [])
   check(presetLabels.length >= 6, 'the due date offers natural-language presets', JSON.stringify(presetLabels))
   check(
     (await page.locator('[data-testid=task-due-set-recurring]').count()) > 0,
@@ -1194,7 +1194,7 @@ try {
     'no freshness controls on the list view',
   )
   check(
-    (await page.getByTestId('freshness-updated').innerText().catch(() => '')).trim().length > 0,
+    (await page.getByTestId('freshness-updated').filter({ visible: true }).innerText().catch(() => '')).trim().length > 0,
     'and says when what you are looking at last arrived',
     'the list shows no age for its data',
   )

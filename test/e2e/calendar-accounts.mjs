@@ -845,7 +845,7 @@ try {
     actions:
       (await page.getByTestId('planner-conferencing-connect').count()) +
       (await page.getByTestId('planner-conferencing-disconnect').count()),
-    says: ((await page.getByTestId('planner-conferencing-zoom-state').innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim(),
+    says: ((await page.getByTestId('planner-conferencing-zoom-state').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim(),
   }
   releaseConns()
   const settledTo = await waitUntil(

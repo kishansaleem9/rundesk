@@ -199,7 +199,7 @@ try {
       'the collapse is eating real data, not blanks',
   )
 
-  const hiddenLabel = () => readText(page.getByTestId('empty-fields-hidden').first())
+  const hiddenLabel = () => readText(page.getByTestId('empty-fields-hidden').first().filter({ visible: true }))
   chk(
     new RegExp(`\\b${emptiesBefore}\\b`).test(await hiddenLabel()),
     `and it says how many it hid (${emptiesBefore})`,
@@ -228,7 +228,7 @@ try {
    * against "FILLED" while the panel is behaving correctly.
    */
   const rows = async () =>
-    (await page.getByTestId('custom-field-row').allInnerTexts()).map((r) => r.toLowerCase())
+    (await page.getByTestId('custom-field-row').filter({ visible: true }).allInnerTexts()).map((r) => r.toLowerCase())
   await waitUntil(async () => (await rows()).length > 0, { timeoutMs: 20_000 })
 
   const collapsedRows = await rows()

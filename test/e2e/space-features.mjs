@@ -152,14 +152,16 @@ async function inspect(spaceId) {
   await page.waitForSelector('[data-testid="list-customize"]', { timeout: 20_000 })
 
   // Grouping and sorting by a field the space switched off must not be offered.
-  const groupOptions = await page.locator('[data-testid="list-group-by"] option').allInnerTexts()
+  // Offered by a DRAWN select: Playwright counts no <option> as visible, so the guard
+  // is on the select (`found-29-sep/innertext-reads-hidden-leaves`).
+  const groupOptions = await page.locator('[data-testid="list-group-by"]').filter({ visible: true }).locator('option').allInnerTexts()
   const emailButton = await page.locator('[data-testid="list-email-button"]').count()
   const toolbar = await page.locator('body').innerText()
 
   // The filter panel's field list.
   await page.locator('[data-testid="list-filter-builder"]').click()
   await page.locator('[data-testid="list-filter-add"]').click()
-  const fieldOptions = await page.locator('[data-testid="list-filter-rule"] select').first().locator('option').allInnerTexts()
+  const fieldOptions = await page.locator('[data-testid="list-filter-rule"] select').first().filter({ visible: true }).locator('option').allInnerTexts()
 
   await ctx.close()
   return { groupOptions, emailButton, fieldOptions, toolbar }

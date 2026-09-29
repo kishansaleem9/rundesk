@@ -232,7 +232,7 @@ try {
   await mGmail.click({ timeout: 10_000 }).catch(() => {})
   const mNotice = mpage.getByTestId('palette-source-disconnected')
   await mNotice.waitFor({ state: 'visible', timeout: 10000 }).catch(() => {})
-  const noticeText = ((await mNotice.innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const noticeText = ((await mNotice.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const mConnect = await mpage.getByTestId('palette-source-connect').count()
   chk(
     /someone else/i.test(noticeText) && mConnect === 0,
@@ -241,7 +241,7 @@ try {
   )
   await mpage.getByTestId('palette-source-sharepoint').click({ timeout: 10_000 }).catch(() => {})
   await mpage.waitForTimeout(600)
-  const spText = ((await mNotice.innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const spText = ((await mNotice.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const spConnect = await mpage.getByTestId('palette-source-connect').count()
   chk(
     /not connected/i.test(spText) && !/someone else/i.test(spText) && spConnect === 0,

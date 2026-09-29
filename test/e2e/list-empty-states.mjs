@@ -123,7 +123,7 @@ const page = await ctx.newPage()
 const visible = (testId) => page.getByTestId(testId).isVisible().catch(() => false)
 const countOf = (testId) => page.getByTestId(testId).count()
 const textOfId = async (testId) =>
-  (await page.getByTestId(testId).innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
+  (await page.getByTestId(testId).filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
 
 /**
  * An attribute off an element that may not exist, without a 30-second wait.
@@ -257,9 +257,10 @@ try {
    * button, and the filtered state's one control is Clear filters — so the
    * claim is that the filtered state, on screen, offers no button but that one.
    */
+  // Every button, hidden ones too: the claim is an absence, and the text only names a button with no testid.
   const filteredButtons = await page
     .locator('[data-testid="list-empty-filtered"] button')
-    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid') || el.innerText.trim()))
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid') || el.innerText.trim())) // text-read: absence — no button but Clear filters
   const invitations = filteredButtons.filter((b) => b !== 'list-empty-clear-filters')
   chk(
     (await countOf('list-empty-filtered')) === 1 && invitations.length === 0,

@@ -214,7 +214,7 @@ try {
   chk(await waitUntil(onlyMine, { timeoutMs: 15_000 }),
     'searching this run\'s tag leaves exactly its nine visible cards, and nobody else\'s',
     `the grid drew ${await cards().count()} cards for ${TAG}`)
-  chk((await readText(page.getByTestId('templates-total'))).trim() === `${TOTAL} available`,
+  chk((await readText(page.getByTestId('templates-total').filter({ visible: true }))).trim() === `${TOTAL} available`,
     'while the total says 10 — the server\'s count, not the DOM\'s',
     `the total badge read ${JSON.stringify((await readText(page.getByTestId('templates-total'))).trim())}`)
 
@@ -382,7 +382,7 @@ try {
   const engCards = () => page.locator('[data-testid="templates-section-engineering"] [data-testid="templates-card"]')
   chk(await engCards().count() === 6, 'Engineering shows six of its seven',
     `it showed ${await engCards().count()}`)
-  chk((await readText(page.getByTestId('templates-category-more-engineering'))).trim() === 'See 1 more',
+  chk((await readText(page.getByTestId('templates-category-more-engineering').filter({ visible: true }))).trim() === 'See 1 more',
     'and offers "See 1 more" — the number it is actually holding back',
     `it read ${JSON.stringify((await readText(page.getByTestId('templates-category-more-engineering'))).trim())}`)
   chk(await page.getByTestId('templates-category-more-marketing').count() === 0,

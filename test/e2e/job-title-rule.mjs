@@ -205,7 +205,7 @@ try {
     adminSaved = await titleOf(colleague.id)
   }
   const shownAfter = adminOffered
-    ? await waitUntil(async () => (await cardOf(adminPage, colleague.id).getByTestId('teams-person-title').innerText().catch(() => '')).trim() === 'Principal analyst', { timeoutMs: 10_000 })
+    ? await waitUntil(async () => (await cardOf(adminPage, colleague.id).getByTestId('teams-person-title').filter({ visible: true }).innerText().catch(() => '')).trim() === 'Principal analyst', { timeoutMs: 10_000 })
     : false
   chk(
     adminOffered && adminSaved === 'Principal analyst' && shownAfter,
@@ -243,7 +243,7 @@ try {
     async () => (await cardOf(plainPage, plain.id).getByTestId('teams-person-title-error').count()) > 0,
     { timeoutMs: 8000 },
   )
-  const errorText = errorShown ? (await cardOf(plainPage, plain.id).getByTestId('teams-person-title-error').innerText().catch(() => '')).trim() : ''
+  const errorText = errorShown ? (await cardOf(plainPage, plain.id).getByTestId('teams-person-title-error').filter({ visible: true }).innerText().catch(() => '')).trim() : ''
   const stillEditing = (await cardOf(plainPage, plain.id).getByTestId('teams-person-title-input').count()) > 0
   chk(
     errorShown && errorText.length > 0 && stillEditing && (await titleOf(plain.id)) === 'Copywriter',

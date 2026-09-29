@@ -195,7 +195,8 @@ try {
    */
   const coverTabs = page.locator('[role="tablist"]').filter({ has: page.getByTestId('cover-tab-link') })
   const tabStrips = await coverTabs.count()
-  const tabsText = tabStrips === 1 ? await coverTabs.innerText().catch(() => '') : ''
+  // Unfiltered: what it lacks is the claim, and a hidden strip read whole is the stricter read.
+  const tabsText = tabStrips === 1 ? await coverTabs.innerText().catch(() => '') : '' // text-read: absence — no pretend tab on the strip
   const sawTabs = tabStrips === 1 && tabsText.trim().length > 0
   const unseen = `no tab strip holding the picker's Link tab was read (${tabStrips} found), so what it lacks says nothing`
   chk(
@@ -702,7 +703,7 @@ try {
     { timeoutMs: 15_000 },
   )
   const errText = said
-    ? (await page.getByTestId('cover-upload-error').innerText({ timeout: 6000 }).catch(() => '')).trim()
+    ? (await page.getByTestId('cover-upload-error').filter({ visible: true }).innerText({ timeout: 6000 }).catch(() => '')).trim()
     : ''
   chk(
     armed && reopened && said && errText.length > 0,

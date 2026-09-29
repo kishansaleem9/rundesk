@@ -279,7 +279,7 @@ try {
   )
   chk(
     (await page.getByTestId('quick-create-attachments').count()) === 1 &&
-      (await readText(page.getByTestId('quick-create-attachments'))).toLowerCase().includes('attachment'),
+      (await readText(page.getByTestId('quick-create-attachments').filter({ visible: true }))).toLowerCase().includes('attachment'),
     'under an Attachments heading, as the frame draws it',
     'there is no Attachments section — the files were staged somewhere invisible',
   )
@@ -395,7 +395,7 @@ try {
   const refusedName = names[0] ?? null
   const toastText = armed && refusedName
     ? await waitUntil(
-        async () => (await readText(page.locator('[data-sonner-toast]').first())).includes(refusedName),
+        async () => (await readText(page.locator('[data-sonner-toast]').first().filter({ visible: true }))).includes(refusedName),
         { timeoutMs: 20_000 },
       )
     : false

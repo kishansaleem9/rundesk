@@ -422,7 +422,7 @@ try {
      * The role is the half you cannot read off the sidebar, and the reason to
      * open this page rather than just looking at the app.
      */
-    const rowText = (await row.innerText().catch(() => '')).toLowerCase()
+    const rowText = (await row.filter({ visible: true }).innerText().catch(() => '')).toLowerCase()
     workspaceRow.step(
       rowText.includes(String(mine[0].role).replace(/_/g, ' ').toLowerCase()),
       `row read "${rowText.replace(/\s+/g, ' ').slice(0, 80)}" expected role ${mine[0].role}`,
@@ -743,7 +743,7 @@ try {
     await page.getByTestId('notepad-open').waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     await page.getByTestId('notepad-open').click({ timeout: 10_000 }).catch(() => {})
     await waitUntil(
-      async () => (await page.getByTestId('notepad-status').innerText({ timeout: 2000 })).trim().length > 0,
+      async () => (await page.getByTestId('notepad-status').filter({ visible: true }).innerText({ timeout: 2000 })).trim().length > 0,
       { timeoutMs: 15_000 },
     )
     check(

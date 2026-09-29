@@ -245,7 +245,7 @@ try {
    * THE MIC LIST IS THE DEVICE LIST, filtered. A picker that offered the camera
    * and the speakers would be listing whatever `enumerateDevices` returned.
    */
-  const micText = await readText(page.getByTestId('clip-setup-mic'))
+  const micText = await readText(page.getByTestId('clip-setup-mic').filter({ visible: true }))
   chk(
     micText.includes('Studio Headset') && !micText.includes('FaceTime') && !micText.includes('Speakers'),
     'and the microphone row lists the real audio inputs, and only those',
@@ -257,7 +257,7 @@ try {
    * picks your screen, which it cannot be.
    */
   chk(
-    (await readText(page.getByTestId('clip-setup-browser-note'))).trim().length > 0,
+    (await readText(page.getByTestId('clip-setup-browser-note').filter({ visible: true }))).trim().length > 0,
     'and it says the browser will still ask which screen to share',
     'the source row is presented as if it chose the screen itself',
   )

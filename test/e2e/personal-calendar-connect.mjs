@@ -197,7 +197,7 @@ try {
   // The failure, as the callback sends a person back.
   const back = personalFail.url ? `${B}${personalFail.url.pathname}${personalFail.url.search}` : `${B}/app/${WS}/calendar?settings=accounts`
   await page.goto(back, { waitUntil: 'domcontentloaded' })
-  const said = ((await page.getByTestId('planner-account-connect-error').innerText({ timeout: 20_000 }).catch(() => '')) ?? '').trim()
+  const said = ((await page.getByTestId('planner-account-connect-error').filter({ visible: true }).innerText({ timeout: 20_000 }).catch(() => '')) ?? '').trim()
   // Closed, the page takes its reason with it: a reload does not say it again.
   await page.keyboard.press('Escape').catch(() => {})
   await page.getByTestId('planner-settings-dialog').waitFor({ state: 'hidden', timeout: 8000 }).catch(() => {})

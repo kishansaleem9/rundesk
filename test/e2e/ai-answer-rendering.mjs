@@ -127,7 +127,14 @@ const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ?
  * seconds × ten reads is five minutes added to a suite that runs in four.
  */
 const GRACE_MS = 3_000
-const textOf = (loc) => loc.innerText({ timeout: GRACE_MS }).catch(() => null)
+/*
+ * AND ONLY WHAT IS DRAWN. A hidden element answers `innerText` with its whole
+ * text, so a read standing for "shown" is filtered to visible first; a hidden
+ * element then reads as null like an absent one
+ * (`found-29-sep/innertext-reads-hidden-leaves`). The two reads below that are
+ * not about showing — the answer's absences and a card's own label — read unfiltered.
+ */
+const textOf = (loc) => loc.filter({ visible: true }).innerText({ timeout: GRACE_MS }).catch(() => null)
 const attrOf = (loc, name) => loc.getAttribute(name, { timeout: GRACE_MS }).catch(() => null)
 
 const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
@@ -302,14 +309,15 @@ try {
    */
   const headings = answer.locator('h1, h2, h3, h4, h5, h6')
   const headingCount = await headings.count()
-  const headingText = headingCount ? (await headings.first().innerText()).trim() : null
+  const headingText = headingCount ? ((await textOf(headings.first())) ?? '').trim() : null
   const itemCount = await answer.locator('li').count()
   chk(
     headingCount === 1 && headingText === 'Project status' && itemCount === 3,
     'and its heading and three-item list are real block elements',
     `found ${headingCount} heading(s) reading ${JSON.stringify(headingText)} and ${itemCount} list item(s)`,
   )
-  const answerText = ((await textOf(answer)) ?? '').replace(/\s+/g, ' ')
+  // Unfiltered, as it always was: these two checks are absences, and a hidden answer read whole is the stricter read.
+  const answerText = ((await answer.innerText({ timeout: GRACE_MS }).catch(() => null)) ?? '').replace(/\s+/g, ' ') // text-read: absence — no syntax left in the answer
   chk(
     !answerText.includes('**') && !answerText.includes('## '),
     'with none of the syntax left visible',
@@ -812,7 +820,8 @@ try {
   const pressed = page.getByTestId('ai-starter-projectStatus')
   // `aar-18-starters-are-a-fixed-list` replaces the card set, so this card is
   // gone and this read was the throw that cost that patch six checks.
-  const pressedTitle = ((await textOf(pressed)) ?? '').split('\n')[0].trim()
+  // Unfiltered: the label is what the question is compared AGAINST, not a claim that it is shown.
+  const pressedTitle = ((await pressed.innerText({ timeout: GRACE_MS }).catch(() => null)) ?? '').split('\n')[0].trim() // text-read: key — the label of the card, which the question must not be
   // AND THE PRESS, not only the read. I guarded the read for this same patch
   // this morning and left the press one line under it, which is precisely the
   // shape that keeps turning up: `aar-18-starters-are-a-fixed-list` replaces
@@ -823,7 +832,7 @@ try {
     async () => (await page.locator('[data-testid^="ai-question-"]').count()) > 0,
     { timeoutMs: 15_000 },
   )
-  const askedText = asked ? (await page.locator('[data-testid^="ai-question-"]').first().innerText()).trim() : ''
+  const askedText = asked ? ((await textOf(page.locator('[data-testid^="ai-question-"]').first())) ?? '').trim() : ''
   chk(
     asked && askedText.length > pressedTitle.length && askedText !== pressedTitle,
     'pressing a card asks its prompt, which is a sentence and not the card’s label',

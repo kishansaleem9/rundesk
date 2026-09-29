@@ -532,7 +532,7 @@ try {
   const badge = page.getByTestId('sidebar-my-tasks-personal-list-count')
   const openNow = ((await api(`/workspaces/${WS}/personal-tasks`)).data ?? []).filter((p) => !p.done).length
   chk(
-    await waitUntil(async () => Number(await badge.innerText().catch(() => 'x')) === openNow, { timeoutMs: 25_000 }),
+    await waitUntil(async () => Number(await badge.filter({ visible: true }).innerText().catch(() => 'x')) === openNow, { timeoutMs: 25_000 }),
     `the badge reads the ${openNow} open personal tasks the server has`,
     `the badge read "${await badge.innerText().catch(() => '<absent>')}" for ${openNow} open tasks`,
   )
@@ -553,7 +553,7 @@ try {
   await page.goto(`${B}/app/${WS}`, { waitUntil: 'domcontentloaded' })
   chk(
     await waitUntil(
-      async () => Number(await badge.innerText().catch(() => 'x')) === openNow - 1,
+      async () => Number(await badge.filter({ visible: true }).innerText().catch(() => 'x')) === openNow - 1,
       { timeoutMs: 25_000 },
     ),
     'and ticking one off takes the badge down by exactly one',

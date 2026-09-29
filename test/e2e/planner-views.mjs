@@ -209,7 +209,7 @@ try {
   } else {
     lateBlock.step(
       await waitUntil(
-        async () => (await readText(page.getByTestId('planner-month-grid'))).includes(`Late month ${TAG}`),
+        async () => (await readText(page.getByTestId('planner-month-grid').filter({ visible: true }))).includes(`Late month ${TAG}`),
         { timeoutMs: 15_000 },
       ),
       'the month drew empty cells for days it never asked the server about',
@@ -226,7 +226,7 @@ try {
   // month a week's step also lands in the next month, and this passed with the
   // arrow moving a week (`pv-2`, on 24 September). Two week-long steps can
   // never cross two month boundaries; two month-long steps always do.
-  const monthLabel = () => readText(page.getByTestId('planner-month'))
+  const monthLabel = () => readText(page.getByTestId('planner-month').filter({ visible: true }))
   const before = await monthLabel()
   await page.getByTestId('planner-next').click()
   const movedOnce = await waitUntil(async () => (await monthLabel()) !== before, { timeoutMs: 10_000 })

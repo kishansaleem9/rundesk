@@ -515,7 +515,7 @@ try {
   if (reopened) {
     await page.getByTestId('integrations-suggest-name').fill('X'.repeat(81))
     await page.getByTestId('integrations-suggest-submit').click()
-    refusal = await readText(page.getByTestId('integrations-suggest-error'), { timeoutMs: 10_000 })
+    refusal = await readText(page.getByTestId('integrations-suggest-error').filter({ visible: true }), { timeoutMs: 10_000 })
   }
   chk(
     /80 characters at most/i.test(refusal),
@@ -530,8 +530,8 @@ try {
   // ── 6 · the Connect Custom MCP Servers banner ────────────────────────────
   console.log('\n▶ `19:07` the Connect Custom MCP Servers banner')
   await openIntegrations()
-  const mcpTitle = await readText(page.getByTestId('integrations-mcp-title'))
-  const mcpSubtitle = await readText(page.getByTestId('integrations-mcp-subtitle'))
+  const mcpTitle = await readText(page.getByTestId('integrations-mcp-title').filter({ visible: true }))
+  const mcpSubtitle = await readText(page.getByTestId('integrations-mcp-subtitle').filter({ visible: true }))
   chk(
     /connect custom mcp servers/i.test(mcpTitle) && /any tool or data source/i.test(mcpSubtitle),
     'the banner carries the frame’s own two lines',
@@ -541,7 +541,7 @@ try {
   // is a failing check, not a broken harness.
   await page.getByTestId('integrations-mcp-banner').click({ timeout: 8000 }).catch(() => {})
   await page.waitForSelector('[data-testid="integrations-mcp-dialog"]', { timeout: 10_000 }).catch(() => {})
-  const limitation = await readText(page.getByTestId('integrations-mcp-limitation'))
+  const limitation = await readText(page.getByTestId('integrations-mcp-limitation').filter({ visible: true }))
   chk(
     limitation.length > 0 && /cannot call an external tool yet/i.test(limitation),
     'it opens, and says plainly what the AI cannot do yet',

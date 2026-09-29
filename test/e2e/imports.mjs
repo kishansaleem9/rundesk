@@ -186,7 +186,8 @@ try {
   const reasons = []
   for (const key of UNDRAWN) {
     const el = page.getByTestId(`import-unsupported-${key}`)
-    reasons.push((await el.count()) ? ((await el.first().innerText()) ?? '') : '')
+    // Drawn, and caught: a hidden reason reads '' and fails the check below in its own words.
+    reasons.push((await el.count()) ? ((await el.first().filter({ visible: true }).innerText().catch(() => '')) ?? '') : '')
   }
   chk(
     reasons.length === UNDRAWN.length && reasons.every((r) => r.trim().length > 40),
@@ -301,7 +302,7 @@ try {
     rejectMeta.push({
       row: await row.getAttribute('data-row'),
       code: await row.getAttribute('data-code'),
-      text: await row.innerText(),
+      text: await row.filter({ visible: true }).innerText().catch(() => ''),
     })
   }
   const byRow = Object.fromEntries(rejectMeta.map((r) => [r.row, r]))

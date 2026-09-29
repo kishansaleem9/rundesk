@@ -367,7 +367,7 @@ try {
     // unqualified `innerText` waited out the default timeout and ended the run
     // at 25 of 29.
     reasons.push(
-      (await page.getByTestId(`ai-value-category-reason-${id}`).innerText().catch(() => '')).trim(),
+      (await page.getByTestId(`ai-value-category-reason-${id}`).filter({ visible: true }).innerText().catch(() => '')).trim(),
     )
   }
   chk(
@@ -375,9 +375,16 @@ try {
     'each with its own sentence, not one shared fallback',
     `the three reasons read ${JSON.stringify(reasons)}`,
   )
+  /*
+   * Hoisted out of the check so its marker is on a line of its own, and read only
+   * when the count holds, as the `&&` did. Unfiltered: the claim is that no digit
+   * is printed, and a hidden tile read whole is the stricter read
+   * (`found-29-sep/innertext-reads-hidden-leaves`).
+   */
+  const unavailable = await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()
+  const imagesTile = unavailable === 3 ? await page.getByTestId('ai-value-category-images').innerText().catch(() => '0') : '0' // text-read: absence — no digit anywhere on the tile
   chk(
-    (await page.locator('[data-testid^="ai-value-category-unavailable-"]').count()) === 3 &&
-      !/\d/.test(await page.getByTestId('ai-value-category-images').innerText().catch(() => '0')),
+    unavailable === 3 && !/\d/.test(imagesTile),
     'and none of them prints a number a person could mistake for a count',
     `the Images tile reads ${JSON.stringify(
       (await page.getByTestId('ai-value-category-images').innerText().catch(() => '<no tile>')).replace(
@@ -409,7 +416,7 @@ try {
   // a different route. An empty string fails the regex below, which is the
   // honest answer for a card that is not on screen.
   const visibleTasks = (
-    (await page.getByTestId('ai-value-category-tasks').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('ai-value-category-tasks').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   chk(
     new RegExp(`(^|\\D)${serverTasks}(\\D|$)`).test(visibleTasks),
@@ -423,7 +430,7 @@ try {
    * silently become the thing the note warned about.
    */
   const unitNote = (await page.getByTestId('ai-value-categories')
-    .locator('xpath=preceding-sibling::*[1]').innerText().catch(() => '')) || ''
+    .locator('xpath=preceding-sibling::*[1]').filter({ visible: true }).innerText().catch(() => '')) || ''
   chk(
     /run/i.test(unitNote),
     'and the heading says the unit is a run, as `ai-value.ts` insists',

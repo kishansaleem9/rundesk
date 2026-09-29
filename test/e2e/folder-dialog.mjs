@@ -198,7 +198,7 @@ try {
     'there is no private toggle — a folder could only ever be created public, from the one ' +
       'dialog the frame shows the toggle in',
   )
-  const privacyText = (await readText(page.getByTestId('quick-create-folder-private').locator('xpath=ancestor::label[1]')))
+  const privacyText = (await readText(page.getByTestId('quick-create-folder-private').locator('xpath=ancestor::label[1]').filter({ visible: true })))
     .replace(/\s+/g, ' ')
   chk(
     /only you and invited members have access/i.test(privacyText),

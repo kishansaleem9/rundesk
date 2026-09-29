@@ -154,7 +154,7 @@ try {
     'the Overview carries a Bookmarks card',
     'no bookmarks card on the workspace home',
   )
-  const listed = (await page.getByTestId('bookmarks-list').innerText().catch(() => '')).trim()
+  const listed = (await page.getByTestId('bookmarks-list').filter({ visible: true }).innerText().catch(() => '')).trim()
   chk(listed.includes(`The spec ${stamp}`), 'and shows what was saved',
     `the card read ${JSON.stringify(listed.slice(0, 120))}`)
 

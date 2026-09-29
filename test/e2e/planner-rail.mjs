@@ -206,7 +206,7 @@ try {
   console.log('\n▶ each section holds what its name says')
 
   const textsIn = async (testid) =>
-    (await page.getByTestId(testid).allInnerTexts()).map((s) => s.toLowerCase())
+    (await page.getByTestId(testid).filter({ visible: true }).allInnerTexts()).map((s) => s.toLowerCase())
 
   const assignedItems = await textsIn('planner-assigned-item')
   chk(

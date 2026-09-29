@@ -135,7 +135,7 @@ try {
     await tab.goto(`${B}/app/${WS}/${space.id}/${project.id}/${desk.id}?task=${source.id}`, { waitUntil: 'domcontentloaded' })
     await waitUntil(() => tab.getByTestId('task-tab-overview').isVisible().catch(() => false), { timeoutMs: 30_000 })
   }
-  const textsOf = (locator) => locator.allInnerTexts().catch(() => [])
+  const textsOf = (locator) => locator.filter({ visible: true }).allInnerTexts().catch(() => [])
 
   await openSource()
   // The composer is on the Comments tab.
@@ -221,8 +221,8 @@ try {
   const option = fieldRow.getByTestId(`cf-tasks-option-${needle.id}`)
   await option.click({ timeout: 15_000 }).catch(() => {})
   const chip = fieldRow.getByTestId(`cf-task-${needle.id}`)
-  await waitUntil(async () => ((await chip.innerText({ timeout: 2000 }).catch(() => '')) ?? '').includes(NEEDLE), { timeoutMs: 15_000 })
-  const chipText = ((await chip.innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  await waitUntil(async () => ((await chip.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? '').includes(NEEDLE), { timeoutMs: 15_000 })
+  const chipText = ((await chip.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const stored = await api(`/workspaces/${WS}/tasks/${source.id}/custom-fields`)
   const storedValue = (stored.data ?? []).find((row) => row.definition?.id === field.data.id)?.value
   chk(

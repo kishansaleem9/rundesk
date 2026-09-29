@@ -138,11 +138,11 @@ try {
   await box.click()
   await box.fill('12')
   const suggestion = await waitUntil(
-    async () => (await readText(page.getByTestId('task-estimate-suggestion'))).length > 0,
+    async () => (await readText(page.getByTestId('task-estimate-suggestion').filter({ visible: true }))).length > 0,
     { timeoutMs: 10_000 },
   )
   chk(suggestion, 'a suggestion row appears', 'nothing says what the box heard')
-  const suggestionText = await readText(page.getByTestId('task-estimate-suggestion'))
+  const suggestionText = await readText(page.getByTestId('task-estimate-suggestion').filter({ visible: true }))
   chk(
     /12/.test(suggestionText) && /hour/i.test(suggestionText),
     `and it reads the frame's own words — "${suggestionText}"`,

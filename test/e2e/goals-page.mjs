@@ -98,7 +98,7 @@ try {
   const admin = await signIn(ADMIN.email, ADMIN.password)
   const card = admin.locator('a', { hasText: `${TAG} thirty of sixty` }).first()
   await card.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
-  const cardText = (await card.innerText().catch(() => '')).replace(/\s+/g, ' ')
+  const cardText = (await card.filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ')
   chk(
     /\b50%/.test(cardText),
     'a goal at 30 of 60 reads 50% on its card',

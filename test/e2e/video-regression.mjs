@@ -419,6 +419,7 @@ try {
    */
   const controls = await page
     .getByTestId('inbox-controls')
+    .filter({ visible: true })
     .innerText()
     .catch(() => '')
   chk(controls.length > 0, 'the inbox offers its bucket controls', 'no inbox controls row on the page')
@@ -1042,8 +1043,16 @@ try {
       if (!haveToggle) return g13.rest('skipped: there was no dock handle to open')
 
       await aiToggle.click()
-      await aiPage.waitForTimeout(1500)
-      const composer = aiPage.locator('input[placeholder*="Ask Rundesk" i]').first()
+      /*
+       * FOUND BY ITS OWN HOOK, NOT BY ITS WORDS. The resting composer has turned
+       * through four invitations since `2c78436` (`commit-log/log-4ad25f6-1`),
+       * none of them "Ask Rundesk", and a locator by that placeholder matched
+       * nothing: every lane read "the composer stayed disabled" and skipped the
+       * six checks after it (`found-29-sep/video-regression-finds-the-composer-by-its-old-words`).
+       * Waited for until it is shown, rather than for a fixed 1.5 s.
+       */
+      const composer = aiPage.getByTestId('ai-composer-input').first()
+      await composer.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
       // Asserted rather than assumed: with no key the composer is disabled,
       // and `fill` would then time out 30s into a failure whose message says
       // nothing about why.
@@ -1085,7 +1094,7 @@ try {
       // The MESSAGE read the chip through a catch and the CONDITION did not, so
       // an absent chip threw out of the assertion describing it — and the press
       // below was bare as well.
-      const chipText = await chip.innerText({ timeout: 6000 }).catch(() => null)
+      const chipText = await chip.filter({ visible: true }).innerText({ timeout: 6000 }).catch(() => null)
       g13.step(chipText?.trim() === 'Show me the overdue one', chipText ?? '(unreadable)')
       // A chip that does not ask the question is a label.
       await chip.click({ timeout: 8000 }).catch(() => {})

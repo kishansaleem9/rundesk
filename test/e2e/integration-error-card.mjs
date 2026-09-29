@@ -230,13 +230,13 @@ try {
     'and only that one — the healthy tiles stay quiet',
     `${await cards().count()} error cards were drawn for one stored failure`,
   )
-  const title = await readText(cardFor('gcal').getByTestId('integration-error-title'))
+  const title = await readText(cardFor('gcal').getByTestId('integration-error-title').filter({ visible: true }))
   chk(
     /Google Calendar/.test(title) && /connect/i.test(title),
     'the card names the account it could not connect',
     `the title read ${JSON.stringify(title)}`,
   )
-  const body = await readText(cardFor('gcal').getByTestId('integration-error-body'))
+  const body = await readText(cardFor('gcal').getByTestId('integration-error-body').filter({ visible: true }))
   /*
    * THE CHECK THE WHOLE ROW IS FOR. Not "a body is present": the body has to
    * contain the exact sentence this run stored, tag and all.
@@ -252,7 +252,7 @@ try {
     `the body read ${JSON.stringify(body)}`,
   )
   chk(
-    (await readText(cardFor('gcal').getByTestId('integration-error-when'))).length > 0,
+    (await readText(cardFor('gcal').getByTestId('integration-error-when').filter({ visible: true }))).length > 0,
     'and says when it last failed',
     'the card gave no date, so a failure from last month reads as one from this morning',
   )
@@ -285,20 +285,20 @@ try {
     'two failing integrations draw two cards',
     `${await cards().count()} cards for two stored failures`,
   )
-  const githubBody = await readText(cardFor('github').getByTestId('integration-error-body'))
+  const githubBody = await readText(cardFor('github').getByTestId('integration-error-body').filter({ visible: true }))
   chk(
     githubBody.includes(GITHUB_ERROR) && !githubBody.includes(GCAL_ERROR),
     'the second card says the SECOND provider’s error and not the first’s',
     `GitHub's card read ${JSON.stringify(githubBody)}`,
   )
-  const gcalBodyAgain = await readText(cardFor('gcal').getByTestId('integration-error-body'))
+  const gcalBodyAgain = await readText(cardFor('gcal').getByTestId('integration-error-body').filter({ visible: true }))
   chk(
     gcalBodyAgain.includes(GCAL_ERROR) && !gcalBodyAgain.includes(GITHUB_ERROR),
     'and the first still says its own',
     `Google Calendar's card read ${JSON.stringify(gcalBodyAgain)}`,
   )
   chk(
-    /GitHub/.test(await readText(cardFor('github').getByTestId('integration-error-title'))),
+    /GitHub/.test(await readText(cardFor('github').getByTestId('integration-error-title').filter({ visible: true }))),
     'each card is titled for its own integration',
     `the GitHub card was titled ${JSON.stringify(await readText(cardFor('github').getByTestId('integration-error-title')))}`,
   )

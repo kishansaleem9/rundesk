@@ -231,7 +231,7 @@ try {
    * the six below goes red and it says which word it expected.
    */
   const labelOf = async (view) =>
-    (await page.getByTestId(`space-wizard-viewlabel-${view}`).first().innerText().catch(() => '')).trim()
+    (await page.getByTestId(`space-wizard-viewlabel-${view}`).first().filter({ visible: true }).innerText().catch(() => '')).trim()
   const seen = {}
   for (const view of EXPECTED_VIEWS) {
     const text = await labelOf(view)
@@ -284,9 +284,10 @@ try {
    * still be a tick-box that leads nowhere.
    */
   // `?? ''` before `.replace`: with the panel gone the loop below finds no
-  // ghost views in an empty string, which is what it should report.
+  // ghost views in an empty string, which is what it should report. Unfiltered:
+  // the words are an absence, and a hidden panel read whole is the stricter read.
   const panelText = (
-    (await page.getByTestId('space-wizard-views').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('space-wizard-views').innerText({ timeout: 8000 }).catch(() => null)) ?? '' // text-read: absence — no ghost view named
   ).replace(/\s+/g, ' ')
   const offeredGhosts = []
   for (const v of FRAME_ONLY) {

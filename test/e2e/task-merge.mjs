@@ -365,7 +365,7 @@ try {
    * and getting it backwards bins the wrong one. The dialog has to say so
    * before anything is clickable.
    */
-  const direction = await page.getByTestId('task-merge-direction').innerText().catch(() => '')
+  const direction = await page.getByTestId('task-merge-direction').filter({ visible: true }).innerText().catch(() => '')
   chk(
     direction.includes(`Merge from UI ${stamp}`),
     'and says which task is being merged away',

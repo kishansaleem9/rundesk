@@ -175,21 +175,21 @@ try {
   // ══ 2. WHAT THE PANEL SAYS IT IS ══════════════════════════════════════════
   console.log('\n▶ and the panel is headed by WHOSE comment it is')
 
-  const title = panelOpen ? (await readText(page.getByTestId('comment-thread-title'))).trim() : ''
+  const title = panelOpen ? (await readText(page.getByTestId('comment-thread-title').filter({ visible: true }))).trim() : ''
   check(
     title.includes(MY_NAME) && /thread/i.test(title),
     'the header reads "Thread by <name>", with the comment author\'s real name in it',
     `the header read "${title}" for a comment written by "${MY_NAME}" — a panel headed just ` +
       '"Thread" is the same panel with the one fact that orients you taken out',
   )
-  const rootText = panelOpen ? await readText(page.getByTestId('comment-thread-root')) : ''
+  const rootText = panelOpen ? await readText(page.getByTestId('comment-thread-root').filter({ visible: true })) : ''
   check(
     rootText.includes(ROOT_BODY),
     'and the comment itself is in the panel, not just its replies',
     `the panel's root block read "${rootText.slice(0, 120)}" — the frame draws the comment at the ` +
       'top of its own thread',
   )
-  const repliesText = panelOpen ? await readText(page.getByTestId('comment-thread-replies')).catch(() => '') : ''
+  const repliesText = panelOpen ? await readText(page.getByTestId('comment-thread-replies').filter({ visible: true })).catch(() => '') : ''
   check(
     repliesText.includes(SEEDED_REPLY),
     'with the replies it already has under it',
@@ -260,7 +260,7 @@ try {
   )
   check(
     await waitUntil(
-      async () => (await readText(page.getByTestId('comment-thread-panel'))).includes(NEW_REPLY),
+      async () => (await readText(page.getByTestId('comment-thread-panel').filter({ visible: true }))).includes(NEW_REPLY),
       { timeoutMs: 15_000 },
     ),
     'and it appears in the thread without leaving it',
@@ -284,7 +284,7 @@ try {
     'the panel would not close — a thread that replaces the list and cannot be left is a trap, ' +
       'not a panel',
   )
-  const listText = backOnList ? await readText(page.locator('[data-comment-id]').first()) : ''
+  const listText = backOnList ? await readText(page.locator('[data-comment-id]').first().filter({ visible: true })) : ''
   check(
     listText.includes('2 replies'),
     'and the list counts the reply that was written in the thread',

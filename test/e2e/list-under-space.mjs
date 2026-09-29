@@ -227,7 +227,7 @@ try {
     'the tree shows it directly under the Space, not buried in a Project',
     'a space-level list is openable by URL and absent from the sidebar',
   )
-  const treeText = await page.locator('aside, nav').first().innerText().catch(() => '')
+  const treeText = await page.locator('aside, nav').first().filter({ visible: true }).innerText().catch(() => '')
   chk(
     treeText.includes(`Space list ${stamp}`),
     'and shows it by name',

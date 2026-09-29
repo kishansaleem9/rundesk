@@ -118,7 +118,7 @@ try {
   const first = shown
     ? {
         success: await row.getAttribute('data-success', { timeout: 5000 }).catch(() => null),
-        text: await row.innerText({ timeout: 5000 }).catch(() => ''),
+        text: await row.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => ''),
       }
     : null
   chk(
@@ -132,7 +132,7 @@ try {
   await page.goto(`${B}/app/${WS}/goals/${GOAL}`, { waitUntil: 'domcontentloaded' })
   const rows = page.getByTestId('goal-history').getByTestId('goal-history-row')
   await waitUntil(async () => (await rows.count()) >= 2, { timeoutMs: 20_000 })
-  const history = await rows.allInnerTexts().catch(() => [])
+  const history = await rows.filter({ visible: true }).allInnerTexts().catch(() => [])
   chk(
     history.length === 2 && /3\s*→\s*7/.test(history[0] ?? '') && /0\s*→\s*3/.test(history[1] ?? ''),
     'the goal’s History lists each change of its value, newest first — 3 → 7, then 0 → 3 — with who made it',
@@ -146,7 +146,7 @@ try {
   await page.goto(`${B}/app/profile?tab=notifications`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('digest-preview-open').click({ timeout: 20_000 }).catch(() => {})
   const said_ = await waitUntil(async () => (await page.getByTestId('digest-preview-total').count()) + (await page.getByTestId('digest-preview-empty').count()) > 0, { timeoutMs: 15_000 })
-  const totalText = (await page.getByTestId('digest-preview-total').innerText().catch(() => '')).trim()
+  const totalText = (await page.getByTestId('digest-preview-total').filter({ visible: true }).innerText().catch(() => '')).trim()
   const empty = await page.getByTestId('digest-preview-empty').count()
   chk(
     said_ && (TOTAL === 0 ? empty === 1 : totalText.includes(String(TOTAL))),

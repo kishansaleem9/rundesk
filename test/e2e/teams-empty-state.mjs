@@ -155,14 +155,14 @@ try {
     'teams-empty never rendered — the page with nothing on it is still blank',
   )
 
-  const headline = flat(await readText(page.getByTestId('teams-empty-headline')))
+  const headline = flat(await readText(page.getByTestId('teams-empty-headline').filter({ visible: true })))
   chk(
     headline === COPY.headline,
     'the headline is the frame’s headline',
     `it read ${JSON.stringify(headline)}, not ${JSON.stringify(COPY.headline)}`,
   )
 
-  const body = flat(await readText(page.getByTestId('teams-empty-body')))
+  const body = flat(await readText(page.getByTestId('teams-empty-body').filter({ visible: true })))
   chk(
     body === COPY.body,
     'and the line under it says what the hub is for',
@@ -248,14 +248,14 @@ try {
     `after three presses it sits at ${JSON.stringify(idxWrapped)}, not back at 0`,
   )
 
-  const cardOne = flat(await readText(cards.nth(0)))
+  const cardOne = flat(await readText(cards.nth(0).filter({ visible: true })))
   chk(
     cardOne.includes(COPY.cardOneTitle) && cardOne.includes(COPY.cardOneBody),
     'the first is Teams Hub, with what it explains',
     `the first card read ${JSON.stringify(cardOne.slice(0, 160))}`,
   )
 
-  const cardTwo = flat(await readText(cards.nth(1)))
+  const cardTwo = flat(await readText(cards.nth(1).filter({ visible: true })))
   chk(
     cardTwo.includes(COPY.cardTwoTitle) && cardTwo.includes(COPY.cardTwoBody),
     'the second is Member & team management, with what it explains',
@@ -268,7 +268,7 @@ try {
    * sees a workspace that HAS a team, so it never reads this copy. This is the
    * same rule, applied to the text it cannot reach.
    */
-  const emptyText = flat(await readText(page.getByTestId('teams-empty')))
+  const emptyText = flat(await readText(page.getByTestId('teams-empty').filter({ visible: true })))
   chk(
     emptyText !== '' && !/analytics/i.test(emptyText),
     'and the copy promises nothing that has nothing behind it',
@@ -334,7 +334,7 @@ try {
       'which makes it useless as a signal',
   )
 
-  const rowText = flat(await readText(page.getByTestId('teams-row').first()))
+  const rowText = flat(await readText(page.getByTestId('teams-row').first().filter({ visible: true })))
   chk(
     rowText.includes(teamName),
     'the new team is the one in the list',

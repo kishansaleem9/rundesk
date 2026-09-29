@@ -202,10 +202,10 @@ try {
    */
   await openMenu()
   await waitUntil(
-    async () => (await readText(menuItem('task-menu-favorite'))).toLowerCase().includes('remove'),
+    async () => (await readText(menuItem('task-menu-favorite').filter({ visible: true }))).toLowerCase().includes('remove'),
     { timeoutMs: 10_000 },
   )
-  const menuLabel = (await readText(menuItem('task-menu-favorite'))).toLowerCase()
+  const menuLabel = (await readText(menuItem('task-menu-favorite').filter({ visible: true }))).toLowerCase()
   chk(
     menuLabel.includes('remove'),
     'and reopening the menu offers to remove it',

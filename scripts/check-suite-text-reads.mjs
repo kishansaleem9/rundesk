@@ -1,9 +1,11 @@
 #!/usr/bin/env node
 /*
- * A CHECK THAT SAYS TEXT IS SHOWN DOES NOT READ IT WITH `textContent`
+ * A CHECK THAT SAYS TEXT IS SHOWN READS WHAT IS DRAWN: NEVER `textContent`,
+ * AND `innerText` ONLY OF AN ELEMENT KNOWN TO BE DRAWN
  * (the ledger's `checks-read-textContent-not-what-is-shown`, a found-23-sep
  * item — cited without its section because `check-ledger-ids.mjs` reads an id
- * as lowercase, and this one has a capital C).
+ * as lowercase, and this one has a capital C — and, one step on,
+ * `found-29-sep/innertext-reads-hidden-leaves`).
  *
  * `textContent` is every character in an element, drawn or not: text inside
  * `hidden`, `display: none` or a closed `<details>` reads exactly as if it
@@ -40,15 +42,51 @@
  * `.filter({ visible: true })` on its locator, `checkVisibility()` in page
  * code — and then `innerText` for anything hidden inside it.
  *
- * THE RULE. Every `textContent` / `allTextContents` read in a suite is one of:
+ * SO `innerText` READS ARE HELD TO THE SAME RULE
+ * (`found-29-sep/innertext-reads-hidden-leaves`). Measured 29 September at
+ * `15e2681`, comments stripped: 266 `innerText` / `allInnerTexts` /
+ * `.innerText` reads in 90 suites (the ledger had 252 in 86, on an older tree), and 130
+ * more through `readText(locator)` — `lib/wait.mjs`'s `locator.innerText()`,
+ * bounded and caught, which no grep for `innerText` sees: 396 in 115 suites.
+ * 121 already had an out (86 guarded on the read, 31 in a message, 3 in a
+ * message-only variable, 1 marked). 42 read what is drawn by the two outs
+ * below: 32 the page's own body, 10 after the same element's visibility was
+ * asked. 197 decided a check that text is SHOWN with nothing on the read — a
+ * count, a chip, a toast, a label, a row, a panel; 6 of them `<option>`s, whose
+ * guard goes on the `<select>` because Playwright counts no option as visible.
+ * 10 asserted an ABSENCE, 1 was page code already guarded by its own box, and
+ * 25 sat in five suites other work was changing (LEFT_FOR_LATER, below).
+ *
+ * Three facts from the lanes' Chromium decide the extra outs: a hidden leaf
+ * (`hidden`, `display: none`) answers innerText in full, `visibility: hidden`
+ * and a closed `<details>` answer empty, and the body — drawn by definition —
+ * answers with only what is drawn. So an innerText read (only innerText:
+ * `textContent` of a drawn element still reads what is hidden inside it) also
+ * passes where
+ *
+ *   · the element read is the page's own BODY (`locator('body')`,
+ *     `document.body`), or
+ *   · the same element's visibility is ASKED FIRST and gates the read:
+ *     `drawn ? (await el.innerText()) : ''` with `drawn` declared from
+ *     `el.isVisible()` or a `waitFor` that waits for it shown, or
+ *     `(await el.isVisible()) && …` ahead of the read in one statement. Same
+ *     element, before the read, as a ternary's test or the left of an `&&`.
+ *
+ * THE RULE. Every read of an element's text in a suite — `textContent`,
+ * `allTextContents`, `innerText`, `allInnerTexts`, or `readText(locator)` — is
+ * one of:
  *
  *   · in a check's MESSAGE — the second argument onward of `chk(`, `check(`
  *     or a chain's `.step(` — or in a variable that only messages use. A
  *     message decides nothing;
  *   · VISIBILITY-GUARDED on the read itself: `.filter({ visible: true })`,
  *     `:visible` or `visible=true` on the locator it reads (followed to the
- *     locator's declaration when it is held in a variable), or
- *     `checkVisibility()` in the page code that reads it;
+ *     locator's declaration when it is held in a variable; for `readText`, the
+ *     locator handed to it), or `checkVisibility()` in the page code that reads
+ *     it — on the element read, not only on an ancestor it is found in, since a
+ *     hidden leaf inside a drawn panel is read in full (`<option>`s excepted:
+ *     their select is the only guard they can have) — and, for innerText
+ *     alone, the body or the same element asked first;
  *   · EXEMPT, by `// text-read: <reason>` at the end of its own line, the
  *     reason one of `absence`, `key`, `detail`, `not-rendered`.
  *
@@ -59,8 +97,9 @@
  * through a call into a condition is a parser's job, not a regex's. So the
  * question is asked the other way round: a read passes where it provably
  * decides nothing, where it provably reads what is drawn, or where somebody
- * wrote down why. Six markers on this tree: `key` four times, `absence` and
- * `not-rendered` once each.
+ * wrote down why. Seventeen markers on this tree: `absence` twelve times and
+ * `key` five. There were six before the innerText half, one of them
+ * `not-rendered` on `task-menu`'s print copy, which is now read under print media.
  *
  * A MARKER GOES ON THE READ'S OWN LINE, AND NEVER INSIDE A CHECK'S ARGUMENTS.
  * The other gates split a check's arguments on text (`topLevelArgs`, in
@@ -82,7 +121,8 @@
  * `--mutate` plants suites in a temp directory — the hr-9 read among them —
  * requires every violating shape to be caught and every fixed form to pass,
  * then breaks this file one rule at a time and requires a planted case to
- * notice (`lib/mutate.mjs`).
+ * notice (`lib/mutate.mjs`). A planted run reads LEFT_FOR_LATER from
+ * `TEXT_READS_LEFT` instead, so its cases do not depend on today's list.
  *
  *   node scripts/check-suite-text-reads.mjs [--mutate]
  */
@@ -98,7 +138,48 @@ const SUITES = process.env.SUITE_DIR ?? join(dirname(SELF), '..', 'test', 'e2e')
 const MIN_SUITES = process.env.SUITE_DIR ? 1 : 100
 const REASONS = ['absence', 'key', 'detail', 'not-rendered']
 const GUARD = /\.filter\(\s*\{\s*visible\s*:\s*true\s*\}\s*\)|:visible\b|\bvisible=true\b|\bcheckVisibility\s*\(/
-const READ = /\.(textContent|allTextContents)\b/g
+/*
+ * THE GUARD HAS TO BE ON THE ELEMENT READ. A filter on an ANCESTOR —
+ * `panel.filter({ visible: true }).getByTestId('count')` — leaves a hidden
+ * count inside a drawn panel read in full, which is this ledger's leaf
+ * (`found-29-sep/innertext-reads-hidden-leaves`). So after the last guard the
+ * chain may narrow (`first()`, `nth()`, `filter({ hasText })`) but not step to
+ * a descendant. One exception, `<option>`s: Playwright counts no option as
+ * visible, so the select they are read from is the only guard they can have.
+ */
+const STEP = /\.\s*(?:locator|getBy[A-Za-z]+|querySelector(?:All)?)\s*\(/
+const OPTION = /\.\s*locator\(\s*(['"`])option\1\s*\)/g
+const onElement = (text) => {
+  const guards = [...text.matchAll(new RegExp(GUARD.source, 'g'))]
+  const last = guards[guards.length - 1]
+  return !!last && !STEP.test(text.slice(last.index + last[0].length).replace(OPTION, ''))
+}
+const READ = /\.(textContent|allTextContents|innerText|allInnerTexts)\b/g
+// `readText(locator)` in `test/e2e/lib/wait.mjs` is `locator.innerText()`, bounded and caught.
+const READ_TEXT = /(?<![\w$.])readText\s*\(/g
+const INNER = new Set(['innerText', 'allInnerTexts', 'readText'])
+// The page's own body, the one element drawn by definition (normalised: no spaces around punctuation).
+const PAGE = /^(?:[A-Za-z_$][\w$]*\.locator\((['"`])(?:body|html)\1\)(?:\.first\(\))?|document\.(?:body|documentElement)\??)$/
+/*
+ * LEFT FOR LATER: four suites other work was changing when the innerText half
+ * was closed, so their reads could not be converted then. Each may hold exactly
+ * this many innerText reads with no out — more is a new read needing one, and
+ * fewer asks for the number to come down, so a conversion cannot be undone
+ * quietly (`found-29-sep/innertext-reads-hidden-leaves`). What they were at
+ * `15e2681`: assign-to-priorities 202, 230, 275, 282 and planner-priorities
+ * 123, 156, 232 (a prompt, a toast, the rail and its count, through
+ * `readText`), planner-priorities 282 (an absence); doc-import 163, 195, 319
+ * and person-panel 274, 350, 408, 875 (a formats line, a link, an error, a
+ * clock, a list, an empty state, a result). ui-sweep's ten were converted once
+ * its fixed waits were (`found-29-sep/ui-sweep-reads-after-fixed-waits`).
+ */
+const LEFT_FOR_LATER = {
+  'assign-to-priorities.mjs': 4,
+  'doc-import.mjs': 3,
+  'person-panel.mjs': 4,
+  'planner-priorities.mjs': 4,
+}
+const LEFT = process.env.SUITE_DIR ? JSON.parse(process.env.TEXT_READS_LEFT ?? '{}') : LEFT_FOR_LATER
 const EVALUATES = /^(?:evaluate|evaluateAll|evaluateHandle|\$eval|\$\$eval|waitForFunction)$/
 const CHECKS = /(?<![.\w$])(?:chk|check)\s*\(|\.step\s*\(/g
 const MARKER = /\/\/\s*text-read:\s*([\w-]*)/g
@@ -251,6 +332,15 @@ const argSpans = (code, open, close) => {
   return spans
 }
 
+/** An expression with the spaces around its punctuation dropped, so a chain wrapped over lines reads as one. */
+const norm = (s) => s.trim().replace(/\s+/g, ' ').replace(/\s*([.()[\]{},?:])\s*/g, '$1')
+/** That text as a pattern matching it however it is spaced. */
+const flex = (s) =>
+  s
+    .split(/([.()[\]{},?:])/)
+    .map((p, i) => (i % 2 ? `\\s*\\${p}\\s*` : p.replace(/[\\^$*+?.()|[\]{}]/g, '\\$&').replace(/ /g, '\\s+')))
+    .join('')
+
 /*
  * Where a statement that starts at `from` ends: `;`, a closing bracket it did
  * not open, or a newline nothing carries on over — a line ending in an
@@ -345,21 +435,72 @@ export function readsIn(src) {
     return uses.every((u) => (inCheck(u) ?? 0) >= 1)
   }
   // Where a guard can be written: the chain the read belongs to, and — when
-  // that chain starts at a variable declared in this file — its declaration.
+  // that chain starts at a variable declared in this file — its declaration,
+  // put first, so the text reads in the order the locator is built.
   const guardText = (start, end) => {
     let text = bare.slice(start, end)
     const root = code.slice(start, end).match(/^\s*([A-Za-z_$][\w$]*)/)?.[1]
     const d = root && declOf(root, start)
-    if (d && !(d.from <= start && start < d.to)) text += ` ${bare.slice(d.from, d.to)}`
+    if (d && !(d.from <= start && start < d.to)) text = `${bare.slice(d.from, d.to)} ${text}`
     return text
   }
 
+  /*
+   * THE SAME ELEMENT'S VISIBILITY, ASKED FIRST, DECIDING WHETHER ITS TEXT
+   * COUNTS — innerText only. A shown element's `innerText` leaves out what is
+   * hidden inside it, so a read is sound once the element read is known drawn:
+   * `drawn ? (await el.innerText()) : ''` with `drawn` declared as
+   * `el.isVisible()` (or a `waitFor` that waits for it shown), or
+   * `(await el.isVisible()) && …` ahead of the read in one statement. The
+   * question has to be about the SAME element, come BEFORE the read, and its
+   * answer has to gate the read — a ternary's test or the left of an `&&`.
+   */
+  const regionStart = (p) => {
+    const d = decls.filter((x) => x.from <= p && p < x.to).sort((a, b) => b.from - a.from)[0]
+    if (d) return d.from
+    const call = calls.filter((c) => c.args[0][0] <= p && p <= c.args[0][1]).sort((a, b) => b.open - a.open)[0]
+    return call ? call.args[0][0] : src.lastIndexOf('\n', p) + 1
+  }
+  const shownState = (method, open, close) =>
+    method === 'isVisible' || !/\bstate\s*:\s*(['"`])(?!visible\1)/.test(bare.slice(open, close))
+  const gates = (k, to) => {
+    for (;;) {
+      while (k < to && /\s/.test(code[k])) k++
+      const chained = /^\.\s*(?:catch|then)\s*\(/.exec(code.slice(k, k + 24))
+      if (chained) k = matchForward(code, k + chained[0].length - 1) + 1
+      else if (code[k] === ')') k += 1
+      else break
+    }
+    return /^(?:\?(?![.?])|&&)/.test(code.slice(k, k + 2))
+  }
+  const asked = (recv, from, to) => {
+    const ask = new RegExp(`(?<![\\w$.])${flex(norm(recv))}\\s*\\.\\s*(isVisible|waitFor)\\s*\\(`, 'g')
+    for (const q of bare.slice(from, to).matchAll(ask)) {
+      const open = from + q.index + q[0].length - 1
+      const close = matchForward(code, open)
+      if (close > 0 && shownState(q[1], open, close) && gates(close + 1, to)) return true
+    }
+    for (const t of code.slice(from, to).matchAll(/(?<![\w$.])([A-Za-z_$][\w$]*)(?=\s*(?:\?(?![.?])|&&))/g)) {
+      const d = declOf(t[1], to)
+      if (!d || d.at >= to || isFunction(d)) continue
+      for (const q of bare.slice(d.from, d.to).matchAll(ask)) {
+        const open = d.from + q.index + q[0].length - 1
+        if (shownState(q[1], open, matchForward(code, open))) return true
+      }
+    }
+    return false
+  }
+
+  const found = [
+    ...[...code.matchAll(READ)].map((m) => ({ dot: m.index, name: m[1], end: m.index + m[0].length })),
+    ...[...code.matchAll(READ_TEXT)].map((m) => ({ dot: m.index, name: 'readText', end: m.index + m[0].length })),
+  ].sort((a, b) => a.dot - b.dot)
   const reads = []
-  for (const m of code.matchAll(READ)) {
-    const dot = m.index
-    const after = code.slice(dot + m[0].length).match(/^\s*(\(|=(?!=))?/)[1]
+  for (const { dot, name, end } of found) {
+    const after = name === 'readText' ? '(' : code.slice(end).match(/^\s*(\(|=(?!=))?/)[1]
     if (after === '=') continue // a write: `el.textContent = …`
-    const read = { line: lineOf(dot), verb: after === '(' ? `${m[1]}()` : `.${m[1]}` }
+    const inner = INNER.has(name)
+    const read = { line: lineOf(dot), inner, verb: name === 'readText' ? 'readText()' : after === '(' ? `${name}()` : `.${name}` }
     const k = inCheck(dot)
     if (k !== null && k >= 1) read.kind = 'message'
     else if (k === null) {
@@ -368,7 +509,14 @@ export function readsIn(src) {
     }
     if (!read.kind) {
       let text = ''
-      if (after === '(') {
+      // The element read: the chain in front of the read, or `readText`'s first argument.
+      let recv = bare.slice(chainStart(code, dot), dot)
+      if (name === 'readText') {
+        const open = code.indexOf('(', dot)
+        const [a, b] = argSpans(code, open, matchForward(code, open))[0]
+        text = guardText(a, b)
+        recv = bare.slice(a, b)
+      } else if (after === '(') {
         text = guardText(chainStart(code, dot), matchForward(code, code.indexOf('(', dot)) + 1)
       } else {
         // In page code: the evaluate-family call around it, receiver and callback both.
@@ -386,7 +534,12 @@ export function readsIn(src) {
         }
         if (!text) text = bare.slice(src.lastIndexOf('\n', dot) + 1, src.indexOf('\n', dot) >>> 0)
       }
-      if (GUARD.test(text)) read.kind = 'guarded'
+      if (onElement(text)) read.kind = 'guarded'
+      else if (inner && recv.trim()) {
+        // innerText only: `textContent` of a drawn element still reads what is hidden inside it.
+        if (PAGE.test(norm(recv))) read.kind = 'page'
+        else if (asked(recv, regionStart(dot), dot)) read.kind = 'asked'
+      }
     }
     reads.push(read)
   }
@@ -402,7 +555,10 @@ export function readsIn(src) {
 /** The gate over one directory: every problem, and a tally of what was read. */
 export function scan(dir) {
   const problems = []
-  const tally = { reads: 0, suites: 0, message: 0, 'message-only': 0, guarded: 0, exempt: {} }
+  const tally = {
+    reads: 0, suites: 0, textContent: 0, innerText: 0, readText: 0,
+    message: 0, 'message-only': 0, guarded: 0, asked: 0, page: 0, exempt: {}, left: {},
+  }
   let files = []
   try {
     files = readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()
@@ -423,7 +579,9 @@ export function scan(dir) {
     }
     if (reads.length) tally.suites += 1
     tally.reads += reads.length
+    for (const r of reads) tally[r.verb === 'readText()' ? 'readText' : r.inner ? 'innerText' : 'textContent'] += 1
     const byLine = new Map(markers.map((mk) => [mk.line, mk]))
+    const unread = []
     for (const r of reads) {
       if (r.kind) {
         tally[r.kind] += 1
@@ -433,10 +591,28 @@ export function scan(dir) {
       if (mk && REASONS.includes(mk.reason) && !mk.inCheck) {
         tally.exempt[mk.reason] = (tally.exempt[mk.reason] ?? 0) + 1
         mk.used = true
+      } else if (!mk && r.inner && file in LEFT) {
+        unread.push(r.line)
+      } else if (!mk && r.inner) {
+        problems.push(`${file}:${r.line}  ${r.verb} — a hidden element answers innerText with its whole text, and nothing on the read says it is drawn`)
       } else if (!mk) {
         problems.push(`${file}:${r.line}  ${r.verb} — reads hidden text as if it were shown, and nothing on the read says otherwise`)
       }
       // A marker that is there and cannot exempt is reported once, on its own line, below.
+    }
+    if (file in LEFT) {
+      const want = LEFT[file]
+      if (unread.length > want) {
+        problems.push(
+          `${file}  ${unread.length} innerText read(s) with no out (lines ${unread.join(', ')}), where ${want} were left ` +
+            'for later — a new read needs a guard, a message or a marker',
+        )
+      } else if (unread.length < want) {
+        problems.push(
+          `${file}  ${unread.length} innerText read(s) with no out, where LEFT_FOR_LATER says ${want} — bring it down to ` +
+            `${unread.length}, so a conversion cannot be undone quietly`,
+        )
+      } else if (want) tally.left[file] = want
     }
     for (const mk of markers) {
       if (mk.inCheck) {
@@ -459,10 +635,12 @@ function report({ problems, tally, suites }) {
     for (const p of problems) console.log(`✗ ${p}`)
     console.error(
       `\n[text-reads] ${problems.length} problem(s). A check that says text is SHOWN has to read what is drawn:\n` +
-        'put the visibility check on the element read — `.filter({ visible: true })` on its locator, or\n' +
-        '`checkVisibility()` in page code — and read `innerText` for anything hidden inside it. `innerText`\n' +
-        'alone is not enough: an element that is itself hidden gives back its whole text. Keep `textContent`\n' +
-        'behind the filter where `innerText` would change the words (`uppercase` labels, `<option>`s).\n' +
+        'put the visibility check on the element read — `.filter({ visible: true })` on its locator (or on the\n' +
+        'locator handed to `readText`), `checkVisibility()` in page code, or the same element\'s `isVisible()`\n' +
+        'asked first with its answer gating the read — and read `innerText` for anything hidden inside it.\n' +
+        '`innerText` alone is not enough: an element that is itself hidden gives back its whole text, and only\n' +
+        'the page\'s own body is drawn by definition. Keep `textContent` behind the filter where `innerText`\n' +
+        'would change the words (`uppercase` labels, `<option>`s).\n' +
         'A read that asserts nothing about showing ends its line with `// text-read: <reason>`, one of\n' +
         `${REASONS.join(', ')} — outside any check's arguments.`,
     )
@@ -470,11 +648,18 @@ function report({ problems, tally, suites }) {
     return false
   }
   const exempt = Object.entries(tally.exempt).sort()
+  const left = Object.entries(tally.left).sort()
   console.log(
-    `[text-reads] ok — ${tally.reads} textContent read(s) in ${tally.suites} of ${suites} suite(s), none resting a ` +
+    `[text-reads] ok — ${tally.reads} read(s) of an element's text in ${tally.suites} of ${suites} suite(s) ` +
+      `(${tally.textContent} textContent, ${tally.innerText} innerText, ${tally.readText} through readText), none resting a ` +
       `check that text is shown on text that may be hidden: ${tally.message} in a check's message, ` +
       `${tally['message-only']} in a variable only messages use, ${tally.guarded} behind a visibility guard, ` +
-      `${exempt.reduce((n, [, v]) => n + v, 0)} exempt${exempt.length ? ` (${exempt.map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`,
+      `${tally.asked} after the same element's visibility is asked, ${tally.page} of the page's own body, ` +
+      `${exempt.reduce((n, [, v]) => n + v, 0)} exempt${exempt.length ? ` (${exempt.map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}` +
+      (left.length
+        ? `; ${left.reduce((n, [, v]) => n + v, 0)} innerText read(s) left for later in ${left.length} suite(s) other work ` +
+          `was changing (${left.map(([k, v]) => `${k} ${v}`).join(', ')})`
+        : ''),
   )
   return true
 }
@@ -489,6 +674,8 @@ const HR9 = [
   "const empty = await page.getByTestId('home-reminders-empty').textContent({ timeout: 5000 }).catch(() => null)",
   "chk(/no reminders/i.test(empty ?? ''), 'and with none left, the panel says there are none', `it read ${empty}`)",
 ].join('\n')
+// Two innerText reads with no out, for the left-for-later cases.
+const LEFT_TWO = "const a = await page.getByTestId('a').innerText()\nconst b = await readText(page.getByTestId('b'))\nchk(a === '1' && b === '2', 'both')"
 const CASES = [
   ['caught', 'the hr-9 read: a hidden empty state read with textContent', { 'home-reminders.mjs': HR9 }, /✗ home-reminders\.mjs:2 {2}textContent\(\)/],
   ['passes', 'the same suite fixed: filtered to visible, read with innerText', { 'home-reminders.mjs': HR9.replace('.textContent({', '.filter({ visible: true }).innerText({') }],
@@ -499,7 +686,7 @@ const CASES = [
   ['caught', 'a variable a message uses AND the condition', { 'c.mjs': "const t = await page.getByTestId('x').textContent()\nchk(t === 'a', 'it says a', `it said ${t}`)" }, /✗ c\.mjs:1 /],
   ['caught', 'a guard on another statement, not on the read', { 'c.mjs': "const shown = page.getByTestId('x').filter({ visible: true })\nconst t = await page.getByTestId('x').textContent()\nchk(t === 'a', 'it says a')" }, /✗ c\.mjs:2 /],
   ['caught', 'a marker with a reason nobody defined', { 'c.mjs': "const t = await page.getByTestId('x').textContent() // text-read: because\nchk(t === 'a', 'it says a')" }, /not a reason this gate knows/],
-  ['caught', 'a marker that exempts nothing', { 'c.mjs': "const t = await page.getByTestId('x').innerText() // text-read: key\nchk(t === 'a', 'it says a')" }, /exempts nothing/],
+  ['caught', 'a marker that exempts nothing', { 'c.mjs': "const t = await page.getByTestId('x').filter({ visible: true }).innerText() // text-read: key\nchk(t === 'a', 'it says a')" }, /exempts nothing/],
   ['caught', "a marker inside a check's arguments", { 'c.mjs': "chk(\n  (await page.getByTestId('x').textContent()) === 'a', // text-read: key\n  'it says a',\n)" }, /inside a check's arguments/],
   ['caught', 'a directory with no suites in it', { 'README.md': 'nothing' }, /below the floor/],
   ['passes', 'a read in a check message', { 'c.mjs': "chk(await visible('x'), 'x is there', `it read ${await page.getByTestId('x').textContent().catch(() => null)}`)" }],
@@ -515,13 +702,54 @@ const CASES = [
       "await page.evaluate(() => { document.body.textContent = '' })",
     ].join('\n'),
   }],
+
+  // ── innerText, which leaves out what is hidden INSIDE a drawn element and
+  // answers a hidden element with its whole text (`found-29-sep/innertext-reads-hidden-leaves`).
+  ['caught', 'a leaf read with innerText, which a hidden leaf answers in full', { 'c.mjs': "chk((await page.getByTestId('count').innerText()) === '3', 'three open')" }, /✗ c\.mjs:1 {2}innerText\(\)/],
+  ['caught', 'allInnerTexts over a list, in a helper the condition calls', { 'c.mjs': "const labels = () => page.getByTestId('l').allInnerTexts()\nchk((await labels()).includes('a'), 'a is listed')" }, /✗ c\.mjs:1 {2}allInnerTexts\(\)/],
+  ['caught', 'an innerText property read in page code', { 'c.mjs': "const w = await page.locator('li').evaluateAll((els) => els.map((e) => e.innerText))\nchk(w.length === 3, 'three')" }, /✗ c\.mjs:1 {2}\.innerText/],
+  ['caught', 'a leaf read through readText, which is innerText by another name', { 'c.mjs': "const t = await readText(page.getByTestId('chip'))\nchk(t === 'a', 'the chip says a')" }, /✗ c\.mjs:1 {2}readText\(\)/],
+  ['caught', 'a guard on an ancestor, not on the leaf read', { 'c.mjs': "chk((await page.getByTestId('panel').filter({ visible: true }).getByTestId('count').innerText()) === '3', 'three open')" }, /✗ c\.mjs:1 {2}innerText\(\)/],
+  ['caught', 'an ancestor guarded where it is declared, and a leaf read from it', { 'c.mjs': "const panel = page.getByTestId('panel').filter({ visible: true })\nchk((await panel.getByTestId('count').innerText()) === '3', 'three open')" }, /✗ c\.mjs:2 {2}innerText\(\)/],
+  ['caught', 'page code reading a child of the element it checked', { 'c.mjs': "const t = await page.locator('li').filter({ visible: true }).evaluateAll((els) => els.map((e) => e.querySelector('b').innerText))\nchk(t.length === 1, 'one')" }, /✗ c\.mjs:1 {2}\.innerText/],
+  ['passes', 'options of a drawn select, the one guard an option can have', { 'c.mjs': "const opts = await page.locator('select').filter({ visible: true }).locator('option').allInnerTexts()\nchk(opts.includes('a'), 'a is offered')" }],
+  ['passes', 'readText handed a locator filtered to visible', { 'c.mjs': "const t = await readText(page.getByTestId('chip').filter({ visible: true }))\nchk(t === 'a', 'the chip says a')" }],
+  ['passes', 'the page’s own body, read with innerText', { 'c.mjs': "const body = await page.locator('body').innerText()\nconst doc = await page.evaluate(() => document.body?.innerText ?? '')\nchk(body.includes('a') && doc.includes('a'), 'a is on the page')" }],
+  ['caught', 'a container that is not the body, which can be hidden whole', { 'c.mjs': "const t = await page.locator('main').innerText()\nchk(t.includes('a'), 'a is on the page')" }, /✗ c\.mjs:1 {2}innerText\(\)/],
+  ['caught', 'the body read with textContent, which reads what is hidden in it', { 'c.mjs': "const t = await page.locator('body').textContent()\nchk(t.includes('a'), 'a is on the page')" }, /✗ c\.mjs:1 {2}textContent\(\)/],
+  ['passes', 'the same element’s visibility asked first, its answer gating the read', {
+    'c.mjs': [
+      "const pick = page.getByTestId('pick')",
+      'const drawn = await waitUntil(() => pick.isVisible().catch(() => false))',
+      "const text = drawn ? (await pick.innerText()).trim() : ''",
+      "const sheet = page.getByTestId('sheet').first()",
+      'const open = await sheet.waitFor({ timeout: 8000 }).then(() => true).catch(() => false)',
+      "const said = open ? await sheet.innerText().catch(() => '') : ''",
+      "chk((await page.getByTestId('x').isVisible()) && (await page.getByTestId('x').innerText()) === 'a', 'x says a')",
+      "const toast = page.locator('[data-sonner-toast]')",
+      "const toasted = await toast.first().waitFor({ state: 'visible', timeout: 10_000 }).then(() => true).catch(() => false)",
+      "const told = toasted ? await readText(toast.first()) : ''",
+      "chk(drawn && text === 'a' && said === 'b' && told === 'c', 'it says a, b and c')",
+    ].join('\n'),
+  }],
+  ['caught', 'visibility asked of another element', { 'c.mjs': "const shown = await page.getByTestId('panel').isVisible()\nconst t = shown ? await page.getByTestId('count').innerText() : ''\nchk(t === '3', 'three')" }, /✗ c\.mjs:2 {2}innerText\(\)/],
+  ['caught', 'visibility asked after the read', { 'c.mjs': "const el = page.getByTestId('x')\nconst t = await el.innerText()\nconst drawn = await el.isVisible()\nchk(drawn && t === 'a', 'a')" }, /✗ c\.mjs:2 {2}innerText\(\)/],
+  ['caught', 'a wait for the element attached, not shown', { 'c.mjs': "const el = page.getByTestId('x')\nconst there = await el.waitFor({ state: 'attached' }).then(() => true, () => false)\nconst t = there ? await el.innerText() : ''\nchk(t === 'a', 'a')" }, /✗ c\.mjs:3 {2}innerText\(\)/],
+  ['caught', 'visibility asked and not gating the read', { 'c.mjs': "const el = page.getByTestId('x')\nconst both = [await el.isVisible(), await el.innerText()]\nchk(both[0] && both[1] === 'a', 'a')" }, /✗ c\.mjs:2 {2}innerText\(\)/],
+  ['caught', 'textContent after the same element’s isVisible, which still reads what is hidden inside it', { 'c.mjs': "const el = page.getByTestId('x')\nconst t = (await el.isVisible()) ? await el.textContent() : ''\nchk(t === 'a', 'a')" }, /✗ c\.mjs:2 {2}textContent\(\)/],
+  ['passes', 'navigator.clipboard.readText, which reads no element', { 'c.mjs': "const copied = await page.evaluate(() => navigator.clipboard.readText())\nchk(copied === 'a', 'copied a')" }],
+  ['passes', 'an innerText read marked absence', { 'c.mjs': "const t = await page.getByTestId('x').innerText() // text-read: absence — nothing may say y, hidden or not\nchk(!t.includes('y'), 'y is not there')" }],
+  ['passes', 'a suite left for later, holding the reads it was left with', { 'left.mjs': LEFT_TWO }, undefined, { TEXT_READS_LEFT: '{"left.mjs":2}' }],
+  ['caught', 'and one more read there is reported', { 'left.mjs': `${LEFT_TWO}\nchk((await page.getByTestId('c').innerText()) === '3', 'three')` }, /left\.mjs {2}3 innerText read\(s\) with no out \(lines 1, 2, 4\)/, { TEXT_READS_LEFT: '{"left.mjs":2}' }],
+  ['caught', 'and one fewer asks for the number to come down', { 'left.mjs': "const a = await page.getByTestId('a').innerText()\nchk(a === '1', 'one')" }, /left\.mjs {2}1 innerText read\(s\) with no out, where LEFT_FOR_LATER says 2/, { TEXT_READS_LEFT: '{"left.mjs":2}' }],
+  ['caught', 'a textContent read in a suite left for later is still reported', { 'left.mjs': "const a = await page.getByTestId('a').innerText()\nconst t = await page.getByTestId('t').textContent()\nchk(a === '1' && t === '2', 'both')" }, /✗ left\.mjs:2 {2}textContent\(\)/, { TEXT_READS_LEFT: '{"left.mjs":1}' }],
 ]
 
 function runCases(gate) {
   let fail = 0
   const seen = {}
   console.log(`\n▶ planted suites, each run through ${gate === SELF ? 'this gate' : 'the gate under test'}`)
-  for (const [want, name, files, pattern] of CASES) {
+  for (const [want, name, files, pattern, caseEnv] of CASES) {
     const dir = mkdtempSync(join(tmpdir(), 'text-reads-'))
     let r
     try {
@@ -531,6 +759,8 @@ function runCases(gate) {
       }
       const env = { ...process.env, SUITE_DIR: dir }
       delete env.TEXT_READS_UNDER_TEST
+      delete env.TEXT_READS_LEFT
+      Object.assign(env, caseEnv)
       r = spawnSync(process.execPath, [gate], { encoding: 'utf8', env, timeout: 60_000 })
     } finally {
       rmSync(dir, { recursive: true, force: true })
@@ -591,8 +821,23 @@ if (process.env.TEXT_READS_UNDER_TEST) {
         ['any-reason-will-do', at('} else if (!REASONS.includes(mk.reason)) {\n', '        problems.push'), '} else if (false) {\n        problems.push'],
         ['stale-markers-pass', at('} else if (!mk.used) {', '\n'), '} else if (false) {\n'],
         ['markers-anywhere', at('      if (mk.inCheck) {', '\n        problems.push('), '      if (false) {\n        problems.push('],
-        ['roots-not-followed', at('if (d && !(d.from <= start && start < d.to)) ', 'text +='), 'if (false) text +='],
+        ['roots-not-followed', at('if (d && !(d.from <= start && start < d.to)) ', 'text = `'), 'if (false) text = `'],
         ['violations-exit-zero', at('    process.exitCode = 1\n', '    return false'), '    process.exitCode = 0\n    return false'],
+        // The innerText half (`found-29-sep/innertext-reads-hidden-leaves`).
+        ['innertext-unread', at('const READ = /\\.(textContent|allTextContents', '|innerText|allInnerTexts)\\b/g'), 'const READ = /\\.(textContent|allTextContents)\\b/g'],
+        ['readtext-unread', at('...[...code.matchAll(', 'READ_TEXT)]'), '...[...[]]'],
+        ['any-container-is-the-page', at('(?:body', '|html)\\1'), '[^\'"`]*\\1'],
+        ['innertext-rules-for-textContent', at('else if (inner ', '&& recv.trim()) {'), 'else if (recv.trim()) {'],
+        ['asked-of-any-element', at('${flex(', 'norm(recv))}'), '[^;]*?'],
+        ['asked-after-the-read', at('asked(recv, regionStart(dot), ', 'dot)'), 'asked(recv, regionStart(dot), code.length)'],
+        ['any-wait-will-do', at("method === 'isVisible' || ", '!/\\bstate'), "method === 'isVisible' || true || !/\\bstate"],
+        ['asked-need-not-gate', at('return /^(?:\\?(?![.?])|&&)/', '.test(code.slice(k, k + 2))'), 'return true'],
+        ['left-for-later-may-grow', at('if (unread.length ', '> want) {'), 'if (false) {'],
+        ['left-for-later-may-shrink', at('} else if (unread.length ', '< want) {'), '} else if (false) {'],
+        ['left-for-later-covers-textContent', at('} else if (!mk && r.inner ', '&& file in LEFT) {'), '} else if (!mk && file in LEFT) {'],
+        ['ancestor-guards-count', at('!!last && !STEP', '.test('), '!!last && !/(?!)/.test('],
+        ['options-unexcused', at(".replace(OPTION, ", "'')"), ''],
+        ['declaration-read-last', at('text = `${bare.slice(d.from, d.to)} ', '${text}`'), 'text = `${text} ${bare.slice(d.from, d.to)}`'],
       ],
     })
     if (!realOk || fail || blind) process.exitCode = 1

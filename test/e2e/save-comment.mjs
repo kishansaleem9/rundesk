@@ -214,7 +214,7 @@ try {
    * bookmark, and "Saved" alone does not name Inbox › Later.
    */
   const toastText = await waitUntil(
-    async () => (await readText(page.locator('[data-sonner-toast]').first())).includes('Later'),
+    async () => (await readText(page.locator('[data-sonner-toast]').first().filter({ visible: true }))).includes('Later'),
     { timeoutMs: 10_000 },
   )
   chk(
@@ -245,7 +245,7 @@ try {
    */
   await openComments()
   const afterReload = await waitUntil(async () => {
-    const label = await readText(page.getByTestId(`comment-save-${commentId}`))
+    const label = await readText(page.getByTestId(`comment-save-${commentId}`).filter({ visible: true }))
     return label.trim().toLowerCase() === 'saved'
   }, { timeoutMs: 20_000 })
   chk(
@@ -261,7 +261,7 @@ try {
   await page.goto(`${stack.base}/app/${workspaceId}/inbox?view=later`, { waitUntil: 'domcontentloaded' })
   await settleCookies()
   const inLater = await waitUntil(
-    async () => (await readText(page.getByTestId('later-saved-comments'))).includes(BODY),
+    async () => (await readText(page.getByTestId('later-saved-comments').filter({ visible: true }))).includes(BODY),
     { timeoutMs: 20_000 },
   )
   chk(
@@ -313,7 +313,7 @@ try {
       'top is most of the way back to not having saved it',
   )
   const focusedText = await waitUntil(
-    async () => (await readText(page.getByTestId('comment-focused'))).includes(BODY),
+    async () => (await readText(page.getByTestId('comment-focused').filter({ visible: true }))).includes(BODY),
     { timeoutMs: 20_000 },
   )
   chk(
@@ -383,7 +383,7 @@ try {
   const goneFromLater = await waitUntil(async () => {
     const section = page.getByTestId('later-saved-comments')
     if (!(await section.isVisible().catch(() => false))) return false
-    const text = await readText(section)
+    const text = await readText(section.filter({ visible: true }))
     return text.includes(REPLY_BODY) && !text.includes(BODY)
   }, { timeoutMs: 20_000 })
   chk(

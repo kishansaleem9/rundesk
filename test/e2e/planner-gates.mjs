@@ -145,7 +145,7 @@ try {
   const offered = await page.getByTestId('planner-onboarding').count()
   const gcal = page.getByTestId('planner-onboarding-connect-gcal')
   const gcalDisabled = await gcal.isDisabled({ timeout: 8000 }).catch(() => null)
-  const note = ((await page.getByTestId('planner-onboarding-not-configured').innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const note = ((await page.getByTestId('planner-onboarding-not-configured').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   await gcal.click({ timeout: 3000, force: true }).catch(() => {})
   await page.waitForTimeout(1000)
   chk(

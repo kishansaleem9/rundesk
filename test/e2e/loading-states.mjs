@@ -165,7 +165,9 @@ async function paintedElements(page) {
       if (r.width < 8 || r.height < 8) continue
       if (r.bottom < 0 || r.top > window.innerHeight) continue
       const s = getComputedStyle(el)
-      if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity === 0) continue
+      // `checkVisibility()` says in one word what the box above already implies: no
+      // hidden ancestor either (`found-29-sep/innertext-reads-hidden-leaves`).
+      if (s.visibility === 'hidden' || s.display === 'none' || +s.opacity === 0 || !el.checkVisibility()) continue
       const painted =
         s.backgroundImage !== 'none' ||
         (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent')

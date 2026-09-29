@@ -245,7 +245,7 @@ try {
    */
   await page.getByTestId('related-tab-references').click({ timeout: 8000 }).catch(() => {})
   const docShown = await waitUntil(async () => {
-    const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
+    const body = await page.getByTestId('related-items-panel').filter({ visible: true }).innerText().catch(() => '')
     return body.includes(`Link doc ${stamp}`)
   }, { timeoutMs: 15_000 })
   chk(
@@ -256,7 +256,8 @@ try {
   )
   await page.getByTestId('related-tab-relationships').click({ timeout: 8000 }).catch(() => {})
   const backToTasks = await waitUntil(async () => {
-    const body = await page.getByTestId('related-items-panel').innerText().catch(() => '')
+    // Unfiltered: an absence, where a hidden panel read whole is the stricter read.
+    const body = await page.getByTestId('related-items-panel').innerText().catch(() => '') // text-read: absence — the doc is not listed here
     return !body.includes(`Link doc ${stamp}`)
   }, { timeoutMs: 15_000 })
   chk(

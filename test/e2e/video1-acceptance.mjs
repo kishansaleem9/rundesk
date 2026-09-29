@@ -125,10 +125,10 @@ try {
   await page.reload({ waitUntil: 'domcontentloaded' })
   const kept = await appears(page.getByTestId('bookmarks-list'))
   await waitUntil(
-    async () => (await page.getByTestId('bookmarks-list').innerText({ timeout: 2000 })).includes(`Acceptance ${stamp}`),
+    async () => (await page.getByTestId('bookmarks-list').filter({ visible: true }).innerText({ timeout: 2000 })).includes(`Acceptance ${stamp}`),
     { timeoutMs: 15_000 },
   )
-  const listed = kept ? await page.getByTestId('bookmarks-list').innerText() : ''
+  const listed = kept ? await page.getByTestId('bookmarks-list').filter({ visible: true }).innerText().catch(() => '') : ''
   chk(listed.includes(`Acceptance ${stamp}`), 'and a bookmark saved there survives a reload',
     'the bookmark did not come back')
 
@@ -168,7 +168,7 @@ try {
    */
   await page.getByTestId('palette-filters-toggle').click()
   await page.waitForTimeout(800)
-  const panelText = await page.locator('[cmdk-root], [role="dialog"]').first().innerText().catch(() => '')
+  const panelText = await page.locator('[cmdk-root], [role="dialog"]').first().filter({ visible: true }).innerText().catch(() => '')
   chk(
     /trending in workspace/i.test(panelText) && /trending for you/i.test(panelText),
     '§G03-6 the filters panel offers both trending modes',
@@ -207,7 +207,7 @@ try {
   chk(await appears(page.getByTestId('freshness-controls')), '§G01-8 the list says how old it is',
     'no freshness controls on the list')
   chk(
-    (await page.getByTestId('freshness-updated').innerText().catch(() => '')).trim().length > 0,
+    (await page.getByTestId('freshness-updated').filter({ visible: true }).innerText().catch(() => '')).trim().length > 0,
     'and names when the data arrived',
     'the age line is empty',
   )
@@ -224,7 +224,7 @@ try {
   await page.waitForTimeout(3000)
   await page.getByTestId(`space-toggle-${spaceId}`).click().catch(() => {})
   await page.waitForTimeout(2000)
-  const treeText = await page.locator('aside, nav').first().innerText().catch(() => '')
+  const treeText = await page.locator('aside, nav').first().filter({ visible: true }).innerText().catch(() => '')
   chk(
     treeText.includes(`Acceptance space list ${stamp}`),
     'and it appears in the tree under its Space',

@@ -156,12 +156,12 @@ try {
     await page.locator('.ProseMirror').first().click({ timeout: 5000 }).catch(() => {})
     await page.keyboard.press('End').catch(() => {})
     await page.keyboard.type(words, { delay: 5 }).catch(() => {})
-    return (await page.locator('.ProseMirror').first().innerText().catch(() => '')).includes(words)
+    return (await page.locator('.ProseMirror').first().filter({ visible: true }).innerText().catch(() => '')).includes(words)
   }
   const menuItems = async (page) => {
     await page.getByTestId('doc-more-menu').click({ timeout: 5000 }).catch(() => {})
     await waitUntil(async () => (await page.getByRole('menu').count()) > 0, { timeoutMs: 5000 })
-    const items = (await page.getByRole('menuitem').allInnerTexts().catch(() => [])).map((s) => s.trim())
+    const items = (await page.getByRole('menuitem').filter({ visible: true }).allInnerTexts().catch(() => [])).map((s) => s.trim())
     await page.keyboard.press('Escape').catch(() => {})
     await waitUntil(async () => (await page.getByRole('menu').count()) === 0, { timeoutMs: 5000 })
     return items

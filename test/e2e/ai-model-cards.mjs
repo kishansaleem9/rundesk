@@ -246,6 +246,7 @@ try {
    */
   const fastCardText = await page
     .getByTestId('ai-model-hint-fast')
+    .filter({ visible: true })
     .innerText({ timeout: 8000 })
     .then((t) => t.trim())
     .catch(() => null)
@@ -346,6 +347,7 @@ try {
   // a bound that hides a row hides its card, and this one is read twice too.
   const maxCardText = await page
     .getByTestId('ai-model-hint-max')
+    .filter({ visible: true })
     .innerText({ timeout: 8000 })
     .then((t) => t.trim())
     .catch(() => null)

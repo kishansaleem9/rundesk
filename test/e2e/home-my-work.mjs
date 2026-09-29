@@ -168,7 +168,7 @@ try {
     return box.getByTestId('home-task-row').evaluateAll((els) => els.map((e) => e.getAttribute('data-task-id')))
   }
   const countOf = async (testId) =>
-    (await page.getByTestId(`${testId}-count`).innerText({ timeout: 5000 }).catch(() => '')).trim()
+    (await page.getByTestId(`${testId}-count`).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')).trim()
 
   const assigned = await rowsIn('assigned-to-me')
   const assignedCount = await countOf('home-nav-assigned-to-me')

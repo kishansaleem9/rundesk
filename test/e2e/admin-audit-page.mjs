@@ -124,7 +124,7 @@ try {
   await page.getByRole('button', { name: /Export CSV/ }).click({ timeout: 10_000 }).catch(() => {})
   const toast = page.locator('[data-sonner-toast]')
   await waitUntil(async () => (await toast.count()) > 0, { timeoutMs: 10_000 })
-  const toldExport = ((await toast.first().innerText({ timeout: 3000 }).catch(() => '')) ?? '').replace(/\s+/g, ' ').trim()
+  const toldExport = ((await toast.first().filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? '').replace(/\s+/g, ' ').trim()
   await page.unroute(EXPORT, failExport).catch(() => {})
   chk(
     /could not be exported/i.test(toldExport),
@@ -142,7 +142,7 @@ try {
   await page.route(LIST, failList)
   await page.reload({ waitUntil: 'domcontentloaded' })
   await waitUntil(async () => (await page.getByTestId('admin-audit-load-failed').count()) > 0 || (await shown('No audit events yet.')) > 0, { timeoutMs: 20_000 })
-  const failedSays = ((await page.getByTestId('admin-audit-load-failed').innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim()
+  const failedSays = ((await page.getByTestId('admin-audit-load-failed').filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? '').trim()
   const saysNone = await shown('No audit events yet.')
   await page.unroute(LIST, failList).catch(() => {})
   chk(

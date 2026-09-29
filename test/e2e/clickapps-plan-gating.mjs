@@ -261,7 +261,7 @@ try {
   // payload, so there is no badge to read: this waited out the default
   // timeout, threw, and ended the run at 14 of 15.
   const proBadge = (
-    await page.getByTestId('space-wizard-clickapp-lock-customFields').innerText().catch(() => '')
+    await page.getByTestId('space-wizard-clickapp-lock-customFields').filter({ visible: true }).innerText().catch(() => '')
   ).trim()
   // The badge read above was bounded for `-8-nolockpayload` and these two were
   // left bare — each of them read TWICE, once in the condition and once in the
@@ -282,7 +282,7 @@ try {
     `the badge read ${JSON.stringify(proBadge)}, customFields disabled=` +
       `${JSON.stringify(cfDisabled)}, priority disabled=${JSON.stringify(prioDisabled)}`,
   )
-  const note = await page.getByTestId('space-wizard-plan-note').innerText().catch(() => '')
+  const note = await page.getByTestId('space-wizard-plan-note').filter({ visible: true }).innerText().catch(() => '')
   chk(
     /Free/.test(note),
     'and the panel says which plan you are on, rather than leaving four grey rows to explain themselves',

@@ -161,7 +161,7 @@ try {
   chk(teamsListed, 'and sees the teams that exist',
     'the teams list was empty for a member on a workspace that has a team')
 
-  const rowText = await readText(page.getByTestId('teams-row').first())
+  const rowText = await readText(page.getByTestId('teams-row').first().filter({ visible: true }))
   chk(
     /\d+\s/.test(rowText) || /\d/.test(rowText),
     'with how many people are in each',
@@ -233,6 +233,7 @@ try {
   // thirty seconds and throw rather than name what was missing.
   const bodyText = await page
     .getByTestId('teams-page')
+    .filter({ visible: true })
     .innerText({ timeout: 10_000 })
     .catch(() => '')
   chk(

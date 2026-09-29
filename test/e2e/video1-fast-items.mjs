@@ -249,7 +249,8 @@ console.log('\n§1.5  the language switcher is out of the top bar')
   const { ctx, page } = await openApp()
   const header = page.locator('header').first()
   const inTopbar = await header.getByRole('combobox').count()
-  const topbarText = await header.innerText({ timeout: 5000 }).catch(() => '')
+  // Unfiltered: an absence, where a hidden top bar read whole is the stricter read.
+  const topbarText = await header.innerText({ timeout: 5000 }).catch(() => '') // text-read: absence — no language named in the top bar
   check(
     !/english|urdu|español|العربية/i.test(topbarText),
     'no language control in the top bar',
@@ -368,7 +369,7 @@ console.log('\n§2.2  the Inbox "Other" chip is gone')
   // Two rows of controls in the header: the triage views (Inbox / Later /
   // Cleared) and the filter chips over them (All / Primary).
   const labelsOf = async (selector) =>
-    (await page.locator(selector).allInnerTexts())
+    (await page.locator(selector).filter({ visible: true }).allInnerTexts())
       .map((c) => c.split('\n')[0].trim())
       .filter(Boolean)
   const chipLabels = await labelsOf('header button[aria-pressed]')
@@ -451,7 +452,7 @@ console.log('\n§2.2  the Inbox "Other" chip is gone')
   if (!haveSaved) {
     later.rest('skipped: there was no panel to read the message out of')
   } else {
-    later.step(/the one she starred/.test(await saved.innerText()), 'the panel showed no message')
+    later.step(/the one she starred/.test(await saved.filter({ visible: true }).innerText().catch(() => '')), 'the panel showed no message')
   }
 
   // A bookmark to the removed filter must not strand anyone.
@@ -502,7 +503,7 @@ console.log('\n§1.3  the sidebar collapses to icons')
   // measuring the aside counts the dock's links and its drag handle too.
   const rail = page.locator('[data-testid="workspace-sidebar"][data-collapsed="true"] > nav')
   const railLinks = await rail.locator('a').count()
-  const railText = (await rail.innerText({ timeout: 5000 }).catch(() => '')).trim()
+  const railText = (await rail.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')).trim()
   check(railLinks >= 5, `the destinations are still reachable (${railLinks} icons)`)
   check(
     /home/i.test(railText) && /inbox/i.test(railText),
@@ -604,7 +605,9 @@ console.log('\n§1.1  task type at create time, and as a search filter')
   if (!hasSelect) {
     createType.rest('skipped: there was no type to choose, so nothing could be sent')
   } else {
-    const options = await typeSelect.locator('option').allInnerTexts()
+    // Offered by a DRAWN select: Playwright counts no <option> as visible, so the guard
+    // is on the select (`found-29-sep/innertext-reads-hidden-leaves`).
+    const options = await typeSelect.filter({ visible: true }).locator('option').allInnerTexts()
     createType.step(
       options.some((o) => /milestone/i.test(o)),
       '',

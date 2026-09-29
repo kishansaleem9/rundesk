@@ -155,7 +155,7 @@ try {
   await opener.click({ timeout: 10_000 }).catch(() => {})
   await page.waitForTimeout(3000)
 
-  const parentBlock = (await page.getByTestId('reply-thread-parent').innerText().catch(() => '')).trim()
+  const parentBlock = (await page.getByTestId('reply-thread-parent').filter({ visible: true }).innerText().catch(() => '')).trim()
   chk(
     parentBlock.includes(`Parent message ${stamp}`),
     'and shows the message being replied to',

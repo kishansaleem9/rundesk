@@ -179,10 +179,11 @@ try {
   await page.locator('[cmdk-input]').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   await page.locator('[cmdk-input]').first().fill(NEEDLE)
   await waitUntil(
-    async () => (await page.locator('[cmdk-list]').first().innerText({ timeout: 2000 })).includes('Quarterly planning'),
+    async () => (await page.locator('[cmdk-list]').first().filter({ visible: true }).innerText({ timeout: 2000 })).includes('Quarterly planning'),
     { timeoutMs: 20_000 },
   )
-  const paletteText = (await page.locator('[cmdk-list]').first().innerText()).replace(/\s+/g, ' ')
+  // Caught: filtered to what is drawn, a hidden list waits out the timeout and would throw.
+  const paletteText = (await page.locator('[cmdk-list]').first().filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ')
   check(
     paletteText.includes('Quarterly planning'),
     'a task whose TITLE does not contain the word is still shown',
@@ -378,10 +379,10 @@ try {
     // The title is drawn once the docs have answered; read it when it names the
     // doc (bounded — a page that reopens another doc still fails, naming it).
     await waitUntil(
-      async () => (await page.getByTestId('docs-active-title').innerText({ timeout: 2000 })).includes(SECOND_DOC),
+      async () => (await page.getByTestId('docs-active-title').filter({ visible: true }).innerText({ timeout: 2000 })).includes(SECOND_DOC),
       { timeoutMs: 20_000 },
     )
-    const reopened = await page.getByTestId('docs-active-title').innerText().catch(() => '')
+    const reopened = await page.getByTestId('docs-active-title').filter({ visible: true }).innerText().catch(() => '')
     docAddress.step(reopened.includes(SECOND_DOC), `reopened "${reopened.trim()}"`)
     tidy(await A(`/docs/${secondDocId}`, { method: 'DELETE' }), `/docs/${secondDocId}`)
   }

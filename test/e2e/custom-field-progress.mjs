@@ -296,7 +296,7 @@ try {
     'no progress bar rendered — the API would be computing a number nobody can see',
   )
   chk(
-    (await page.getByTestId('custom-field-progress-pct').innerText().catch(() => '')).includes('67'),
+    (await page.getByTestId('custom-field-progress-pct').filter({ visible: true }).innerText().catch(() => '')).includes('67'),
     'showing the figure the API computed, not a different one',
     `the task read ${JSON.stringify(await page.getByTestId('custom-field-progress-pct').innerText().catch(() => null))}, expected 67%`,
   )
@@ -320,7 +320,7 @@ try {
   await openFields(bare.id)
   const emptyShown = await waitUntil(
     async () =>
-      (await page.getByTestId('custom-field-progress-pct').innerText().catch(() => '')).includes('100'),
+      (await page.getByTestId('custom-field-progress-pct').filter({ visible: true }).innerText().catch(() => '')).includes('100'),
     { timeoutMs: 20_000 },
   )
   chk(

@@ -161,7 +161,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `03:40` — "Created `<date>`" on the header')
 
-  const chipText = await readText(page.getByTestId('task-created-chip'))
+  const chipText = await readText(page.getByTestId('task-created-chip').filter({ visible: true }))
   chk(
     chipText.trim().length > 0,
     `the header carries a created-date chip — "${chipText.trim()}"`,
@@ -233,7 +233,7 @@ try {
    */
   chk(
     await waitUntil(
-      async () => (await readText(page.getByTestId('task-activity-rail'))).includes(ITEM),
+      async () => (await readText(page.getByTestId('task-activity-rail').filter({ visible: true }))).includes(ITEM),
       { timeoutMs: 20_000 },
     ),
     'and the rail is showing this task\'s own activity',
@@ -301,7 +301,7 @@ try {
   const bothAtOnce = await waitUntil(async () => {
     const fieldsShowing = (await page.getByTestId('task-field').count())
       + (await page.getByTestId('task-field-empty').count()) > 0
-    const activityShowing = (await readText(page.getByTestId('task-activity-rail'))).includes(ITEM)
+    const activityShowing = (await readText(page.getByTestId('task-activity-rail').filter({ visible: true }))).includes(ITEM)
     return fieldsShowing && activityShowing
   }, { timeoutMs: 20_000 })
   chk(

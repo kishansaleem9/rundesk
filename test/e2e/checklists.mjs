@@ -227,7 +227,7 @@ try {
   await firstForm.getByTestId('checklist-item-input').fill(FIRST_ITEM)
   await firstForm.locator('button[type=submit]').click()
 
-  const countText = () => readText(page.getByTestId('checklist-open-count'))
+  const countText = () => readText(page.getByTestId('checklist-open-count').filter({ visible: true }))
   chk(
     await waitUntil(async () => /\b2\b/.test(await countText()), { timeoutMs: 15_000 }),
     'two unticked items across two lists read as 2 open',
@@ -331,10 +331,10 @@ try {
   const feed = await (async () => {
     await page.getByTestId('task-tab-activity').click({ timeout: 20_000 })
     await waitUntil(
-      async () => (await readText(page.getByTestId('activity-time'))).length > 0,
+      async () => (await readText(page.getByTestId('activity-time').filter({ visible: true }))).length > 0,
       { timeoutMs: 15_000 },
     )
-    return page.locator('ol').first().innerText().catch(() => '')
+    return page.locator('ol').first().filter({ visible: true }).innerText().catch(() => '')
   })()
   chk(
     feed.includes(SECOND_ITEM) && feed.includes(SECOND),

@@ -333,7 +333,7 @@ try {
     'the Folder tab swallowed it — this mutation had no onError, so the server said no ' +
       'and the dialog sat there with the button looking un-pressed',
   )
-  const toastText = await readText(toast)
+  const toastText = await readText(toast.filter({ visible: true }))
   chk(
     /taken/i.test(toastText),
     'and it reads "Folder name taken", the frame\'s shape of words',
@@ -386,7 +386,7 @@ try {
   )
   const sidebarToast = page.locator('[data-sonner-toast]').first()
   chk(
-    await waitUntil(async () => /taken/i.test(await readText(sidebarToast, { timeoutMs: 1500 })), {
+    await waitUntil(async () => /taken/i.test(await readText(sidebarToast.filter({ visible: true }), { timeoutMs: 1500 })), {
       timeoutMs: 15_000,
     }),
     'the sidebar path reports the refusal with the same words',

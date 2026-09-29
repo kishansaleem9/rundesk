@@ -240,7 +240,7 @@ try {
     'the refusal reaches the person as a toast',
     'the server refused the duplicate and the dialog said nothing at all',
   )
-  const toastText = await readText(toast)
+  const toastText = await readText(toast.filter({ visible: true }))
   chk(
     /taken/i.test(toastText),
     'and it reads "List name taken", the frame\'s words',
@@ -290,7 +290,7 @@ try {
       'no and the dialog sat there looking un-pressed',
   )
   chk(
-    /taken/i.test(await readText(tabToast)),
+    /taken/i.test(await readText(tabToast.filter({ visible: true }))),
     'with the same words',
     `it read "${await readText(tabToast)}"`,
   )

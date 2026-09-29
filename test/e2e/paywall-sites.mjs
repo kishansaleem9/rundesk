@@ -337,7 +337,7 @@ try {
     'it is the PLAN talking, not a switched-off flag',
     'the dialog reported itself as a flag gate — "buy Business" is the wrong instruction for a toggle',
   )
-  const eyebrow = await readText(page.getByTestId('feature-gate-eyebrow'))
+  const eyebrow = await readText(page.getByTestId('feature-gate-eyebrow').filter({ visible: true }))
   chk(
     /current plan/i.test(eyebrow),
     'and it opens with the frame’s own sentence about the plan',
@@ -414,8 +414,8 @@ try {
     'the board Download did nothing visible on a plan that does not include it',
   )
   chk(
-    (await readText(page.getByTestId('feature-gate-name'))).length > 0 &&
-      (await readText(page.getByTestId('feature-gate-title'))).toLowerCase().includes('board'),
+    (await readText(page.getByTestId('feature-gate-name').filter({ visible: true }))).length > 0 &&
+      (await readText(page.getByTestId('feature-gate-title').filter({ visible: true }))).toLowerCase().includes('board'),
     'and the gate is about the board export, not about Team View',
     `the gate was headed ${JSON.stringify(await readText(page.getByTestId('feature-gate-title')))}`,
   )

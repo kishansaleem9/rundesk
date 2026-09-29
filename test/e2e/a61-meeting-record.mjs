@@ -134,7 +134,9 @@ try {
   await p.waitForTimeout(3000)
   await openNotes()
   const sel = p.locator('label').filter({ hasText: 'Open a saved meeting' }).locator('select').first()
-  const opts = await sel.locator('option').allInnerTexts()
+  // Offered by a DRAWN select: Playwright counts no <option> as visible, so the guard
+  // is on the select (`found-29-sep/innertext-reads-hidden-leaves`).
+  const opts = await sel.filter({ visible: true }).locator('option').allInnerTexts()
   chk(opts.some((o) => o.includes(TITLE)), 'the saved meeting is listed after a reload',
     `saved meetings: ${JSON.stringify(opts).slice(0, 200)}`)
 

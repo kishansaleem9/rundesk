@@ -320,7 +320,7 @@ try {
   const cards = await page.locator('[data-testid^="space-wizard-preset-"]').count()
   chk(cards === 4, 'all four cards are on screen', `found ${cards} preset card(s)`)
   chk(
-    (await readText(page.locator('[data-testid="space-wizard-seed-note"]'))).includes('Tasks'),
+    (await readText(page.locator('[data-testid="space-wizard-seed-note"]').filter({ visible: true }))).includes('Tasks'),
     'and it says which lists the Space will be created with `[07:46]`',
     'nothing warned that the Space arrives with lists nobody made',
   )
@@ -372,14 +372,14 @@ try {
   await press('space-wizard-copy-apply')
   chk(
     await waitUntil(async () => {
-      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
+      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]').filter({ visible: true }))).replace(/\s+/g, ' ')
       return /Gantt/.test(row) && /Team/.test(row)
     }, { timeoutMs: 10_000 }),
     'Apply puts the source Space\'s own views into this wizard — Gantt and Team, which no preset here has together',
     `the Default views row read "${(await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')}"`,
   )
   chk(
-    (await readText(page.locator('[data-testid="space-wizard-copy-note"]'))).includes('Personal Space'),
+    (await readText(page.locator('[data-testid="space-wizard-copy-note"]').filter({ visible: true }))).includes('Personal Space'),
     'and says where they came from, by name',
     'nothing on screen named the Space the configuration was taken from',
   )
@@ -396,7 +396,7 @@ try {
   const showsCard = (row) => marketingViews.every((v) => new RegExp(`\\b${v}\\b`, 'i').test(row))
   chk(
     await waitUntil(async () => {
-      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
+      const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]').filter({ visible: true }))).replace(/\s+/g, ' ')
       return showsCard(row) && !/Gantt/.test(row) &&
         (await page.locator('[data-testid="space-wizard-copy-note"]').count()) === 0
     }, { timeoutMs: 10_000 }),
@@ -415,8 +415,8 @@ try {
 
   console.log('\n▶ the views panel has the frame\'s TWO tabs `[frame 07:12]`')
   chk(
-    (await readText(page.locator('[data-testid="space-wizard-viewstab-required"]'))).trim().toLowerCase() === 'required views' &&
-      (await readText(page.locator('[data-testid="space-wizard-viewstab-templates"]'))).trim().toLowerCase() === 'default view templates',
+    (await readText(page.locator('[data-testid="space-wizard-viewstab-required"]').filter({ visible: true }))).trim().toLowerCase() === 'required views' &&
+      (await readText(page.locator('[data-testid="space-wizard-viewstab-templates"]').filter({ visible: true }))).trim().toLowerCase() === 'default view templates',
     'the panel is tabbed Required views | Default View Templates, as the frame draws',
     'the second tab is missing or misnamed — Rundesk drew only the switch list',
   )
@@ -427,7 +427,7 @@ try {
   )
   chk(
     JSON.stringify(tplKeys) === JSON.stringify(PRESETS.presets.map((p) => p.key)) &&
-      (await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]'))).includes('Gantt'),
+      (await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]').filter({ visible: true }))).includes('Gantt'),
     'the tab offers one named view set per workflow, each naming the views it carries',
     `it offered ${JSON.stringify(tplKeys)} and the project set read ` +
       `"${await readText(page.locator('[data-testid="space-wizard-viewtplset-project"]'))}"`,

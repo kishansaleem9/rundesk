@@ -136,11 +136,11 @@ try {
    * one word.
    */
   const existing = await waitUntil(
-    async () => (await readText(page.locator('ol, div').filter({ hasText: TAG }).first())).includes(TAG),
+    async () => (await readText(page.locator('ol, div').filter({ hasText: TAG }).first().filter({ visible: true }))).includes(TAG),
     { timeoutMs: 20_000 },
   )
   chk(existing, 'the seeded comment is on screen', 'the comment never rendered at all')
-  const shown = await readText(page.locator(`text=/and\\/or/`).first())
+  const shown = await readText(page.locator(`text=/and\\/or/`).first().filter({ visible: true }))
   chk(
     shown.includes('and/or') && shown.includes('file_name_here'),
     'and reads exactly as it was written — underscores and slashes survive',

@@ -226,7 +226,7 @@ try {
 
   const mt = await pageFor(member.email)
   await openPanel(mt)
-  const adminRowText = ((await rowOf(mt, A.id).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
+  const adminRowText = ((await rowOf(mt, A.id).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
   const adminRowInputs = await rowOf(mt, A.id).locator('input').count()
   const adminRowDelete = await rowOf(mt, A.id).getByRole('button').count()
   const ownValue = await rowOf(mt, MH?.id).locator('input').inputValue({ timeout: 5000 }).catch(() => '')

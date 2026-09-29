@@ -138,7 +138,7 @@ async function tab(session) {
 }
 
 const sidebarText = async (page) =>
-  (await page.locator('[data-testid="workspace-sidebar"]').innerText()).replace(/\s+/g, ' ')
+  (await page.locator('[data-testid="workspace-sidebar"]').filter({ visible: true }).innerText().catch(() => '')).replace(/\s+/g, ' ')
 
 try {
   // ── 1. the ordinary path: visit a workspace, then leave the tree ──────────
@@ -326,7 +326,7 @@ try {
       'nothing on the page explains why the invitation did not open',
     )
     chk(
-      (await page.locator('[data-testid="invite-unusable-reason"]').innerText().catch(() => ''))
+      (await page.locator('[data-testid="invite-unusable-reason"]').filter({ visible: true }).innerText().catch(() => ''))
         .includes('expired'),
       'and it keeps the reason the server gave',
       'the server’s reason is swallowed',

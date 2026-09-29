@@ -175,7 +175,7 @@ const chooseCard = async (row, option) => {
  */
 const readout = async (row) => {
   await openCustomize()
-  return page.getByTestId(`${row}-value`).innerText().catch(() => '')
+  return page.getByTestId(`${row}-value`).filter({ visible: true }).innerText().catch(() => '')
 }
 
 try {

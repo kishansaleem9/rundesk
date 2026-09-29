@@ -287,7 +287,7 @@ try {
    */
   // Guarded: an unmounted element here used to auto-wait thirty seconds and
   // THROW, which is how this suite failed in CI while passing locally.
-  const working = await readText(page.getByTestId('ai-value-time'))
+  const working = await readText(page.getByTestId('ai-value-time').filter({ visible: true }))
   chk(
     /×/.test(working) && /\d/.test(working),
     'showing its arithmetic beside it',

@@ -116,7 +116,7 @@ try {
     if ((await trigger.count()) === 0) return null
     await trigger.first().click({ timeout: 5000, force: true }).catch(() => {})
     await page.getByRole('menu').first().waitFor({ state: 'visible', timeout: 5000 }).catch(() => {})
-    const items = await page.getByRole('menuitem').allInnerTexts().catch(() => [])
+    const items = await page.getByRole('menuitem').filter({ visible: true }).allInnerTexts().catch(() => [])
     await page.keyboard.press('Escape').catch(() => {})
     await page.waitForTimeout(300)
     return items.map((s) => s.trim())

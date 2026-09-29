@@ -70,6 +70,12 @@ export async function textOf(page) {
  * missing instead of dying anonymously. Empty string is deliberately not
  * special-cased here — an assertion on '' fails on its own, and it fails with
  * the caller's own words.
+ *
+ * AND IT READS WHATEVER IT IS HANDED, hidden or not: a hidden element answers
+ * `innerText` with its whole text. A check that the text is SHOWN hands this a
+ * locator filtered to visible — `readText(el.filter({ visible: true }))` — so a
+ * hidden element reads '' like a missing one; `check-suite-text-reads.mjs`
+ * holds every call (`found-29-sep/innertext-reads-hidden-leaves`).
  */
 export async function readText(locator, { timeoutMs = 8000 } = {}) {
   try {

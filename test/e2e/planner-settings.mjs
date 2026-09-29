@@ -340,7 +340,9 @@ try {
    * being fixed for.
    */
   const gotLists = await waitUntil(async () => {
-    const opts = await page.locator('[data-testid="planner-default-list"] option').allInnerTexts()
+    // Offered by a DRAWN select: Playwright counts no <option> as visible, so the
+    // guard is on the select (`found-29-sep/innertext-reads-hidden-leaves`).
+    const opts = await page.locator('[data-testid="planner-default-list"]').filter({ visible: true }).locator('option').allInnerTexts()
     return opts.some((o) => o.includes('Inbox list'))
   }, { timeoutMs: 8000 })
   const options = await page.locator('[data-testid="planner-default-list"] option').allInnerTexts()
@@ -352,7 +354,7 @@ try {
   await page.locator('[data-testid="planner-block-prefix"]').fill('Focus on')
   await page.locator('[data-testid="planner-block-prefix"]').blur()
   const reprefixed = await waitUntil(async () => {
-    const texts = await page.locator('[data-testid="planner-block"]').allInnerTexts()
+    const texts = await page.locator('[data-testid="planner-block"]').filter({ visible: true }).allInnerTexts()
     return texts.some((x) => x.startsWith('Focus on '))
   }, { timeoutMs: 8000 })
   chk(
@@ -373,7 +375,7 @@ try {
    */
   console.log('\n▶ the switches that were saving and changing nothing')
   const backlogTitles = () =>
-    page.locator('[data-testid="planner-backlog-item"]').allInnerTexts()
+    page.locator('[data-testid="planner-backlog-item"]').filter({ visible: true }).allInnerTexts()
   const overdueCount = () => page.locator('[data-testid="planner-overdue"]').count()
 
   chk(
@@ -456,7 +458,7 @@ try {
     async () => (await page.locator('[data-testid="planner-whats-new-item"]').count()) === NEWS.length,
     { timeoutMs: 8000 },
   )
-  const newsTitles = await page.locator('[data-testid="planner-whats-new-item"]').allInnerTexts()
+  const newsTitles = await page.locator('[data-testid="planner-whats-new-item"]').filter({ visible: true }).allInnerTexts()
   chk(
     newsArrived && NEWS.every((n) => newsTitles.some((text) => text.includes(n.title))),
     "\"What's new\" lists what the workspace actually published, both of them",

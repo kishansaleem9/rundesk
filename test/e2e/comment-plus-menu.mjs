@@ -212,7 +212,7 @@ try {
    * and the last section follows it to the panel — the check that kept it out
    * stood here.
    */
-  const menuText = (await readText(page.locator('[role="menu"]').first())).toLowerCase()
+  const menuText = (await readText(page.locator('[role="menu"]').first().filter({ visible: true }))).toLowerCase()
   chk(
     menuText.includes('slash'),
     'while Slash commands, which now has an engine, is offered',
@@ -277,7 +277,7 @@ try {
   chk(
     await waitUntil(
       async () =>
-        (await readText(page.getByTestId('comment-mention-picker'))).includes(`Mentionable ${TAG}`),
+        (await readText(page.getByTestId('comment-mention-picker').filter({ visible: true }))).includes(`Mentionable ${TAG}`),
       { timeoutMs: 10_000 },
     ),
     'and the picker is showing TASKS — the tab the item names',
@@ -386,7 +386,7 @@ try {
   await page.getByTestId('comment-assign-select').selectOption(me.id, { timeout: 8000 }).catch(() => {})
   chk(
     await waitUntil(
-      async () => (await readText(page.getByTestId('comment-assign-pending'))).length > 0,
+      async () => (await readText(page.getByTestId('comment-assign-pending').filter({ visible: true }))).length > 0,
       { timeoutMs: 10_000 },
     ),
     'and the composer says who it will go to before you post',

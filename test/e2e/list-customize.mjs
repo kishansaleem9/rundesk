@@ -723,7 +723,7 @@ try {
    * their own sentences about a caption that is not there.
    */
   const present = (await note.count()) > 0
-  const noteText = present ? await readText(note) : ''
+  const noteText = present ? await readText(note.filter({ visible: true })) : ''
   const notePlan = present ? await note.getAttribute('data-plan') : null
   chk(
     notePlan === 'business' && noteText.trim().length > 0,

@@ -135,7 +135,7 @@ try {
     await box.getByText(/Nothing scheduled/i).waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
     // What the section offers is decided by a second answer (the person's calendars).
     await page.waitForTimeout(2500)
-    const text = ((await box.innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()
+    const text = ((await box.filter({ visible: true }).innerText().catch(() => '')) || '').replace(/\s+/g, ' ').trim()
     const offers = (await box.getByRole('link', { name: /Connect Calendar/i }).count().catch(() => 0)) > 0
     return { text, offers }
   }
@@ -220,7 +220,7 @@ try {
     await button.waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
     await page.waitForTimeout(1500)
     const enabled = await button.isEnabled().catch(() => null)
-    const why = ((await page.getByTestId('planner-account-add-not-configured').innerText().catch(() => '')) ?? '').trim()
+    const why = ((await page.getByTestId('planner-account-add-not-configured').filter({ visible: true }).innerText().catch(() => '')) ?? '').trim()
     page.asked.length = 0
     await button.click({ timeout: 3000, force: true }).catch(() => {})
     await page.waitForTimeout(2000)

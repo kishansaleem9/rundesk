@@ -338,7 +338,7 @@ try {
   console.log('\n▶ frame `05:25` — the card, and its three actions')
 
   chk(
-    (await readText(page.getByTestId('clip-created-title'))).trim().length > 0,
+    (await readText(page.getByTestId('clip-created-title').filter({ visible: true }))).trim().length > 0,
     'the finished clip is headed with what just happened',
     'no "Clip created!" heading on the card',
   )
@@ -382,7 +382,7 @@ try {
   )
   chk(
     await waitUntil(
-      async () => (await readText(page.locator('[data-sonner-toast]').first())).length > 0,
+      async () => (await readText(page.locator('[data-sonner-toast]').first().filter({ visible: true }))).length > 0,
       { timeoutMs: 10_000 },
     ),
     'and confirms it, as the frame does',
@@ -469,7 +469,7 @@ try {
    * thing it was written to catch.
    */
   const toldOff = await waitUntil(
-    async () => /could not be uploaded/i.test(await readText(page.locator('[data-sonner-toast]').first())),
+    async () => /could not be uploaded/i.test(await readText(page.locator('[data-sonner-toast]').first().filter({ visible: true }))),
     { timeoutMs: 20_000 },
   )
   chk(
@@ -630,7 +630,7 @@ try {
 
   await openComposer()
   const cardUp = await waitUntil(
-    async () => (await readText(page.getByTestId('comment-clip-title'))).includes('Stop Recording Guide'),
+    async () => (await readText(page.getByTestId('comment-clip-title').filter({ visible: true }))).includes('Stop Recording Guide'),
     { timeoutMs: 25_000 },
   )
   chk(
@@ -670,7 +670,7 @@ try {
   await openComposer()
   chk(
     await waitUntil(
-      async () => (await readText(page.getByTestId('comment-clip-processing'))).includes('Still arriving'),
+      async () => (await readText(page.getByTestId('comment-clip-processing').filter({ visible: true }))).includes('Still arriving'),
       { timeoutMs: 25_000 },
     ),
     'a clip still arriving says so, instead of being a paperclip to nowhere',

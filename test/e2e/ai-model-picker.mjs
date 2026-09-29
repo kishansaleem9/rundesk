@@ -264,6 +264,7 @@ try {
   // patch that takes the group heading away.
   const bestHeader = await page
     .getByTestId('ai-model-group-best')
+    .filter({ visible: true })
     .innerText({ timeout: 6000 })
     .then((t) => t.trim())
     .catch(() => null)
@@ -339,10 +340,10 @@ try {
   // require a non-empty sentence, so an absent row answers '' and fails them
   // rather than ending the section thirty seconds later.
   const openAiReason = (
-    (await page.getByTestId('ai-model-reason-openai').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('ai-model-reason-openai').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   const googleReason = (
-    (await page.getByTestId('ai-model-reason-google').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('ai-model-reason-google').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   /*
    * A REASON EACH, AND DIFFERENT ONES. A missing i18n key falls back to a
