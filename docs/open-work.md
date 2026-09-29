@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 346 items, 40 open, 7 partly fixed, 299 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 347 items, 41 open, 7 partly fixed, 299 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1583,6 +1583,14 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The next preflight caught the cause. The run printed "(it said: at ChildProcess._handle.onexit …)": the mutant's stub had exited on EADDRINUSE. The gates drew their ports from their pid, `9300 + pid % 400` and `9500 + pid % 300`. Those ranges overlap each other, and stubs left by ended mutant runs were still listening in them (`found-29-sep/killed-mutants-outlive-their-run`). Both gates now take a port the OS chose (`scripts/lib/free-port.mjs`).
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
+
+### `found-29-sep/ui-sweep-reads-after-fixed-waits` — open (test tooling, medium; found by the break run for `6a31a5f`)
+
+**ui-sweep still reads after 45 fixed sleeps in sections 0–11 and 15, and a loaded lane outlasts them**
+
+*Evidence, 29 September:* the break set for `ui-sweep` on lane 3 at `6a31a5f`, beside three other break runs, stopped at its baseline, 90/107. Section 9 pressed Ctrl+K, slept 1.2 s and counted the palette once; it had not drawn yet, so the section reported "Ctrl+K did not open the palette" and skipped its other 16 checks. The run before stopped on 16b's teardown for the same kind of read (`found-29-sep/ui-sweep-teardown-skips-the-press`). Sections 12–16b wait for what they read since `d15081f`; sections 0–11 and 15 still hold 45 `waitForTimeout` calls, each a guess at how long the next read needs.
+
+*To close:* every remaining fixed wait becomes a bounded wait for what the next line reads or presses. The palette hotkey toggles, so it is pressed once, after the dialog before it has gone. The check count and every sentence stay as they are. Measure before and after under load, and let the `ui-sweep` break set run to its verdicts.
 
 ### `found-29-sep/ui-sweep-teardown-skips-the-press` — **closed** (test tooling, small; found by the break run for `15e2681`)
 
@@ -3612,6 +3620,7 @@ A lane that `RUNDESK_LANE_SEARCH` names gets the stub on 93k and an API started 
 Measuring with the stub found four defects in the product, each an item of its own and closed with this one: `found-29-sep/meili-file-hits-skip-the-read-rule`, `found-29-sep/meili-finds-deleted-docs`, `found-29-sep/meili-gone-after-boot-fails-every-search` and `found-29-sep/files-of-binned-tasks-found`. The measurements are there.
 
 Regression, after the fix: every suite that searches (24, `search-index` and `doc-import` among them) on lane 5, where the stub answers, and on lane 6, where Postgres does. 24 of 24 green on each, every run its full count (477 checks a lane). `guest-read-scope` and `search-read-access`, which failed on a search lane before they rebuilt their index, are green on both.
+Break verdicts at `6a31a5f`, through `wt-break.sh`, which gave the lanes the stub from the patches' headers: `search-index-1..6` 8, 11, 8, 11, 11 and 11 of 12, against 12/12; `doc-import-5` 14/16 and `doc-import-1..4` 15, 15, 14 and 15 of 16, against 16/16. `guest-read-scope` (`grs-1..15`) and `search-read-access` (`sra-1..11`), which now rebuild their index, measured again on a lane without the stub: every patch reddens, against 12/12 and 4/4.
 
 ### `found-29-sep/meili-file-hits-skip-the-read-rule` — **closed** (security, small; found measuring `commit-log/log-68c0345-1` with the new search stub)
 
@@ -3622,6 +3631,7 @@ Regression, after the fix: every suite that searches (24, `search-index` and `do
 *Closed, 29 September:* a file hit is held to its task's rules, as the database's file search is: the task's reach and privacy, the bin, and the workspace. One query over the attachments joined to their task, list, project and space; a hit whose row is gone is dropped.
 - Measured with `search-index` section 6 on lane 5, where the stub answers: before, the member's search found the file (8/12 in all); after, it does not while the admin's does (12/12).
 - Unit: "holds a file hit to its task’s reach, privacy and bin, and drops one the database does not return" (47/51 before, 51/51 after). Patches `sst-4` (unit) and `search-index-7` (suite).
+- Break verdict at `6a31a5f`, on a lane the runner gave the stub: `search-index-7` 10/12, reddening the refused space's file and the binned task's file, against a 12/12 baseline.
 
 ### `found-29-sep/meili-finds-deleted-docs` — **closed** (visible bug, small; found measuring `commit-log/log-68c0345-1`)
 
@@ -3632,6 +3642,7 @@ Regression, after the fix: every suite that searches (24, `search-index` and `do
 *Closed, 29 September:* a doc hit is held to the archived rule, for managers too, as a task hit is, and dropped when its doc is gone; the doc rule still applies to everyone else. The read is the authority, so nothing has to remember to take a doc out of the index.
 - Measured on lane 5: before, the deleted doc was found; after, it is found before its delete and not after (`search-index` section 6).
 - Unit: "holds a doc hit to the archived rule, a manager’s too, and drops one the database does not return". Patches `sst-5` and `search-index-8`. `sst-1` is re-aimed onto the new doc rule.
+- Break verdict at `6a31a5f`: `search-index-8` 11/12, against a 12/12 baseline with the stub.
 
 ### `found-29-sep/meili-gone-after-boot-fails-every-search` — **closed** (visible bug, small; found measuring `commit-log/log-68c0345-1`)
 
@@ -3642,6 +3653,7 @@ Regression, after the fix: every suite that searches (24, `search-index` and `do
 *Closed, 29 September:* the Meilisearch half of a search is caught; the search is answered from Postgres, a warning is logged, and the next search asks Meilisearch again.
 - Measured on lane 5 with the stub sent away under the running API: before, 500; after, 200 with the task found, and the API's log says "Meilisearch search failed, answered from Postgres: fetch failed".
 - Unit: "answers from Postgres when Meilisearch fails after boot". Patches `sst-6` and `search-index-9`.
+- Break verdict at `6a31a5f`: `search-index-9` 11/12, against a 12/12 baseline with the stub.
 
 ### `found-29-sep/files-of-binned-tasks-found` — **closed** (visible bug, small; found reading the search stub's notes, measured on lane 1)
 
@@ -3652,6 +3664,7 @@ Regression, after the fix: every suite that searches (24, `search-index` and `do
 *Closed, 29 September:* a file goes where its task goes. Both engines withhold the file of an archived or binned task unless archived work is asked for.
 - Measured: before, lane 6 (Postgres) 11/12 and lane 5 (index) 8/12 with this check red on both; after, 12/12 on both.
 - Unit: "withholds the file of an archived or binned task unless archived work is asked for". Patches `sst-7` and `search-index-10`, which takes both engines' rule out and so reddens on either.
+- Break verdict at `6a31a5f`: `search-index-10` 11/12 on the stub lane. The Postgres half's run comes with the next set on a lane without the stub.
 
 ### `commit-log/log-ad00a7c-1` — **closed** (test tooling, medium; the same work as `harness/model-lane-routing-unbuilt`)
 
@@ -5528,6 +5541,8 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 *Evidence:* Commit 6f62af6: the third card is cut off in the frame, 'its tail is written by me' and is not checked. catalogs.ts:2831-2835 reads 'Stay focused with Priorities' / 'Instantly know what each team is working on ...'.
 
 *To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
+
+*Researched, 29 September:* not settled by public sources. ClickUp's pages describe Priorities in Teams Hub ("see what each person is working on", "share and compare priorities") but not the empty state's carousel copy, and no page quotes the third card. The frame's beginning stays, and the tail stays ours until the owner or a later frame gives the real one.
 
 ### `ledger-rows/row-2398-remainder` — **closed** (small)
 
