@@ -247,6 +247,12 @@ jobs:
       - name: A mutant run ends with everything it started
         run: node scripts/check-run-mutant.mjs --mutate
 
+      # Every break patch writes /home/user/rundesk/…; a runner in another
+      # checkout aims it at its own. check-unit-claims.mjs ran them as written
+      # from an agent's worktree and patched 29 files of the main checkout.
+      - name: A break patch runs aimed at its own tree
+        run: node scripts/check-patch-root.mjs --mutate
+
       # And the matcher that decides whether a claim counts as verified, for 798
       # patches across two checkers. Every one of its rules is a LOOSENING that
       # exists because a real claim was being misread, and a loosening is one

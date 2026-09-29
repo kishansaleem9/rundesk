@@ -80,6 +80,7 @@ step "and the model seam is really a seam" node scripts/check-model-stub.mjs --m
 step "and the search seam is really a seam" node scripts/check-meili-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
 step "a mutant run ends with all it started" node scripts/check-run-mutant.mjs --mutate
+step "a break patch runs aimed at its own tree" node scripts/check-patch-root.mjs --mutate
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs --mutate
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs --mutate
 step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs --mutate

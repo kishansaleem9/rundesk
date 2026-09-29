@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 347 items, 41 open, 7 partly fixed, 299 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 348 items, 41 open, 7 partly fixed, 300 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1602,6 +1602,22 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The press back is decided by what the server holds (`GET /workspaces/:id/work-schedule`, Saturday is ISO day 6). The button is waited for until it shows the six-day week, pressed, and the server is waited for until it no longer holds Saturday.
 - The teardown's check asks the server as well as the button, and puts the week back through the API when the press failed, so a failed run no longer leaves the next one a six-day week.
 - After: 107/107 on lane 3 beside three break runs, two regression runs and an agent's (load about 13). The failing run was the break set's baseline under the same kind of load; its set is queued again on the next commit.
+
+### `found-29-sep/unit-claims-patch-the-main-checkout` — **closed** (test tooling, small; found integrating an agent's work)
+
+**`check-unit-claims.mjs`, run from another checkout, patched the main one and restored its own**
+
+*Evidence, 29 September:*
+- Committing `b0ccb1d` (ledger only), `git status` showed 29 files under `apps/` modified by nobody's edit: security and correctness rules turned off (`&& Boolean(0)`, `shared: false`, a guest check dropped). Each was written about three seconds after the last, between 18:48:51 and 18:51:02.
+- An agent working in its own worktree had run `node scripts/check-unit-claims.mjs` there, as an extra check. Every patch writes `/home/user/rundesk/…`, the gate ran each as written, and it backed up and restored the files under its own root. So 41 patches wrote the main checkout; the worktree was "restored" untouched, its tests passed, and every claim read green.
+- `check-no-break-patches.mjs` called the tree clean: these patches leave no signature.
+- Nothing reached a commit: `b0ccb1d` was committed from the index, which held the two ledger files. The 29 files went back to `HEAD` at once, and the agents were told to run no patch-applying gate from a worktree.
+
+*Closed, 29 September:*
+- `scripts/lib/patch-root.mjs` aims a patch's text at the checkout that runs it, as `check-break-patches.py` (`_here()`) and `wt-break.sh` already do. `check-unit-claims.mjs` runs each claim through a copy aimed at its own root, in the temp directory.
+- Run anywhere but the main checkout, the gate also compares the main checkout's `git status` before and after, and fails, naming the files, if it moved.
+- Measured from a scratch worktree of `b0ccb1d` with the fix: the main checkout's status identical before and after, 45 of 45 claims reddened in the worktree, and the worktree restored.
+- `check-patch-root.mjs --mutate` is in preflight and CI: 6 cases, 4 of 4 mutations caught (a patch run as written, only the first path moved, a path that only begins the same moved too, the root compared as spelled).
 
 ### `found-29-sep/killed-mutants-outlive-their-run` — **closed** (test tooling, small; found committing `found-29-sep/stub-mutants-time-out-unnamed`)
 
@@ -4893,7 +4909,7 @@ and it reads the structure instead.
 - Someone outside the workspace is refused in their own column, with a reason, while the others draw.
 - Nine people are a 400 that names the limit of eight, and Sara named nine times is one column, not a refusal.
 - 5/5 on lane 5. Registered in CI's `postgres-harnesses` job, which now runs 243 suites; the comment that counts them had stayed at 241.
-- `tsa-1..4` are API patches: the de-duplication dropped (as `ts-9`, which the browser suite could never redden), every column read as the first person's, one refused column failing the whole schedule, and the limit gone. Their runs come with this commit.
+- `tsa-1..4` are API patches: the de-duplication dropped (as `ts-9`, which the browser suite could never redden), every column read as the first person's, one refused column failing the whole schedule, and the limit gone. At `3186ab8` on lane 3, against a 5/5 baseline: `tsa-1` 3/5 and `tsa-2` 3/5, each reddening the two checks it names, `tsa-3` 4/5 and `tsa-4` 4/5.
 
 ### `commit-log/log-30183c3-1` — **closed** (test tooling, small)
 

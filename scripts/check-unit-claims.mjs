@@ -25,11 +25,13 @@
  *
  *   node scripts/check-unit-claims.mjs
  */
-import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, utimesSync } from 'node:fs'
-import { join, dirname } from 'node:path'
+import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, utimesSync, rmSync } from 'node:fs'
+import { join, dirname, resolve } from 'node:path'
+import { tmpdir } from 'node:os'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { findInTree } from './lib/find-in-tree.mjs'
+import { aimedAt, PATCHES_ROOT } from './lib/patch-root.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -93,6 +95,18 @@ for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
 
 const unknown = []
 
+/*
+ * THE MAIN CHECKOUT IS WATCHED FROM ANYWHERE ELSE. A patch runs aimed at this
+ * tree (`lib/patch-root.mjs`); run as written from an agent's worktree, 41
+ * of them wrote the main checkout while this restored and tested its own, and
+ * every claim read green (`found-29-sep/unit-claims-patch-the-main-checkout`).
+ * So a run outside the main checkout also says whether the main one moved.
+ */
+const elsewhere = resolve(ROOT) !== PATCHES_ROOT && existsSync(join(PATCHES_ROOT, '.git'))
+const mainStatus = () =>
+  execFileSync('git', ['status', '--porcelain', '--', 'apps', 'packages'], { cwd: PATCHES_ROOT, encoding: 'utf8' })
+const mainBefore = elsewhere ? mainStatus() : null
+
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const patch = join(BREAKS, f)
   const text = readFileSync(patch, 'utf8')
@@ -136,8 +150,11 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   let applied = false
   let out = ''
   let failed = null
+  // Written beside nothing: a copy aimed at this tree, in the temp directory.
+  const runnable = join(tmpdir(), `.unit-claim-${process.pid}-${f}`)
   try {
-    execFileSync('python3', [patch], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
+    writeFileSync(runnable, aimedAt(text, ROOT))
+    execFileSync('python3', [runnable], { cwd: ROOT, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
     applied = true
     try {
       out = execFileSync('pnpm', ['exec', ...args], {
@@ -164,6 +181,7 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
      */
     restore(backup)
     pending = null
+    rmSync(runnable, { force: true })
   }
   if (!applied) continue
 
@@ -202,6 +220,16 @@ for (const r of green) console.log(`  GREEN  ${r}`)
 for (const r of unknown) console.log(`  ????   ${r}`)
 
 let bad = 0
+if (elsewhere) {
+  const mainAfter = mainStatus()
+  if (mainAfter !== mainBefore) {
+    console.error(
+      `\n[unit-claims] the main checkout (${PATCHES_ROOT}) changed while this ran from ${resolve(ROOT)}:\n` +
+        `${mainAfter.trim() || '(now clean)'}\nA patch wrote there instead of here. Put those files back before anything commits them.`,
+    )
+    bad = 1
+  }
+}
 if (dirty) {
   console.error(
     `\n[unit-claims] the working tree is NOT back as it was:\n${dirty}\n` +
