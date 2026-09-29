@@ -1,5 +1,7 @@
 # The original defect restored: a disabled input goes on inviting you to type into it,
 # whether the model is missing or an answer is already in flight.
+# RE-AIMED 29 September: the resting state turns through four sentences now
+# (`commit-log/log-4ad25f6-1`), so the anchor ends on that turn; the edit is the same.
 # Reddens: ai-answer-rendering: "the composer says which state it is in, and it is the state /ai/status reports"
 import io
 p = '/home/user/rundesk/apps/web/src/components/ai-panel.tsx'
@@ -8,7 +10,7 @@ a = """            placeholder={
                 ? t('aiPanel.placeholderWorking')
                 : !aiAvailable
                   ? t('aiPanel.placeholderUnavailable')
-                  : t('aiPanel.inputPlaceholder')
+                  : t(RESTING_PLACEHOLDERS[restingTurn])
             }
 """
 b = """            placeholder={t('aiPanel.inputPlaceholder')}

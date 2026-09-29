@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 47 open, 8 partly fixed, 284 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 46 open, 8 partly fixed, 285 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -4966,7 +4966,7 @@ FAILs. video-regression 94/94.
 
 *Evidence:* reaudit.md:853 (M). ai-panel.tsx testids have no composer-plus. :1817-1823 has three static placeholder states with no rotation (built then reverted in 4ad25f6 because 'the resting state never renders in a lane'). Since 6fbd79b/ad00a7c a lane can be given a model per lane (RUNDESK_LANE_MODEL). TaskAiBar disables 'presentation' because there is 'no slide-deck entity' (task-detail-sheet.tsx:596-600, 625-629). The ai_usage metering exists (reaudit.md:6558-6564). Only the allowance and reset are missing, which the frames never give.
 
-*To close:* Rotating placeholder: rebuild it and measure on a model lane. Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
+*To close:* Rotating placeholder: built 29 September (`commit-log/log-4ad25f6-1`). Credit meter: allowance and reset from ClickUp research, reading ai_usage. Composer '+': contents from ClickUp research (existing parts: knowledge tab, skills, @-mention search). Slide deck: frame 16:50 specifies an inline 4-slide embed; needs an artifact entity plus a renderer.
 
 ### `ledger-rows/row-869` — open, large
 
@@ -5080,13 +5080,24 @@ FAILs. video-regression 94/94.
 
 *To close:* Research ClickUp Teams Hub Analytics and build it over the existing reports aggregators. Replace the absence check in teams-destination.mjs with a check of the new tab. Record the row in §2 so it is counted.
 
-### `commit-log/log-4ad25f6-1` — open, small
+### `commit-log/log-4ad25f6-1` — **closed** (small)
 
 **The rotating composer placeholder (frames 16:30-16:45) was built and then reverted; the reason for reverting has since gone away**
 
 *Evidence:* Commit 4ad25f6 reverted the rotation because GET /ai/status answers available:false on every lane, so no suite could see it. It said wiring model-stub.mjs would make it measurable. Commit 6fbd79b then wired the stub behind RUNDESK_LANE_MODEL (lane-env.sh:161-177). ai-panel.tsx:1817-1822 still has three fixed placeholder states (working, unavailable, inputPlaceholder) and nothing rotates. Commit 4dacd13 also lists it as absent.
 
 *To close:* Rebuild the four-sentence rotation on the resting state. Measure it on a lane started with RUNDESK_LANE_MODEL, and write a break patch that freezes the rotation. This depends on log-ad00a7c-1 so the suite lands on a lane that has a model.
+
+*Closed, 29 September.* The frames are ClickUp's own. From `16:30` to `16:45`, the Brain² prompt's placeholder turns through four sentences with nobody touching the page: "Need help? Ask, search or create." / "From quick questions to big projects…" / "Type your request. I'll search, answer, or build it for you." / "Curious about something? Ask away." (`docs/video2-frame-observations.md`).
+- The dock's composer, resting and ready, turns through the four every 3.8 s in the frame's order (four locales). A timer runs only while the composer rests on the invitation. Busy ("Working on it…") and unavailable ("AI is not configured on this server") keep their precedence, and nobody typing sees a placeholder.
+- The reason it was reverted on 23 September is gone: lane 7 has a model (`log-ad00a7c-1`), so the resting state renders and can be read.
+
+`ai-answer-rendering`:
+- Its placeholder check asked for "Ask Rundesk AI anything…" where a model answers, and now takes any of the four. A new check reads two turns, each the next of the four, and where no model answers, that the refusal holds still.
+- Before 50/52 on lane 7 (the old invitation, never turning) and 52/52 on lane 6. After 52/52 on both.
+- `aar-24` (no timer; model lane) reddens the new check alone (51/52). `aar-10`, re-aimed onto the new resting state, reddens its check again with the two that follow from it (49/52).
+- Regression on lane 7: `brain-entry-points` 19/19, `command-palette` 43/43, `ai-create-containers` 33/33.
+- Row 853 of the reaudit keeps its `M` for the credit meter, the composer "+" and the generated artefacts (`ledger-rows/row-853`).
 
 ### `commit-log/log-6b140c5-1` — **closed** (small)
 

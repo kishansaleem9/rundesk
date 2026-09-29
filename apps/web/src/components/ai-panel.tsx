@@ -508,6 +508,17 @@ function AiTrace({ steps, t }: { steps: string[]; t: (k: TranslationKey) => stri
  * than prose, so the API is not a translation table and an unknown step from a
  * newer server still renders as something honest instead of vanishing.
  */
+/**
+ * Frames `16:30`–`16:45` — the resting composer cycles its invitation through
+ * four sentences with nobody touching the page (`commit-log/log-4ad25f6-1`).
+ * Built and reverted on 23 September because no lane had a model, so the
+ * resting state never rendered and nothing could see it; the model lane can.
+ * Only the ready, resting state turns: busy and unavailable keep their
+ * precedence, and nobody typing sees a placeholder at all.
+ */
+const RESTING_PLACEHOLDERS: TranslationKey[] = ['aiPanel.rotate1', 'aiPanel.rotate2', 'aiPanel.rotate3', 'aiPanel.rotate4']
+const PLACEHOLDER_TURN_MS = 3800
+
 const AI_STEP_LABEL: Record<string, TranslationKey> = {
   workspace: 'aiPanel.stepWorkspace',
   skill: 'aiPanel.stepSkill',
@@ -1379,6 +1390,15 @@ export function AiPanel({
   }
 
   const aiAvailable = statusQuery.data?.available !== false
+  // The resting invitation's turn: a timer runs only while the composer rests
+  // on it, so the rotation stops the moment anything else is true.
+  const [restingTurn, setRestingTurn] = useState(0)
+  const composerResting = aiAvailable && !isStreaming && !input
+  useEffect(() => {
+    if (!composerResting) return
+    const id = window.setInterval(() => setRestingTurn((n) => (n + 1) % RESTING_PLACEHOLDERS.length), PLACEHOLDER_TURN_MS)
+    return () => window.clearInterval(id)
+  }, [composerResting])
   const busy = busyStateFor(steps, streamBuffer.length > 0)
 
   return (
@@ -1883,7 +1903,7 @@ export function AiPanel({
                 ? t('aiPanel.placeholderWorking')
                 : !aiAvailable
                   ? t('aiPanel.placeholderUnavailable')
-                  : t('aiPanel.inputPlaceholder')
+                  : t(RESTING_PLACEHOLDERS[restingTurn])
             }
             onKeyDown={(e) => {
               if (e.key === 'Enter' && !e.shiftKey) {

@@ -867,7 +867,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
 | B | Live focus countdown in the header — `FocusBlockPill` in `app-topbar.tsx`, frame `15:20`'s moon glyph and *"Work on … 2h 56m left"* right of the workspace switcher. It reads `useRunningFocusBlock`, sharing its fetch, its choice of block and its one-second clock with the tab-title writer, so there is no second countdown in the file. Testid `focus-block-pill`, measured by `test/e2e/focus-pill.mjs` |
 | M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |
-| M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck |
+| M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck. *(29 September: the rotating placeholder is built and measured on a lane with a model — `commit-log/log-4ad25f6-1`, `ai-answer-rendering`; the row stays `M` for the credit meter, the composer "+" and the generated artefacts.)* |
 | B | Skills; Recent Chats with auto-derived names |
 
 ### S18–S22 · model picker, AI execution, analytics, credits, connections, teams

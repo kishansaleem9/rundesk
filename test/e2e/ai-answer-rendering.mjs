@@ -76,7 +76,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". Exact, so a skipped branch is a failure. */
-const EXPECTED_CHECKS = 51
+const EXPECTED_CHECKS = 52
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -566,17 +566,44 @@ try {
    * with a model a missing composer, an empty placeholder or one still reading
    * "Working on it…" all passed: the absence of one string standing in for the
    * presence of another, which is the shape this check was rewritten to lose.
-   * Where a model answers, the composer rests on its invitation, and that
-   * sentence (`aiPanel.inputPlaceholder`) is what is asked for.
+   * Where a model answers, the composer rests on its invitation — since 29
+   * September one of the four the frames rotate through at `16:30`–`16:45`
+   * (`commit-log/log-4ad25f6-1`), so any of the four, and nothing else.
    */
-  const RESTING = 'Ask Rundesk AI anything…'
+  const ROTATION = [
+    'Need help? Ask, search or create.',
+    'From quick questions to big projects…',
+    "Type your request. I'll search, answer, or build it for you.",
+    'Curious about something? Ask away.',
+  ]
   const beforePlaceholder = await attrOf(composer, 'placeholder')
   chk(
-    beforePlaceholder === (modelConfigured ? RESTING : UNAVAILABLE),
+    modelConfigured ? ROTATION.includes(beforePlaceholder) : beforePlaceholder === UNAVAILABLE,
     'the composer says which state it is in, and it is the state /ai/status reports',
     `the placeholder read ${JSON.stringify(beforePlaceholder)} while /ai/status said ` +
       `available=${JSON.stringify(aiStatus.data?.available)}, so it should read ` +
-      JSON.stringify(modelConfigured ? RESTING : UNAVAILABLE),
+      (modelConfigured ? `one of ${JSON.stringify(ROTATION)}` : JSON.stringify(UNAVAILABLE)),
+  )
+
+  /*
+   * AND AT REST IT TURNS, in the frame's order (`commit-log/log-4ad25f6-1`):
+   * read over two turns, each sentence the next of the four. Where no model
+   * answers the composer says so and holds still — a rotation over a refusal
+   * would invite typing into a box that is disabled.
+   */
+  const turned = [beforePlaceholder]
+  await waitUntil(async () => {
+    const now = await attrOf(composer, 'placeholder')
+    if (now && now !== turned[turned.length - 1]) turned.push(now)
+    return turned.length >= 3
+  }, { timeoutMs: 12_000, stepMs: 200 })
+  const inOrder = turned.every((p, i) => i === 0 || ROTATION.indexOf(p) === (ROTATION.indexOf(turned[i - 1]) + 1) % ROTATION.length)
+  chk(
+    modelConfigured
+      ? turned.length >= 3 && turned.every((p) => ROTATION.includes(p)) && inOrder
+      : turned.length === 1 && turned[0] === UNAVAILABLE,
+    'at rest the invitation turns through the frame’s four sentences in their order, and where no model answers it holds still',
+    `over 12 s the placeholder read ${JSON.stringify(turned)}`,
   )
 
   /*
