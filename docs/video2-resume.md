@@ -14,7 +14,7 @@ defect classes, and the trap list) and `docs/video2-reaudit.md` (the ledger).
 
 ## 1. The count
 
-**173 rows — 148 built · 11 partial · 14 missing.** `docs/video2-reaudit.md`
+**173 rows — 151 built · 9 partial · 13 missing.** `docs/video2-reaudit.md`
 §4 carries the arithmetic. §5 holds the 41 rows recovered from
 `docs/video2-frame-observations.md` after the originals were lost, and every
 row closed this session carries a `closed by:` line naming the suite and its
@@ -40,15 +40,21 @@ Postgres and a real browser — never because the code was written.
 
 ## 2. What is verified, and what is not
 
-**113 suites exist and ALL 113 are registered in `ci.yml`.** This paragraph
-said "112 exist, 104 are registered, and the eight unregistered ones are
-unregistered on purpose" — true when it was written and not since. The rule it
-states still holds and is worth keeping: a suite goes into `ci.yml` when it has
-run green locally, never when the code is merely written, because registering a
-red suite turns the pipeline into something nobody reads. There is simply
-nothing waiting on it at the moment.
+**239 suites exist and all 239 are registered in `ci.yml`**, by `node
+scripts/check-suites-registered.mjs` on 29 September, which fails the build on
+a suite with no step (its list of suites excused by name is empty). The jobs'
+`run: node test/e2e/` lines put 233 in `postgres-harnesses` and 6 in
+`browser-suites`. This
+paragraph said "112 exist, 104 are registered", then "113 suites exist and ALL
+113 are registered" while `doc-import` was not. A count typed here goes stale
+with the next suite; the checker is where to read it. The rule it states still
+holds and is worth keeping: a suite goes into `ci.yml` when it has run green
+locally, never when the code is merely written, because registering a red
+suite turns the pipeline into something nobody reads.
 
-101 of the 113 carry checks; the rest are fixtures and helpers.
+All 239 declare checks, 3,643 between them (`check-break-coverage.mjs`, 29
+September). This said "101 of the 113 carry checks; the rest are fixtures and
+helpers"; helpers live in `test/e2e/lib/` and are not counted.
 
 **Break-testing is the incomplete part**, and it is the step that separates a
 check from decoration.
@@ -62,11 +68,28 @@ patches touching nothing near them, because those four were already failing on
 a tree two commits stale. Every line in that file looked like a result and
 meant nothing.
 
+**Today the checkers count it, from the logs themselves.** On 29 September, at
+`d86220d`:
+
+```
+check-break-coverage.mjs   239 suites · 3,643 checks · 1,917 patches attributed
+                           to a suite (40 name none) · no suite without a patch
+check-break-reddened.mjs   62 of 239 suites have a patch measured against this
+                           tree that reddens a check it names: 259 patches,
+                           with 0 that reddened nothing and 0 unproven; 41 claim
+                           a unit test; 1,657 were measured against a tree that
+                           has moved since, and are not counted as proof of it
+```
+
+The 1,657 are the size of the work owed: `never-run-plan.mjs --drifted` names
+them. What follows in this section is the picture on 21 September, kept for the
+reasons in it, which still hold.
+
 Counted honestly, by whether the results file opens with a `== BASELINE (no
 patch) … 0 failed` line — recounted from the files, not carried forward:
 
-Recounted from the files on 21 September, of the **101 suites that carry
-checks**:
+Recounted from the files on 21 September, of the **101 suites that carried
+checks then**:
 
 ```
  50 have a break run with a VERIFIED GREEN baseline
@@ -82,15 +105,16 @@ break patch WRITTEN for them, and when it was first run — the first time anyon
 had printed the denominator — **47 of 101 suites had none at all**, including
 `video-regression` (81 checks), `custom-field-progress` (58) and `task-menu`
 (33). It is a ratchet in CI now: the count may fall and may not rise, so a new
-suite arrives with a patch or fails the build that brings it.
+suite arrives with a patch or fails the build that brings it. It is 0 of 239
+on 29 September.
 
-That last number is the honest size of the remaining work, and it has not been
-stated plainly before. The 34 are the ones whose checks are known to fail when
-the thing they watch is broken. Everything else is a suite that passes, which
-is not the same claim.
+That last number was the honest size of the remaining work on 21 September.
+The 34 below were the ones whose checks were known to fail when the thing they
+watch is broken. Everything else was a suite that passes, which is not the
+same claim.
 
-Green baselines, complete: `ai-answer-rendering` · `attach-on-create` ·
-`calendar-accounts` · `clickapps-plan-gating` · `command-palette` ·
+Green baselines, complete, on 21 September: `ai-answer-rendering` ·
+`attach-on-create` · `calendar-accounts` · `clickapps-plan-gating` · `command-palette` ·
 `create-menu-ai` · `custom-field-types` · `focus-pill` · `folder-create` ·
 `folder-dialog` · `gantt-controls` · `imports` · `list-card-cover` ·
 `list-customize` · `list-empty-states` · `list-view-controls` ·
@@ -101,7 +125,7 @@ Green baselines, complete: `ai-answer-rendering` · `attach-on-create` ·
 `task-mentions` · `teams-empty-state` · `teams-person-cards` ·
 `template-center` · `video1-acceptance`.
 
-Stale results files to re-run before their numbers mean anything:
+Stale results files to re-run before their numbers meant anything, then:
 `ai-action-categories`, `ai-activity-filters`, `ai-create-containers`,
 `ai-model-picker`, `integration-error-card`, `login-workspace-binding`,
 `space-create-menu`, `task-activity-filter`, `task-field-create`,
@@ -194,8 +218,10 @@ Two of those sets exist because an earlier run found the patch at fault rather
 than the check: `tab-title-countdown-2-norestore` was inert until a third
 title-restore path was removed, and `task-cover-1-nocustom` was inert twice —
 first because `hidden` loses to Tailwind's `flex`, then because a later `style`
-prop on the same element wins over an earlier one. Both are rewritten and
-awaiting a run.
+prop on the same element wins over an earlier one. Both were rewritten and
+have run since: `tab-title-countdown-2-norestore` reddens its check (9 passed,
+1 failed, against a 10/0 baseline at `dde1c835`) and `task-cover-1-nocustom`
+three (39/3 against 42/0 at `f583354b`), both on 24 September.
 
 ## 3. Defects still open
 
@@ -231,19 +257,30 @@ These are the ones still standing:
    over a token nothing queried. `listSources` now only calls a source connected
    when the stored grant carries the scope the query needs, which also fixed a
    live confident zero for `google-drive`.
-3. **292 inert `.catch(() => {})` across 63 suites.** `apiClient` never throws,
+3. ~~**292 inert `.catch(() => {})` across 63 suites.**~~ **Closed, 29 September.** `apiClient` never throws,
    so these catch nothing: cleanup that silently does not clean up, and setup
    that silently does not set up. `docs/e2e-shared-state-audit.md` has the
-   count and the shape of the fix.
-4. **`GET /tasks/workspace/:id/timeline` accepts `projectId` and no client
-   sends it.** CLOSED BY DECISION (29 September, `resume-defects/resume-4`):
-   the client is right not to send it — the timeline's query has no window and
-   its project options come from the full rows, so the page filters what it
-   holds. What was wrong was that nothing proved the server narrows on it:
-   `gantt-controls`' check "the timeline endpoint really narrows on
-   `projectId`, which no client sends" does, with the run's own ids, and its
-   patch `gantt-29-projectid-ignored` reddens it. The `from`/`to` the service
-   declared and read nothing of are gone (`timeline-projectid-param`).
+   count and the shape of the fix. That count (292) was taken when there were
+   66 suites, and it counted every `.catch(() => {})`. Measured again on 29
+   September with a parser: 1,544 in the 239 suites, 158 of them on an API
+   client in 133 suites; the rest are on Playwright calls, which do throw, and
+   on SQL and browser teardown. The 158 are now status checks, and
+   `check-suite-api-catches.mjs` refuses a new one (`suite-hygiene/inert-catches`,
+   `resume-defects/resume-3` in `docs/open-work.md`).
+4. ~~**`GET /tasks/workspace/:id/timeline` accepts `projectId` and no client
+   sends it.**~~ **CLOSED BY DECISION, 21 September** (`07d9208`): the framing
+   was wrong. `/ai/activity`'s `userId` was a parameter the panel needed and
+   failed to send; here the timeline query has no window, so the page holds
+   every dated task and `projectOptions` derives from exactly those rows —
+   the client is right not to send it. What was missing was any exercise of
+   the parameter, and `gantt-controls` now has one: *"the timeline endpoint
+   really narrows on `projectId`, which no client sends"*, which
+   `gantt-29-projectid-ignored` reddens (29/1 against a 30/0 baseline at
+   `8ba0bacd`). The residue, `opts.from` and `opts.to` declared on
+   `getTimelineForWorkspace` and read by nothing, was removed on 25 September
+   in `8ba0bac` (`product-siblings/timeline-projectid-param` in
+   `docs/open-work.md`). The ledger item `resume-defects/resume-4` was closed
+   as this stale entry on 29 September.
 5. **A ledger row marked built is incomplete.** The Gantt today-line/zoom row
    claims the `Today` control, which did not exist until this session. The row
    needs re-reading against what is now there.
@@ -257,9 +294,14 @@ These are the ones still standing:
 7. **A clip's "Copy link" yields a link that expires in 24 hours and says
    nothing about it.** One of three share paths states the expiry, and it is
    not the one people use.
-8. **`email.service.send()` has no `replyTo`**, so an outbound mail cannot
-   carry the address that brings a reply back into the task. Blocks the
-   composer-as-email row; `task_comments` also needs a channel column.
+8. ~~**`email.service.send()` has no `replyTo`**~~, so an outbound mail cannot
+   carry the address that brings a reply back into the task. **Partly fixed,
+   24 September:** `send()` takes a Message-ID and a Reply-To and hands both to
+   the transport (`email.service.ts:600-617`), and a comment notification's
+   Reply-To is the task's address where its list has an alias. Still open, and
+   still blocking the composer-as-email row: cc and bcc, a channel column on
+   `task_comments` and a reader for it, and minting an alias
+   (`resume-defects/resume-8` in `docs/open-work.md`).
 
 ## 4. Two rows assessed but not built
 
@@ -277,13 +319,20 @@ These are the ones still standing:
 ## 5. Rebuilding the environment
 
 The scripts that matter are **in the repo**: `scripts/e2e-lanes/`. Its README
-has the full recipe and the two traps that cost the most time. In short:
+has the full recipe and the two traps that cost the most time, and
+`docs/resume-2026-09-26.md` §5 and §6 have the process and the `/tmp` helpers
+as they stand now. In short:
 
 ```bash
-bash scripts/e2e-lanes/fleet-up.sh 4     # N independent lanes from a dump
-bash scripts/e2e-lanes/fleet-sync.sh 4   # push the CURRENT schema, restart
-bash scripts/e2e-lanes/verify.sh <suite> 2
+bash scripts/e2e-lanes/fleet-up.sh "1 2 3 4"   # lanes 1-4 from the pristine dump: a LIST, never a count
+bash scripts/e2e-lanes/fleet-sync.sh 4         # push the CURRENT schema to lanes 1-4, restart them (this one still reads a count)
+bash scripts/e2e-lanes/verify.sh <suite> 2     # one suite on lane 2
 ```
+
+This block read `fleet-up.sh 4 # N independent lanes`. `fleet-up.sh` takes a
+list now, and it drops and restores every lane it is given, so `4` is lane
+four alone (`lane_list` in `lane-env.sh`). A lane gets the model stub only when
+`RUNDESK_LANE_MODEL` names it (`all`, or lane numbers); see `lane-env.sh`.
 
 Two things that are not obvious and will waste an hour each:
 
@@ -326,15 +375,18 @@ evidence.
 
 **When the allowance resets**, do not wait for a push to coincide with it.
 `ci.yml` carries a `workflow_dispatch` trigger; fire a run at the branch head.
-Expect the first one to take a little over two hours — `postgres-harnesses`
-runs 155 suites (24 September; the other six are in `browser-suites`) at
-roughly 1.1 minutes each, about 171 minutes, and its `timeout-minutes` is 210
-with that arithmetic written beside it. **If you add a suite, redo that
-arithmetic** in the job's comment; the count has gone 50 → 85 → … → 116 → 117
-→ 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155, and `check-suites-registered.mjs` now fails any suite without a step,
-so the count cannot quietly lag the directory. **The job should be split**:
-the comment above it says why that was not done without a working pipeline to
-prove the split on.
+Expect the first one to take over four hours — `postgres-harnesses` runs 233
+suites (29 September, counted from its `run: node test/e2e/` lines; the other
+six are in `browser-suites`) at roughly 1.1 minutes each, about 256 minutes
+plus setup, and its `timeout-minutes` is 300 with that arithmetic written
+beside it.
+**If you add a suite, redo that arithmetic** in the job's comment, which keeps
+the count's history; this file kept a second copy of it, and the copy read 155
+and 210 while the job had reached 233 and 300. `check-suites-registered.mjs`
+fails any suite without a step, so registration cannot quietly lag the
+directory; the running time can, and nothing checks it. **The job should be
+split**: the comment above it says why that was not done without a working
+pipeline to prove the split on.
 
 ## 7. The thing most worth remembering
 

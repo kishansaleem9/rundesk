@@ -9,9 +9,11 @@
 # reports `0 failed` counted as still-green AND as short, which takes REDDENED
 # below zero and trips "PROVED NOTHING" on a set that proved something.
 #
-# It lives in its own file because two programs ask this question — the runner
-# and the reporter — and two copies of a classifier is the duplicated list this
-# audit keeps finding.
+# It lives in its own file because two programs asked this question — the
+# runner and the reporter — and two copies of a classifier is the duplicated
+# list this audit keeps finding. The runner was `break-queue.sh`, deleted in
+# `d840b55`; `break-report.sh` is the one caller now, and `scripts/lib/log-tree.mjs`
+# holds the not-run outcomes (`NOT_RUN`) for the planner and the checkers.
 #
 # Each patch block is classified exactly once, in the order a reader would: the
 # header says MISSING, FAILED or CHANGED NOTHING, else the body says the run

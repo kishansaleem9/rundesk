@@ -179,7 +179,7 @@ if (four && consolidated) {
  * one that most needs tying down, not the one to excuse.
  *
  * `B*` counts as built. The row is built; the asterisk records a remainder in
- * the row's own prose, and a count that dropped those four would disagree with
+ * the row's own prose, and a count that dropped those rows would disagree with
  * every other statement in the file about what is done.
  */
 const two = slice('## 2. What the frames show', '## 3. Deliberately out of scope')

@@ -254,7 +254,14 @@ try {
 } finally {
   await browser.close().catch(() => {})
   if (sql && heldWs) await sql`delete from workspace_integration_connections where workspace_id = ${heldWs}`.catch(() => {})
-  if (A && heldWs) await A(`/workspaces/${heldWs}`, { method: 'DELETE' }).catch(() => {})
+  if (A && heldWs) {
+    try {
+      const gone = await A(`/workspaces/${heldWs}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${heldWs} answered ${gone.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE /workspaces/${heldWs} got no answer (${err?.message ?? err})`)
+    }
+  }
   await sql?.end({ timeout: 5 }).catch(() => {})
   stack?.close()
   const ran = passed + failed

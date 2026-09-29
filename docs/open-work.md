@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 323 items, 85 open, 10 partly fixed, 228 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 323 items, 68 open, 10 partly fixed, 245 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1219,6 +1219,7 @@ The editor starts read only and is made editable only when the doc's capabilitie
 - Patches `dlc-1..11`, one or more per check: all eleven redden (lane 3, at `0911c6e`, baseline 7/7).
 - In CI (229).
 - Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
+- 29 September, under a four-lane sweep: the Edit member's check read the editor before the doc's capabilities had answered (`contenteditable` still "false", though the typing then took). The editor is read only until they answer, and says nothing meanwhile, which outlasted the network lull the suite waited for. It now waits until the read-only pill is drawn or the editor is editable (15 s at most), and fails in its own words if neither comes.
 
 ### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — **closed** (permissions, small; found by the deletion research)
 
@@ -3385,13 +3386,17 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Closed, found already done on 24 September:* `scripts/e2e-lanes/sweep.sh` runs the committed `verify.sh` (`bash "$HERE/verify.sh"`, since `5985ce7`), and its header records the old `/tmp` call as history. `drain.sh` is in no committed directory; a copy remains only in `/tmp` on this machine. `video2-resume.md` names `run-plan.sh` and `never-run-plan.mjs`, and mentions `drain.sh` only as deleted on 23 September.
 
-### `commit-log/log-d92d58f-1` — open, small
+### `commit-log/log-d92d58f-1` — **closed** (test tooling, small)
 
 **Nothing stops two builds writing the same per-lane web bundle at once**
 
 *Evidence:* Commit d92d58f: 'verify.sh refuses a stale bundle and nothing refuses two writers to the same one'. grep for lock or flock in verify.sh and refresh-dists.sh finds only the stale-build notes (verify.sh:115, 125).
 
 *To close:* Take a lock per lane around the vite build and the run, in the style of the wt<lane>.lock that wt-break.sh uses.
+
+*Closed, 29 September.* Nothing held a lane's bundle: `verify.sh` refused a stale one, and two `refresh-dists.sh` for the same lane, or one started while a suite was reading it, emptied the directory under the other (`--emptyOutDir`). Now each lane's bundle has one writer or any number of readers (`dist_lock_*`, lane-env.sh): `verify.sh` holds it shared from before its staleness check to the end of the run (the suite inherits the descriptor), and `refresh-dists.sh` takes it exclusive for each build. A build waits for the runs reading the bundle, a run waits for a build writing it, and a second build of a lane waits for the first; 20 minutes without the lock is a refusal (`verify.sh` exit 6, as for a stale bundle). It is a `flock`, so the kernel lets go when a holder dies, and nothing is left held after a kill.
+- `scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate` (preflight, and CI's verify job — no lane, no build): three orderings on a stand-in bundle, each read from the order its steps write to a log (a build started under a run, a second build under a first, a run started under a build); with helpers that take nothing, which is the state before, all three fail.
+- Demonstrated on lane 2: a `refresh-dists.sh` building for 23.6 s, and a `verify.sh` asked 4 s in; the suite's log was written at 24.1 s, after the build, and the run passed on the fresh bundle. The lock is taken before `verify.sh` looks for `index.html`, because a build empties the directory when it starts writing, and a run asked then would otherwise fall back to the shared bundle without it.
 
 ### `harness/measuredat-counts-nonmeasurements` — **closed**
 
@@ -4319,13 +4324,24 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* In the CI job, start s3-stub.mjs on the port the suites compute (or pass --store) and export R2_ENDPOINT/R2_* to the API, sharing lane_store_env's values. Write fixtures under os.tmpdir() via mkdtempSync instead of /tmp/claude-0.
 
-### `suite-hygiene/inert-catches` — open, medium
+### `suite-hygiene/inert-catches` — **closed** (test tooling, medium)
 
 **39 inert .catch(() => {}) on apiClient-shaped calls, several restoring shared account state; the recorded count of 292 does not reproduce**
 
 *Evidence:* A paren-matching scan of calls to apiClient/apiAs-bound names found 32 direct `.catch(` sites in 20 suites. It also found 6 cleanup runners `for (const fn of cleanup.reverse()) await fn().catch(() => {})` (doc-task-links:273, list-filters:211, planner-blocks:228, space-default-permission:492, space-presets:177, view-visibility:250), plus video-regression.mjs:452 (`API(...)`, missed by name). All 62 local apiAs copies and lib/fixture.mjs:28-46 return {status,data,error} and never throw on an HTTP status. The worst are restores of shared state that fail silently. video-regression.mjs:482-485 sets the admin's inbox preferences as the starting state, 594 reads them back through an inert catch, and 616-619 restores them for 'every other' suite. video-regression.mjs:452 and video1-acceptance.mjs:324-326 re-mark notifications unread. panel-collapse.mjs:612 clears a seeded notification. ai-value.mjs:317-321 restores the workspace's real benchmark. task-provenance.mjs:169-173 restores a task-type name 'against a real workspace'. Setup: replies-inline-thread.mjs:95 adds the peer to the channel, and the checks below assume that worked. The docs say '292 … across 63 of the 66 suites' (e2e-shared-state-audit.md:105-118, dated 2026-09-20; video2-resume.md:230). Today there are 115 suites and 778 `.catch(() => {})` in total, mostly on Playwright calls that DO reject, so 292 most likely counted those and overstates the inert set.
 
 *To close:* Replace each with a status check. For restores and setup, fail or log loudly with the status. For cleanup, collect non-2xx statuses and print them in the summary. Correct the doc's count to the measured client-call sites and state how it was measured.
+
+*Closed, 29 September.* Measured with a parser (acorn over every suite, each caught promise traced back to the call that made it, and that call's head checked against the names the file binds to an API client: `apiAs`/`apiClient` results, fetch-calling helpers, aliases, `.as` properties). The 239 suites held 1,544 `.catch(() => {})` (a grep finds 1,549; five are in comments). 158 were on an API client, in 133 suites: 136 on a client call, 11 on a closure or loop that calls one (six `cleanup.reverse()` runners, three `restore?.()`, one `cleanup?.()`, one `platformOn()`), and 11 on a raw `fetch` to the API. 111 of the 158 were one copied line, the teardown `DELETE` of the suite's own workspace. The 115-suite counts above (32, then 33 plus 10) were right for their day; the suites added since copied the teardown line. The rest of the 1,544 are on Playwright, SQL and browser teardown, which do reject.
+
+- Every one of the 158 is a status check now. A cleanup accepts 200, 204 or 404 and prints anything else as `cleanup left behind: …` above the totals, uncounted. A restore of shared state is a counted check, one in each of ten suites (`panel-collapse`, `person-panel`, `settings-depth`, `video-regression`, `video1-acceptance`, `task-provenance`, `ai-value`, `flag-resolution`, `planner-default-list`, `comment-recording`), each suite's `EXPECTED_CHECKS` one higher. Setup that could not stage its row throws a sentence naming what (`bookmarks`, `comment-recording`, `replies-inline-thread`, `video-regression`).
+- `lib/fixture.mjs` `ensureShared` reads every write and closes its task with the list's own closed status, not `done`.
+- Found doing it, and fixed: 67 suites closed their proxy before the teardown `DELETE`, which goes through that proxy, so those workspaces were never archived (ECONNREFUSED, swallowed); `stack.close()` now comes after it. Five teardowns in four suites answered 400, because their clients sent `content-type: application/json` on a bodyless `DELETE`; they send it only with a body now. `replies-inline-thread` sent `{ userId }` where the route reads `userIds[]`, so its peer was never added (2xx, `added: 0`); it sends the list and requires `added === 1`.
+- Demonstrated: a teardown pointed at a wrong workspace printed `cleanup left behind: DELETE /workspaces/… answered 400` above `1 passed, 0 failed`.
+- `scripts/check-suite-api-catches.mjs --mutate` (preflight, and CI's verify job) keeps it so. It reads each suite as code (comments, strings, regex literals and template text blanked), resolves the names the file binds to an API client (factories, aliases, fetch-calling helpers, `.as` properties, curried calls), and refuses an empty handler on a client call, on a closure or loop that calls one, or on a raw `fetch`, and a null handler whose result nothing reads. It found 158 at `d86220d` (136 direct, 11 wrapped, 11 fetch), line for line what the scanner found, and 0 now. 24 of 24 mutations bite, over 24 planted cases (18 it must catch, 6 it must pass: Playwright, SQL, teardown, a handler that does something, the shape inside a comment, string or regex, and `waitUntil`).
+- It also caught the three suites added since that base (`audit-log-settings`, `routes-with-readers`, `assign-with-ai-picker`), which had the old teardown and closed their proxy first. `routes-with-readers` put the admin's digest setting back through the closed proxy too, so the restore never happened (lane 7's admin was left on a weekly digest); it now restores before closing and treats no answer as a failed restore, and lane 7's setting is back to the default.
+- `docs/e2e-shared-state-audit.md` §3 and its table, and `docs/video2-resume.md` §3, carry the measured split instead of 292.
+- The 133 suites on lane 6 at the agent's tree: each `N passed, 0 failed` at its `EXPECTED_CHECKS`. At this tree, with the text-read and stale-doc changes merged in, on lanes 1, 3, 5 and 7 at once: 137 of 138 (the changed suites and `a39-dm-tabs`, whose fixture changed). `doc-level-controls` read its editor before the doc's capabilities had answered under that load; it now waits for them (see `doc-editor-open-to-readers`), then 7/7.
 
 ### `commit-log/log-944e47f-1` — partly-fixed, medium
 
@@ -4335,13 +4351,15 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Re-measure the catches that follow an apiClient call, then replace them with status assertions. Move the remaining suites to pickWorkspace or a tagged workspace. Give comment-recording its own account.
 
-### `resume-defects/resume-3` — open, medium
+### `resume-defects/resume-3` — **closed** (test tooling, medium)
 
 **Inert .catch(() => {}) on API clients: the doc's 292 is a miscount; the real figure is 33 direct plus 10 wrapped, and it is still open**
 
 *Evidence:* test/e2e/lib/fixture.mjs:28-46: apiClient returns {status,data,error} for any HTTP status. It does reject when fetch itself rejects (line 32 is unguarded), so each .catch swallows only a dead API, never an HTTP failure. Most suites use a local apiAs(token) of the same shape (e.g. activity-rail.mjs:70-78, chat-message-actions.mjs:157-170), and none of the 16 apiAs I checked throws. THE 292 IS A MISCOUNT: git grep at 944e47f (the commit that wrote docs/e2e-shared-state-audit.md) finds 292 `.catch(() => {})` in 63 suites, but the figure counts every such catch. I parsed each site's call head with a bracket-matching script, using the same method on both trees. At 944e47f only 32 sites (20 suites) were on an API client. The rest were Playwright calls, which do throw and whose bounded `.click().catch(() => {})` form scripts/check-suite-section-enders.mjs:782-783 prescribes, plus postgres tagged templates, browser.close and sql.end. CURRENT TREE (115 suites): 778 `.catch(() => {})` in 109 suites, of which 33 sit directly on an API client in 20 suites (A:24, api:5, rootApi:2, API:1, cleanupA:1), plus video-regression.mjs:594 `.catch(() => null)`. Another 10 wrap closures that call A: `for (const fn of cleanup.reverse()) await fn().catch(() => {})` at doc-task-links:273, list-filters:211, planner-blocks:228, space-default-permission:492, space-presets:177 and view-visibility:250 (14 `cleanup.push(() => A(...))` closures), and `restore?.().catch` at panel-collapse:145, person-panel:138, settings-depth:133 and chat-message-actions:180. The count has not come down. The two newest suites added the pattern (ai-answer-rendering.mjs:856-859, doc-import.mjs:364), and no checker forbids it. WORST CLEANUP THAT SILENTLY DOES NOT CLEAN: task-menu.mjs:509, where an inbound-email alias whose own comment says it 'must not persist into whatever runs next' is DELETEd with a catch and no status read. panel-collapse.mjs:1041-1042 deletes three seeded spaces in the shared workspace, unchecked. assign-to-priorities.mjs:341 and planner-priorities.mjs:314 delete priorities in finally. teams-destination.mjs:259 deletes a group. request-access.mjs:304-307: the comment says 'this is a 404 it ignores', but the code ignores every status. WORST RESTORES OF SHARED ADMIN STATE, never checked: panel-collapse.mjs:183 and 457-458 (PATCH /users/me panelsCollapsed and sidebarCollapsed), settings-depth.mjs:172-176 (presence, mute, highContrast), ai-value.mjs:318-322 ('this workspace's real setting'), task-provenance.mjs:169-173 ('this runs against a real workspace'), and video1-acceptance.mjs:324-325, which re-marks notifications unread after mark-all-read on the shared admin with no after-check. video-regression.mjs:453 has the same shape but is guarded by the chk at 455-460. SETUP THAT DOES NOT SET UP: among the 33 only replies-inline-thread.mjs:95 (adding the peer to a channel), and the chk at 106-110 guards it. The larger instance has no .catch at all: fixture.mjs ensureShared discards the statuses of the assignee POSTs (230, 256), the close PATCH (258, a hard-coded status 'done', which contradicts the fixture's own warning at 105-110) and the solo-meeting POST (281-290). If that last one fails, the negative check its comment at 234-248 exists for passes vacuously again. SEPARATE LIVE CLASS: about 140 postgres cleanups in 38 suites (e.g. assign-to-priorities.mjs:345-347, `sql\`delete ...\`.catch(() => {})`) catch real rejections and discard them.
 
 *To close:* Replace every direct and wrapped site with an explicit acceptable-status assertion, following the audit's own recipe at docs/e2e-shared-state-audit.md:142-151. DELETE cleanup accepts 200/204/404; restores of shared state must succeed. Make a failed restore a counted FAIL (restore closures return the response, and done() or the finally checks it). Change the cleanup.push loops to push closures whose result is checked. Fix fixture.mjs ensureShared to check each POST/PATCH and resolve the closed status from the list's statuses, not 'done'. Add a read-only checker (in the style of check-suite-section-enders) that refuses `.catch(` attached to a call on any identifier bound from apiClient or apiAs, so the count cannot regrow. Correct the 292 in docs/video2-resume.md:230 and docs/e2e-shared-state-audit.md:105,118,194 to the true split: 33 plus 10 on API clients; about 140 SQL swallowers as a separate class; Playwright catches deliberate.
+
+*Closed, 29 September,* with `suite-hygiene/inert-catches` (the measurement, the 158 status checks, the gate, and `ensureShared` reading every write and closing by the list's own status). The 292 in `docs/video2-resume.md` and `docs/e2e-shared-state-audit.md` is corrected to the measured split. The SQL swallowers this item counted as a separate class (`sql`...`.catch(() => {})` in cleanups) are out of the gate's scope; they do reject, and each discards a real error, so they remain a class of their own.
 
 ### `suite-hygiene/unbalanced-else-branches` — open, medium
 
@@ -4391,13 +4409,16 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Add a real-API section, or a small real-API suite, for the team schedules endpoint, or record on row 821 that it is closed by the browser suite plus the unit test.
 
-### `commit-log/log-30183c3-1` — open, small
+### `commit-log/log-30183c3-1` — **closed** (test tooling, small)
 
 **process.exit() is still used at 216 places in the suites; recorded as harmless for now**
 
 *Evidence:* Commit 30183c3 recorded it as 'the wrong pattern that cannot bite today' (11.6 KB of output against a 64 KB pipe buffer). A count now finds 216 calls across 114 suites. Ledger line 6448 says 215, so the count has already grown by one. The checkers were already switched to process.exitCode (ledger 5527).
 
 *To close:* Convert the suites to set process.exitCode, or at least stop the count growing with a ratchet.
+
+*Closed, 29 September, by the item's ratchet rather than a conversion.* Counted with the suites lexed (comments, strings, regex literals and template text left out): 215 `process.exit()` calls in 113 suites, where 129 suites already set `process.exitCode`. A call is harmless where a suite writes to a file, as the lanes and the break runner do, and loses the end of the output where it writes to a pipe, as CI's steps do (`scripts/lib/bail.mjs` measured the loss). Converting is not free: a suite that ends in `process.exit()` may depend on it to stop a handle nothing closed, and would then hang until CI's timeout, so each conversion wants its own run.
+- `scripts/check-suite-process-exit.mjs --mutate` (preflight, and CI's verify job): more than 215 fails, naming the suites; fewer fails too, until the number in it comes down, so a conversion stays converted. The mutation checks that a call in a comment or a string is not counted and that a planted one over the baseline fails.
 
 ### `commit-log/log-641be6c-1` — open, small
 
@@ -4941,7 +4962,7 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Repoint the sentence at wt-break.sh and refresh-dists.sh.
 
-### `ledger-rows/ledger-defects-fixed-unmarked` — open, small
+### `ledger-rows/ledger-defects-fixed-unmarked` — **closed** (stale doc, small)
 
 **'Defects found while checking' carries four entries fixed in code but not marked fixed (one explicitly says 'Not fixed')**
 
@@ -4949,7 +4970,22 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Strike each one with the fixing location, so the open-defect list is only what is open.
 
-### `ledger-rows/ledger-model-stub-stale` — open, small
+*Closed, 29 September.* The five entries are struck where they stand, each with
+the commit that fixed it and where: the category grid inside the loading branch
+and its own skeleton (`43f7b57`), the `SearchService` injection removed
+(`43f7b57`), the composer's three placeholders (`43f7b57`, reddened by
+`aar-10-placeholder-never-changes`), the palette menu's Escape (`5d224bb`,
+checked by `command-palette.mjs`), and container create gated by
+`assertCanCreateInSpace` (`59062a8`, `space-default-permission.mjs` 18 → 22
+checks, 36 now). The text as found stays under each. No suite names the tiles'
+skeleton. Three other entries under "Added 21 September" still read *Not
+fixed* although the ledger closes them under other ids
+(`ledger-rows/defect-calendar-toggles-before-settings`,
+`ledger-rows/defect-projects-position-unordered`,
+`found-25-sep/oauth-start-answers-for-no-application`); they were left for those
+items.
+
+### `ledger-rows/ledger-model-stub-stale` — **closed** (stale doc, small)
 
 **The ledger still says the model stub is wired into no lane and that six suites assert the refusal, which is the premise behind the placeholder revert and 'AI unmeasurable'**
 
@@ -4957,7 +4993,18 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Rewrite both ledger passages to the current state and name the one remaining step (dispatcher routes create-menu-ai/task-ai-bar to no-model lanes, the rest to model lanes). That step is what unblocks the rotating placeholder (row 853) and the AI field types (row 719).
 
-### `commit-log/log-666f15f-2` — open, small
+*Closed, 29 September.* Both passages state what is true now. The stub has been
+wired per lane since 23 September (`6fbd79b`, then `ad00a7c`): a lane gets it
+when `RUNDESK_LANE_MODEL` names it, and a break set whose patch needs a model
+gets one, baseline included. `ai-create-containers` and `ai-answer-rendering` ask
+`/ai/status` and hold either way. The six of the old count were four, and the
+count missed `ai-activity-filters`, so three suites stand on the refusal today:
+`create-menu-ai`, `task-ai-bar` and `ai-activity-filters`. Both passages name the
+one step left, routing each suite to a lane by that need
+(`harness/model-lane-routing-unbuilt`), and say it is what the rotating
+placeholder and the AI field types wait on.
+
+### `commit-log/log-666f15f-2` — **closed** (stale doc, small)
 
 **The ledger's B* legend still says those suites have never been run or registered**
 
@@ -4965,7 +5012,15 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Replace the legend with the §4 meaning and drop the not-run claim.
 
-### `commit-log/log-ad00a7c-2` — open, small
+*Closed, 29 September.* The legend says what the asterisk means, the meaning §4
+uses: a built row that also records something the frame asks for and Rundesk
+lacks. It names the two rows that carry one, the Comment split button and the
+plan-tier paywall. The not-run meaning is recorded as history: `2b7897a`
+registered both suites green on 21 September, and on 24 September they ran 37 of
+37 and 29 of 29 with every break patch reddening. The §0 entry that first made
+the claim is struck with the same facts.
+
+### `commit-log/log-ad00a7c-2` — **closed** (stale doc, small)
 
 **Comments still describe the model flag as it was before it changed**
 
@@ -4973,13 +5028,35 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Reword all of these to the list syntax (all, or a list of lane numbers) and to the count of four suites.
 
-### `commit-log/log-e44622e-1` — open, small
+*Closed, 29 September.* Every comment that spelled the switch `=1` spells it as
+the list it has been since `ad00a7c`: `all`, or lane numbers, and unset is none.
+The count is not repeated in `fleet-restart.sh`; it points at `lane-env.sh`,
+which now says four suites asserted the refusal when they were counted on 23
+September, that two have since been re-aimed, and that the count missed
+`ai-activity-filters`: three stand on the refusal today. The item asked for
+"four", and four is no longer true.
+
+### `commit-log/log-e44622e-1` — **closed** (stale doc, small)
 
 **The handoff doc docs/video2-resume.md is stale again in many places**
 
 *Evidence:* Commits e44622e and 10b4086 corrected this doc once already. Now: :41 says '113 suites ... ALL 113 are registered' (there are 115 suite files and doc-import is unregistered). :66-74 has a table of 50 green, 1 refused, 6 unreadable and 44 not run, while check-break-reddened reports 115 of 115 proven and 828 reddened. §3 #4 (:234-236) lists the timeline projectId as open, but commit 07d9208 settled it as not a defect and added a check (gantt-29). §6 :316-322 says 150 minutes and 98 suites and 'Split the job before adding the tenth', while ci.yml:428 is 180 and the job has 109 steps, unsplit. :185 and :285 recommend drain.sh. check-video2-counts guards only the headline count.
 
 *To close:* Rewrite §2, §3, §5 and §6 from the checkers' current output, and consider guarding the suite and registration counts the same way the headline is guarded.
+
+*Closed, 29 September.* The handoff's counts are the checkers' own, dated 29
+September at `d86220d`: 239 suites, all 239 registered (233 of them in
+`postgres-harnesses` and 6 in `browser-suites`, by the jobs' `run:` lines), 3,643
+checks, no suite without a patch, and 62 suites with a patch measured against
+this tree, 259 such patches reddening what they claim and 1,657 measured against
+a tree that has moved.
+The 21 September figures stay, marked as that day's. §3 item 4 is closed by
+decision (`07d9208`, `gantt-29-projectid-ignored` 29/1 at `8ba0bacd`), with its
+residue removed in `8ba0bac`; item 8 is partly fixed; item 3's count is dated.
+§5 spells `fleet-up.sh` as a list. §6 gives 233 suites and 300 minutes and
+points at the job's comment for the history instead of keeping a second copy.
+The item's suggestion to guard the suite and registration counts the way the
+headline is guarded was not taken up.
 
 ### `harness/log-tree-header-contradicts-body-rule` — **closed**
 
@@ -4991,7 +5068,7 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Rewrite log-tree.mjs:33-37 to state the body rule. Fix freshness in code as part of planner-ignores-patch-body, not by editing the comment only.
 
-### `commit-log/missed-ci-meili-1` — open, small
+### `commit-log/missed-ci-meili-1` — **closed** (stale doc, small)
 
 **ci.yml claims the e2e job runs a real Meilisearch; it runs none**
 
@@ -4999,13 +5076,28 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Either add a getmeili/meilisearch service and its environment variables to postgres-harnesses, and then point doc-import at indexing, or correct both comments so they stop claiming coverage that does not exist.
 
-### `commit-log/missed-d840b55-1` — open, small
+*Closed, 29 September.* Both `ci.yml` comments stop claiming a Meilisearch: the
+split would duplicate the Postgres, object-store and build setup, and
+`addressability-live` runs against a real API and a real Postgres, with search
+on `SearchService`'s Postgres fallback because no lane and no CI job starts
+Meilisearch or sets `MEILISEARCH_URL`. The suite's own header says the same.
+Nothing was added to CI, so the Meilisearch path stays unmeasured there.
+
+### `commit-log/missed-d840b55-1` — **closed** (stale doc, small)
 
 **d840b55 said every comment naming break-queue.sh was updated; four still name it as a live consumer**
 
 *Evidence:* Commit d840b55 deleted scripts/e2e-lanes/break-queue.sh and says 'The three comments that referenced it now name the runner'. Yet syncup-live.mjs:259 and video-regression.mjs:1055 still say the summary line is kept because `scripts/e2e-lanes/break-queue.sh` parses it. wt-break.sh:461 says 'Named here so `break-queue.sh` can count it'. test/e2e/breaks/emoji-picker-2-data-inlined.py:28 says 'break-queue.sh counts a run with no summary as CRASHED'. In the same class, fleet-up.sh:11 sends the reader to 'break-fleet.sh', which `git log --all` shows never existed.
 
 *To close:* Rename each reference to the real consumer (wt-break.sh plus classify-break-log.awk, or run-plan.sh), and fix the pointer in fleet-up.sh. Consider having check-suite or preflight fail on comments that name a script path that does not exist.
+
+*Closed, 29 September.* No comment names `break-queue.sh` as a live reader any
+more. The two suites name what parses their summary line today, the patch names
+what counts a run with no summary as crashed, and the classifier's header no
+longer claims a runner calls it. `wt-break.sh` and `fleet-up.sh` had already been
+corrected by the two `harness/` items closed before this one. The suggested gate
+(check-suite or preflight failing on a comment that names a script path that
+does not exist) was not added.
 
 ### `harness/resume-doc-harness-stale` — **closed**
 
@@ -5017,7 +5109,7 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Rewrite §2's drain paragraph and §5 to point at run-plan.sh, chain-plan.sh and never-run-plan.mjs. Update §6's numbers.
 
-### `ledger-rows/row-2270` — open, small
+### `ledger-rows/row-2270` — **closed** (stale doc, small)
 
 **§5 row 2270 (P, project-status per-status breakdown) is STALE: the breakdown is built and measured**
 
@@ -5025,7 +5117,17 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Re-read and mark it B, keeping only the model-written answer as a remainder, which can be measured on a model-stub lane. Adjust §4 §5 split (P 4 -> 3 or fewer).
 
-### `ledger-rows/row-2374` — open, small
+*Closed, 29 September.* The row is `B`, closed by `ai-create-containers`, 33 of
+33: `GET /ai/project-status` answers with no model, its two breakdowns add up to
+its own total, and one in-progress task moves it by exactly one, and two patches
+redden those checks. The same object is written into the chat's context and
+served by the endpoint, and two more suites check it counts only what the reader
+may open. What stays open is the answer itself: nothing yet reads the breakdown
+in a prompt or in what a model writes, which a suite sent to a lane with the
+model stub can. §5 moves from 32 · 4 · 5 to 34 · 2 · 5 with the busy-state row
+below.
+
+### `ledger-rows/row-2374` — **closed** (stale doc, small)
 
 **§5 row 2374 (P, AI busy state in words) is STALE: built and measured; only the frame's exact words differ**
 
@@ -5033,7 +5135,16 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Mark B (or B* with the label-wording remainder). Adjust §4. The ledger's separate defect at reaudit.md:2588-2590 (disabled input keeps the ask placeholder) is also fixed.
 
-### `ledger-rows/row-791` — open, small
+*Closed, 29 September.* The row is `B*`, closed by `ai-answer-rendering`, 51 of
+51: a word above the step log that comes from what the stream has sent, and a
+composer that says "Working on it…" while a request is out and invites typing
+only when it takes it, measured without a model and reddened by three patches.
+The asterisk records the frame's own words: it draws Cookin' and Brain where
+Rundesk says Writing the answer and then nothing; Handling and "Working on it…"
+match. The separate defect for the disabled composer's placeholder is struck
+with it (`ledger-defects-fixed-unmarked`).
+
+### `ledger-rows/row-791` — **closed** (stale doc, small)
 
 **Row 791 (M, create-modal placeholder 'Add description, or write with ⚡AI') is STALE: built, measured, and was already built when the row was written**
 
@@ -5041,7 +5152,18 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Mark row 791 B, closed by create-menu-ai (cite its check count), and move §2/§4 counts 9 M -> 8 M. Reconcile the 10:04 vs Board-view frame claim. Under the new policy ClickUp's own create-task modal settles the placeholder.
 
-### `ledger-rows/row-793-796-798-799` — open, small
+*Closed, 29 September.* The row is `B`, closed by `create-menu-ai`, 24 checks,
+four of them this row's, 24 of 24 on 24 September with each of its four patches
+reddening. The frame question is settled by the frames: `10:02` to `10:06` draw
+the create-task modal over the Board with the placeholder showing, and `10:00`
+and `10:08` are the Board before it opens and after it closes, so the suite's
+`10:04` is right and §7's reading was wrong. §7, §6 and row 730 are corrected to
+match. §2 moves from 116 · 7 · 9 to 117 · 7 · 8. Not measured: the button's
+success path, which needs a suite on a lane with a model. ClickUp's own modal
+was not needed to settle it. `docs/clickup-research.md:107` still says "No
+frame shows it" and was not changed here.
+
+### `ledger-rows/row-793-796-798-799` — **closed** (stale doc, small)
 
 **Four B* rows keep an asterisk whose reason ('suite has not been run, not in ci.yml') is no longer true**
 
@@ -5049,7 +5171,14 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Mark 793/796/798/799 plain B with their suites and current counts. Delete or rewrite the B* legend. Fix the §4 'four' to match the two real B* rows (730, 788).
 
-### `suite-hygiene/stale-env-premises` — open, small
+*Closed, 29 September.* The four rows are plain `B`. The board's Customize
+switches and the export caption are closed by `list-customize` (37 checks, 37 of
+37 on 24 September), and the avatar picker and "Tasks where I have assigned" by
+`list-assignee-filter` (29 checks, 29 of 29), with every break patch in both
+sets reddening. §2 now holds two `B*` rows, 730 and 788, and §4 says two. The
+totals do not move, since `B*` already counted as built.
+
+### `suite-hygiene/stale-env-premises` — **closed** (stale doc, small)
 
 **Suite headers, comments and harness notes still state 'no key' or 'no bucket' as facts about the lanes**
 
@@ -5057,13 +5186,36 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Restate each as configuration-dependent ('with no model configured …', 'CI starts no store; lanes do'), or delete the premise where the suite now asks /ai/status. Fix syncup-live's 58 to 59. Correct lane-env and fleet-restart to the list spelling and the true suite count.
 
-### `ledger-rows/stale-reason-comments` — open, small
+*Closed, 29 September.* No suite header or comment states "no key" or "no
+bucket" as a fact about the lanes. Each says what happens with no model or no
+store configured, and where one is: the lanes and CI start the object store,
+and a lane gets the model when `RUNDESK_LANE_MODEL` names it. `syncup-live`'s
+total reads 59, as `EXPECTED_CHECKS` does. `ai-activity-filters` now says it
+needs a lane without a model, and `lane-env.sh` counts it among the three that
+stand on the refusal. `comment-recording` keeps registering its row directly and
+says why that still holds with a store. Two premises were already right and are
+unchanged. Seen and not changed, because it is executable: `syncup-live.mjs:1150`
+skips the storage chain on any `upload-url` answer of 400 or above, so where a
+store is configured a failing presign would read as "not configured here"
+rather than as a failure.
+
+### `ledger-rows/stale-reason-comments` — **closed** (stale doc, small)
 
 **Code comments still carry blocking reasons that are no longer true**
 
 *Evidence:* task-detail-sheet.tsx:7285-7291: CommentPlusMenu says 'EIGHT are here' and that slash commands are absent, but comment-plus-slash is rendered. task-detail-sheet.tsx:577-581 and :1452-1454: 'Brain² HUB … does not exist', although the /app/:ws/ai hub and the shell AI dock exist. space-views.ts:59-63: 'The five Rundesk does not have (Map, Activity, Mind Map, Timeline, Workload)', although workload/timeline/mindmaps pages exist. calendar-sync.service.ts:25: 'manual or scheduled pullEvents', with no scheduler.
 
 *To close:* Rewrite each comment when its row is built, or now, so the reason no longer blocks investigation.
+
+*Closed, 29 September.* Each comment says what exists and what does not, so none
+blocks the investigation that would build the row. The plus menu holds nine of
+the frame's ten items, and the tenth, Brain, waits on a chat that takes a task
+(`docs/clickup-research.md`, clickup-ai item 8). The task bar and the header say
+the same about Brain²: the AI page and the dock exist, `/ai/brain` and agents do
+not. `space-views.ts` says the five views are not offered because no list can
+draw them, and that three exist as workspace pages. The calendar service says
+`pullEvents` runs only when asked, points at the open "Sync now" row, and no
+longer claims a schedule.
 
 ### `harness/suite-reads-untested-claim-stale` — **closed**
 

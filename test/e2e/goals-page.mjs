@@ -149,8 +149,12 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
   await browser?.close().catch(() => {})
+  if (WS && token) {
+    const gone = await fetch(`${API}/workspaces/${WS}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }).catch(() => null)
+    if (![200, 204, 404].includes(gone?.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone?.status ?? 'nothing'}`)
+  }
+  // Only now: the DELETE above goes through this proxy, and a closed one refuses it.
   stack.close()
-  if (WS && token) await fetch(`${API}/workspaces/${WS}`, { method: 'DELETE', headers: { authorization: `Bearer ${token}` } }).catch(() => {})
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

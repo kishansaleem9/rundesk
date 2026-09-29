@@ -29,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 5
+const EXPECTED_CHECKS = 6
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -63,8 +63,8 @@ const TAG = `flr${stamp}`
 let sql = null
 let WS = null
 let A = null
-/** The platform's forms switch, put back on however the run ends. */
-const platformOn = async () => { if (A) await A('/feature-flags/forms', { method: 'PUT', body: { enabled: true, scope: 'global' } }) }
+/** The platform's forms switch, put back on however the run ends; its answer, or null with no client. */
+const platformOn = async () => (A ? A('/feature-flags/forms', { method: 'PUT', body: { enabled: true, scope: 'global' } }) : null)
 
 try {
   sql = await openDb()
@@ -146,8 +146,18 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)
 } finally {
-  await platformOn().catch(() => {})
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
+  // Every workspace on the platform reads this switch, so a refused restore is
+  // this run's failure. With no client nothing was switched.
+  const healed = await platformOn()
+  chk(
+    !A || healed?.status < 300,
+    'and the platform’s Forms switch is back on for every workspace after this run',
+    `PUT /feature-flags/forms ${healed ? said(healed) : 'was never sent'}`,
+  )
+  if (WS && A) {
+    const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status || 'nothing'}`)
+  }
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

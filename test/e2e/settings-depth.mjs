@@ -109,7 +109,7 @@ const check = (ok, label, detail = '') => {
 }
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 61
+const EXPECTED_CHECKS = 62
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -131,7 +131,15 @@ const apiAs = (token) => async (route, init = {}) => {
 }
 
 const done = async (browser, stack, restore) => {
-  await restore?.().catch(() => {})
+  // The status, the mute and high contrast are the admin's, and so every later
+  // suite's: putting them back is part of this run. The restore returns its answers.
+  let refused
+  try {
+    refused = ((await restore?.()) ?? []).filter((res) => res.status >= 300).map((res) => res.status)
+  } catch (err) {
+    refused = [`no answer (${err?.message ?? err})`]
+  }
+  check(refused.length === 0, 'and the status, mute and contrast this run changed are put back', `refused: ${refused.join(', ')}`)
   await browser?.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
@@ -170,11 +178,11 @@ try {
   await A('/presence/me/status', { method: 'PUT', body: { emoji: null, text: null } })
   await A('/notifications/mute', { method: 'POST', body: { minutes: null } })
   await A('/users/me', { method: 'PATCH', body: { highContrast: false } })
-  restore = async () => {
-    await A('/presence/me/status', { method: 'PUT', body: { emoji: null, text: null } })
-    await A('/notifications/mute', { method: 'POST', body: { minutes: null } })
-    await A('/users/me', { method: 'PATCH', body: { highContrast: false } })
-  }
+  restore = async () => [
+    await A('/presence/me/status', { method: 'PUT', body: { emoji: null, text: null } }),
+    await A('/notifications/mute', { method: 'POST', body: { minutes: null } }),
+    await A('/users/me', { method: 'PATCH', body: { highContrast: false } }),
+  ]
 
   const origin = REMOTE
     ? BASE
@@ -774,11 +782,13 @@ try {
    * choice and is not one.
    *
    * Checked on the CHROME rather than on the list. Clips live in object
-   * storage, which is unconfigured here and in CI, so the library is empty
-   * everywhere and a count-the-cards check would pass against a page that had
-   * never learned to filter. What the parameter being READ looks like is the
-   * chip; the filtering rule itself is unit-tested in lib/clip-kind.test.ts,
-   * where it can be given clips without a bucket.
+   * storage: an API with none configured has an empty library, and one with a
+   * store (the lanes and CI start `s3-stub.mjs`) can hold what other suites
+   * uploaded, so a count-the-cards check would pass or fail on the fixture
+   * rather than on the filter — and would pass against a page that had never
+   * learned to filter wherever the library is empty. What the parameter being
+   * READ looks like is the chip; the filtering rule itself is unit-tested in
+   * lib/clip-kind.test.ts, where it can be given clips without a bucket.
    */
   console.log('\n▶ §G07-5 — the two clip tools are two libraries')
   await page.goto(`${origin}/app/${workspaceId}/clips`, { waitUntil: 'domcontentloaded' })

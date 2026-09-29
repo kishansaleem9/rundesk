@@ -141,9 +141,13 @@ const apiAs = (token) => async (route, init = {}) => {
   return { status: res.status, data: json?.data, error: json?.error }
 }
 
+/** What a cleanup DELETE did not remove: gone, or already gone (404), is fine; anything else is said above the totals. */
+const leftBehind = []
+
 const done = async (browser, stack) => {
   await browser?.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {
@@ -427,7 +431,8 @@ try {
       (d.labels ?? []).some((l) => (l.name ?? l) === CREATE_TAG),
       JSON.stringify(d.labels ?? []),
     )
-    await A(`/tasks/${made.id}`, { method: 'DELETE' }).catch(() => {})
+    const gone = await A(`/tasks/${made.id}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /tasks/${made.id} answered ${gone.status}`)
   }
 
   // ---------------------------------------------------------------------

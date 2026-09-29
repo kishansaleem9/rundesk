@@ -50,7 +50,7 @@ const keys = []
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   call = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${auth.accessToken}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
+    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${auth.accessToken}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
     return { status: res.status, data: (await res.json().catch(() => null))?.data }
   }
   const made = await call('/workspaces', { method: 'POST', body: { name: TAG } })
@@ -95,10 +95,20 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
-  // The objects are storage's, not the workspace's: they go one by one.
+  // The objects are storage's, not the workspace's: they go one by one. Gone,
+  // or already gone (404), is fine; any other answer, or none, is said above
+  // the totals.
   if (WS && call) {
-    for (const storageKey of keys) await call(`/workspaces/${WS}/clips`, { method: 'DELETE', body: { storageKey } }).catch(() => {})
-    await call(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
+    const takeBack = async (what, route, init) => {
+      try {
+        const res = await call(route, init)
+        if (![200, 204, 404].includes(res.status)) console.log(`  cleanup left behind: ${what} answered ${res.status}`)
+      } catch (err) {
+        console.log(`  cleanup left behind: ${what} got no answer (${err?.message ?? err})`)
+      }
+    }
+    for (const storageKey of keys) await takeBack(`clip ${storageKey}`, `/workspaces/${WS}/clips`, { method: 'DELETE', body: { storageKey } })
+    await takeBack(`workspace ${WS}`, `/workspaces/${WS}`, { method: 'DELETE' })
   }
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

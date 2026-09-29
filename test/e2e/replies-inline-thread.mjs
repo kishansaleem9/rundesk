@@ -92,7 +92,12 @@ try {
   })
   const channelId = channel.data?.id
   if (!channelId) throw new Error(`could not make a channel: ${channel.status} ${JSON.stringify(channel.error)}`)
-  await A(`/chat/channels/${channelId}/members`, { method: 'POST', body: { userId: theirId } }).catch(() => {})
+  // `userIds`, a list: sent as `userId` this answered 2xx with `added: 0` and
+  // the peer was never in the channel.
+  const joined = await A(`/chat/channels/${channelId}/members`, { method: 'POST', body: { userIds: [theirId] } })
+  if (joined.status >= 300 || joined.data?.added !== 1) {
+    throw new Error(`could not add the teammate to the channel: ${joined.status} ${JSON.stringify(joined.data ?? joined.error)}`)
+  }
 
   // I say something; THEY reply to it. The reply is what notifies me.
   const parent = await A(`/chat/channels/${channelId}/messages`, {

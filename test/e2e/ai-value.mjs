@@ -39,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 22
+const EXPECTED_CHECKS = 23
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -146,9 +146,11 @@ try {
    * person reading does not reintroduce it.
    *
    * `ai_usage` rows are appended by the AI service as a side effect of calling
-   * the model, and a test environment has no API key, so no endpoint can create
-   * one. Hence the direct insert — with a tagged feature name, so exactly these
-   * rows can be taken away again.
+   * the model. With no model configured — CI, and every lane
+   * `RUNDESK_LANE_MODEL` does not name — no endpoint can create one, and this
+   * suite runs in both configurations, so it asks none to. Hence the direct
+   * insert — with a tagged feature name, so exactly these rows can be taken
+   * away again.
    */
   sql = await openDb()
   chk(
@@ -313,13 +315,24 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${lines[0]}${where ? `\n         ${where.trim()}` : ''}`)
 } finally {
-  // The benchmark is this workspace's real setting, not the suite's to keep.
+  // The benchmark is this workspace's real setting, not the suite's to keep, so
+  // a refused restore is this run's failure. Nothing read, nothing to put back.
+  let putBack = null
   if (restoreBenchmark && A && workspaceId) {
-    await A(`/ai/value/benchmark?workspaceId=${workspaceId}`, {
-      method: 'PATCH',
-      body: restoreBenchmark,
-    }).catch(() => {})
+    try {
+      putBack = await A(`/ai/value/benchmark?workspaceId=${workspaceId}`, {
+        method: 'PATCH',
+        body: restoreBenchmark,
+      })
+    } catch (err) {
+      putBack = { status: 0, error: { message: String(err?.message ?? err) } }
+    }
   }
+  chk(
+    !putBack || putBack.status < 300,
+    'and the workspace’s own benchmark is put back',
+    `PATCH answered ${putBack?.status} ${JSON.stringify(putBack?.error ?? null)} — the workspace keeps this run's benchmark`,
+  )
   // The staged spend is this suite's, and must not follow the database around.
   if (sql) {
     await sql`delete from ai_usage where feature = ${FIXTURE_FEATURE}`.catch(() => {})

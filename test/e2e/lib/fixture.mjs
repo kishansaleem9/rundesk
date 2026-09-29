@@ -228,10 +228,22 @@ export async function ensureShared(
   peerUserId,
   { taskTitle, meetingTitle, closedTaskTitle, soloMeetingTitle },
 ) {
+  /*
+   * EVERY WRITE HERE IS READ. This client never throws on a status, so a write
+   * that was refused used to leave the row missing and the check that needed
+   * it passing or failing about something else (`resume-defects/resume-3`).
+   * A refused write now stops the suite, naming what could not be staged.
+   */
+  const must = (what, res) => {
+    if (!res || res.status === 0 || res.status >= 300) {
+      throw new Error(`ensureShared could not ${what}: ${res?.status ?? 'no answer'} ${JSON.stringify(res?.error?.message ?? null)}`)
+    }
+    return res.data
+  }
   const existing = (await api(`/tasks/list/${listId}`)).data ?? []
   const tasks = Array.isArray(existing) ? existing : (existing.tasks ?? [])
   let task = tasks.find((t) => t.title === taskTitle)
-  if (!task) task = (await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } })).data
+  if (!task) task = must('make the shared task', await api('/tasks', { method: 'POST', body: { listId, title: taskTitle } }))
   // Assigned to both, because "open tasks with them" means exactly that — a
   // task only one of you is on is not shared. On EVERY run, not only when the
   // task is made: the peer is whoever `ensureDm` picks, which is the first
@@ -240,7 +252,7 @@ export async function ensureShared(
   // no-op, and this client never throws).
   if (task?.id) {
     for (const userId of [myUserId, peerUserId]) {
-      if (userId) await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } })
+      if (userId) must('assign the shared task', await api(`/tasks/${task.id}/assignees`, { method: 'POST', body: { userId } }))
     }
   }
 
@@ -260,16 +272,19 @@ export async function ensureShared(
    * except the one under test.
    */
   if (closedTaskTitle && !tasks.some((t) => t.title === closedTaskTitle)) {
-    const closed = (await api('/tasks', {
+    // Closed by the LIST'S own closed status: a list whose statuses were
+    // renamed has no `done`, and a PATCH to a key it lacks is refused.
+    const statuses = (await api(`/lists/${listId}/statuses`)).data ?? []
+    const closedKey = (Array.isArray(statuses) ? statuses : []).find((s) => s.category === 'closed')?.key
+    if (!closedKey) throw new Error(`ensureShared could not close a task: the list has no closed status (${JSON.stringify(statuses)})`)
+    const closed = must('make the closed task', await api('/tasks', {
       method: 'POST',
       body: { listId, title: closedTaskTitle },
-    })).data
-    if (closed?.id) {
-      for (const userId of [myUserId, peerUserId]) {
-        if (userId) await api(`/tasks/${closed.id}/assignees`, { method: 'POST', body: { userId } })
-      }
-      await api(`/tasks/${closed.id}`, { method: 'PATCH', body: { status: 'done' } })
+    }))
+    for (const userId of [myUserId, peerUserId]) {
+      if (userId) must('assign the closed task', await api(`/tasks/${closed.id}/assignees`, { method: 'POST', body: { userId } }))
     }
+    must(`close the closed task (${closedKey})`, await api(`/tasks/${closed.id}`, { method: 'PATCH', body: { status: closedKey } }))
   }
 
   const meetings = (await api(`/workspaces/${workspaceId}/meetings`)).data ?? []
@@ -286,7 +301,7 @@ export async function ensureShared(
   let meeting = list.find((m) => m.title === meetingTitle && attends(m, myUserId) && attends(m, peerUserId))
   if (!meeting) {
     const startsAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString()
-    meeting = (await api(`/workspaces/${workspaceId}/meetings`, {
+    meeting = must('make the shared meeting', await api(`/workspaces/${workspaceId}/meetings`, {
       method: 'POST',
       body: {
         title: meetingTitle,
@@ -295,12 +310,14 @@ export async function ensureShared(
         provider: 'manual',
         attendeeIds: [myUserId, peerUserId].filter(Boolean),
       },
-    })).data
+    }))
   }
 
   /* The solo one: same workspace, same shape, one attendee. */
   if (soloMeetingTitle && !list.some((m) => m.title === soloMeetingTitle)) {
-    await api(`/workspaces/${workspaceId}/meetings`, {
+    // The negative check's row: if this is refused, "a meeting only one of you
+    // attended is not listed" would pass about a meeting that does not exist.
+    must('make the solo meeting', await api(`/workspaces/${workspaceId}/meetings`, {
       method: 'POST',
       body: {
         title: soloMeetingTitle,
@@ -309,7 +326,7 @@ export async function ensureShared(
         provider: 'manual',
         attendeeIds: [myUserId].filter(Boolean),
       },
-    })
+    }))
   }
   return { task, meeting }
 }

@@ -170,6 +170,8 @@ const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 let sql = null
 const TAG = `e2e-clipcard-${Date.now()}`
+/** Clips a cleanup could not take out of the library, said above the totals. */
+const leftBehind = []
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -599,7 +601,8 @@ try {
   // The clips this section put in the library go again, so the library a later
   // run reads is not this run's leftovers.
   for (const storageKey of uploadedClips) {
-    await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey } }).catch(() => {})
+    const taken = await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey } })
+    if (![200, 204, 404].includes(taken.status)) leftBehind.push(`DELETE clip ${storageKey} answered ${taken.status}`)
   }
   realStore = false
 
@@ -720,6 +723,7 @@ try {
   }
   await browser.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

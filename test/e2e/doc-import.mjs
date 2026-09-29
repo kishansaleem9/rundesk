@@ -361,8 +361,16 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${err?.message ?? err}`)
 } finally {
   // This run's doc only — the e2e database is shared, so nothing is found by
-  // counting and nothing is removed by pattern.
-  if (api && madeDocId) await api(`/docs/${madeDocId}`, { method: 'DELETE' }).catch(() => {})
+  // counting and nothing is removed by pattern. Gone, or already gone (404), is
+  // fine; any other answer, or none, is said above the totals.
+  if (api && madeDocId) {
+    try {
+      const res = await api(`/docs/${madeDocId}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(res.status)) console.log(`  cleanup left behind: DELETE /docs/${madeDocId} answered ${res.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE /docs/${madeDocId} got no answer (${err?.message ?? err})`)
+    }
+  }
   await browser.close().catch(() => {})
   // `close`, not `stop`: the stack has no `stop`, and `stack.stop?.()` was an
   // optional call on nothing — it closed nothing, the server held two

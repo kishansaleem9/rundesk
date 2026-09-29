@@ -113,7 +113,7 @@ const check = (ok, label, detail = '') => {
 
 const chain = makeChain(check)
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 59
+const EXPECTED_CHECKS = 60
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -135,7 +135,15 @@ const apiAs = (token) => async (route, init = {}) => {
 }
 
 const done = async (browser, stack, restore) => {
-  await restore?.().catch(() => {})
+  // The timezone, priorities and time off are the admin's, and so every later
+  // suite's: putting them back is part of this run. The restore returns its answers.
+  let refused
+  try {
+    refused = ((await restore?.()) ?? []).filter((res) => res.status >= 300 && res.status !== 404).map((res) => res.status)
+  } catch (err) {
+    refused = [`no answer (${err?.message ?? err})`]
+  }
+  check(refused.length === 0, 'and the timezone, priorities and time off this run changed are put back', `refused: ${refused.join(', ')}`)
   await browser?.close().catch(() => {})
   stack?.close()
   const ran = passed + failed
@@ -183,16 +191,20 @@ try {
   const priorTz = before.data?.timezone ?? null
   await A('/users/me', { method: 'PATCH', body: { timezone: 'Asia/Karachi' } })
   restore = async () => {
-    if (priorTz) await A('/users/me', { method: 'PATCH', body: { timezone: priorTz } })
+    const answers = []
+    if (priorTz) answers.push(await A('/users/me', { method: 'PATCH', body: { timezone: priorTz } }))
     const mine = await A(`/workspaces/${workspaceId}/priorities`)
+    answers.push(mine)
     for (const p of mine.data ?? []) {
-      await A(`/workspaces/${workspaceId}/priorities/${p.id}`, { method: 'DELETE' })
+      answers.push(await A(`/workspaces/${workspaceId}/priorities/${p.id}`, { method: 'DELETE' }))
     }
     // A run that dies mid-section must not leave this account booked away.
     const leave = await A(`/workspaces/${workspaceId}/time-off`)
+    answers.push(leave)
     for (const e of leave.data ?? []) {
-      if (e.userId === meId) await A(`/workspaces/${workspaceId}/time-off/${e.id}`, { method: 'DELETE' })
+      if (e.userId === meId) answers.push(await A(`/workspaces/${workspaceId}/time-off/${e.id}`, { method: 'DELETE' }))
     }
+    return answers
   }
   // Start from an empty list so the empty state is checkable.
   const existing = await A(`/workspaces/${workspaceId}/priorities`)

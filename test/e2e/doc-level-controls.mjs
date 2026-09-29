@@ -134,8 +134,15 @@ try {
    */
   const offers = async (page, docId) => {
     await waitUntil(async () => page.url().includes(docId), { timeoutMs: 5000 })
-    await page.waitForLoadState('networkidle', { timeout: 8000 }).catch(() => {})
-    const editable = await page.locator('.ProseMirror').first().getAttribute('contenteditable').catch(() => null)
+    // Decided once the capabilities have answered: the read-only pill is drawn,
+    // or the editor has been made editable. Until then it is read only by
+    // default and says nothing, which under load outlasts a network lull.
+    await waitUntil(
+      async () => (await page.getByTestId('doc-read-only').count()) > 0
+        || (await page.locator('.ProseMirror').first().getAttribute('contenteditable', { timeout: 2000 }).catch(() => null)) === 'true',
+      { timeoutMs: 15_000 },
+    )
+    const editable = await page.locator('.ProseMirror').first().getAttribute('contenteditable', { timeout: 5000 }).catch(() => null)
     return {
       editable,
       readOnly: await page.getByTestId('doc-read-only').count(),
@@ -259,8 +266,12 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)
 } finally {
   await browser?.close().catch(() => {})
+  if (WS && A) {
+    const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status || 'nothing'}`)
+  }
+  // Only now: the DELETE above goes through this proxy, and a closed one refuses it.
   stack.close()
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

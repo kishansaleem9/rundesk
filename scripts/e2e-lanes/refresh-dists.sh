@@ -23,6 +23,9 @@
 {
 set -u
 cd /home/user/rundesk
+# The bundle lock (`dist_lock_exclusive`): a build waits for the runs reading
+# this bundle, and a second build of the same lane waits for the first.
+. /home/user/rundesk/scripts/e2e-lanes/lane-env.sh
 
 if [ $# -ge 1 ]; then
   LANES=($1)
@@ -39,6 +42,10 @@ echo "refreshing: ${LANES[*]}"
 
 for k in "${LANES[@]}"; do
   out="/tmp/claude-0/dist-$k"
+  if ! dist_lock_exclusive "$out"; then
+    echo "lane $k: $out has been in use by a run or another build for 20 minutes — not rebuilt"
+    exit 1
+  fi
   if pnpm -C apps/web exec vite build --outDir "$out" --emptyOutDir > "/tmp/claude-0/dist-$k.log" 2>&1; then
     echo "lane $k: $out rebuilt"
   else
@@ -46,6 +53,7 @@ for k in "${LANES[@]}"; do
     tail -5 "/tmp/claude-0/dist-$k.log"
     exit 1
   fi
+  dist_lock_release
 done
 echo "${#LANES[@]} bundle(s) refreshed"
 exit

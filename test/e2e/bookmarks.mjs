@@ -71,7 +71,10 @@ try {
 
   // Start from a known slate: earlier runs must not decide what this one sees.
   for (const b of (await A(`/workspaces/${workspaceId}/bookmarks`)).data ?? []) {
-    await A(`/workspaces/${workspaceId}/bookmarks/${b.id}`, { method: 'DELETE' }).catch(() => {})
+    const gone = await A(`/workspaces/${workspaceId}/bookmarks/${b.id}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) {
+      throw new Error(`could not clear an earlier run's bookmark ${b.id} to start from a known slate: DELETE answered ${gone.status}`)
+    }
   }
 
   console.log('\n▶ §G01-9 — a Rundesk item, or any URL from around the web')

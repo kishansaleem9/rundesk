@@ -29,7 +29,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 19
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -342,9 +342,18 @@ try {
     '§G10-12 Clear all is there even with nothing unread',
     'Clear all vanished once everything was read',
   )
+  // Mark-all-read was the admin's whole inbox, and every later suite reads it:
+  // putting the unread rows back is part of this run, so a refusal fails it.
+  const refused = []
   for (const n of notifs.filter((n) => !n.readAt)) {
-    await A(`/notifications/${n.id}/unread`, { method: 'POST' }).catch(() => {})
+    const res = await A(`/notifications/${n.id}/unread`, { method: 'POST' })
+    if (res.status >= 300) refused.push(`${n.id}: ${res.status}`)
   }
+  chk(
+    refused.length === 0,
+    'and the rows it marked read are unread again for the suites after this one',
+    `marking unread was refused for ${refused.join(', ')}`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)

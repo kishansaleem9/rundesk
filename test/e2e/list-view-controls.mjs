@@ -88,6 +88,8 @@ const fixture = await ensureSweepFixture(api, WS)
 const PARENT_TITLE = `parent ${TAG}`
 const CHILD_TITLE = `child ${TAG}`
 const created = []
+/** What the cleanup below could not take back, said above the totals. */
+const leftBehind = []
 const parent = (await api('/tasks', { method: 'POST', body: { listId: fixture.listId, title: PARENT_TITLE } })).data
 if (!parent?.id) throw new Error('could not create the parent task this suite is about')
 created.push(parent.id)
@@ -576,10 +578,16 @@ try {
   /*
    * Everything this run made, taken back. A parent delete cascades to its
    * child, but both ids are sent because the order of that cascade is the
-   * server's business, not this suite's.
+   * server's business, not this suite's — so 404 is as good as 200 here, and
+   * any other answer, or none, is said above the totals.
    */
   for (const id of created.reverse()) {
-    await api(`/tasks/${id}`, { method: 'DELETE' }).catch(() => {})
+    try {
+      const res = await api(`/tasks/${id}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(res.status)) leftBehind.push(`DELETE /tasks/${id} answered ${res.status}`)
+    } catch (err) {
+      leftBehind.push(`DELETE /tasks/${id} got no answer (${err?.message ?? err})`)
+    }
   }
   await browser.close().catch(() => {})
 }
@@ -589,6 +597,7 @@ if (results.length !== EXPECTED_CHECKS) {
   console.log(`  \x1b[31mFAIL\x1b[0m ran ${results.length} checks, expected ${EXPECTED_CHECKS}`)
   results.push(0)
 }
+for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
 console.log(`\n${results.length - failed()} passed, ${failed()} failed`)
 await stack?.close?.()
 process.exit(failed() ? 1 : 0)

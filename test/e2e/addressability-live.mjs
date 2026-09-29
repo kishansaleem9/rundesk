@@ -2,10 +2,12 @@
  * Every fix from the addressability audit, exercised as a person would.
  *
  * The per-fix suites assert the mechanism. This one drives the whole set
- * against a real API, a real Postgres and a real Meilisearch, in one session,
- * doing what a user does: type into the palette, click a channel, open a task,
- * switch a tab, follow a link out of the workspace and come back. It exists to
- * catch the thing that unit-shaped checks cannot — one fix breaking another.
+ * against a real API and a real Postgres, in one session — not a real
+ * Meilisearch: no lane and no CI job starts one, so its search is
+ * SearchService's Postgres fallback — doing what a user does: type into the
+ * palette, click a channel, open a task, switch a tab, follow a link out of
+ * the workspace and come back. It exists to catch the thing that unit-shaped
+ * checks cannot — one fix breaking another.
  *
  *   node test/e2e/addressability-live.mjs --api 3011 --dist apps/web/dist
  */
@@ -85,11 +87,18 @@ const apiAs = (token) => async (route, init = {}) => {
   return { status: res.status, data: json?.data, error: json?.error }
 }
 
+/** What a cleanup DELETE did not remove: gone or already gone (404) is fine, anything else is said above the totals. */
+const leftBehind = []
+const tidy = (res, route) => {
+  if (![200, 204, 404].includes(res.status)) leftBehind.push(`DELETE ${route} answered ${res.status}`)
+}
+
 let browser
 let stack
 const done = async () => {
   await browser?.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {
@@ -351,7 +360,7 @@ try {
       'and coming back to that address reopens THAT doc, not the first one',
       `reopened "${reopened.trim()}"`,
     )
-    await A(`/docs/${secondDoc.data.id}`, { method: 'DELETE' }).catch(() => {})
+    tidy(await A(`/docs/${secondDoc.data.id}`, { method: 'DELETE' }), `/docs/${secondDoc.data.id}`)
   }
 
   // ── 8. dashboard: mode in the address, and counts that are the caller's ──
@@ -387,7 +396,7 @@ try {
     `${openScoped.length} open of ${scoped.data?.length} listed (this suite's own among them: ${openScoped.some((t) => t.id === mineOpen.data?.id)}), ` +
       `${member.data?.length} from the member endpoint, ${strays.length} not in it`,
   )
-  if (mineOpen.data?.id) await A(`/tasks/${mineOpen.data.id}`, { method: 'DELETE' }).catch(() => {})
+  if (mineOpen.data?.id) tidy(await A(`/tasks/${mineOpen.data.id}`, { method: 'DELETE' }), `/tasks/${mineOpen.data.id}`)
   const leaked = await A(`/tasks/workspace/${WS}?limit=5&assigneeId=00000000-0000-4000-8000-000000000000`)
   const unfiltered = await A(`/tasks/workspace/${WS}?limit=5`)
   check(

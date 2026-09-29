@@ -243,7 +243,10 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
   for (const sock of sockets) sock.close()
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
+  if (WS && A) {
+    const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status || 'nothing'}`)
+  }
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

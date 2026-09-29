@@ -121,7 +121,7 @@ const check = (ok, label, detail = '') => {
 const chain = makeChain(check)
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 56
+const EXPECTED_CHECKS = 57
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -142,10 +142,25 @@ const apiAs = (token) => async (route, init = {}) => {
   return { status: res.status, data: json?.data, error: json?.error }
 }
 
+/** What a cleanup could not remove: gone, or already gone (404), is fine; anything else is said above the totals. */
+const leftBehind = []
+const tidy = (res, what) => {
+  if (![200, 201, 204, 404].includes(res.status)) leftBehind.push(`${what} answered ${res.status}`)
+}
+
 const done = async (browser, stack, restore) => {
-  await restore?.().catch(() => {})
+  // The panels, sidebar and dock are the admin's, and so every later suite's:
+  // putting them back is part of this run. Each restore returns its answers.
+  let refused
+  try {
+    refused = ((await restore?.()) ?? []).filter((res) => res.status >= 300).map((res) => res.status)
+  } catch (err) {
+    refused = [`no answer (${err?.message ?? err})`]
+  }
+  check(refused.length === 0, 'and the panels, sidebar and dock this run changed are put back', `refused: ${refused.join(', ')}`)
   await browser?.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {
@@ -181,7 +196,7 @@ try {
   // Start from a known state: the checks below are about what a collapse does,
   // not about what this account happened to leave behind last time.
   await A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {} } })
-  restore = () => A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {} } })
+  restore = async () => [await A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {} } })]
 
   const origin = REMOTE
     ? BASE
@@ -376,8 +391,8 @@ try {
       `the editor opened "${activeTitle.trim()}" instead`,
     )
 
-    await A(`/docs/${idA}`, { method: 'DELETE' }).catch(() => {})
-    await A(`/docs/${idB}`, { method: 'DELETE' }).catch(() => {})
+    tidy(await A(`/docs/${idA}`, { method: 'DELETE' }), `DELETE /docs/${idA}`)
+    tidy(await A(`/docs/${idB}`, { method: 'DELETE' }), `DELETE /docs/${idB}`)
   }
 
   // ---------------------------------------------------------------------
@@ -421,7 +436,7 @@ try {
         page.url(),
       )
     }
-    await A(`/dashboards/${presetId}`, { method: 'DELETE' }).catch(() => {})
+    tidy(await A(`/dashboards/${presetId}`, { method: 'DELETE' }), `DELETE /dashboards/${presetId}`)
   }
 
   // ---------------------------------------------------------------------
@@ -455,8 +470,9 @@ try {
    * before being believed.
    */
   await A('/users/me', { method: 'PATCH', body: { sidebarCollapsed: false } })
-  restore = () =>
-    A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {}, sidebarCollapsed: false } })
+  restore = async () => [
+    await A('/users/me', { method: 'PATCH', body: { panelsCollapsed: {}, sidebarCollapsed: false } }),
+  ]
 
   await page.goto(`${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
@@ -610,7 +626,7 @@ try {
         chainCheck(afterUnread?.readAt == null, `readAt=${afterUnread?.readAt}`)
       }
     }
-    await A(`/notifications/${seeded.id}/clear`, { method: 'POST' }).catch(() => {})
+    tidy(await A(`/notifications/${seeded.id}/clear`, { method: 'POST' }), `POST /notifications/${seeded.id}/clear`)
   }
 
   // ---------------------------------------------------------------------
@@ -791,10 +807,10 @@ try {
   const DEFAULT_DOCK = ['home', 'inbox', 'chat', 'ai', 'docs', 'dashboards', 'settings']
   await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
   const priorRestore = restore
-  restore = async () => {
-    await priorRestore?.()
-    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
-  }
+  restore = async () => [
+    ...((await priorRestore?.()) ?? []),
+    await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } }),
+  ]
   await page.reload({ waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
 
@@ -882,13 +898,13 @@ try {
     body: { navFavorites: null, navRecents: null },
   })
   const priorRestore2 = restore
-  restore = async () => {
-    await priorRestore2?.()
+  restore = async () => [
+    ...((await priorRestore2?.()) ?? []),
     await A(`/dashboards/dock/${workspaceId}`, {
       method: 'POST',
       body: { navFavorites: null, navRecents: null },
-    })
-  }
+    }),
+  ]
   await page.goto(`${origin}/app/${workspaceId}`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3500)
 
@@ -1040,7 +1056,7 @@ try {
       `spaces=${madeSpaces.length} list=${listMade}`)
 
     const cleanupTree = async () => {
-      for (const id of madeSpaces) await A(`/spaces/${id}`, { method: 'DELETE' }).catch(() => {})
+      for (const id of madeSpaces) tidy(await A(`/spaces/${id}`, { method: 'DELETE' }), `DELETE /spaces/${id}`)
     }
 
     try {

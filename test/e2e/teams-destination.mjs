@@ -67,6 +67,8 @@ const apiAs = (token) => async (route, init = {}) => {
 
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
+/** What a cleanup DELETE did not remove, said above the totals. */
+const leftBehind = []
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -263,7 +265,8 @@ try {
     'after being added to a team, My Teams was still empty — it is not reading membership',
   )
 
-  await A(`/workspaces/${workspaceId}/groups/${team.id}`, { method: 'DELETE' }).catch(() => {})
+  const gone = await A(`/workspaces/${workspaceId}/groups/${team.id}`, { method: 'DELETE' })
+  if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /workspaces/${workspaceId}/groups/${team.id} answered ${gone.status}`)
 } catch (e) {
   const lines = e.message.split('\n')
   const where = lines.find((l) => l.includes('waiting for') || l.includes('getByTestId'))
@@ -272,6 +275,7 @@ try {
 } finally {
   await browser.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   /*

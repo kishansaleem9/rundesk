@@ -117,6 +117,11 @@ const apiAs = (token) => async (route, init = {}) => {
 
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
+/** What a cleanup DELETE did not remove: gone, or already gone (404), is fine; anything else is said above the totals. */
+const leftBehind = []
+const tidy = (res, route) => {
+  if (![200, 204, 404].includes(res.status)) leftBehind.push(`DELETE ${route} answered ${res.status}`)
+}
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -542,10 +547,10 @@ try {
   )
   // Left as it was found: an alias this suite minted must not persist into
   // whatever runs next against the same list.
-  if (!hadAlias) await A(`/lists/${listId}/inbound-email`, { method: 'DELETE' }).catch(() => {})
+  if (!hadAlias) tidy(await A(`/lists/${listId}/inbound-email`, { method: 'DELETE' }), `/lists/${listId}/inbound-email`)
 
-  await A(`/tasks/${task.id}`, { method: 'DELETE' }).catch(() => {})
-  await A(`/tasks/${other.id}`, { method: 'DELETE' }).catch(() => {})
+  tidy(await A(`/tasks/${task.id}`, { method: 'DELETE' }), `/tasks/${task.id}`)
+  tidy(await A(`/tasks/${other.id}`, { method: 'DELETE' }), `/tasks/${other.id}`)
 } catch (e) {
   const lines = e.message.split('\n')
   const where = lines.find((l) => l.includes('waiting for') || l.includes('getByTestId'))
@@ -554,6 +559,7 @@ try {
 } finally {
   await browser.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

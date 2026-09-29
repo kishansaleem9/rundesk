@@ -213,7 +213,10 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
-  if (A) for (const ws of workspaces) await A(`/workspaces/${ws}`, { method: 'DELETE' }).catch(() => {})
+  for (const ws of A ? workspaces : []) {
+    const gone = await A(`/workspaces/${ws}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${ws} answered ${gone.status || 'nothing'}`)
+  }
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

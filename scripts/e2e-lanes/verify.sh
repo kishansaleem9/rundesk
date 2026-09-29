@@ -54,6 +54,17 @@ PORT=$((3020 + LANE))
 # The lane helpers (`lane_schema_drift`); it defines functions and sets nothing else.
 . /home/user/rundesk/scripts/e2e-lanes/lane-env.sh
 DIST="/tmp/claude-0/dist-$LANE"
+# A BUILD NEVER WRITES THE BUNDLE THIS RUN READS (`commit-log/log-d92d58f-1`).
+# Held shared from here to the end of the run (the suite inherits the lock's
+# descriptor), so a rebuild in progress finishes before the staleness check
+# below reads the bundle, and none starts until the suite is done. Taken
+# before `index.html` is looked for: a build empties the directory when it
+# starts writing, and a run asked then would otherwise fall back to the
+# shared bundle without the lock.
+if [ -d "$DIST" ] && ! dist_lock_shared "$DIST"; then
+  echo "== $SUITE (lane $LANE) REFUSING — $DIST has been locked by a build for 20 minutes"
+  exit 6
+fi
 [ -f "$DIST/index.html" ] || DIST="apps/web/dist"
 
 # ── A PER-LANE BUNDLE IS ONLY AS FRESH AS ITS LAST BUILD. ────────────────────

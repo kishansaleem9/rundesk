@@ -148,8 +148,9 @@ for k in "${LANES[@]}"; do
   # a suite's second run differ from its first for a reason nothing in the
   # suite mentions.
   lane_store_up "$k"
-  # Off unless RUNDESK_LANE_MODEL=1 — see lane-env.sh for the six suites that
-  # flip the day a lane can answer.
+  # Off unless RUNDESK_LANE_MODEL names this lane (`all`, or a list of lane
+  # numbers) — see lane-env.sh for which suites need a lane without a model,
+  # and why a fleet mixes the two.
   lane_model_up "$k"
   (
     cd "$R/apps/api"

@@ -53,6 +53,8 @@ let failed = 0
 let sql = null
 let stack = null
 let browser = null
+/** What a cleanup DELETE did not remove, said above the totals. */
+const leftBehind = []
 const TAG = `lxp-${Date.now()}`
 const chk = (cond, good, bad) => {
   if (cond) { passed += 1; console.log(`  \x1b[32mPASS\x1b[0m ${good}`) }
@@ -431,7 +433,8 @@ try {
     `it asked for fields=${tableFields}`,
   )
 
-  await A(`/lists/${list.id}`, { method: 'DELETE' }).catch(() => {})
+  const gone = await A(`/lists/${list.id}`, { method: 'DELETE' })
+  if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /lists/${list.id} answered ${gone.status}`)
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
@@ -444,6 +447,7 @@ try {
     await sql`delete from workspaces where name like ${'%' + TAG}`.catch(() => {})
     await sql.end({ timeout: 5 }).catch(() => {})
   }
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   /*

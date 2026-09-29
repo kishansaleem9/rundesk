@@ -308,25 +308,31 @@ try {
    * what every other suite reads.
    */
   const outsiderId = signup.data?.user?.id ?? signup.data?.id
-  if (outsiderId) {
-    await A(`/workspaces/${workspaceId}/members/${outsiderId}`, { method: 'DELETE' }).catch(() => {})
-  }
+  // Judged by the roster read below; its answer goes in that check's reason.
+  const removed = outsiderId
+    ? await A(`/workspaces/${workspaceId}/members/${outsiderId}`, { method: 'DELETE' })
+    : null
   const roster = (await A(`/workspaces/${workspaceId}/members`)).data ?? []
   chk(
     !roster.some((m) => (m.user?.email ?? m.email) === outsider.email),
     'and the check left the roster as it found it',
-    `${outsider.email} is still a member of the workspace`,
+    `${outsider.email} is still a member of the workspace (the DELETE answered ${removed?.status ?? 'nothing: no id to remove'})`,
   )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
   // Whatever happened above, the workspace gets its roster back. Idempotent:
-  // the happy path already removed them and this is a 404 it ignores.
+  // the happy path already removed them and this is a 404 it accepts; any
+  // other answer leaves them on the roster, and is said above the totals.
   if (cleanupA && cleanupWorkspaceId && cleanupOutsiderId) {
-    await cleanupA(`/workspaces/${cleanupWorkspaceId}/members/${cleanupOutsiderId}`, {
-      method: 'DELETE',
-    }).catch(() => {})
+    const route = `/workspaces/${cleanupWorkspaceId}/members/${cleanupOutsiderId}`
+    try {
+      const res = await cleanupA(route, { method: 'DELETE' })
+      if (![200, 204, 404].includes(res.status)) console.log(`  cleanup left behind: DELETE ${route} answered ${res.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE ${route} got no answer (${err?.message ?? err})`)
+    }
   }
   await browser.close().catch(() => {})
   stack?.close()

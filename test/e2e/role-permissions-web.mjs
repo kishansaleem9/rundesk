@@ -58,7 +58,7 @@ let A = null
 try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${auth.accessToken}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
+    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${auth.accessToken}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
     return { status: res.status, data: (await res.json().catch(() => null))?.data }
   }
   const make = async (route, body, what) => {
@@ -254,8 +254,16 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
   await browser?.close().catch(() => {})
+  if (WS && A) {
+    try {
+      const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE /workspaces/${WS} got no answer (${err?.message ?? err})`)
+    }
+  }
+  // Only now: the DELETE above goes through this proxy, and a closed one refuses it.
   stack.close()
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

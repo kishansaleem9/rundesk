@@ -221,22 +221,25 @@ const chain = makeChain(check, skip)
  *
  * There was a third option. A check that cannot run is not ABSENT, it is
  * UNKNOWN — and an unknown outcome can be reported and COUNTED like any other.
- * `skip()` above does that, so the total is 58 on every machine and `!==`
+ * `skip()` above does that, so the total is 59 on every machine and `!==`
  * works. A soundcard-less runner still exits 0, because a skip is not a
  * failure; a branch that vanished silently now fails, which is what the floor
  * could never do.
  *
  * AND THE EXCEPTION NAMED THE WRONG FIVE. It said "two speaker-picker checks
  * that need a routable audio output, and three recording checks that need the
- * AI Notes entitlement". Observed from a run on this machine, the five that
- * skip are all ONE gate — the storage chain, because no bucket is configured
- * (`upload-url -> 400`). The speaker picker and the recording entitlement both
- * ran as real checks. The floor of 48 was 53 minus five checks that were not
- * the five it described, which is the stale reason in a comment that exists to
- * justify an exception.
+ * AI Notes entitlement". Observed from a run on a machine with no object store,
+ * the five that skipped were all ONE gate — the storage chain, because no
+ * bucket was configured (`upload-url -> 400`). The speaker picker and the
+ * recording entitlement both ran as real checks. The floor of 48 was 53 minus
+ * five checks that were not the five it described, which is the stale reason
+ * in a comment that exists to justify an exception. The lanes and CI start
+ * `s3-stub.mjs` now (`lane-env.sh`; ci.yml's "Start the object store"), so
+ * there the storage chain runs too.
  *
- * 59 = 54 checks that ran plus the 5 the deployment cannot answer. Observed,
- * not derived: it was `53 passed, 0 failed, 5 skipped` when this was written,
+ * 59 = 54 checks that ran plus the 5 a deployment with no object store cannot
+ * answer. Observed, not derived: it was `53 passed, 0 failed, 5 skipped` when
+ * this was written,
  * and the 54th is "and it arrives without a reload", added when
  * `sl-3-call-card-not-broadcast` ran green against a pair of checks that both
  * tolerated one. Raise it when checks are
@@ -256,7 +259,10 @@ const done = async (browser, stack) => {
    * number on a machine with a soundcard and one without, and `!==` catches a
    * branch that vanished silently rather than reporting on whatever half it
    * reached. The `N passed, M failed` prefix is kept exactly as it was because
-   * `scripts/e2e-lanes/break-queue.sh` parses it.
+   * the harness parses it: `wt-break.sh` copies it into each break log, where
+   * `classify-break-log.awk` and `check-break-reddened.mjs` read it, and
+   * `verify.sh` and `local-sweep.mjs` read it off the run. (It used to say
+   * `break-queue.sh`, deleted in `d840b55`.)
    */
   if (ran !== EXPECTED_CHECKS) {
     console.log(
@@ -1081,9 +1087,10 @@ console.log('\n5. recording announces itself to everyone')
 /*
  * Consent is the one thing here that is a legal problem rather than a UX one,
  * and the promise is that it is impossible to be recorded without being told.
- * The upload itself needs object storage, which is not configured locally —
- * but the announcement is the part that must not be able to fail, and it is
- * pure signalling.
+ * The upload itself needs object storage, which a run may or may not have —
+ * the lanes and CI start `s3-stub.mjs`, and an API started without the R2
+ * variables has none — but the announcement is the part that must not be able
+ * to fail, and it is pure signalling.
  */
 const recordChain = chain(
   'the person recording sees the banner',
@@ -1124,9 +1131,10 @@ console.log('\n5b. the recording reaches storage, from the browser')
  * So the PUT is made from INSIDE the page, which is the only place the
  * question can be asked honestly. Same for playback afterwards.
  *
- * Skipped rather than failed where storage is unconfigured — locally and in
- * CI there is no bucket, and a check that cannot run must say so rather than
- * report a verdict it did not reach.
+ * Skipped rather than failed where storage is unconfigured — an API started
+ * without the R2 variables has no bucket (the lanes and CI start
+ * `s3-stub.mjs`, so there it runs), and a check that cannot run must say so
+ * rather than report a verdict it did not reach.
  */
 let storageChecked = false
 const storageChain = chain(

@@ -130,8 +130,12 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)
 } finally {
+  for (const ws of MADE) {
+    const gone = await A(`/workspaces/${ws}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${ws} answered ${gone.status || 'nothing'}`)
+  }
+  // Only now: the DELETEs above go through this proxy, and a closed one refuses them.
   stack.close()
-  for (const ws of MADE) await A(`/workspaces/${ws}`, { method: 'DELETE' }).catch(() => {})
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

@@ -48,13 +48,17 @@
  *      the composer, and the three frames show three different sets. A fixed
  *      three would photograph identically at `17:42`.
  *
- * NO PROVIDER KEY EXISTS HERE, so `/ai/chat` 503s (checked in
- * `ai-create-containers.mjs`, where it belongs). Phase A below is entirely real
- * — real API, real Postgres, real browser — because the panel renders STORED
- * thread messages, which is the production path for reopening a conversation.
- * Phase B intercepts exactly one endpoint, the one that cannot work in this
- * environment, and replays the frame format `chatStream` genuinely writes; the
- * server half of those frames is asserted against Postgres in the other suite.
+ * WHETHER A MODEL ANSWERS DEPENDS ON THE LANE. With none configured — CI, and
+ * every lane `RUNDESK_LANE_MODEL` does not name — `/ai/chat` 503s; on a lane it
+ * names, it streams from `model-stub.mjs`. `ai-create-containers.mjs` checks
+ * that the chat agrees with `/ai/status` either way, where that belongs. Phase
+ * A below is entirely real — real API, real Postgres, real browser — because
+ * the panel renders STORED thread messages, which is the production path for
+ * reopening a conversation. Phase B intercepts exactly one endpoint, `/ai/chat`,
+ * and replays the frame format `chatStream` genuinely writes, so the frames are
+ * the ones this suite chose and the request is held open for as long as it
+ * needs, in either configuration; the server half of those frames is asserted
+ * against Postgres in the other suite.
  *
  *   node test/e2e/ai-answer-rendering.mjs --api 3011 --dist apps/web/dist
  */
@@ -143,6 +147,19 @@ let taskB = null
  * read, and a run that threw halfway would otherwise leave them there for good.
  */
 const lateTasks = []
+/**
+ * A cleanup DELETE, and what it did not remove: gone, or already gone (404), is
+ * fine; any other answer, or none, is said above the totals.
+ */
+const leftBehind = []
+const takeBack = async (route) => {
+  try {
+    const res = await api(route, { method: 'DELETE' })
+    if (![200, 204, 404].includes(res.status)) leftBehind.push(`DELETE ${route} answered ${res.status}`)
+  } catch (err) {
+    leftBehind.push(`DELETE ${route} got no answer (${err?.message ?? err})`)
+  }
+}
 
 try {
   console.log('\n▶ two tasks with DIFFERENT statuses, so a chip cannot be a constant')
@@ -531,10 +548,11 @@ try {
   /*
    * AND THEN ASKED AGAINST THE CONFIGURATION, for the same reason the three
    * checks in `ai-create-containers` were. Pinning the unavailable sentence is
-   * pinning the ENVIRONMENT: no lane had a model, so every lane read it. With
-   * `RUNDESK_LANE_MODEL=1` the composer is not disabled at all and the
-   * placeholder is the resting invitation, so the exact string this check was
-   * just corrected to assert would fail — correctly, and about nothing.
+   * pinning the ENVIRONMENT: no lane had a model, so every lane read it. On a
+   * lane `RUNDESK_LANE_MODEL` names (`all`, or a list of lane numbers) the
+   * composer is not disabled at all and the placeholder is the resting
+   * invitation, so the exact string this check was just corrected to assert
+   * would fail — correctly, and about nothing.
    *
    * One check, true either way: the composer's placeholder says which state it
    * is in, and that state is the one `/ai/status` reports.
@@ -551,9 +569,11 @@ try {
   )
 
   /*
-   * ONE ENDPOINT INTERCEPTED — the one that cannot work without a provider key
-   * — replaying the frames `chatStream` genuinely writes. The handler holds the
-   * request open, which is what makes the in-flight state observable at all.
+   * ONE ENDPOINT INTERCEPTED — `/ai/chat`, which refuses where no model is
+   * configured and, where one answers, would answer with the stub's text
+   * rather than these frames — replaying the frames `chatStream` genuinely
+   * writes. The handler holds the request open, which is what makes the
+   * in-flight state observable at all.
    */
   let release = () => {}
   const held = new Promise((resolve) => { release = resolve })
@@ -766,10 +786,11 @@ try {
   // ── `17:42`–`17:50` — the word bar ─────────────────────────────────────────
   console.log('\n▶ `17:42`–`17:50` — three words above the composer, and they change')
   /*
-   * ONE ENDPOINT INTERCEPTED, and it is the one that cannot answer honestly
-   * here: with no provider key `GET /ai/status` reports `available: false` and
-   * the composer is correctly disabled, so there is no way to type. Everything
-   * the bar does is client-side and real; this only opens the door.
+   * ONE ENDPOINT INTERCEPTED, `GET /ai/status`, so this section runs the same
+   * on every lane: where no model is configured it reports `available: false`
+   * and the composer is correctly disabled, so there is no way to type, and
+   * where one is, the intercept says what the route would. Everything the bar
+   * does is client-side and real; this only opens the door.
    *
    * THE BODY IS THE ENVELOPE, NOT THE PAYLOAD. This stub used to fulfil with
    * `{"available":true}`, and every API response in this product is wrapped —
@@ -857,10 +878,10 @@ try {
   await browser?.close().catch(() => {})
   // Every row this run made, taken back.
   for (const t of [taskA, taskB]) {
-    if (t?.id) await api(`/tasks/${t.id}`, { method: 'DELETE' }).catch(() => {})
+    if (t?.id) await takeBack(`/tasks/${t.id}`)
   }
-  for (const id of lateTasks) await api(`/tasks/${id}`, { method: 'DELETE' }).catch(() => {})
-  if (threadId) await api(`/workspaces/${WS}/ai-chats/${threadId}`, { method: 'DELETE' }).catch(() => {})
+  for (const id of lateTasks) await takeBack(`/tasks/${id}`)
+  if (threadId) await takeBack(`/workspaces/${WS}/ai-chats/${threadId}`)
 }
 
 const failed = () => results.filter((x) => !x).length
@@ -868,6 +889,7 @@ if (results.length !== EXPECTED_CHECKS) {
   console.log(`  \x1b[31mFAIL\x1b[0m ran ${results.length} checks, expected ${EXPECTED_CHECKS}`)
   results.push(0)
 }
+for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
 console.log(`\n${results.length - failed()} passed, ${failed()} failed`)
 await stack?.close?.()
 process.exit(failed() ? 1 : 0)

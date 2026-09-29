@@ -158,12 +158,16 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)
 } finally {
   await browser?.close().catch(() => {})
-  stack.close()
   if (A && digestWas) {
     const back = await A('/notifications/preferences', { method: 'POST', body: { digest: digestWas } })
-    if (back.status >= 300) console.log(`  (the admin's digest setting was not put back: ${said(back)})`)
+    if (back.status === 0 || back.status >= 300) console.log(`  (the admin's digest setting was not put back: ${said(back)})`)
   }
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
+  if (WS && A) {
+    const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status || 'nothing'}`)
+  }
+  // Only now: the restore and the DELETE above go through this proxy, and a closed one refuses them.
+  stack.close()
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

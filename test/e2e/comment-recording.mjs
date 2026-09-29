@@ -46,7 +46,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 32
+const EXPECTED_CHECKS = 33
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -177,6 +177,8 @@ window.SpeechRecognition = FakeSpeechRecognition
 const stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
 const browser = await chromium.launch(launchOptions())
 let restoreLocale = null
+/** The tasks a cleanup DELETE could not remove, said above the totals. */
+const leftBehind = []
 
 try {
   const auth = await signInApi(API, ME.email, ME.password)
@@ -212,10 +214,12 @@ try {
     `POST with an empty body and no attachment returned ${empty.status} — blank comments would be postable`,
   )
 
-  // A real attachment row, made the way the composer makes one. R2 is not
-  // configured locally, so the presign step is skipped and the row registered
-  // directly against this task's own prefix — the same prefix the presigner
-  // signs, which `addAttachment` checks.
+  // A real attachment row, registered directly against this task's own prefix
+  // — the same prefix the presigner signs, which `addAttachment` checks. The
+  // presign and the upload are skipped: first because R2 was not configured
+  // locally, and still, now that the lanes and CI run `s3-stub.mjs`, because
+  // `addAttachment` registers a row without the object and the rule asked here
+  // is the comment's, not the bytes'.
   const key = `workspaces/${workspaceId}/tasks/${task.id}/attachments/voice-note_${stamp}.webm`
   const voice = (await A(`/tasks/${task.id}/attachments`, {
     method: 'POST',
@@ -335,7 +339,10 @@ try {
 
   // Back to a task anyone can reach, so the composer checks below are not run
   // against a private one.
-  await A(`/tasks/${task.id}/assignees/${outsiderId}`, { method: 'DELETE' }).catch(() => {})
+  const unassigned = await A(`/tasks/${task.id}/assignees/${outsiderId}`, { method: 'DELETE' })
+  if (![200, 204, 404].includes(unassigned.status)) {
+    throw new Error(`could not take the outsider off the task again, so the composer checks would run on a private task: DELETE answered ${unassigned.status}`)
+  }
 
   const listed = (await A(`/tasks/${task.id}/comments`)).data ?? []
   const posted = listed.find((c) => (c.attachments ?? []).some((f) => f.id === voice.id))
@@ -645,8 +652,10 @@ try {
     `${flagged} of ${rows} rows were flagged — the warning is being drawn from something other than the person`,
   )
 
-  await A(`/tasks/${task.id}`, { method: 'DELETE' }).catch(() => {})
-  await A(`/tasks/${other.id}`, { method: 'DELETE' }).catch(() => {})
+  for (const id of [task.id, other.id]) {
+    const gone = await A(`/tasks/${id}`, { method: 'DELETE' })
+    if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /tasks/${id} answered ${gone.status}`)
+  }
 } catch (e) {
   failed += 1
   /*
@@ -660,15 +669,26 @@ try {
   const where = lines.find((l) => l.includes('waiting for') || l.includes('getByTestId'))
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${lines[0]}${where ? `\n         ${where.trim()}` : ''}`)
 } finally {
-  // The account's language is this suite's to borrow, not to keep.
+  // The account's language is this suite's to borrow, not to keep — every later
+  // suite reads it, so a refused restore is this run's failure. Nothing read,
+  // nothing borrowed.
+  let restored = null
   if (restoreLocale) {
     try {
       const auth = await signInApi(API, ME.email, ME.password)
-      await apiAs(auth.accessToken)('/users/me', { method: 'PATCH', body: { locale: restoreLocale } })
-    } catch { /* the stack is going down anyway */ }
+      restored = await apiAs(auth.accessToken)('/users/me', { method: 'PATCH', body: { locale: restoreLocale } })
+    } catch (err) {
+      restored = { status: `no answer (${String(err?.message ?? err).split('\n')[0]})` }
+    }
   }
+  chk(
+    !restoreLocale || restored.status < 300,
+    'and the account gets its own language back',
+    `putting the locale back to ${JSON.stringify(restoreLocale)} answered ${restored?.status}`,
+  )
   await browser.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

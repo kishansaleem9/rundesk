@@ -615,8 +615,13 @@ went missing entirely. A list that is only written once stops being true.
   but `[11:28]` is "aap ko ya aap ke alawa [kisi aur ko]" and the frame draws
   one face with one `✕`. Recorded here rather than guessed at.
 
-- **The three items above carry `B*`, not `B`, and the star is the whole
-  point.** The session that built them could not start Postgres, the API or a
+- ~~**The three items above carry `B*`, not `B`, and the star is the whole
+  point.**~~ **RUN AND REGISTERED THE SAME DAY, AND PLAIN `B` FROM 29
+  SEPTEMBER.** `2b7897a` registered both suites in `ci.yml` green on 21
+  September, and on 24 September `list-customize` ran 37 of 37 (it gained the
+  list view's trio since) with 21 of 21 break patches reddening, and
+  `list-assignee-filter` 29 of 29 with 15 of 15. The reason as it stood: the
+  session that built them could not start Postgres, the API or a
   browser, so `list-customize` (29) and `list-assignee-filter` (29) are written
   and typechecked and **have never been run**, and neither is registered in
   `ci.yml` — step 7 says to register a suite only once it is locally green, and
@@ -728,7 +733,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
-| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing, and its MENU has no frame behind it.** `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. Rundesk already has the primary button (`quick-create-submit`). What is absent is a menu whose contents nothing shows, so building it would mean inventing them — the same refusal the create-modal-placeholder row makes. **Blocked on the reference, which is a different thing from not done yet** |
+| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing, and its MENU has no frame behind it.** `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. Rundesk already has the primary button (`quick-create-submit`). What is absent is a menu whose contents nothing shows, so building it would mean inventing them — the refusal the create-modal-placeholder row also made, until 29 September showed that row's frame had been misread (see that row). **Blocked on the reference, which is a different thing from not done yet** |
 | — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
 | B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — **the drop handler exists.** The row said "the panel exists, no drop handler" and that reason is now false: `task-detail-sheet.tsx` carries `onDrop`/`onDragOver`/`onDragEnter` on the zone, it takes a drop AND opens the picker on click through the SAME mutation, and `isFileDrag` guards on the dataTransfer TYPES rather than on `files.length`, because during dragover the file list is deliberately empty. The status was always `B`; only the parenthetical was stale, which is worse than a wrong status — a reader trusts a reason |
@@ -789,26 +794,31 @@ Legend: **B** built · **P** partial · **M** missing.
 | B\* | **Plan-tier paywall UI** — frame `09:26`'s modal, closed by `paywall-sites.mjs`, 30 checks, break set complete 10/10: the plain line, the heading naming the tier and the feature, the panel that describes and previews, the tier beside it, and one button. Stale, not missing. **The metered *"uses have expired"* state is the part still absent, and it is blocked on the reference.** `09:30` draws the second state inline — the same feature preview over *"Your Team view uses have expired."* and one **Contact admin** button — and that is ALL it draws. No counter, no remaining count, no allowance, no reset. Rundesk has no metering to hang it on either: `PlanUsage.usage` is `{ members, projects }`, which counts things that EXIST rather than times a feature was USED. Building it means inventing the allowance and the reset policy and then writing checks against my own invention; building only the renderer is worse — a branch nothing can reach is the mirror defect. Recorded as blocked rather than pending |
 | B | Calendar view, Gantt (today line, zoom, drag, critical path) |
 | B | Gantt: Auto fit, week numbers, collapsible panels, local export |
-| M | Create-modal placeholder "Add description, or write with ⚡AI" — **and it has no frame behind it.** `video2-frame-observations.md:250` cites `10:00`; `09:54` through `10:08` are all the Board view, and the other create modal it cites, `21:36`, is the Brain² hub. Every create modal that IS on screen (`00:08`, `00:14`, `00:20`) already has a description typed into it, so the placeholder is never drawn. Left `M` rather than built: a string with no frame is a summary, and building to a summary instead of to the frame is what step 1 exists to stop. See §7 |
+| B | Create-modal placeholder "Add description, or write with ⚡AI" — closed by `create-menu-ai.mjs`, 24 checks, four of them this row's: the placeholder, the ⚡AI control dead until the task has a title, the request it sends with the title as its prompt, and a refusal that reaches the person as a toast. 24 of 24 on 24 September, and `cma-11` to `cma-14` each redden their check. **THIS ROW SAID THE PLACEHOLDER HAD NO FRAME BEHIND IT, AND THE FRAME HAD BEEN MISREAD.** `10:02` to `10:06` draw the create-task modal open over the Board view — title `vjgkgkg`, description empty and reading the placeholder — while `[09:59]` has her adding a task again. `10:00` (the cursor on **Add Task**) and `10:08` (the modal gone, a "Task created" toast) are the Board alone; `10:02` and `10:05`, which §7 listed as the Board view, both show the modal over it, extracted again on 29 September. The row also said Rundesk had not built it: the string landed in `5494c0f` and the ⚡AI button in `666f15f`, both on 21 September and both before `3100ba1` rewrote this row to `M`. Not measured: the button's success path, a description written where a model answers — `create-menu-ai` is about the refusal and runs where none does. See §7 |
 | B | Customize view: Autosave, Pin, Private, Protected, Set default, Copy link, Sharing |
-| B\* | **Customize: Stack fields, Show empty fields, Collapse empty columns** — board switches, each read by the grid. `list-customize` 29 |
+| B | **Customize: Stack fields, Show empty fields, Collapse empty columns** — board switches, each read by the grid. Closed by `list-customize.mjs`, 37 checks: 37 of 37 on 24 September, with 21 of 21 break patches reddening |
 | B | Customize on the LIST view — **the frame `11:00` trio built**, closed by `list-customize.mjs`, **37 checks, 8 of them new and all 8 break-tested**. Show task locations · Show subtask parent names · Show closed tasks, drawn where frame `10:35` draws the board's own three, because two different trios in one slot is the reference being specific. **`showClosed` is passed down, not re-declared**: the toolbar's Closed chip already owned that state, and two controls for one question each with their own `useState` agree exactly until one is used — so it is checked in both directions, since either direction alone passes on a build that writes the shared value and reads back a private one. The two annotations are **maps, not booleans**: a row can only ask "is there a string for me", so a switch left on while the data says nothing draws nothing and the mirror defect has nowhere to happen. The parent title is resolved from **every row the page holds, not the visible ones** — a closed parent with an open child is the fixture — because a lookup against the filtered set draws no name at all, which is what a task with no parent draws. `showClosed` also joins `currentViewConfig` now: it had been a chip the view did not remember, and this file's own rule for Card size is that the panel configures the VIEW |
 | B | Export: CSV/Excel, three-way scope, date+time formats, honours the view |
-| B\* | **Export paywall** — the refusal was already built; the frame's "⚡ Business feature" caption inside the open dialog was not. `list-customize` 29 |
+| B | **Export paywall** — the refusal was already built; the frame's "⚡ Business feature" caption inside the open dialog was not. Closed by `list-customize.mjs`, 37 checks, 37 of 37 on 24 September; the refusal itself is `paywall-sites.mjs`'s |
 | B | In-list search, Save-view chip, filter rules, nested groups, saved filter sets |
-| B\* | **Assignee filter is an avatar picker** — faces, Me above the roster, the frame's ✕; the native `<select>` stays beside it, one state. `list-assignee-filter` 29 |
-| B\* | **"Tasks where I have assigned" — Comments · Subtasks · Checklists** — a server source each, unioned into the filter. `list-assignee-filter` 29 |
+| B | **Assignee filter is an avatar picker** — faces, Me above the roster, the frame's ✕; the native `<select>` stays beside it, one state. Closed by `list-assignee-filter.mjs`, 29 checks: 29 of 29 on 24 September, with 15 of 15 break patches reddening |
+| B | **"Tasks where I have assigned" — Comments · Subtasks · Checklists** — a server source each, unioned into the filter. Closed by `list-assignee-filter.mjs`, 29 checks, 29 of 29 on 24 September |
 
-**B\*** — built end to end, with a suite written against a real API and a real
-browser, and **the suite has not been run**: the session that wrote these
-four rows was not allowed to start Postgres or the API, so the number beside
-each one is its `EXPECTED_CHECKS`, not a green run. They are not registered in
-`ci.yml` for the same reason — the process file's step 7 says to register a
-suite only once it is locally green, and going red on somebody else's commit is
-the failure that rule exists to prevent. Twenty-eight break patches are written
-and every one was verified by parsing and by applying it to a COPY; none was
-run against a live stack either. **A `B*` is a claim about the code and the
-checks, not about a run.**
+**B\*** — built, and the row also records something the frame asks for that is
+not there; the asterisk is where that remainder is written down, and §4 counts
+the row as built. Two rows in these tables carry one: the Comment split button,
+whose "Create Task ▾" menu no frame opens, and the plan-tier paywall, whose
+metered "uses have expired" state no frame explains.
+
+THIS LEGEND USED TO GIVE THE ASTERISK A SECOND MEANING, and four rows above
+carried it: the board's Customize switches, the export paywall caption, the
+avatar picker and "Tasks where I have assigned". It read "built end to end …
+and **the suite has not been run**", with neither suite registered in `ci.yml`,
+because the session that wrote them could not start Postgres or the API. That
+stopped being true on 21 September, when `2b7897a` registered both suites green,
+and both have since run with every break patch reddening: `list-customize` 37
+of 37 and 21 of 21, `list-assignee-filter` 29 of 29 and 15 of 15, on 24
+September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ### S13–S17 · imports, templates, planner, planner settings, task menu, AI hub
 
@@ -895,7 +905,7 @@ checks, not about a run.**
 
 ## 4. Counts
 
-**173 rows: 148 built · 11 partial · 14 missing.**
+**173 rows: 151 built · 9 partial · 13 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -931,9 +941,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 116 | 7 | 9 | 132 |
-| §5, recovered from the frame observations | 32 | 4 | 5 | 41 |
-| **consolidated** | **148** | **11** | **14** | **173** |
+| §2, the sections table | 117 | 7 | 8 | 132 |
+| §5, recovered from the frame observations | 34 | 2 | 5 | 41 |
+| **consolidated** | **151** | **9** | **13** | **173** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -945,15 +955,30 @@ every row of frame `12:08`'s submenu either built or drawn with its reason and
 no control. A build that raised the total would mean a row had been invented
 rather than answered.
 
-§2's 116 built includes the four marked `B*` — built, but the row also records
+THREE MORE MOVED ON 29 SEPTEMBER, AND NOTHING WAS BUILT FOR THEM: they were
+read. In §2 the create-modal placeholder goes from `M` to `B` — its frame had
+been misread, and the string and its ⚡AI button were in the tree before its row
+was written. In §5 the project-status breakdown goes from `P` to `B` and the
+busy state from `P` to `B*`: both were built on 20 September in `43f7b57` and
+are measured by `ai-create-containers` and `ai-answer-rendering`, and neither
+row had been re-read since. So §2 moves `116 · 7 · 9` → `117 · 7 · 8` and §5
+`32 · 4 · 5` → `34 · 2 · 5`, and the total stays 173. Counted row by row: §2's
+tables hold 115 `B`, 2 `B*`, 7 `P` and 8 `M` (the four `—` rows are not
+counted), and §5's appendices 33 `- status: B`, 1 `B*`, 2 `P` and 5 `M`.
+
+§2's 117 built includes the two marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
-down.
+down. This read "the four" until 29 September while §2 held six: the two above,
+and four whose asterisk meant something else — a suite not yet run — which had
+stopped being true (the legend under §2 records it). §5's 34 built includes one
+`B*` of its own, the busy state, whose remainder is the frame's own words.
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
-116 above is 112 plus the Threads, Create Folder, Importers and Composer-hint
-rows closing, not the strike being undone.
+117 above is 112 plus the Threads, Create Folder, Importers and Composer-hint
+rows closing and the create-modal placeholder being read, not the strike being
+undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
 countdown anywhere in the walkthrough; the row existed only because of the
@@ -1022,15 +1047,17 @@ said so. §4's table credits §5 with **31 · 4 · 6**; the line above says
 survived several readings — which is precisely how the 173-that-was-two-numbers
 got as far as it did, recorded at the top of §4.
 
-They are the same forty-one rows at two moments. Seventeen have closed since
-this section was written — sixteen that were missing and one that was partial —
-and seventeen is the whole difference:
+They are the same forty-one rows at two moments. Nineteen have closed since
+this section was written — sixteen that were missing and three that were
+partial — and nineteen is the whole difference. (Seventeen until 29 September,
+when the project-status breakdown and the busy state were read against the tree
+and found built and measured.)
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
 | as recovered (this section, and the three appendices below) | 15 | 5 | 21 | 41 |
-| closed since, each named on its own row by the suite that proves it | +17 | −1 | −16 | 0 |
-| **live (what §4 credits §5 with)** | **32** | **4** | **5** | **41** |
+| closed since, each named on its own row by the suite that proves it | +19 | −3 | −16 | 0 |
+| **live (what §4 credits §5 with)** | **34** | **2** | **5** | **41** |
 
 Both numbers are kept rather than one being overwritten, because the
 as-recovered split is what the three appendices below add up to, and a section
@@ -2284,7 +2311,24 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   per-`statusCategory` count anywhere in the context, and no list of anybody
   else's work. Asked to "summarize all current tasks", the model has one total
   and fifteen of your own rows to do it from.
-- status: P
+- status: B
+- closed by: ai-create-containers 33/33 — four of its checks are the
+  breakdown: `GET /ai/project-status` answers with no model at all, its
+  by-status and by-category counts each add up to its own total, and one
+  in-progress task moves it by exactly one, in the in-progress bucket
+  (`acc-9-breakdown-does-not-add-up` and `acc-10-breakdown-open-only` redden
+  them). Built on 20 September in `43f7b57`, and read against the tree on 29
+  September: `workspaceStatusBreakdown` (`ai.service.ts:2068`) is one GROUP BY
+  over every task the caller may see, `formatWorkspaceContext` writes it into
+  the chat's context as *"Task status breakdown (EVERY task in this workspace
+  you can see, not just yours)"* (`:240-251`, wired at `:2023`), and the
+  endpoint serves the same object (`ai.controller.ts:601-609`).
+  `workspace-read-access` and `private-list-reach` check that it counts, for a
+  member, only what that member may open.
+- not measured: the answer itself. No check reads the breakdown in a prompt or
+  in what a model writes back; `model-stub.mjs` records every prompt it is
+  sent, so a suite routed to a lane with a model can
+  (`harness/model-lane-routing-unbuilt`).
 - defect class: none — but note the shape: a single aggregate labelled
   "Workspace totals" sitting beside a personal list is one edit away from being
   summarised as if it were the personal list's breakdown.
@@ -2386,7 +2430,22 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   `placeholder={t('aiPanel.inputPlaceholder')}` — *"Ask Rundesk AI anything…"* —
   while `disabled={!aiAvailable || isStreaming}` (`:914`, `:921`), so a dead input
   still invites you to type into it.
-- status: P
+- status: B*
+- closed by: ai-answer-rendering 51/51 — built on 20 September in `43f7b57`
+  and read against the tree on 29 September. `AiBusyState`
+  (`ai-panel.tsx:523-569`, drawn while a request is out, `:1495`) puts a word
+  above the step log that comes from what the stream has sent, never from a
+  timer: Thinking before the first frame, Handling once an action step
+  arrives, Writing the answer once text does. The composer reads *"Working on
+  it…"* while a request is out and *"AI is not configured on this server"*
+  when none can be sent, and invites typing only when it takes it
+  (`:1817-1823`). Measured with `/ai/chat` held open by route interception, so
+  no model is needed; `aar-8-no-busy-state`, `aar-10-placeholder-never-changes`
+  and `aar-13-busy-state-never-clears` redden it.
+- remainder: the frame's own words. It draws **Cookin'** while the answer
+  streams and **Brain** when it lands; Rundesk says Writing the answer, and the
+  word goes when the answer lands (`catalogs.ts:3739-3741`). **Handling** and
+  *"Working on it…"* are the frame's words exactly.
 - defect class: none
 - why not already a row: `B | **Live step log**; steps emitted only after the
   lookup returns` covers the steps, and covers them well — the step log is the
@@ -2568,10 +2627,17 @@ Seven, of which one was already confirmed.
 
 ## Defects found while checking, which are not scope rows
 
-Three. None changes a count; all three are in code this session touched.
+Three. None changes a count; all three are in code this session touched, and
+all three were fixed on 20 September in `43f7b57`. Each is struck below with
+where it was fixed (29 September).
 
-- **`ai-value-panel.tsx:459-520` renders the eight category tiles outside the
-  loading guard.** The `valueQuery.isPending` ternary at `:322-438` covers only
+- ~~**`ai-value-panel.tsx:459-520` renders the eight category tiles outside the
+  loading guard.**~~ **FIXED 20 September** — the category grid now sits inside
+  the `valueQuery.isPending` branch, and a skeleton with its own testid,
+  `ai-value-categories-skeleton`, stands in while the query is in flight
+  (`ai-value-panel.tsx:461-478`, under a comment headed "DEFECT, FIXED HERE").
+  No suite names the skeleton. As found: the `valueQuery.isPending` ternary at
+  `:322-438` covers only
   the four `Stat` tiles; the category `Card` follows it. While the query is in
   flight `data` is `undefined`, so `const supported = row?.supported ?? false`
   (`:486`) is false for all eight and every tile — including *Tasks created or
@@ -2579,16 +2645,24 @@ Three. None changes a count; all three are in code this session touched.
   page's own "a fact about the product" string appearing as a fact about a
   workspace, which is the exact confusion the file's header comment exists to
   prevent.
-- **`AiService` injects `SearchService` and never calls it.**
+- ~~**`AiService` injects `SearchService` and never calls it.**~~ **REMOVED 20
+  September** — the constructor no longer takes it, and a comment where it
+  stood says why (`ai.service.ts:926-933`). A connected-app search can inject
+  it in the code that calls it. As found:
   `apps/api/src/modules/ai/ai.service.ts:797` declares
   `@Optional() private search?: SearchService`; `grep -n "this.search"` over the
   file returns nothing. The comment above it (`:792-796`) reads *"SearchService is
   retained for other surfaces"* — a **stale reason**, since within this class it
   is retained for none. Worth removing or wiring, and it is the natural door for
   the connected-app-search row above.
-- **`ai-panel.tsx:914` keeps `"Ask Rundesk AI anything…"` on an input disabled at
-  `:921`.** Covered by the busy-state row above; noted separately because it is a
-  one-line fix independent of the rest of that row.
+- ~~**`ai-panel.tsx:914` keeps `"Ask Rundesk AI anything…"` on an input disabled at
+  `:921`.**~~ **FIXED 20 September** — the placeholder reads *"Working on it…"*
+  while a request is out and *"AI is not configured on this server"* when none
+  can be sent, and invites typing only when the input takes it
+  (`ai-panel.tsx:1817-1823`). `ai-answer-rendering` checks it and
+  `aar-10-placeholder-never-changes` reddens that check. As found: covered by
+  the busy-state row above; noted separately because it is a one-line fix
+  independent of the rest of that row.
 
 ### Added 21 September
 
@@ -2639,10 +2713,14 @@ Three. None changes a count; all three are in code this session touched.
   unprotected behaviour change in a file three agents were editing is not worth
   the risk. It needs its own check first.
 
-- **`palette-more-types-menu` has the same untrapped catcher**
+- ~~**`palette-more-types-menu` has the same untrapped catcher**~~ **FIXED 21
+  September** in `5d224bb` — while the menu is open, the palette's
+  `onEscapeKeyDown` closes the menu and cancels the palette's own close
+  (`command-palette.tsx:712-716`), and `command-palette.mjs` checks that Escape
+  takes the menu away and leaves the palette and its query alone. As found:
   (`command-palette.tsx:872`) with no Escape handler. Lower impact — it sits
   inside a Radix dialog whose own Escape closes the whole palette — but the
-  menu itself cannot be dismissed by keyboard. *Not fixed.*
+  menu itself cannot be dismissed by keyboard. ~~*Not fixed.*~~
 
 - **Every file staged on the create modal was silently dropped. FIXED.**
   `input.files` is a **live** `FileList` — the same object every time — and the
@@ -2874,13 +2952,25 @@ parses the answer rather than echoing it, reports a refusal in words, and meters
 what came back. Those are the product's own defects, and the refusal path could
 never reach them.
 
-**Not wired into the lanes, deliberately, and this is the honest state of it.**
-Configuring a model would do to those suites what configuring storage did to the
-cover picker's Upload tab: every check that asserts the refusal would have to be
-rewritten against the live path, one suite at a time, with break patches to
-match. That is the video-2 work, and a 268-patch sweep is in flight against the
-current tree as this is written. The reason is retired and the seam is proven;
-the rewrite is the next piece of work, not this one.
+**Wired into the lanes since 23 September, per lane, and off unless a lane is
+named.** This paragraph read "Not wired into the lanes, deliberately", which
+was true for one night. `6fbd79b` put the stub behind `lane-env.sh`, and
+`ad00a7c` made the switch a list: `RUNDESK_LANE_MODEL` names the lanes that get
+a model (`all`, or lane numbers; unset is none), and a break set whose patch
+says it reddens only where a model answers gets one, baseline included
+(`patches_needing_model`, held to it by `check-model-lanes.sh`). The rewrite
+this paragraph put off has been done where the refusal was scenery:
+`ai-create-containers` and `ai-answer-rendering` ask `/ai/status` now and hold
+in either configuration, 33 of 33 and 51 of 51 run both ways. Three suites
+still stand on the refusal and need a lane without a model: `create-menu-ai`
+and `task-ai-bar`, which are about it, and `ai-activity-filters`, which forces
+its failed run through it. **The one step left** is routing each suite by that
+need — those three to lanes without a model, the suites whose checks reach past
+the refusal to lanes with one (`harness/model-lane-routing-unbuilt`). Until a
+suite can be sent to the lane its subject needs, a check on the resting
+composer or on a model's answer measures whichever lane it lands on, which is
+what holds back the rotating placeholder (the last section of this file) and
+the AI field types (§2's field-types row).
 
 The agent-runtime half of the original reason stands unchanged: a stub answers
 `/v1/messages`, and Brain²'s hub still needs a runtime Rundesk does not have.
@@ -2902,6 +2992,19 @@ show rather than by what Rundesk does not have — the create-modal placeholder,
 `"Create Task ▾"`'s menu, and the metered state's policy — and the distinction
 is worth keeping: one kind is waiting on work, the other on a better
 reference, and only the first belongs in a backlog.
+
+*Corrected 29 September:* the create-modal placeholder was never held back by
+the reference; its frame was misread. `10:02` to `10:06` draw the create-task
+modal open over the Board view, its description empty and reading *"Add
+description, or write with ⚡AI"*, and `[09:59]` has her adding a task again.
+§7 listed `10:02` and `10:05` among the Board-view frames; extracted again on 29
+September, both show the modal over the board, and only `10:00` and `10:08` are
+the board alone. It was also built before this paragraph was written — the
+string in `5494c0f` and its ⚡AI button in `666f15f`, both on 21 September — so
+it should not have been among the nine `M` rows "confirmed genuinely absent"
+above. Its row is `B`, closed by `create-menu-ai`. That leaves TWO rows here
+held back by the reference, `"Create Task ▾"`'s menu and the metered state's
+policy, and THREE with `Add to ›` below.
 
 `"Add to ›"` was the last row standing, and it fell to the same question asked
 one row later than it should have been: **what does the video say its submenu
@@ -2936,11 +3039,12 @@ build is free because half of it already exists. There is only a new table, a
 migration, and a rewrite of every list query, all of it in service of a sentence
 the video never says.
 
-**Which leaves ZERO buildable rows in §2**, and FOUR held back by the reference
-rather than by Rundesk: the create-modal placeholder, `"Create Task ▾"`'s menu,
-the metered state's policy, and now `Add to ›`. The count does not move — the
-row stays `M`, because it is still a thing the product does not have — but the
-reason does, and the reason is what a backlog is read for. The first pass said
+**Which leaves ZERO buildable rows in §2**, and ~~FOUR~~ THREE held back by the
+reference rather than by Rundesk: ~~the create-modal placeholder~~ (misread, and
+built; see the correction above), `"Create Task ▾"`'s menu, the metered state's
+policy, and now `Add to ›`. The count does not move — the row stays `M`,
+because it is still a thing the product does not have — but the reason does,
+and the reason is what a backlog is read for. The first pass said
 fifty were buildable.
 
 The lesson is narrower and more uncomfortable than "check the frames". Every one
@@ -2979,14 +3083,16 @@ the frames:
 | `:431-433` | GPT-5.**4**; "Best models" holds all the rows | **GPT-5.6**, and "Best models" holds **three** rows; the other four are behind Show more |
 | `:501` | 12 open tasks | **13**, and its own breakdown 11+1+1 does not equal 12 |
 | `:516-517` | two explainer cards | **three**, in a carousel with a pager |
-| `:250-251` | `10:00` "create modal again", description placeholder **"Add description, or write with ⚡AI"** | `10:00` is the **Board view**, and so are `09:54`, `10:02`, `10:05` and `10:08` — the lanes `TO DO · PLANNING · IN PROGRESS · AT RISK · UPDATE REQUIRED · ON HOLD · COMPLETE`, which is what `:252` itself describes as the drag that follows. No create modal is open anywhere in that window, so the placeholder string has no frame behind it at this timecode |
+| `:250-251` | `10:00` "create modal again", description placeholder **"Add description, or write with ⚡AI"** | Two seconds early, and right about what it describes. `10:00` is the **Board view** — the lanes `TO DO · PLANNING · IN PROGRESS · AT RISK · UPDATE REQUIRED · ON HOLD · COMPLETE` — with the cursor on **Add Task**; from `10:02` to `10:06` the create-task modal is open over the board, title `vjgkgkg`, description empty and reading the placeholder; by `10:08` it has closed and a "Task created" toast is up. *Corrected 29 September:* this cell read "`10:00` is the Board view, and so are `09:54`, `10:02`, `10:05` and `10:08` … No create modal is open anywhere in that window, so the placeholder string has no frame behind it", and `10:02` and `10:05` both show the modal, extracted again the same day |
 | `:99` | `21:36` create modal asking Task → Doc → Reminder → Whiteboard → Dashboard | `21:36` is the **Brain² hub** at `/ai/brain` — Ask \| Agents toggle, Super Agents rail, the four starter cards, and the credit meter reading `12 Brain AI uses` / `500 Credits left`. The tab strip it describes is real, but it is the one at `00:08`–`00:20`, not here |
 
 Two more, found 21 September by extracting the frames rather than trusting the
 line. Both are timecode errors rather than content errors — the tab strip at
-`:99` exists, just not at `21:36` — but a row derived from a timecode that
-shows something else cannot be checked against the frame at all, which is how
-`Create-modal placeholder` came to sit in §2 with no frame behind it.
+`:99` exists, just not at `21:36`, and the modal `:250` describes opens two
+seconds after `10:00` — but a row derived from a timecode that shows something
+else cannot be checked against the frame at all. That is how `Create-modal
+placeholder` came to sit in §2 as having no frame behind it, until 29
+September found the frame two seconds on.
 
 The `21:36` frame is worth keeping for a different reason: it corroborates four
 rows that are still `M` — the Brain² hub and its AI-scoped nav, the Ask\|Agents
@@ -4601,7 +4707,13 @@ with the row unchanged afterwards; 21 unit tests cover the resolution order.
 `lists.service.ts` and `projects.service.ts` check workspace membership and
 container privacy and nothing else, so a plain member can create a list inside
 a view-only space and is only refused when they try to edit it. That is its
-own row, and it is open.
+own row, ~~and it is open~~ **and it was closed on 21 September** in `59062a8`:
+`assertCanCreateInSpace` (`common/permissions/container-access.ts:202`) asks
+the same resolver the edit and delete gates ask, from `ListsService`
+(`lists.service.ts:162`), `ProjectsService` (`projects.service.ts:87`) and
+`FoldersService` (`folders.service.ts:109`), and `space-default-permission.mjs`
+went from 18 checks to 22 for it (36 now). `docs/video2-resume.md` §3 records
+it as fixed.
 
 ### The header pill — built on the surface the frames actually draw
 
@@ -6648,13 +6760,14 @@ strings in all four catalogues, a 3.8-second rotation on the resting state
 only, busy and unavailable keeping their precedence — and then reverted
 unbuilt, for a reason worth more than the feature.
 
-**The resting state never renders in a lane.** `GET /ai/status` answers
-`{"available": false}` on every one of them, because no lane carries a model
-key, so `ai-panel.tsx` takes its `placeholderUnavailable` branch permanently.
-A rotation on the branch underneath it cannot be observed by any suite in this
-harness. Shipping it would mean adding code no check can see, which is the
-facade in its purest form — and it would be MY facade, not one found in the
-tree.
+**The resting state rendered in no lane when this was built.** `GET /ai/status`
+answered `{"available": false}` on every one of them, because no lane carried a
+model key, so `ai-panel.tsx` took its `placeholderUnavailable` branch
+permanently, and a rotation on the branch underneath it could not be observed
+by any suite in this harness. A lane `RUNDESK_LANE_MODEL` names renders it now
+(see below); what no suite can do yet is choose that lane. Shipping it would
+mean adding code no check can see, which is the facade in its purest form — and
+it would be MY facade, not one found in the tree.
 
 `ai-answer-rendering` demonstrates the point from the other side: its composer
 check reads the placeholder off a DISABLED input and had to be renamed from
@@ -6664,22 +6777,31 @@ and the value held another.
 ### What would make it measurable, and what that costs
 
 `scripts/e2e-lanes/model-stub.mjs` exists, is Anthropic-compatible, and
-`check-model-stub.mjs` drives it every preflight. **It is wired into no lane.**
-Wiring it is the same move `s3-stub.mjs` already made one subsystem over: the
-ledger's old verdict that the AI surfaces were unmeasurable "for want of a key
-this repository does not hold" was retired when the stub was written, and the
-remaining gap is the four lines of `lane-env.sh` that would point an API at it.
+`check-model-stub.mjs` drives it every preflight. This said it was wired into
+no lane, which stopped being true five minutes after it was written: since 23
+September (`6fbd79b`, then `ad00a7c`) `lane-env.sh` starts it and points a
+lane's API at it when `RUNDESK_LANE_MODEL` names that lane (`all`, or lane
+numbers; unset is none). That was the same
+move `s3-stub.mjs` had made one subsystem over, and it retired the ledger's old
+verdict that the AI surfaces were unmeasurable "for want of a key this
+repository does not hold".
 
-The cost is not the wiring. **Six suites assert the AI-unavailable state** —
+The cost was never the wiring, and it was smaller than this section said. It
+named **six suites** as asserting the AI-unavailable state —
 `ai-answer-rendering`, `ai-assign`, `ai-create-containers`, `clip-created-card`,
-`create-menu-ai`, `task-ai-bar` — and every one of them would flip the day a
-lane could answer. That is exactly the class this pass found twice tonight in
-`attach-on-create` and `clip-created-card`, where a green depended on the
-environment being broken, except six at once and knowingly rather than by
-surprise. Each needs its refusal re-aimed from *starved* to *arranged*, the way
-`task-cover` already does it, and each has a patch set to re-measure.
+`create-menu-ai`, `task-ai-bar`. Counted inside their checks on 23 September
+(`7c4ac44`) it was four: `ai-assign` and `clip-created-card` carried a sentence
+about the missing key and asserted nothing about it. The count missed one the
+other way, `ai-activity-filters`, which forces its failed run through the
+refusal (`forced.status === 503`, there since `39863ff`). Two of the four were
+re-aimed from *starved* to *arranged* the same night — `ai-create-containers`
+and `ai-answer-rendering` ask `/ai/status` and hold either way (`350743c`,
+`b5a52bc`) — which leaves three that need a lane without a model:
+`create-menu-ai`, `task-ai-bar` and `ai-activity-filters`.
 
-So it is recorded rather than started: a known piece of work, with a measured
-cost instead of a guess, and the thing it unlocks is not one placeholder but
-every AI surface that is currently only measured in its refusal. Starting it
-and stopping halfway would leave those six suites worse than they are now.
+**One step is left:** routing each suite to a lane by that need
+(`harness/model-lane-routing-unbuilt`). A break set already gets a model when a
+patch in it needs one; a suite does not choose, so a check on the resting
+composer would measure whichever lane it landed on. That is why the rotating
+placeholder stays reverted, and the same step is what makes the AI field types
+measurable.

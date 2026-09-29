@@ -43,7 +43,7 @@ const chk = (cond, good, bad) => {
 }
 
 const apiAs = (token) => async (route, init = {}) => {
-  const res = await fetch(`${API}${route}`, { ...init, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
+  const res = await fetch(`${API}${route}`, { ...init, headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
   return { status: res.status, data: (await res.json().catch(() => null))?.data }
 }
 
@@ -158,7 +158,14 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
-  if (WS && A) await A(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
+  if (WS && A) {
+    try {
+      const gone = await A(`/workspaces/${WS}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${WS} answered ${gone.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE /workspaces/${WS} got no answer (${err?.message ?? err})`)
+    }
+  }
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

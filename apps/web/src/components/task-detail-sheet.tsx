@@ -599,11 +599,15 @@ function formatDuration(ms?: number | null): string {
  * Brain² for a presentation, document or prototype"*, with the three nouns
  * emphasised as three separate offers.
  *
- * WHAT IT CANNOT BE. The Brain² HUB is a recorded decision in this audit — it
- * does not exist and is not being built — so a bar that navigates to `/ai/brain`
- * would be a control named after a place that is not there. This bar therefore
- * does its work HERE, against the endpoints this product actually has, and the
- * word "Brain²" stays only in the sentence because that sentence is the frame's.
+ * WHAT IT CANNOT BE. The frame's Brain² hub lives at `/ai/brain` and carries
+ * agents. Rundesk's AI page is `/app/:workspaceId/ai`, with the composer, the
+ * model picker and the starter cards, and there are no agents
+ * (`docs/video2-reaudit.md`, "What the Brain² rows are actually about"). So a
+ * bar that navigates to `/ai/brain` would be a control named after a place that
+ * is not there, and one that navigates to the AI page would leave this task
+ * behind: `POST /ai/chat` takes no task. This bar therefore does its work HERE,
+ * against the endpoints that do take the task, and the word "Brain²" stays only
+ * in the sentence because that sentence is the frame's.
  *
  * WHY ONE OF THE THREE IS ENABLED AND TWO ARE NOT, rather than three buttons
  * that all "work". Same rule the model picker settled on when it listed ChatGPT
@@ -1554,9 +1558,14 @@ export function TaskDetailSheet({
                     asked for it, so a task could not tell you how old it was
                     without opening the activity feed and scrolling to the end.
 
-                    NOT "Brain²" beside it: that button leads to a hub this
-                    product does not have, and a control named after a place
-                    that does not exist is the facade this audit keeps removing.
+                    NOT "Brain²" beside it, yet. In the frame that button opens
+                    the assistant on this task. Rundesk has the assistant — the
+                    shell's AI dock and `/app/:workspaceId/ai` — but
+                    `POST /ai/chat` takes no task, so a button here could open
+                    the dock and not point it at the task: a control that says
+                    more than it does. Open, not refused;
+                    `docs/clickup-research.md` (clickup-ai, item 8) has the
+                    build.
 
                     `formatDate` rather than the frame's literal "7 Aug", so the
                     chip follows the reader's own date format — the same one the
@@ -7586,13 +7595,15 @@ function CommentsPanel({
 /**
  * §V2-S05b frame `04:50` — the comment composer's "+" menu.
  *
- * The frame lists ten items. EIGHT are here. The two that are not are absent
- * because there is nothing behind them, and putting them in the menu would be
- * the facade this codebase has spent two videos removing:
- *
- *   · **Slash commands** in the comment composer. The description editor has
- *     them; the composer does not, and it is its own row in the re-audit.
- *   · **Brain**. The Brain² hub does not exist — also its own row.
+ * The frame lists ten items. NINE are here. **Slash commands** joined when the
+ * composer gained them (§V2-S05c, below); this said "EIGHT" and called them
+ * absent until 29 September. The one that is not here is **Brain**: in the
+ * frame it opens the assistant on this comment's task, and Rundesk's assistant
+ * — the shell's AI dock and `/app/:workspaceId/ai` — takes no task
+ * (`POST /ai/chat`), so the item would open something that cannot see where it
+ * was opened from, which is the facade this codebase has spent two videos
+ * removing. Its own row, open rather than refused; `docs/clickup-research.md`
+ * (clickup-ai, item 8) has the build.
  *
  * Everything here goes to the SAME code the direct controls use: Add a file
  * clicks the composer's own file input, Record a Video Clip calls the recorder's

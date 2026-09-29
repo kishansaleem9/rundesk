@@ -24,9 +24,11 @@
 # under it, which is byte-identical to a patch that reddened three checks.
 #
 # That is one suite defect and one harness defect, both now fixed — the section
-# reports its three remaining checks as skipped rather than throwing, and
-# `break-queue.sh` counts a run with no summary as CRASHED rather than as
-# REDDENED. Against the fixed suite this reddens SIX: the two network checks,
+# reports its three remaining checks as skipped rather than throwing, and a run
+# with no summary is recorded as one: `wt-break.sh` writes `NO SUMMARY`, which
+# `classify-break-log.awk` counts as CRASHED rather than as REDDENED (this said
+# `break-queue.sh`, the reader then, deleted in `d840b55`). Against the fixed
+# suite this reddens SIX: the two network checks,
 # the failure state that never appears, and the three that say plainly they
 # could not be evaluated.
 #

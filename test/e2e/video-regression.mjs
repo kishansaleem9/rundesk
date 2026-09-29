@@ -469,14 +469,17 @@ try {
         'and Clear all survives having read everything',
         'Clear all vanished once nothing was unread',
       )
+      // Judged by the count below; a refused one is named in its reason.
+      const refused = []
       for (const n of before) {
-        await API(`/notifications/${n.id}/unread`, { method: 'POST' }).catch(() => {})
+        const res = await API(`/notifications/${n.id}/unread`, { method: 'POST' })
+        if (res.status >= 300) refused.push(`${n.id}: ${res.status}`)
       }
       const after = (await API('/notifications?unreadOnly=true')).data ?? []
       chk(
         after.length === before.length,
         'and the check left the inbox exactly as it found it',
-        `unread was ${before.length}, is now ${after.length}`,
+        `unread was ${before.length}, is now ${after.length}${refused.length ? `; marking unread was refused for ${refused.join(', ')}` : ''}`,
       )
     }
   } else {
@@ -499,10 +502,13 @@ try {
    * then read the server back.
    */
   ref('A2.6b', 'The gear opens Customize Inbox: grouping, order and density')
-  await rootApi('/notifications/preferences', {
+  const startedFrom = await rootApi('/notifications/preferences', {
     method: 'POST',
     body: { inboxView: { groupByDate: true, sortNewestFirst: true, density: 'comfortable' } },
-  }).catch(() => {})
+  })
+  if (startedFrom.status >= 300) {
+    throw new Error(`could not start the inbox from date groups, newest first, comfortable: POST /notifications/preferences answered ${startedFrom.status}`)
+  }
   await go(`/app/${WS}/inbox?filter=primary`, 3200)
 
   const gear = page.getByTestId('primary-customise')
@@ -634,11 +640,16 @@ try {
   }
 
   // Put it back, so the rest of this suite and every other one see the inbox
-  // they expect.
-  await rootApi('/notifications/preferences', {
+  // they expect — which makes a refusal this run's failure, not a shrug.
+  const putBack = await rootApi('/notifications/preferences', {
     method: 'POST',
     body: { inboxView: { groupByDate: true, sortNewestFirst: true, density: 'comfortable' } },
-  }).catch(() => {})
+  })
+  chk(
+    putBack.status < 300,
+    'and the inbox is put back to date groups, newest first, for the suites after this one',
+    `putting the inbox back was refused: POST /notifications/preferences answered ${putBack.status}, so every later suite sees this run's settings`,
+  )
 
   ref('A2.9', 'Replies get their own route, with unread against read')
   await go(`/app/${WS}/replies`, 3500)
@@ -1071,8 +1082,11 @@ if (failed.length) {
 }
 // `=== false`, not `!pass`: a counted skip is truthy and must not read as a
 // failure, and the totals below must not read it as a pass either. The
-// `N passed, M failed` prefix is kept exactly as it was because
-// `scripts/e2e-lanes/break-queue.sh` parses it.
+// `N passed, M failed` prefix is kept exactly as it was because the harness
+// parses it: `wt-break.sh` copies it into each break log, where
+// `classify-break-log.awk` and `check-break-reddened.mjs` read it, and
+// `verify.sh` and `local-sweep.mjs` read it off the run. (It used to say
+// `break-queue.sh`, deleted in `d840b55`.)
 console.log(
   `\n\x1b[1m${results.length - failed.length - skipped.length} passed, ${failed.length} failed` +
     `${skipped.length ? `, ${skipped.length} skipped` : ''}\x1b[0m`,
@@ -1080,7 +1094,7 @@ console.log(
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
  * branch that silently skipped becomes a shorter run that still reports zero
- * failures and exits 0. Ninety-three checks walking the whole product is a lot
+ * failures and exits 0. Ninety-four checks walking the whole product is a lot
  * of places to stop quietly. Observed from a green run, not guessed — the
  * ninth and last suite in this directory to get one.
  *
@@ -1090,8 +1104,13 @@ console.log(
  * dock can be opened" was asserted only on the branch where there was no dock
  * to open. It reports eight on every path now, one of which is new. See the
  * block itself: this constant moving is the visible half of that fix.
+ *
+ * 93 → 94 WHEN PUTTING THE INBOX BACK BECAME A CHECK. A2.6b's restore of the
+ * admin's inbox settings, which every later suite reads, ended in
+ * `.catch(() => {})` on a client that never throws on a status, so a refused
+ * one was invisible. It is counted now, on every path.
  */
-const EXPECTED_CHECKS = 93
+const EXPECTED_CHECKS = 94
 if (results.length !== EXPECTED_CHECKS) {
   console.log(
     `\n\x1b[31m✗ ${results.length} of ${EXPECTED_CHECKS} checks ran\x1b[0m — this run stopped ` +

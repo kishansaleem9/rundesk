@@ -29,12 +29,14 @@
  *      and must leave no row — which is checked by counting, not by reading the
  *      refusal.
  *
- *   4. THE MODEL-FACING HALF 503s HONESTLY. There is no provider key in this
- *      environment. `/ai/command` and `/ai/chat` therefore refuse, and that is
- *      a real failure path rather than something to work around: it is checked
- *      here so the difference between "no key" and "no tools" stays visible.
- *      The tool layer is exercised through `/ai/command/execute`, which makes
- *      no model call at all — the same door the five task tools already use.
+ *   4. THE MODEL-FACING HALF ANSWERS WHAT `/ai/status` SAYS. With no model
+ *      configured — CI, and every lane `RUNDESK_LANE_MODEL` does not name —
+ *      `/ai/command` and `/ai/chat` refuse with 503, and that is a real failure
+ *      path rather than something to work around; where a model answers they
+ *      must not refuse. Checked here so the difference between "no key" and
+ *      "no tools" stays visible. The tool layer is exercised through
+ *      `/ai/command/execute`, which makes no model call at all — the same door
+ *      the five task tools already use — so it runs the same either way.
  *
  * ITS OWN FIXTURES. Everything is created inside one space this run makes,
  * named with a unique tag, and every count is scoped to that space. The
@@ -342,9 +344,10 @@ try {
    * provider key". True of every lane, because no lane had a model — and the
    * third check said so itself: "if this says available:true, the two 503s
    * above mean something else entirely and this suite is measuring the wrong
-   * thing." That trap was right, and `lane-env.sh` can now spring it:
-   * `RUNDESK_LANE_MODEL=1` points the API at `model-stub.mjs` and the two 503s
-   * become 200s.
+   * thing." That trap was right, and `lane-env.sh` can now spring it: on a
+   * lane `RUNDESK_LANE_MODEL` names (`all`, or a list of lane numbers) the API
+   * talks to `model-stub.mjs`, and the two endpoints answer instead of
+   * refusing.
    *
    * So the claim is rewritten as the one that was always meant: THE THREE
    * AGREE. `/ai/status` says whether a model is configured, and `/ai/command`

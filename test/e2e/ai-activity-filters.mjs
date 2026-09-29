@@ -20,12 +20,15 @@
  *      column AND the write, so the filter has something to discriminate.
  *
  * A REAL FAILURE IS FORCED, not simulated. `POST /ai/task/generate` against an
- * environment with no `ANTHROPIC_API_KEY` is a genuine failed run — it is the
- * most common AI failure this product has, and until 0150 it left no trace
- * anywhere. The suite checks the 503 explicitly (the fixture's `apiClient`
- * NEVER THROWS, so a `.catch` on it would be inert and a failed call would read
- * as success), then proves exactly one new failed row appeared and that the two
- * status filters put it on opposite sides.
+ * API with no model configured — CI, and every lane `RUNDESK_LANE_MODEL` does
+ * not name — is a genuine failed run: it is the most common AI failure this
+ * product has, and until 0150 it left no trace anywhere. The suite checks the
+ * 503 explicitly (the fixture's `apiClient` NEVER THROWS, so a `.catch` on it
+ * would be inert and a failed call would read as success), then proves exactly
+ * one new failed row appeared and that the two status filters put it on
+ * opposite sides. So this suite needs a lane WITHOUT a model: where one
+ * answers, the request succeeds, the 503 check says so, and the failed-row
+ * checks after it have nothing to count (`lane-env.sh`).
  *
  * ITS OWN FIXTURES: the failed row is identified by DELTA against a set of ids
  * read moments before, and the succeeded row carries a feature name unique to
@@ -119,9 +122,9 @@ try {
   const failedBefore = idsOf(before)
 
   /*
-   * A genuine failure. No API key is configured in a test environment, so this
-   * is the product's real "AI features are not configured" path — the one that
-   * used to 503 and record nothing at all. The status is checked EXPLICITLY:
+   * A genuine failure, where no model is configured: the product's real "AI
+   * features are not configured" path — the one that used to 503 and record
+   * nothing at all. The status is checked EXPLICITLY:
    * `apiClient` returns `{status, data, error}` and never throws, so a `.catch`
    * here would be inert and a 200 would sail through as if it had failed.
    */

@@ -121,21 +121,29 @@ lane_store_up () {
 # exactly as `R2_ENDPOINT` needed none. What was missing was never a key; it was
 # something to answer.
 #
-# GATED ON `RUNDESK_LANE_MODEL=1`, DELIBERATELY, AND THIS IS THE WHOLE POINT.
-# FOUR suites assert the model refusal — 503 and the words "not configured" —
-# and every one flips the day a lane can answer:
+# GATED ON `RUNDESK_LANE_MODEL`, WHICH NAMES THE LANES THAT GET ONE — `all`, or
+# a list of lane numbers, and unset is none (`lane_has_model`, below) —
+# DELIBERATELY, AND THIS IS THE WHOLE POINT. Counted on 23 September, FOUR
+# suites asserted the model refusal — 503 and the words "not configured" — and
+# every one would have flipped the day a lane could answer:
 #
 #     ai-create-containers   5 assertions
 #     create-menu-ai         7
 #     task-ai-bar            7
 #     ai-answer-rendering    2
 #
-# That is 21, COUNTED INSIDE `chk(` CALLS rather than grepped for. A grep over
+# That was 21, COUNTED INSIDE `chk(` CALLS rather than grepped for. A grep over
 # whole files says six suites, because `ai-assign` and `clip-created-card` each
 # carry a header sentence about the missing key and assert nothing about it —
 # `clip-created-card`'s mentions are all about STORAGE. Overstating the cost of
 # this work in the one comment somebody will read before starting it would be
 # the same habit this audit spent a night finding in its own ledger.
+#
+# AND THE COUNT MISSED ONE. `ai-activity-filters` forces its failed run by
+# asking for a task with no model and asserts the 503 without the words
+# (`forced.status === 503`); its status checks count that failure. Two of the
+# four have since been re-aimed (below), so THREE suites stand on the refusal
+# today: `create-menu-ai`, `task-ai-bar` and `ai-activity-filters`.
 #
 # It is the defect class found twice in one night — a green that depended on
 # the environment being broken — except known in advance.
@@ -162,20 +170,23 @@ lane_store_up () {
 # AVAILABILITY IS PROCESS-LEVEL — one key per API — so a suite cannot choose.
 # Turning this on for every lane would not break those two so much as EMPTY
 # them. What they need is a lane without a model, which is what the per-lane
-# shape of this flag already allows: `RUNDESK_LANE_MODEL=1` is read per lane at
+# shape of this flag already allows: `RUNDESK_LANE_MODEL` is read per lane at
 # launch, so a fleet can run some lanes with a model and some without, and each
 # suite goes to the lane whose configuration is its subject. Half of that is
 # wired: a break set whose patch says it needs a model gets one, and the
 # runner's stamp re-syncs a lane whose model differs from what the set asked
 # for (`patches_needing_model`, `lane_serving_id`, below). Routing a SUITE by
-# its need — the dispatcher sending `create-menu-ai` only to a lane without one
-# — is NOT done (`harness/model-lane-routing-unbuilt`).
+# its need — the dispatcher sending `create-menu-ai`, `task-ai-bar` and
+# `ai-activity-filters` only to a lane without one — is NOT done
+# (`harness/model-lane-routing-unbuilt`).
 #
 # The two stale header sentences on `ai-assign` and `clip-created-card` were
 # fixed at the same time; neither is a check, so neither blocks anything.
 #
-# Turning this on for every lane before that work is done would empty two green
-# suites and redden nothing, which is worse than a gate that fails loudly.
+# Turning this on for every lane before that work is done would take the
+# refusal away from the three suites that stand on it, and their checks would
+# fail over the lane rather than the product — which is worse than a gate that
+# fails loudly, because it reads as a regression.
 #
 # Lane k gets port 92<k>, beside storage on 91<k>.
 lane_model_port () { echo $((9200 + $1)); }
@@ -473,6 +484,32 @@ break_locks_drop () {
 # foreign key `…_fk` where a migration's `REFERENCES` makes `…_fkey`, and the
 # same key under two names is not drift. What it constrains is.
 SCHEMA_REF_DB=rundesk_schema_ref
+# ONE WRITER OR ANY NUMBER OF READERS PER LANE BUNDLE (`commit-log/log-d92d58f-1`).
+# `verify.sh` refused a STALE bundle and nothing refused two writers: two
+# `refresh-dists.sh` for one lane at once each emptied the other's output, and a
+# rebuild could empty `/tmp/claude-0/dist-<k>` under a suite reading it. A run
+# holds a shared `flock` on `<dist>.lock` for as long as it runs; a build takes
+# it exclusive, so it waits for the runs and they wait for it. The kernel drops
+# a lock when its holder dies, so nothing is left held after a kill.
+#
+#   dist_lock_shared    <dist> [seconds]  hold it shared on fd DIST_LOCK_FD
+#   dist_lock_exclusive <dist> [seconds]  hold it exclusive on fd DIST_LOCK_FD
+#   dist_lock_release                     let it go
+#
+# Each waits up to [seconds] (default 1200) and answers 1 if it could not get it.
+dist_lock_take () {
+  local mode=$1 dist=$2 wait=${3:-1200}
+  exec {DIST_LOCK_FD}>"$dist.lock" || return 1
+  flock "$mode" -w "$wait" "$DIST_LOCK_FD"
+}
+dist_lock_shared () { dist_lock_take -s "$@"; }
+dist_lock_exclusive () { dist_lock_take -x "$@"; }
+dist_lock_release () {
+  [ -n "${DIST_LOCK_FD:-}" ] || return 0
+  flock -u "$DIST_LOCK_FD"
+  exec {DIST_LOCK_FD}>&-
+  DIST_LOCK_FD=
+}
 # A PUSH THAT STOPPED IS NOT A PUSH (`found-29-sep/lane-push-errors-read-as-synced`).
 # drizzle-kit 0.31 exits 0 when it stops on a question no pipe can answer
 # ("Interactive prompts require a TTY terminal"), having applied nothing, so

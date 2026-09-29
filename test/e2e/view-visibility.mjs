@@ -293,7 +293,17 @@ try {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
 } finally {
-  for (const fn of cleanup.reverse()) await fn().catch(() => {})
+  // Each is a DELETE: gone, or already gone (404), is fine; anything else is
+  // left behind, and said above the totals by the call that did not do it.
+  for (const fn of cleanup.reverse()) {
+    const what = String(fn).replace(/^\(\) => /, '')
+    try {
+      const res = await fn()
+      if (![200, 204, 404].includes(res.status)) console.log(`  cleanup left behind: ${what} answered ${res.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: ${what} got no answer (${err?.message ?? err})`)
+    }
+  }
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {

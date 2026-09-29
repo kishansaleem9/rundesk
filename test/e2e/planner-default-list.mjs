@@ -30,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 6
+const EXPECTED_CHECKS = 7
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -66,7 +66,7 @@ try {
   token = auth.accessToken
   const me = auth.user.id
   call = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
+    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${token}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
     return { status: res.status, data: (await res.json().catch(() => null))?.data }
   }
   const make = async (route, body, what) => {
@@ -184,7 +184,7 @@ try {
   const joined = await call(`/workspaces/${WS}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
   if (joined.status >= 300) throw new Error(`could not add the member: ${joined.status}`)
   const asMember = async (route, init = {}) => {
-    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${member.accessToken}`, 'content-type': 'application/json' }, body: init.body ? JSON.stringify(init.body) : undefined })
+    const res = await fetch(`${API}${route}`, { ...init, headers: { authorization: `Bearer ${member.accessToken}`, ...(init.body ? { 'content-type': 'application/json' } : {}) }, body: init.body ? JSON.stringify(init.body) : undefined })
     return { status: res.status, data: (await res.json().catch(() => null))?.data }
   }
   await asMember(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: PRIVATE_LIST } })
@@ -204,13 +204,33 @@ try {
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(e?.message ?? e).split('\n')[0]}`)
 } finally {
   await browser?.close().catch(() => {})
-  stack.close()
-  // The admin's own planner settings: left with no list chosen.
+  // The admin's own planner settings: left with no list chosen. They are the
+  // person's, not the workspace's, so every later suite reads them and a
+  // refused restore is this run's failure. With no client nothing was chosen.
+  let cleared = null
   if (WS && call) {
-    await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: null } }).catch(() => {})
-    await call(`/workspaces/${WS}`, { method: 'DELETE' }).catch(() => {})
-    if (WS2) await call(`/workspaces/${WS2}`, { method: 'DELETE' }).catch(() => {})
+    try {
+      cleared = await call(`/planner/${WS}/settings`, { method: 'PATCH', body: { defaultListId: null } })
+    } catch (err) {
+      cleared = { status: `no answer (${err?.message ?? err})` }
+    }
   }
+  chk(
+    !cleared || cleared.status < 300,
+    'and the admin’s planner is left with no default list for the suites after this one',
+    `PATCH /planner/${WS}/settings answered ${cleared?.status}`,
+  )
+  for (const ws of call ? [WS, WS2] : []) {
+    if (!ws) continue
+    try {
+      const gone = await call(`/workspaces/${ws}`, { method: 'DELETE' })
+      if (![200, 204, 404].includes(gone.status)) console.log(`  cleanup left behind: DELETE /workspaces/${ws} answered ${gone.status}`)
+    } catch (err) {
+      console.log(`  cleanup left behind: DELETE /workspaces/${ws} got no answer (${err?.message ?? err})`)
+    }
+  }
+  // Only now: the calls above go through this proxy, and a closed one refuses them.
+  stack.close()
   await sql?.end?.({ timeout: 5 })
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)

@@ -336,9 +336,17 @@ try {
   failed += 1
   console.error('\n\x1b[31mSUITE ERROR\x1b[0m', err)
 } finally {
+  // Gone, or already gone (404), is fine; any other answer, or none, leaves a
+  // priority behind, and is said here above the totals.
   if (A && workspaceId) {
-    for (const p of (await myPriorities()).data ?? []) {
-      await A(`/workspaces/${workspaceId}/priorities/${p.id}`, { method: 'DELETE' }).catch(() => {})
+    try {
+      for (const p of (await myPriorities()).data ?? []) {
+        const route = `/workspaces/${workspaceId}/priorities/${p.id}`
+        const res = await A(route, { method: 'DELETE' })
+        if (![200, 204, 404].includes(res.status)) console.log(`  cleanup left behind: DELETE ${route} answered ${res.status}`)
+      }
+    } catch (err) {
+      console.log(`  cleanup left behind: this run's priorities got no answer (${err?.message ?? err})`)
     }
   }
   if (sql) {

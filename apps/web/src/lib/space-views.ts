@@ -59,8 +59,13 @@ import type { TranslationKey } from './i18n'
  * Deliberately NOT the frame's eleven. A view that can be ticked in the wizard
  * and that no surface draws is the mirror defect — a stored value no reader
  * honours — and it is worse than an absent tick-box, because the database then
- * holds evidence for a view that does not exist. The five Rundesk does not
- * have (Map, Activity, Mind Map, Timeline, Workload) are not offered.
+ * holds evidence for a view that does not exist. The five no list can draw as
+ * a view (Map, Activity, Mind Map, Timeline, Workload) are not offered. Three
+ * of them exist as WORKSPACE pages — `/app/:workspaceId/workload`, `/timeline`
+ * and `/mindmaps` — and none of the three is a tab a list renders, so the tick
+ * would still be a value no reader honours; Map and Activity exist in neither
+ * form. Offering one is building its list view, not adding its key here
+ * (`docs/clickup-research.md`, clickup-other, items 2a to 2e).
  */
 export const SPACE_VIEW_KEYS = ['list', 'board', 'table', 'calendar', 'gantt', 'team'] as const
 export type SpaceViewKey = (typeof SPACE_VIEW_KEYS)[number]

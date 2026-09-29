@@ -29,12 +29,13 @@
  *      exactly that bug.
  *
  * ITS OWN FIXTURES. `ai_usage` rows are written by the AI service as a side
- * effect of calling the model, and a test environment has no API key, so no
- * endpoint can create one — hence the direct insert, the same reasoning as
- * `ai-value.mjs`. Every row this suite makes carries a unique `model` tag so
- * exactly those can be removed again, and every claim is a DELTA against a
- * baseline read moments earlier, so the shared database's other rows are
- * irrelevant to it.
+ * effect of calling the model. With no model configured — CI, and every lane
+ * `RUNDESK_LANE_MODEL` does not name — no endpoint can create one, and this
+ * suite runs in both configurations, so it asks none to. Hence the direct
+ * insert, the same reasoning as `ai-value.mjs`. Every row this suite makes
+ * carries a unique `model` tag so exactly those can be removed again, and
+ * every claim is a DELTA against a baseline read moments earlier, so the
+ * shared database's other rows are irrelevant to it.
  *
  *   node test/e2e/ai-action-categories.mjs --api 3011 --dist apps/web/dist
  */

@@ -178,9 +178,19 @@ async function signIn(page, origin, who) {
 }
 
 const done = async (browser, stack, cleanup) => {
-  await cleanup?.().catch(() => {})
+  // The cleanup returns [route, answer] for each channel it archives; one that
+  // is refused stays behind, and is said above the totals.
+  let leftBehind
+  try {
+    leftBehind = ((await cleanup?.()) ?? [])
+      .filter(([, res]) => ![200, 201, 204, 404].includes(res.status))
+      .map(([route, res]) => `POST ${route} answered ${res.status}`)
+  } catch (err) {
+    leftBehind = [`archiving this run's channels got no answer (${err?.message ?? err})`]
+  }
   await browser?.close().catch(() => {})
   stack?.close()
+  for (const line of leftBehind) console.log(`  cleanup left behind: ${line}`)
   const ran = passed + failed
   console.log(`\n${passed} passed, ${failed} failed`)
   if (ran !== EXPECTED_CHECKS) {
@@ -231,7 +241,8 @@ try {
   const channelId = created.data?.id
   if (!channelId) throw new Error(`could not create a channel: ${JSON.stringify(created).slice(0, 200)}`)
   await A(`/chat/channels/${channelId}/members`, { method: 'POST', body: { userIds: [other.user.id] } })
-  cleanup = () => A(`/chat/channels/${channelId}/archive`, { method: 'POST' })
+  const archive = async (id) => [`/chat/channels/${id}/archive`, await A(`/chat/channels/${id}/archive`, { method: 'POST' })]
+  cleanup = async () => [await archive(channelId)]
 
   const origin = REMOTE ? BASE : await (async () => {
     stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
@@ -774,8 +785,9 @@ try {
   }
   const priorCleanup = cleanup
   cleanup = async () => {
-    await priorCleanup?.()
-    for (const id of seededChannels) await A(`/chat/channels/${id}/archive`, { method: 'POST' })
+    const answers = (await priorCleanup?.()) ?? []
+    for (const id of seededChannels) answers.push(await archive(id))
+    return answers
   }
   check(seededChannels.length === 12, 'twelve conversations to choose between', `${seededChannels.length} made`)
 

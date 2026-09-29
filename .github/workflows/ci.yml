@@ -290,6 +290,16 @@ jobs:
       - name: A check of shown text reads what is drawn, and that rule bites
         run: node scripts/check-suite-text-reads.mjs --mutate
 
+      # An API client never throws on a status, so a .catch(() => {}) on its
+      # call hides every refusal (suite-hygiene/inert-catches, resume-3).
+      - name: No silent catch on an API client, and that gate bites
+        run: node scripts/check-suite-api-catches.mjs --mutate
+
+      # process.exit() loses the end of a suite's output on a pipe; the count
+      # may only fall (log-30183c3-1).
+      - name: No new process.exit in a suite
+        run: node scripts/check-suite-process-exit.mjs --mutate
+
       # Rule six of that checker, which is a gate over a tree with zero sites
       # left in it — and zero is the number this audit has learnt not to take on
       # trust. The rule turns on two things that can be wrong without looking
@@ -407,6 +417,11 @@ jobs:
       # nothing; the lane scripts read its log (lane-push-errors-read-as-synced).
       - name: A push that stops is not read as synced
         run: bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate
+
+      # One writer or any number of readers per lane web bundle: a run holds it
+      # shared, a build exclusive (log-d92d58f-1).
+      - name: One writer or many readers per lane bundle
+        run: bash scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate
 
       # The unit claims found their test files by walking the repository, and
       # took an agent worktree's unpatched copy under .claude/ for this tree's
@@ -555,7 +570,7 @@ jobs:
     # and a cold one.
     #
     # **THE FIX IS TO SPLIT THIS JOB**, and it is deliberately not being done
-    # here. Splitting means duplicating the Postgres + Meilisearch + build
+    # here. Splitting means duplicating the Postgres + object store + build
     # setup into a second job and dividing 107 steps between them, and CI
     # cannot run until October, so it could not be validated — a restructure
     # that is wrong is worse on the first green day than a job that is merely
@@ -769,9 +784,11 @@ jobs:
         if: '!cancelled()'
         run: node test/e2e/person-panel.mjs --api 3011 --dist apps/web/dist
 
-      # Every addressability fix driven in one session against a real API, a
-      # real Postgres and a real Meilisearch — the thing the per-fix suites
-      # cannot catch is one of them breaking another.
+      # Every addressability fix driven in one session against a real API and a
+      # real Postgres — the thing the per-fix suites cannot catch is one of them
+      # breaking another. Not a real Meilisearch: this job starts none and sets
+      # no MEILISEARCH_URL, so search here takes SearchService's Postgres
+      # fallback and the Meilisearch path is not measured.
       - name: Addressability, end to end
         if: '!cancelled()'
         run: node test/e2e/addressability-live.mjs --api 3011 --dist apps/web/dist

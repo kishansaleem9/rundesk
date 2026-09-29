@@ -25,10 +25,14 @@ import { readableTask, type ReadActor } from '../../common/permissions/read-acce
  * event on the workspace's connected calendar. Archiving / clearing the
  * dueDate deletes the event.
  *
- * Inbound: a manual or scheduled `pullEvents` call fetches recent events
- * from the calendar and either updates the linked task or creates a new
- * task in the workspace's designated inbox list (settable on the
- * connection metadata as `inboxListId`).
+ * Inbound: `pullEvents` fetches recent events from the calendar and either
+ * updates the linked task or creates a new task in the workspace's designated
+ * inbox list (settable on the connection metadata as `inboxListId`). It runs
+ * only when asked — `POST /workspaces/:ws/calendar-sync/:provider/pull`, which
+ * the calendar-sync wizard calls — and nothing schedules it: this module has
+ * no `@Cron` or `@Interval`. This said "a manual or scheduled `pullEvents`
+ * call"; the planner's "Sync now" and a scheduled pull are the open row in
+ * `docs/video2-reaudit.md` §5 ("Sync now" on the planner).
  *
  * iCal: every user has a personal `/ical/:token.ics` feed that any
  * calendar client (Outlook, Apple Calendar, Google) can subscribe to.

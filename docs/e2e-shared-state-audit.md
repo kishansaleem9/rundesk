@@ -102,7 +102,9 @@ enumerates them).
 
 ---
 
-## 3. 292 inert error handlers
+## 3. Inert error handlers — 158 on API clients, now none
+
+*Corrected 29 September* (`suite-hygiene/inert-catches`, `resume-defects/resume-3`): the 292 below counted every `.catch(() => {})`, most of them on Playwright calls, which do throw. Measured with a parser on 29 September, the 239 suites held 1,544 `.catch(() => {})`: 158 on an API client, in 133 suites (136 on a client call, 11 on a closure or loop that calls one, 11 on a raw `fetch` to the API), and the rest on Playwright, SQL and browser teardown. The 158 are now status checks: a cleanup `DELETE` accepts 200, 204 or 404 and prints anything else, and a restore of shared state is a counted check. `scripts/check-suite-api-catches.mjs` refuses a new one.
 
 `apiClient` (`test/e2e/lib/fixture.mjs:28-46`) **never throws**:
 
@@ -115,8 +117,8 @@ return { status: res.status, data: json?.data, error: json?.error }
 A 500, a 403, a 404 — every one of them returns normally. The only way to know
 a call failed is to look at `status`.
 
-Which makes this pattern, which appears **292 times across 63 of the 66
-suites**, do nothing at all:
+Which makes this pattern — which the first count put at 292 across 63 of the
+66 suites, counting every such catch — do nothing at all:
 
 ```js
 await A(`/workspaces/${id}/priorities/${p.id}`, { method: 'DELETE' }).catch(() => {})
@@ -129,7 +131,7 @@ reader from checking whether it *did*.
 Two consequences, both real:
 
 - **Cleanup that silently does not clean up.** A teardown `DELETE` that 404s
-  leaves the row behind, and the next run inherits it. Several of the 292 are
+  leaves the row behind, and the next run inherits it. Many of the 158 were
   in `finally` blocks.
 - **Setup that silently does not set up.** A fixture `POST` that fails leaves
   the suite asserting against a world it never built — and the assertion that
@@ -191,7 +193,7 @@ block.
 | 1 | `workspaces[0]` instead of `pickWorkspace` | 41 suites | mechanical |
 | 2 | 3 suites leak a workspace per run | 3 suites | small |
 | 3 | shared admin's locale mutated, restored only in `finally` | 1 suite, 16 victims | small |
-| 4 | inert `.catch(() => {})` on a client that never throws | 292 sites, 63 suites | mechanical, but needs judgement per site |
+| 4 | inert `.catch(() => {})` on a client that never throws | 158 sites, 133 suites (the first count, 292, counted every catch) — fixed 29 September | mechanical, but needs judgement per site |
 | 5 | assertions not narrowed to the suite's own tag | varies | per suite |
 
 None of these is a product defect. All of them are reasons a product defect

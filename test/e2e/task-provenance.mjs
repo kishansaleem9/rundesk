@@ -30,7 +30,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 8
+const EXPECTED_CHECKS = 9
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
@@ -165,12 +165,18 @@ try {
     `submit ${second.status}; task type ${JSON.stringify(afterTask?.taskTypeId)} vs ${JSON.stringify(formType?.id)}`,
   )
 
-  // Put the name back — this runs against a real workspace.
-  if (formType?.id) {
-    await A(`/workspaces/${workspaceId}/task-types/${formType.id}`, {
+  // Put the name back — this runs against a real workspace, so a refusal is
+  // this run's failure. With no type there was nothing renamed to put back.
+  const putBack = formType?.id
+    ? await A(`/workspaces/${workspaceId}/task-types/${formType.id}`, {
       method: 'PATCH', body: { name: formType.name },
-    }).catch(() => {})
-  }
+    })
+    : null
+  chk(
+    !putBack || putBack.status < 300,
+    'and the type gets its own name back',
+    `PATCH task-type returned ${putBack?.status}: ${JSON.stringify(putBack?.error)} — the workspace keeps the renamed type`,
+  )
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)
