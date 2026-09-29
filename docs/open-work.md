@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 350 items, 40 open, 7 partly fixed, 303 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 41 open, 7 partly fixed, 306 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1584,13 +1584,58 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
 
-### `found-29-sep/innertext-reads-left-for-later` — open (test tooling, small; left by `found-29-sep/innertext-reads-hidden-leaves`)
+### `found-29-sep/priority-readd-answers-a-ticked-off-row` — open (visible bug, small; found closing `ledger-rows/row-850`)
+
+**Adding a task that is on a list but ticked off says it was added, and it stays off the rail**
+
+*Evidence, 29 September:* the unique index on (owner, workspace, task) holds one row, and the insert answers a duplicate with the row that is there. A ticked-off row does not stop the prompt, because a done task may be offered again. So pressing Add answers with the done row. The toast says "Task added to … Priorities." while the task stays off the open rail. The owner's own add behaved the same before `ledger-rows/row-850`, which only inherited it.
+
+*To close:* find out from ClickUp what adding a task already done on a priorities list does, and make the add do that, whether reopening the row or saying it is done. Check it from the prompt and from the route.
+
+### `found-29-sep/priority-added-at-on-hover-only` — open (parity, small; found closing `ledger-rows/row-850`)
+
+**When a colleague added a priority is shown only on hover**
+
+*Evidence, 29 September:* ClickUp's expanded Personal Priorities view has "Added by" and "Added at" columns. The Planner rail and the person panel draw "Added by <name>" and give the time only as the row's `title` attribute, which a touch screen cannot show.
+
+*To close:* draw when a row was added, beside who added it, in the rail and the panel. The time is the row's `createdAt`, in the viewer's locale. Check that it is drawn, not only present.
+
+### `found-29-sep/priority-field-adds-to-nobody-else` — open (feature, small; found closing `ledger-rows/row-850`)
+
+**A task's Priority field cannot add it to somebody's priorities**
+
+*Evidence, 29 September:* ClickUp's Priority field has "Add to Personal Priorities", with a person's avatar to pick. Here the only ways a task reaches a colleague's list are the prompt after assigning and the route. The task menu's Add to › Someone's Priorities is `ledger-rows/row-845`.
+
+*To close:* the Priority field's menu offers the workspace's members (not to a guest), and posts to `POST /workspaces/:ws/people/:userId/priorities`, or to the caller's own list. Check it end to end, with the route's refusals said in words.
+
+### `found-29-sep/standup-check-reads-the-stubs-words` — **closed** (test tooling, small; found by the regression for `ledger-rows/row-850` on lane 7)
+
+**`person-panel`'s check that a model's standup was written from real work read the length of the stub's reply**
+
+*Evidence, 29 September:* with a model configured, "and the sentence was written from real work, not from an empty week" asked for more than 20 characters and no "no recorded task activity". On a lane the reply is the model stub's own sentence, "A stubbed reply.", 16 characters, whatever the product sent. So the check failed on every model lane (59/60), and on none could it pass. A longer stub sentence would have made it pass on an empty week just as well. The check means that the model was handed the person's real rows, which the reply cannot show.
+
+*Closed, 29 September:*
+- The check reads what the model was handed. The lane's stub records every call (`/__control/seen`, as `ai-task-reads` reads it), and the call that wrote the standup has to carry the finished task's title. The sentence is unchanged.
+- Only a deployment elsewhere, whose model records nothing the suite can read, still falls back to the reply.
+- `person-panel` 60/60 on lane 7, where it was 59/60.
+- `person-panel-5` (new) hands the model an empty week while the API still returns the true rows: 59/60, reddening this check, which says the call "did NOT carry" the title. With the old check the same patch was also 59/60, failing on the stub's 16 characters as the true product did, so the two could not be told apart.
+
+### `found-29-sep/innertext-reads-left-for-later` — **closed** (test tooling, small; left by `found-29-sep/innertext-reads-hidden-leaves`)
 
 **15 `innerText` reads in four suites still decide a "shown" check with nothing on the read**
 
 *Evidence, 29 September:* `assign-to-priorities` (4), `doc-import` (3), `person-panel` (4) and `planner-priorities` (4) were being changed by other work while the rest were converted, so they were left. `check-suite-text-reads.mjs` holds each at its count (`LEFT_FOR_LATER`): a new unguarded read there fails the gate, and a conversion has to lower the number with it. The notes of the conversion list each line and the edit that closes it. `ui-sweep`'s ten, left with them, were converted once its fixed waits were (`found-29-sep/ui-sweep-reads-after-fixed-waits`).
 
 *To close:* guard each read as the other 197 were (`.filter({ visible: true })` on the element read), measure each suite before and after, and take the suites out of `LEFT_FOR_LATER`.
+
+*Closed, 29 September,* once the priorities work that had been changing them (`ledger-rows/row-850`) was merged:
+- 18 reads guarded: the 15 held here, and 3 more that the priorities work added to `assign-to-priorities` (the colleague's prompt, and "Added by" in the panel and the rail). Each has `.filter({ visible: true })` on the element read or on the locator handed to `readText`. `planner-priorities`' check that a done priority has left the rail is an absence, so it reads the rail whole and carries the `absence` marker, outside its check's arguments. Every check sentence is as before.
+- `LEFT_FOR_LATER` is empty, and `check-suite-text-reads.mjs` passes with nothing held.
+- After, with the product unchanged: `assign-to-priorities` 22/22 and `person-panel` 60/60 on lane 7, `doc-import` 16/16 and `planner-priorities` 10/10 on lane 5.
+- Three leaves hidden (`display: none`) in scratch builds, each suite run twice against it: once as it is, once with only that read's filter taken off.
+  - The Planner's priority counter: 22/22 unfiltered, and 21/22 filtered, reddening "with the counter the frame shows".
+  - The person panel's clock: 60/60 unfiltered, and 59/60 filtered, reddening "and their LOCAL TIME as a clock, not a zone name".
+  - The import panel's accepted-formats line: 16/16 unfiltered, and 15/16 filtered, reddening "the panel names the formats it accepts".
 
 ### `found-29-sep/video-regression-finds-the-composer-by-its-old-words` — **closed** (test tooling, small; found by the `innerText` conversion's runs on lane 6 and the priorities work's on lane 7)
 
@@ -1602,6 +1647,14 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The composer is found by its own `data-testid="ai-composer-input"`, and waited for until it is shown, instead of a fixed 1.5 s.
 - Before 87/94, after 94/94, on lane 1.
 - `vr-5` (the composer disabled whatever `/ai/status` says) is new: 87/94 with a scratch build, reddening the check it names; the six after it are skipped by the chain. Nothing claimed that check before. While the chain stopped there, `vr-2` and `vr-3`, which claim checks after it, could only redden by the skip; their runs come with this commit.
+- The break set at `f179b3d`, lane 1, against a 94/94 baseline:
+  - `vr-1` 91/94 (the inbox view's order and grouping, read back from the server);
+  - `vr-2` 92/94 (no trace survived the answer);
+  - `vr-3` 93/94 (the chip did not send its suggestion);
+  - `vr-4` 85/94 (no dock handle, and the chain's skips after it);
+  - `vr-5` 87/94 (the composer stayed disabled).
+
+  Each reddens what it names. `vr-2` and `vr-3` now redden their own checks, where before they reached them only through the chain's skip.
 
 ### `found-29-sep/ui-sweep-reads-after-fixed-waits` — **closed** (test tooling, medium; found by the break run for `6a31a5f`)
 
@@ -1627,7 +1680,13 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
   - The converted file was 107/107 in all 13 runs, under the same loads.
   - Under the confined load: §1b 13.7 → 5.9 s, §9 24.2 → 15.3 s, §12 32.3 → 23.2 s. §15 is slower (102.8 → 168.2 s), because it now reads a finished page, not one 1.9 s after its address changed.
 - On the integrated tree: 107/107 on lane 5, in 90 s.
-- The `ui-sweep` break set runs on this commit; its verdicts come with the next.
+- The `ui-sweep` break set at `f179b3d`, lane 2, against a 107/107 baseline:
+  - `us-2` 106 (the buckets did not change on regrouping);
+  - `us-3` 106 (share levels listed without their meaning);
+  - `us-4` 105 (the field search narrowed nothing);
+  - `us-5` 106 (the star did not land on its own type).
+
+  Each reddens what it names. `us-1` names its check in another form ("Reddens: ui-sweep, the `status` iteration of …"), so the plan built from the headers missed it; it runs with the next set.
 
 ### `found-29-sep/ui-sweep-teardown-skips-the-press` — **closed** (test tooling, small; found by the break run for `15e2681`)
 
@@ -1845,6 +1904,7 @@ In the lanes' Chromium a hidden leaf (`hidden`, `display: none`) answers `innerT
 - `check-suite-text-reads.mjs --mutate` (preflight, and CI's verify job) reads `innerText`, `allInnerTexts`, the `.innerText` property and `readText(locator)` with the same three outs as `textContent`. The visibility guard has to be on the element read, not an ancestor (`<option>`s excepted, guarded on their select). For `innerText` alone, the page's body and the same element asked first (`isVisible()`, or a `waitFor` for it shown, gating the read) count as guards too. 42 planted cases; 28 of 28 mutations bite.
 - 197 reads guarded in 84 suites: `.filter({ visible: true })` on the element read or on the locator handed to `readText`, and on the `<select>` for the six option reads. 7 of them got the catch a hidden element now needs. 12 reads carry a marker: the 10 absence reads, and the two reads `ai-answer-rendering`'s helper used to make unfiltered, its answer (`absence`) and a card's label (`key`). `a39-dm-tabs`'s `main, body` is written as the body it always was, and `loading-states` names `checkVisibility()` beside its box check. Every check sentence is byte-for-byte as before: 1802 check calls in 86 suites.
 - `task-menu`'s print checks read under print media: the `print()` stub leaves the dialog open; the suite reads the copy and its id filtered to visible under `emulateMedia({ media: 'print' })`, restores screen media, then fires `afterprint` itself.
+- Break sets for the 87 changed suites run after the commit, two lanes at a time (642 patches). The first, `task-menu` at `f179b3d` against 37/37, gave 33, 35, 34 and 36 of 37 for `task-menu-1..4`, each reddening what it names.
 - Lane 6, the git original and then this tree: 85 of the 86 changed suites green both times with their full counts (1763 checks). `video-regression` is 87/94 both times with the same seven: its G13-10 chain looks for the composer by "Ask Rundesk", a placeholder `2c78436` retired.
 - Six leaves hidden in scratch builds: `task-menu`'s printed id, `activity-rail`'s created chip, `checklists`' open count, `planner-grid`'s backlog rows, `bookmarks`' list, and an integration's error title. Each check stayed green on the git original with its leaf hidden and reddened after the change.
 - Left for later: 25 reads in `assign-to-priorities` (4), `doc-import` (3), `person-panel` (4), `planner-priorities` (4) and `ui-sweep` (10), which other work was changing. The gate holds each suite at that count (`LEFT_FOR_LATER`): a new unguarded read fails, and a conversion has to bring the number down with it.
@@ -5418,7 +5478,7 @@ FAILs. video-regression 94/94.
 - Regression: shared with row 743's, 19/19.
 - In main after the merge: shared with row 743's.
 
-### `ledger-rows/row-850` — open, small
+### `ledger-rows/row-850` — **closed**, small
 
 **Add to a colleague's priorities — refused on purpose; the frame's prompt names the assignee, so ClickUp research should settle it**
 
@@ -5432,6 +5492,25 @@ FAILs. video-regression 94/94.
 - My Settings has "Ask to add task to priorities after assigning: Show a prompt asking if you'd like to add the task to the assigned member's priorities."
 - The expanded view shows who added each task and when ("Added by", "Added at").
 - A colleague's priorities are shown on their profile and in Teams Hub; a task the viewer cannot open reads "Private task".
+
+*Closed, 29 September.* ClickUp settles it, so the refusal is gone. `POST /workspaces/:ws/people/:userId/priorities` adds a task to a colleague's list when:
+- the caller is a member and not a guest (403);
+- the colleague is a member (404);
+- the body is a task, not a typed line (400);
+- both of them can open the task, asked of each by `readableTask`: 404 for the caller, 403 for the colleague. ClickUp's sources do not say whether a task the colleague cannot open may be added, so the safe rule is taken.
+
+A second add answers with the row that is there. Every row records who added it (`user_priorities.added_by_id`, migration 0167), and the list returns `addedBy`. Ticking, ordering and removing stay the owner's: the one who added a row gets 404.
+
+Assigning a colleague now offers their priorities by name ("Add this task to <name>'s priorities?"). The offer follows the same "Don't ask again", is not made when the task is already open on their list, and is never made to a guest. The toast says whose list the task went on and opens their panel. The Planner rail and the person panel say "Added by" under a row somebody else added. Four locales.
+
+`assign-to-priorities`, 10 checks, now 22. "Assigning a teammate raises no prompt" is replaced by the colleague half:
+- Before: 9/22 on lane 7. The nine kept checks pass. The thirteen new ones fail: there is no prompt, and the route answers 404 "Cannot POST".
+- After: 22/22 on lane 7, in each of four runs.
+- `acp-1..29` are new. The 13 aimed at the suite each redden what they name, against the 22/22 baseline. The 16 unit claims each redden their test: 8 in `people.service.test.ts` (new, 8 tests) and 8 in `use-priorities.test.ts`.
+- `a2p-1`, `a2p-2` and `a2p-5` are re-aimed. `a2p-1`'s teammate prompt now writes onto your own list, and reddens six checks.
+- Regression on lanes 5–7 after the merge: 46 suites, each one that reads priorities, assignees, the Planner or the person panel, and `doc-import`. All 46 green, 1031 checks, among them `person-panel` 60/60 and `video-regression` 94/94 on the model lane.
+
+Found while building it: `found-29-sep/priority-readd-answers-a-ticked-off-row`, `found-29-sep/priority-added-at-on-hover-only` and `found-29-sep/priority-field-adds-to-nobody-else`. The task menu's Add to › Someone's Priorities stays with `ledger-rows/row-845`; the route built here is the one it would call. The agent's note that the prompt could offer a colleague who cannot open the task does not hold: assigning refuses anybody who cannot see the task, judged as an assignee (`assertPersonCanSeeTask`), and the prompt follows only a successful assignment. So it is not recorded as a defect.
 
 So the write takes a person: a member, admin or owner may add a task they can see to anyone's priorities, and the prompt after assigning offers the assignee's. Not settled by the sources: whether a task the colleague cannot open may be added; the safe rule is to refuse it.
 

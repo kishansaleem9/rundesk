@@ -15,19 +15,21 @@
 # it says, which is the harder half to notice.
 #
 # ONE CHECK. The prompt still appears, the chain still completes, and the
-# teammate check below still passes — because that one turns on identity rather
-# than on the mute, and the suite un-mutes before it to make sure the two
-# cannot be confused.
+# colleague half below still passes — the suite un-mutes before it, so what
+# decides there is who was assigned, never the mute.
+#
+# Re-aimed 29 September: the prompt's state now names whose list it offers
+# (`ledger-rows/row-850`), and is closed with `setPriorityPrompt(null)`.
 #
 # Reddens: assign-to-priorities: "after \"Don't ask again\", assigning stops offering"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """                onClick={() => {
                   mutePriorityPrompt()
-                  setPriorityPromptOpen(false)
+                  setPriorityPrompt(null)
                 }}"""
 b = """                onClick={() => {
-                  setPriorityPromptOpen(false)
+                  setPriorityPrompt(null)
                 }}"""
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

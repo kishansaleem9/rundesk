@@ -43,7 +43,8 @@ import { useTranslation } from '../lib/i18n'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
 import { usePersonPanel } from '../store/person-panel'
-import { usePriorities, usePriorityActions } from '../lib/use-priorities'
+import { usePriorities, usePriorityActions, addedByOther } from '../lib/use-priorities'
+import { exactTime } from '../lib/relative-time'
 import { InlineSkeleton } from './loading-skeletons'
 
 type Person = {
@@ -96,15 +97,6 @@ type PersonTask = {
   listName?: string | null
 }
 
-type Priority = {
-  id: string
-  taskId: string | null
-  title: string
-  taskStatus?: string | null
-  position: number
-  doneAt: string | null
-}
-
 /**
  * §G06 [05:46] — "mera TIME ZONE kya chal raha hai".
  *
@@ -142,7 +134,7 @@ function LocalTime({ timezone }: { timezone?: string | null }) {
 
 /** §G06 [05:54] — today's most important tasks, chosen rather than derived. */
 function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId: string; isMe: boolean }) {
-  const { t } = useTranslation()
+  const { t, locale } = useTranslation()
   const qc = useQueryClient()
   const [draft, setDraft] = useState('')
 
@@ -193,8 +185,24 @@ function Priorities({ workspaceId, userId, isMe }: { workspaceId: string; userId
           >
             {p.doneAt && <Check className="h-3 w-3" />}
           </button>
-          <span className={cn('flex-1 text-[13px]', p.doneAt && 'text-muted-foreground line-through')}>
-            {p.title}
+          <span className="min-w-0 flex-1">
+            <span className={cn('block text-[13px]', p.doneAt && 'text-muted-foreground line-through')}>
+              {p.title}
+            </span>
+            {/*
+              `ledger-rows/row-850` — a task a colleague put on this person's
+              list says who, and when on hover: ClickUp's "Added by" and "Added
+              at". What they chose themselves says nothing.
+            */}
+            {addedByOther(p, userId) && (
+              <span
+                data-testid={`priority-added-by-${p.id}`}
+                title={p.createdAt ? exactTime(p.createdAt, locale) : undefined}
+                className="block text-[11px] text-muted-foreground"
+              >
+                {t('person.priorityAddedBy', { name: addedByOther(p, userId) ?? '' })}
+              </span>
+            )}
           </span>
           {isMe && (
             <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">

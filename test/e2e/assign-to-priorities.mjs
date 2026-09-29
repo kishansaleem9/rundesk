@@ -12,15 +12,25 @@
  *
  * Rundesk had none of the four. Assigning wrote an assignee and stopped.
  *
- * WHY THE PROMPT ONLY APPEARS FOR YOURSELF. The frame's prompt names the
+ * AND FOR A COLLEAGUE (`ledger-rows/row-850`). The frame's prompt names the
  * assignee ("…to Hamda Tahir's priorities?") and the toast that follows says
- * "your Priorities" — she was assigning to herself. Priorities are written
- * through `POST /workspaces/:id/priorities`, which deliberately takes no
- * `:userId`; `PrioritiesController` says routing it under `/people/:userId`
- * "would invite a client to pass somebody else's id and expect it to work".
- * Filling a colleague's day is a permission this product has not given, so the
- * prompt does not offer it. That is checked here, not assumed: assigning a
- * teammate must NOT raise the prompt.
+ * "your Priorities" — she was assigning to herself — and this suite first held
+ * the prompt to that: assigning a teammate had to raise nothing, because the
+ * only write took no `:userId` and filling a colleague's day was a permission
+ * the product had not given. ClickUp settles what the frame could not (help
+ * centre, "Personal Priorities", formerly LineUp): "Members, Admins, and
+ * Owners can add tasks to other people's priorities", assigning asks "Add this
+ * task to <assignee>'s priorities?", and the owner's list shows who added each
+ * task. So assigning a teammate offers THEIR priorities, by name, and the
+ * later sections follow that write to the teammate:
+ *
+ *   · read back AS THEM, by id, with who added it — and not on yours;
+ *   · in the panel the toast's link opens, and in their own Planner, "Added
+ *     by" and the assigner's name;
+ *   · held by the server whatever a client sends: a guest is refused (403),
+ *     so is a task the teammate cannot open (403) and somebody who is not in
+ *     the workspace (404); a second add answers with the row that is there;
+ *     and the row is the teammate's — whoever added it cannot take it off.
  *
  * WHAT MAKES THE CHAIN EASY TO FAKE. Each link photographs fine on its own — a
  * prompt that appears, a toast that says a thing happened, a rail with a row in
@@ -43,7 +53,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 10
+const EXPECTED_CHECKS = 22
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -53,6 +63,8 @@ const ME = {
   email: process.env.E2E_EMAIL ?? 'admin@rundesk.internal',
   password: process.env.E2E_PASSWORD ?? 'Admin@123!',
 }
+/** The teammate's, the guest's and the outsider's. */
+const PERSON_PASSWORD = 'Teammate@123!'
 
 let passed = 0
 let failed = 0
@@ -125,18 +137,57 @@ try {
   const [afterMuteTask] = await sql`
     insert into tasks (list_id, title) values (${list.id}, ${`After mute ${TAG}`}) returning id`
 
-  /* A second real person, so "only for yourself" has somebody to not-prompt for. */
-  const mateEmail = `mate-${Date.now()}@rundesk.invalid`
-  const reg = await fetch(`${API}/auth/register`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ email: mateEmail, displayName: `Mate ${TAG}`, password: 'Teammate@123!' }),
-  })
-  if (!reg.ok) throw new Error(`could not register a teammate: ${reg.status}`)
-  await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: mateEmail, role: 'member' } })
+  /*
+   * PEOPLE, EACH WITH A SESSION OF THEIR OWN. `POST /auth/register` answers
+   * with one, so reading as the teammate and being refused as the guest cost
+   * nothing out of the login route's ten a minute (`lib/signin.mjs`).
+   */
+  const register = async (label) => {
+    const email = `${label.toLowerCase()}-${Date.now()}@rundesk.invalid`
+    const res = await fetch(`${API}/auth/register`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email, displayName: `${label} ${TAG}`, password: PERSON_PASSWORD }),
+    })
+    const body = await res.json().catch(() => null)
+    if (!res.ok || !body?.data?.accessToken) throw new Error(`could not register the ${label}: ${res.status}`)
+    return { email, id: body.data.user?.id, as: apiAs(body.data.accessToken) }
+  }
+  const join = async (who, role) => {
+    const added = await A(`/workspaces/${workspaceId}/members`, { method: 'POST', body: { email: who.email, role } })
+    if (added.status >= 300) throw new Error(`could not add ${who.email} as ${role}: ${added.status} ${JSON.stringify(added.error)}`)
+  }
+
+  /* A second real person, whose priorities the colleague half fills. */
+  const mate = await register('Mate')
+  await join(mate, 'member')
+  const mateEmail = mate.email
   const mateId = ((await A(`/workspaces/${workspaceId}/members`)).data ?? [])
     .find((m) => m.email === mateEmail)?.userId
   if (!mateId) throw new Error('the teammate did not join the workspace')
+  const M = mate.as
+  const theirPriorities = () => M(`/workspaces/${workspaceId}/priorities`)
+
+  /*
+   * A GUEST WHO MAY OPEN THE TASK, so the only thing refusing them is being a
+   * guest: the space is shared with them to view (`guest-reach.ts`).
+   */
+  const guest = await register('Guest')
+  await join(guest, 'guest')
+  await sql`insert into space_members (space_id, user_id, role) values (${space.id}, ${guest.id}, 'view')`
+  /* Somebody in no part of this workspace. */
+  const outsider = await register('Outsider')
+  /* A task the assigner may open and the teammate may not: private, the admin's, on nobody. */
+  const [hidden] = await sql`
+    insert into tasks (list_id, title, visibility, created_by_id)
+    values (${list.id}, ${`Hidden from the teammate ${TAG}`}, 'private', ${me.id}) returning id`
+  /*
+   * And one the server's own checks add through the route, so a second add and
+   * a removal stand on a row of their own rather than on the prompt's — a
+   * defect in the prompt is then not counted again down there.
+   */
+  const [routed] = await sql`
+    insert into tasks (list_id, title) values (${list.id}, ${`Added through the route ${TAG}`}) returning id`
 
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
   const page = await ctx.newPage()
@@ -199,7 +250,7 @@ try {
     'nothing was offered — assigning writes an assignee and the chain stops there',
   )
 
-  const promptText = await readText(page.getByTestId('priority-prompt'))
+  const promptText = await readText(page.getByTestId('priority-prompt').filter({ visible: true }))
   chk(
     /priorit/i.test(promptText) &&
       /don.t ask again/i.test(promptText),
@@ -227,7 +278,7 @@ try {
     'a toast confirms it',
     'the write happened silently — the frame shows a confirmation',
   )
-  const toastText = (await readText(toast)).toLowerCase()
+  const toastText = (await readText(toast.filter({ visible: true }))).toLowerCase()
   chk(
     toastText.includes('priorities') && /open priorities/i.test(toastText),
     'and the toast offers to open Priorities',
@@ -272,14 +323,14 @@ try {
     'the task is on your priorities, by id — not a copy of its title',
     `the priorities list held: ${stored.map((p) => `${p.title}(${p.taskId ?? 'no task'})`).join(' | ') || '(empty)'}`,
   )
-  const railText = await readText(page.getByTestId('planner-priorities'))
+  const railText = await readText(page.getByTestId('planner-priorities').filter({ visible: true }))
   chk(
     railText.includes(`Chain subject ${TAG}`),
     'and THAT task is in the Priorities rail',
     `the rail held: ${railText.slice(0, 160)}`,
   )
   chk(
-    /\b1\b/.test(await readText(page.getByTestId('planner-priority-count'))),
+    /\b1\b/.test(await readText(page.getByTestId('planner-priority-count').filter({ visible: true }))),
     'with the counter the frame shows',
     `the counter read "${await readText(page.getByTestId('planner-priority-count'))}"`,
   )
@@ -317,20 +368,179 @@ try {
   await page.evaluate(() => window.localStorage.removeItem('rundesk.priorityPromptOff'))
 
   // -------------------------------------------------------------------------
-  console.log('\n▶ and it does NOT offer to fill a colleague\'s day')
+  console.log('\n▶ assigning a teammate offers THEIR priorities, by name (`ledger-rows/row-850`)')
 
   /*
-   * The API takes no user id on the write, deliberately. A prompt that appeared
-   * here would be offering something the product cannot do, and the person
-   * whose day it claimed to fill would never know.
+   * The prompt is un-muted above, so what decides here is who was assigned.
+   * It used to be checked that nothing appeared; ClickUp's prompt asks about
+   * "the assigned member's priorities", and so does this one.
    */
   await openTask(other.id)
   await (await assignChip(mateId)).click({ timeout: 20_000 })
-  await page.waitForTimeout(1500)
   chk(
-    !(await page.getByTestId('priority-prompt').isVisible().catch(() => false)),
-    'assigning a teammate raises no prompt',
-    'it offered to add the task to someone else\'s priorities — a permission the API does not grant',
+    await waitUntil(
+      () => page.getByTestId('priority-prompt').isVisible().catch(() => false),
+      { timeoutMs: 15_000 },
+    ),
+    'assigning a teammate offers too',
+    'nothing was offered — the colleague half of the chain is still refused',
+  )
+  const theirPrompt = await readText(page.getByTestId('priority-prompt').filter({ visible: true }))
+  chk(
+    theirPrompt.includes(`Mate ${TAG}'s priorities`),
+    'and it names them: "Add this task to <their name>\'s priorities?"',
+    `the prompt read: ${theirPrompt}`,
+  )
+
+  // Bounded and caught, as the first half's press is: what follows reports.
+  await page.getByTestId('priority-prompt-add').click({ timeout: 8000 }).catch(() => {})
+
+  /*
+   * The toast first, while it lives — the first half's reason, again — and
+   * read the moment it shows. Waiting for the RIGHT words instead let a toast
+   * with the wrong ones expire under the wait, and its link then went
+   * unpressed: `acp-4` (the toast says "your") reddened the panel check below
+   * as well as this one on its first run.
+   */
+  const theirToast = page.locator('[data-sonner-toast]').first()
+  const theirToastShown = await waitUntil(() => theirToast.isVisible().catch(() => false), { timeoutMs: 10_000 })
+  const theirToastText = theirToastShown ? await readText(theirToast, { timeoutMs: 2000 }) : ''
+  chk(
+    theirToastText.includes(`Mate ${TAG}`),
+    'the toast says whose priorities it went on',
+    `the toast read: ${theirToastText || '(no toast)'} — "your Priorities" would be a sentence about somebody else`,
+  )
+  // Its link is pressed before the server is polled, for the same reason.
+  await theirToast.getByRole('button').first().click({ timeout: 8000 }).catch(() => {})
+
+  let theirs = []
+  chk(
+    await waitUntil(async () => {
+      theirs = (await theirPriorities()).data ?? []
+      return theirs.some((p) => p.taskId === other.id)
+    }, { timeoutMs: 15_000 }),
+    'the task is on THEIR priorities, read back as them, by id',
+    `their list held: ${theirs.map((p) => `${p.title}(${p.taskId ?? 'no task'})`).join(' | ') || '(empty)'}`,
+  )
+  const theirEntry = theirs.find((p) => p.taskId === other.id)
+  chk(
+    theirEntry?.addedBy?.id === me.id,
+    'and it says who added it: the one who assigned it',
+    `the entry's addedBy read ${JSON.stringify(theirEntry?.addedBy ?? null)}`,
+  )
+  /*
+   * Only once it IS on theirs: with nothing written anywhere, "not on yours"
+   * holds for a build that has no colleague half at all.
+   */
+  const mineAfter = (await myPriorities()).data ?? []
+  chk(
+    !!theirEntry && !mineAfter.some((p) => p.taskId === other.id),
+    'and it is not on yours',
+    !theirEntry && mineAfter.some((p) => p.taskId === other.id)
+      ? 'it went onto the assigner\'s own list while the prompt named the teammate'
+      : theirEntry
+        ? 'the teammate\'s task was written onto the assigner\'s own list as well'
+        : 'it is on nobody\'s list — the write never reached the teammate',
+  )
+
+  /*
+   * The toast's link opens the teammate, whose panel starts on their
+   * priorities. Read by the entry's own id, so it is THAT row saying who.
+   */
+  let panelSays = ''
+  chk(
+    await waitUntil(async () => {
+      panelSays = await readText(page.getByTestId(`priority-added-by-${theirEntry?.id}`).filter({ visible: true }), { timeoutMs: 1000 })
+      return panelSays.includes(me.displayName)
+    }, { timeoutMs: 15_000 }),
+    'the toast\'s link opens their priorities, where the task says who added it',
+    `the panel's row read "${panelSays}"${theirEntry ? '' : ' — there was no entry to read'}`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ and the teammate, in their own Planner, sees who put it there')
+
+  /*
+   * Signed in as them, through the form — the proxy in `lib/local-stack.mjs`
+   * waits out a throttled login. Each step is bounded and caught, so a
+   * sign-in that fails is the check below failing in its own words, and the
+   * server's rules after it still run.
+   */
+  const mateContext = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
+  const matePage = await mateContext.newPage()
+  await matePage.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
+  await matePage.fill('input[type=email]', mateEmail, { timeout: 15_000 }).catch(() => {})
+  await matePage.fill('input[type=password]', PERSON_PASSWORD, { timeout: 15_000 }).catch(() => {})
+  await matePage.click('button[type=submit]', { timeout: 15_000 }).catch(() => {})
+  await matePage.waitForURL(/\/app/, { timeout: LOGIN_NAV_TIMEOUT_MS }).catch(() => {})
+  await matePage.goto(`${stack.base}/app/${workspaceId}/calendar`, { waitUntil: 'domcontentloaded' })
+  const theirRow = matePage.getByTestId('planner-priority-item').filter({ hasText: `Teammate subject ${TAG}` })
+  let railSays = ''
+  chk(
+    await waitUntil(async () => {
+      railSays = await readText(theirRow.getByTestId('planner-priority-added-by').filter({ visible: true }), { timeoutMs: 1000 })
+      return /added by/i.test(railSays) && railSays.includes(me.displayName)
+    }, { timeoutMs: 20_000 }),
+    'in their Planner\'s Priorities, the task says "Added by" and who',
+    `the row's label read "${railSays}"`,
+  )
+  await mateContext.close().catch(() => {})
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ the server holds the rules, whatever a client sends')
+
+  /* How many rows this person's list holds for one task, read in the database itself. */
+  const rowsFor = async (userId, taskId) =>
+    (await sql`
+      select count(*)::int as n from user_priorities
+      where user_id = ${userId} and workspace_id = ${workspaceId} and task_id = ${taskId}`)[0].n
+  const addFor = (as, userId, taskId) =>
+    as(`/workspaces/${workspaceId}/people/${userId}/priorities`, { method: 'POST', body: { taskId } })
+  /*
+   * A refusal is its status AND its sentence: a route that does not exist
+   * answers 404 as well, and said nothing about anybody's membership.
+   */
+  const says = (res, pattern) => pattern.test(res.error?.message ?? '')
+
+  const byGuest = await addFor(guest.as, mateId, task.id)
+  chk(
+    byGuest.status === 403 && says(byGuest, /guest/i) && (await rowsFor(mateId, task.id)) === 0,
+    'a guest may not add to a colleague\'s priorities (403), though the task is open to them',
+    `the guest's add answered ${byGuest.status} ${JSON.stringify(byGuest.error?.message ?? null)}`,
+  )
+
+  const unreadable = await addFor(A, mateId, hidden.id)
+  chk(
+    unreadable.status === 403 && says(unreadable, /cannot open this task/i) && (await rowsFor(mateId, hidden.id)) === 0,
+    'nor may anybody add a task the colleague cannot open (403)',
+    `adding the private task answered ${unreadable.status} ${JSON.stringify(unreadable.error?.message ?? null)}`,
+  )
+
+  const stranger = await addFor(A, outsider.id, task.id)
+  chk(
+    stranger.status === 404 && says(stranger, /not in this workspace/i) && (await rowsFor(outsider.id, task.id)) === 0,
+    'nor add to somebody who is not in the workspace (404)',
+    `adding for the outsider answered ${stranger.status} ${JSON.stringify(stranger.error?.message ?? null)}`,
+  )
+
+  const once = await addFor(A, mateId, routed.id)
+  const again = await addFor(A, mateId, routed.id)
+  const rowsAfterAgain = await rowsFor(mateId, routed.id)
+  chk(
+    once.status < 300 && again.status < 300 && !!once.data?.id && again.data?.id === once.data.id && rowsAfterAgain === 1,
+    'adding it again answers with the same entry, and their list still holds one row for it',
+    `the adds answered ${once.status} then ${again.status}, with ${once.data?.id ?? 'nothing'} then ` +
+      `${again.data?.id ?? 'nothing'}; ${rowsAfterAgain} row(s) for the task`,
+  )
+
+  const pulled = once.data?.id
+    ? await A(`/workspaces/${workspaceId}/priorities/${once.data.id}`, { method: 'DELETE' })
+    : { status: 0 }
+  const rowsAfterPull = await rowsFor(mateId, routed.id)
+  chk(
+    pulled.status === 404 && rowsAfterPull === 1,
+    'and it is theirs now: the one who added it cannot take it off (404)',
+    `the adder's DELETE answered ${pulled.status}; ${rowsAfterPull} row(s) left for the task`,
   )
 } catch (err) {
   failed += 1

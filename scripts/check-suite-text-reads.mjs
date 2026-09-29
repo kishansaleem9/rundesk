@@ -161,24 +161,16 @@ const INNER = new Set(['innerText', 'allInnerTexts', 'readText'])
 // The page's own body, the one element drawn by definition (normalised: no spaces around punctuation).
 const PAGE = /^(?:[A-Za-z_$][\w$]*\.locator\((['"`])(?:body|html)\1\)(?:\.first\(\))?|document\.(?:body|documentElement)\??)$/
 /*
- * LEFT FOR LATER: four suites other work was changing when the innerText half
- * was closed, so their reads could not be converted then. Each may hold exactly
- * this many innerText reads with no out — more is a new read needing one, and
- * fewer asks for the number to come down, so a conversion cannot be undone
- * quietly (`found-29-sep/innertext-reads-hidden-leaves`). What they were at
- * `15e2681`: assign-to-priorities 202, 230, 275, 282 and planner-priorities
- * 123, 156, 232 (a prompt, a toast, the rail and its count, through
- * `readText`), planner-priorities 282 (an absence); doc-import 163, 195, 319
- * and person-panel 274, 350, 408, 875 (a formats line, a link, an error, a
- * clock, a list, an empty state, a result). ui-sweep's ten were converted once
- * its fixed waits were (`found-29-sep/ui-sweep-reads-after-fixed-waits`).
+ * LEFT FOR LATER: suites other work was changing when the innerText half was
+ * closed, each held at its count of innerText reads with no out — more is a
+ * new read needing one, and fewer asks for the number to come down, so a
+ * conversion cannot be undone quietly (`found-29-sep/innertext-reads-hidden-leaves`).
+ * Five suites were held here on 29 September. ui-sweep's ten were converted
+ * with its fixed waits (`found-29-sep/ui-sweep-reads-after-fixed-waits`), and
+ * the other four's with the priorities work that had been changing them
+ * (`found-29-sep/innertext-reads-left-for-later`). None is held now.
  */
-const LEFT_FOR_LATER = {
-  'assign-to-priorities.mjs': 4,
-  'doc-import.mjs': 3,
-  'person-panel.mjs': 4,
-  'planner-priorities.mjs': 4,
-}
+const LEFT_FOR_LATER = {}
 const LEFT = process.env.SUITE_DIR ? JSON.parse(process.env.TEXT_READS_LEFT ?? '{}') : LEFT_FOR_LATER
 const EVALUATES = /^(?:evaluate|evaluateAll|evaluateHandle|\$eval|\$\$eval|waitForFunction)$/
 const CHECKS = /(?<![.\w$])(?:chk|check)\s*\(|\.step\s*\(/g

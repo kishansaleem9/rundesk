@@ -120,7 +120,7 @@ try {
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `13:05` — the empty state is not a dead end')
 
-  const railText = await readText(page.getByTestId('planner-priorities'))
+  const railText = await readText(page.getByTestId('planner-priorities').filter({ visible: true }))
   chk(
     /prioritize a task/i.test(railText),
     'the rail shows the empty state the frame shows',
@@ -153,7 +153,7 @@ try {
   )
   chk(
     await waitUntil(
-      async () => (await readText(page.getByTestId('planner-priorities'))).includes(TITLE),
+      async () => (await readText(page.getByTestId('planner-priorities').filter({ visible: true }))).includes(TITLE),
       { timeoutMs: 10_000 },
     ),
     'and the rail shows it without a reload',
@@ -229,7 +229,7 @@ try {
   await page.getByTestId('menu-my-profile').click()
   chk(
     await waitUntil(
-      async () => (await readText(page.getByTestId('person-priorities'))).includes(TITLE),
+      async () => (await readText(page.getByTestId('person-priorities').filter({ visible: true }))).includes(TITLE),
       { timeoutMs: 12_000 },
     ),
     'and the person panel lists it too — both surfaces answer about the same list',
@@ -277,13 +277,12 @@ try {
      * The rail lists what is still open, so a finished priority should leave it.
      * A rail that kept showing done items would make the tick look broken.
      */
-    lifecycle.step(
-      await waitUntil(
-        async () => !(await readText(page.getByTestId('planner-priorities'))).includes(TITLE),
-        { timeoutMs: 10_000 },
-      ),
-      'a priority that is done is still sitting in the rail as if it were not',
+    // Read whole: what the rail lacks is the claim, and a hidden rail read whole is the stricter read.
+    const leftTheRail = await waitUntil(
+      async () => !(await readText(page.getByTestId('planner-priorities'))).includes(TITLE), // text-read: absence
+      { timeoutMs: 10_000 },
     )
+    lifecycle.step(leftTheRail, 'a priority that is done is still sitting in the rail as if it were not')
 
     // Add a second one to remove, since the first is now done and out of view.
     const SECOND = `Drop me ${TAG}`

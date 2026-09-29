@@ -22,6 +22,8 @@ import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { containerVisibilityFilter, taskInReachFilter } from '../../common/permissions/container-access.guard-helper'
 import { resolveIsManager, taskVisibilityFilter, listVisibilityFilter } from '../../common/permissions/item-visibility'
+import { readableTask, type ReadActor } from '../../common/permissions/read-access'
+import { isUuid } from '../../common/validation/uuid'
 import { PresenceService } from '../presence/presence.service'
 import { AiService } from '../ai/ai.service'
 import type { StandupData } from './standup'
@@ -778,13 +780,17 @@ export class PeopleService {
    *
    * Readable by any colleague, because the panel is about a person and this is
    * the most interesting thing on it: "what are you actually doing today" is
-   * the question a teammate opens a profile to answer. Writable only by the
-   * person themselves — a priority is a decision, and a decision somebody else
-   * can edit is not one.
+   * the question a teammate opens a profile to answer. Ticked, ordered and
+   * cleared only by the person themselves — a priority is a decision, and a
+   * decision somebody else can edit is not one. A colleague may ADD a task to
+   * it, as in ClickUp (`addPriorityFor`, `ledger-rows/row-850`), and each row
+   * says who added it, so the owner can tell their own choices from the ones
+   * handed to them.
    */
   async listPriorities(workspaceId: string, requesterId: string, userId: string) {
     await this.assertBothMembers(workspaceId, requesterId, userId)
     const viewer = (await this.viewerFilter(workspaceId, requesterId)).where
+    const adder = alias(users, 'priority_adder')
     return this.db
       .select({
         id: userPriorities.id,
@@ -797,12 +803,21 @@ export class PeopleService {
         position: userPriorities.position,
         doneAt: userPriorities.doneAt,
         createdAt: userPriorities.createdAt,
+        /*
+         * Who put it there (`ledger-rows/row-850`), with `createdAt` for when:
+         * ClickUp's "Added by" and "Added at". The owner on their own rows, and
+         * null on one older than the column. Null too once the adder is gone —
+         * a left join on nobody, which drizzle answers with null rather than
+         * an object of nulls.
+         */
+        addedBy: { id: adder.id, displayName: adder.displayName },
       })
       .from(userPriorities)
       .leftJoin(tasks, eq(tasks.id, userPriorities.taskId))
       .leftJoin(lists, eq(lists.id, tasks.listId))
       .leftJoin(projects, eq(projects.id, lists.projectId))
       .leftJoin(spaces, eq(spaces.id, projects.spaceId))
+      .leftJoin(adder, eq(adder.id, userPriorities.addedById))
       .where(
         and(
           eq(userPriorities.userId, userId),
@@ -852,13 +867,119 @@ export class PeopleService {
       if (!found) throw new NotFoundException('That task is not in this workspace')
     }
 
+    // Your own row, added by you (`ledger-rows/row-850`).
+    return this.insertPriority(workspaceId, userId, { taskId, title }, userId)
+  }
+
+  /**
+   * `ledger-rows/row-850` — a task added to a COLLEAGUE's priorities.
+   *
+   * This module refused it on purpose, and the task sheet offered its prompt
+   * after assigning only when you assigned yourself. ClickUp decides the other
+   * way (help centre, "Personal Priorities", formerly LineUp): "Members,
+   * Admins, and Owners can add tasks to other people's priorities" — from the
+   * task's Priority field, from Add to › Someone's Priorities, and from the
+   * prompt after assigning, "Add this task to <name>'s priorities?" — and the
+   * owner's list shows who added each task and when. Guests cannot.
+   *
+   * What stays the owner's is everything after the add. Ticking, ordering and
+   * removing ask for the owner alone (below), so the day is still theirs to
+   * decide; what a colleague can do is put a task in front of them.
+   *
+   * The rules, each refused in its own words:
+   *
+   *   - the caller is a member of the workspace and not a guest (403);
+   *   - the colleague is a member of it (404, as their profile is);
+   *   - it is a task, never a typed line: a line typed into somebody else's
+   *     day is a message, and this is not where messages go (400);
+   *   - the caller may open the task, or it does not exist to them (404);
+   *   - the colleague may open it too (403). ClickUp draws a task its reader
+   *     cannot open as "Private task"; whether one may be ADDED is not settled
+   *     by what it publishes, so the safe rule is taken and a row its owner
+   *     could not read is never written.
+   *
+   * Both reads are `readableTask`, the rule `ResourceMemberGuard` applies to
+   * anybody opening a task — membership, the container rule, a guest's reach,
+   * the private-list and private-task rules — asked of the colleague as them.
+   * A task already on their list answers with the row that is there.
+   */
+  async addPriorityFor(
+    workspaceId: string,
+    caller: ReadActor,
+    userId: string,
+    input: { taskId?: string | null; title?: string | null },
+  ) {
+    // Your own id is your own list, by your own add's rules.
+    if (userId === caller.id) return this.addPriority(workspaceId, caller.id, input)
+
+    const members = await this.memberRoles(workspaceId, [caller.id, userId])
+    const callerRole = members.get(caller.id)?.role
+    if (!callerRole) throw new ForbiddenException('Workspace membership required')
+    if (callerRole === 'guest') {
+      throw new ForbiddenException("A guest cannot add tasks to somebody else's priorities")
+    }
+    const target = members.get(userId)
+    if (!target) throw new NotFoundException('That person is not in this workspace')
+
+    const taskId = input.taskId || null
+    if (!taskId) throw new BadRequestException("Only a task can be added to somebody else's priorities")
+    if (!(await this.mayOpenTask(workspaceId, taskId, caller))) {
+      // Not found, as on your own list: a task you may not open does not exist to you.
+      throw new NotFoundException('That task is not in this workspace')
+    }
+    if (!(await this.mayOpenTask(workspaceId, taskId, { id: userId, role: target.platformRole }))) {
+      throw new ForbiddenException(
+        `${target.displayName || 'That person'} cannot open this task, so it cannot go on their priorities`,
+      )
+    }
+
+    return this.insertPriority(workspaceId, userId, { taskId, title: null }, caller.id)
+  }
+
+  /** These people's roles in the workspace, and each one's account role and name; a non-member is absent. */
+  private async memberRoles(workspaceId: string, ids: string[]) {
+    // A malformed id is nobody, not a database error.
+    const wanted = [...new Set(ids)].filter(isUuid)
+    const rows =
+      wanted.length === 0
+        ? []
+        : await this.db
+            .select({
+              userId: workspaceMembers.userId,
+              role: workspaceMembers.role,
+              platformRole: users.role,
+              displayName: users.displayName,
+            })
+            .from(workspaceMembers)
+            .innerJoin(users, eq(users.id, workspaceMembers.userId))
+            .where(and(eq(workspaceMembers.workspaceId, workspaceId), inArray(workspaceMembers.userId, wanted)))
+    return new Map(rows.map((r) => [r.userId, r]))
+  }
+
+  /** Whether `actor` may open this task in this workspace: `readableTask`, the guard's own rule. */
+  private async mayOpenTask(workspaceId: string, taskId: string, actor: ReadActor): Promise<boolean> {
+    if (!isUuid(taskId)) return false
+    return (await readableTask(this.db, workspaceId, taskId, actor)) !== null
+  }
+
+  /**
+   * One row at the end of `ownerId`'s list, recording who added it; a task
+   * already on the list answers with the row that is there.
+   */
+  private async insertPriority(
+    workspaceId: string,
+    ownerId: string,
+    subject: { taskId: string | null; title: string | null },
+    addedById: string,
+  ) {
+    const { taskId, title } = subject
     // Appended, not prepended: a list you keep re-ordering from the top is a
     // list where the thing you added first sinks, which is backwards for
     // "these are the important ones, in order".
     const [last] = await this.db
       .select({ position: userPriorities.position })
       .from(userPriorities)
-      .where(and(eq(userPriorities.userId, userId), eq(userPriorities.workspaceId, workspaceId)))
+      .where(and(eq(userPriorities.userId, ownerId), eq(userPriorities.workspaceId, workspaceId)))
       .orderBy(desc(userPriorities.position))
       .limit(1)
 
@@ -866,23 +987,25 @@ export class PeopleService {
       const [row] = await this.db
         .insert(userPriorities)
         .values({
-          userId,
+          userId: ownerId,
           workspaceId,
           taskId,
           title: taskId ? null : title,
           position: (last?.position ?? -1) + 1,
+          addedById,
         })
         .returning()
       return row
     } catch (err) {
-      // Adding a task that is already on the list is somebody making sure.
+      // Adding a task that is already on the list is somebody making sure —
+      // the owner, or a colleague whose prompt raced the owner's own add.
       if ((err as { code?: string })?.code === '23505') {
         const [existing] = await this.db
           .select()
           .from(userPriorities)
           .where(
             and(
-              eq(userPriorities.userId, userId),
+              eq(userPriorities.userId, ownerId),
               eq(userPriorities.workspaceId, workspaceId),
               eq(userPriorities.taskId, taskId!),
             ),
@@ -905,6 +1028,10 @@ export class PeopleService {
     return row
   }
 
+  /**
+   * Take one off. Only the owner — not the colleague who added it: once it is
+   * on somebody's list it is theirs to drop (`ledger-rows/row-850`).
+   */
   async removePriority(priorityId: string, userId: string) {
     const [row] = await this.db
       .delete(userPriorities)

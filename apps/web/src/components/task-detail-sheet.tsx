@@ -107,7 +107,11 @@ import {
   usePriorityActions,
   priorityPromptMuted,
   mutePriorityPrompt,
+  prioritiesQuery,
+  offersPriority,
+  type Priority,
 } from '../lib/use-priorities'
+import { openPersonPanel } from '../store/person-panel'
 import {
   useCollapseEmptyFields,
   setCollapseEmptyFields,
@@ -2396,11 +2400,14 @@ function OverviewPanel({
    * added here is in the rail's list without a reload.
    */
   const currentUserId = useAuthStore((s) => s.user?.id) ?? ''
+  const { role: viewerRole } = useWorkspaceRole(workspaceId)
   const { data: myPriorities } = usePriorities(workspaceId, currentUserId)
   const priorityActions = usePriorityActions(workspaceId, currentUserId)
-  const [priorityPromptOpen, setPriorityPromptOpen] = useState(false)
-  // Offering to add something that is already on the list is noise.
-  const isAlreadyPriority = !!myPriorities?.some((p) => p.taskId === taskId && !p.doneAt)
+  /*
+   * Whose priorities the open prompt offers: yours, or the colleague you just
+   * assigned, by name (`ledger-rows/row-850`). Null while nothing is offered.
+   */
+  const [priorityPrompt, setPriorityPrompt] = useState<{ userId: string; name: string | null } | null>(null)
   const [editingDescription, setEditingDescription] = useState(false)
   // §G15 [22:28] — the slash menu on the description, and what has been typed
   // after the slash to narrow it.
@@ -2818,6 +2825,8 @@ function OverviewPanel({
     setDescriptionDraft('')
     setSummaryText(null)
     setSummarizing(false)
+    // An offer is about the task it was raised on, and the person it names.
+    setPriorityPrompt(null)
   }, [taskId])
   const pendingInvitesQuery = useQuery({
     queryKey: ['workspace-invitations', workspaceId],
@@ -2826,17 +2835,20 @@ function OverviewPanel({
   })
 
   /*
-   * §V2-S16 frames `15:50`–`15:55` — assigning offers to put the task on your
-   * day, and the toast that follows links to where it landed.
+   * §V2-S16 frames `15:50`–`15:55` — assigning offers to put the task on the
+   * assignee's day, and the toast that follows links to where it landed.
    *
-   * ONLY WHEN THE ASSIGNEE IS YOU. The frame's prompt names the assignee
-   * ("Add this task to Hamda Tahir's priorities?") and the toast that follows
-   * says "your Priorities", because she was assigning to herself. Priorities
-   * are written through `POST /workspaces/:id/priorities`, which takes no
-   * `:userId` on purpose — see `PrioritiesController`: routing the write under
-   * `/people/:userId` "would invite a client to pass somebody else's id and
-   * expect it to work". Offering to fill a colleague's day is a permission this
-   * product has deliberately not given, so the prompt does not pretend to.
+   * YOURS, as the frame shows it: its prompt names the assignee ("Add this
+   * task to Hamda Tahir's priorities?") and the toast says "your Priorities",
+   * because she was assigning to herself. AND A COLLEAGUE'S, since
+   * `ledger-rows/row-850`. That half was refused on purpose while the only
+   * write took no `:userId` — filling somebody else's day was a permission
+   * this product had not given. ClickUp gives it: members, admins and owners
+   * may add tasks to other people's priorities, and its setting "Ask to add
+   * task to priorities after assigning" asks about "the assigned member's
+   * priorities". So the prompt names whoever was assigned and the write goes
+   * to their list (`POST /people/:userId/priorities`), where the server holds
+   * the rules: no guest, a member, a task both of you may open.
    */
   const addAssignee = useMutation({
     mutationFn: (userId: string) =>
@@ -2848,18 +2860,40 @@ function OverviewPanel({
       await qc.invalidateQueries({ queryKey: ['task', taskId] })
       // Whether they may move its status depends on whether they are on it.
       await qc.invalidateQueries({ queryKey: ['task-caps', taskId] })
-      if (userId === currentUserId && !priorityPromptMuted() && !isAlreadyPriority) {
-        setPriorityPromptOpen(true)
-      }
+      await offerPriorities(userId)
     },
   })
 
+  /*
+   * Whether to ask, by `offersPriority`: not while muted, not a guest about a
+   * colleague, not when the task is already open on that person's list. A
+   * colleague's list is read at the moment of asking, through the one query
+   * every surface shares; a list that cannot be read offers nothing, rather
+   * than an offer made blind.
+   */
+  const offerPriorities = async (userId: string) => {
+    const mine = userId === currentUserId
+    const muted = priorityPromptMuted()
+    const offers = (theirs: Priority[] | undefined) =>
+      offersPriority({ assigneeId: userId, currentUserId, viewerRole, muted, taskId, theirs })
+    // No, whatever their list holds: nothing to read.
+    if (!offers([])) return
+    const theirs = mine
+      ? myPriorities
+      : await qc.fetchQuery(prioritiesQuery(workspaceId, userId)).catch(() => null)
+    if (theirs === null || !offers(theirs)) return
+    const member = mine ? null : (membersQuery.data ?? []).find((m) => m.userId === userId)
+    setPriorityPrompt({ userId, name: member ? member.displayName || member.email : null })
+  }
+
   const addToPriorities = () => {
+    // A colleague's list has a write of its own (`ledger-rows/row-850`).
+    if (priorityPrompt && priorityPrompt.userId !== currentUserId) return addToTheirPriorities(priorityPrompt)
     priorityActions.add.mutate(
       { taskId },
       {
         onSuccess: () => {
-          setPriorityPromptOpen(false)
+          setPriorityPrompt(null)
           // The toast links to where the task went. "Added" with no way to look
           // is a claim the reader has to take on trust.
           toast.success(t('planner.addedToPriorities'), {
@@ -2869,6 +2903,28 @@ function OverviewPanel({
                   onClick: () => navigate({ to: `/app/${workspaceId}/calendar` }),
                 }
               : undefined,
+          })
+        },
+      },
+    )
+  }
+
+  /*
+   * `ledger-rows/row-850` — the colleague's half. The toast says whose list the
+   * task went on, and its link opens that person: their panel starts on their
+   * priorities, where the task now says who added it.
+   */
+  const addToTheirPriorities = (them: { userId: string; name: string | null }) => {
+    priorityActions.addFor.mutate(
+      { userId: them.userId, taskId },
+      {
+        onSuccess: () => {
+          setPriorityPrompt(null)
+          toast.success(t('planner.addedToTheirPriorities', { name: them.name ?? t('taskDetail.userFallback') }), {
+            action: {
+              label: t('planner.openPriorities'),
+              onClick: () => openPersonPanel(them.userId),
+            },
           })
         },
       },
@@ -3420,14 +3476,19 @@ function OverviewPanel({
         {/*
           §V2-S16 frame `15:50` — the offer, beside the assignee control the
           frame shows it beside. Two ways out, exactly as the frame has them:
-          take it, or stop being asked.
+          take it, or stop being asked. It names the colleague it is about, as
+          the frame's does (`ledger-rows/row-850`); yours says "your".
         */}
-        {priorityPromptOpen && (
+        {priorityPrompt && (
           <div
             data-testid="priority-prompt"
             className="mt-2 flex flex-wrap items-center gap-2 rounded-md border border-accent/40 bg-accent/5 px-3 py-2"
           >
-            <span className="text-[12px]">{t('planner.addToPrioritiesAsk')}</span>
+            <span className="text-[12px]">
+              {priorityPrompt.userId === currentUserId
+                ? t('planner.addToPrioritiesAsk')
+                : t('planner.addToPrioritiesAskFor', { name: priorityPrompt.name ?? t('taskDetail.userFallback') })}
+            </span>
             <div className="ml-auto flex items-center gap-1.5">
               <Button
                 type="button"
@@ -3436,7 +3497,7 @@ function OverviewPanel({
                 data-testid="priority-prompt-mute"
                 onClick={() => {
                   mutePriorityPrompt()
-                  setPriorityPromptOpen(false)
+                  setPriorityPrompt(null)
                 }}
                 className="h-7 px-2 text-[11px]"
               >
@@ -3446,7 +3507,7 @@ function OverviewPanel({
                 type="button"
                 size="sm"
                 data-testid="priority-prompt-add"
-                disabled={priorityActions.add.isPending}
+                disabled={priorityActions.add.isPending || priorityActions.addFor.isPending}
                 onClick={addToPriorities}
                 className="h-7 px-2 text-[11px]"
               >

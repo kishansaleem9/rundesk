@@ -15,9 +15,11 @@
  * copies, no compiler between them. One key and one set of mutations instead.
  *
  * The READ is per-person (`/people/:userId/priorities` — you can look at a
- * colleague's) while every WRITE is about yourself (`/priorities`, no `:userId`
- * in the path). That asymmetry is the API's, deliberately: see
- * `PrioritiesController`. It is why the actions here take no user id.
+ * colleague's) while the writes are about yourself (`/priorities`, no `:userId`
+ * in the path), with ONE exception: `addFor` puts a task on a colleague's list
+ * (`POST /people/:userId/priorities`, `ledger-rows/row-850`), as ClickUp lets
+ * a member do. Ticking, removing and reordering stay the owner's, which is why
+ * the rest of the actions here take no user id.
  */
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from '@rundesk/ui'
@@ -30,6 +32,20 @@ export type Priority = {
   taskStatus?: string | null
   position: number
   doneAt: string | null
+  createdAt?: string
+  /**
+   * Who put it on the list (`ledger-rows/row-850`): the owner, or a colleague
+   * who added a task to it. Null on a row older than the record.
+   */
+  addedBy?: { id: string; displayName: string } | null
+}
+
+/**
+ * The name to say "Added by" with, when somebody OTHER than the list's owner
+ * put this row there; null when the owner did, or nobody knows.
+ */
+export function addedByOther(p: Priority, ownerId: string | undefined): string | null {
+  return p.addedBy && p.addedBy.id !== ownerId ? p.addedBy.displayName : null
 }
 
 /*
@@ -63,19 +79,56 @@ export function mutePriorityPrompt(): void {
 export const prioritiesKey = (workspaceId: string | undefined, userId: string | undefined) =>
   ['priorities', workspaceId, userId] as const
 
+/**
+ * The one read, as a query definition: `usePriorities` renders it, and the
+ * task sheet asks it once after assigning a colleague (`qc.fetchQuery`), under
+ * the same key, so the answer lands in the cache every surface reads.
+ */
+export const prioritiesQuery = (workspaceId: string | undefined, userId: string | undefined) => ({
+  queryKey: prioritiesKey(workspaceId, userId),
+  queryFn: () => api<Priority[]>(`/workspaces/${workspaceId}/people/${userId}/priorities`),
+})
+
 export function usePriorities(workspaceId: string | undefined, userId: string | undefined) {
   return useQuery({
-    queryKey: prioritiesKey(workspaceId, userId),
+    ...prioritiesQuery(workspaceId, userId),
     enabled: !!workspaceId && !!userId,
-    queryFn: () => api<Priority[]>(`/workspaces/${workspaceId}/people/${userId}/priorities`),
   })
 }
 
 /**
- * Add, tick, remove and reorder your own priorities.
+ * §V2-S16 frame `15:50`, and `ledger-rows/row-850` — whether assigning
+ * somebody should ask to add the task to their priorities.
+ *
+ * For yourself, as the frame shows it. For a colleague, too: ClickUp's
+ * setting is "Ask to add task to priorities after assigning … to the assigned
+ * member's priorities", and its prompt names them. Not for anybody while the
+ * prompt is muted ("Don't ask again" is one preference, whoever is assigned);
+ * not when the task is already on that person's list and still open; and a
+ * guest is never offered a colleague's list, because guests cannot add to one
+ * (the server refuses it too). A guest's OWN list is theirs to add to.
+ */
+export function offersPriority(opts: {
+  assigneeId: string
+  currentUserId: string
+  viewerRole: string | undefined
+  muted: boolean
+  taskId: string
+  /** The assignee's priorities, as the viewer may read them. */
+  theirs: Priority[] | undefined
+}): boolean {
+  if (opts.muted) return false
+  if (opts.assigneeId !== opts.currentUserId && opts.viewerRole === 'guest') return false
+  return !(opts.theirs ?? []).some((p) => p.taskId === opts.taskId && !p.doneAt)
+}
+
+/**
+ * Add, tick, remove and reorder your own priorities — and add a task to a
+ * colleague's (`addFor`).
  *
  * `userId` is only used to know which cached list to refresh — the requests
- * themselves are always about the caller.
+ * themselves are about the caller, except `addFor`'s, which names its person
+ * and refreshes theirs.
  */
 export function usePriorityActions(workspaceId: string | undefined, userId: string | undefined) {
   const qc = useQueryClient()
@@ -92,6 +145,23 @@ export function usePriorityActions(workspaceId: string | undefined, userId: stri
         body: typeof input === 'string' ? { title: input } : input,
       }),
     onSuccess: invalidate,
+    onError,
+  })
+
+  /*
+   * `ledger-rows/row-850` — a task onto a COLLEAGUE's list. A task only, as the
+   * API takes it: the server asks that the caller is no guest, that the
+   * colleague is in the workspace and that both of them may open the task, and
+   * a refusal comes back as its own sentence in the toast.
+   */
+  const addFor = useMutation({
+    mutationFn: ({ userId: theirId, taskId }: { userId: string; taskId: string }) =>
+      api<Priority>(`/workspaces/${workspaceId}/people/${theirId}/priorities`, {
+        method: 'POST',
+        body: { taskId },
+      }),
+    onSuccess: (_row, { userId: theirId }) =>
+      qc.invalidateQueries({ queryKey: prioritiesKey(workspaceId, theirId) }),
     onError,
   })
 
@@ -117,5 +187,5 @@ export function usePriorityActions(workspaceId: string | undefined, userId: stri
     onError,
   })
 
-  return { add, setDone, remove, reorder }
+  return { add, addFor, setDone, remove, reorder }
 }

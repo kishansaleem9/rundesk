@@ -28,6 +28,12 @@ import { tasks } from './tasks'
  * Deliberately NOT cleared at midnight. "Today's" describes what it is for,
  * not a retention policy — and a list that empties itself overnight loses work
  * somebody did on purpose. Ticking things off is how it clears.
+ *
+ * AND NOT ONLY THE OWNER WRITES IT (`ledger-rows/row-850`). ClickUp lets a
+ * member, admin or owner add a task to somebody else's priorities — assigning
+ * offers "Add this task to <name>'s priorities?" — and the owner's list says
+ * who added each one and when. So a row records who put it there; the list
+ * stays its owner's to tick, order and clear.
  */
 export const userPriorities = pgTable(
   'user_priorities',
@@ -43,6 +49,13 @@ export const userPriorities = pgTable(
     position:    integer('position').notNull().default(0),
     /** Ticked off. Kept rather than deleted so "I did that today" survives. */
     doneAt:      timestamp('done_at', { withTimezone: true }),
+    /**
+     * Who put it on the list: the owner, or a colleague who added a task to it
+     * (`ledger-rows/row-850`); `createdAt` is when. Null on a row written before
+     * this was kept, when only the owner could write one, and once the one who
+     * added it is gone — the row is the owner's and stays.
+     */
+    addedById:   uuid('added_by_id').references(() => users.id, { onDelete: 'set null' }),
     createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

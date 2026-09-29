@@ -84,8 +84,9 @@ export class PeopleController {
    * §G06 [05:54] — their priorities.
    *
    * Readable by any colleague — "what are you actually doing today" is what a
-   * teammate opens a profile to find out. The writes below are the owner's
-   * only: a decision somebody else can edit is not a decision.
+   * teammate opens a profile to find out. Ticking, ordering and removing are
+   * the owner's only, below: a decision somebody else can edit is not a
+   * decision. Each row says who added it.
    */
   @Get(':userId/priorities')
   priorities(
@@ -95,12 +96,35 @@ export class PeopleController {
   ) {
     return this.people.listPriorities(workspaceId, user.id, userId)
   }
+
+  /**
+   * `ledger-rows/row-850` — add a task to THIS person's priorities.
+   *
+   * The one write about somebody else's list, and it was refused on purpose
+   * until ClickUp's own rule was read: members, admins and owners may add a
+   * task to a colleague's priorities (guests may not), and assigning asks
+   * "Add this task to <name>'s priorities?". It adds and nothing more — the
+   * task is theirs to tick, order and drop, through the owner's routes below —
+   * and only a task both of you may open (`PeopleService.addPriorityFor`).
+   */
+  @Post(':userId/priorities')
+  @ApiOperation({ summary: "Add a task to a colleague's priorities (ledger-rows/row-850)" })
+  addPriority(
+    @Param('workspaceId') workspaceId: string,
+    @Param('userId') userId: string,
+    @CurrentUser() user: CurrentUserPayload,
+    @Body() body: { taskId?: string | null; title?: string | null },
+  ) {
+    return this.people.addPriorityFor(workspaceId, user, userId, body ?? {})
+  }
 }
 
 /**
  * The caller's own priorities. A separate controller because these are writes
- * about yourself and take no `:userId` — routing them under `/people/:userId`
- * would invite a client to pass somebody else's id and expect it to work.
+ * about yourself and take no `:userId`. Adding a task to a COLLEAGUE's list is
+ * `POST /people/:userId/priorities` above (`ledger-rows/row-850`), with rules
+ * of its own; everything here stays about the caller, so ticking, removing and
+ * reordering a row are its owner's alone, whoever added it.
  */
 @ApiTags('people')
 @ApiBearerAuth()

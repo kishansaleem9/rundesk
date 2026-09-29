@@ -203,13 +203,13 @@ went missing entirely. A list that is only written once stops being true.
   which existed: the offer after assigning, "Don't ask again", the toast with
   **Open Priorities**, and the task appearing in the Planner rail with a
   counter. Assigning wrote an assignee and stopped.
-  **The prompt only appears when the assignee is you**, because
-  `POST /workspaces/:id/priorities` deliberately takes no `:userId` —
-  `PrioritiesController` says routing it under `/people/:userId` "would invite a
-  client to pass somebody else's id and expect it to work". Filling a
-  colleague's day is a permission this product has not granted, so the prompt
-  does not offer it; the suite checks that assigning a teammate raises nothing.
-  10 checks, five break-tests.
+  **The prompt appeared only when the assignee was you**, because
+  `POST /workspaces/:id/priorities` deliberately took no `:userId`, and the
+  suite checked that assigning a teammate raised nothing. 10 checks, five
+  break-tests. *(29 September: ClickUp lets Members, Admins and Owners add to
+  other people's priorities, so assigning a colleague now offers theirs, through
+  `POST /workspaces/:id/people/:userId/priorities`, and each row says who added
+  it — `ledger-rows/row-850`, 22 checks.)*
 
 - **The assignee picker, frame `15:45` — and the worst-shaped defect of this
   pass.** The control was `availableMembers.slice(0, 8)` rendered as chips: no
@@ -864,7 +864,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | "⚡ Assign with AI" — the ranking closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task. Until 29 September no page asked it; the picker's footer, where frame `15:45` draws it, now does, and assigns on confirm (`assign-with-ai-picker.mjs`, 2 checks) |
 | — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
-| M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |
+| B | **Add to a COLLEAGUE's priorities** — closed by `assign-to-priorities.mjs`, 22 checks (`ledger-rows/row-850`). ClickUp lets Members, Admins and Owners add to other people's priorities, and guests cannot, so assigning a colleague asks "Add this task to <name>'s priorities?". The toast opens their panel, and their rail and panel say who added each row. Both of them must be able to open the task |
 | B | Live focus countdown in the header — `FocusBlockPill` in `app-topbar.tsx`, frame `15:20`'s moon glyph and *"Work on … 2h 56m left"* right of the workspace switcher. It reads `useRunningFocusBlock`, sharing its fetch, its choice of block and its one-second clock with the tab-title writer, so there is no second countdown in the file. Testid `focus-block-pill`, measured by `test/e2e/focus-pill.mjs` |
 | M | Brain² hub, `/ai/brain`, AI-scoped left nav, Ask\|Agents toggle, Super Agents |
 | M | Credit meter; rotating placeholder; composer "+"; generated artifacts / slide deck. *(29 September: the rotating placeholder is built and measured on a lane with a model — `commit-log/log-4ad25f6-1`, `ai-answer-rendering`; the row stays `M` for the credit meter, the composer "+" and the generated artefacts.)* |
@@ -912,7 +912,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**174 rows: 154 built · 9 partial · 11 missing.**
+**174 rows: 155 built · 9 partial · 10 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -948,9 +948,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 120 | 7 | 6 | 133 |
+| §2, the sections table | 121 | 7 | 5 | 133 |
 | §5, recovered from the frame observations | 34 | 2 | 5 | 41 |
-| **consolidated** | **154** | **9** | **11** | **174** |
+| **consolidated** | **155** | **9** | **10** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -992,7 +992,15 @@ and Brain opens the comment AI panel the space bar already opened
 `ledger-rows/row-751`). So §2 moves `118 · 7 · 8` → `120 · 7 · 6`. Counted row
 by row: §2's tables hold 118 `B`, 2 `B*`, 7 `P` and 6 `M`.
 
-§2's 120 built includes the two marked `B*` — built, but the row also records
+ONE MORE ROW MOVED FROM `M` TO `B` THAT NIGHT, on a refusal the product had
+chosen. Adding to a colleague's priorities was `M` because the write took no
+`:userId`, deliberately. ClickUp lets Members, Admins and Owners add to other
+people's priorities, so the refusal went: assigning a colleague now offers
+theirs, and each row says who added it (`assign-to-priorities.mjs`, 22 checks;
+`ledger-rows/row-850`). So §2 moves `120 · 7 · 6` → `121 · 7 · 5`: 119 `B`,
+2 `B*`, 7 `P` and 5 `M`.
+
+§2's 121 built includes the two marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two above,

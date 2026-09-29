@@ -16,7 +16,8 @@ import {
   GRID_SIZES,
   type PlannerGridSize,
 } from '../components/planner-settings-dialog'
-import { usePriorities, usePriorityActions } from '../lib/use-priorities'
+import { usePriorities, usePriorityActions, addedByOther } from '../lib/use-priorities'
+import { exactTime } from '../lib/relative-time'
 import {
   plannerRange,
   plannerStep,
@@ -1401,7 +1402,23 @@ export function PlannerPage() {
                     onClick={() => priorityActions.setDone.mutate({ id: p.id, done: !p.doneAt })}
                     className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded border border-border hover:border-emerald-500"
                   />
-                  <span className="flex-1 truncate">{p.title}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate">{p.title}</span>
+                    {/*
+                      `ledger-rows/row-850` — a task a colleague put on your
+                      list says who, as ClickUp's "Added by" does, and when on
+                      hover. Your own choices say nothing: they are the list.
+                    */}
+                    {addedByOther(p, currentUserId) && (
+                      <span
+                        data-testid="planner-priority-added-by"
+                        title={p.createdAt ? exactTime(p.createdAt, locale) : undefined}
+                        className="block truncate text-[10px] text-muted-foreground"
+                      >
+                        {t('planner.priorityAddedBy', { name: addedByOther(p, currentUserId) ?? '' })}
+                      </span>
+                    )}
+                  </span>
                   <button
                     type="button"
                     data-testid={`planner-priority-remove-${p.id}`}

@@ -32,7 +32,7 @@
  * Run:  pnpm --filter @rundesk/web test
  */
 import { readFileSync } from 'node:fs'
-import { prioritiesKey } from './use-priorities'
+import { prioritiesKey, offersPriority, addedByOther, type Priority } from './use-priorities'
 
 const failures: string[] = []
 const expect = (cond: boolean, label: string): void => {
@@ -84,9 +84,49 @@ for (const [rel, what] of CALL_SITES) {
   )
 }
 
+/*
+ * `ledger-rows/row-850` — whether assigning somebody asks to add the task to
+ * THEIR priorities. The e2e suite follows the offer to a colleague's list; the
+ * two times it must NOT be made are here, because a browser can only show that
+ * nothing appeared by waiting for it not to.
+ */
+const row = (over: Partial<Priority>): Priority => ({
+  id: 'p1', taskId: 't1', title: 'A task', position: 0, doneAt: null, ...over,
+})
+const ask = (over: Partial<Parameters<typeof offersPriority>[0]>) =>
+  offersPriority({
+    assigneeId: 'mate', currentUserId: 'me', viewerRole: 'member', muted: false, taskId: 't1', theirs: [], ...over,
+  })
+
+expect(ask({}), 'assigning a colleague offers to add the task to their priorities')
+expect(
+  !ask({ viewerRole: 'guest' }),
+  'a guest is not offered a colleague’s priorities — guests cannot add to them',
+)
+expect(ask({ viewerRole: 'guest', assigneeId: 'me' }), 'a guest assigning themself is still offered their own')
+expect(
+  !ask({ theirs: [row({ taskId: 't1' })] }),
+  'a task already open on their list is not offered again',
+)
+expect(
+  ask({ theirs: [row({ taskId: 't1', doneAt: '2026-09-29T10:00:00Z' })] }),
+  'a task they have ticked off may be offered again',
+)
+expect(!ask({ muted: true }), 'muting the prompt silences the offer for a colleague too')
+
+/* And the owner's list names who added a row only when it was somebody else. */
+expect(
+  addedByOther(row({ addedBy: { id: 'mate', displayName: 'Mate Tahir' } }), 'me') === 'Mate Tahir',
+  'a row a colleague added says who added it',
+)
+expect(addedByOther(row({ addedBy: { id: 'me', displayName: 'Me' } }), 'me') === null, 'your own rows say nothing')
+
 if (failures.length) {
   console.error(`use-priorities: ${failures.length} failure(s)`)
   for (const f of failures) console.error(`  - ${f}`)
   throw new Error(`${failures.length} assertion(s) failed`)
 }
-console.log('use-priorities: one key, named for the resource, and both surfaces read through it')
+console.log(
+  'use-priorities: one key, named for the resource, and both surfaces read through it; ' +
+    'the offer after assigning asks what ClickUp asks, and "Added by" names only somebody else',
+)

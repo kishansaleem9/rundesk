@@ -170,7 +170,7 @@ try {
    * bounded and caught up here rather than inside the call (rule six).
    */
   const accepted = (
-    (await page.getByTestId('import-doc-accepted').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('import-doc-accepted').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   chk(
     /\.md\b/.test(accepted) && /\.txt\b/.test(accepted),
@@ -202,7 +202,7 @@ try {
     `the result carried data-doc-id=${JSON.stringify(madeDocId)}`,
   )
   const shownTitle = (
-    (await page.getByTestId('import-doc-open').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('import-doc-open').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   chk(
     shownTitle === TITLE,
@@ -360,7 +360,7 @@ try {
     { timeoutMs: 20_000 },
   )
   const refusal = (
-    (await page.getByTestId('import-doc-error').innerText({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('import-doc-error').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   chk(
     refused && refusal.length > 0,

@@ -121,6 +121,10 @@ const ADMIN = {
 }
 
 const API = `http://127.0.0.1:${API_PORT}/api/v1`
+// The lane's model stub records every call it answers, so what the product
+// handed a model can be read back (`/__control/seen`), as `ai-task-reads` does.
+const MODEL = `http://127.0.0.1:${argOf('--model', process.env.E2E_MODEL_PORT ?? String(9200 + (API_PORT - 3020)))}`
+const stubCalls = async () => (await fetch(`${MODEL}/__control/seen`).then((r) => r.json()).catch(() => null))?.calls ?? null
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = { authorization: `Bearer ${token}` }
@@ -271,7 +275,7 @@ try {
   await page.getByTestId('person-email').waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   check(await page.getByTestId('person-email').isVisible().catch(() => false), 'shows their email')
   // §G06 [05:46] — "mera TIME ZONE kya chal raha hai".
-  const clock = await page.getByTestId('person-local-time').innerText().catch(() => '')
+  const clock = await page.getByTestId('person-local-time').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')
   check(/\d/.test(clock), 'and their LOCAL TIME as a clock, not a zone name', clock)
   check(
     await page.getByTestId('person-reporting').isVisible().catch(() => false),
@@ -347,7 +351,7 @@ try {
     JSON.stringify((savedLeave.data ?? []).map((e) => [e.startsOn, e.endsOn])).slice(0, 160),
   )
   check(
-    (await page.getByTestId('person-time-off-list').innerText().catch(() => '')).includes(away),
+    (await page.getByTestId('person-time-off-list').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')).includes(away),
     'and the panel shows the days back, without a reload',
   )
 
@@ -405,7 +409,7 @@ try {
     await page.getByTestId('person-priorities').isVisible().catch(() => false),
     'Priorities is the tab it opens on',
   )
-  const emptyText = await readText(page.getByTestId('person-priorities'))
+  const emptyText = await readText(page.getByTestId('person-priorities').filter({ visible: true }))
   check(/most important/i.test(emptyText), 'the empty state invites you to add them', emptyText.slice(0, 90))
 
   await page.getByTestId('priority-input').fill('Ship the release')
@@ -770,6 +774,7 @@ try {
   // Closed through the API, so completedAt is set the way the app sets it.
   if (finished?.id) await A(`/tasks/${finished.id}`, { method: 'PATCH', body: { status: 'done' } })
 
+  const callsBefore = (await stubCalls())?.length ?? null
   const standup = await A(`/workspaces/${workspaceId}/people/${meId}/standup`, {
     method: 'POST',
     body: { days: 7 },
@@ -803,12 +808,26 @@ try {
    * exact title back would fail a deployment whose only sin is having an API
    * key; what can still be insisted on is that the model was not handed an
    * empty person, which is the wiring failure worth catching either way.
+   *
+   * SO IT IS ASKED OF WHAT THE MODEL WAS HANDED. This read the reply's length,
+   * more than 20 characters, and on a lane the reply is the stub's own
+   * sentence: "A stubbed reply.", 16, whatever the product sent. It failed on
+   * every model lane and could pass on none, and a longer stub sentence would
+   * have made it pass on an empty week just as well
+   * (`found-29-sep/standup-check-reads-the-stubs-words`). The stub records the
+   * call, so the finished task's title has to be in it. Only a deployment
+   * elsewhere, whose model records nothing here, is left with the reply.
    */
   if (sd?.generated) {
+    const sent = callsBefore === null ? null : JSON.stringify(((await stubCalls()) ?? []).slice(callsBefore))
     check(
-      (sd?.text ?? '').trim().length > 20 && !/no recorded task activity/i.test(sd?.text ?? ''),
+      REMOTE && sent === null
+        ? (sd?.text ?? '').trim().length > 20 && !/no recorded task activity/i.test(sd?.text ?? '')
+        : sent !== null && !!finished?.title && sent.includes(finished.title),
       'and the sentence was written from real work, not from an empty week',
-      (sd?.text ?? '').slice(0, 200),
+      sent === null
+        ? `the model stub at ${MODEL} could not be read; the reply was ${JSON.stringify((sd?.text ?? '').slice(0, 160))}`
+        : `the call that wrote it ${sent.includes(finished?.title ?? '\u0000') ? 'carried' : 'did NOT carry'} "${finished?.title}" (${sent.length} characters sent)`,
     )
   } else {
     check(
@@ -872,7 +891,7 @@ try {
     if (!wrote) {
       standupPanel.rest('skipped: nothing was written, so there was nothing to read')
     } else {
-      const shown = (await page.getByTestId('person-standup-result').innerText().catch(() => '')) ?? ''
+      const shown = (await page.getByTestId('person-standup-result').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')) ?? ''
       standupPanel.step(shown.trim().length > 10, JSON.stringify(shown.slice(0, 120)))
     }
   }
