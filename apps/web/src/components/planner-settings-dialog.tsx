@@ -797,6 +797,14 @@ function FooterPaneView({
     queryFn: () => api<Announcement[]>(`/workspaces/${workspaceId}/announcements/active`),
     enabled: pane === 'whatsNew' && !!workspaceId,
   })
+  // What is listed here has been seen, as the banner's is: a view each, counted once per person.
+  const listedIds = pane === 'whatsNew' ? news.map((item) => item.id).join(',') : ''
+  useEffect(() => {
+    if (!workspaceId || !listedIds) return
+    for (const id of listedIds.split(',')) {
+      void api(`/workspaces/${workspaceId}/announcements/${id}/view`, { method: 'POST' }).catch(() => {})
+    }
+  }, [workspaceId, listedIds])
 
   const [text, setText] = useState('')
   const [filed, setFiled] = useState<string | null>(null)

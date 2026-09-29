@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 318 items, 96 open, 12 partly fixed, 210 closed, counted from this file's headings early on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 320 items, 91 open, 11 partly fixed, 218 closed, counted from this file's headings early on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1189,7 +1189,7 @@ Now:
 
 Left beside it, as their own items: the web offers no way to archive or delete a doc (`found-28-sep/docs-offer-no-archive-or-delete`), and the doc editor takes typing from people who may only read or comment (`found-28-sep/doc-editor-open-to-readers`).
 
-### `found-28-sep/docs-offer-no-archive-or-delete` — open, feature, small (found closing `doc-archive-and-delete-at-two-levels`)
+### `found-28-sep/docs-offer-no-archive-or-delete` — **closed** (feature, small; found closing `doc-archive-and-delete-at-two-levels`)
 
 **The docs panel has an Archived scope and no control that archives or deletes a doc**
 
@@ -1197,13 +1197,28 @@ Left beside it, as their own items: the web offers no way to archive or delete a
 
 *To close:* an Archive (and Delete) in the doc's menu, offered at Edit — which needs the caller's level on the doc in its payload — and Unarchive on an archived one. Measure a member at Edit and at Comment.
 
-### `found-28-sep/doc-editor-open-to-readers` — open, mirror, small (found closing `doc-archive-and-delete-at-two-levels`; read, not run)
+*Closed, 29 September,* with `doc-editor-open-to-readers` below. The level comes from the doc's capabilities (`GET /docs/:id/capabilities`, the checks its routes ask, which the share button already read), one query for the page and the button. The doc's header has a menu, drawn when there is something in it: Archive at Edit (the doc then opens in the Archived bucket, where the menu offers Unarchive, which brings it back to All), and Delete at Edit on a live doc, which sends it to the Trash and opens the next doc. Both land the doc in the Trash of whoever did it (`doc-archive-and-delete-at-two-levels`), so an archived doc is not offered Delete, which would change nothing. Four locales.
+
+Measured on lane 2 at `f8a799d` before: a member with an Edit share was offered no menu at all, and nothing on the page archived or deleted a doc. After: the Edit share's menu offers Archive and Delete; Archive archives it as the editor's doing and Unarchive restores it; Delete puts it in the editor's own Trash; View and Comment shares get no menu. Checks 3–5 of `doc-level-controls` (below); patches `dlc-5..9`, `dlc-11`.
+
+### `found-28-sep/doc-editor-open-to-readers` — **closed** (mirror, small; found closing `doc-archive-and-delete-at-two-levels`)
 
 **The doc editor takes typing from someone who may only read or comment, and a refused save says nothing**
 
 *Evidence (reading, 28 September):* the docs panel knows nothing of the caller's level: the editor is editable for everyone who can open the doc. `saveDoc`'s `onError` speaks only for a 409 (a teammate's edit); the 403 a View or Comment share gets is dropped, so the typing looks saved until the doc reloads.
 
 *To close:* the caller's level in the doc payload, a read-only editor below Edit, and a refused save said. Measure a View share typing.
+
+*Closed, 29 September.* Measured on lane 2 at `f8a799d` before: a View share and a Comment share were each shown an editable editor that took their typing, with Save and the formatting tools; and when an Edit share was lowered to View while the doc was open, Save answered 403 and the page said nothing. ClickUp: View and Comment read a Doc; Edit changes it.
+
+The editor starts read only and is made editable only when the doc's capabilities say Edit; below Edit the formatting tools, the AI tools and Save are not drawn, and a "Read only" pill says why. A save refused for any reason but a teammate's edit (409, as before) is said with the API's own sentence ("Your access to this doc does not allow changing it"), and the level is asked again, so the page turns read only. Four locales.
+
+`doc-level-controls`, 7 checks, a View, a Comment and an Edit share on one doc:
+- Before: 1/7 on lane 2 (the API's capabilities, which were right).
+- After: 7/7 on lane 2.
+- Patches `dlc-1..11`, one or more per check. Their runs follow the commit.
+- In CI (229).
+- Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
 
 ### `found-28-sep/trash-deletes-for-good-wider-than-clickup` — **closed** (permissions, small; found by the deletion research)
 
@@ -1348,7 +1363,7 @@ Now:
 - `client-access` 7/7 on lane 7.
 - Patch `bsw-1` makes the lock ignore the edit rule, and reddened the new check (lane 4, at `5086fe0`, baseline 7/7).
 
-### `found-28-sep/announcement-views-counted-per-click` — open, small (found by the announcement research)
+### `found-28-sep/announcement-views-counted-per-click` — **closed** (visible bug, small; found by the announcement research)
 
 **An announcement's views count every call, and paused or expired ones accept views and dismissals**
 
@@ -1356,7 +1371,20 @@ Now:
 
 *To close:* One view per person; refuse paused and expired announcements; give Mark seen an effect or remove it.
 
-### `found-28-sep/announcements-flag-gates-nothing` — open, facade, small (found by the announcement research)
+*Closed, 29 September.* Measured on lane 1 at `f8a799d` before the change: one member's three views and another's one counted 4; a paused and an expired announcement each took a view and a dismissal (200s, counts 1); a dismissal recorded no view; the home banner offered Mark seen, which counted a click and changed nothing on the page; showing the banner or What's new recorded nothing. ClickUp has no workspace banner (its nearest is a Chat post), so the rule is the product's own: a view is a person.
+
+- A view is a row per person, `announcement_views` (migration `0165`, unique on the announcement and the person, as `announcement_dismissals` already was), and the count moves only when the row is new. The counts recorded before are kept.
+- `view` and `dismiss` take a live announcement only (published, not paused, not expired), else 404, as for somebody who was never shown it; a dismissal is a view too, and both are written with `ON CONFLICT DO NOTHING`, so two at once are one rather than the unique index's 500.
+- The web records a view when it shows the announcement: the home banner, and each one What's new lists (the banner shows only the newest, so the older ones are seen there). Mark seen is gone, in four locales.
+
+`announcement-views`, 9 checks:
+- Before: 0/9 on lane 1.
+- After: 9/9 on lane 1.
+- Patches `anv-1..10`, one or more per check. Their runs follow the commit.
+- In CI (229).
+- Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
+
+### `found-28-sep/announcements-flag-gates-nothing` — **closed** (facade, small; found by the announcement research)
 
 **The `chat.announcements` feature flag gates nothing**
 
@@ -1364,13 +1392,45 @@ Now:
 
 *To close:* Gate announcements by the flag, or remove it from the registry.
 
-### `found-28-sep/role-flags-read-the-account-role` — open, small (found by the ClickApps research)
+*Closed, 29 September: removed.* Gating by it would have hidden every live banner in a workspace whose newcomer left Chat unticked at sign-up (sign-up writes the whole Chat category from that pick, `chat.announcements` with it), and no workspace setting could turn it back on: the switch was offered only in the platform console, where it read off by default while announcements worked everywhere. ClickUp has no ClickApp for announcements. So the flag leaves the registry and Chat's category, the console no longer draws the switch, and migration `0165` deletes its stored switches and asks. Announcements stay governed by `announcement.manage` and membership, as they were.
+
+Measured on lane 1 at `f8a799d` before: switching it off answered 200 and the banner was served as before; a newcomer picking Chat got a `chat.announcements` switch. After: the switch is refused as a feature this build does not have (400), and sign-up writes no such switch. Two checks in `announcement-views` (above); patches `anv-9`, `anv-10`.
+
+The platform console's announcements page still lists only the workspaces its super admin belongs to; a workspace's announcements are managed from its own Settings → Announcements now.
+
+### `found-28-sep/role-flags-read-the-account-role` — **closed** (visible bug, small; found by the ClickApps research)
 
 **A role-scoped feature flag matches the account's role in the navigation and the workspace role in the ask**
 
 *Evidence:* `resolveForUserRequest` passes `user.role` (`feature-flags.service.ts:70`), while `requestFlag` resolves with the membership's role (`:215-219`). A role-scoped flag can therefore read differently in the nav and in "Contact your admin".
 
 *To close:* Resolve with the workspace role in both, and measure a manager with a role-scoped override.
+
+*Closed, 29 September,* with `platform-flag-switches-apply-nowhere` below. Measured on lane 5 at `c55a088` before: a platform override turning Forms off for managers in a workspace left the manager told Forms was on (the navigation matched the account's role, `user`) and its routes answering 200; the guard passed the account's role too. Now resolution reads the caller's role in the workspace itself whenever it knows the workspace and the person, so the navigation, the guard and "Contact your admin" read one role. After: the manager is told off and the routes answer 404, a plain member keeps Forms, and the manager's ask goes out rather than saying Forms is already on.
+
+`flag-resolution`, 5 checks (two for this item):
+- Before: 1/5 on lane 5 (the workspace's own switch, which worked).
+- After: 5/5 on lane 7.
+- Patches `flr-1..4`. Their runs follow the commit.
+- In CI (231).
+
+### `found-29-sep/platform-flag-switches-apply-nowhere` — **closed** (facade, small; found closing `role-flags-read-the-account-role`)
+
+**The platform console's feature switches applied in no workspace, and each one added a row**
+
+*Evidence, measured on lane 5 at `c55a088`:* the console switches a feature for the whole platform (`PUT /feature-flags/:flag`, `scope: 'global'`, no workspace). Turning Forms off answered 200, and a workspace went on resolving Forms on and serving its routes: a workspace read loaded only that workspace's rows (`resolveFromDb`), so a row with no workspace was never read. And the unique key ran over nullable columns with NULLs distinct, so the upsert never matched a platform row: each switch inserted another, and which one a read applied was the table's order. Forms had nine platform rows on lane 5.
+
+*Closed:* a workspace read loads the platform's rows and the workspace's, and applies them platform first, then the workspace's, a role's, a person's — the more specific wins. A switch updates its own row, found with NULLs equal, under a lock per flag, and makes one only when there is none. Migration `0166` keeps the newest of each duplicate and makes the key NULLS NOT DISTINCT. The drizzle schema cannot say NULLS NOT DISTINCT: drizzle-kit 0.31 does not read it back, and tried to rebuild the key, asking about the table's rows, on every lane push, which failed without a terminal. So the rule is kept in code, and a database built by `drizzle-kit push` (CI's) holds one row too.
+
+The seeded platform rows are all on (the default-enabled flags), so applying them changes nothing by itself; a feature the console had switched off would now be off in every workspace that says nothing of its own. Three checks in `flag-resolution` (above); patches `flr-1`, `flr-2`, `flr-4`.
+
+### `found-29-sep/lane-push-errors-read-as-synced` — open, test tooling, small (found closing `platform-flag-switches-apply-nowhere`)
+
+**A schema push that stops on an error is reported as synced**
+
+*Evidence, 29 September:* drizzle-kit 0.31 asks before adding a unique key to a table with rows, and with no terminal it prints "Error: Interactive prompts require a TTY terminal" and exits 0, having applied nothing. `fleet-sync.sh` pipes `yes` into the push, reads no status and no log, and said "7/7 lanes synced and up"; `schema_ref_ensure` (`lane-env.sh`) trusts the same exit status, so the schema reference was built without the table migration 0165 adds, and `build-api.sh` then refused every lane as drifted — the right answer, from the wrong database.
+
+*To close:* read the push's log for an error as well as its status, in both places, and fail loudly; prove it with a push that is made to stop.
 
 ### `found-28-sep/copy-points-admins-to-the-console` — **closed** (stale reason, small; found by the ClickApps research)
 
@@ -1409,13 +1469,24 @@ Now:
 - `member-settings-tabs`' slow-read check: three loads of three land on Archived with the read held back 4.5 s.
 - Patches `sbs-1` (the route awaits again) and `sbs-2` (the page never decides); both typecheck applied, and both reddened the slow-read check (lane 2, at `ebe20cf`). `srg-1` is re-aimed onto `settingsTabsFor`, which both now read, and reddened its check.
 
-### `found-28-sep/own-capacity-not-self-service` — open, feature, small (found by the people-and-calendar research)
+### `found-28-sep/own-capacity-not-self-service` — **closed** (feature, small; found by the people-and-calendar research)
 
 **A member cannot set their own weekly capacity**
 
 *Evidence:* ClickUp lets every member set their own capacity in Workload. `PATCH members/:userId/capacity` refuses a member even for themselves (it asks `members.profile.manage`), and no page offers it.
 
 *To close:* Let a member set their own, and keep others' behind the key.
+
+*Closed, 29 September.* Measured on lane 1 at `c55a088` before: a plain member setting their own weekly capacity was refused (403, "Missing required permission: members.profile.manage"), and the Workload page drew every capacity as a figure, for everyone. ClickUp ("Set capacity limits in Workload view"): "Workspace members can set capacity for themselves, while Admins, Workspace owners, and managers can set capacity for themselves and others", by clicking the capacity beside the name.
+
+- `PATCH members/:userId/capacity` takes a member's own from any member but a guest ("A guest has no capacity to set"); somebody else's asks `members.profile.manage`, refused as "Setting somebody else’s capacity takes the Set member profiles permission", and the rank rule stays.
+- The Workload page's capacity beside a name is a button on the reader's own row, and on everyone's for a holder of the key: it opens a weekly-hours field and saves. Four locales.
+
+`own-capacity`, 6 checks:
+- Before: 1/6 on lane 1 (a manager setting a member's, and refused an admin's, which held).
+- After: 6/6 on lane 1.
+- Patches `ocp-1..7`; `pca-6` is re-aimed onto the inline key. Their runs follow the commit.
+- In CI (231).
 
 ### `found-28-sep/archived-tasks-unarchived-in-place` — open, feature, small (found by the archived-tasks research)
 
@@ -2688,7 +2759,7 @@ Each is its own question.
 
 *Closed:* the expected day is the meeting instant's own day in the zone (`todayIn(ZONE, at)`). 3/3 at 20:40 UTC, the hour it failed.
 
-### `found-24-sep/three-suites-fail-under-a-full-sweep` — partly-fixed, small (test tooling; found by the full sweep)
+### `found-24-sep/three-suites-fail-under-a-full-sweep` — **closed** (test tooling, small; found by the full sweep)
 
 **`addressability-live`, `request-access` and `task-menu` failed during a four-lane full sweep and passed on their own**
 
@@ -2735,7 +2806,9 @@ Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing ch
 - `folder-dialog`: the edit dialog opened until the folder is drawn, not pressed once.
 - `settings-depth`: the note asked of the server until it holds the words, before the reload.
 
-The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-menu-ai` was the proxy's keep-alive, closed as `e2e-proxy-advertises-the-apis-keep-alive`. Each suite passed alone on lane 5, and a sweep of the 17 with `ai-answer-rendering` and `create-menu-ai` on lane 7 at `f8a799d` passed 19/19 (28/28, 9/9, 37/37, 93/93, 56/56, 5/5, 34/34, 25/25, 91/91, 36/36, 18/18, 73/73, 23/23, 59/59, 30/30, 29/29, 61/61, 51/51, 24/24). **Still owed:** the same under a multi-lane sweep's load, which is where they failed.
+The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-menu-ai` was the proxy's keep-alive, closed as `e2e-proxy-advertises-the-apis-keep-alive`. Each suite passed alone on lane 5, and a sweep of the 17 with `ai-answer-rendering` and `create-menu-ai` on lane 7 at `f8a799d` passed 19/19 (28/28, 9/9, 37/37, 93/93, 56/56, 5/5, 34/34, 25/25, 91/91, 36/36, 18/18, 73/73, 23/23, 59/59, 30/30, 29/29, 61/61, 51/51, 24/24).
+
+*Closed, 29 September:* the same 19 under a four-lane sweep's load (lanes 1, 2, 3 and 7 at once on four cores, which is where they failed), with 30 more suites in the same sweep: 49/49 at `c55a088`. Each read the same numbers as alone.
 
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)

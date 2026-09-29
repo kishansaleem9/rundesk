@@ -17,6 +17,12 @@ export const featureFlags = pgTable('feature_flags', {
   updatedAt:   timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
   createdAt:   timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
+  // ONE ROW PER SWITCH. A platform switch has no scope id and no workspace, and
+  // with NULLs distinct every switch added a row. Migration 0166 makes this key
+  // NULLS NOT DISTINCT; it is not said here because drizzle-kit 0.31 does not
+  // read it back from a database, and would try to rebuild the key on every
+  // push. `setFlag` updates the switch's row itself, so a pushed database keeps
+  // one row too (`found-29-sep/platform-flag-switches-apply-nowhere`).
   unique('uq_flag_scope').on(t.flagKey, t.scope, t.scopeId, t.workspaceId),
 ])
 

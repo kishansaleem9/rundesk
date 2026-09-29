@@ -20,7 +20,8 @@ import { CreateAnnouncementDto, UpdateAnnouncementDto } from './dto/announcement
  *
  * THE LIVE BANNER STAYS EVERY MEMBER'S: `active`, `view` and `dismiss` ask
  * membership alone, because the workspace home and the planner's What's new
- * read it for everybody.
+ * read it for everybody. `view` and `dismiss` take a live announcement only,
+ * and count each person once.
  */
 @ApiTags('announcements')
 @ApiBearerAuth()
@@ -81,8 +82,9 @@ export class AnnouncementsController {
   trackView(
     @Param('workspaceId') workspaceId: string,
     @Param('announcementId') announcementId: string,
+    @CurrentUser() user: { id: string },
   ) {
-    return this.announcementsService.trackView(workspaceId, announcementId)
+    return this.announcementsService.trackView(workspaceId, announcementId, user.id)
   }
 
   @Post(':announcementId/dismiss')

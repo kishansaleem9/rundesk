@@ -935,8 +935,12 @@ export class WorkspacesService {
     const rounded = Math.round(weeklyCapacityHours)
     const previous = await this.getMembership(workspaceId, userId)
     if (!previous) throw new NotFoundException('Member not found')
+    // A guest is not in the Workload: ClickUp's own capacity is a workspace member's.
+    if (actor?.id === userId && previous.role === 'guest') {
+      throw new ForbiddenException('A guest has no capacity to set')
+    }
     // As for roles: nobody holding `members.profile.manage` sets the hours of
-    // somebody above their own role.
+    // somebody above their own role (their own is at their own rank).
     await this.assertWithinRank(workspaceId, actor, [previous.role], 'set the capacity of somebody who is')
     await this.db
       .update(workspaceMembers)

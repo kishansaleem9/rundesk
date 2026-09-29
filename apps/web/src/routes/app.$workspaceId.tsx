@@ -22,7 +22,7 @@ import {
 import { api } from '../lib/api'
 import { ASSIGNED_COMMENT_TYPES, REPLY_TYPES } from '../lib/reply-types'
 import { notificationsUrl, typesKey, useNotificationPages, useUnreadCount } from '../lib/notifications-query'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { formatDistanceToNowStrict, isToday, isPast } from 'date-fns'
 import { useAuthStore } from '../store/auth'
 import { MentionText } from '../components/mention-text'
@@ -284,6 +284,16 @@ function WorkspaceHome() {
     if (r.channelId) navigate({ to: `/app/${workspaceId}/chat?channel=${r.channelId}${r.messageId ? `&message=${r.messageId}` : ''}` as any })
   }
   const visibleAnnouncement = (announcementsQuery.data ?? [])[0]
+  /*
+   * SHOWN IS SEEN: the banner records a view when it is drawn, and the server
+   * counts each person once (`found-28-sep/announcement-views-counted-per-click`).
+   * A Mark seen button added one per click and changed nothing on the page.
+   */
+  const shownAnnouncementId = visibleAnnouncement?.id
+  useEffect(() => {
+    if (!workspaceId || !shownAnnouncementId) return
+    void api(`/workspaces/${workspaceId}/announcements/${shownAnnouncementId}/view`, { method: 'POST' }).catch(() => {})
+  }, [workspaceId, shownAnnouncementId])
   // §A6.5 — the scheduled briefing arrives as a notification; Home is where the
   // user starts their day, so the most recent one is shown here rather than
   // being left to be discovered on the Insights page.
@@ -339,15 +349,6 @@ function WorkspaceHome() {
               )}
             </div>
             <div className="flex items-center gap-2 shrink-0">
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => {
-                  void api(`/workspaces/${workspaceId}/announcements/${visibleAnnouncement.id}/view`, { method: 'POST' })
-                }}
-              >
-                {t('appWorkspace.markSeen')}
-              </Button>
               <Button
                 size="sm"
                 variant="ghost"

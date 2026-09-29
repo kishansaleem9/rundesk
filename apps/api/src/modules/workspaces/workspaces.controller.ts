@@ -3,6 +3,7 @@ import { PermissionsGuard, RequirePermissions } from '../custom-roles/permission
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { WorkspacesService, withoutDomainToken } from './workspaces.service'
 import { PlansService } from '../plans/plans.service'
+import { CustomRolesService } from '../custom-roles/custom-roles.service'
 import type { PlanLimitsOverride } from '../plans/plans.constants'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
 import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
@@ -22,6 +23,7 @@ export class WorkspacesController {
   constructor(
     private readonly workspacesService: WorkspacesService,
     private readonly plans: PlansService,
+    private readonly customRoles: CustomRolesService,
   ) {}
 
   @Get()
@@ -267,23 +269,31 @@ export class WorkspacesController {
   }
 
   /*
-   * A member's weekly capacity and whom they report to ask
-   * `members.profile.manage`: a manager's and up by default, and a custom role
-   * grants it. ClickUp: "Admins, Workspace owners, and managers can set
-   * capacity for themselves and others", and the org chart's manager field is
-   * set "for yourself or other people". The service adds the rank rule: nobody
-   * sets these for somebody above their own role
-   * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
+   * A member's weekly capacity. Their own is theirs to set — ClickUp:
+   * "Workspace members can set capacity for themselves, while Admins, Workspace
+   * owners, and managers can set capacity for themselves and others"
+   * (`found-28-sep/own-capacity-not-self-service`); it asked the key even for
+   * yourself. Somebody else's asks `members.profile.manage`, a manager's and up
+   * by default, and a custom role grants it; the service adds the rank rule
+   * (nobody sets it for somebody above their own role,
+   * `found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`) and
+   * refuses a guest their own.
    */
   @Patch(':workspaceId/members/:userId/capacity')
-  @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
-  @RequirePermissions('members.profile.manage')
+  @UseGuards(WorkspaceMemberGuard)
   async updateMemberCapacity(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('userId', new ParseUUIDPipe()) userId: string,
     @Body() body: { weeklyCapacityHours: number },
     @CurrentUser() user: any,
   ) {
+    if (
+      userId !== user.id &&
+      user.role !== 'super_admin' &&
+      !(await this.customRoles.hasPermission(workspaceId, user.id, 'members.profile.manage'))
+    ) {
+      throw new ForbiddenException('Setting somebody else’s capacity takes the Set member profiles permission')
+    }
     return this.workspacesService.updateMemberCapacity(workspaceId, userId, body.weeklyCapacityHours, {
       id: user.id,
       email: user.email,
@@ -292,7 +302,7 @@ export class WorkspacesController {
   }
 
   // Reporting line: who reports to whom draws the org tree. `members.profile.manage`,
-  // as capacity is — it was never admin-only: `WorkspaceAdminGuard` admitted managers.
+  // as somebody else's capacity is — it was never admin-only: `WorkspaceAdminGuard` admitted managers.
   @Patch(':workspaceId/members/:userId/manager')
   @UseGuards(WorkspaceMemberGuard, PermissionsGuard)
   @RequirePermissions('members.profile.manage')

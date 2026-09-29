@@ -43,12 +43,22 @@ const rolesHolding = (holders: string[]) => ({
   holdersOf: async (_ws: string, key: string) => (key === 'workspace.clickapps.manage' ? holders : []),
 })
 
-/** A db that records the override it is asked to write. */
+/**
+ * A db that records the override it is asked to write. A switch runs in a
+ * transaction: it updates the switch's own row, found with NULLs equal, and
+ * writes one when there is none — here there never is.
+ */
 const writingDb = () => {
   const written: any[] = []
+  const tx = {
+    execute: async () => undefined,
+    update: () => ({ set: () => ({ where: () => ({ returning: async () => [] }) }) }),
+    insert: () => ({ values: async (v: any) => { written.push(v) } }),
+  }
   return {
     written,
-    insert: () => ({ values: (v: any) => (written.push(v), { onConflictDoUpdate: async () => undefined }) }),
+    insert: tx.insert,
+    transaction: async (fn: (t: typeof tx) => Promise<unknown>) => fn(tx),
   }
 }
 

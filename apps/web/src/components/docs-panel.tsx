@@ -1,12 +1,23 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, toast } from '@rundesk/ui'
+import {
+  Button,
+  Card,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  toast,
+} from '@rundesk/ui'
 import {
   AlignCenter,
   AlignJustify,
   AlignLeft,
   AlignRight,
+  Archive,
+  ArchiveRestore,
   Check,
   CheckCircle2,
   CheckSquare,
@@ -28,6 +39,7 @@ import {
   MessageCircle,
   MessagesSquare,
   Minus,
+  MoreHorizontal,
   Network,
   Palette,
   Pilcrow,
@@ -86,6 +98,21 @@ type Doc = {
   spaceName?: string | null
   subpageCount?: number
   shareCount?: number
+  isArchived?: boolean
+}
+
+/**
+ * What the reader may do to a doc: the checks its routes ask
+ * (`GET /docs/:id/capabilities`). One query for the page and its share button.
+ */
+type DocCapabilities = { edit: boolean; delete: boolean; makeLink: boolean; revokeLink: boolean }
+function useDocCapabilities(docId: string | null | undefined) {
+  return useQuery({
+    queryKey: ['doc-capabilities', docId],
+    queryFn: () => api<DocCapabilities>(`/docs/${docId}/capabilities`),
+    enabled: Boolean(docId),
+    staleTime: 30_000,
+  })
 }
 
 /** A5.6 — the docs-hub buckets. Mirrors DOC_SCOPES on the API. */
@@ -288,6 +315,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
     ],
     content: activeDoc?.content ?? { type: 'doc', content: [{ type: 'paragraph' }] },
     immediatelyRender: false,
+    // Read only until the doc's capabilities say Edit (`mayEdit` below).
+    editable: false,
     onUpdate: ({ editor }) => {
       const from = editor.state.selection.from
       const text = editor.state.doc.textBetween(Math.max(0, from - 30), from, '\n', '\n')
@@ -396,12 +425,71 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
         toast(t('docs.docUpdatedByTeammate'), {
           description: t('docs.docUpdatedDescription'),
         })
+      } else {
+        // Any other refusal is said, and the level asked again: a View or
+        // Comment share's 403 was dropped, and the words looked saved until a
+        // reload (`found-28-sep/doc-editor-open-to-readers`).
+        toast.error(error instanceof ApiError ? error.message : t('docs.couldNotSave'))
+        await qc.invalidateQueries({ queryKey: ['doc-capabilities', selectedDocId] })
       }
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
     onSuccess: async () => {
       await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
     },
+  })
+
+  /*
+   * THE OPEN DOC AT THE READER'S LEVEL (`found-28-sep/doc-editor-open-to-readers`):
+   * below Edit the editor is read only and nothing that changes the doc is
+   * offered, and until the answer comes nothing is editable. The editor took
+   * typing from everyone who could open the doc.
+   */
+  const capsQuery = useDocCapabilities(activeDoc?.id)
+  const mayEdit = capsQuery.data?.edit === true
+  const mayDelete = capsQuery.data?.delete === true
+  const readOnlyShown = Boolean(activeDoc && capsQuery.data && !mayEdit)
+  useEffect(() => {
+    if (editor && editor.isEditable !== mayEdit) editor.setEditable(mayEdit)
+  }, [editor, mayEdit])
+
+  /*
+   * ARCHIVE, UNARCHIVE AND DELETE, from the doc's own menu, at Edit
+   * (`found-28-sep/docs-offer-no-archive-or-delete`): the panel had an Archived
+   * bucket and nothing that sent a doc there. ClickUp: "Anyone, including
+   * guests, with Edit permissions can archive and unarchive Docs". An archived
+   * doc is opened in the Archived bucket, where Unarchive is; either way it is
+   * in the Trash of whoever sent it (`doc-archive-and-delete-at-two-levels`).
+   */
+  const openIn = (docId: string | null, nextScope: DocScope) =>
+    navigate({
+      to: '/app/$workspaceId/docs',
+      params: { workspaceId },
+      search: { scope: nextScope === 'all' ? undefined : nextScope, doc: docId ?? undefined },
+      replace: true,
+    })
+  const refreshDocs = async () => {
+    await qc.invalidateQueries({ queryKey: ['docs', workspaceId] })
+    await qc.invalidateQueries({ queryKey: ['doc-scope-counts', workspaceId] })
+  }
+  const archiveDoc = useMutation({
+    mutationFn: ({ id, archive }: { id: string; archive: boolean }) =>
+      api(`/docs/${id}`, { method: 'PATCH', body: JSON.stringify({ isArchived: archive }) }),
+    onSuccess: async (_row, { id, archive }) => {
+      toast.success(t(archive ? 'docs.archivedToast' : 'docs.unarchivedToast'))
+      await refreshDocs()
+      openIn(id, archive ? 'archived' : 'all')
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('docs.couldNotArchive')),
+  })
+  const deleteDoc = useMutation({
+    mutationFn: (id: string) => api(`/docs/${id}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      toast.success(t('docs.movedToTrash'))
+      setSelectedDocId(null)
+      await refreshDocs()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('docs.couldNotDelete')),
   })
 
   type SlashCommand = 'h2' | 'todo' | 'bullet' | 'code' | 'quote' | 'divider' | 'callout' | 'table' | 'listEmbed'
@@ -810,7 +898,16 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
             {activeDoc?.title ?? t('docs.selectADoc')}
           </h3>
           {activeDoc && (
-            <div className="flex flex-wrap gap-1.5">
+            <div className="flex flex-wrap items-center gap-1.5">
+              {readOnlyShown && (
+                <span
+                  data-testid="doc-read-only"
+                  title={t('docs.readOnlyHint')}
+                  className="rounded-full border border-border px-2 py-0.5 text-[11px] text-muted-foreground"
+                >
+                  {t('docs.readOnly')}
+                </span>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -860,6 +957,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               >
                 <FileText className="h-3.5 w-3.5" />
               </Button>
+              {mayEdit && (
+              <>
               <Button
                 size="sm"
                 variant="ghost"
@@ -1081,6 +1180,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
                   </div>
                 )}
               </span>
+              </>
+              )}
               <Button
                 size="sm"
                 variant="ghost"
@@ -1107,6 +1208,8 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               >
                 <History className="h-3.5 w-3.5" />
               </Button>
+              {mayEdit && (
+              <>
               <span className="relative inline-flex">
                 <Button
                   size="sm"
@@ -1144,6 +1247,49 @@ export function DocsPanel({ workspaceId }: { workspaceId: string }) {
               >
                 {saveDoc.isPending ? t('common.saving') : t('common.save')}
               </Button>
+              </>
+              )}
+              {(mayEdit || mayDelete) && (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <button
+                      type="button"
+                      data-testid="doc-more-menu"
+                      aria-label={t('docs.moreActions')}
+                      title={t('docs.moreActions')}
+                      className="inline-flex h-8 items-center rounded-md px-2 text-muted-foreground hover:bg-surface-50 hover:text-foreground"
+                    >
+                      <MoreHorizontal className="h-3.5 w-3.5" />
+                    </button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end">
+                    {mayEdit && (
+                      <DropdownMenuItem
+                        disabled={archiveDoc.isPending}
+                        onSelect={() => archiveDoc.mutate({ id: activeDoc.id, archive: !activeDoc.isArchived })}
+                      >
+                        {activeDoc.isArchived ? (
+                          <ArchiveRestore className="h-3.5 w-3.5 mr-2" />
+                        ) : (
+                          <Archive className="h-3.5 w-3.5 mr-2" />
+                        )}
+                        {t(activeDoc.isArchived ? 'docs.unarchive' : 'docs.archive')}
+                      </DropdownMenuItem>
+                    )}
+                    {/* An archived doc is in the Trash already: Delete would change nothing. */}
+                    {mayDelete && !activeDoc.isArchived && (
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        disabled={deleteDoc.isPending}
+                        onSelect={() => deleteDoc.mutate(activeDoc.id)}
+                      >
+                        <Trash2 className="h-3.5 w-3.5 mr-2" />
+                        {t('docs.delete')}
+                      </DropdownMenuItem>
+                    )}
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              )}
             </div>
           )}
         </div>
@@ -1979,11 +2125,7 @@ function ShareDocButton({
    * (found-28-sep/delete-and-public-link-offered-to-everyone). The copy button
    * stays for anyone who can see an existing link.
    */
-  const caps = useQuery({
-    queryKey: ['doc-capabilities', doc.id],
-    queryFn: () => api<{ makeLink: boolean; revokeLink: boolean }>(`/docs/${doc.id}/capabilities`),
-    staleTime: 30_000,
-  })
+  const caps = useDocCapabilities(doc.id)
   const mayToggle = caps.isError ? true : caps.data ? (isShared ? caps.data.revokeLink : caps.data.makeLink) : null
 
   const toggle = async () => {

@@ -1156,6 +1156,20 @@
       "when": 1900000130031,
       "tag": "0164_space_default_full_edit",
       "breakpoints": true
+    },
+    {
+      "idx": 165,
+      "version": "7",
+      "when": 1900000130032,
+      "tag": "0165_announcement_views",
+      "breakpoints": true
+    },
+    {
+      "idx": 166,
+      "version": "7",
+      "when": 1900000130033,
+      "tag": "0166_feature_flag_switch_once",
+      "breakpoints": true
     }
   ]
 }

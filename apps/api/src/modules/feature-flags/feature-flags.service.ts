@@ -1,5 +1,5 @@
 import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
-import { and, eq, gte, isNull } from 'drizzle-orm'
+import { and, eq, gte, isNull, or, sql } from 'drizzle-orm'
 import { featureFlagRequests, featureFlags, workspaceMembers } from '@rundesk/db'
 import { DEFAULT_ENABLED_FLAGS, FLAGS } from '@rundesk/feature-flags'
 import type { FlagKey, FlagResolutionContext, ResolvedFlags } from '@rundesk/feature-flags'
@@ -19,6 +19,13 @@ const CACHE_TTL_MS = 5 * 60 * 1000  // 5 minutes
  * role grants it.
  */
 const CLICKAPPS_KEY = 'workspace.clickapps.manage' as const
+
+/**
+ * Who a flag is resolved for. `workspaceRole` is the caller's role in the
+ * workspace, when the caller already has it (the ask reads the membership);
+ * otherwise resolution looks it up.
+ */
+type ResolutionContext = Partial<FlagResolutionContext> & { workspaceRole?: string }
 
 /** A flag this build knows — the switch and the ask refuse anything else. */
 function isKnownFlag(flagKey: string): boolean {
@@ -42,7 +49,7 @@ export class FeatureFlagsService {
     return resolved[flagKey] ?? false
   }
 
-  async resolveForContext(ctx: Partial<FlagResolutionContext>): Promise<Record<string, boolean>> {
+  async resolveForContext(ctx: ResolutionContext): Promise<Record<string, boolean>> {
     const cacheKey = `${ctx.userId ?? 'anon'}:${ctx.workspaceId ?? 'none'}`
     const cached = this.cache.get(cacheKey)
     if (cached && cached.expiresAt > Date.now()) return cached.flags
@@ -119,26 +126,46 @@ export class FeatureFlagsService {
     }
   }
 
-  private async resolveFromDb(ctx: Partial<FlagResolutionContext>): Promise<Record<string, boolean>> {
+  private async resolveFromDb(ctx: ResolutionContext): Promise<Record<string, boolean>> {
     // Start with platform defaults
     const resolved: Record<string, boolean> = {}
     for (const flag of DEFAULT_ENABLED_FLAGS) resolved[flag] = true
 
-    // Load all relevant overrides in one query, ordered global → workspace → role → user
+    /*
+     * THE PLATFORM'S SWITCHES AND THE WORKSPACE'S, both
+     * (`found-29-sep/platform-flag-switches-apply-nowhere`). A workspace read
+     * loaded the workspace's rows alone, so a switch the platform console made
+     * (no workspace) applied in no workspace: it answered 200 and changed
+     * nothing anybody could see.
+     */
     const rows = await this.db.select().from(featureFlags).where(
       ctx.workspaceId
-        ? eq(featureFlags.workspaceId, ctx.workspaceId)
+        ? or(eq(featureFlags.workspaceId, ctx.workspaceId), isNull(featureFlags.workspaceId))
         : isNull(featureFlags.workspaceId),
     )
+    /*
+     * A ROLE OVERRIDE NAMES A WORKSPACE ROLE, so it is matched against the
+     * caller's role in this workspace (`found-28-sep/role-flags-read-the-account-role`).
+     * The navigation and the guard passed the account's role (`user.role`) while
+     * the ask read the membership, so a manager's override read differently in
+     * the nav and in "Contact your admin". Outside a workspace, the role given.
+     */
+    const role = ctx.workspaceId && ctx.userId
+      ? (ctx.workspaceRole ?? (await this.workspaceRole(ctx.workspaceId, ctx.userId))) ?? ctx.role
+      : ctx.role
 
-    // Apply in resolution order: global first, then workspace, role, user (most specific wins)
+    // Apply in resolution order: global first, then workspace, role, user (most
+    // specific wins); within a scope the platform's row first, then the workspace's.
     const order = ['global', 'workspace', 'role', 'user'] as const
     for (const scope of order) {
-      for (const row of rows.filter((r) => r.scope === scope)) {
+      const inScope = rows
+        .filter((r) => r.scope === scope)
+        .sort((a, b) => Number(a.workspaceId != null) - Number(b.workspaceId != null))
+      for (const row of inScope) {
         const scopeMatches =
           scope === 'global' ||
           (scope === 'workspace' && row.scopeId === ctx.workspaceId) ||
-          (scope === 'role' && row.scopeId === ctx.role) ||
+          (scope === 'role' && row.scopeId === role) ||
           (scope === 'user' && row.scopeId === ctx.userId)
 
         if (scopeMatches) resolved[row.flagKey] = row.enabled
@@ -146,6 +173,15 @@ export class FeatureFlagsService {
     }
 
     return resolved
+  }
+
+  private async workspaceRole(workspaceId: string, userId: string): Promise<string | undefined> {
+    const [membership] = await this.db
+      .select({ role: workspaceMembers.role })
+      .from(workspaceMembers)
+      .where(and(eq(workspaceMembers.workspaceId, workspaceId), eq(workspaceMembers.userId, userId)))
+      .limit(1)
+    return membership?.role as string | undefined
   }
 
   async setFlag(
@@ -181,11 +217,33 @@ export class FeatureFlagsService {
     // An override for a flag no build reads is a row that changes nothing.
     if (!isKnownFlag(flagKey)) throw new BadRequestException(`Unknown feature "${flagKey}"`)
     const updatedBy = actor.id
-    await this.db.insert(featureFlags).values({
-      flagKey, scope, scopeId, workspaceId: workspaceId ?? undefined, enabled, updatedBy,
-    }).onConflictDoUpdate({
-      target: [featureFlags.flagKey, featureFlags.scope, featureFlags.scopeId, featureFlags.workspaceId],
-      set: { enabled, updatedBy, updatedAt: new Date() },
+    /*
+     * THE SWITCH'S OWN ROW, found with NULLs equal, updated — or made when
+     * there is none (`found-29-sep/platform-flag-switches-apply-nowhere`). A
+     * platform switch has no scope id and no workspace, and an upsert on the
+     * unique key never matched NULLs, so each switch added a row and a read
+     * applied whichever the table listed last. Migration 0166 makes the key
+     * NULLS NOT DISTINCT as well; a database built by `drizzle-kit push` has the
+     * plain key, so the rule is kept here. One switch of a flag at a time.
+     */
+    const match = and(
+      eq(featureFlags.flagKey, flagKey),
+      eq(featureFlags.scope, scope),
+      scopeId == null ? isNull(featureFlags.scopeId) : eq(featureFlags.scopeId, scopeId),
+      workspaceId == null ? isNull(featureFlags.workspaceId) : eq(featureFlags.workspaceId, workspaceId),
+    )
+    await this.db.transaction(async (tx) => {
+      await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${`feature-flag:${flagKey}`}))`)
+      const updated = await tx
+        .update(featureFlags)
+        .set({ enabled, updatedBy, updatedAt: new Date() })
+        .where(match)
+        .returning({ id: featureFlags.id })
+      if (updated.length === 0) {
+        await tx.insert(featureFlags).values({
+          flagKey, scope, scopeId, workspaceId: workspaceId ?? undefined, enabled, updatedBy,
+        })
+      }
     })
     this.invalidateForFlagChange(scope, scopeId, workspaceId)
     await this.security.logAuditEvent({
@@ -241,6 +299,7 @@ export class FeatureFlagsService {
       userId: requester.id,
       workspaceId,
       role: membership.role,
+      workspaceRole: membership.role,
     })
     if (resolved[flagKey] === true) return { status: 'already_enabled', notified: 0 }
 

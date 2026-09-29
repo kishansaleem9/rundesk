@@ -18,11 +18,12 @@ import {
 } from '@rundesk/ui'
 import { ListSkeleton } from '../components/loading-skeletons'
 import { Users, Calendar, AlertTriangle, Download } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTranslation } from '../lib/i18n'
 import { localDayKey } from '../lib/local-date'
 import { useAuthStore } from '../store/auth'
 import { useWorkspaceRole } from '../hooks/use-workspace-role'
+import { usePermissions } from '../hooks/use-permissions'
 import { InlineSkeleton } from '../components/loading-skeletons'
 
 export function WorkloadPage() {
@@ -83,6 +84,16 @@ export function WorkloadPage() {
     }))
   }, [workloadQuery.data, t])
   const trackedWindowDays = workloadQuery.data?.[0]?.trackedWindowDays ?? days
+  /*
+   * WHOSE CAPACITY THIS READER SETS: their own, unless they are a guest, and
+   * anybody's where they hold `members.profile.manage` (the route's rule;
+   * `found-28-sep/own-capacity-not-self-service`). The server keeps the rank rule.
+   */
+  const me = useAuthStore((s) => s.user)
+  const myRole = useWorkspaceRole(workspaceId).role
+  const mayManageProfiles = usePermissions(workspaceId).can('members.profile.manage') === true
+  const setsCapacityOf = (userId?: string) =>
+    Boolean(userId) && ((userId === me?.id && myRole !== 'guest') || mayManageProfiles)
   // A day off has zero capacity, so any load on it would read as overload; the
   // person is away, which is a scheduling problem, not a capacity one.
   const overloadedCount = people.filter((p) =>
@@ -299,9 +310,7 @@ export function WorkloadPage() {
                     <div className="text-sm font-medium truncate">{p.name}</div>
                     <div className="text-[10px] text-muted-foreground truncate">{p.role}</div>
                   </div>
-                  <Badge variant="soft" className="text-[10px] tabular-nums">
-                    {p.capacity}h
-                  </Badge>
+                  <CapacityBadge workspaceId={workspaceId} person={p} editable={setsCapacityOf(p.userId)} />
                 </div>
                 {dates.map((d, i) => (
                   <WorkloadCell
@@ -660,6 +669,96 @@ function WorkloadCell({
             </Link>
           ))}
         </div>
+      </PopoverContent>
+    </Popover>
+  )
+}
+
+/**
+ * A person's capacity on their row: the figure, or — on the reader's own row,
+ * and on others' where they may set it — a button that sets the weekly hours.
+ * ClickUp sets capacity from the capacity beside the name in Workload view.
+ */
+function CapacityBadge({
+  workspaceId,
+  person,
+  editable,
+}: {
+  workspaceId: string
+  person: { userId?: string; name: string; capacity: number; weeklyCapacityHours: number }
+  editable: boolean
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [open, setOpen] = useState(false)
+  const [hours, setHours] = useState(String(person.weeklyCapacityHours))
+  const save = useMutation({
+    mutationFn: (weeklyCapacityHours: number) =>
+      api(`/workspaces/${workspaceId}/members/${person.userId}/capacity`, {
+        method: 'PATCH',
+        body: { weeklyCapacityHours },
+      }),
+    onSuccess: () => {
+      toast.success(t('workload.capacitySaved'))
+      setOpen(false)
+      qc.invalidateQueries({ queryKey: ['workload-report', workspaceId] })
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('workload.capacityNotSaved')),
+  })
+  const badge = (
+    <Badge variant="soft" className="text-[10px] tabular-nums">
+      {person.capacity}h
+    </Badge>
+  )
+  if (!editable || !person.userId) return badge
+  return (
+    <Popover
+      open={open}
+      onOpenChange={(next) => {
+        setOpen(next)
+        if (next) setHours(String(person.weeklyCapacityHours))
+      }}
+    >
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          data-testid={`workload-capacity-${person.userId}`}
+          aria-label={t('workload.setCapacityOf', { name: person.name })}
+          title={t('workload.setCapacityOf', { name: person.name })}
+          className="rounded-full hover:ring-1 hover:ring-accent/50"
+        >
+          {badge}
+        </button>
+      </PopoverTrigger>
+      <PopoverContent className="w-60 p-3" align="end">
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            const n = Number(hours)
+            if (hours.trim() !== '' && Number.isFinite(n)) save.mutate(n)
+          }}
+        >
+          <label className="text-xs font-medium" htmlFor={`capacity-${person.userId}`}>
+            {t('workload.weeklyCapacity')}
+          </label>
+          <div className="mt-1.5 flex items-center gap-2">
+            <input
+              id={`capacity-${person.userId}`}
+              data-testid="workload-capacity-input"
+              type="number"
+              min={0}
+              max={168}
+              step={1}
+              value={hours}
+              onChange={(e) => setHours(e.target.value)}
+              className="h-8 w-20 rounded-md border border-border bg-background px-2 text-sm tabular-nums"
+            />
+            <span className="text-xs text-muted-foreground">{t('workload.hoursPerWeek')}</span>
+          </div>
+          <Button type="submit" size="sm" className="mt-2 w-full" disabled={save.isPending}>
+            {t('common.save')}
+          </Button>
+        </form>
       </PopoverContent>
     </Popover>
   )
