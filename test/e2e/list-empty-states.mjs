@@ -188,6 +188,9 @@ try {
   chk(await countOf('list-empty-filtered') === 0,
     'and the filtered state is not the one on screen',
     'a list with nothing in it claimed a filter had emptied it')
+  // The invitation is drawn once the list's access has answered (`list-caps`),
+  // which under load comes after the rows: read it then, not on the first frame.
+  await waitUntil(async () => /create task/i.test(await textOfId('list-empty-none')), { timeoutMs: 10_000 })
   const emptyListText = await textOfId('list-empty-none')
   chk(/create task/i.test(emptyListText),
     'it offers to create the first task, which is the right invitation here',

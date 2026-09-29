@@ -50,6 +50,7 @@ step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "the plan asks for what is unmeasured" node scripts/check-plan-population.mjs
 step "and the unit claims redden too"   node scripts/check-unit-claims.mjs
+step "and they read this tree, not a nested one" node scripts/check-find-in-tree.mjs --mutate
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "every suite has a CI step"        node scripts/check-suites-registered.mjs
 step "and that gate can fail"           node scripts/check-suites-registered-cases.mjs --mutate

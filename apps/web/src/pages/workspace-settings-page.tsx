@@ -2,11 +2,12 @@ import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Button, Card, Input, Label, Switch, cn, toast } from '@rundesk/ui'
-import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone } from 'lucide-react'
+import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
 import { applyAccentColor } from '../components/app-topbar'
 import { AnnouncementsPanel } from '../components/announcements-panel'
+import { AuditLogPanel } from './admin-audit-page'
 import { AdvancedSecurityPanel } from '../components/advanced-security-panel'
 import { SsoTab } from '../components/sso-tab'
 import { GroupsTab } from '../components/groups-tab'
@@ -110,6 +111,7 @@ const TAB_GROUPS = [
     headingKey: 'settings.groupSecurity',
     tabs: [
       { id: 'security', labelKey: 'settings.tabSecurity', icon: Shield },
+      { id: 'auditLog', labelKey: 'settings.tabAuditLog', icon: ScrollText },
       { id: 'sso', labelKey: 'settings.tabSso', icon: KeyRound },
     ],
   },
@@ -292,6 +294,7 @@ export function SettingsPage() {
                 {tab === 'announcements' && <AnnouncementsPanel workspaceId={validWorkspaceId} />}
                 {tab === 'integrations' && <IntegrationsTab workspaceId={validWorkspaceId} />}
                 {tab === 'security' && <SecurityTab workspaceId={validWorkspaceId} />}
+                {tab === 'auditLog' && <AuditLogPanel workspaceId={validWorkspaceId} />}
                 {tab === 'sso' && <SsoTab workspaceId={validWorkspaceId} />}
                 {tab === 'labels' && <LabelsTab workspaceId={validWorkspaceId} />}
                 {tab === 'taskTypes' && <TaskTypesTab workspaceId={validWorkspaceId} />}

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { Button, Card, Input, cn, toast } from '@rundesk/ui'
 import { Shield, Search, Download } from 'lucide-react'
@@ -111,7 +111,37 @@ function buildFilterParams(opts: { from: string; to: string; actorId: string; gr
   return p
 }
 
+/**
+ * The platform console's audit log: any workspace the super admin picks.
+ */
 export function AuditLogPage() {
+  const { workspaces, workspaceId, setWorkspaceId } = useAdminWorkspace()
+  return (
+    <div className="p-6">
+      <AuditLogPanel
+        workspaceId={workspaceId}
+        picker={
+          <AdminWorkspacePicker
+            testId="admin-audit-workspace"
+            workspaces={workspaces.data}
+            value={workspaceId}
+            onChange={setWorkspaceId}
+            className="h-9 py-0 px-2 min-w-44"
+          />
+        }
+      />
+    </div>
+  )
+}
+
+/**
+ * ONE WORKSPACE'S AUDIT TRAIL — the console's page and the workspace's own
+ * Settings → Audit log, for whoever holds `workspace.audit.view`
+ * (`found-24-sep/workspace-audit-log-not-in-settings`). ClickUp keeps it in
+ * the workspace's settings, filtered by date, user and event. `picker` is the
+ * console's workspace choice; Settings has none.
+ */
+export function AuditLogPanel({ workspaceId, picker }: { workspaceId: string | null | undefined; picker?: ReactNode }) {
   const { t } = useTranslation()
   const [search, setSearch] = useState('')
   const [page, setPage] = useState(1)
@@ -126,11 +156,9 @@ export function AuditLogPage() {
   const setTo = (v: string) => { setToState(v); setPage(1) }
   const setActorId = (v: string) => { setActorIdState(v); setPage(1) }
 
-  // The trail is one workspace's: the one picked, else the first the admin
-  // joined. A different workspace has different people, so the actor filter
-  // starts again with it.
-  const { workspaces, workspaceId, setWorkspaceId } = useAdminWorkspace()
-  const pickWorkspace = (id: string) => { setWorkspaceId(id); setActorIdState(''); setPage(1) }
+  // A different workspace has different people, so the actor filter and the
+  // page start again with it.
+  useEffect(() => { setActorIdState(''); setPage(1) }, [workspaceId])
 
   // Actor dropdown is sourced from workspace members so it covers everyone, not
   // just actors present on the current page.
@@ -190,7 +218,7 @@ export function AuditLogPage() {
   }
 
   return (
-    <div className="p-6 space-y-4">
+    <div className="space-y-4" data-testid="audit-log-panel">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Shield className="h-5 w-5 text-accent" />
@@ -203,16 +231,12 @@ export function AuditLogPage() {
 
       {/* Server-side filters (Plan §13.3): date range + actor, applied to the whole trail. */}
       <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card/40 p-3">
-        <div className="flex flex-col gap-1">
-          <label className="text-xs text-muted-foreground">{t('common.workspace')}</label>
-          <AdminWorkspacePicker
-            testId="admin-audit-workspace"
-            workspaces={workspaces.data}
-            value={workspaceId}
-            onChange={pickWorkspace}
-            className="h-9 py-0 px-2 min-w-44"
-          />
-        </div>
+        {picker && (
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">{t('common.workspace')}</label>
+            {picker}
+          </div>
+        )}
         <div className="flex flex-col gap-1">
           <label className="text-xs text-muted-foreground">{t('adminAudit.dateFrom')}</label>
           <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />

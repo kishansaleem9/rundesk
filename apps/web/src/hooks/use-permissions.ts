@@ -32,6 +32,7 @@ export type WorkspacePermission =
   | 'members.role.change'
   | 'roles.manage'
   | 'security.policy.manage'
+  | 'workspace.audit.view'
 
 /**
  * The one read of this person's keys, as a query the router can also wait on:

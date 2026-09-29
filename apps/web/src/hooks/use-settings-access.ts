@@ -11,6 +11,7 @@ export const SETTINGS_TABS = [
   'spaces',
   'workSchedule',
   'security',
+  'auditLog',
   'sso',
   'features',
   'announcements',
@@ -41,6 +42,8 @@ const TAB_KEYS: Partial<Record<SettingsTabId, WorkspacePermission[]>> = {
   roles: ['roles.manage'],
   workSchedule: ['workspace.schedule.manage'],
   security: ['security.policy.manage'],
+  // The workspace's own audit trail (`found-24-sep/workspace-audit-log-not-in-settings`).
+  auditLog: ['workspace.audit.view'],
   features: ['workspace.clickapps.manage'],
   announcements: ['announcement.manage'],
   // The workspace's data export sits on Integrations.

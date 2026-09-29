@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 321 items, 88 open, 11 partly fixed, 222 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 322 items, 86 open, 11 partly fixed, 225 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1338,7 +1338,7 @@ Now:
 `client-edit`, 6 checks:
 - Before: 1/6 on lane 7 (a plain member was offered nothing, which held).
 - After: 6/6 on lane 7.
-- Patches `cle-1..8`; `cki-2` is re-aimed onto the delete's own line. Their runs follow the commit.
+- Patches `cle-1..8`: all eight redden (lane 2, at `d86220d`, baseline 6/6); `cki-2` is re-aimed onto the delete's own line, and its run follows.
 - Regression on lanes 5, 6 and 7: the client, invoice, billable-time and project-page suites, 8/8.
 - In CI (232).
 
@@ -1392,7 +1392,7 @@ Now:
 `announcement-views`, 9 checks:
 - Before: 0/9 on lane 1.
 - After: 9/9 on lane 1.
-- Patches `anv-1..10`, one or more per check: all ten redden (lane 4, at `0911c6e`, baseline 9/9).
+- Patches `anv-1..10`, one or more per check: all ten redden (lane 4, at `0911c6e`, baseline 9/9). `ana-6`, re-aimed onto the banner's paused-and-expired rule, reddens (lane 3, at `394d3f9`, baseline 8/8).
 - In CI (229).
 - Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
 
@@ -1423,7 +1423,7 @@ The platform console's announcements page still lists only the workspaces its su
 `flag-resolution`, 5 checks (two for this item):
 - Before: 1/5 on lane 5 (the workspace's own switch, which worked).
 - After: 5/5 on lane 7.
-- Patches `flr-1..4`. Their runs follow the commit.
+- Patches `flr-1..4`: all four redden (lane 1, at `394d3f9`, baseline 5/5).
 - In CI (231).
 
 ### `found-29-sep/platform-flag-switches-apply-nowhere` — **closed** (facade, small; found closing `role-flags-read-the-account-role`)
@@ -1455,6 +1455,16 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 *Closed, 29 September:* `push_log_ok` (`lane-env.sh`) reads a push as done only when its log says the schema was applied or nothing changed, and holds no error. `fleet-sync.sh` reads every lane's log and pristine's before it stops anything: one that stopped is named, with its first error line, and nothing is restarted (exit 1), so the lanes keep serving what they served. `schema_ref_ensure` refuses to build the reference on a stopped push.
 - `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
 - Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
+
+### `found-29-sep/unit-claims-read-a-nested-checkout` — **closed** (test tooling, small; found by the preflight for `workspace-audit-log-not-in-settings`)
+
+**The unit claims patched this tree and ran an agent worktree's copy of the test**
+
+*Evidence, 29 September:* the preflight's "and the unit claims redden too" read 0 of 41 claims as reddening — 16 "still passed with the patch applied", 25 failed without the test's name — where every earlier run read 41. `check-unit-claims.mjs` found the test file a claim names by walking the whole repository, skipping only `node_modules`, `dist` and `.git`. Two agent worktrees sat under `.claude/worktrees/`, each a whole copy of the repository, and `.claude` sorts before `apps`: the walk returned their copy of every test. The patch went into this tree; the test that ran was theirs, unpatched.
+
+*Closed, 29 September:* the walk is `scripts/lib/find-in-tree.mjs`, which passes over any directory below the root that holds a `.git` (a worktree's file or a clone's directory): a nested checkout is another tree.
+- `scripts/check-find-in-tree.mjs --mutate` (preflight, and CI's verify job): a throwaway tree holds the same test file in its own place and inside a nested checkout that sorts first; the walk must return the tree's own, and a copy of the walker without the rule must return the nested one.
+- Before: 0 of 41 with the two worktrees in place. After, the same worktrees in place: 41 of 41 reddened, 0 did not, 0 unreadable.
 
 ### `found-28-sep/copy-points-admins-to-the-console` — **closed** (stale reason, small; found by the ClickApps research)
 
@@ -1529,7 +1539,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 `unarchive-in-place`, 5 checks:
 - Before: 1/5 on lane 5 (Settings → Archived's answers, which the batching keeps).
 - After: 5/5 on lane 7.
-- Patches `uip-1..8`; `ata-4` and `tsc-1` are re-aimed. Their runs follow the commit.
+- Patches `uip-1..8`: all eight redden (lane 2, at `d86220d`, baseline 5/5); `ata-4` and `tsc-1` are re-aimed, and their runs follow.
 - In CI (233).
 
 ### `found-28-sep/job-title-rule-and-message-disagree` — **closed** (permissions, small; found by the user-group research)
@@ -2847,6 +2857,10 @@ The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-men
 *Closed, 29 September:* the same 19 under a four-lane sweep's load (lanes 1, 2, 3 and 7 at once on four cores, which is where they failed), with 30 more suites in the same sweep: 49/49 at `c55a088`. Each read the same numbers as alone.
 
 The break runs for `c55a088` found one wait that had cost a check its bite: `role-permissions-web` counted Save as template two frames after the member's keys answered, and the sheet still showed its skeleton then, so `rpw-5` (the button offered to everybody) ran 0 failed. The absence is now counted once the sheet has drawn the task (its cover band); `rpw-5`'s run follows the commit.
+
+*Break runs, 29 September* (lanes 1–4, at `0911c6e`, `394d3f9` and `d86220d`, every baseline green): in 14 of the 17 suites every patch reddens the check it names — `folder-dialog` 24 of 24, `space-default-permission` 22 of 22, `list-export` 10 of 10, `ai-activity-filters` 10 of 10, `addressability-live`, `panel-collapse`, `person-panel`, `task-menu`, `task-depth`, `video-regression`, `request-access`, `a61-meeting-record` and `settings-depth` 4 of 4 each, `video1-acceptance` 1 of 1. `role-permissions-web` (with `rpw-5`) and `chat-message-actions` were still running at this commit.
+
+`list-empty-states` was not measured: its baseline was red under the four runners' load (22 of 23 at `394d3f9`). The empty state read "No tasks yet" without its Create task, which the page draws once the list's access (`list-caps`) has answered, and under load that answer comes after the rows. Alone on lane 7 it passed 23/23 three times. It now waits (10 s at most) for the invitation before reading it, so a patch that takes the invitation away still fails the check; its set runs after the commit.
 
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)
@@ -4690,13 +4704,25 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Decide from ClickUp's behaviour whether assigning someone else offers to add the task to THEIR priorities. If yes, add a permissioned write, for example allowed to managers or the assigner of a task they can see.
 
-### `found-24-sep/workspace-audit-log-not-in-settings` — open, medium (unbuilt; found fixing the console's audit log)
+### `found-24-sep/workspace-audit-log-not-in-settings` — **closed** (unbuilt, medium; found fixing the console's audit log)
 
 **A workspace's admins cannot read its audit log: the web shows it only in the super-admin console**
 
 *Evidence:* `GET /workspaces/:id/audit-logs` and its export are guarded by `WorkspaceAdminGuard`, so a workspace admin may read them. The only page that reads them is `/app/admin/audit`, and `/app/admin` lets in a super-admin only. ClickUp puts the audit log in the workspace's own settings, for its owner and admins (an Enterprise feature there), with filters by date, event and user, and a CSV export.
 
 *To close:* research ClickUp's audit log page — its event categories, filters and export — then give workspace settings an "Audit log" tab for owners and admins that reads the same routes as the console page. A suite: a workspace admin reads their own workspace's events and not another's, and a member is offered no tab.
+
+*Closed, 29 September.* ClickUp ("Workspace audit logs"): generated in the Workspace's Settings, each event with its date, user, role, event and status, filtered by user, event type and date. The routes already asked `workspace.audit.view` (since `role-editor-offers-unenforced-permissions`); what was missing was a page. Measured on lane 7 at `d86220d` before: a workspace admin who is no platform admin, and a member granted the key, were offered no Audit log tab (the address sent the member to Archived), and nothing in Settings read the trail.
+
+- The console's page is now a panel, `AuditLogPanel`: the trail's filters (date range, actor, event group, search), its rows and Export CSV. The console hands it its workspace picker; Settings hands it none.
+- Settings has an Audit log tab, keyed by `workspace.audit.view` (an admin's by default, and a custom role's where one grants it), reading the workspace's own trail. Four locales.
+
+`audit-log-settings`, 4 checks:
+- Before: 1/4 on lane 7 (a plain member refused, which held).
+- After: 4/4 on lane 7.
+- Patches `als-1..5`; `aap-2` is re-aimed onto the console's picker. Their runs follow the commit.
+- In CI (234).
+- Regression on lane 7, 16 suites (the console's audit page, Settings' tabs by key, custom-role grants, the admin-key pages): 16/16.
 
 ### `found-25-sep/connected-calendars-read-by-nothing` — open, unbuilt (large; found closing `meetings-connect-calendar-goes-to-settings`)
 
@@ -5017,13 +5043,15 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 ## Stale documentation — 2
 
-### `resume-defects/resume-4` — open, small
+### `resume-defects/resume-4` — **closed** (stale doc, small)
 
 **Item 4 (timeline projectId) was resolved as a recorded decision plus a check; the handoff doc still lists it as open**
 
 *Evidence:* docs/video2-resume.md:234-236 still lists it as an open defect. test/e2e/gantt-controls.mjs:193-230 records the reframing: the client is right not to send projectId, because the query has no window and projectOptions derive from the full rows. It then checks that the server narrows on it, using the run's own ids. The client still sends none (workspace-timeline-page.tsx:229 `/tasks/workspace/${workspaceId}/timeline`). The break gantt-29-projectid-ignored reddens it: /tmp/claude-0/break-gantt-controls.txt shows the baseline at 8083f883 at 29/0 and the patch at 28/1. Residue: tasks.service.ts:1832 getTimelineForWorkspace declares opts.from/opts.to, and nothing reads them (body :1834-1867). The controller (tasks.controller.ts:127-137) never passes them. That is a small mirror (class 2).
 
 *To close:* Mark item 4 closed-by-decision in docs/video2-resume.md with the check's name (gantt-controls, the 'really narrows on projectId' check) and its break gantt-29. Either remove the unread from/to from the opts type or wire them to a query param with a check.
+
+*Closed, 29 September:* `docs/video2-resume.md`'s item 4 is marked closed by decision, naming the check (`gantt-controls`, "the timeline endpoint really narrows on `projectId`, which no client sends") and its patch `gantt-29-projectid-ignored`. The unread `from`/`to` had already left `getTimelineForWorkspace`'s options (`timeline-projectid-param`); nothing in the web sends them.
 
 ### `resume-defects/resume-6` — **closed**
 

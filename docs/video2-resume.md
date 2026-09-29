@@ -236,8 +236,14 @@ These are the ones still standing:
    that silently does not set up. `docs/e2e-shared-state-audit.md` has the
    count and the shape of the fix.
 4. **`GET /tasks/workspace/:id/timeline` accepts `projectId` and no client
-   sends it.** The same shape as the `/ai/activity` `userId` defect, which was
-   fixed; this one has not been.
+   sends it.** CLOSED BY DECISION (29 September, `resume-defects/resume-4`):
+   the client is right not to send it — the timeline's query has no window and
+   its project options come from the full rows, so the page filters what it
+   holds. What was wrong was that nothing proved the server narrows on it:
+   `gantt-controls`' check "the timeline endpoint really narrows on
+   `projectId`, which no client sends" does, with the run's own ids, and its
+   patch `gantt-29-projectid-ignored` reddens it. The `from`/`to` the service
+   declared and read nothing of are gone (`timeline-projectid-param`).
 5. **A ledger row marked built is incomplete.** The Gantt today-line/zoom row
    claims the `Today` control, which did not exist until this session. The row
    needs re-reading against what is now there.

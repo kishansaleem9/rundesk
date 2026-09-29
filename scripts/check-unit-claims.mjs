@@ -29,6 +29,7 @@ import { readdirSync, readFileSync, writeFileSync, existsSync, statSync, utimesS
 import { join, dirname } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
+import { findInTree } from './lib/find-in-tree.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -38,17 +39,9 @@ const BREAKS = join(ROOT, 'test/e2e/breaks')
 // same shape as a green in the e2e sweep.
 const BASELINE = { reddened: 4 }
 
-const find = (name, dir = ROOT) => {
-  for (const e of readdirSync(dir, { withFileTypes: true })) {
-    if (['node_modules', 'dist', '.git'].includes(e.name)) continue
-    const p = join(dir, e.name)
-    if (e.isDirectory()) {
-      const hit = find(name, p)
-      if (hit) return hit
-    } else if (e.name === name) return p
-  }
-  return null
-}
+// This checkout's file of that name, never a nested checkout's copy
+// (`scripts/lib/find-in-tree.mjs`: the agents' worktrees under `.claude/`).
+const find = (name) => findInTree(name, ROOT)
 
 // `# Reddens: unit: <file>.test.ts "<test name>"`, with the name possibly
 // wrapped onto the continuation line the rest of this audit uses.
