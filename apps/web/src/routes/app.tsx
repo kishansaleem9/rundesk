@@ -1,6 +1,8 @@
 import { createFileRoute, Outlet, redirect, useRouterState } from '@tanstack/react-router'
-import { Suspense, lazy, useEffect, useMemo, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
+import { cn } from '@rundesk/ui'
 import { lazyChunk } from '../lib/chunk-reload'
+import { AiDockContext, type AiDock, type AiDockScope } from '../lib/ai-dock'
 import {
   CommandPaletteSkeleton,
   PanelSkeleton,
@@ -76,6 +78,12 @@ function AppShell() {
    */
   const [navOpen, setNavOpen] = useState(false)
   const [aiAsk, setAiAsk] = useState<{ text: string; id: number } | undefined>(undefined)
+  /*
+   * `ledger-rows/row-743` — what the dock is pointed at beyond the page, if
+   * anything: a task, from its header's Brain² (see `lib/ai-dock.ts`). Ended
+   * by closing the dock or the task.
+   */
+  const [aiScope, setAiScope] = useState<AiDockScope | null>(null)
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const routeId = useRouterState({ select: (s) => s.matches[s.matches.length - 1]?.routeId ?? '' })
 
@@ -92,6 +100,16 @@ function AppShell() {
     setAiAsk({ text: question, id: Date.now() })
     setAiOpen(true)
   }
+
+  // `ledger-rows/row-743` — the task header's Brain² goes through the same
+  // seam: where the palette hands the dock a question, the header hands it a
+  // task, and both open it. Stable, because the sheet keys effects on them.
+  const openAiOn = useCallback((scope: AiDockScope) => {
+    setAiScope(scope)
+    setAiOpen(true)
+  }, [])
+  const closeAi = useCallback(() => setAiOpen(false), [])
+  const releaseAi = useCallback(() => setAiScope(null), [])
 
   // ⌘K / Ctrl+K must live here: the palette itself is only mounted while
   // open, so a listener inside the component can never open it.
@@ -118,6 +136,16 @@ function AppShell() {
   }, [pathname])
   const aiDocked = aiOpen && !!workspaceId && !isAdminRoute
   const routeLoading = useRouteLoading()
+  // Closing the dock ends the pointing: opened again from the top bar, it is
+  // about the page again, not about a task that may be long closed.
+  useEffect(() => {
+    if (!aiDocked) setAiScope(null)
+  }, [aiDocked])
+  const aiBeside = aiDocked ? aiScope : null
+  const aiDock = useMemo<AiDock | null>(
+    () => (workspaceId ? { scope: aiBeside, openOn: openAiOn, close: closeAi, release: releaseAi } : null),
+    [workspaceId, aiBeside, openAiOn, closeAi, releaseAi],
+  )
 
   // Above the admin early-return on purpose: hooks run unconditionally, and the
   // admin subtree is still inside the app — a block running while you read the
@@ -137,6 +165,7 @@ function AppShell() {
   }
 
   return (
+    <AiDockContext.Provider value={aiDock}>
     <div className="h-screen flex bg-background overflow-hidden">
       <WorkspaceSidebar />
       {navOpen && (
@@ -168,11 +197,31 @@ function AppShell() {
       {aiDocked ? (
         // Narrow screens have no room for a column, so the dock overlays there
         // and becomes a real third column from md up.
-        <aside className="fixed inset-y-0 right-0 z-40 w-full max-w-sm border-l border-border/60 shadow-xl md:static md:z-auto md:w-[380px] md:max-w-none md:shadow-none">
+        /*
+         * `ledger-rows/row-743` — POINTED AT A TASK, THE DOCK SHARES THE SCREEN
+         * WITH ITS SHEET. The sheet's layer is `fixed inset-0 z-50` over the
+         * whole viewport, so a dock left at `z-40` / `z-auto` opens UNDER the
+         * task it was opened from: in the DOM, and out of reach — with this
+         * line taken out (`bep-4`), a press on the dock's chip lands on the
+         * sheet's overlay. It is lifted to exactly the sheet's z-50, not past
+         * it. At equal z the later element paints on top, and this aside comes
+         * after `<main>`, so it sits over the sheet — and under every menu,
+         * popover and dialog the sheet opens, which are portalled to the end of
+         * `body`. From md up the sheet moves over by this column's 380px
+         * (`task-detail-sheet.tsx`).
+         */
+        <aside
+          data-testid="ai-dock"
+          className={cn(
+            'fixed inset-y-0 right-0 z-40 w-full max-w-sm border-l border-border/60 shadow-xl md:static md:z-auto md:w-[380px] md:max-w-none md:shadow-none',
+            aiBeside && 'z-50 md:relative md:z-50',
+          )}
+        >
           <Suspense fallback={<PanelSkeleton className="h-full bg-card" />}>
             <AiPanel
               workspaceId={workspaceId!}
               currentView={describeCurrentView(routeId)}
+              scope={aiBeside}
               ask={aiAsk}
               onAskHandled={() => setAiAsk(undefined)}
               onClose={() => setAiOpen(false)}
@@ -214,5 +263,6 @@ function AppShell() {
       <SupportWidget />
       <NewBuildAvailable />
     </div>
+    </AiDockContext.Provider>
   )
 }

@@ -37,6 +37,7 @@ import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { viewLabelKey } from '../lib/space-views'
 import { useSpeechRecognition, MicButton } from '../lib/use-speech-recognition'
 import { useAiChatActions, useAiChatThread, useAiMessageActions } from '../lib/skills-api'
+import { viewWithScope, type AiDockScope } from '../lib/ai-dock'
 
 /**
  * §V2-S18 frame `[17:16]` — what `GET /ai/models` answers with.
@@ -431,6 +432,13 @@ type AiPanelProps = {
   /** Optional hint about where the user is (e.g. "list Backlog", "dashboard"),
    * forwarded so the server grounds answers to the current view (Plan §7.15). */
   currentView?: string
+  /**
+   * `ledger-rows/row-743` — the task the dock was opened from, by its header's
+   * Brain². Named in the view hint of every turn, beside the page's own, and
+   * shown on a chip over the composer; what that does and does not give the
+   * model is written at the top of `lib/ai-dock.ts`.
+   */
+  scope?: AiDockScope | null
   /** §A6.4 — a question handed in from elsewhere (the palette's Ask AI row, an
    * `/ai?prompt=` link). `id` separates two identical asks so the second one is
    * still sent instead of being read as a re-render of the first. */
@@ -809,6 +817,7 @@ function ModelPickerRow({
 export function AiPanel({
   workspaceId,
   currentView,
+  scope = null,
   ask,
   onAskHandled,
   onClose,
@@ -944,8 +953,11 @@ export function AiPanel({
    * TWO surfaces, because two is what the shell can produce. The list route's
    * segments are all parameters, so the hint there is the literal `'list'`; the
    * /ai page passes no hint at all. A task is a sheet over the list route, not
-   * a route, so there is no task hint to map — and a third surface nothing
-   * could send would be a branch that exists only to be listed.
+   * a route, and the dock opened from one (its header's Brain²,
+   * `ledger-rows/row-743`) is still over that list: the task goes to the
+   * server as `scope`, inside the view hint a turn carries, and the cards stay
+   * the list's. The server knows no task surface, and a third surface it could
+   * not serve would be a branch that exists only to be listed.
    *
    * `staleTime` is the global 30s. That is right for this: the overdue count
    * moves over a day, not over a keystroke, and a starter row that re-fetched
@@ -1190,9 +1202,11 @@ export function AiPanel({
         body: JSON.stringify({
           messages: [...messages, userMsg].map((m) => ({ role: m.role, content: m.content })),
           // Send the real workspaceId so the server builds a grounded context
-          // via buildWorkspaceContext (Plan §7.6), plus the current-view hint.
+          // via buildWorkspaceContext (Plan §7.6), plus the current-view hint —
+          // naming the task too when the dock was opened from one
+          // (`ledger-rows/row-743`).
           workspaceId,
-          currentView,
+          currentView: viewWithScope(currentView, scope),
           // §15 — omitted entirely when absent, so a normal chat turn is
           // byte-identical to what it was before skills existed.
           ...(skillId ? { skillId } : {}),
@@ -1208,12 +1222,25 @@ export function AiPanel({
         // A refused skill comes back as JSON with a reason ("This skill is
         // disabled", "Skill not found"). Swallowing it and saying "Stream
         // request failed" would hide the one thing the person can act on.
+        /*
+         * AND THE REASON WAS READ AND THEN THROWN AWAY. The catch below put
+         * "Sorry, I encountered an error. Please try again." in its place, so a
+         * lane with no model answered a turn with "try again" — found building
+         * the checks for `ledger-rows/row-743`, which run on such a lane. Two
+         * shapes arrive here: this route's own 503, `{ error: '…' }`, and the
+         * exception filter's `{ error: { message } }` for a refusal thrown
+         * before the stream opens (a skill). A refusal carries its sentence to
+         * the message; a transport failure has none, and keeps the house line.
+         */
         const reason = await response
           .clone()
           .json()
-          .then((body: { error?: string }) => body?.error)
+          .then((body: { error?: string | { message?: string } }) =>
+            typeof body?.error === 'string' ? body.error : body?.error?.message,
+          )
           .catch(() => undefined)
-        throw new Error(reason || 'Stream request failed')
+        if (reason) throw Object.assign(new Error(reason), { refused: true })
+        throw new Error('Stream request failed')
       }
 
       const reader = response.body.getReader()
@@ -1231,6 +1258,14 @@ export function AiPanel({
        * one of the two is evidence.
        */
       const collectedCreated: CreatedContainer[] = []
+      /*
+       * A STREAM THE SERVER OPENED AND COULD NOT FINISH ends in `{ error }` —
+       * the provider failed after the steps went out. This loop read every
+       * other frame and not that one, so the turn was answered with an empty
+       * bubble (`found-29-sep/dock-answers-a-failed-stream-with-nothing`). The
+       * provider's message is not the person's to act on; the house line is.
+       */
+      let streamFailed = false
 
       while (true) {
         const { done, value } = await reader.read()
@@ -1266,6 +1301,7 @@ export function AiPanel({
                 accumulated += parsed.delta
                 setStreamBuffer(accumulated)
               }
+              if (parsed.error) streamFailed = true
             } catch {
               // Ignore malformed stream frames and continue.
             }
@@ -1276,7 +1312,7 @@ export function AiPanel({
       // Finalize
       const assistantMsg: Message = {
         role: 'assistant',
-        content: accumulated,
+        content: streamFailed ? [accumulated.trim(), t('aiPanel.errorMessage')].filter(Boolean).join('\n\n') : accumulated,
         id: Date.now().toString(),
         steps: collectedSteps.length ? collectedSteps : undefined,
         followUps: collectedFollowUps.length ? collectedFollowUps : undefined,
@@ -1284,7 +1320,9 @@ export function AiPanel({
       }
       setMessages((prev) => [...prev, assistantMsg])
       setStreamBuffer('')
-      if (writeTo && accumulated.trim()) {
+      // A failed turn is not kept in the thread: what came before the failure
+      // would read, reopened, as the whole answer.
+      if (writeTo && accumulated.trim() && !streamFailed) {
         void chat
           .append(writeTo, 'assistant', accumulated)
           // This is the turn that can trigger the rename, per `shouldAutoTitle`.
@@ -1297,7 +1335,10 @@ export function AiPanel({
           ...prev,
           {
             role: 'assistant',
-            content: t('aiPanel.errorMessage'),
+            // The server's own sentence when it refused: "AI features are not
+            // configured" is somebody's to fix, and "try again" is not the
+            // answer to it.
+            content: err?.refused && err.message ? String(err.message) : t('aiPanel.errorMessage'),
             id: Date.now().toString(),
           },
         ])
@@ -1560,6 +1601,25 @@ export function AiPanel({
             >
               <Gem className="h-3 w-3 text-primary" />
               <span className="truncate max-w-[14rem]">{skillName ?? t('skills.title')}</span>
+            </div>
+          )}
+          {/*
+            `ledger-rows/row-743` — which task this dock was opened from, where
+            ClickUp puts the location Brain is reading: in the prompt field. It
+            names the task and claims no more than the turn carries
+            (`lib/ai-dock.ts`). There is no ✕: it lasts while the task is open,
+            and closing the task or the dock is what ends it.
+          */}
+          {scope && (
+            <div
+              className="inline-flex min-w-0 items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-2.5 py-1 text-[11px] text-foreground"
+              data-testid="ai-scope-chip"
+              data-scope-kind={scope.kind}
+              data-scope-id={scope.id}
+              title={t('aiPanel.scopeTaskHint')}
+            >
+              <CheckSquare className="h-3 w-3 shrink-0 text-accent" />
+              <span className="truncate max-w-[14rem]">{t('aiPanel.scopeTask', { title: scope.title })}</span>
             </div>
           )}
           {/*

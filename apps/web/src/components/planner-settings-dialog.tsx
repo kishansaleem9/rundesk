@@ -1,11 +1,27 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core'
+import {
+  SortableContext,
+  arrayMove,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable'
+import { CSS } from '@dnd-kit/utilities'
+import {
   Dialog,
   DialogContent,
   DialogHeader,
   DialogTitle,
   Button,
+  Checkbox,
   Switch,
   cn,
   toast,
@@ -20,6 +36,7 @@ import {
   LifeBuoy,
   Lightbulb,
   ArrowLeft,
+  GripVertical,
 } from 'lucide-react'
 import { PlannerAccountsPage } from './planner-accounts-page'
 import { api, ApiError } from '../lib/api'
@@ -239,6 +256,35 @@ export const RAIL_SECTIONS = [
   'todayOverdue',
   'backlog',
 ] as const
+export type RailSection = (typeof RAIL_SECTIONS)[number]
+
+/**
+ * Frames `14:13`–`14:16` — "Show, hide and reorder the sections that appear in
+ * the planner sidebar": the sections the rail draws, IN THE ORDER IT DRAWS THEM.
+ *
+ * `railSections` is the shown sections, in rail order, and this is its one
+ * reader: the rail and the Sidebar page both draw what it returns, so the page
+ * cannot list an order the rail does not draw. Until 29 September the array
+ * was read only by `.includes()` — the order was stored and honoured by
+ * nothing, while the ledger recorded reorder as built
+ * (`ledger-rows/row-835-reorder`).
+ *
+ * Nothing stored is the frame's five in the frame's order. A name that is not
+ * a section, or one listed twice, is passed over: the API keeps the array as
+ * it is sent, so a stale or hand-written value must not draw an empty section
+ * or the same one twice. A HIDDEN section has no place in the order, because
+ * the rail has no place for it; shown again, it joins at the foot.
+ */
+export function railSectionsShown(stored: readonly string[] | null | undefined): RailSection[] {
+  if (!Array.isArray(stored)) return [...RAIL_SECTIONS]
+  const shown: RailSection[] = []
+  for (const name of stored) {
+    const section = RAIL_SECTIONS.find((s) => s === name)
+    if (section && !shown.includes(section)) shown.push(section)
+  }
+  return shown
+}
+
 const RAIL_LABEL: Record<string, TranslationKey> = {
   priorities: 'planner.priorities',
   meetWith: 'planner.meetWith',
@@ -322,7 +368,59 @@ export function PlannerSettingsDialog({
     return ALL_ZONES.includes(current) ? ALL_ZONES : [current, ...ALL_ZONES]
   }, [settings?.timezone])
 
-  const railOn = (key: string) => (settings?.railSections ?? [...RAIL_SECTIONS]).includes(key)
+  /*
+   * The Sidebar page draws the rail as it stands: the shown sections in the
+   * rail's order, then the hidden ones, which have no place in it.
+   *
+   * THE RAIL'S WRITE IS OPTIMISTIC, where every other control here waits for
+   * the server. A dropped row that springs back to where it was until the save
+   * answers reads as a drop that failed, and the rail behind the dialog reads
+   * the same cache, so it moves with the row. A save the server refuses puts
+   * the order back and says so.
+   */
+  const railShown = railSectionsShown(settings?.railSections)
+  const railHidden = RAIL_SECTIONS.filter((key) => !railShown.includes(key))
+  const [railSaid, setRailSaid] = useState('')
+  const saveRail = useMutation({
+    mutationKey: ['planner-rail', workspaceId],
+    mutationFn: (railSections: RailSection[]) =>
+      api(`/planner/${workspaceId}/settings`, { method: 'PATCH', body: { railSections } }),
+    onMutate: async (railSections) => {
+      await qc.cancelQueries({ queryKey: ['planner-settings', workspaceId] })
+      const before = qc.getQueryData<Settings>(['planner-settings', workspaceId])
+      qc.setQueryData<Settings>(['planner-settings', workspaceId], (old) => ({ ...(old ?? {}), railSections }))
+      return { before }
+    },
+    onError: (err, _next, context) => {
+      if (context?.before) qc.setQueryData(['planner-settings', workspaceId], context.before)
+      toast.error(err instanceof ApiError ? err.message : t('plannerSettings.saveFailed'))
+    },
+    // Re-read once the last of a run of moves has landed, not after each: an
+    // arrow held down sends several, and a read between two of them would draw
+    // an order the person has already moved past.
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: ['planner-rail', workspaceId] }) <= 1) {
+        void qc.invalidateQueries({ queryKey: ['planner-settings', workspaceId] })
+      }
+    },
+  })
+  const moveRail = (from: number, to: number) => {
+    if (from === to || from < 0 || to < 0 || from >= railShown.length || to >= railShown.length) return
+    const next = arrayMove(railShown, from, to)
+    saveRail.mutate(next)
+    setRailSaid(t('plannerSettings.railMoved', {
+      name: t(RAIL_LABEL[railShown[from]]),
+      position: to + 1,
+      count: next.length,
+    }))
+  }
+  // A press is a press: the row moves only once the pointer has travelled, so
+  // ticking a row's box is never read as the start of a drag.
+  const railSensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 6 } }))
+  const onRailDragEnd = ({ active, over }: DragEndEvent) => {
+    if (!over || active.id === over.id) return
+    moveRail(railShown.indexOf(active.id as RailSection), railShown.indexOf(over.id as RailSection))
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -614,26 +712,68 @@ export function PlannerSettingsDialog({
               </div>
             )}
 
+            {/*
+              Frames `14:13`–`14:16` — **Sidebar sections**: a box and a grip
+              on each of the five, and the row itself is what the pointer
+              picks up (`14:13` draws the open hand over Priorities' name, not
+              over its grip). The grip is also the keyboard's way in: focused,
+              the arrow keys move the section one place.
+
+              The shown rows are the rail, top to bottom, and nothing else: a
+              drop saves `railSections` in its new order and the rail follows
+              it. A row whose box is cleared leaves the rail and sinks under
+              the shown ones, because a hidden section has no place in the
+              rail to keep; ticked again, it joins at the foot. `+ Add a new
+              section` is not drawn: no frame says what a new section holds.
+            */}
             {pane === null && page === 'sidebar' && (
-              <div className="space-y-1" data-testid="planner-settings-sidebar">
-                <p className="mb-2 text-[12px] text-muted-foreground">{t('plannerSettings.sidebarHint')}</p>
-                {RAIL_SECTIONS.map((key) => (
-                  <label key={key} className="flex items-center justify-between rounded px-2 py-2 text-[13px]">
-                    {t(RAIL_LABEL[key])}
-                    <Switch
-                      checked={railOn(key)}
-                      data-testid={`planner-rail-${key}`}
-                      onCheckedChange={(next) => {
-                        const current = settings?.railSections ?? [...RAIL_SECTIONS]
-                        set({
-                          railSections: next
-                            ? [...new Set([...current, key])]
-                            : current.filter((s) => s !== key),
-                        })
-                      }}
-                    />
-                  </label>
-                ))}
+              <div className="space-y-2" data-testid="planner-settings-sidebar">
+                <div>
+                  <div className="text-[13px] font-medium">{t('plannerSettings.railSectionsTitle')}</div>
+                  <p className="text-[12px] text-muted-foreground">{t('plannerSettings.sidebarHint')}</p>
+                </div>
+                <DndContext
+                  sensors={railSensors}
+                  collisionDetection={closestCenter}
+                  onDragEnd={onRailDragEnd}
+                  accessibility={RAIL_DND_ACCESSIBILITY}
+                >
+                  <SortableContext items={railShown} strategy={verticalListSortingStrategy}>
+                    <ul className="space-y-1.5" data-testid="planner-rail-list">
+                      {railShown.map((key, index) => (
+                        <RailRow
+                          key={key}
+                          section={key}
+                          label={t(RAIL_LABEL[key])}
+                          onHide={() => saveRail.mutate(railShown.filter((s) => s !== key))}
+                          onStep={(step) => moveRail(index, index + step)}
+                        />
+                      ))}
+                      {railHidden.map((key) => (
+                        <li
+                          key={key}
+                          data-testid="planner-rail-row"
+                          data-section={key}
+                          data-shown="false"
+                          className="flex items-center gap-2.5 rounded-md border border-border/60 px-3 py-2 text-[13px]"
+                        >
+                          <Checkbox
+                            checked={false}
+                            aria-label={t(RAIL_LABEL[key])}
+                            data-testid={`planner-rail-${key}`}
+                            onCheckedChange={(next) => {
+                              if (next === true) saveRail.mutate([...railShown, key])
+                            }}
+                          />
+                          <span className="min-w-0 flex-1 truncate text-muted-foreground">{t(RAIL_LABEL[key])}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </SortableContext>
+                </DndContext>
+                {/* The move, said: a drag or an arrow key changes the order
+                    silently otherwise. */}
+                <p className="sr-only" aria-live="polite" data-testid="planner-rail-said">{railSaid}</p>
               </div>
             )}
 
@@ -921,6 +1061,86 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
       </div>
       <div className="shrink-0">{children}</div>
     </div>
+  )
+}
+
+/*
+ * dnd-kit's own announcements are English sentences naming a row by its id
+ * ("Draggable item backlog was dropped…"), in four locales. The Sidebar page
+ * says the move itself, translated, in its own live region.
+ */
+const RAIL_DND_ACCESSIBILITY = {
+  announcements: {
+    onDragStart: () => undefined,
+    onDragOver: () => undefined,
+    onDragEnd: () => undefined,
+    onDragCancel: () => undefined,
+  },
+}
+
+/**
+ * One shown section on the Sidebar page: its box, its name and its grip, as
+ * frame `14:14` draws them. The whole row is the drag source; the grip is the
+ * row's keyboard handle, and ↑ / ↓ on it move the section one place.
+ */
+function RailRow({
+  section,
+  label,
+  onHide,
+  onStep,
+}: {
+  section: RailSection
+  label: string
+  onHide: () => void
+  onStep: (step: -1 | 1) => void
+}) {
+  const { t } = useTranslation()
+  const { listeners, setNodeRef, transform, transition, isDragging } = useSortable({ id: section })
+  return (
+    <li
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition }}
+      {...listeners}
+      data-testid="planner-rail-row"
+      data-section={section}
+      data-shown="true"
+      data-dragging={isDragging ? 'true' : undefined}
+      className={cn(
+        'flex cursor-grab touch-none items-center gap-2.5 rounded-md border border-border/70 bg-background px-3 py-2 text-[13px] hover:bg-muted/40',
+        isDragging && 'relative z-10 cursor-grabbing shadow-md',
+      )}
+    >
+      {/* NOT A <label>. A row picked up by its name and dropped is a click on
+          that name, and a label's click ticks its box whatever the drag
+          stopped: dnd-kit stops the click's propagation after a drag, not the
+          label's default action. So the name is the drag's, and the box is
+          the box's. */}
+      <Checkbox
+        checked
+        aria-label={label}
+        data-testid={`planner-rail-${section}`}
+        onCheckedChange={(next) => {
+          if (next !== true) onHide()
+        }}
+      />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
+      <button
+        type="button"
+        data-testid={`planner-rail-handle-${section}`}
+        aria-label={t('plannerSettings.railMove', { name: label })}
+        title={t('plannerSettings.railMove', { name: label })}
+        aria-keyshortcuts="ArrowUp ArrowDown"
+        onKeyDown={(e) => {
+          if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+            e.preventDefault()
+            onStep(e.key === 'ArrowUp' ? -1 : 1)
+          }
+        }}
+        className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <GripVertical className="h-3.5 w-3.5" aria-hidden />
+      </button>
+    </li>
   )
 }
 

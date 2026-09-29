@@ -40,6 +40,15 @@ export const WORKSPACE_CALENDAR_IDS = ['workspace:timeOff', 'workspace:holidays'
 export type WorkspaceCalendarId = (typeof WORKSPACE_CALENDAR_IDS)[number]
 
 /**
+ * Frames `14:13`–`14:16` — the planner rail's five sections, as the Sidebar
+ * page lists them. `railSections` is the shown ones in the order the rail
+ * draws them, so it may name each of these once and nothing else
+ * (`found-29-sep/rail-sections-kept-as-sent`). The web's copy is `RAIL_SECTIONS`
+ * in `planner-settings-dialog.tsx`.
+ */
+export const RAIL_SECTIONS = ['priorities', 'meetWith', 'assignedToMe', 'todayOverdue', 'backlog'] as const
+
+/**
  * §V2-15b — how many people the side-by-side grid will draw at once.
  *
  * Not a performance limit: each column is a `getCalendar` call, and twelve
@@ -442,6 +451,20 @@ export class PlannerService {
       )
       if (unknown.length) {
         throw new BadRequestException(`Not a calendar that can be hidden: ${unknown[0]}`)
+      }
+    }
+    /*
+     * The rail's order. The web passes over a name that is no section and a
+     * repeat, but a stored order is what the rail is drawn in, and one reader
+     * forgiving a bad value is not a rule: the sections, each at most once.
+     */
+    if (patch.railSections !== undefined) {
+      const value: unknown = patch.railSections
+      if (!Array.isArray(value) || value.some((v) => !(RAIL_SECTIONS as readonly unknown[]).includes(v))) {
+        throw new BadRequestException(`The rail's sections are ${RAIL_SECTIONS.join(', ')}`)
+      }
+      if (new Set(value).size !== value.length) {
+        throw new BadRequestException('The rail names a section twice')
       }
     }
     /* The fourth value is `list`, and the web dialog's own copy of this union

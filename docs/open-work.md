@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 51 open, 8 partly fixed, 265 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 333 items, 46 open, 8 partly fixed, 279 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1457,13 +1457,96 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
 - Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
 
-### `found-29-sep/workspace-delete-leaves-stored-files` — open, small (found closing `workspace-permanent-delete-unbuilt`)
+### `found-29-sep/workspace-delete-leaves-stored-files` — **closed**, break run pending (found closing `workspace-permanent-delete-unbuilt`)
 
 **Deleting a workspace for good leaves its stored files in the store**
 
 *Evidence, read:* `deleteForGood` (workspaces.service) deletes the workspace's rows by cascade; the objects those rows pointed at in the store (attachments, clips, covers, the logo) are not touched. `R2Service` deletes one object by key (`deleteObject`) and cannot list a prefix, so nothing here could find them. ClickUp's own delete offers to remove the Workspace's data from its third-party processors too.
 
 *To close:* collect the workspace's object keys before the rows go (or list the workspace's prefix, once the store can), delete them after, and check against the store stub that none is left.
+
+*Closed, 29 September.* ClickUp's own delete offers to remove the Workspace's data from its third-party processors as well; here the store is ours, and deleting for good now empties it. `deleteForGood` reads what the store holds for the workspace before its rows go, and deletes it after:
+- The keys its rows name: task attachments and covers, chat attachments and custom emoji, call recordings.
+- The prefixes the workspace names: `workspaces/<id>/` (its tasks' files, and its clips, which have no table), `calls/<id>/`, `chat/<id>/` and its logos. `R2Service.listAllObjects`, added for `clip-library-lists-the-oldest-200`, reads every page of a prefix, so "cannot list a prefix" had stopped being true.
+- Best effort, and counted: an object that will not go is counted in the audit record (`objectsRemoved`, `objectsLeft`, `prefixesUnlisted`) instead of failing a deletion whose rows are already gone. A store that is not configured holds nothing of the workspace's.
+
+`workspace-delete-for-good`, check 5, stages an attachment (presigned, PUT to the store stub, recorded on a task) and a clip (named only by its prefix), deletes for good, and reads the stub's DELETE requests for both keys:
+- Before 4/5 (the store untouched), after 5/5 on lane 7.
+- Patches `wdg-9..11` (the store untouched; the prefixes unread; the keys read after the rows): break run pending.
+- The suite read the deletion's record as soon as the row had gone. With the store emptied between the row going and the record being written, a loaded lane read 0 records (lane 6, in the batch's sweep); it reads once the deletion has answered now, 5/5 on lane 6.
+- In CI with the suite. Regression: the batch's sweep on the final bundles, 57 suites on five lanes at once (1,289 checks): 53 green, and the four that were not are accounted for — `brain-entry-points` twice (its fourteenth check counted answers, which a regenerate keeps level, and a cookie card drawn late covered the scope chip on lane 1; both fixed in the suite, 14/14 on lanes 1, 3 and 7), `workspace-delete-for-good` once (below), and `chat-message-actions` under the load (`found-29-sep/chat-message-actions-reads-after-fixed-waits`; 73/73 on an idle lane).
+
+### `found-29-sep/rail-sections-kept-as-sent` — **closed**, break run pending (API rule, small; found closing `ledger-rows/row-835-reorder`)
+
+**The planner kept any rail order it was sent**
+
+*Evidence, 29 September:* `updateSettings` (planner.service) validated every other planner setting and had no rule for `railSections`, which `PlannerSettings` did not declare. The web passes over a name that is no section and a repeat when it draws the rail, but the server stored them: measured on lane 5, a PATCH of `["priorities","nonsense"]` and one of `["backlog","backlog"]` each answered 200, and Postgres held `["backlog","backlog"]`.
+
+*Closed, 29 September:* the planner service stores the rail's five sections (`RAIL_SECTIONS`, the web's list), each at most once, and refuses anything else with the reason ("The rail's sections are …", "The rail names a section twice"). `PlannerSettings` declares `railSections`. Every value the Sidebar page has ever written is a subset of the five, so no stored order is made unwritable. `rail-reorder` check 13: before 12/13, after 13/13 on lane 5; patch `rro-10`, break run pending.
+
+### `found-29-sep/model-stub-never-streams` — **closed** (test tooling, small; found measuring `ledger-rows/row-743` on a model lane)
+
+**The model stub answered a streamed call with JSON, so no streamed AI answer was ever measured**
+
+*Evidence, 29 September:* `model-stub.mjs` answered every `/v1/messages` call with one JSON message. The chat dock and the other streamed routes call `messages.stream`, which sends `stream: true` and reads server-sent events; the SDK found none, and every streamed turn on a model lane ended in "request ended without sending any chunks". Measured on lane 7: `brain-entry-points` 11/13, its dock turn answered by a stream carrying only that error. `ai-answer-rendering` passed there without a streamed answer to read. `brain-entry-points`' own model branch had never run: it expected 200 where the routes answer a POST 201.
+
+*Closed, 29 September:* a `stream: true` call is answered with the Messages API's own events in its order (`message_start`, a text block whose reply goes out in several deltas, `message_delta` with the stop reason and usage, `message_stop`). `check-model-stub.mjs` streams through the real SDK, as the service does: the deltas join to the scripted reply, the SDK's final message agrees, and it is ended and metered; 12 cases, and 11 of 11 mutations bite (two new: a streamed call answered as JSON, and the reply sent in one delta). `brain-entry-points`' model branch asserts the 201 and that the dock shows exactly the deltas the stream carried; its summarize check, that the panel shows the draft the server sent. On lane 7 with the streaming stub, its dock turn passes.
+
+### `found-29-sep/dock-answers-a-failed-stream-with-nothing` — **closed** (visible bug, small; found measuring `ledger-rows/row-743` on a model lane)
+
+**A turn whose provider failed after the stream opened was answered with an empty bubble**
+
+*Evidence, 29 September:* `chatStream` writes its steps, and when the provider fails its catch records the failure and writes `data: {"error": …}`. The dock's stream reader handled steps, follow-ups, created containers and deltas, and not that frame, so it finalized an answer with no text: the person saw an empty reply and no reason, and the empty turn was not kept, so nothing on reopening said it had failed either. Measured with `brain-entry-points` check 14 on lane 7 (the model stub failing the calls, as often as the SDK retries): the stream carried the error and the dock drew an empty answer, 13/14. On lane 6 (no model, the server's frames handed to the dock): 13/14 the same way.
+
+*Closed, 29 September:* an `{ error }` frame marks the turn failed. The dock answers it with its house line ("Sorry, I encountered an error. Please try again."), after whatever text came before the failure; the provider's message is not the person's to act on. A failed turn is not written to the thread, where what came before the failure would read as the whole answer. Check 14: after 14/14 on lanes 1, 3 and 7. Its first version counted the dock's answers, and a regenerate drops the answer it replaces, so it failed on the fixed build too: the before above was read by that version. It reads what the last answer says now, and the before is `bep-15`'s run (the frame unread, built and run on lanes 6 and 7): 13/14 on each, check 14 alone.
+
+### `found-29-sep/stale-model-stub-never-replaced` — **closed** (test tooling, small; found restarting lane 7's model stub for `model-stub-never-streams`)
+
+**A lane's stale model stub was never stopped, so its replacement died and the old one kept answering**
+
+*Evidence, 29 September:* `lane_model_up` compares the running stub's source with the file and restarts a stale one: it ran `pkill -f "model-stub.mjs --port $port "`, with a space after the port. The store stub's command line goes on past its port (`--bucket …`), so its copy of that line matched; the model stub's ends at the port, so this one never did. Measured on lane 7: `lane_model_up 7` printed "the model stub never announced itself on 9207", its log held EADDRINUSE, and 9207 went on answering with source `562fad040c30` while the file read `bc096d578862`.
+
+*Closed, 29 September:* `stub_down` (lane-env.sh) stops a stub by its port matched as a whole word, and returns once nothing answers on it; the model and store launchers and `fleet-up.sh` use it. After: `lane_model_up 7` answered, and 9207 reports `bc096d578862`. `scripts/e2e-lanes/stub-down-selfcheck.sh --mutate` (preflight, and CI's verify job — no lane): the real model and store stubs on spare ports are both stopped, and a stub on a port that begins with the same digits is left alone; the old pattern and a pattern with no end to the port are each caught.
+
+### `found-29-sep/primary-create-silent-under-a-space` — **closed** (visible bug, small; found building `commit-log/log-6b140c5-1`)
+
+**The create modal's Create task closed and said nothing when the list was picked under a space alone**
+
+*Evidence, 29 September:* the primary button's `onSuccess` went to the task only when a project had been picked (`spaceId && projectId && listId`). A list made under a space alone sits in the space's hidden container, and picking it leaves the project empty, so the modal closed, the page stayed where it was, and nothing said the task had been made. Measured on lane 5 with `create-task-chevron` check 8: one task made, the modal closed, the page `/app/<ws>`, no sheet.
+
+*Closed, 29 September:* the primary opens the task through the same `opener` Create and open uses, which reads the list row's container when no project was picked; where no page can be worked out it says the task was made, as Create and close does. Check 8: before failed on lane 5 (7/9 with check 9), after 9/9 on lane 3. Patch `ctc-13` (the primary needs a project again) reddens check 8 alone (8/9, lane 1).
+
+### `found-29-sep/task-create-fails-silently` — **closed** (visible bug, small; found building `commit-log/log-6b140c5-1`)
+
+**A refused or failed task create said nothing**
+
+*Evidence, 29 September:* the task tab's create mutation had no `onError`, the defect the List and Folder tabs beside it had and lost ("THIS MUTATION HAD NO `onError`", twice in the same file). A refused POST, for the primary and all four endings, left the modal as it was with the button back, which reads as a press that did not register. Measured on lane 5 with `create-task-chevron` check 9, the server's 403 answered in the page: no toast, the form kept.
+
+*Closed, 29 September:* the refusal is said in the server's words (or "That task could not be created." when there are none; four locales), and the form keeps what was typed. Check 9: before failed on lane 5, after 9/9 on lane 3. Patch `ctc-14` (no `onError`) reddens check 9 alone (8/9, lane 3).
+
+### `found-29-sep/comment-plus-menu-keeps-focus-after-create` — open, small (visible bug; found building `commit-log/log-6b140c5-1`)
+
+**After New Task, New Doc or New Whiteboard from a comment's "+" menu, the menu stays mounted and holds the focus**
+
+*Evidence, 29 September (the chevron build's regression, instrumented):* choosing one of the three opens the create modal, and the comment's "+" menu stays mounted, `data-state="closed"`, with the focus still in it, until an Escape dismisses it. Its Radix layer takes that first Escape and marks it handled, so an Escape meant for the modal went to the menu (which is why the create modal's first Escape guard broke `comment-plus-menu`'s New Doc section).
+
+*To close:* close the "+" menu before the create modal opens (or open the modal from the menu's `onCloseAutoFocus`, as Brain opens the comment AI panel), so the modal's title has the focus; a check that typing straight after New Task lands in the title, and that one Escape closes the modal.
+
+### `found-29-sep/chat-message-actions-reads-after-fixed-waits` — open, medium (test tooling; found by this batch's regression sweep)
+
+**`chat-message-actions` reads what it checks after fixed waits, and fails under load**
+
+*Evidence, 29 September:* in a sweep of 57 suites on five lanes at once it failed three checks on lane 3 ("landing on /chat puts the channel it chose in the address", and the two Mark unread checks after it); alone on lane 3 a different one ("the empty channel shows action cards"); on an idle lane 5, 73/73. The suite waits a fixed time and then reads, 53 times (`waitForTimeout(4000)` before the empty channel's cards, `3500` before the address): the pattern already taken out of 20 other suites.
+
+*To close:* each read waits for what it reads (`waitUntil` on the element or the address), the fixed waits go, and the suite holds 73/73 on four lanes at once.
+
+### `found-29-sep/ai-chat-takes-no-task` — open, small (feature; found closing `ledger-rows/row-743`)
+
+**The AI dock pointed at a task knows its title and id, not its contents**
+
+*Evidence, 29 September:* Brain² opens the dock pointed at the task, and each turn names the task to the server (`list / task "<title>" (id <uuid>)`). `POST /ai/chat` takes no `taskId`, so the model never reads the task's description, comments or subtasks. ClickUp's task Brain reads the location it is opened from, and offers Summarize, Progress update and Find similar tasks there (help centre, through search summaries). The comment panel's Summarize this task already reads the task, through `/ai/summarize`.
+
+*To close:* take an optional `taskId` on `POST /ai/chat`, resolved before the stream opens the way `skillId` is: `assertTaskReadable`, then `buildTaskSummaryInput` appended to the context, and a `step('task')` line in the trace. The web sends the `scope.id` it already holds. Then the task-surface starters (`GET /ai/starters?surface=task&taskId=`: Progress update, Find similar tasks), and a reply drafted from the comment thread (`POST /ai/comment-draft`), both of which need the first.
 
 ### `found-29-sep/innertext-reads-hidden-leaves` — open, medium (test tooling; found closing `checks-read-textContent-not-what-is-shown`)
 
@@ -4879,7 +4962,7 @@ FAILs. video-regression 94/94.
 
 *To close:* Rebuild the four-sentence rotation on the resting state. Measure it on a lane started with RUNDESK_LANE_MODEL, and write a break patch that freezes the rotation. This depends on log-ad00a7c-1 so the suite lands on a lane that has a model.
 
-### `commit-log/log-6b140c5-1` — open, small
+### `commit-log/log-6b140c5-1` — **closed** (small)
 
 **The 'Create Task ▾' chevron menu is missing**
 
@@ -4887,7 +4970,10 @@ FAILs. video-regression 94/94.
 
 *To close:* Research which options ClickUp's Create Task chevron offers, then build the split button with each option wired to real behaviour, plus checks.
 
-### `ledger-rows/row-730` — open, small
+*Closed, 29 September.* ClickUp (help centre "Create a task" and "Create tasks and subtasks on mobile", from search snippets; the pages themselves are refused by this machine's proxy): Create and close, Create and open, Create and start another ("resets the task creation modal") and Create and duplicate ("keeps its content open in the task creation modal"); on the web the button itself creates and closes, and its dropdown holds the other three. Here the button already went to the task it made, and still does, so the chevron beside it offers all four, and each makes the task once, the same way: Create and close closes the modal and leaves the page where it was, with frame `01:20`'s toast ("Task created — ‹title› › ‹list›", with View task); Create and open closes it and opens the task's sheet on its list, which for a list picked under the space alone the primary button never did; Create and start another leaves the modal open on a blank form in the same space, project and list; Create and duplicate leaves it open with everything kept. Both halves are live only with a title and a list and nothing in flight, the menu is drawn over the modal, and Escape on the menu closes the menu, not the modal. Four locales. `create-task-chevron`, 7 checks: before 1/7 on lane 2's current bundle (the primary button, which held); after 7/7 on lane 2; patches `ctc-1..12` each redden what they name and nothing else (lane 2, baseline 7/7); regression on lane 2, the 20 suites that open the create modal, 20/20, once a first Escape guard that cost `comment-plus-menu` its last section (11 of 13 ran) was replaced; in CI (241).
+- In main after the merge, two defects found beside it are fixed and checked (`found-29-sep/primary-create-silent-under-a-space`, `found-29-sep/task-create-fails-silently`), so the suite has 9 checks: before 7/9 on lane 5 (checks 8 and 9), after 9/9 on lane 3. `ctc-1` is re-aimed onto the primary's new close-and-open, and reddens checks 1 and 8 (7/9, lane 5); `ctc-13` reddens check 8 and `ctc-14` check 9 (8/9 each, lanes 1 and 3), each a bundle built with the patch and the source put back.
+
+### `ledger-rows/row-730` — **closed** (small)
 
 **Comment ▾ is built (B*), but the 'Create Task ▾' menu is still missing, held only because no frame opens the chevron**
 
@@ -4895,7 +4981,9 @@ FAILs. video-regression 94/94.
 
 *To close:* Build the Create Task split button with the menu ClickUp actually offers (research lens: e.g. create-and-open / create-and-start-another / create-and-duplicate). Enable the Email mode once row-1252 lands.
 
-### `resume-defects/row-730-create-task-chevron` — open, small
+*Closed, 29 September.* The Create Task ▾ half is built to ClickUp's menu and measured, as `commit-log/log-6b140c5-1` records: `create-task-chevron`, 7 checks, 1/7 before and 7/7 after on lane 2, patches `ctc-1..12`. The row keeps its `B*` in `docs/video2-reaudit.md`, and the asterisk now records the Email mode alone, listed and disabled with its reason. Enabling it is `ledger-rows/row-1252`'s, whose own To close says so ("it also closes row-730's first remainder"): nothing here sends a composed comment out, so the mode stays as it is until outbound mail lands.
+
+### `resume-defects/row-730-create-task-chevron` — **closed** (small)
 
 **Ledger row 730's 'Create Task ▾' is recorded as 'Blocked on the reference', so under the new policy it is simply unbuilt**
 
@@ -4903,7 +4991,9 @@ FAILs. video-regression 94/94.
 
 *To close:* Build the chevron menu to ClickUp's four options: close, open the created task's sheet, reset the form keeping list and location, and keep the content for a duplicate. Add checks that each option leaves the modal and route in the stated state and creates exactly one task, plus a break patch per option. Rewrite row 730 without the 'blocked on the reference' reason.
 
-### `ledger-rows/row-743` — open, small
+*Closed, 29 September.* Built to the four, as `commit-log/log-6b140c5-1` records, and each is checked for the modal, the page and the count, the count read by SQL in the list and by title: Create and close makes one task, closes the modal, leaves the page as it was and says so in a toast; Create and open makes one, closes the modal and opens the task's sheet on its list, here a list picked under the space alone; Create and start another makes one and leaves the modal open on a blank form in the same space, project and list; Create and duplicate makes one and leaves the modal open with the same title, description and priority. Patches per option: `ctc-4` and `ctc-5` (close goes to the task; close says nothing), `ctc-6` and `ctc-7` (open goes nowhere; open needs a project), `ctc-8` and `ctc-9` (another keeps the title; another drops the list), `ctc-10` (duplicate clears the form), and `ctc-11` (every item posts twice), which reddens all four; each reddened only what it names (lane 2, baseline 7/7). Row 730 (`docs/video2-reaudit.md:736` at `3ccd85d`) is rewritten without "blocked on the reference", and the B\* legend, §7's list of rows held back by the reference and a second "*Corrected 29 September*" paragraph say the same.
+
+### `ledger-rows/row-743` — **closed** (small)
 
 **Task header 'Brain²' button — absent; the reason 'the hub does not exist' is stale because the AI dock it would open exists**
 
@@ -4911,13 +5001,44 @@ FAILs. video-regression 94/94.
 
 *To close:* Add the header button so it opens the shell AI dock with the task as context, using the same askAi/currentView seam the palette uses. Get the exact ClickUp behaviour (opens Brain scoped to the task) from the ClickUp research lens. Measure it on a model-stub lane. Update the stale comments.
 
-### `ledger-rows/row-751` — open, small
+*Closed, 29 September.* ClickUp ("Use Brain AI on tasks" and "Collaborate with ClickUp Brain anywhere in your Workspace", read through search summaries because this session's proxy refuses help.clickup.com): the task's upper-right Brain opens Brain in a side panel that by default reads only the task it was opened from, and offers Summarize, Progress update and Find similar tasks there. The row's reason was stale. The dock existed, and every turn it sends carries a view that the server writes into the model's context. Measured on lane 6 before, on the lane's own bundle: the Created chip was followed by the activity-rail toggle, and nothing on the sheet opened the dock (0 of 8).
+
+- Brain², straight after the Created chip, opens the shell's AI dock through the palette's seam: `openAiOn` beside `askAi` in the shell, handed to the sheet as a context. The dock is pointed at the task. A chip names the task, and each turn names it to the server as `list / task "<title>" (id <uuid>)`. Pressed again, Brain² closes the dock.
+- The dock stands beside the sheet. It is lifted to the sheet's z-50, and the sheet moves over by the dock's 380px; without the lift the dock opened under the sheet (`bep-4`). The dock follows the sheet to a subtask, and closing the task hands it back to the page. Four locales.
+- The dock does not read the task's description or comments, because `POST /ai/chat` takes no task id. Reading them is an API change: a `taskId` resolved before the stream opens, checked with `assertTaskReadable` and read with `buildTaskSummaryInput`. Reported, not made.
+- Found on the way: the dock read a refused turn's reason and answered "Sorry, I encountered an error. Please try again." in its place, and it read only the chat route's own error shape. It now answers in the server's words ("AI features are not configured" on a lane with no model).
+- The comments that said the button could not be built now say what it does: at the Created chip, at the TaskAiBar, and in ai-panel on the starter surface.
+
+`brain-entry-points`, 13 checks when it was built (14 since: the dock's answer to a failed stream, `found-29-sep/dock-answers-a-failed-stream-with-nothing`), of which 1–8 and 14 are this row's:
+- Before: 0/13 on lane 6.
+- After: 13/13 on lane 6.
+- Patches `bep-1..9`: all nine redden their checks (lane 6, baseline 13/13).
+- In CI (240).
+- Regression on lane 6, 19 suites (the task menu and depth, the task header and rail, the comment composer, its menu, thread and recorder, the AI bar, the dock and the palette): 19/19.
+- In main after the merge: 14/14 on lanes 1, 3 and 7 (7 has a model; the model branch ran for the first time), and the batch's sweep on the final bundles, 57 suites on five lanes at once (1,289 checks): 53 green, and the four that were not are accounted for — `brain-entry-points` twice (its fourteenth check counted answers, which a regenerate keeps level, and a cookie card drawn late covered the scope chip on lane 1; both fixed in the suite, 14/14 on lanes 1, 3 and 7), `workspace-delete-for-good` once (below), and `chat-message-actions` under the load (`found-29-sep/chat-message-actions-reads-after-fixed-waits`; 73/73 on an idle lane).
+
+### `ledger-rows/row-751` — **closed** (small)
 
 **'Brain' in the comment '+' menu — absent; an AI destination already exists (the comment AI panel), so the reason is stale**
 
 *Evidence:* reaudit.md:751 `| M | "Brain" in the "+" menu — the Brain² hub does not exist |`. CommentPlusMenu (task-detail-sheet.tsx:7298+) renders assign, clip, mention-task, file, slash, emoji, new task/doc/whiteboard and no Brain. The comment AI panel exists: task-detail-sheet.tsx:6982-6995 `comment-ai-panel` (instruction in, draft out, Keep to apply), opened today by a space on an empty composer. The menu's header comment at :7285-7291 is itself stale: it says 'EIGHT are here' and that slash commands are absent, but `comment-plus-slash` is rendered.
 
 *To close:* Add a 'Brain' item that opens comment-ai-panel (ClickUp research for any extra behaviour). Correct the CommentPlusMenu header comment.
+
+*Closed, 29 September.* ClickUp ("Use Brain on task comments", read through search summaries): Brain opens from a task comment, by the Brain icon in the comment field or Space in an empty comment, to summarize the context, take action or craft a reply. That destination was already here. The row's reason ("the Brain² hub does not exist") had never been about it; the destination is the comment AI panel, which the space bar opens. Measured on lane 6 before, on the lane's own bundle: the "+" menu ran nine items and no Brain (0 of 5).
+
+- Brain sits beside Add emoji, as frame `04:50` draws it, and opens the panel through the one opener the space bar also calls. Its first build left the cursor nowhere: the closing menu took focus from the prompt and let it fall to the page. The menu now puts the cursor in the prompt as it closes (`bep-11`).
+- The panel's Summarize this task sends the task's id to `POST /ai/summarize`, which drafts from the task's description, activity, subtasks, blockers and comments. The four writing modes still send only the instruction. Nothing reaches the comment box without Keep. Four locales.
+- CommentPlusMenu's header says ten of ten and why it stood at nine. The composer's and the catalogue's comments are corrected too.
+- `comment-plus-menu` had a check that Brain stayed out ("and Brain, which has nothing behind it, is still absent"). It now follows Brain to the panel. `cpm-1`, re-aimed, unwires the row and reddens that check (baseline 13/13).
+
+`brain-entry-points`, 13 checks when it was built (14 since), of which 9–13 are this row's:
+- Before: 0/13 on lane 6.
+- After: 13/13 on lane 6.
+- Patches `bep-10..14`: all five redden their checks (lane 6, baseline 13/13).
+- In CI (240).
+- Regression: shared with row 743's, 19/19.
+- In main after the merge: shared with row 743's.
 
 ### `ledger-rows/row-850` — open, small
 
@@ -5099,13 +5220,32 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Research ClickUp's actual Teams empty-state card copy, use it in all four locales, and check it.
 
-### `ledger-rows/row-2398-remainder` — open, small
+### `ledger-rows/row-2398-remainder` — **closed** (small)
 
 **Teams 'All People' count badge — an open remainder inside a B row, counted nowhere**
 
 *Evidence:* reaudit.md:2404 draws 'All People' with a count (2); :2416-2417 says 'The People count badge … is NOT part of this closure and stays open'. workspace-teams-page.tsx:218-241: the tabs teams/people/chart render a label and icon and no count.
 
 *To close:* Add the member count to the People tab and a check for it. Record it as a B* or its own row so it is counted.
+
+*Closed, 29 September.* Measured on lane 4 before: All People drew its label
+and icon and no number; `teams-people-count` 2/6, the two that hold when nothing
+is drawn. Frame `21:00`: All People, and no other entry, carries `2`, muted at
+the right of the row. ClickUp (help centre, from search snippets): All people is
+for viewing the people who have joined the Workspace, and people invited who
+have not joined are under Pending. The People tab now carries the number of
+members it lists, from the same query, drawn once the list has answered (a 0
+while it loads would say the workspace is empty), not narrowed by a search, and
+said in full to a reader ("4 people in this workspace"); four locales. It is its
+own row in `video2-reaudit.md` §2 (S18–S22), `B`, so §4 moves to 174 rows, 152
+built, and the handoff document's headline with it; `check-video2-counts` read
+the handoff's total as a literal 173 and compares it with §4 now.
+`td-2-analytics-appears` is re-aimed onto the `</button>` that closes the tab
+map and reddens both its checks (lane 4, baseline 14/14).
+`teams-people-count`, 6 checks: 6/6 after, on lane 4; patches `tpc-1..6` each
+reddened the check it names (lane 4, `3ccd85d` with this change, baseline 6/6);
+regression as above, 24/24. In CI (240).
+- In main after the merge: shared with `row-835-reorder`'s.
 
 ### `ledger-rows/row-780-remainder` — **closed** (already fixed, small)
 
@@ -5117,13 +5257,40 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *Closed, 29 September, as already fixed:* `commit-log/log-a0b4108-1` did it. The sidebar's "New folder" opens the Create menu's Folder form on its space (`spaceCreate`, `initialSpaceId` in `workspace-sidebar.tsx`), the way its "+" menu opens the other types, and the sidebar's own `{name}`-only dialog is gone. `folder-create` drives the sidebar path. There is one folder form, with the frame's fields.
 
-### `ledger-rows/row-835-reorder` — open, small
+### `ledger-rows/row-835-reorder` — **closed** (small)
 
 **Planner rail 'reorder' is recorded as built but does not exist; the stored order is a mirror no reader honours**
 
 *Evidence:* Frame 14:10 draws 'Show, hide and reorder…' with drag handles (video2-frame-observations.md:353-355). reaudit.md:835 and :6617 both say the five sections 'are built there with show, hide and reorder'. planner-settings-dialog.tsx:618-633 renders only a Switch per section, with no drag, sortable, move or arrow code in the file. workspace-planner-page.tsx draws sections in fixed JSX order (railOn gates at :1242, :1336, :1482, :1506, :1550) and reads settings.railSections only via .includes (:1011), so the array's order is read by nothing. The planner-settings.mjs checks (:314-328) assert only on/off. This falsifies the ledger's claim at reaudit.md:6624-6632 that 'Not one error ran the other way — nothing recorded as built turned out to be absent'.
 
 *To close:* Add drag or up/down reorder to the Sidebar settings page. Render the rail in railSections order, with RAIL_SECTIONS as the default order. Add a check that a reordered rail renders in the stored order and survives reload. Correct rows 835 and 6617 and the 'one direction' paragraph.
+
+*Closed, 29 September.* Measured on lane 4 before, against its bundle: with an
+order stored Backlog first, the rail drew Priorities, Meet with, Team schedules,
+Assigned to me, Today & overdue and Backlog, as it always had, and the Sidebar
+page drew five switches and no grip; `rail-reorder` 0/12. The page is drawn at
+`14:13`–`14:16`, not `14:10`: a box and a grip on each of the five, and at
+`14:13` the open hand over Priorities' name. ClickUp (help centre, from search
+snippets): the Home Sidebar's sections are reordered by drag and drop; no
+snippet describes the Planner's Sidebar page. `railSectionsShown`
+(`planner-settings-dialog.tsx`) is now the one reader of `railSections` — the
+shown sections in the stored order, the frame's five when nothing is stored, a
+name that is no section or a repeat passed over — and the rail and the Sidebar
+page both draw what it returns. The page draws the frame's heading and sentence
+and a row per section with a box, its name and a grip; a row is dragged by
+itself, or moved a place with ↑/↓ on its grip, and the save is optimistic, so
+the row and the rail behind the dialog move at once and a refusal puts them
+back. A cleared row sinks under the shown ones with no grip and, ticked again,
+joins the rail at the foot; Team schedules rides under Meet with, and at the
+foot when Meet with is hidden. Four locales, no API change. The sidebar row, the
+sharpened-reason paragraph and the "one direction" paragraph of
+`video2-reaudit.md` are corrected where they stand, the wrong words quoted.
+`rail-reorder`, 12 checks: 12/12 after, on lane 4; patches `rro-1..9` each
+reddened the check it names (lane 4, `3ccd85d` with this change, baseline
+12/12); regression on lane 4, the 24 suites that open the planner, its settings
+or the Teams page, 24/24. In CI (240).
+- The server's half, which the build left open (`found-29-sep/rail-sections-kept-as-sent`): `railSections` was kept as sent. `updateSettings` now stores the five sections, each at most once, and refuses anything else, saying which. The check that the rail passes over a stranger and a repeat writes them in Postgres now, and a thirteenth check reads the refusal: before 12/13 on lane 5 (the server stored `["backlog","backlog"]`), after 13/13. Patch `rro-10`: break run pending.
+- In main after the merge: `rail-reorder` 13/13 and `teams-people-count` 6/6, and the batch's sweep on the final bundles, 57 suites on five lanes at once (1,289 checks): 53 green, and the four that were not are accounted for — `brain-entry-points` twice (its fourteenth check counted answers, which a regenerate keeps level, and a cookie card drawn late covered the scope chip on lane 1; both fixed in the suite, 14/14 on lanes 1, 3 and 7), `workspace-delete-for-good` once (below), and `chat-message-actions` under the load (`found-29-sep/chat-message-actions-reads-after-fixed-waits`; 73/73 on an idle lane).
 
 ## Stale documentation — 18
 

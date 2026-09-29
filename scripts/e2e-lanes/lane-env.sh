@@ -79,6 +79,25 @@ stub_is_current () {
     grep -q "\"source\":\"$want\""
 }
 
+# A STUB IS STOPPED BY ITS PORT, AND WAITED ON
+# (`found-29-sep/stale-model-stub-never-replaced`). Both launchers ran
+# `pkill -f "<stub>.mjs --port $port "`, with a space after the port. The store
+# stub's command line goes on past its port (`--bucket …`), so that matched;
+# the model stub's ends at the port, so it never did. A stale model stub was
+# never stopped, its replacement died on EADDRINUSE, and the lane went on
+# answering from the old source, the one `stub_is_current` was written to
+# retire. The port is matched as a whole word now, and the call returns only
+# once nothing answers on it.
+stub_down () {
+  local port="$1" file="$2"
+  pkill -f "$(basename "$file") --port $port( |\$)" 2>/dev/null
+  for _ in $(seq 1 50); do
+    curl -s --noproxy '*' --max-time 1 -o /dev/null "http://127.0.0.1:$port/__control/version" 2>/dev/null || return 0
+    sleep 0.1
+  done
+  return 1
+}
+
 lane_store_up () {
   local k="$1"
   local port bucket log
@@ -93,7 +112,7 @@ lane_store_up () {
     return 0
   fi
 
-  pkill -f "s3-stub.mjs --port $port " 2>/dev/null
+  stub_down "$port" "$LANE_ENV_DIR/s3-stub.mjs"
   : > "$log"
   RUNDESK_S3_STUB=1 nohup node "$LANE_ENV_DIR/s3-stub.mjs" \
     --port "$port" --bucket "$bucket" --strict >> "$log" 2>&1 &
@@ -375,7 +394,7 @@ lane_model_up () {
     return 0
   fi
 
-  pkill -f "model-stub.mjs --port $port " 2>/dev/null
+  stub_down "$port" "$LANE_ENV_DIR/model-stub.mjs"
   : > "$log"
   RUNDESK_MODEL_STUB=1 nohup node "$LANE_ENV_DIR/model-stub.mjs" --port "$port" >> "$log" 2>&1 &
 

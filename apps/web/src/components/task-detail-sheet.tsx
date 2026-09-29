@@ -83,8 +83,12 @@ import {
   // `Comment ▾` split button of `04:11`.
   Download,
   ChevronDown,
+  // The task header's Brain² and the "+" menu's Brain (`ledger-rows/row-743`,
+  // `ledger-rows/row-751`).
+  Brain as BrainIcon,
 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import { useAiDock } from '../lib/ai-dock'
 import { offerUndo } from '../lib/undoable-delete'
 import { useActivityRail, setActivityRail } from '../lib/activity-rail'
 import { parseEstimate, formatEstimate } from '../lib/estimate'
@@ -605,9 +609,12 @@ function formatDuration(ms?: number | null): string {
  * (`docs/video2-reaudit.md`, "What the Brain² rows are actually about"). So a
  * bar that navigates to `/ai/brain` would be a control named after a place that
  * is not there, and one that navigates to the AI page would leave this task
- * behind: `POST /ai/chat` takes no task. This bar therefore does its work HERE,
- * against the endpoints that do take the task, and the word "Brain²" stays only
- * in the sentence because that sentence is the frame's.
+ * behind. The conversation about this task is the header's Brain²
+ * (`ledger-rows/row-743`): the shell's dock, opened beside the sheet and
+ * pointed at it, which tells the model WHICH task — `POST /ai/chat` takes no
+ * task id, so it cannot read the task's contents. This bar therefore does its
+ * work HERE, against the endpoints that do take the task and read what is in
+ * it, and "Brain²" is in its sentence because that sentence is the frame's.
  *
  * WHY ONE OF THE THREE IS ENABLED AND TWO ARE NOT, rather than three buttons
  * that all "work". Same rule the model picker settled on when it listed ChatGPT
@@ -1038,6 +1045,31 @@ export function TaskDetailSheet({
     queryKey: ['task', taskId],
     queryFn: () => api<TaskDetail>(`/tasks/${taskId}`),
   })
+
+  /*
+   * `ledger-rows/row-743` — the shell's AI dock, which the header's Brain²
+   * points at this task (`lib/ai-dock.ts`). Null outside a workspace shell, and
+   * then there is no button: a Brain² that could open nothing is not drawn.
+   *
+   * THE DOCK FOLLOWS THE TASK ON SCREEN. Pointed at a task, and the sheet moves
+   * on to a subtask or a dependency, or the title is edited, it is re-pointed —
+   * so its chip never names a task this sheet is not showing. And when the
+   * sheet closes the dock is released back to the page it is over.
+   */
+  const aiDock = useAiDock()
+  const dockBeside = !!aiDock?.scope
+  const shownTaskId = detailQuery.data?.id
+  const shownTitle = detailQuery.data?.title
+  useEffect(() => {
+    if (!aiDock?.scope || !open || !shownTaskId || shownTitle === undefined) return
+    if (aiDock.scope.id === shownTaskId && aiDock.scope.title === shownTitle) return
+    aiDock.openOn({ kind: 'task', id: shownTaskId, title: shownTitle })
+  }, [aiDock, open, shownTaskId, shownTitle])
+  const releaseDock = aiDock?.release
+  useEffect(() => {
+    if (!open || !releaseDock) return
+    return () => releaseDock()
+  }, [open, releaseDock])
   const capsQuery = useQuery({
     enabled,
     queryKey: ['task-caps', taskId],
@@ -1305,6 +1337,15 @@ export function TaskDetailSheet({
         className={cn(
           'w-full overflow-y-auto transition-[max-width] duration-200',
           expanded ? 'sm:max-w-[90vw]' : 'sm:max-w-2xl',
+          /*
+           * `ledger-rows/row-743` — the dock this sheet's Brain² opened stands
+           * in the right 380px (`routes/app.tsx`), so from md up the sheet ends
+           * where the dock begins instead of under it, and gives up that much
+           * width. On a narrow screen the dock overlays, as it does everywhere
+           * there.
+           */
+          dockBeside && 'md:right-[380px]',
+          dockBeside && (expanded ? 'md:max-w-[calc(90vw-380px)]' : 'md:max-w-[min(42rem,calc(100vw-380px))]'),
         )}
       >
         <TaskCapsContext.Provider value={caps}>
@@ -1558,14 +1599,12 @@ export function TaskDetailSheet({
                     asked for it, so a task could not tell you how old it was
                     without opening the activity feed and scrolling to the end.
 
-                    NOT "Brain²" beside it, yet. In the frame that button opens
-                    the assistant on this task. Rundesk has the assistant — the
-                    shell's AI dock and `/app/:workspaceId/ai` — but
-                    `POST /ai/chat` takes no task, so a button here could open
-                    the dock and not point it at the task: a control that says
-                    more than it does. Open, not refused;
-                    `docs/clickup-research.md` (clickup-ai, item 8) has the
-                    build.
+                    "Brain²" follows it, below. This comment used to say it could
+                    not: `POST /ai/chat` takes no task, so a button here "could
+                    open the dock and not point it at the task". The dock was
+                    always pointable — every turn carries a view hint the
+                    server writes into its context — so the button points it
+                    there (`ledger-rows/row-743`).
 
                     `formatDate` rather than the frame's literal "7 Aug", so the
                     chip follows the reader's own date format — the same one the
@@ -1579,6 +1618,51 @@ export function TaskDetailSheet({
                     >
                       {t('taskDetail.createdOn', { date: formatDate(detailQuery.data.createdAt) })}
                     </span>
+                  )}
+                  {/*
+                    §V2-S04 frame `03:40` — **Brain²**, the second item of
+                    "Created 7 Aug · Brain² · Share · ⋯" (`ledger-rows/row-743`).
+
+                    In ClickUp the task's upper-right Brain opens Brain in a
+                    side panel, reading by default only the task it was opened
+                    from. Here it opens the shell's AI dock — the assistant the
+                    palette's Ask AI already opens, through the same seam —
+                    pointed at this task: the dock's chip names it, and every
+                    turn tells the server which task it is (title and id, as the
+                    view it writes into the model's context). The dock stands
+                    beside the sheet rather than under it, and follows it to a
+                    subtask; closing the task hands it back to the page.
+
+                    What it does NOT do is read the task's description or
+                    comments into the conversation: `POST /ai/chat` takes no
+                    task id, and that is an API change. The bar under the title
+                    and the comment panel's Summarize reach those through the
+                    endpoints that take the task.
+
+                    A toggle, like the rail button beside it: pressed while the
+                    dock is on this task, it closes the dock.
+                  */}
+                  {aiDock && (
+                    <button
+                      type="button"
+                      data-testid="task-header-brain"
+                      aria-pressed={aiDock.scope?.id === detailQuery.data.id}
+                      title={t('taskDetail.brainHint')}
+                      onClick={() =>
+                        aiDock.scope?.id === detailQuery.data.id
+                          ? aiDock.close()
+                          : aiDock.openOn({ kind: 'task', id: detailQuery.data.id, title: detailQuery.data.title })
+                      }
+                      className={cn(
+                        'mr-1 inline-flex h-8 items-center gap-1 rounded-md px-2 text-xs font-medium hover:bg-muted/60',
+                        aiDock.scope?.id === detailQuery.data.id
+                          ? 'text-accent'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
+                    >
+                      <BrainIcon className="h-3.5 w-3.5" aria-hidden />
+                      {t('taskDetail.brain')}
+                    </button>
                   )}
                   {/*
                     And the button the frame's note names: "Activity panel is
@@ -6172,8 +6256,11 @@ function CommentsPanel({
    * Half true, and checking it was worth the time: Record a Video Clip, Add a
    * file and Mention a task did exist; assigning the comment you are WRITING,
    * an emoji inserter, and the three "New …" entry points did not; and Slash
-   * commands and Brain have no engine at all. So this is a menu plus the three
+   * commands and Brain had no engine yet. So this is a menu plus the three
    * pieces that make its entries real, not a menu over ten finished things.
+   * Both have one now: slash commands (§V2-S05c, below), and Brain opens the
+   * comment AI panel the space bar opens (§V2-S05d, `ledger-rows/row-751`) —
+   * all ten are in.
    */
   const [assignTo, setAssignTo] = useState<string>('')
   /*
@@ -6211,11 +6298,25 @@ function CommentsPanel({
    */
   const [aiOpen, setAiOpen] = useState(false)
   const [aiPrompt, setAiPrompt] = useState('')
-  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format'>('expand')
+  const [aiMode, setAiMode] = useState<'improve' | 'shorten' | 'expand' | 'format' | 'summarize'>('expand')
   const [aiDraft, setAiDraft] = useState<string | null>(null)
   const [aiBusy, setAiBusy] = useState(false)
   const [aiError, setAiError] = useState<string | null>(null)
   const aiPromptRef = useRef<HTMLTextAreaElement | null>(null)
+  /*
+   * ONE OPENER for the panel, and both ways in call it: the space bar on an
+   * empty box, and the "+" menu's Brain (`ledger-rows/row-751`) — ClickUp's
+   * own two, the Space key and the Brain icon in the comment field. Two copies
+   * of these four lines would be two panels that open differently. (From the
+   * menu, the menu has to let go of the cursor first; it puts it in the prompt
+   * as it closes — see `CommentPlusMenu`.)
+   */
+  const openCommentAi = () => {
+    setAiOpen(true)
+    setAiDraft(null)
+    setAiError(null)
+    requestAnimationFrame(() => aiPromptRef.current?.focus())
+  }
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [quickCreate, setQuickCreate] = useState<'task' | 'doc' | 'whiteboard' | null>(null)
   const commentFileInputRef = useRef<HTMLInputElement | null>(null)
@@ -6940,10 +7041,7 @@ function CommentsPanel({
              */
             if (e.key === ' ' && text === '' && !aiOpen) {
               e.preventDefault()
-              setAiOpen(true)
-              setAiDraft(null)
-              setAiError(null)
-              requestAnimationFrame(() => aiPromptRef.current?.focus())
+              openCommentAi()
               return
             }
             if (!showMentions || activeCandidates.length === 0) return
@@ -7287,13 +7385,24 @@ function CommentsPanel({
           </div>
         )}
         {/*
-          §V2-S05d — the AI panel the space bar opens.
+          §V2-S05d — the AI panel the space bar opens, and the "+" menu's Brain.
 
           It asks for an INSTRUCTION and hands back a DRAFT you have to keep.
           The chat composer learned this the hard way: its sparkle used to
           rewrite what you had written the moment it was pressed, with no way to
           say what you wanted and no way back. Nothing here touches the comment
           box until Keep is pressed.
+
+          AND ONE MODE THAT READS THE TASK (`ledger-rows/row-751`). ClickUp
+          opens Brain from a task comment to summarize the context, take action
+          or craft a reply (help.clickup.com, "Use Brain on task comments").
+          The four writing modes rewrite the instruction and know nothing of
+          the task (`POST /ai/writing/improve` takes text, a mode and a
+          workspace). Summarize this task sends the task's id to
+          `POST /ai/summarize`, which checks the reader may open the task and
+          drafts from its description, status, recent activity, open subtasks,
+          blockers and comments — so it needs no instruction, and the box says
+          so rather than taking one it would ignore.
         */}
         {aiOpen && (
           <div
@@ -7309,7 +7418,10 @@ function CommentsPanel({
               rows={2}
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder={t('taskDetail.aiComposerPlaceholder')}
+              disabled={aiMode === 'summarize'}
+              placeholder={
+                aiMode === 'summarize' ? t('taskDetail.aiSummarizePlaceholder') : t('taskDetail.aiComposerPlaceholder')
+              }
               data-testid="comment-ai-prompt"
               className="text-xs"
             />
@@ -7321,28 +7433,41 @@ function CommentsPanel({
                 aria-label={t('taskDetail.aiComposerMode')}
                 className="h-7 rounded border border-border bg-card px-1.5 text-[11px]"
               >
-                {/* Exactly the four `POST /ai/writing/improve` accepts. A fifth
-                    would fall through to `improve` server-side and read as a
-                    control that does nothing. */}
+                {/* The first four are exactly the four `POST /ai/writing/improve`
+                    accepts; a fifth sent there would fall through to `improve`
+                    server-side and read as a control that does nothing. The
+                    fifth here goes somewhere else: `POST /ai/summarize`, with
+                    the task (`ledger-rows/row-751`). */}
                 <option value="expand">{t('taskDetail.aiModeExpand')}</option>
                 <option value="improve">{t('taskDetail.aiModeImprove')}</option>
                 <option value="shorten">{t('taskDetail.aiModeShorten')}</option>
                 <option value="format">{t('taskDetail.aiModeFormat')}</option>
+                <option value="summarize">{t('taskDetail.aiModeSummarize')}</option>
               </select>
               <Button
                 size="sm"
                 data-testid="comment-ai-run"
-                disabled={!aiPrompt.trim() || aiBusy}
+                disabled={(aiMode !== 'summarize' && !aiPrompt.trim()) || aiBusy}
                 onClick={async () => {
                   setAiBusy(true)
                   setAiError(null)
                   setAiDraft(null)
                   try {
-                    const r = await api<{ improved: string }>('/ai/writing/improve', {
-                      method: 'POST',
-                      body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },
-                    })
-                    const improved = (r?.improved ?? '').trim()
+                    const drafted =
+                      aiMode === 'summarize'
+                        ? (
+                            await api<{ summary: string }>('/ai/summarize', {
+                              method: 'POST',
+                              body: { taskId, type: 'task', workspaceId },
+                            })
+                          )?.summary
+                        : (
+                            await api<{ improved: string }>('/ai/writing/improve', {
+                              method: 'POST',
+                              body: { text: aiPrompt.trim(), mode: aiMode, workspaceId },
+                            })
+                          )?.improved
+                    const improved = (drafted ?? '').trim()
                     if (!improved) throw new Error(t('taskDetail.aiComposerEmpty'))
                     setAiDraft(improved)
                   } catch (err) {
@@ -7495,6 +7620,8 @@ function CommentsPanel({
                 commentTextRef.current?.focus()
               }}
               onEmoji={() => setEmojiOpen((v) => !v)}
+              onBrain={openCommentAi}
+              brainFocus={aiPromptRef}
               onSlash={() => {
                 // Same menu the "/" key opens, reached from the "+" instead.
                 setText((prev) => (prev.endsWith('/') ? prev : `${prev}/`))
@@ -7595,15 +7722,17 @@ function CommentsPanel({
 /**
  * §V2-S05b frame `04:50` — the comment composer's "+" menu.
  *
- * The frame lists ten items. NINE are here. **Slash commands** joined when the
- * composer gained them (§V2-S05c, below); this said "EIGHT" and called them
- * absent until 29 September. The one that is not here is **Brain**: in the
- * frame it opens the assistant on this comment's task, and Rundesk's assistant
- * — the shell's AI dock and `/app/:workspaceId/ai` — takes no task
- * (`POST /ai/chat`), so the item would open something that cannot see where it
- * was opened from, which is the facade this codebase has spent two videos
- * removing. Its own row, open rather than refused; `docs/clickup-research.md`
- * (clickup-ai, item 8) has the build.
+ * The frame lists ten items, and all TEN are here. **Slash commands** joined
+ * when the composer gained them (§V2-S05c, below); this said "EIGHT" and called
+ * them absent until 29 September. **Brain** joined on the same day
+ * (`ledger-rows/row-751`). It was held out on the ground that Rundesk's
+ * assistant takes no task (`POST /ai/chat`), which was true of the dock and
+ * beside the point: the comment composer has its own AI destination, the panel
+ * the space bar opens, and ClickUp's Brain in a comment is exactly that (the
+ * Brain icon in the comment field and Space on an empty comment open the same
+ * thing). So Brain opens that panel, through the same opener the space bar
+ * calls; its Summarize this task mode is the one that reads the task, and
+ * nothing reaches the comment box without Keep.
  *
  * Everything here goes to the SAME code the direct controls use: Add a file
  * clicks the composer's own file input, Record a Video Clip calls the recorder's
@@ -7618,6 +7747,8 @@ function CommentPlusMenu({
   onRecordClip,
   onMentionTask,
   onEmoji,
+  onBrain,
+  brainFocus,
   onSlash,
   onQuickCreate,
 }: {
@@ -7628,11 +7759,25 @@ function CommentPlusMenu({
   onRecordClip: () => void
   onMentionTask: () => void
   onEmoji: () => void
+  onBrain: () => void
+  /** The panel's prompt: where the cursor goes once this menu has let go of it. */
+  brainFocus: { current: HTMLTextAreaElement | null }
   onSlash: () => void
   onQuickCreate: (mode: 'task' | 'doc' | 'whiteboard') => void
 }) {
   const { t } = useTranslation()
   const [assignOpen, setAssignOpen] = useState(false)
+  /*
+   * WHERE THE CURSOR GOES, MEASURED RATHER THAN ASSUMED. Brain calls the opener
+   * the space bar calls, and the opener puts the cursor in the panel's prompt —
+   * which holds from the space bar and did not from here. Sampled every 50ms
+   * after the press: the prompt had focus at 0ms, the closing menu had taken it
+   * back to its own container by 50ms, and it fell to <body> when the menu
+   * unmounted. A menu hands focus on only once it has closed, through
+   * `onCloseAutoFocus`, so that is where Brain puts it: in the prompt, rather
+   * than back on the "+".
+   */
+  const brainChosen = useRef(false)
 
   return (
     <>
@@ -7648,7 +7793,16 @@ function CommentPlusMenu({
             <Plus className="h-3.5 w-3.5" />
           </button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuContent
+          align="start"
+          className="w-56"
+          onCloseAutoFocus={(e) => {
+            if (!brainChosen.current) return
+            brainChosen.current = false
+            e.preventDefault()
+            brainFocus.current?.focus()
+          }}
+        >
           {/*
             NO `preventDefault` HERE. Keeping the menu open to show the picker
             leaves Radix's `pointer-events: none` on the body, so the composer
@@ -7689,6 +7843,21 @@ function CommentPlusMenu({
           <DropdownMenuItem data-testid="comment-plus-emoji" onSelect={onEmoji}>
             <Smile className="mr-2 h-4 w-4" />
             {t('commentPlus.addEmoji')}
+          </DropdownMenuItem>
+          {/*
+            Brain, beside Add emoji where frame `04:50` draws it
+            (`ledger-rows/row-751`): the panel the space bar opens, through the
+            same opener (see above).
+          */}
+          <DropdownMenuItem
+            data-testid="comment-plus-brain"
+            onSelect={() => {
+              brainChosen.current = true
+              onBrain()
+            }}
+          >
+            <BrainIcon className="mr-2 h-4 w-4" />
+            {t('commentPlus.brain')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem data-testid="comment-plus-new-task" onSelect={() => onQuickCreate('task')}>

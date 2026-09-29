@@ -141,6 +141,15 @@ export type PlannerSettings = {
    * their phone.
    */
   plannerOnboardingDismissed?: boolean
+  /**
+   * Frames `14:13`–`14:16` — the planner rail's shown sections, in the order the
+   * rail draws them (`ledger-rows/row-835-reorder`). Each of the five at most
+   * once; the planner service refuses anything else.
+   *
+   * Reader: `railSectionsShown` (`planner-settings-dialog.tsx`), for the rail
+   * and the Sidebar page both.
+   */
+  railSections?: string[]
   /** "Default event duration", shown as `1 hour`. */
   defaultDurationMinutes?: number
   /**

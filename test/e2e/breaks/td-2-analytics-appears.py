@@ -5,10 +5,10 @@
 # it, and she never opens it — so a tab there would be a page whose purpose
 # somebody has to guess. This suite fails if one shows up."
 #
-# So this is the same edit as `cpm-1-the-menu-grows-a-brain`, in a different
-# file, for the same reason: a frame that lists four and a UI that shows three
-# reads as an oversight, and the decision lives in a comment rather than in the
-# code.
+# So this is the same edit `cpm-1-the-menu-grows-a-brain` made while Brain had
+# nothing behind it (it has since been re-aimed), in a different file, for the
+# same reason: a frame that lists four and a UI that shows three reads as an
+# oversight, and the decision lives in a comment rather than in the code.
 #
 # WRITTEN AS A SEPARATE BUTTON, NOT AS A FOURTH ENTRY IN THE ARRAY — and the
 # first version was the latter and BUILD FAILED. `TabId` is inferred from that
@@ -27,18 +27,18 @@
 # Everything else on the page is untouched — a member still gets in, the teams
 # and people still list, My Teams still renders, the org chart still answers.
 #
+# RE-AIMED 29 September: All People's count now sits between a tab's label and
+# its `</button>` (`ledger-rows/row-2398-remainder`), so the anchor starts at the
+# `</button>` that closes the map; the edit is the same.
+#
 # Reddens: teams-destination: "there are exactly the three destinations that have something behind them"
 import io
 p = '/home/user/rundesk/apps/web/src/pages/workspace-teams-page.tsx'
-a = """            <x.icon className="h-3.5 w-3.5" />
-            {t(x.labelKey)}
-          </button>
+a = """          </button>
         ))}
       </div>
 """
-b = """            <x.icon className="h-3.5 w-3.5" />
-            {t(x.labelKey)}
-          </button>
+b = """          </button>
         ))}
         <button
           type="button"

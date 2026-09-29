@@ -19,6 +19,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signUpApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
 import { openDb } from './lib/db.mjs'
+import { storeBase, storeRequests } from './lib/store.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -26,7 +27,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 4
+const EXPECTED_CHECKS = 5
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -57,6 +58,7 @@ const PASSWORD = 'DeleteForGood@12345!'
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
+const STORE = storeBase(API_PORT, argOf('--store', undefined))
 let browser = null
 let sql = null
 let O = null
@@ -89,6 +91,21 @@ try {
   const list = (await O('/lists', { method: 'POST', body: { projectId: project, name: `${TAG} list` } })).data?.id
   const task = await O('/tasks', { method: 'POST', body: { listId: list, title: `${TAG} task` } })
   if (task.status >= 300 || !task.data?.id) throw new Error(`could not stage the workspace's contents: ${said(task)}`)
+  // And files in the store: an attachment, which a row names, and a clip,
+  // which only its prefix does (clips have no table).
+  const body = Buffer.from(`${TAG} bytes`)
+  const pre = await O(`/tasks/${task.data.id}/attachments/presign`, { method: 'POST', body: { fileName: `${TAG}.txt`, contentType: 'text/plain', sizeBytes: body.length } })
+  const putFile = pre.data?.uploadUrl ? await fetch(pre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'text/plain' }, body }).then((r) => r.status, () => 0) : 0
+  const recordedFile = pre.data?.storageKey
+    ? await O(`/tasks/${task.data.id}/attachments`, { method: 'POST', body: { fileName: `${TAG}.txt`, storageKey: pre.data.storageKey, contentType: 'text/plain', sizeBytes: body.length } })
+    : { status: 0 }
+  const clipPre = await O(`/workspaces/${WS}/clips/presign`, { method: 'POST', body: { fileName: `${TAG}.webm`, contentType: 'video/webm', title: `${TAG} clip` } })
+  const putClip = clipPre.data?.uploadUrl ? await fetch(clipPre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'video/webm' }, body }).then((r) => r.status, () => 0) : 0
+  if (putFile >= 300 || !putFile || recordedFile.status >= 300 || !putClip || putClip >= 300) {
+    throw new Error(`could not store the workspace's files: attachment presign ${pre.status}, PUT ${putFile}, record ${recordedFile.status}; clip presign ${clipPre.status}, PUT ${putClip} — a lane needs its store for this suite`)
+  }
+  const FILE_KEY = pre.data.storageKey
+  const CLIP_KEY = clipPre.data.storageKey
   const archived = await O(`/workspaces/${WS}`, { method: 'DELETE' })
   if (archived.status >= 300) throw new Error(`could not archive the workspace: ${said(archived)}`)
 
@@ -156,7 +173,16 @@ try {
   console.log('\n▶ confirming')
   const answers = []
   op.on('response', (r) => { if (r.url().includes(`/workspaces/${WS}/permanent`)) answers.push(r.status()) })
+  const storeBefore = await storeRequests(STORE)
   await confirm.click({ timeout: 5000 }).catch(() => {})
+  /*
+   * READ ONCE THE DELETION HAS ANSWERED, not once the row has gone. The row
+   * goes first, then the store is emptied, then the deletion is recorded with
+   * what the store gave back, so between the row going and the answer the
+   * record is not there yet: read then, a loaded lane counted 0 records for a
+   * deletion that recorded one (29 September, lane 6).
+   */
+  await waitUntil(() => answers.length > 0, { timeoutMs: 30_000 })
   const gone = await waitUntil(async () => (await sql`select count(*)::int as n from workspaces where id = ${WS}`)[0].n === 0, { timeoutMs: 15_000 })
   const [{ n: spacesLeft }] = await sql`select count(*)::int as n from spaces where workspace_id = ${WS}`
   const [{ n: tasksLeft }] = await sql`select count(*)::int as n from tasks where id = ${task.data.id}`
@@ -168,6 +194,20 @@ try {
     `answered ${JSON.stringify(answers)}; workspace gone ${gone}; spaces left ${spacesLeft}; tasks left ${tasksLeft}; recorded ${recorded}; row gone ${rowLeft}`,
   )
   await op.context().close().catch(() => {})
+
+  // ══ 5. AND WHAT THE STORE HELD FOR IT ════════════════════════════════════
+  console.log('\n▶ the store')
+  const storeAfter = await storeRequests(STORE)
+  const deletedKeys = (storeAfter?.requests ?? [])
+    .filter((r) => r.n > (storeBefore?.seq ?? Infinity) && r.method === 'DELETE')
+    .map((r) => r.key)
+  chk(
+    storeBefore !== null && deletedKeys.includes(FILE_KEY) && deletedKeys.includes(CLIP_KEY),
+    'and the files it held go from the store with it — a task’s attachment, which its row names, and a clip, which only its prefix does',
+    storeBefore === null
+      ? `the store at ${STORE} could not be read, so nothing here was measured`
+      : `after the delete the store was asked to delete ${JSON.stringify(deletedKeys)}; the attachment ${FILE_KEY}, the clip ${CLIP_KEY}`,
+  )
 } catch (err) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)

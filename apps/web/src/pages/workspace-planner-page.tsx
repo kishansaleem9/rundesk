@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
+import { Fragment, Suspense, lazy, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Button, cn, toast } from '@rundesk/ui'
@@ -12,7 +12,7 @@ import { localDayKey } from '../lib/local-date'
 import { useAuthStore } from '../store/auth'
 import {
   PlannerSettingsDialog,
-  RAIL_SECTIONS,
+  railSectionsShown,
   GRID_SIZES,
   type PlannerGridSize,
 } from '../components/planner-settings-dialog'
@@ -98,7 +98,8 @@ type PlannerSettings = {
   /** FOUR values. The dialog's copy of this union had three and the server had
    *  always accepted four — see `planner-settings-dialog.tsx`. */
   colorTasksBy?: 'none' | 'priority' | 'status' | 'list'
-  /** Which rail sections are shown — the Sidebar page. */
+  /** Which rail sections are shown, in the order the rail draws them — the
+   *  Sidebar page. Reader: `railSectionsShown`, below. */
   railSections?: string[]
   /** A `users` column, surfaced here because the Appearance page edits it. */
   weekStart?: string
@@ -1026,8 +1027,14 @@ export function PlannerPage() {
    * checkboxes on the Sidebar page controlling two sections the rail never drew
    * for anybody who had not saved a preference. Sixth instance of the same
    * shape in this codebase; the compiler cannot see any of them.
+   *
+   * AND THE ORDER IS READ, frames `14:13`–`14:16` ("Show, hide and reorder").
+   * This was `.includes(key)` over a rail drawn in a fixed order, so the
+   * array's order was stored and read by nothing (`ledger-rows/row-835-reorder`).
+   * The rail now draws `railSectionsShown` in its order — the same function the
+   * Sidebar page lists its rows by.
    */
-  const railOn = (key: string) => (settings?.railSections ?? [...RAIL_SECTIONS]).includes(key)
+  const railShown = railSectionsShown(settings?.railSections)
   const blockLabel = (b: Block) => (b.taskId && b.label ? `${prefix} ${b.label}` : b.label ?? '')
 
   /*
@@ -1234,6 +1241,91 @@ export function PlannerPage() {
   const allDay = blocks.filter((b) => b.isAllDay)
   const timed = blocks.filter((b) => !b.isAllDay)
 
+  /*
+   * §V2-15b, frame `12:48` — **Team schedules**, the picker half.
+   *
+   * A SEPARATE SECTION FROM "MEET WITH", deliberately. They look similar
+   * and are not: Meet with overlays one person on your own week to answer
+   * "is Sara free on Thursday"; this picks several and gives each their
+   * own column, to answer "when are the four of us free". Folding them
+   * into one control would have meant either losing the overlay or
+   * drawing four people's hatching on top of each other, which is a
+   * picture of nobody's schedule. `planner-grid.mjs` asserts the overlay
+   * still works, and it does, untouched.
+   *
+   * Held here rather than written in the rail because the rail draws it in one
+   * of two places: under Meet with, wherever the stored order puts Meet with,
+   * or at the foot when Meet with is hidden.
+   */
+  const teamSchedulesSection = (
+    <section data-testid="planner-team-schedules">
+      <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+        {t('planner.teamSchedules')}
+      </h2>
+      {teamUserIds.length > 0 && (
+        <ul className="mb-1.5 space-y-0.5" data-testid="planner-team-chips">
+          {teamUserIds.map((id) => (
+            <li
+              key={id}
+              data-testid="planner-team-chip"
+              data-user-id={id}
+              className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1 text-[12px]"
+            >
+              <span className="truncate">{nameOf(id)}</span>
+              <button
+                type="button"
+                aria-label={t('planner.teamRemovePerson')}
+                data-testid={`planner-team-remove-${id}`}
+                disabled={setTeamPeople.isPending}
+                onClick={() => toggleTeamPerson(id)}
+                className="rounded px-1 text-muted-foreground hover:text-foreground"
+              >
+                ×
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+        <input
+          value={teamQuery}
+          onChange={(e) => setTeamQuery(e.target.value)}
+          placeholder={t('planner.teamSearchPeople')}
+          aria-label={t('planner.teamSearchPeople')}
+          data-testid="planner-team-search"
+          className="h-8 w-full rounded-md border border-border/80 bg-card pl-7 pr-2 text-[12px]"
+        />
+        {teamQuery.trim() !== '' && (
+          <div className="mt-1 space-y-0.5">
+            {teamMatches.length === 0 ? (
+              <p className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="planner-team-none">
+                {t('planner.noPeople')}
+              </p>
+            ) : (
+              teamMatches.map((m) => (
+                <button
+                  key={m.userId}
+                  type="button"
+                  data-testid="planner-team-result"
+                  data-user-id={m.userId}
+                  disabled={setTeamPeople.isPending}
+                  onClick={() => {
+                    toggleTeamPerson(m.userId)
+                    setTeamQuery('')
+                  }}
+                  className="block w-full truncate rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40"
+                >
+                  {m.displayName || m.email}
+                </button>
+              ))
+            )}
+          </div>
+        )}
+      </div>
+    </section>
+  )
+
   return (
     <div className="flex h-full min-h-0" data-testid="planner-page">
       {/* What is being dragged, under the pointer. A drag with no feedback is
@@ -1255,11 +1347,20 @@ export function PlannerPage() {
         </div>
       )}
       {/* ── the rail, frame 13:08 ─────────────────────────────────────── */}
-      <aside className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4">
+      <aside data-testid="planner-rail" className="w-64 shrink-0 border-r border-border/60 overflow-y-auto p-3 space-y-4">
         <h1 className="text-[13px] font-semibold">{t('planner.title')}</h1>
 
-        {railOn('priorities') && (
-        <section data-testid="planner-priorities">
+        {/*
+          The shown sections, in the order `railSectionsShown` reads them out of
+          `railSections`; each pass draws the one section it names. Team
+          schedules is not among the five the Sidebar page orders (frame `14:14`
+          lists five), so it rides directly under Meet with, and at the foot of
+          the rail when Meet with is hidden.
+        */}
+        {railShown.map((key) => (
+        <Fragment key={key}>
+        {key === 'priorities' && (
+        <section data-testid="planner-priorities" data-rail-section="priorities">
           <h2 className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.priorities')}
             {/* Frame `16:05` — the rail carries a count once something is on it. */}
@@ -1352,8 +1453,8 @@ export function PlannerPage() {
         </section>
         )}
 
-        {railOn('meetWith') && (
-        <section>
+        {key === 'meetWith' && (
+        <section data-rail-section="meetWith">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.meetWith')}
           </h2>
@@ -1418,88 +1519,12 @@ export function PlannerPage() {
         </section>
         )}
 
-        {/*
-          §V2-15b, frame `12:48` — **Team schedules**, the picker half.
+        {key === 'meetWith' && teamSchedulesSection}
 
-          A SEPARATE SECTION FROM "MEET WITH", deliberately. They look similar
-          and are not: Meet with overlays one person on your own week to answer
-          "is Sara free on Thursday"; this picks several and gives each their
-          own column, to answer "when are the four of us free". Folding them
-          into one control would have meant either losing the overlay or
-          drawing four people's hatching on top of each other, which is a
-          picture of nobody's schedule. `planner-grid.mjs` asserts the overlay
-          still works, and it does, untouched.
-        */}
-        <section data-testid="planner-team-schedules">
-          <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-            {t('planner.teamSchedules')}
-          </h2>
-          {teamUserIds.length > 0 && (
-            <ul className="mb-1.5 space-y-0.5" data-testid="planner-team-chips">
-              {teamUserIds.map((id) => (
-                <li
-                  key={id}
-                  data-testid="planner-team-chip"
-                  data-user-id={id}
-                  className="flex items-center justify-between gap-2 rounded-md border border-border/70 px-2 py-1 text-[12px]"
-                >
-                  <span className="truncate">{nameOf(id)}</span>
-                  <button
-                    type="button"
-                    aria-label={t('planner.teamRemovePerson')}
-                    data-testid={`planner-team-remove-${id}`}
-                    disabled={setTeamPeople.isPending}
-                    onClick={() => toggleTeamPerson(id)}
-                    className="rounded px-1 text-muted-foreground hover:text-foreground"
-                  >
-                    ×
-                  </button>
-                </li>
-              ))}
-            </ul>
-          )}
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
-            <input
-              value={teamQuery}
-              onChange={(e) => setTeamQuery(e.target.value)}
-              placeholder={t('planner.teamSearchPeople')}
-              aria-label={t('planner.teamSearchPeople')}
-              data-testid="planner-team-search"
-              className="h-8 w-full rounded-md border border-border/80 bg-card pl-7 pr-2 text-[12px]"
-            />
-            {teamQuery.trim() !== '' && (
-              <div className="mt-1 space-y-0.5">
-                {teamMatches.length === 0 ? (
-                  <p className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="planner-team-none">
-                    {t('planner.noPeople')}
-                  </p>
-                ) : (
-                  teamMatches.map((m) => (
-                    <button
-                      key={m.userId}
-                      type="button"
-                      data-testid="planner-team-result"
-                      data-user-id={m.userId}
-                      disabled={setTeamPeople.isPending}
-                      onClick={() => {
-                        toggleTeamPerson(m.userId)
-                        setTeamQuery('')
-                      }}
-                      className="block w-full truncate rounded px-2 py-1 text-left text-[12px] hover:bg-muted/40"
-                    >
-                      {m.displayName || m.email}
-                    </button>
-                  ))
-                )}
-              </div>
-            )}
-          </div>
-        </section>
-
-        {/* Frame `13:05` puts these two between "Meet with" and "Backlog". */}
-        {railOn('assignedToMe') && (
-        <section data-testid="planner-assigned">
+        {/* Frame `13:05` puts these two between "Meet with" and "Backlog",
+            which is where `RAIL_SECTIONS` puts them until an order is stored. */}
+        {key === 'assignedToMe' && (
+        <section data-testid="planner-assigned" data-rail-section="assignedToMe">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.assignedToMe')}
           </h2>
@@ -1522,8 +1547,8 @@ export function PlannerPage() {
         </section>
         )}
 
-        {railOn('todayOverdue') && (
-        <section data-testid="planner-today-overdue">
+        {key === 'todayOverdue' && (
+        <section data-testid="planner-today-overdue" data-rail-section="todayOverdue">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.todayOverdue')}
           </h2>
@@ -1566,8 +1591,8 @@ export function PlannerPage() {
         </section>
         )}
 
-        {railOn('backlog') && (
-        <section data-testid="planner-backlog">
+        {key === 'backlog' && (
+        <section data-testid="planner-backlog" data-rail-section="backlog">
           <h2 className="mb-1.5 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
             {t('planner.backlog')}
           </h2>
@@ -1598,6 +1623,10 @@ export function PlannerPage() {
           )}
         </section>
         )}
+        </Fragment>
+        ))}
+
+        {!railShown.includes('meetWith') && teamSchedulesSection}
       </aside>
 
       {/* ── the grid ──────────────────────────────────────────────────── */}

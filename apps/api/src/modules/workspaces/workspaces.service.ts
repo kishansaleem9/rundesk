@@ -312,7 +312,11 @@ export class WorkspacesService {
     if (typeof confirmName !== 'string' || confirmName !== ws.name) {
       throw new BadRequestException('Type the workspace’s name exactly as it is to delete it for good')
     }
+    // What the store holds for it is read BEFORE the rows go: afterwards
+    // nothing would say which objects were its.
+    const stored = await this.storedKeysOf(ws.id)
     await this.db.delete(workspaces).where(eq(workspaces.id, ws.id))
+    const removed = await this.purgeStored(stored)
     await this.security.logAuditEvent({
       actorId: actor.id,
       actorEmail: actor.email,
@@ -321,9 +325,68 @@ export class WorkspacesService {
       resourceType: 'workspace',
       resourceId: ws.id,
       description: `Workspace "${ws.name}" deleted for good`,
-      metadata: { organizationId: ws.organizationId },
+      metadata: { organizationId: ws.organizationId, objectsRemoved: removed.removed, objectsLeft: removed.failed, prefixesUnlisted: removed.unlisted },
     })
-    return { deleted: true }
+    return { deleted: true, objectsRemoved: removed.removed }
+  }
+
+  /**
+   * WHAT THE STORE HOLDS FOR A WORKSPACE (`found-29-sep/workspace-delete-leaves-stored-files`):
+   * the keys its rows name — task attachments and covers, chat attachments and
+   * emoji, call recordings — and the prefixes named by the workspace itself:
+   * `workspaces/<id>/` (its tasks' files and its clips, which have no table),
+   * `calls/<id>/`, `chat/<id>/` and its logos. Read before the rows are deleted.
+   */
+  private async storedKeysOf(workspaceId: string): Promise<{ keys: string[]; prefixes: string[] }> {
+    const rows = await this.db.execute(sql`
+      select ta.storage_key as k from task_attachments ta
+        join tasks t on t.id = ta.task_id join lists l on l.id = t.list_id
+        join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+        where s.workspace_id = ${workspaceId}
+      union select t.cover_storage_key from tasks t join lists l on l.id = t.list_id
+        join projects p on p.id = l.project_id join spaces s on s.id = p.space_id
+        where s.workspace_id = ${workspaceId} and t.cover_storage_key is not null
+      union select ca.storage_key from chat_message_attachments ca join chat_channels c on c.id = ca.channel_id
+        where c.workspace_id = ${workspaceId}
+      union select e.storage_key from chat_custom_emoji e where e.workspace_id = ${workspaceId} and e.storage_key is not null
+      union select cr.storage_key from call_recordings cr join calls c on c.id = cr.call_id where c.workspace_id = ${workspaceId}
+      union select c.recording_storage_key from calls c where c.workspace_id = ${workspaceId} and c.recording_storage_key is not null
+    `)
+    const keys = (rows as unknown as Array<{ k: string | null }>).map((r) => r.k).filter((k): k is string => !!k)
+    return {
+      keys,
+      prefixes: [`workspaces/${workspaceId}/`, `calls/${workspaceId}/`, `chat/${workspaceId}/`, `workspace-logos/${workspaceId}-`],
+    }
+  }
+
+  /**
+   * Delete them, and everything under the prefixes. Best effort and counted: a
+   * store that is not configured holds nothing of ours, and an object that
+   * will not go is counted in the audit record rather than failing a deletion
+   * whose rows are already gone.
+   */
+  private async purgeStored(stored: { keys: string[]; prefixes: string[] }): Promise<{ removed: number; failed: number; unlisted: number }> {
+    if (!this.r2.configured) return { removed: 0, failed: 0, unlisted: 0 }
+    const all = new Set(stored.keys)
+    let unlisted = 0
+    for (const prefix of stored.prefixes) {
+      try {
+        for (const o of await this.r2.listAllObjects(prefix)) if (o.Key) all.add(o.Key)
+      } catch {
+        unlisted += 1
+      }
+    }
+    let removed = 0
+    let failed = 0
+    for (const key of all) {
+      try {
+        await this.r2.deleteObject(key)
+        removed += 1
+      } catch {
+        failed += 1
+      }
+    }
+    return { removed, failed, unlisted }
   }
 
   /**

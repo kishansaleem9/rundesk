@@ -66,7 +66,7 @@ for k in "${LANES[@]}"; do
   # re-creates the database, so the lane must start with an EMPTY bucket. The
   # helper on its own would keep a running store and its objects, which is the
   # right behaviour for `fleet-restart.sh` and the wrong one here.
-  pkill -f "s3-stub.mjs --port $S3PORT " 2>/dev/null
+  stub_down "$S3PORT" "$LANE_ENV_DIR/s3-stub.mjs"
   : > "/tmp/claude-0/s3-v$k.log"
   sudo -u postgres psql -q -c "DROP DATABASE IF EXISTS $DB WITH (FORCE)" 2>/dev/null
   sudo -u postgres psql -q -c "CREATE DATABASE $DB OWNER rundesk" 2>/dev/null

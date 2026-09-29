@@ -38,6 +38,7 @@ step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-sel
 step "a push that stops is not read as synced" bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate
 step "one writer or many readers per lane bundle" bash scripts/e2e-lanes/bundle-lock-selfcheck.sh --mutate
 step "a suite runs where its model need is met" bash scripts/e2e-lanes/lane-need-selfcheck.sh --mutate
+step "a stale stub is stopped before its replacement starts" bash scripts/e2e-lanes/stub-down-selfcheck.sh --mutate
 step "a routing suite says what its worker does" node scripts/check-suite-routes.mjs
 step "and that gate bites, case by case"  node scripts/check-suite-routes-cases.mjs --mutate
 step "the e2e proxy keeps what it advertises" node scripts/check-local-stack-keepalive.mjs --mutate

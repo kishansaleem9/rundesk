@@ -17,8 +17,12 @@
  *   · An emoji inserter did not exist in the composer at all — reactions on
  *     posted comments are not the same thing.
  *   · New Task / New Doc / New Whiteboard had no entry point from here.
- *   · Slash commands and Brain have NO ENGINE, so they are deliberately absent
- *     rather than present as labels. Both are their own rows in the re-audit.
+ *   · Slash commands and Brain had NO ENGINE, so they were deliberately absent
+ *     rather than present as labels. Both were their own rows in the re-audit,
+ *     and both are in now: the composer gained a slash menu (§V2-S05c), and
+ *     Brain opens the comment AI panel the space bar opens
+ *     (`ledger-rows/row-751`, 29 September) — so the last section follows
+ *     Brain to that panel.
  *
  * So this is a menu plus the three pieces that make its entries real.
  *
@@ -157,6 +161,7 @@ try {
     'comment-plus-mention-task',
     'comment-plus-file',
     'comment-plus-emoji',
+    'comment-plus-brain',
     'comment-plus-slash',
     'comment-plus-new-task',
     'comment-plus-new-doc',
@@ -173,22 +178,15 @@ try {
   )
 
   /*
-   * AND THE TWO WITH NO ENGINE ARE NOT. This is the check that keeps the menu
-   * honest: Slash commands and Brain would be trivial to add as rows and would
-   * do nothing, which is the defect class this codebase keeps removing.
-   */
-  /*
-   * BRAIN STAYS OUT. Slash commands used to be excluded alongside it for the
-   * same reason — nothing behind them — and §V2-S05c built the engine, so the
-   * item is real now and IS expected. Brain² still does not exist, so that half
-   * of this check stands unchanged: the menu must not grow a label over nothing.
+   * THE TWO THAT HAD NO ENGINE. This used to be where they were kept OUT: Slash
+   * commands and Brain would be trivial to add as rows that do nothing, which
+   * is the defect class this codebase keeps removing. §V2-S05c built the slash
+   * menu, so that item is expected by name below; Brain has the comment AI
+   * panel behind it since `ledger-rows/row-751`, so it is in `wanted` above,
+   * and the last section follows it to the panel — the check that kept it out
+   * stood here.
    */
   const menuText = (await readText(page.locator('[role="menu"]').first())).toLowerCase()
-  chk(
-    !menuText.includes('brain'),
-    'and Brain, which has nothing behind it, is still absent',
-    `the menu offered: ${menuText.replace(/\n/g, ' | ')}`,
-  )
   chk(
     menuText.includes('slash'),
     'while Slash commands, which now has an engine, is offered',
@@ -343,6 +341,27 @@ try {
     }, { timeoutMs: 20_000 }),
     'and the posted comment really carries the assignment',
     'the comment was posted unassigned — the menu collected a choice and dropped it',
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ Brain opens the comment AI panel — the one the space bar opens')
+
+  /*
+   * THIS REPLACES "and Brain, which has nothing behind it, is still absent",
+   * which was right while nothing stood behind it. The comment AI panel could
+   * have all along, and does since `ledger-rows/row-751`. A Brain row that
+   * opens nothing is still the facade that check kept out, so this one follows
+   * the row to the panel instead of stopping at the label;
+   * `brain-entry-points.mjs` follows the panel on to the task.
+   */
+  await openPlus()
+  await item('comment-plus-brain').click({ timeout: 8000 }).catch(() => {})
+  chk(
+    await waitUntil(() => page.getByTestId('comment-ai-panel').isVisible().catch(() => false), {
+      timeoutMs: 10_000,
+    }),
+    'and Brain, which now has the comment AI panel behind it, opens that panel',
+    'the Brain row opened nothing — a label over nothing, which is what this check used to keep out',
   )
 } catch (err) {
   failed += 1

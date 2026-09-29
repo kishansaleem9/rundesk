@@ -182,18 +182,48 @@ const server = createServer(async (req, res) => {
   const system = typeof body.system === 'string' ? body.system : JSON.stringify(body.system ?? '')
   const text = staged?.text ?? SCRIPTS.find((s) => s.when.test(system))?.text ?? 'A stubbed reply.'
   staged = null
+  // The product meters on these; zeroes would make a usage check pass on a
+  // call that never happened, so they are derived from the exchange.
+  const usage = { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }
+  const id = `msg_stub_${seen.length}`
+
+  /*
+   * STREAMED WHEN ASKED (`found-29-sep/model-stub-never-streams`). The chat
+   * dock and the other streamed routes call `messages.stream`, which sends
+   * `stream: true` and reads server-sent events. Answered with the JSON below,
+   * the SDK found no event in it, and every streamed turn on a model lane ended
+   * in "request ended without sending any chunks", so no streamed answer was
+   * ever measured here. These are the Messages API's own events in its order,
+   * and the text goes out in several deltas: a reader that kept only the last
+   * one is caught.
+   */
+  if (body.stream === true) {
+    const words = text.split(/(?<= )/)
+    const per = Math.max(1, Math.ceil(words.length / 3))
+    const parts = []
+    for (let i = 0; i < words.length; i += per) parts.push(words.slice(i, i + per).join(''))
+    const events = [
+      ['message_start', { type: 'message_start', message: { id, type: 'message', role: 'assistant', model: body.model ?? 'claude-stub', content: [], stop_reason: null, stop_sequence: null, usage: { input_tokens: usage.input_tokens, output_tokens: 1 } } }],
+      ['content_block_start', { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }],
+      ...parts.map((part) => ['content_block_delta', { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: part } }]),
+      ['content_block_stop', { type: 'content_block_stop', index: 0 }],
+      ['message_delta', { type: 'message_delta', delta: { stop_reason: 'end_turn', stop_sequence: null }, usage: { output_tokens: usage.output_tokens } }],
+      ['message_stop', { type: 'message_stop' }],
+    ]
+    res.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
+    for (const [event, data] of events) res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`)
+    return res.end()
+  }
 
   return json(res, 200, {
-    id: `msg_stub_${seen.length}`,
+    id,
     type: 'message',
     role: 'assistant',
     model: body.model ?? 'claude-stub',
     content: [{ type: 'text', text }],
     stop_reason: 'end_turn',
     stop_sequence: null,
-    // The product meters on these; zeroes would make a usage check pass on a
-    // call that never happened, so they are derived from the exchange.
-    usage: { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) },
+    usage,
   })
 })
 

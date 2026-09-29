@@ -443,22 +443,31 @@ if (resume !== null) {
   if (!consolidated) {
     problems.push(`${RESUME} could not be compared: §4's consolidated row was never parsed.`)
   }
-  const m = resume.match(/\*\*173 rows — (\d+) built · (\d+) partial · (\d+) missing\.\*\*/)
+  /*
+   * THE TOTAL IS READ, NOT WRITTEN INTO THE PATTERN. This matched `**173 rows
+   * — …**` literally, so the day a row was added — All People's count, 29
+   * September, 173 → 174 — the headline could not be kept true without this
+   * file reporting it missing. The total is compared with §4 like the split.
+   */
+  const m = resume.match(/\*\*(\d+) rows — (\d+) built · (\d+) partial · (\d+) missing\.\*\*/)
   if (!m) {
     problems.push(
-      `${RESUME}: no "**173 rows — N built · N partial · N missing.**" headline. It is checked ` +
+      `${RESUME}: no "**N rows — N built · N partial · N missing.**" headline. It is checked ` +
         'here because it is the first number the next session reads; if it was removed on ' +
         'purpose, remove this assertion with it.',
     )
   } else {
     // Against §4's CONSOLIDATED row — §2 alone is 112/11/9 and the handoff
     // document quotes the whole ledger, §2 plus §5.
-    const want = { B: consolidated?.[0], P: consolidated?.[1], M: consolidated?.[2] }
-    const got = { B: num(m[1]), P: num(m[2]), M: num(m[3]) }
-    if (consolidated && (want.B !== got.B || want.P !== got.P || want.M !== got.M)) {
+    const want = { total: consolidated?.[3], B: consolidated?.[0], P: consolidated?.[1], M: consolidated?.[2] }
+    const got = { total: num(m[1]), B: num(m[2]), P: num(m[3]), M: num(m[4]) }
+    if (
+      consolidated &&
+      (want.total !== got.total || want.B !== got.B || want.P !== got.P || want.M !== got.M)
+    ) {
       problems.push(
-        `${RESUME} says ${got.B} built · ${got.P} partial · ${got.M} missing and §4 ` +
-          `consolidates to ${want.B} · ${want.P} · ${want.M}. The handoff document is read ` +
+        `${RESUME} says ${got.total} rows — ${got.B} built · ${got.P} partial · ${got.M} missing and §4 ` +
+          `consolidates to ${want.total} rows — ${want.B} · ${want.P} · ${want.M}. The handoff document is read ` +
           'before the ledger, and it is the first number the next session sees.',
       )
     }

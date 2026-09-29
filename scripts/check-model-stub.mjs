@@ -108,6 +108,20 @@ async function main() {
       // arrives, so the old assertion held for a stub that answered every
       // arranged failure as 400 — which is what it did.
       .catch((e: Error & { status?: number }) => \`\${e.constructor.name}:\${e.status ?? '?'}\`)
+    /*
+     * STREAMED, as the chat dock asks: \`messages.stream\` sends \`stream: true\`
+     * and reads events. Every delta is kept, so a stub that sent one piece, or
+     * a reader shown only the last, cannot pass for this.
+     */
+    const deltas: string[] = []
+    const stream = client.messages.stream({ model: 'claude-stub-1', max_tokens: 256, system: sys, messages: [{ role: 'user', content: 'stream it' }] })
+    stream.on('text', (t: string) => deltas.push(t))
+    const final = await stream.finalMessage()
+    out.streamDeltas = deltas.length
+    out.streamJoined = deltas.join('')
+    out.streamFinal = final.content[0]?.type === 'text' ? final.content[0].text : null
+    out.streamStop = final.stop_reason
+    out.streamUsage = final.usage
     await fetch(BASE + '/__control/reset', { method: 'POST' })
     out.afterReset = (await (await fetch(BASE + '/__control/seen')).json()).calls.length
   } catch (err) {
@@ -222,6 +236,18 @@ if (out.none !== undefined) {
     'an arranged API error reaches the product as an ERROR carrying THE STATUS THAT WAS ARRANGED',
     `the arranged failure came back as ${JSON.stringify(out.arranged)}`,
   )
+  const streamedReply = (() => {
+    try {
+      return JSON.parse(String(out.streamJoined))
+    } catch {
+      return null
+    }
+  })()
+  chk(
+    out.streamDeltas > 1 && streamedReply?.title === 'Stubbed task title' && out.streamFinal === out.streamJoined && out.streamStop === 'end_turn' && out.streamUsage?.output_tokens > 0,
+    'a streamed call — what the chat dock makes — is answered as the Messages API\'s events: the scripted reply in several deltas, which the SDK joins into its final message, ended and metered',
+    `the stream gave ${out.streamDeltas} delta(s) joining to ${JSON.stringify(String(out.streamJoined).slice(0, 80))}; its final message read ${JSON.stringify(String(out.streamFinal).slice(0, 80))}, stop ${out.streamStop}, usage ${JSON.stringify(out.streamUsage)}`,
+  )
   chk(out.afterReset === 0, 'and reset clears the record, so a section can establish its own starting state', `after reset the stub still held ${out.afterReset} call(s)`)
   const wantSource = createHash('sha1').update(readFileSync(STUB)).digest('hex').slice(0, 12)
   chk(
@@ -249,9 +275,12 @@ if (process.argv.includes('--mutate')) {
     // is read. The case asserted the error's class name and could not see it.
     ['a staged status is read after it has been cleared', 'const status = staged.status\n    const err =', 'const err ='],
     ['the arranged status is replaced by a constant', 'return json(res, status, err)', 'return json(res, 400, err)'],
-    ['usage is zeroes, so a metering check passes on nothing', 'usage: { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }', 'usage: { input_tokens: 0, output_tokens: 0 }'],
+    ['usage is zeroes, so a metering check passes on nothing', 'const usage = { input_tokens: Math.max(1, Math.ceil(system.length / 4)), output_tokens: Math.max(1, Math.ceil(text.length / 4)) }', 'const usage = { input_tokens: 0, output_tokens: 0 }'],
     ['a stale stub reports the source on disk', 'return res.end(JSON.stringify({ source: SOURCE }))', "return res.end(JSON.stringify({ source: 'stale' }))"],
     ['reset keeps the record of the run before', 'seen.length = 0', 'void seen'],
+    // `found-29-sep/model-stub-never-streams`: a streamed call answered as JSON.
+    ['a streamed call is answered as JSON', 'if (body.stream === true) {', 'if (false) {'],
+    ['the streamed reply goes out in one delta', 'const per = Math.max(1, Math.ceil(words.length / 3))', 'const per = words.length || 1'],
   ]
   console.log('\n▶ and each mutation of the stub reddens a case')
   for (const [label, from, to] of MUTATIONS) {

@@ -114,7 +114,7 @@ type PersonPreview = {
 }
 
 export function TeamsPage() {
-  const { t } = useTranslation()
+  const { t, tCount } = useTranslation()
   const { workspaceId } = useParams({ strict: false }) as { workspaceId?: string }
   // Who may create a team is who holds `groups.manage`, the key `POST /groups`
   // asks: an admin's by default and grantable by a custom role, as ClickUp has
@@ -262,6 +262,27 @@ export function TeamsPage() {
           >
             <x.icon className="h-3.5 w-3.5" />
             {t(x.labelKey)}
+            {/*
+              §V2-12, frame `21:00` — All People carries the number of people in
+              the workspace (`2` there), muted, beside its name, and it is the
+              only entry that does (`ledger-rows/row-2398-remainder`).
+
+              The members the People tab lists, from the same query, so the
+              number and the cards cannot disagree; a search narrows the cards
+              and not this. Drawn once the list has answered: a 0 while it loads
+              would say the workspace is empty. Its testid does not begin
+              `teams-tab-`, which `teams-destination` counts as tabs.
+            */}
+            {x.id === 'people' && membersQuery.isSuccess && (
+              <span
+                data-testid="teams-people-count"
+                aria-label={tCount('teams.peopleCount', members.length)}
+                title={tCount('teams.peopleCount', members.length)}
+                className="text-xs font-normal tabular-nums text-muted-foreground"
+              >
+                {members.length}
+              </span>
+            )}
           </button>
         ))}
       </div>

@@ -1,9 +1,18 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Input, cn, toast } from '@rundesk/ui'
-import { Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock } from 'lucide-react'
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  Input,
+  cn,
+  toast,
+} from '@rundesk/ui'
+import { Layers, Upload, X, Bell, Paperclip, Search, Sparkles, Lock, ChevronDown } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { CreateSpaceWizard } from './create-space-wizard'
 import { colorForTagName } from './task-tags'
@@ -15,7 +24,9 @@ import { CREATE_TYPES, createTypeOf, type CreateKind } from '../lib/create-types
 
 type Space = { id: string; name: string }
 type Project = { id: string; name: string }
-type List = { id: string; name: string }
+// The lists routes answer whole rows; `projectId` is the container a list
+// picked under a space alone lives in, which opening its task needs.
+type List = { id: string; name: string; projectId?: string }
 type TaskType = { id: string; name: string; isDefault?: boolean }
 
 /*
@@ -474,6 +485,29 @@ const CREATABLE_FIELD_TYPES: Array<{ value: string; labelKey: TranslationKey }> 
 type TaskTemplate = { id: string; name: string }
 type WorkspaceMember = { userId: string; displayName?: string | null; email?: string | null }
 
+/**
+ * §V2-S01 frame `00:05` — the footer's **Create Task ▾**, a primary `Create
+ * Task` with a chevron segment beside it.
+ *
+ * No frame opens the chevron, so what is behind it is ClickUp's own menu (help
+ * centre "Create a task" and "Create tasks and subtasks on mobile", from search
+ * snippets): **Create and close**, **Create and open**, **Create and start
+ * another** ("resets the task creation modal") and **Create and duplicate**
+ * ("keeps its content open in the task creation modal").
+ *
+ * `main` is the primary button, and it does what it did before there was a
+ * menu. The four are the menu. Every one of them makes the task the same way,
+ * once; only what happens afterwards differs.
+ */
+type CreateThen = 'main' | 'close' | 'open' | 'another' | 'duplicate'
+const CREATE_THEN: Array<{ value: Exclude<CreateThen, 'main'>; labelKey: TranslationKey }> = [
+  { value: 'close', labelKey: 'quickCreate.then.close' },
+  { value: 'open', labelKey: 'quickCreate.then.open' },
+  { value: 'another', labelKey: 'quickCreate.then.another' },
+  { value: 'duplicate', labelKey: 'quickCreate.then.duplicate' },
+]
+type CreatedTask = { id: string; title?: string }
+
 function TaskForm({
   workspaceId,
   onClose,
@@ -483,6 +517,8 @@ function TaskForm({
   const navigate = useNavigate()
   const qc = useQueryClient()
   const [title, setTitle] = useState('')
+  // Where the next task starts, after "Create and start another" or "…duplicate".
+  const titleRef = useRef<HTMLInputElement>(null)
   // §V2-06 frame `08:00` — answered already when this was opened from a space's
   // "+". Still a <select>, so it can be changed; it just is not blank.
   const [spaceId, setSpaceId] = useState(initialSpaceId ?? '')
@@ -853,7 +889,9 @@ function TaskForm({
   })
 
   const create = useMutation({
-    mutationFn: async () => {
+    // `then` is the Create Task ▾ choice. It changes nothing about the task
+    // made here, only what `onSuccess` does once it exists.
+    mutationFn: async (_then: CreateThen): Promise<CreatedTask> => {
       /*
        * Tags first, because the task wants ids and she types names —
        * [23:23] "agar aap likh ke enter kar doongi to yeh tag ban jayega".
@@ -958,29 +996,109 @@ function TaskForm({
       if (problems.length) toast.error(problems.join(' '))
       return task
     },
-    onSuccess: (task) => {
+    onSuccess: (task, then) => {
       qc.invalidateQueries({ queryKey: ['tasks', listId] })
+      if (then !== 'main') return createdThen(task, then)
+      /*
+       * The primary goes to the task it made, wherever its list is. It went
+       * only when a project had been picked, so a list picked under a space
+       * alone closed the modal and said nothing at all
+       * (`found-29-sep/primary-create-silent-under-a-space`). Where no page can
+       * be worked out, it says the task was made, as Create and close does.
+       */
+      const open = opener(task.id)
+      if (!open) return createdThen(task, 'close')
       onClose()
-      if (spaceId && projectId && listId) {
-        navigate({
-          to: '/app/$workspaceId/$spaceId/$projectId/$listId',
-          params: { workspaceId, spaceId, projectId, listId },
-          search: { task: task.id },
-        })
-      }
+      open()
     },
+    /*
+     * THIS MUTATION HAD NO `onError`, the defect the List and Folder tabs below
+     * had and lost: a refused or failed create said nothing, for the primary
+     * and all four endings, and the button came back as if nothing had been
+     * pressed (`found-29-sep/task-create-fails-silently`). The form keeps what
+     * was typed.
+     */
+    onError: (e) => toast.error(e instanceof Error ? e.message : t('quickCreate.taskFailed')),
   })
+
+  /*
+   * Opening a task is going to its list's page with `?task=`, where the sheet
+   * lives. Worked out when the task is made, because the toast's View can be
+   * pressed after the form has moved on to another list. A list picked under
+   * a space alone sits in the space's hidden container, and its row carries
+   * that container, so neither Create and open nor the primary button needs a
+   * project to have been picked.
+   */
+  const opener = (taskId: string) => {
+    const container = projectId || lists.find((l) => l.id === listId)?.projectId
+    if (!spaceId || !container || !listId) return null
+    const params = { workspaceId, spaceId, projectId: container, listId }
+    return () =>
+      navigate({ to: '/app/$workspaceId/$spaceId/$projectId/$listId', params, search: { task: taskId } })
+  }
+
+  /*
+   * Create and start another — a blank task in the same place. What described
+   * the task just made is cleared; the space, project and list are kept, which
+   * is the whole difference from closing the modal and opening it again.
+   */
+  const startAnother = () => {
+    setTitle('')
+    setDescription('')
+    setTaskTypeId('')
+    setAssigneeIds([])
+    setStartDate('')
+    setDueDate('')
+    setPriority('normal')
+    setEstimateHours('')
+    setTagNames([])
+    setTagDraft('')
+    setTemplateId('')
+    setWatcherIds([])
+    setAttachments([])
+  }
+
+  /** The four menu endings, each in the state its name says. */
+  const createdThen = (task: CreatedTask, then: Exclude<CreateThen, 'main'>) => {
+    const open = opener(task.id)
+    if (then === 'open' && open) {
+      onClose()
+      open()
+      return
+    }
+    /*
+     * The rest leave the page where it is, so something has to say that the
+     * task exists and where: frame `01:20`'s own toast, "Task created — dbgdh ›
+     * Personal List", with its View.
+     */
+    const listName = lists.find((l) => l.id === listId)?.name ?? ''
+    toast.success(
+      t('quickCreate.taskCreatedIn', { title: task.title ?? title.trim(), list: listName }),
+      open ? { action: { label: t('quickCreate.viewTask'), onClick: () => { onClose(); open() } } } : undefined,
+    )
+    if (then === 'close' || then === 'open') {
+      onClose()
+      return
+    }
+    // Duplicate keeps every field as it is: the next press makes the copy.
+    if (then === 'another') startAnother()
+    titleRef.current?.focus()
+  }
+
+  // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight.
+  const canCreate = Boolean(title.trim() && listId) && !create.isPending
 
   return (
     <form
       className="px-5 py-4 space-y-3"
       onSubmit={(e) => {
         e.preventDefault()
-        if (title.trim() && listId) create.mutate()
+        if (title.trim() && listId) create.mutate('main')
       }}
     >
       <Input
         autoFocus
+        ref={titleRef}
         data-testid="quick-create-task-title"
         placeholder={t('quickCreate.taskTitlePlaceholder')}
         value={title}
@@ -1612,14 +1730,63 @@ function TaskForm({
           — the one people use most — did not, so a suite could fill the whole
           form and then have nothing to press by name.
         */}
-        <Button
-          type="submit"
-          size="sm"
-          data-testid="quick-create-submit"
-          disabled={!title.trim() || !listId || create.isPending}
-        >
-          {create.isPending ? t('quickCreate.creating') : t('quickCreate.createTask')}
-        </Button>
+        <div className="inline-flex">
+          <Button
+            type="submit"
+            size="sm"
+            data-testid="quick-create-submit"
+            disabled={!canCreate}
+            className="rounded-r-none"
+          >
+            {create.isPending ? t('quickCreate.creating') : t('quickCreate.createTask')}
+          </Button>
+          {/*
+            §V2-S01 frame `00:05` — the chevron half of Create Task ▾. It is live
+            exactly when the button is, because everything in its menu creates
+            too, and while one create is in flight neither half starts another.
+          */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                type="button"
+                size="sm"
+                data-testid="quick-create-chevron"
+                aria-label={t('quickCreate.createOptions')}
+                title={t('quickCreate.createOptions')}
+                disabled={!canCreate}
+                className="rounded-l-none border-l border-primary-foreground/25 px-1.5"
+              >
+                <ChevronDown className="h-3.5 w-3.5" />
+              </Button>
+            </DropdownMenuTrigger>
+            {/*
+              Portalled to the body, so it has to sit above the modal's
+              z-[10000]. And the Escape that closes it goes no further: the
+              modal closes on any Escape that reaches the document, and one
+              spent closing this menu must not throw away the half-filled task.
+              Stopped here rather than read as `defaultPrevented` there, since
+              any Radix layer on the page marks its Escape so — a comment's "+"
+              menu still unmounting took the one meant for the modal.
+            */}
+            <DropdownMenuContent
+              align="end"
+              className="z-[10001] w-56"
+              data-testid="quick-create-options"
+              onEscapeKeyDown={(e) => e.stopPropagation()}
+            >
+              {CREATE_THEN.map((item) => (
+                <DropdownMenuItem
+                  key={item.value}
+                  data-testid={`quick-create-then-${item.value}`}
+                  disabled={!canCreate}
+                  onSelect={() => create.mutate(item.value)}
+                >
+                  {t(item.labelKey)}
+                </DropdownMenuItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
       </div>
     </form>
   )

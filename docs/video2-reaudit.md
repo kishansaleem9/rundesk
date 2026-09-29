@@ -249,7 +249,9 @@ went missing entirely. A list that is only written once stops being true.
   `start` through a published ref, and the three "New …" items open the
   quick-create modal on the matching tab rather than being three more creators.
   11 checks, four break-tests — one of which asserts the menu does NOT offer
-  Slash commands or Brain.
+  Slash commands or Brain. *(29 September: both are in it now. That check
+  follows Brain to the comment AI panel it opens, and `cpm-1` is re-aimed at it —
+  `ledger-rows/row-751`.)*
 - **Two defects found while building it, both dead handlers:**
   · the quick-create modal's Escape was `onKeyDown` on a `<div>`, which takes no
     focus and so never receives a key event — the modal looked as if it closed
@@ -406,7 +408,10 @@ went missing entirely. A list that is only written once stops being true.
   task is a full-page view and Rundesk's is a side sheet. The gap the re-audit
   named is that the panel could not be toggled at all.
   NOT "Brain²" beside the chip: that button leads to a hub this product does
-  not have. 12 checks, nine break-tests.
+  not have. 12 checks, nine break-tests. *(29 September: that reason was stale.
+  The frame's Brain² opens Brain beside the task, scoped to it, and the shell's
+  dock could already be pointed there; it is built straight after the chip —
+  `ledger-rows/row-743`.)*
   **A tenth break-test found a suite defect of the familiar kind.** The "sheet
   widens" check SAMPLED a width that is animated, so it compared 672px, failed,
   then re-measured 685px for its own failure message — the mistake
@@ -733,7 +738,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task-detail AI bar ("Ask Brain² for a presentation, document or prototype") — closed by `task-ai-bar.mjs`, 18 checks. `ANTHROPIC_API_KEY` is empty here, so every surface ends in "AI features are not configured"; the suite asserts that MESSAGE, never the status alone, and no check may pass on a 404 |
 | B | "Collapse empty fields" — one preference across the grid and the Fields tab |
 | B | Relative times in the activity feed + "Show more" |
-| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick. **`"Create Task ▾"` is the part still missing, and its MENU has no frame behind it.** `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. Rundesk already has the primary button (`quick-create-submit`). What is absent is a menu whose contents nothing shows, so building it would mean inventing them — the refusal the create-modal-placeholder row also made, until 29 September showed that row's frame had been misread (see that row). **Blocked on the reference, which is a different thing from not done yet** |
+| B\* | **"Comment ▾" split button** — frame `04:11`, closed by `task-mentions.mjs`. It is a MODE switch, not two actions: the menu draws Comment with a tick and Email under it, and `[04:11]` says what the other is for. **Email is listed and disabled, with its reason on the row**, because Rundesk's mail goes the other way — `email-to-task.ts` turns mail sent to a task's address into a comment and nothing posts a composed body out — so a selectable Email mode would be a dead control wearing a tick, and that disabled mode is what the asterisk records (it waits on outbound mail, `ledger-rows/row-1252`). **`"Create Task ▾"` is built**, closed by `create-task-chevron.mjs`, 7 checks. `00:07` draws the split button in the create modal's footer — a primary `Create Task` with a chevron segment beside it — and no frame in the video ever opens that chevron; `video2-frame-observations.md` names it once, at line 11, and never again. So its menu is ClickUp's own (help centre "Create a task" and "Create tasks and subtasks on mobile"): **Create and close**, **Create and open**, **Create and start another** (a blank form, the same space, project and list) and **Create and duplicate** (the same content, kept). The primary button (`quick-create-submit`) keeps what it did; each item makes one task and ends where its name says. This row said "blocked on the reference" until 29 September: a chevron no frame opens still has a menu somebody has written down |
 | — | Toast "Task created — `<title>` › `<list>`" with Copy / View — satisfied differently: creating a task NAVIGATES to it, where Copy link is already in its menu |
 | B | **Time estimate takes `12`, `90m`, `1h 30m`** with a suggestion row; reads back `12h` |
 | B | Attachments "Drop files here" — **the drop handler exists.** The row said "the panel exists, no drop handler" and that reason is now false: `task-detail-sheet.tsx` carries `onDrop`/`onDragOver`/`onDragEnter` on the zone, it takes a drop AND opens the picker on click through the SAME mutation, and `isFileDrag` guards on the dataTransfer TYPES rather than on `files.length`, because during dragover the file list is deliberately empty. The status was always `B`; only the parenthetical was stale, which is worse than a wrong status — a reader trusts a reason |
@@ -746,7 +751,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | Task type "✦ Fill with AI" — closed by `task-ai-bar.mjs`, 18 checks (frame `03:25`, the foot of the Task Types popover) |
 | B | **Activity panel toggles to a rail** beside the fields; the tab drops out while it is up |
 | B | Task header **"Created `<date>`" chip** — the API returned it all along |
-| M | Task header "Brain²" button — deliberate: the hub does not exist |
+| B | Task header **"Brain²"** — frame `03:40` draws it straight after the Created chip. Closed 29 September by `brain-entry-points.mjs`, 9 of its 14 checks (`ledger-rows/row-743`). This row said *"deliberate: the hub does not exist"*, and the reason was stale: what the frame's button opens is Brain beside the task and scoped to it, and the shell's AI dock already sent a view the server writes into the model's context. It opens the dock pointed at the task (a chip names it, and every turn names it to the server by title and id), beside the sheet rather than under it; closing the task hands the dock back to the page. The dock does not read the task's description or comments: `POST /ai/chat` takes no task id, which is an API change, not made (`found-29-sep/ai-chat-takes-no-task`) |
 | B | @ picker People/Tasks/Docs; "Does not have access to task" |
 | P | @ picker **Whiteboards / Locations / Channels closed** by `task-mentions.mjs`, 17 checks (frames `04:00`/`04:11`). Still open, and blocked rather than pending: **Brain section** and **Agents**, both of which address the Brain² hub that does not exist (see §3). The Locations check asserts a request LEFT THE PAGE carrying the typed word and exactly the three location types — filtering the sidebar's cached tree in the browser finds nothing for a space created this minute and calls it "no matches" |
 | B | Per-@-type keyboard hint footer — closed by `task-mentions.mjs`, 17 checks. Frame `04:00` draws `'@' People | '@@' Tasks | '@@@' Docs | '@@@@' Whiteboards | '@/' Locations | '#' Channels`; Rundesk had no footer at all |
@@ -754,7 +759,7 @@ Legend: **B** built · **P** partial · **M** missing.
 | B | "Attach as audio file" tooltip — closed by `comment-recording.mjs`, 32 checks |
 | B | **Comment "+" menu** — eight of the frame's ten items, each one wired |
 | B | Slash commands in the comment composer, and in the "+" menu |
-| M | "Brain" in the "+" menu — the Brain² hub does not exist |
+| B | **"Brain" in the "+" menu** — frame `04:50` puts it beside Add emoji. Closed 29 September by `brain-entry-points.mjs`, 5 of its 14 checks (`ledger-rows/row-751`). The row's reason (*"the Brain² hub does not exist"*) was never about it: Brain on a comment opens the comment AI panel, which the space bar already opened. The row opens that panel with the cursor in its prompt, and the panel's Summarize this task sends the task's id to `/ai/summarize`; nothing reaches the comment without Keep |
 | B | Comment bodies render block markdown, which is what makes the above visible |
 | B | Record a Video Clip; real `getDisplayMedia` |
 | B | **Screen-record setup panel** — source hint / quality / mic, one module for both recorders |
@@ -807,8 +812,9 @@ Legend: **B** built · **P** partial · **M** missing.
 **B\*** — built, and the row also records something the frame asks for that is
 not there; the asterisk is where that remainder is written down, and §4 counts
 the row as built. Two rows in these tables carry one: the Comment split button,
-whose "Create Task ▾" menu no frame opens, and the plan-tier paywall, whose
-metered "uses have expired" state no frame explains.
+whose Email mode is listed and disabled until mail can go out (its "Create Task
+▾" menu, the remainder until 29 September, is built), and the plan-tier
+paywall, whose metered "uses have expired" state no frame explains.
 
 THIS LEGEND USED TO GIVE THE ASTERISK A SECOND MEANING, and four rows above
 carried it: the board's Customize switches, the export paywall caption, the
@@ -843,7 +849,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | Appearance: **Grid size** — frame `14:05`'s first control, three swatches (Default · Large · XL) over *"Choose how large events and time slots appear in the grid"*. Closed by `planner-appearance-toggles.mjs`, 3 of its 20 checks, **re-run green at HEAD**. THIS ROW WAS STALE, not missing: the control, the API's validation and the reader all exist. `const hourPx = GRID_SIZES[gridSize]` is the reader and every block's `top` and `height` is computed from it, and `GRID_SIZES` is imported FROM the settings dialog rather than re-declared, so the swatch and the grid cannot disagree about what "Large" means |
 | B | Timezone — the control the validated server support was missing |
 | B | Sidebar page: show/hide rail sections |
-| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open, and **blocked rather than pending** — the distinction matters because "still open" invites somebody to build it. It is on Calendar settings › Sidebar, over the planner rail, not on the tree; the five named sections of frame `14:10` are built there with show, hide and reorder, from one shared list the planner page imports rather than the hardcoded copy it used to keep. What no frame supplies is what a NEW section would contain: `14:10` draws the button and nothing opens it, so a name and a rule for what falls into it would both be mine. Same class as Super Agents at `16:30` — a control the frames draw over a decision they never make. `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
+| P | Sidebar: **drag-reorder closed** by `sidebar-reorder.mjs`, **23 checks** — 21, plus the two added when a break patch aimed at something else deleted `canDropOn`'s entire list rule and all 21 stayed green: the suite asserted that a FOLDER dropped on a project row sends nothing and never that a LIST dropped on one sends something (§8). `+ Add a new section` still open, and **blocked rather than pending** — the distinction matters because "still open" invites somebody to build it. It is on Calendar settings › Sidebar, over the planner rail, not on the tree; the five named sections of frame `14:10` are built there with show, hide and reorder, from one shared list the planner page imports rather than the hardcoded copy it used to keep. **THAT SENTENCE WAS FALSE WHEN IT WAS WRITTEN, and stayed false until 29 September: reorder did not exist** (`ledger-rows/row-835-reorder`). The page drew a switch per section and no grip, the rail was drawn in a fixed order, and `railSections` kept an order only `.includes()` read — the mirror defect, recorded as built. The page is drawn at `14:13`–`14:16` (`14:10` itself still shows Appearance): a box and a grip on each row, and at `14:13` the open hand over Priorities' name. Now each row is dragged by itself, or moved with ↑/↓ on its grip, the order is saved, and the rail draws the stored order, with the frame's as the default — closed by `rail-reorder.mjs`, 12 checks, patches `rro-1..9`. What no frame supplies is what a NEW section would contain: `14:10` draws the button and nothing opens it, so a name and a rule for what falls into it would both be mine. Same class as Super Agents at `16:30` — a control the frames draw over a decision they never make. `projects.position` had existed since the table did with neither end attached — `updateProject` left it out of its whitelist and `getProjectsBySpace` had no `ORDER BY` at all, so the tree drew whatever the query plan produced, which changes as rows are updated and after a vacuum. A column with no writer and no reader is the mirror defect with the mirror missing too |
 | B | **Upcoming meeting page** — time left, quick-join, and desktop notification |
 | B | Time blocking + the five settings that were STORED AND READ BY NOTHING — showWeekNumbers, alwaysOpenAtStartOfWeek, darkenNonWorkingHours, savePersonalEventsQuickly, showRecurring — each now has a reader that changes the grid |
 | B | `showOverdue` — now read by the backlog |
@@ -884,6 +890,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 | B | "Suggest an app" (the `+` is inside the glyph, not a literal prefix) and the "Connect Custom MCP Servers" banner — closed by `app-catalogue.mjs`, 25 checks (frame `19:07`). Both are live controls that record a real request. The MCP **capability** is recorded as a decision, not built: no AI tool in this product reaches outside the workspace, so registering a server would store a value no reader honours |
 | B | Activity log — Status and My-runs filters, both reaching the server. `userId` had been accepted by the endpoint and sent by nothing; Status needed a column AND a failure-recording path, because `recordUsage` only ever fired on success |
 | B | Teams Hub reachable by a plain member; All Teams / All People / Org Chart; My Teams; search; org-chart empty state |
+| B | **All People's count** — frame `21:00` badges All People, and no other entry, with the workspace's head count (`2`), muted at the right of the row. A row since 29 September: §5's carousel row named it and left it open, a remainder inside a `B` row that no count could see (`ledger-rows/row-2398-remainder`). Built the same day on the People tab: the members the tab lists, from the same query, so the number and the cards cannot disagree; drawn once the list has answered, because a 0 while it loads says the workspace is empty; not narrowed by a search. Closed by `teams-people-count.mjs`, 6 checks, patches `tpc-1..6` |
 | B | Teams empty-state headline; **Browse People / Create Team** buttons; **three** explainer cards in a carousel with a pager — closed by `teams-empty-state.mjs`, 21 checks, break set 4/4. This row said "two" until `21:02` was re-extracted: the frame advances the carousel and a third card enters from the right, and the check that asserted TWO would have reddened the correct build. See §7 |
 | B | Per-person work preview cards — each showing its own person's work, asserted by seeding two people differently |
 | B | Contextual starter cards that change with context — closed by `ai-answer-rendering.mjs`, 51 checks (frames `16:32` / `21:15`, four cards each and not one in common). Asserted as a DELTA, not an absolute: the suite creates two overdue tasks and requires "Find Blockers" to name exactly two more than before, because the e2e database is shared |
@@ -905,7 +912,7 @@ September. Those four rows are plain `B` now, and the asterisk means one thing.
 
 ## 4. Counts
 
-**173 rows: 151 built · 9 partial · 13 missing.**
+**174 rows: 154 built · 9 partial · 11 missing.**
 
 THIS LINE READ `88 built · 21 partial · 64 missing` UNTIL 21 SEPTEMBER, and the
 table under it read 104 / 20 / 49. Both summed to 173, so nothing looked wrong
@@ -941,9 +948,9 @@ rather than believed:
 
 | | B | P | M | total |
 | --- | --- | --- | --- | --- |
-| §2, the sections table | 117 | 7 | 8 | 132 |
+| §2, the sections table | 120 | 7 | 6 | 133 |
 | §5, recovered from the frame observations | 34 | 2 | 5 | 41 |
-| **consolidated** | **151** | **9** | **13** | **173** |
+| **consolidated** | **154** | **9** | **11** | **174** |
 
 FOUR ROWS MOVED FROM `P` TO `B` AND THE TOTAL DID NOT CHANGE, which is the
 only shape of movement this table should ever show for a build — and the fourth
@@ -966,7 +973,26 @@ row had been re-read since. So §2 moves `116 · 7 · 9` → `117 · 7 · 8` and
 tables hold 115 `B`, 2 `B*`, 7 `P` and 8 `M` (the four `—` rows are not
 counted), and §5's appendices 33 `- status: B`, 1 `B*`, 2 `P` and 5 `M`.
 
-§2's 117 built includes the two marked `B*` — built, but the row also records
+ONE ROW WAS ADDED ON 29 SEPTEMBER, AND THE TOTAL MOVED WITH IT. Frame `21:00`
+badges All People with the workspace's head count. §5's
+carousel row saw it and wrote that the badge *"is NOT part of this closure and
+stays open"* — a remainder inside a `B` row, counted nowhere
+(`ledger-rows/row-2398-remainder`). It is its own row in §2's S18–S22 table now,
+built the same day (`teams-people-count.mjs`, 6 checks), so §2 moves
+`117 · 7 · 8` → `118 · 7 · 8` and the total 173 → 174. No build invented it:
+the frame asked for it, and this file had written it down without counting it.
+Counted row by row: §2's tables hold 116 `B`, 2 `B*`, 7 `P` and 8 `M`.
+
+TWO ROWS MOVED FROM `M` TO `B` THE SAME DAY, AND THE TOTAL DID NOT. The task
+header's Brain² (`03:40`) and Brain in the comment "+" menu (`04:50`) were `M`
+on a reason that was stale for both: each said the Brain² hub does not exist,
+and neither opens the hub. Brain² opens the shell's AI dock pointed at the task,
+and Brain opens the comment AI panel the space bar already opened
+(`brain-entry-points.mjs`, 13 checks; `ledger-rows/row-743`,
+`ledger-rows/row-751`). So §2 moves `118 · 7 · 8` → `120 · 7 · 6`. Counted row
+by row: §2's tables hold 118 `B`, 2 `B*`, 7 `P` and 6 `M`.
+
+§2's 120 built includes the two marked `B*` — built, but the row also records
 something the frame asks for that is not there. They are counted as built
 because that is what they are; the asterisk is where the remainder is written
 down. This read "the four" until 29 September while §2 held six: the two above,
@@ -976,8 +1002,9 @@ stopped being true (the legend under §2 records it). §5's 34 built includes on
 
 **AND IT WAS 112 RATHER THAN 113 FOR MOST OF THIS PASS BECAUSE ONE ROW WAS
 STRUCK, NOT CLOSED.** The strike below still stands and still costs a row; the
-117 above is 112 plus the Threads, Create Folder, Importers and Composer-hint
-rows closing and the create-modal placeholder being read, not the strike being
+120 above is 112 plus the Threads, Create Folder, Importers and Composer-hint
+rows closing, the create-modal placeholder being read, All People's count
+being added and the two Brain entry points being built, not the strike being
 undone.
 *Countdown in the browser tab title* is built and has a ten-check suite — and it
 answers no frame. The tab at `15:20` reads `vjgkgkg | #86eyjd2jb` and carries no
@@ -1677,7 +1704,8 @@ Named here so the next reader does not re-derive them:
   accurate: `commentPlus.*` renders nine items (assign, recordClip, mentionTask,
   addFile, slashCommands, addEmoji, newTask, newDoc, newWhiteboard) at
   `task-detail-sheet.tsx:6184-6226`, i.e. eight plus the separately-rowed slash
-  commands, with Brain the tenth and absent.
+  commands, with Brain the tenth and absent. *(29 September: Brain is the
+  tenth now, and opens the comment AI panel — `ledger-rows/row-751`.)*
 - **`M | Space dialog footer "Use Templates"`** — re-checked and accurate: no
   `space_templates` table and no space-template service exist.
 
@@ -2474,7 +2502,9 @@ Frames re-extracted and read: `15:17`, `15:18`, `15:19`, `15:20`, `15:22`,
   `21:02` cuts it at the viewport after *"Stay focused with P…"* — so the suite
   asserts the count, the pager, the advance and the wrap, and never that copy.
   The People count badge named at the end of this row is NOT part of this
-  closure and stays open.
+  closure and stays open. *(29 September: it is its own row in §2's S18–S22
+  table now, built and closed by `teams-people-count.mjs` —
+  `ledger-rows/row-2398-remainder`. It was counted nowhere while it sat here.)*
 - status: B
 - closed by: teams-empty-state 21/21, break set 4/4
 - defect class: **the check that enforced the absence of the feature.**
@@ -3006,6 +3036,17 @@ above. Its row is `B`, closed by `create-menu-ai`. That leaves TWO rows here
 held back by the reference, `"Create Task ▾"`'s menu and the metered state's
 policy, and THREE with `Add to ›` below.
 
+*Corrected 29 September, again:* `"Create Task ▾"`'s menu is built. A chevron no
+frame opens is not a menu with no contents: ClickUp's own is written down (help
+centre "Create a task" and "Create tasks and subtasks on mobile", from search
+snippets) — Create and close, Create and open, Create and start another, which
+"resets the task creation modal", and Create and duplicate, which "keeps its
+content open in the task creation modal" — so building to it invents nothing.
+The primary button keeps what it did, and each item makes one task and ends
+where its name says: `create-task-chevron.mjs`, 7 checks, patches `ctc-1..11`.
+That leaves ONE row here held back by the reference, the metered state's
+policy, and TWO with `Add to ›` below.
+
 `"Add to ›"` was the last row standing, and it fell to the same question asked
 one row later than it should have been: **what does the video say its submenu
 does?** Nothing. Frame `15:35` draws the menu with `Add to ›` and its chevron,
@@ -3039,9 +3080,10 @@ build is free because half of it already exists. There is only a new table, a
 migration, and a rewrite of every list query, all of it in service of a sentence
 the video never says.
 
-**Which leaves ZERO buildable rows in §2**, and ~~FOUR~~ THREE held back by the
+**Which leaves ZERO buildable rows in §2**, and ~~FOUR~~ ~~THREE~~ TWO held back by the
 reference rather than by Rundesk: ~~the create-modal placeholder~~ (misread, and
-built; see the correction above), `"Create Task ▾"`'s menu, the metered state's
+built; see the correction above), ~~`"Create Task ▾"`'s menu~~ (built to
+ClickUp's own; see the second correction above), the metered state's
 policy, and now `Add to ›`. The count does not move — the row stays `M`,
 because it is still a thing the product does not have — but the reason does,
 and the reason is what a backlog is read for. The first pass said
@@ -6280,7 +6322,10 @@ into four things that can be built and a longer list that cannot.
 **Blocked, and each for a reason already recorded on its row:** everything
 hanging off the Brain² hub — the header button, the `+`-menu entry, the hub
 itself, the credit meter, the generated artefacts — needs an agent runtime
-Rundesk does not have. The Cover Search tab needs an image provider. Basecamp
+Rundesk does not have. *(Corrected 29 September: the header button and the
+`+`-menu entry never hung off the hub. The one opens Brain beside its task and
+the other the comment's AI panel, and both are built — `ledger-rows/row-743`,
+`ledger-rows/row-751`. The hub and what is generated in it stay blocked.)* The Cover Search tab needs an image provider. Basecamp
 and Confluence import need their own APIs. And four are decisions rather than
 gaps: a colleague's priorities, `"Add to ›"` (no frame opens the submenu),
 the create-modal placeholder (no frame behind it at all), and credits.
@@ -6755,6 +6800,13 @@ reorder, and what no frame supplies is what a NEW section would CONTAIN. Same
 class as Super Agents — a control the frames draw over a decision they never
 make.
 
+*Corrected 29 September* (`ledger-rows/row-835-reorder`): "show, hide and
+reorder" was two of three. This pass read the row's blocker against the tree
+and not the rest of the row: the Sidebar page drew a switch per section and no
+grip, and nothing read the order `railSections` stored. The blocker stands.
+Reorder is built now, and `rail-reorder.mjs` measures it on the rail, before
+and after a reload.
+
 ### What this pass says about the ledger as an instrument
 
 Five claims in it were wrong today, and they were wrong in one direction every
@@ -6764,11 +6816,20 @@ stopped looking), Recent Chats (a null grep read as an absence), the composer
 hint, and two suites recorded as green that were only green because the
 environment was broken.
 
-Not one error ran the other way — nothing recorded as built turned out to be
-absent. That asymmetry is itself a finding. A ledger that overstates gaps costs
-time; a ledger that understates them costs trust, and this one has not done
-that. But reading a row against the tree has been worth more per hour tonight
-than building against it, and the next pass should start there.
+This said: *"Not one error ran the other way — nothing recorded as built
+turned out to be absent. That asymmetry is itself a finding. A ledger that
+overstates gaps costs time; a ledger that understates them costs trust, and
+this one has not done that."* **It was false when it was written**, and the
+counter-example is in this same section: the sidebar row's five sections were
+credited with "show, hide and reorder", and reorder did not exist. The page drew
+a switch per section and no grip, the rail was drawn in a fixed order, and
+`railSections` kept an order that only `.includes()` read — stored, and honoured
+by nothing (`ledger-rows/row-835-reorder`, found 29 September, built the same
+day). So there is no asymmetry to report. The ledger has erred in both
+directions, and a row marked built needs reading against the tree as much as a
+row marked missing. Reading a row against the tree has been worth more per hour
+than building against it, and the next pass should start there, with the rows
+recorded as built.
 
 ---
 
