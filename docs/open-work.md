@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 39 open, 7 partly fixed, 308 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 38 open, 7 partly fixed, 309 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1613,13 +1613,25 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `acp-31` and `acp-32` leave the time to the hover title again. Each is 24/25, reddening its own check.
 - Regression on lanes 5–7: 14 suites that read priorities, the Planner or the person panel, all green, 257 checks.
 
-### `found-29-sep/priority-field-adds-to-nobody-else` — open (feature, small; found closing `ledger-rows/row-850`)
+### `found-29-sep/priority-field-adds-to-nobody-else` — **closed** (feature, small; found closing `ledger-rows/row-850`)
 
 **A task's Priority field cannot add it to somebody's priorities**
 
 *Evidence, 29 September:* ClickUp's Priority field has "Add to Personal Priorities", with a person's avatar to pick. Here the only ways a task reaches a colleague's list are the prompt after assigning and the route. The task menu's Add to › Someone's Priorities is `ledger-rows/row-845`.
 
 *To close:* the Priority field's menu offers the workspace's members (not to a guest), and posts to `POST /workspaces/:ws/people/:userId/priorities`, or to the caller's own list. Check it end to end, with the route's refusals said in words.
+
+*Closed, 29 September.* ClickUp: "click on the Priority field for a task, click an avatar (your avatar is always displayed on the left), and search or select a user" ("View and add tasks to your Personal Priorities").
+- A button beside the task's Priority field, "Add to Personal Priorities", opens the workspace's people: you first, then everybody else, narrowed by a search box.
+- Choosing yourself adds the task to your own list. Choosing a colleague goes through the colleague route (`POST /workspaces/:ws/people/:userId/priorities`), with its rules and its refusals, and the same toast as the prompt, which opens their panel.
+- A guest is offered their own list alone (`priorityPeople`). Your own add is split out of the prompt's, so the field adds to YOUR list even while the prompt after assigning offers a colleague's. Adding to one person's list no longer closes a prompt about somebody else.
+- Four locales.
+- `assign-to-priorities` has three new checks, 28 in all: the people offered, you first; a colleague chosen there has the task on their list, as added by you and not on yours; and choosing yourself puts it on yours. Each is read from the server by the task's id.
+- Before, on lane 7 with the unchanged product: 25/28, the three new checks failing with nothing offered.
+- After: 28/28 on lane 7.
+- `use-priorities.test.ts` has three new expectations: you first, a guest only themself, and search by name.
+- `acp-34` (the list never opens) is 25/28, reddening all three. `acp-35` (a colleague chosen there lands on your own list) and `acp-36` (you listed last) are each 27/28, reddening their own check. `acp-37` is the unit claim: a guest offered everybody fails its expectation.
+- Regression on lanes 5–7: 17 suites that open the task sheet or read priorities, all green, 437 checks.
 
 ### `found-29-sep/standup-check-reads-the-stubs-words` — **closed** (test tooling, small; found by the regression for `ledger-rows/row-850` on lane 7)
 
@@ -1632,6 +1644,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Only a deployment elsewhere, whose model records nothing the suite can read, still falls back to the reply.
 - `person-panel` 60/60 on lane 7, where it was 59/60.
 - `person-panel-5` (new) hands the model an empty week while the API still returns the true rows: 59/60, reddening this check, which says the call "did NOT carry" the title. With the old check the same patch was also 59/60, failing on the stub's 16 characters as the true product did, so the two could not be told apart.
+- The break runner measured it again at `ea3e28f` on lane 3, with a model stub added for the set: 59/60, the same check.
 
 ### `found-29-sep/innertext-reads-left-for-later` — **closed** (test tooling, small; left by `found-29-sep/innertext-reads-hidden-leaves`)
 
@@ -1649,6 +1662,10 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
   - The Planner's priority counter: 22/22 unfiltered, and 21/22 filtered, reddening "with the counter the frame shows".
   - The person panel's clock: 60/60 unfiltered, and 59/60 filtered, reddening "and their LOCAL TIME as a clock, not a zone name".
   - The import panel's accepted-formats line: 16/16 unfiltered, and 15/16 filtered, reddening "the panel names the formats it accepts".
+- The four suites' break sets at `ea3e28f`, lane 3, each reddening what it names:
+  - `doc-import-1..5` give 15, 15, 14, 15 and 14 of 16;
+  - `planner-priorities-2..4` give 2, 8 and 9 of 10;
+  - `person-panel-1..4` give 58, 58, 59 and 59 of 60. `person-panel-3`'s zone name in place of the clock reddens the check whose read this guarded.
 
 ### `found-29-sep/video-regression-finds-the-composer-by-its-old-words` — **closed** (test tooling, small; found by the `innerText` conversion's runs on lane 6 and the priorities work's on lane 7)
 
@@ -1918,6 +1935,12 @@ In the lanes' Chromium a hidden leaf (`hidden`, `display: none`) answers `innerT
 - 197 reads guarded in 84 suites: `.filter({ visible: true })` on the element read or on the locator handed to `readText`, and on the `<select>` for the six option reads. 7 of them got the catch a hidden element now needs. 12 reads carry a marker: the 10 absence reads, and the two reads `ai-answer-rendering`'s helper used to make unfiltered, its answer (`absence`) and a card's label (`key`). `a39-dm-tabs`'s `main, body` is written as the body it always was, and `loading-states` names `checkVisibility()` beside its box check. Every check sentence is byte-for-byte as before: 1802 check calls in 86 suites.
 - `task-menu`'s print checks read under print media: the `print()` stub leaves the dialog open; the suite reads the copy and its id filtered to visible under `emulateMedia({ media: 'print' })`, restores screen media, then fires `afterprint` itself.
 - Break sets for the 87 changed suites run after the commit, two lanes at a time (642 patches). The first, `task-menu` at `f179b3d` against 37/37, gave 33, 35, 34 and 36 of 37 for `task-menu-1..4`, each reddening what it names.
+- At `f179b3d`, lanes 1 and 2, sets for eleven of the changed suites, every patch reddening what it names:
+  - `video-regression`, `ui-sweep` and `task-menu` (above);
+  - `activity-rail`, `planner-grid`, `folder-dialog`, `checklists`, `bookmarks` and `ai-answer-rendering`;
+  - `app-catalogue-1..20`, 21 to 24 of 25;
+  - `hpa-1..19`, 7 to 10 of 11.
+- The other 76 suites' sets were stopped there, to give the machine's four CPUs to the work still open. A guard can only make a check that text is shown stricter: filtered, a hidden element reads empty, and unfiltered it read whole. So a patch that reddened a check before still reddens it. The plans are kept (`/tmp/claude-0/plan-b130-*.full.txt`), and the freshness gate lists these suites until they run.
 - Lane 6, the git original and then this tree: 85 of the 86 changed suites green both times with their full counts (1763 checks). `video-regression` is 87/94 both times with the same seven: its G13-10 chain looks for the composer by "Ask Rundesk", a placeholder `2c78436` retired.
 - Six leaves hidden in scratch builds: `task-menu`'s printed id, `activity-rail`'s created chip, `checklists`' open count, `planner-grid`'s backlog rows, `bookmarks`' list, and an integration's error title. Each check stayed green on the git original with its leaf hidden and reddened after the change.
 - Left for later: 25 reads in `assign-to-priorities` (4), `doc-import` (3), `person-panel` (4), `planner-priorities` (4) and `ui-sweep` (10), which other work was changing. The gate holds each suite at that count (`LEFT_FOR_LATER`): a new unguarded read fails, and a conversion has to bring the number down with it.
@@ -5522,6 +5545,13 @@ Assigning a colleague now offers their priorities by name ("Add this task to <na
 - `acp-1..29` are new. The 13 aimed at the suite each redden what they name, against the 22/22 baseline. The 16 unit claims each redden their test: 8 in `people.service.test.ts` (new, 8 tests) and 8 in `use-priorities.test.ts`.
 - `a2p-1`, `a2p-2` and `a2p-5` are re-aimed. `a2p-1`'s teammate prompt now writes onto your own list, and reddens six checks.
 - Regression on lanes 5–7 after the merge: 46 suites, each one that reads priorities, assignees, the Planner or the person panel, and `doc-import`. All 46 green, 1031 checks, among them `person-panel` 60/60 and `video-regression` 94/94 on the model lane.
+- The break set at `ea3e28f`, lane 3, against a 22/22 baseline:
+  - `a2p-1..5` give 16, 21, 21, 19 and 6 of 22;
+  - `acp-1` gives 14;
+  - `acp-6` and `acp-8` give 19;
+  - `acp-3`, `4`, `5`, `9`, `10`, `11`, `13`, `15`, `17` and `19` give 21 each.
+
+  Each reddens what it names.
 
 Found while building it: `found-29-sep/priority-readd-answers-a-ticked-off-row`, `found-29-sep/priority-added-at-on-hover-only` and `found-29-sep/priority-field-adds-to-nobody-else`. The task menu's Add to › Someone's Priorities stays with `ledger-rows/row-845`; the route built here is the one it would call. The agent's note that the prompt could offer a colleague who cannot open the task does not hold: assigning refuses anybody who cannot see the task, judged as an assignee (`assertPersonCanSeeTask`), and the prompt follows only a successful assignment. So it is not recorded as a defect.
 

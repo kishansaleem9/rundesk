@@ -32,7 +32,7 @@
  * Run:  pnpm --filter @rundesk/web test
  */
 import { readFileSync } from 'node:fs'
-import { prioritiesKey, offersPriority, addedByOther, type Priority } from './use-priorities'
+import { prioritiesKey, offersPriority, addedByOther, priorityPeople, type Priority } from './use-priorities'
 
 const failures: string[] = []
 const expect = (cond: boolean, label: string): void => {
@@ -120,6 +120,18 @@ expect(
   'a row a colleague added says who added it',
 )
 expect(addedByOther(row({ addedBy: { id: 'me', displayName: 'Me' } }), 'me') === null, 'your own rows say nothing')
+
+/* The Priority field's people: you first, then the others; a guest only you. */
+const people = [
+  { userId: 'ana', displayName: 'Ana Sultan', email: 'ana@x.test' },
+  { userId: 'me', displayName: 'Me Myself', email: 'me@x.test' },
+  { userId: 'bo', displayName: 'Bo Tahir', email: 'bo@x.test' },
+]
+const offered = (over: Partial<Parameters<typeof priorityPeople>[0]>) =>
+  priorityPeople({ members: people, currentUserId: 'me', viewerRole: 'member', ...over }).map((m) => m.userId)
+expect(offered({}).join() === 'me,ana,bo', 'the Priority field offers you first, then everybody else')
+expect(offered({ viewerRole: 'guest' }).join() === 'me', 'a guest is offered only their own priorities there')
+expect(offered({ query: 'tah' }).join() === 'bo', 'and typing narrows the people by name')
 
 if (failures.length) {
   console.error(`use-priorities: ${failures.length} failure(s)`)

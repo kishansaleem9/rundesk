@@ -53,7 +53,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 28
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -136,6 +136,14 @@ try {
     insert into tasks (list_id, title) values (${list.id}, ${`Mute subject ${TAG}`}) returning id`
   const [afterMuteTask] = await sql`
     insert into tasks (list_id, title) values (${list.id}, ${`After mute ${TAG}`}) returning id`
+  /* Added to somebody's priorities from its Priority field, not by assigning. */
+  /* How many rows a person's list holds for one task, read in the database itself. */
+  const rowsForTask = async (userId, taskId) =>
+    (await sql`
+      select count(*)::int as n from user_priorities
+      where user_id = ${userId} and workspace_id = ${workspaceId} and task_id = ${taskId}`)[0].n
+  const [fieldTask] = await sql`
+    insert into tasks (list_id, title) values (${list.id}, ${`Priority field ${TAG}`}) returning id`
 
   /*
    * PEOPLE, EACH WITH A SESSION OF THEIR OWN. `POST /auth/register` answers
@@ -474,6 +482,55 @@ try {
     }, { timeoutMs: 10_000 }),
     'and when it was added, drawn beside who rather than left to a hover',
     `the panel's time read ${JSON.stringify(panelWhen)}; the entry was added at ${theirEntry?.createdAt ?? 'no time'}`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ the task\'s Priority field adds it to somebody\'s priorities, as ClickUp\'s does')
+
+  /*
+   * `found-29-sep/priority-field-adds-to-nobody-else`. ClickUp: "click on the
+   * Priority field for a task, click an avatar (your avatar is always displayed
+   * on the left), and search or select a user". Assigning was the only way in.
+   * Read from the server, by this task's id, as the prompt's checks are.
+   */
+  await openTask(fieldTask.id)
+  const openPeople = async () => {
+    await page.getByTestId('priority-add-person').click({ timeout: 8000 }).catch(() => {})
+    await page.getByTestId('priority-people').waitFor({ state: 'visible', timeout: 8000 }).catch(() => {})
+  }
+  await openPeople()
+  const offeredIds = await page
+    .getByTestId('priority-people')
+    .filter({ visible: true })
+    .locator('[data-testid^="priority-person-"]')
+    .evaluateAll((els) => els.map((e) => e.getAttribute('data-testid')?.slice('priority-person-'.length)))
+    .catch(() => [])
+  chk(
+    offeredIds[0] === me.id && offeredIds.includes(mateId),
+    'the Priority field offers Personal Priorities by person, yours first, then your colleagues',
+    `it offered ${JSON.stringify(offeredIds)}; you are ${me.id}, the teammate ${mateId}`,
+  )
+  await page.getByTestId(`priority-person-${mateId}`).click({ timeout: 8000 }).catch(() => {})
+  const onTheirs = async () =>
+    (await sql`select added_by_id from user_priorities
+      where user_id = ${mateId} and workspace_id = ${workspaceId} and task_id = ${fieldTask.id}`)[0] ?? null
+  let theirFieldRow = null
+  await waitUntil(async () => !!(theirFieldRow = await onTheirs()), { timeoutMs: 10_000 })
+  chk(
+    !!theirFieldRow && theirFieldRow.added_by_id === me.id && (await rowsForTask(me.id, fieldTask.id)) === 0,
+    'choosing a colleague there puts the task on their priorities, as added by you, and not on yours',
+    theirFieldRow
+      ? `their row says it was added by ${theirFieldRow.added_by_id === me.id ? 'you' : theirFieldRow.added_by_id}; ` +
+        `your list holds it ${await rowsForTask(me.id, fieldTask.id)} time(s)`
+      : 'nothing reached their list',
+  )
+  await openPeople()
+  await page.getByTestId(`priority-person-${me.id}`).click({ timeout: 8000 }).catch(() => {})
+  await waitUntil(async () => (await rowsForTask(me.id, fieldTask.id)) === 1, { timeoutMs: 10_000 })
+  chk(
+    (await rowsForTask(me.id, fieldTask.id)) === 1,
+    'and choosing yourself puts it on yours',
+    `your list holds it ${await rowsForTask(me.id, fieldTask.id)} time(s)`,
   )
 
   // -------------------------------------------------------------------------

@@ -35,6 +35,7 @@ import {
   // row there was, which read as a delete and was not one.
   Archive as ArchiveIcon,
   Sparkles,
+  ListPlus,
   Wand2,
   Paperclip,
   Diamond,
@@ -109,6 +110,7 @@ import {
   mutePriorityPrompt,
   prioritiesQuery,
   offersPriority,
+  priorityPeople,
   type Priority,
 } from '../lib/use-priorities'
 import { openPersonPanel } from '../store/person-panel'
@@ -2408,6 +2410,13 @@ function OverviewPanel({
    * assigned, by name (`ledger-rows/row-850`). Null while nothing is offered.
    */
   const [priorityPrompt, setPriorityPrompt] = useState<{ userId: string; name: string | null } | null>(null)
+  /*
+   * `found-29-sep/priority-field-adds-to-nobody-else` — ClickUp's Priority
+   * field adds the task to somebody's Personal Priorities by their avatar. The
+   * list it opens, and what has been typed to narrow it.
+   */
+  const [priorityPeopleOpen, setPriorityPeopleOpen] = useState(false)
+  const [priorityPeopleQuery, setPriorityPeopleQuery] = useState('')
   const [editingDescription, setEditingDescription] = useState(false)
   // §G15 [22:28] — the slash menu on the description, and what has been typed
   // after the slash to narrow it.
@@ -2889,11 +2898,21 @@ function OverviewPanel({
   const addToPriorities = () => {
     // A colleague's list has a write of its own (`ledger-rows/row-850`).
     if (priorityPrompt && priorityPrompt.userId !== currentUserId) return addToTheirPriorities(priorityPrompt)
+    addToMyPriorities()
+  }
+
+  /*
+   * Onto your own list, from the prompt or from the Priority field. Split out
+   * so the field adds to YOUR list whatever the prompt is offering at the time
+   * (`found-29-sep/priority-field-adds-to-nobody-else`), and a prompt about a
+   * colleague stays open when you add the task to your own.
+   */
+  const addToMyPriorities = () => {
     priorityActions.add.mutate(
       { taskId },
       {
         onSuccess: () => {
-          setPriorityPrompt(null)
+          setPriorityPrompt((p) => (p && p.userId !== currentUserId ? p : null))
           // The toast links to where the task went. "Added" with no way to look
           // is a claim the reader has to take on trust.
           toast.success(t('planner.addedToPriorities'), {
@@ -2919,7 +2938,8 @@ function OverviewPanel({
       { userId: them.userId, taskId },
       {
         onSuccess: () => {
-          setPriorityPrompt(null)
+          // Only the prompt about THEM is answered; one about somebody else stays.
+          setPriorityPrompt((p) => (p && p.userId !== them.userId ? p : null))
           toast.success(t('planner.addedToTheirPriorities', { name: them.name ?? t('taskDetail.userFallback') }), {
             action: {
               label: t('planner.openPriorities'),
@@ -3322,6 +3342,83 @@ function OverviewPanel({
             >
               <Sparkles className="h-3.5 w-3.5" />
             </button>
+            {/*
+              `found-29-sep/priority-field-adds-to-nobody-else` — ClickUp's
+              Priority field has "Add to Personal Priorities": an avatar per
+              person, yours first. Here a button beside the field opens the same
+              list. Your own list is anybody's to add to; somebody else's goes
+              through the colleague route, with its rules and its toast.
+            */}
+            <div className="relative">
+              <button
+                type="button"
+                data-testid="priority-add-person"
+                aria-haspopup="menu"
+                aria-expanded={priorityPeopleOpen}
+                onClick={() => {
+                  setPriorityPeopleOpen((open) => !open)
+                  setPriorityPeopleQuery('')
+                }}
+                className="h-8 w-8 shrink-0 rounded-md border border-border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent/10"
+                title={t('planner.addToPersonalPriorities')}
+                aria-label={t('planner.addToPersonalPriorities')}
+              >
+                <ListPlus className="h-3.5 w-3.5" />
+              </button>
+              {priorityPeopleOpen && (
+                <div
+                  role="menu"
+                  data-testid="priority-people"
+                  className="absolute right-0 top-9 z-50 w-60 rounded-md border border-border bg-popover p-1.5 shadow-lg"
+                >
+                  <p className="px-1.5 pb-1 text-[11px] font-medium text-muted-foreground">
+                    {t('planner.addToPersonalPriorities')}
+                  </p>
+                  <input
+                    autoFocus
+                    value={priorityPeopleQuery}
+                    onChange={(e) => setPriorityPeopleQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') setPriorityPeopleOpen(false)
+                    }}
+                    placeholder={t('planner.priorityPeopleSearch')}
+                    data-testid="priority-people-search"
+                    className="mb-1 h-7 w-full rounded border border-border bg-card px-2 text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                  />
+                  <div className="max-h-56 overflow-y-auto">
+                    {priorityPeople({
+                      members: membersQuery.data ?? [],
+                      currentUserId,
+                      viewerRole,
+                      query: priorityPeopleQuery,
+                    }).map((m) => {
+                      const name = m.displayName || m.email
+                      const mine = m.userId === currentUserId
+                      return (
+                        <button
+                          key={m.userId}
+                          type="button"
+                          role="menuitem"
+                          data-testid={`priority-person-${m.userId}`}
+                          disabled={priorityActions.add.isPending || priorityActions.addFor.isPending}
+                          onClick={() => {
+                            setPriorityPeopleOpen(false)
+                            if (mine) addToPriorities()
+                            else addToTheirPriorities({ userId: m.userId, name })
+                          }}
+                          className="flex w-full items-center gap-2 rounded px-1.5 py-1 text-left text-sm hover:bg-accent/10 disabled:opacity-50"
+                        >
+                          <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-muted text-[10px] font-medium uppercase">
+                            {(name || '?').slice(0, 1)}
+                          </span>
+                          <span className="truncate">{mine ? t('planner.priorityPersonYou', { name }) : name}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </Field>
         <Field

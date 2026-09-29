@@ -48,6 +48,30 @@ export function addedByOther(p: Priority, ownerId: string | undefined): string |
   return p.addedBy && p.addedBy.id !== ownerId ? p.addedBy.displayName : null
 }
 
+/**
+ * `found-29-sep/priority-field-adds-to-nobody-else` — whose priorities the
+ * task's Priority field offers to add it to.
+ *
+ * ClickUp: "click on the Priority field for a task, click an avatar (your
+ * avatar is always displayed on the left), and search or select a user". So
+ * you first, then everybody else in the workspace, narrowed by what is typed.
+ * A guest is offered their own list alone, because guests cannot add to
+ * anybody else's (the server refuses it too).
+ */
+export function priorityPeople<M extends { userId: string; displayName?: string | null; email?: string | null }>(opts: {
+  members: M[]
+  currentUserId: string
+  viewerRole: string | undefined
+  query?: string
+}): M[] {
+  const q = (opts.query ?? '').trim().toLowerCase()
+  const matches = (m: M) =>
+    !q || (m.displayName ?? '').toLowerCase().includes(q) || (m.email ?? '').toLowerCase().includes(q)
+  const me = opts.members.filter((m) => m.userId === opts.currentUserId)
+  if (opts.viewerRole === 'guest') return me.filter(matches)
+  return [...me, ...opts.members.filter((m) => m.userId !== opts.currentUserId)].filter(matches)
+}
+
 /*
  * §V2-S16 frame `15:50` — "Don't ask again".
  *
