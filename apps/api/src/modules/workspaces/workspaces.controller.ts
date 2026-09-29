@@ -36,7 +36,7 @@ export class WorkspacesController {
   @Get('archived')
   @ApiOperation({ summary: 'List archived workspaces the current user belongs to (Plan §13.4)' })
   async getArchivedWorkspaces(@CurrentUser() user: any) {
-    return this.workspacesService.listArchivedWorkspaces(user.id)
+    return this.workspacesService.listArchivedWorkspaces(user.id, user.role)
   }
 
   @Post()
@@ -156,6 +156,21 @@ export class WorkspacesController {
     @Ip() ip: string,
   ) {
     return this.workspacesService.archiveWorkspace(workspaceId, { id: user.id, email: user.email, ip })
+  }
+
+  @Delete(':workspaceId/permanent')
+  // An owner of the workspace's organization, or a platform admin, and only an
+  // archived workspace, confirmed by its name (`deleteForGood`). No permission
+  // key: ClickUp gives this to the owner alone, and a key would let a role grant it.
+  @UseGuards(WorkspaceMemberGuard)
+  @ApiOperation({ summary: 'Delete an archived workspace for good (its organization’s owner)' })
+  async deleteForGood(
+    @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
+    @Body() body: { confirmName?: unknown },
+    @CurrentUser() user: any,
+    @Ip() ip: string,
+  ) {
+    return this.workspacesService.deleteForGood(workspaceId, body?.confirmName, { id: user.id, email: user.email, ip, role: user.role })
   }
 
   @Post(':workspaceId/restore')

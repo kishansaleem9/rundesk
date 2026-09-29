@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 323 items, 68 open, 10 partly fixed, 245 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 68 open, 10 partly fixed, 246 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1457,6 +1457,14 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
 - Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
 
+### `found-29-sep/workspace-delete-leaves-stored-files` — open, small (found closing `workspace-permanent-delete-unbuilt`)
+
+**Deleting a workspace for good leaves its stored files in the store**
+
+*Evidence, read:* `deleteForGood` (workspaces.service) deletes the workspace's rows by cascade; the objects those rows pointed at in the store (attachments, clips, covers, the logo) are not touched. `R2Service` deletes one object by key (`deleteObject`) and cannot list a prefix, so nothing here could find them. ClickUp's own delete offers to remove the Workspace's data from its third-party processors too.
+
+*To close:* collect the workspace's object keys before the rows go (or list the workspace's prefix, once the store can), delete them after, and check against the store stub that none is left.
+
 ### `found-29-sep/innertext-reads-hidden-leaves` — open, medium (test tooling; found closing `checks-read-textContent-not-what-is-shown`)
 
 **A check that reads an element's `innerText` still reads a hidden element's whole text**
@@ -2871,6 +2879,7 @@ The break runs for `c55a088` found one wait that had cost a check its bite: `rol
 
 `list-empty-states` was not measured: its baseline was red under the four runners' load (22 of 23 at `394d3f9`). The empty state read "No tasks yet" without its Create task, which the page draws once the list's access (`list-caps`) has answered, and under load that answer comes after the rows. Alone on lane 7 it passed 23/23 three times. It now waits (10 s at most) for the invitation before reading it, so a patch that takes the invitation away still fails the check; its set runs after the commit.
 
+*29 September, at a load average near 20 (three agents' suites, two break runners and a regression at once on four cores):* three more reads that waited a fixed time, each found by a break set's red baseline. `list-empty-states` read its second empty state before the list's access had answered (the same race as its first read, fixed earlier today); `task-depth` read the tag's create offer, the save and the badge after 0.5, 2.5 and 0.8 fixed seconds; `video-regression` [A2.6b] reloaded 1.6 s after a toggle, before the choice was stored, and read the old grouping. Each now waits for what it reads, bounded: the invitation, the offer, the task's labels, the badge, the stored preference and then the rows. Alone on lane 7 afterwards: 23/23, 91/91, 94/94. `video-regression` [A2.6] (Clear all after mark-all-read) missed its 20 s bound once at the same load and passed on the re-run; it already waits for the control.
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)
 
@@ -3834,7 +3843,7 @@ The approvals response says the reach (`timeReach`: all, team or own). The month
 - API unit tests 1652/1652.
 - In CI (208).
 
-### `found-25-sep/workspace-permanent-delete-unbuilt` — open, feature, medium (found closing the fifth group of `role-editor-offers-unenforced-permissions`)
+### `found-25-sep/workspace-permanent-delete-unbuilt` — **closed** (feature, medium; found closing the fifth group of `role-editor-offers-unenforced-permissions`)
 
 **Nothing deletes a workspace for good**
 
@@ -3843,6 +3852,18 @@ The approvals response says the reach (`timeReach`: all, team or own). The month
 *ClickUp* (search snippets from "Transfer Workspace ownership"): only the owner deletes a workspace. Here no member is the owner; the creator is recorded, and admins manage the workspace.
 
 *To close:* decide who may delete for good (the creator, or an admin holding a restored `workspace.delete`), and after what — an archive first, and a typed confirmation. Build the route, the cascade, and a check that archived data is gone. The key returns to the catalog with the route that asks it, and `check-permission-keys-asked.mjs` holds the two together.
+
+*Closed, 29 September.* ClickUp ("Delete a Workspace"): only the Workspace owner, from the Workspace's Settings, checks that it goes for good, types the Workspace's name to confirm, and it cannot be recovered. A workspace here belongs to an organization, and the organization has owners (whoever creates a workspace in a new organization is made one; only an owner makes another, and the last is not demoted), so they are its owners, with a platform admin. No permission key: a key would let a role grant what ClickUp keeps for the owner, so `workspace.delete` stays out of the catalog.
+
+- `DELETE /workspaces/:id/permanent` with `{ confirmName }`: 403 for anyone but an owner of its organization or a platform admin, 400 for a workspace that is not archived (archiving is the step that can be undone), 400 for a name that is not the name exactly. It deletes the workspace row, and every row that hangs off it goes with it: 77 of the 78 keys to `workspaces` cascade (measured first by deleting a workspace of 8 spaces and 8 members in a transaction on lane 6 and rolling it back), and `ai_usage` keeps its rows for the bill with the workspace cleared. The deletion is recorded (`workspace.deleted`) with no workspace, because the workspace's own trail goes with it.
+- Settings → Archived: `GET /workspaces/archived` says of each archived workspace whether its reader may delete it for good (the route's own rule), and there the owner is offered Delete for good, a dialog whose button stays off until the name is typed exactly. Four locales.
+
+`workspace-delete-for-good`, 4 checks (the owner a fresh sign-up who owns their own organization, the refused admin one of another):
+- Before: 0/4 on lane 7 (no button; the route 404).
+- After: 4/4 on lane 7.
+- Patches `wdg-1..8`: offered to every admin, offered to nobody, any member deletes, a live workspace deleted, the name not compared, the button on without the name, "delete" archiving again, the deletion not recorded. `crd-15` is re-aimed onto the archived list's new return. Their runs follow the commit.
+- In CI (237).
+- What it leaves: the workspace's stored files (attachments, clips, covers, logos) stay in the store, their rows gone — `found-29-sep/workspace-delete-leaves-stored-files`.
 
 ### `found-25-sep/billing-open-to-managers-and-every-member` — **closed** (security, medium; found mapping `WorkspaceAdminGuard` after the fifth group of `role-editor-offers-unenforced-permissions`)
 

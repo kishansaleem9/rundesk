@@ -453,20 +453,22 @@ try {
   // "likhke ENTER dabao to naya tag ban jaye" — the whole interaction.
   const TAG = `ui-tag-${Date.now()}`
   await page.getByTestId('task-tag-input').fill(TAG)
-  await page.waitForTimeout(500)
-  check(
-    await page.getByTestId('task-tag-create').isVisible().catch(() => false),
-    'a name that does not exist offers to create it',
-  )
+  // Each read waits for what it reads (bounded), not a fixed time: under a
+  // sweep's load the offer, the save and the badge all come later.
+  const offersCreate = await waitUntil(() => page.getByTestId('task-tag-create').isVisible().catch(() => false), { timeoutMs: 5_000 })
+  check(offersCreate, 'a name that does not exist offers to create it')
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(2500)
 
-  const detail = await A(`/tasks/${taskId}`)
+  let detail = await A(`/tasks/${taskId}`)
+  await waitUntil(async () => {
+    detail = await A(`/tasks/${taskId}`)
+    return (detail.data?.labels ?? []).some((l) => l.name === TAG)
+  }, { timeoutMs: 10_000 })
   const applied = (detail.data?.labels ?? []).find((l) => l.name === TAG)
   check(!!applied, 'pressing Enter creates the tag AND puts it on the task', JSON.stringify(detail.data?.labels))
 
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(800)
+  await waitUntil(async () => (await page.locator('body').innerText().catch(() => '')).includes(TAG), { timeoutMs: 5_000 })
   const sheetText = await page.locator('body').innerText()
   check(sheetText.includes(TAG), 'and the tag is visible on the task', sheetText.slice(0, 160))
 

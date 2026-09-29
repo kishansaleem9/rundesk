@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo, useRef } from 'react'
 import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Button, Card, Input, Label, Switch, cn, toast } from '@rundesk/ui'
+import { Button, Card, Dialog, DialogContent, DialogHeader, DialogTitle, Input, Label, Switch, cn, toast } from '@rundesk/ui'
 import { Building2, Users, Plug, Shield, Tag, Trash2, Archive, RotateCcw, UserPlus, Plus, Settings as SettingsIcon, Link2, RefreshCw, KeyRound, Users2, ShieldCheck, Upload, CreditCard, ToggleRight, Layers, Sparkles, UserCog, Lock, Globe, Shapes, CalendarDays, Star, X, Megaphone, ScrollText } from 'lucide-react'
 import { api, ApiError, downloadFile } from '../lib/api'
 import { applyBrandColor } from '../lib/branding'
@@ -86,7 +86,7 @@ type ArchivedTask = {
   /** Whether `POST /tasks/:id/restore` would accept it from this reader: the task's write rule. */
   canRestore: boolean
 }
-type ArchivedWorkspaceEntry = { workspace: Workspace; role: string }
+type ArchivedWorkspaceEntry = { workspace: Workspace; role: string; mayDeleteForGood?: boolean }
 
 /**
  * §A4.4 — one console instead of three. The rail keeps the same destinations but
@@ -2644,6 +2644,7 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
 
   const tasks = tasksQuery.data ?? []
   const archivedWs = workspacesQuery.data ?? []
+  const [deleting, setDeleting] = useState<Workspace | null>(null)
 
   return (
     <div className="space-y-5">
@@ -2713,6 +2714,19 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
                 <div className="text-sm font-medium truncate">{entry.workspace.name}</div>
                 <div className="text-xs text-muted-foreground truncate font-mono">{entry.workspace.slug}</div>
               </div>
+              {/* Deleting it for good is its organization's owners' (`deleteForGood`):
+                  offered where the list says so, which asks the route's rule. */}
+              {entry.mayDeleteForGood && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="shrink-0 text-destructive hover:text-destructive"
+                  data-testid={`archived-workspace-delete-${entry.workspace.id}`}
+                  onClick={() => setDeleting(entry.workspace)}
+                >
+                  {t('settings.deleteForGood')}
+                </Button>
+              )}
               {/* Its restore asks `workspace.manage` in THAT workspace: offered
                   where this person is its admin, said otherwise. */}
               {isSuperAdmin || entry.role === 'workspace_admin' ? (
@@ -2736,7 +2750,66 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
         </ul>
       </Card>
       )}
+      {deleting && (
+        <DeleteForGoodDialog
+          workspace={deleting}
+          onClose={() => setDeleting(null)}
+          onDeleted={() => {
+            setDeleting(null)
+            qc.invalidateQueries({ queryKey: ['archived-workspaces'] })
+            qc.invalidateQueries({ queryKey: ['workspaces'] })
+          }}
+        />
+      )}
     </div>
+  )
+}
+
+/**
+ * DELETE A WORKSPACE FOR GOOD — ClickUp's "Delete Workspace": the name typed to
+ * confirm, and nothing to undo (`found-25-sep/workspace-permanent-delete-unbuilt`).
+ * The button stays off until the name matches exactly, as the route requires.
+ */
+function DeleteForGoodDialog({ workspace, onClose, onDeleted }: { workspace: Workspace; onClose: () => void; onDeleted: () => void }) {
+  const { t } = useTranslation()
+  const [typed, setTyped] = useState('')
+  const remove = useMutation({
+    mutationFn: () => api(`/workspaces/${workspace.id}/permanent`, { method: 'DELETE', body: { confirmName: typed } }),
+    onSuccess: () => {
+      toast.success(t('settings.deletedForGood', { name: workspace.name }))
+      onDeleted()
+    },
+    onError: (e) => toast.error(e instanceof ApiError ? e.message : t('settings.deleteForGoodFailed')),
+  })
+  return (
+    <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+      <DialogContent className="max-w-md" data-testid="delete-for-good-dialog">
+        <DialogHeader>
+          <DialogTitle>{t('settings.deleteForGoodTitle', { name: workspace.name })}</DialogTitle>
+        </DialogHeader>
+        <p className="text-sm text-muted-foreground">{t('settings.deleteForGoodBody', { name: workspace.name })}</p>
+        <Label className="text-xs" htmlFor="delete-for-good-name">{t('settings.deleteForGoodType', { name: workspace.name })}</Label>
+        <Input
+          id="delete-for-good-name"
+          data-testid="delete-for-good-name"
+          value={typed}
+          autoComplete="off"
+          onChange={(e) => setTyped(e.target.value)}
+        />
+        <div className="flex justify-end gap-2">
+          <Button variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            data-testid="delete-for-good-confirm"
+            disabled={typed !== workspace.name || remove.isPending}
+            onClick={() => remove.mutate()}
+          >
+            {t('settings.deleteForGoodConfirm')}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }
 

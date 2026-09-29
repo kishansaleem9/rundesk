@@ -604,8 +604,11 @@ try {
     // only changes its own tick is the whole defect class this audit is about.
     await openDrawer()
     await page.getByTestId('inbox-sort-newest').click()
-    await page.waitForTimeout(1600)
+    // Stored before the page is read again: under load the save outlasts a
+    // fixed wait, and the reload then draws the old order.
+    await waitUntil(async () => (await rootApi('/notifications/preferences').catch(() => null))?.data?.inboxView?.sortNewestFirst === false, { timeoutMs: 10_000 })
     await go(readOn, 3200)
+    await waitUntil(async () => runsUp(await rowTimes()), { timeoutMs: 8_000 })
     const oldestFirst = await rowTimes()
     chk(
       runsUp(oldestFirst) && oldestFirst.length >= 2,
@@ -626,8 +629,9 @@ try {
 
     await openDrawer()
     await page.getByTestId('inbox-group-by-date').click()
-    await page.waitForTimeout(1600)
+    await waitUntil(async () => (await rootApi('/notifications/preferences').catch(() => null))?.data?.inboxView?.groupByDate === false, { timeoutMs: 10_000 })
     await go(readOn, 3200)
+    await waitUntil(async () => (await ungrouped()) === 1, { timeoutMs: 8_000 })
     chk(
       (await dateBuckets()) === 0 && (await ungrouped()) === 1,
       'turning off "group by date" removes the date headers',

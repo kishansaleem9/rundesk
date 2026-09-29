@@ -395,6 +395,9 @@ try {
   const noneAgain = await waitUntil(() => visible('list-empty-none'), { timeoutMs: 15_000 })
   chk(noneAgain, 'an emptied list says "no tasks yet" again',
     'after the rows were deleted the list still claimed a filter was hiding them')
+  // The same wait as the first read: its invitation is drawn once the list's
+  // access has answered, which after a reload under load comes after the rows.
+  await waitUntil(async () => (await textOfId('list-empty-none')) === emptyListText, { timeoutMs: 10_000 })
   chk(await textOfId('list-empty-none') === emptyListText,
     'and says exactly what it said the first time',
     `it now reads ${JSON.stringify(await textOfId('list-empty-none'))}, ` +

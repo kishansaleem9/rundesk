@@ -259,14 +259,71 @@ export class WorkspacesService {
    * `/workspaces` list hides these; the settings "Archived" area surfaces them
    * so an admin can restore one. Restore itself is admin-guarded.
    */
-  async listArchivedWorkspaces(userId: string) {
+  async listArchivedWorkspaces(userId: string, accountRole?: string) {
     const rows = await this.db
       .select({ workspace: workspaces, role: workspaceMembers.role })
       .from(workspaceMembers)
       .innerJoin(workspaces, eq(workspaceMembers.workspaceId, workspaces.id))
       .where(and(eq(workspaceMembers.userId, userId), eq(workspaces.isArchived, true)))
       .orderBy(desc(workspaces.updatedAt))
-    return rows.map((r) => ({ ...r, workspace: withoutDomainToken(r.workspace) }))
+    // Whether this reader may delete each one for good: the same rule
+    // `deleteForGood` asks, so the page offers it where the route accepts it.
+    const owned = new Set(await this.organizationsOwnedBy(userId))
+    return rows.map((r) => ({
+      ...r,
+      workspace: withoutDomainToken(r.workspace),
+      mayDeleteForGood: accountRole === 'super_admin' || owned.has(r.workspace.organizationId),
+    }))
+  }
+
+  /** The organizations this person owns. */
+  private async organizationsOwnedBy(userId: string): Promise<string[]> {
+    const rows = await this.db
+      .select({ organizationId: organizationMembers.organizationId })
+      .from(organizationMembers)
+      .where(and(eq(organizationMembers.userId, userId), eq(organizationMembers.role, 'owner')))
+    return rows.map((r) => r.organizationId)
+  }
+
+  /**
+   * DELETE A WORKSPACE FOR GOOD (`found-25-sep/workspace-permanent-delete-unbuilt`).
+   *
+   * ClickUp ("Delete a Workspace"): only the Workspace owner, from the
+   * Workspace's Settings, with its name typed to confirm, and it cannot be
+   * recovered. A workspace here belongs to an organization, and the
+   * organization's owners are its owners (whoever creates a workspace in a new
+   * organization is made one); a platform admin as well. Only an ARCHIVED
+   * workspace: archiving is the step that can be undone, and this one cannot.
+   *
+   * Every row that hangs off the workspace goes with it: 77 of the 78 keys to
+   * `workspaces` cascade, and `ai_usage` keeps its rows for the bill with the
+   * workspace cleared. The record of the deletion is written with no workspace,
+   * because the workspace's own trail goes with it.
+   */
+  async deleteForGood(workspaceId: string, confirmName: unknown, actor: AuditActor & { role?: string }) {
+    const [ws] = await this.db
+      .select({ id: workspaces.id, name: workspaces.name, organizationId: workspaces.organizationId, isArchived: workspaces.isArchived })
+      .from(workspaces)
+      .where(eq(workspaces.id, workspaceId))
+    if (!ws) throw new NotFoundException('Workspace not found')
+    const owns = actor.role === 'super_admin' || (await this.organizationsOwnedBy(actor.id ?? '')).includes(ws.organizationId)
+    if (!owns) throw new ForbiddenException('Only an owner of the workspace’s organization deletes it for good')
+    if (!ws.isArchived) throw new BadRequestException('Archive the workspace first: only an archived workspace is deleted for good')
+    if (typeof confirmName !== 'string' || confirmName !== ws.name) {
+      throw new BadRequestException('Type the workspace’s name exactly as it is to delete it for good')
+    }
+    await this.db.delete(workspaces).where(eq(workspaces.id, ws.id))
+    await this.security.logAuditEvent({
+      actorId: actor.id,
+      actorEmail: actor.email,
+      ipAddress: actor.ip,
+      action: 'workspace.deleted',
+      resourceType: 'workspace',
+      resourceId: ws.id,
+      description: `Workspace "${ws.name}" deleted for good`,
+      metadata: { organizationId: ws.organizationId },
+    })
+    return { deleted: true }
   }
 
   /**
