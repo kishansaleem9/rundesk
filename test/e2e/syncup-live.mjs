@@ -984,7 +984,7 @@ if (!hasReact) {
 
     // The rendered character, which is what gets sent — `data-emoji` is the
     // base, and a skin tone is applied on the way out.
-    const emoji = gridReady ? ((await firstEmoji.textContent().catch(() => ''))?.trim() ?? '') : ''
+    const emoji = gridReady ? ((await firstEmoji.textContent().catch(() => ''))?.trim() ?? '') : '' // text-read: key — the character to look for on the tiles below
     if (gridReady) await firstEmoji.click().catch(() => {})
 
     const overlayHas = (p) =>
@@ -992,8 +992,9 @@ if (!hasReact) {
         .waitForFunction(
           (want) => {
             const o = document.querySelector('[data-testid="call-reactions"]')
-            if (!o) return false
-            return want ? o.textContent?.includes(want) : (o.textContent?.trim().length ?? 0) > 0
+            // Floated where it is SEEN: a shown overlay's innerText leaves out anything hidden in it.
+            if (!o || !o.checkVisibility()) return false
+            return want ? o.innerText.includes(want) : o.innerText.trim().length > 0
           },
           emoji,
           { timeout: 10000 },

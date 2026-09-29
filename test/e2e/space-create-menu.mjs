@@ -271,14 +271,15 @@ try {
    * which applies text-transform, reports "CREATE". The thing being asserted is
    * that the menu is headed with the WORD the frame shows, which is the string
    * the catalogue supplies and a translator edits; the capitals are the design
-   * system's business. `textContent` is that string.
+   * system's business. `textContent` is that string — of a heading that is
+   * SHOWN, because `textContent` alone reads a hidden one just the same.
    */
   // Bounded and caught: nothing short-circuits a standalone assignment, so an
   // absent element spends Playwright's default thirty seconds here and ends
   // the section. The consumer below already treats the caught value as a
   // miss, so absence reports rather than throws.
   const heading = (
-    (await page.getByTestId('space-create-menu-title').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('space-create-menu-title').filter({ visible: true }).textContent({ timeout: 8000 }).catch(() => null)) ?? ''
   ).trim()
   chk(
     heading === 'Create',
@@ -349,10 +350,11 @@ try {
    * item's whole text would pass on a label that had fallen back to a sibling's
    * string as long as the blurb still contained the right word. `textContent`
    * for the same reason as the heading above: the assertion is about the string
-   * the catalogue supplies, not about how the stylesheet cases it.
+   * the catalogue supplies, not about how the stylesheet cases it — and, as
+   * there, of a label that is shown.
    */
   const itemLabel = async (kind) =>
-    ((await page.getByTestId(`space-create-label-${kind}`).textContent()) ?? '').trim()
+    ((await page.getByTestId(`space-create-label-${kind}`).filter({ visible: true }).textContent({ timeout: 8000 })) ?? '').trim()
   chk(
     JSON.stringify(IN_SPACE_IN_SOURCE) === JSON.stringify(EXPECTED_KINDS),
     `the product's own in-space kinds are the ${EXPECTED_KINDS.length} this suite knows, in its order`,

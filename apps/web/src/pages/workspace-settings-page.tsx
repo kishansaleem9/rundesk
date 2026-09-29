@@ -1609,6 +1609,9 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['webhooks', workspaceId] }),
   })
 
+  // Which webhook's recent deliveries are open (`product-siblings/other-get-routes-without-reader`).
+  const [deliveriesOf, setDeliveriesOf] = useState<string | null>(null)
+
   const testWh = useMutation({
     mutationFn: (id: string) => api(`/workspaces/${workspaceId}/webhooks/${id}/test`, { method: 'POST' }),
   })
@@ -1725,11 +1728,24 @@ function IntegrationsTab({ workspaceId }: { workspaceId: string }) {
                 {' '}<span className="text-red-500">{hook.failureCount}✗</span>
               </div>
               <Button variant="ghost" size="sm" className="text-xs" onClick={() => testWh.mutate(hook.id)} disabled={testWh.isPending}>{t('settings.test')}</Button>
+              <Button
+                variant={deliveriesOf === hook.id ? 'secondary' : 'ghost'}
+                size="sm"
+                className="text-xs"
+                data-testid={`webhook-deliveries-toggle-${hook.id}`}
+                aria-expanded={deliveriesOf === hook.id}
+                onClick={() => setDeliveriesOf((open) => (open === hook.id ? null : hook.id))}
+              >
+                {t('settings.webhookDeliveries')}
+              </Button>
               <Button variant="ghost" size="sm" className="text-xs text-destructive" onClick={() => deleteWh.mutate(hook.id)}>
                 <Trash2 className="h-3.5 w-3.5" />
               </Button>
             </div>
           ))}
+          {deliveriesOf && hooks.some((h) => h.id === deliveriesOf) && (
+            <WebhookDeliveries workspaceId={workspaceId} webhookId={deliveriesOf} />
+          )}
         </Card>
       )}
 
@@ -2719,6 +2735,65 @@ function ArchivedTab({ workspaceId }: { workspaceId: string }) {
           ))}
         </ul>
       </Card>
+      )}
+    </div>
+  )
+}
+
+/**
+ * A WEBHOOK'S RECENT DELIVERIES — `GET …/webhooks/:id/deliveries`, which no page
+ * read (`product-siblings/other-get-routes-without-reader`): the last 50, each
+ * with its event, answer, attempts and time, and for a failed one the start of
+ * what the endpoint said back. The counts beside the webhook said how many
+ * failed; this says which, and why.
+ */
+function WebhookDeliveries({ workspaceId, webhookId }: { workspaceId: string; webhookId: string }) {
+  const { t, tCount } = useTranslation()
+  type Delivery = {
+    id: string
+    event: string
+    statusCode: number | null
+    success: boolean
+    attempts: number
+    duration: number | null
+    responseBody: string | null
+    deliveredAt: string
+  }
+  const query = useQuery({
+    queryKey: ['webhook-deliveries', workspaceId, webhookId],
+    queryFn: () => api<Delivery[]>(`/workspaces/${workspaceId}/webhooks/${webhookId}/deliveries`),
+  })
+  return (
+    <div data-testid={`webhook-deliveries-${webhookId}`} className="mt-2 rounded-md border border-border/60 bg-muted/20 p-2">
+      <div className="text-xs font-medium mb-1">{t('settings.webhookDeliveriesTitle')}</div>
+      {query.isLoading ? (
+        <InlineSkeleton />
+      ) : query.isError ? (
+        <p className="text-xs text-destructive">{t('settings.webhookDeliveriesFailed')}</p>
+      ) : (query.data ?? []).length === 0 ? (
+        <p className="text-xs text-muted-foreground" data-testid="webhook-deliveries-empty">{t('settings.webhookDeliveriesEmpty')}</p>
+      ) : (
+        <ul className="space-y-1">
+          {(query.data ?? []).map((d) => (
+            <li key={d.id} data-testid="webhook-delivery" data-success={d.success ? 'true' : 'false'} className="text-xs">
+              <div className="flex items-center gap-2">
+                <span className={d.success ? 'text-emerald-600' : 'text-red-500'}>{d.success ? '✓' : '✗'}</span>
+                <span className="font-mono">{d.event}</span>
+                <span className="text-muted-foreground">
+                  {d.statusCode ?? t('settings.webhookNoAnswer')}
+                  {d.attempts > 1 ? ` · ${tCount('settings.webhookAttempts', d.attempts)}` : ''}
+                  {d.duration != null ? ` · ${d.duration} ms` : ''}
+                </span>
+                <span className="ml-auto text-muted-foreground">{new Date(d.deliveredAt).toLocaleString()}</span>
+              </div>
+              {!d.success && d.responseBody && (
+                <div className="mt-0.5 pl-5 font-mono text-[11px] text-muted-foreground truncate" title={d.responseBody}>
+                  {d.responseBody.slice(0, 200)}
+                </div>
+              )}
+            </li>
+          ))}
+        </ul>
       )}
     </div>
   )

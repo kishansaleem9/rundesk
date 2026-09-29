@@ -346,7 +346,8 @@ try {
     const toggle = card.getByTestId('integration-toggle')
     return {
       live: (await toggle.count()) === 1 && (await toggle.isEnabled().catch(() => false)),
-      action: ((await card.getByTestId('integration-action').textContent().catch(() => '')) ?? '').trim(),
+      // Read as DRAWN: an offer in the page but hidden is not one anybody can take.
+      action: ((await card.getByTestId('integration-action').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim(),
       why: await card.getByTestId('integration-needs-permission').count(),
     }
   }

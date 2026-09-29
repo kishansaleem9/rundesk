@@ -809,12 +809,13 @@ function TaskTypePicker({
    * §V2-S04 frame `03:25` — "✦ Fill with AI", the full-width button under the
    * four types in the Task Types popover.
    *
-   * WHAT IT HAD TO NOT BE. The ledger already refused "⚡ Assign with AI" on the
-   * grounds that `assign_task` exists but CHOOSING the person does not, and "a
-   * button that returns an arbitrary colleague with a confident label is worse
-   * than no button". The same test applies here and this one passes it: picking
-   * among the workspace's own named types from the task's own words is a
-   * classification over a CLOSED, KNOWN set, and the answer is checkable.
+   * WHAT IT HAD TO NOT BE. The ledger once refused "⚡ Assign with AI" because
+   * "a button that returns an arbitrary colleague with a confident label is
+   * worse than no button". That button now chooses from the numbers and says
+   * why (`GET /ai/assignee-suggestion`, the picker's footer), and the same test
+   * applies here, which this one passes too: picking among the workspace's own
+   * named types from the task's own words is a classification over a CLOSED,
+   * KNOWN set, and the answer is checkable.
    *
    * So it is checked. `POST /ai/task/generate` already accepts a caller-declared
    * field with `options` and answers with a value for it — that is the existing
@@ -3310,6 +3311,7 @@ function OverviewPanel({
         {workspaceId && (caps.edit || caps.progress) && (
           <AssigneePicker
             workspaceId={workspaceId}
+            taskId={taskId}
             members={availableMembers}
             currentUserId={currentUserId}
             onPick={(userId) => addAssignee.mutate(userId)}
@@ -3383,7 +3385,7 @@ function OverviewPanel({
  *   · **People**, with **Me** first                      — built
  *   · **"Invite people via email"**                      — built, gated
  *   · **Agents**, **+ Create Agent**                     — NOT built, see below
- *   · footer **"⚡ Assign with AI"**                      — NOT built, see below
+ *   · footer **"⚡ Assign with AI"**                      — built
  *
  * AGENTS DO NOT EXIST IN THIS PRODUCT. `ai.service.ts` already says so in as
  * many words, about the same frame's Agent filter: "Rundesk has no agents, so
@@ -3391,12 +3393,15 @@ function OverviewPanel({
  * control that can only ever return everything." An Agents section with a
  * "+ Create Agent" button would be the same mistake with a bigger promise.
  *
- * "ASSIGN WITH AI" IS NOT BUILT EITHER, and the reason is worth writing down
- * because half of it does exist. The AI can assign: `assign_task` is a real
- * tool, declared, previewed and executed. What it cannot do is CHOOSE the
- * person — that is the whole content of the button — and a button that returns
- * an arbitrary colleague with a confident label is worse than no button. It is
- * recorded as an open gap in the re-audit.
+ * "ASSIGN WITH AI" CHOOSES FROM THE NUMBERS, and says which
+ * (`product-siblings/assign-with-ai-picker-unbuilt`). This said it was not built
+ * because the AI could assign but not CHOOSE the person — no longer true:
+ * `GET /ai/assignee-suggestion` ranks everyone who may take the task by their
+ * open load (as far as the asker may see it) and by who already holds the
+ * thread in this list, and answers with the pick, the runner-up and each one's
+ * reason in their own numbers, with no model needed. The footer asks it, shows
+ * the pick and why, and assigns only when the person confirms; a refusal is
+ * shown in the route's own words.
  *
  * The invite row is gated on `isManagerOrAbove` because `POST /invitations`
  * requires workspace_admin or manager. `use-workspace-role.ts` puts the rule
@@ -3404,12 +3409,14 @@ function OverviewPanel({
  */
 function AssigneePicker({
   workspaceId,
+  taskId,
   members,
   currentUserId,
   onPick,
   pending,
 }: {
   workspaceId: string
+  taskId: string
   members: WorkspaceMemberLite[]
   currentUserId: string
   onPick: (userId: string) => void
@@ -3539,6 +3546,74 @@ function AssigneePicker({
         >
           {t('taskDetail.assignInvite', { email: query.trim() })}
         </Button>
+      )}
+      <AssignWithAi
+        taskId={taskId}
+        pending={pending}
+        onAssign={(userId) => {
+          onPick(userId)
+          setOpen(false)
+          setQuery('')
+        }}
+      />
+    </div>
+  )
+}
+
+/**
+ * THE PICKER'S FOOTER, "⚡ Assign with AI" (frame `15:45`). Asked on press, not
+ * with the picker: the suggestion reads the workspace's open work.
+ */
+function AssignWithAi({ taskId, pending, onAssign }: { taskId: string; pending: boolean; onAssign: (userId: string) => void }) {
+  const { t } = useTranslation()
+  type Ranked = { userId: string; email: string; displayName: string | null; reason: string }
+  type Suggestion = { ok: true; pick: Ranked; runnerUp: Ranked | null } | { ok: false; message: string }
+  const [asked, setAsked] = useState(false)
+  const suggestion = useQuery({
+    queryKey: ['assignee-suggestion', taskId],
+    queryFn: () => api<Suggestion>(`/ai/assignee-suggestion?taskId=${taskId}`),
+    enabled: asked,
+    staleTime: 0,
+  })
+  const answer = suggestion.data
+  return (
+    <div className="mt-2 border-t border-border/60 pt-2" data-testid="assign-with-ai">
+      {!asked ? (
+        <button
+          type="button"
+          data-testid="assign-with-ai-ask"
+          onClick={() => setAsked(true)}
+          className="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-[12px] hover:bg-muted/60"
+        >
+          <span aria-hidden>⚡</span>
+          {t('taskDetail.assignWithAi')}
+        </button>
+      ) : suggestion.isLoading ? (
+        <p className="px-2 py-1 text-[11px] text-muted-foreground">{t('taskDetail.assignWithAiThinking')}</p>
+      ) : suggestion.isError || !answer ? (
+        <p className="px-2 py-1 text-[11px] text-destructive">{t('taskDetail.assignWithAiFailed')}</p>
+      ) : !answer.ok ? (
+        <p className="px-2 py-1 text-[11px] text-muted-foreground" data-testid="assign-with-ai-refused">{answer.message}</p>
+      ) : (
+        <div className="px-2 py-1 text-[12px]" data-testid="assign-with-ai-pick" data-user-id={answer.pick.userId}>
+          <div className="font-medium">{t('taskDetail.assignWithAiPick', { name: answer.pick.displayName || answer.pick.email })}</div>
+          <p className="mt-0.5 text-[11px] text-muted-foreground">{answer.pick.reason}</p>
+          {answer.runnerUp && (
+            <p className="mt-0.5 text-[11px] text-muted-foreground">
+              {t('taskDetail.assignWithAiRunnerUp', { name: answer.runnerUp.displayName || answer.runnerUp.email })}
+            </p>
+          )}
+          <Button
+            type="button"
+            size="sm"
+            data-testid="assign-with-ai-confirm"
+            disabled={pending}
+            onClick={() => onAssign(answer.pick.userId)}
+            className="mt-1.5 h-7 px-2 text-[11px]"
+          >
+            {t('taskDetail.assignWithAiConfirm', { name: answer.pick.displayName || answer.pick.email })}
+          </Button>
+        </div>
       )}
     </div>
   )

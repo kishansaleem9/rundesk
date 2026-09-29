@@ -124,7 +124,8 @@ try {
   const select = page.getByTestId('space-wizard-permission')
   await select.waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
   const preselected = await select.inputValue().catch(() => null)
-  const shown = await select.evaluate((el) => el.selectedOptions?.[0]?.textContent ?? null).catch(() => null)
+  // A closed select shows its selected option's label — and only while the select itself is shown.
+  const shown = await select.filter({ visible: true }).evaluate((el) => el.selectedOptions?.[0]?.textContent ?? null, undefined, { timeout: 5000 }).catch(() => null)
   await page.keyboard.press('Escape').catch(() => {})
   chk(
     FULL.level === 'admin' && stored?.default_permission === 'admin' && preselected === 'admin' && shown === 'Full edit',

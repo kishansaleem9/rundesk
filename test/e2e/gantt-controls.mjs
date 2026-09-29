@@ -271,7 +271,8 @@ try {
       els.map((e) => ({
         week: e.dataset.week,
         monday: e.dataset.weekStart,
-        text: (e.textContent ?? '').trim(),
+        // As drawn: a label that is not shown reads '' (its own innerText would not say so).
+        text: (e.checkVisibility() ? e.innerText : '').trim(),
         height: e.getBoundingClientRect().height,
       })),
     )

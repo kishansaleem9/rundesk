@@ -242,7 +242,7 @@ try {
 
   const lateFlags = await page.$$eval(
     '[data-testid="planner-today-overdue-item"]',
-    (nodes) => nodes.map((n) => [n.textContent?.toLowerCase() ?? '', n.getAttribute('data-late')]),
+    (nodes) => nodes.map((n) => [n.textContent?.toLowerCase() ?? '', n.getAttribute('data-late')]), // text-read: key — names the row; the check is on data-late
   )
   chk(
     lateFlags.some(([txt, late]) => txt.includes('late thing') && late === 'true') &&

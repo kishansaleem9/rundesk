@@ -297,7 +297,8 @@ try {
   // A row is the card carrying `data-unread`; other test ids inside it start
   // with "notif-" too.
   const rows = page.locator('[data-testid^="notif-"][data-unread]')
-  const text = (id) => page.getByTestId(id).textContent({ timeout: 4000 }).then((t) => t?.trim() ?? null, () => null)
+  // Read as DRAWN, here and below: a count in the page but hidden is a count nobody is shown.
+  const text = (id) => page.getByTestId(id).filter({ visible: true }).innerText({ timeout: 4000 }).then((t) => t?.trim() ?? null, () => null)
   await waitUntil(async () => (await rows.count()) >= 50, { timeoutMs: 20_000 })
   const firstPage = await rows.count()
   chk(
@@ -333,7 +334,7 @@ try {
 
   await page.getByTestId('inbox-load-more').scrollIntoViewIfNeeded({ timeout: 5000 }).catch(() => {})
   await waitUntil(async () => (await rows.count()) === IN_A - 1, { timeoutMs: 15_000 })
-  const titles = (await rows.allTextContents().catch(() => [])).join('\n')
+  const titles = (await rows.filter({ visible: true }).allInnerTexts().catch(() => [])).join('\n')
   chk(
     (await rows.count()) === IN_A - 1 &&
       titles.includes(`${TAG} replied-on`) &&
@@ -370,7 +371,7 @@ try {
   const homeReplies = await homeRows.count()
   await page.goto(`${B}/app/${A.id}?section=assigned-comments`, { waitUntil: 'domcontentloaded' })
   await waitUntil(async () => (await homeRows.count()) === 1, { timeoutMs: 10_000 })
-  const assignedText = (await homeRows.first().textContent({ timeout: 3000 }).catch(() => '')) ?? ''
+  const assignedText = (await homeRows.first().filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? ''
   chk(
     homeReplies === 2 && (await homeRows.count()) === 1 && /assigned a comment/i.test(assignedText),
     'and its panels list the two replies, and under Assigned Comments the comment assigned to R',

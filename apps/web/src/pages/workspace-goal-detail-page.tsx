@@ -76,7 +76,22 @@ export function GoalDetailPage() {
   const [addingKr, setAddingKr] = useState(false)
   const [editingProgress, setEditingProgress] = useState(false)
 
-  const invalidate = () => qc.invalidateQueries({ queryKey: ['goal', goalId] })
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: ['goal', goalId] })
+    void qc.invalidateQueries({ queryKey: ['goal-history', goalId] })
+  }
+  /*
+   * THE GOAL'S PROGRESS OVER TIME — `GET /goals/:id/history`, which no page read
+   * (`product-siblings/other-get-routes-without-reader`): each change of its
+   * value, by whom and when. ClickUp keeps a goal's progress history on the goal.
+   */
+  const historyQuery = useQuery({
+    queryKey: ['goal-history', goalId],
+    queryFn: () =>
+      api<Array<{ id: string; fromValue: number; toValue: number; note: string | null; createdAt: string; author: { id: string; displayName: string | null } | null }>>(
+        `/goals/${goalId}/history`,
+      ),
+  })
 
   const setGoalProgress = useMutation({
     mutationFn: (currentValue: number) => api(`/goals/${goalId}`, { method: 'PATCH', body: JSON.stringify({ currentValue }) }),
@@ -221,6 +236,26 @@ export function GoalDetailPage() {
               ))}
             </div>
           </div>
+        )}
+      </section>
+
+      <section data-testid="goal-history">
+        <h2 className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wider">{t('goalDetail.historyHeading')}</h2>
+        {historyQuery.isLoading ? null : historyQuery.isError ? (
+          <p className="text-sm text-destructive">{t('goalDetail.historyFailed')}</p>
+        ) : (historyQuery.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground" data-testid="goal-history-empty">{t('goalDetail.historyEmpty')}</p>
+        ) : (
+          <ul className="space-y-1.5">
+            {(historyQuery.data ?? []).map((h) => (
+              <li key={h.id} data-testid="goal-history-row" className="flex items-center gap-2 text-sm">
+                <span className="tabular-nums">{t('goalDetail.historyChange', { from: String(h.fromValue), to: String(h.toValue) })}</span>
+                <span className="text-muted-foreground">· {h.author?.displayName ?? t('goalDetail.historySomebody')}</span>
+                {h.note && <span className="text-muted-foreground">· {h.note}</span>}
+                <span className="ml-auto text-xs text-muted-foreground">{new Date(h.createdAt).toLocaleString()}</span>
+              </li>
+            ))}
+          </ul>
         )}
       </section>
     </div>

@@ -198,8 +198,9 @@ try {
       'and two would mean the launcher was added twice',
   )
 
+  // Read as DRAWN, bounded and caught: a hidden placeholder promises nothing, and reports as a miss.
   const placeholder = (
-    await page.locator('[data-testid="planner-command-bar-placeholder"]').textContent()
+    await page.locator('[data-testid="planner-command-bar-placeholder"]').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)
   )?.trim()
   chk(
     placeholder === PLACEHOLDER,

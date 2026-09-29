@@ -212,12 +212,13 @@ try {
   /*
    * The footer, read as TEXT. It is the thing a person follows, so the check is
    * on what it printed — and `textContent`, because a `<code>` in it is not
-   * transformed and this suite should say which it means.
+   * transformed and this suite should say which it means. Of the hints SHOWN:
+   * `textContent` alone counts a hidden hint as printed.
    */
   const footer = page.getByTestId('mention-hints')
   /* `mention-hints` for the container and `mention-hint-<tab>` for each hint, so
    * this prefix query counts the hints and not the box they sit in. */
-  const hints = await page.locator('[data-testid^="mention-hint-"]').allTextContents()
+  const hints = await page.locator('[data-testid^="mention-hint-"]').filter({ visible: true }).allTextContents()
   const hintLine = hints.map((h) => h.replace(/\s+/g, ' ').trim()).join(' | ')
   chk(
     (await footer.isVisible().catch(() => false))
@@ -243,8 +244,9 @@ try {
   await input.fill(`@@@@${TAG}`)
   const boardRows = page.getByTestId('mention-whiteboards-row')
   const foundBoard = await waitUntil(async () => (await boardRows.count()) === 1, { timeoutMs: 15_000 })
+  // The row as DRAWN, and the reason below likewise: a hidden row names nothing to anybody.
   chk(
-    foundBoard && ((await boardRows.first().textContent()) ?? '').includes(TAG),
+    foundBoard && ((await boardRows.first().filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').includes(TAG),
     'and narrowing to this run\'s tag leaves exactly the whiteboard this run made',
     `${await boardRows.count()} whiteboard rows matched a word only one board in the database contains`,
   )
@@ -260,9 +262,10 @@ try {
   const onLocations = await waitUntil(async () => (await tabNow()) === 'locations', { timeoutMs: 10_000 })
   const locRowsUi = page.getByTestId('mention-locations-row')
   const foundLoc = await waitUntil(async () => (await locRowsUi.count()) > 0, { timeoutMs: 15_000 })
+  const locTexts = await locRowsUi.allTextContents() // text-read: absence — no row may belong to another run, hidden rows included
   chk(
     onLocations && foundLoc
-      && (await locRowsUi.allTextContents()).every((txt) => txt.includes(TAG)),
+      && locTexts.every((txt) => txt.includes(TAG)),
     `typing \`@/\` moves to Locations and every row shown (${await locRowsUi.count()}) is one of this run's containers`,
     onLocations
       ? `${await locRowsUi.count()} rows came back and not all of them are this run's — the section is not narrowing`
@@ -391,7 +394,7 @@ try {
   // the section. The consumer below already treats the caught value as a
   // miss, so absence reports rather than throws.
   const reason =
-    (await page.getByTestId('comment-mode-reason-email').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('comment-mode-reason-email').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   chk(
     reason.toLowerCase().includes('email') && reason.trim().length > 30,
     `and the row itself says why: "${reason.trim().slice(0, 80)}…"`,

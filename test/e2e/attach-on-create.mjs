@@ -134,9 +134,10 @@ const stage = (page, name, body) =>
     )
     .catch(() => {})
 
+// The rows DRAWN: a name that is in the page but not shown is not a row anybody sees.
 const rowNames = (page) =>
-  page.locator('[data-testid^="quick-create-attachname-"]').evaluateAll((els) =>
-    els.map((e) => (e.textContent ?? '').trim()),
+  page.locator('[data-testid^="quick-create-attachname-"]').filter({ visible: true }).evaluateAll((els) =>
+    els.map((e) => e.innerText.trim()),
   )
 
 try {

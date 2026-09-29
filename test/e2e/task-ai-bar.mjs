@@ -214,7 +214,8 @@ try {
    * "nothing generates a prototype" send a reader to different places, and the
    * §0 clips guard caught the same flattening on its own author.
    */
-  const reasons = await page.locator('[data-testid^="task-ai-bar-reason-"]').allTextContents()
+  // "On the surface" is what is DRAWN: a reason in the page but hidden is printed nowhere.
+  const reasons = await page.locator('[data-testid^="task-ai-bar-reason-"]').filter({ visible: true }).allInnerTexts()
   chk(
     reasons.length === 2 && reasons[0].trim().length > 0 && reasons[0].trim() !== reasons[1].trim(),
     'and the two it cannot make each print their OWN reason on the surface',
@@ -239,7 +240,8 @@ try {
       : 'the request went out without the task id, so the draft could not be about this task',
   )
 
-  const noteText = noted ? ((await note.textContent()) ?? '') : ''
+  // `noted` waited for the note to be shown; `innerText` then leaves out anything hidden inside it.
+  const noteText = noted ? ((await note.innerText()) ?? '') : ''
   chk(
     noted && (await note.getAttribute('data-kind')) === 'error' && noteText.toLowerCase().includes(REFUSAL),
     'and the bar reports the SERVER\'S own sentence — "not configured", not a house "something went wrong"',
@@ -354,15 +356,16 @@ try {
   }
 
   /*
-   * `textContent`, not `innerText`: this hint is not transformed, but the rule
-   * that bit `activity-rail` is to say which one you mean.
+   * `innerText` of the hint as SHOWN: it is not transformed, so this is the
+   * string `textContent` gave, less anything hidden in it or a hidden hint —
+   * and the rule that bit `activity-rail` is to say which one you mean.
    */
   // Bounded and caught: nothing short-circuits a standalone assignment, so an
   // absent element spends Playwright's default thirty seconds here and ends
   // the section. The consumer below already treats the caught value as a
   // miss, so absence reports rather than throws.
   const hint =
-    (await page.getByTestId('comment-composer-hint').textContent({ timeout: 8000 }).catch(() => null)) ?? ''
+    (await page.getByTestId('comment-composer-hint').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)) ?? ''
   chk(
     hint.includes('space') && hint.includes('/'),
     `the hint reads "${hint.trim()}" — both halves, because both halves now do something`,
@@ -430,7 +433,7 @@ try {
         'and a mode select that changes nothing is a control that remembers a value and does nothing with it',
   )
 
-  const errText = errored ? ((await aiError.textContent()) ?? '') : ''
+  const errText = errored ? ((await aiError.innerText()) ?? '') : ''
   chk(
     errored && errText.toLowerCase().includes(REFUSAL),
     'and the panel reports the server\'s named reason rather than an empty draft or a shrug',

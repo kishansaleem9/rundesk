@@ -369,9 +369,11 @@ try {
   )
 
   const expectedName = peer.displayName || peer.email || ''
+  // Read as DRAWN: a name in the row but hidden labels it for nobody.
   const rowText = await page
     .getByTestId(`sidebar-dm-${startedDmId}`)
-    .textContent()
+    .filter({ visible: true })
+    .innerText({ timeout: 8000 })
     .catch(() => '')
   chk(
     !!expectedName && (rowText ?? '').includes(expectedName),

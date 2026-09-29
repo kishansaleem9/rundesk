@@ -600,9 +600,9 @@ try {
    */
   // Bounded and caught. `Number(undefined)` is NaN and every comparison with
   // NaN is false, so an absent chip fails the checks below rather than
-  // reading as a number.
+  // reading as a number. Read as DRAWN: a hidden chip is absent too.
   const chipBefore = Number(
-    (await page.getByTestId('planner-calendars-count').textContent({ timeout: 8000 }).catch(() => null))?.trim(),
+    (await page.getByTestId('planner-calendars-count').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null))?.trim(),
   )
   const tickedBefore = await page
     .locator('[data-testid="planner-calendar-row"][data-checked="true"]')
@@ -648,7 +648,7 @@ try {
     untickable &&
     (await waitUntil(
       async () =>
-        Number((await page.getByTestId('planner-calendars-count').textContent())?.trim()) ===
+        Number((await page.getByTestId('planner-calendars-count').filter({ visible: true }).innerText({ timeout: 2000 }))?.trim()) ===
         chipBefore - 1,
       { timeoutMs: 10_000 },
     ))

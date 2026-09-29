@@ -229,11 +229,12 @@ went missing entirely. A list that is only written once stops being true.
   satisfy: the whole roster is listed, and a search for one person leaves exactly
   one row.
 - **Not built there, on purpose:** *Agents / + Create Agent* (Rundesk has no
-  agents — `ai.service.ts` already refuses an Agent filter for the same reason)
-  and *"⚡ Assign with AI"*. Half of the latter exists: `assign_task` is a real
-  tool, declared, previewed and executed. The half that does not is the whole
-  point of the button — CHOOSING the person — and a button that returns an
-  arbitrary colleague with a confident label is worse than no button.
+  agents — `ai.service.ts` already refuses an Agent filter for the same reason).
+  *"⚡ Assign with AI"* was listed here too, on the reasoning that the AI could
+  not CHOOSE the person. It can: `GET /ai/assignee-suggestion` ranks everyone
+  who may take the task by their open load and says why (`ai-assign.mjs`). Since
+  29 September the picker's footer asks it, shows the pick with its reason and
+  the runner-up, and assigns only on confirm (`assign-with-ai-picker.mjs`).
 
 - **The comment "+" menu, frame `04:50`.** The row said "the ten items exist
   scattered, no menu gathers them" — half wrong, and checking paid for itself.
@@ -844,7 +845,7 @@ checks, not about a run.**
 | B | A PERMANENT delete for a task — `deletedAt` into the same Trash the other entities use, restorable there, purged by the same cron after the same 30 days. Archive is never purged. An archived task must NOT appear in the Trash, and that check was impossible to satisfy before |
 | M | "Add to ›" — frame `15:35` draws the row and its chevron; **no frame opens the submenu and the transcript never speaks the item**, so what it adds a task TO is unspecified. The gloss this row carried for six weeks — *"a task in more than one list"* — is ClickUp's real product, not anything in the video, and it is what kept the row on the buildable side. Blocked on the reference, not on Rundesk. See §6 |
 | B | Assignee picker: search box, **Me** first, invite-by-email |
-| B | "⚡ Assign with AI" — closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task |
+| B | "⚡ Assign with AI" — the ranking closed by `ai-assign.mjs`, 23 checks. The ranking is the feature: the suite adds work to the first pick and requires the suggestion to **name somebody else**, with no escape hatch — the subject's list is the run's own, so every candidate starts at `inList = 0` and only load moved. It recommends and does not assign, which is asserted by re-reading the task. Until 29 September no page asked it; the picker's footer, where frame `15:45` draws it, now does, and assigns on confirm (`assign-with-ai-picker.mjs`, 2 checks) |
 | — | Agents / "+ Create Agent" — excluded: Rundesk has no agents (see §3) |
 | B | **assign → "Add to priorities?" prompt → toast → planner rail** — the whole chain |
 | M | Add to a COLLEAGUE's priorities — the write takes no `:userId`, deliberately |

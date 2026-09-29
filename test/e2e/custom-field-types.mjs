@@ -444,9 +444,10 @@ try {
   }
 
   const formulaRow = page.getByTestId('custom-field-row').filter({ hasText: 'Remaining' })
+  // Read as DRAWN, here and below: a value in the page but hidden is not one anybody can check.
   chk(
-    (await formulaRow.getByTestId('custom-field-formula-value').textContent().catch(() => '')) === '400'
-      && (await formulaRow.getByTestId('custom-field-formula-expression').textContent().catch(() => ''))
+    (await formulaRow.getByTestId('custom-field-formula-value').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => '')) === '400'
+      && (await formulaRow.getByTestId('custom-field-formula-expression').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => ''))
         === '({Budget} - {Spent}) * 2',
     'the formula row draws the number AND the expression it came from',
     'value=' + JSON.stringify(await formulaRow.getByTestId('custom-field-formula-value').textContent().catch(() => null))
@@ -462,8 +463,8 @@ try {
 
   /*
    * WAITED FOR, not sampled. The chip renders as soon as the field has a value
-   * and only gains its TITLE when the workspace task list resolves, so
-   * `textContent()` a moment too early reads the placeholder — `textContent`
+   * and only gains its TITLE when the workspace task list resolves, so a read
+   * a moment too early reads the placeholder — `innerText`, like `textContent`,
    * is one of the reads Playwright does not auto-wait past. It lost that race
    * under a break patch that touched nothing near it, and then printed the
    * right title in its own failure message, because the message is built after
@@ -473,7 +474,7 @@ try {
   const relatedChip = tasksRow.getByTestId(`cf-task-${other.id}`)
   chk(
     await waitUntil(
-      async () => ((await relatedChip.textContent().catch(() => '')) || '').includes(`Other ${TAG}`),
+      async () => ((await relatedChip.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) || '').includes(`Other ${TAG}`),
       { timeoutMs: 15_000 },
     ),
     'the tasks row draws the related task by TITLE, not by id',
@@ -592,12 +593,12 @@ try {
    * be asserting on a value this check never holds. */
   await waitUntil(
     async () => {
-      const text = (await blockerCell.textContent().catch(() => '')) ?? ''
+      const text = (await blockerCell.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? ''
       return text !== '' && text !== '—'
     },
     { timeoutMs: 20_000 },
   )
-  const cellText = (await blockerCell.textContent().catch(() => '')) ?? ''
+  const cellText = (await blockerCell.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? ''
   chk(
     cellText !== '' && cellText !== '—' && !cellText.includes(other.id) && cellText.includes('1'),
     'and it says how many, never the ids',

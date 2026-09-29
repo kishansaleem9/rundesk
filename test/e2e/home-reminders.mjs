@@ -132,7 +132,8 @@ try {
   await page.getByTestId('create-tab-reminder').click({ timeout: 15_000 }).catch(() => {})
   await page.getByTestId('reminder-note').fill(NOTE, { timeout: 10_000 }).catch(() => {})
   await page.getByTestId('quick-create-reminder').locator('button[type=submit]').click({ timeout: 10_000 }).catch(() => {})
-  const labels = () => page.getByTestId('home-reminder-label').allTextContents().catch(() => [])
+  // The labels DRAWN — for the same reason as the empty state below; a hidden row is not listed.
+  const labels = () => page.getByTestId('home-reminder-label').filter({ visible: true }).allInnerTexts().catch(() => [])
   const listed = await waitUntil(async () => (await labels()).includes(NOTE), { timeoutMs: 15_000 })
   const row = (await sql`select id from reminders where workspace_id = ${WS} and user_id = ${me} and note = ${NOTE}`)[0]
   chk(
@@ -142,7 +143,7 @@ try {
       "['reminders', ws], and until now nothing on any screen held that key",
   )
 
-  const countText = await page.getByTestId('home-nav-reminders-count').textContent({ timeout: 5000 }).catch(() => null)
+  const countText = await page.getByTestId('home-nav-reminders-count').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => null)
   chk(
     countText?.trim() === '2',
     'and the Reminders entry counts what is waiting — the modal’s and the task’s, not the one that went off',
@@ -197,11 +198,12 @@ try {
   // `innerText`, not `textContent`: what is RENDERED. textContent includes
   // hidden elements, so a panel whose empty state was present but hidden —
   // blank to anybody looking — read as saying "No reminders" (hr-9 ran green).
+  // And of a SHOWN panel: a hidden element's own innerText is its whole text.
   const empty = await waitUntil(
-    async () => (await page.getByTestId('home-reminder').count()) === 0 && ((await panel.innerText({ timeout: 3000 }).catch(() => '')) ?? '').length > 0,
+    async () => (await page.getByTestId('home-reminder').count()) === 0 && ((await panel.filter({ visible: true }).innerText({ timeout: 3000 }).catch(() => '')) ?? '').length > 0,
     { timeoutMs: 10_000 },
   )
-  const panelText = (await panel.innerText({ timeout: 5000 }).catch(() => '')) ?? ''
+  const panelText = (await panel.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? ''
   chk(
     empty && /no reminders/i.test(panelText),
     'and with none left, the panel says there are none rather than going blank',

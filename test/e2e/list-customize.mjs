@@ -382,8 +382,9 @@ try {
   console.log('\n▶ `11:00` — "Show task locations" names the list a row lives in')
   await flip('list-show-task-locations')
   const locationChip = page.locator(`[data-testid="task-row-location-${bareId}"]`)
+  // Read as DRAWN, here and for the parent chips below: a chip in the page but hidden says nothing to anybody.
   const locationText = await waitUntil(() => locationChip.count().then((n) => n === 1), { timeoutMs: 8000 })
-    ? ((await locationChip.textContent()) ?? '').trim()
+    ? ((await locationChip.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
     : null
   chk(
     locationText === `Customize ${TAG}`,
@@ -402,7 +403,7 @@ try {
   await flip('list-show-subtask-parents')
   const parentChip = (id) => page.locator(`[data-testid="task-row-parent-${id}"]`)
   const parentText = await waitUntil(() => parentChip(orphanId).count().then((n) => n === 1), { timeoutMs: 8000 })
-    ? ((await parentChip(orphanId).textContent()) ?? '').trim()
+    ? ((await parentChip(orphanId).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
     : null
   chk(
     parentText === `shut ${TAG}`,
@@ -437,7 +438,7 @@ try {
   await flip('list-show-subtask-parents')
   await flip('list-show-subtask-parents')
   const orphanedText = (await parentChip(orphanId).count()) === 1
-    ? ((await parentChip(orphanId).textContent()) ?? '').trim()
+    ? ((await parentChip(orphanId).filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').trim()
     : null
   chk(
     orphanedText === `shut ${TAG}`,

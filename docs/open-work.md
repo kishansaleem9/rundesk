@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 322 items, 86 open, 11 partly fixed, 225 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 323 items, 85 open, 10 partly fixed, 228 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1338,7 +1338,7 @@ Now:
 `client-edit`, 6 checks:
 - Before: 1/6 on lane 7 (a plain member was offered nothing, which held).
 - After: 6/6 on lane 7.
-- Patches `cle-1..8`: all eight redden (lane 2, at `d86220d`, baseline 6/6); `cki-2` is re-aimed onto the delete's own line, and its run follows.
+- Patches `cle-1..8`: all eight redden (lane 2, at `d86220d`, baseline 6/6); `cki-2`, re-aimed onto the delete's own line, reddens (lane 2, at `d86220d`, baseline 3/3).
 - Regression on lanes 5, 6 and 7: the client, invoice, billable-time and project-page suites, 8/8.
 - In CI (232).
 
@@ -1442,7 +1442,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *Evidence, 29 September:* `check-plan-population.mjs` stopped the preflight on three patches "that need a person": `fd-7-toggle-latches`, `af-3-no-failure-recorded` and `sdp-4-refuses-everyone` read as `unreadable`. `folder-dialog` and `ai-activity-filters` printed `FAIL <reason>` without the check's sentence — `af-3`'s reason is built from the run's numbers ("0 new failed rows appeared …"), and `fd-7`'s is two strings joined — so `check-break-reddened.mjs` could not map either back to the check a claim names. 21 more suites had the same helper. `sdp-4`'s claim listed two sentences with no `or`, a shape the checker does not read.
 
-*Closed:* every suite's `chk` prints the sentence, then the reason (the 70 that were fixed on 26 September, and now these 23); `sdp-4`'s claim is in the checker's shape. After: `check-plan-population.mjs` agrees with the reddened checker on every patch (1703 needing a run), with none needing a person; the re-runs of the 23 suites follow in the break backlog.
+*Closed:* every suite's `chk` prints the sentence, then the reason (the 70 that were fixed on 26 September, and now these 23); `sdp-4`'s claim is in the checker's shape. After: `check-plan-population.mjs` agrees with the reddened checker on every patch (1703 needing a run), with none needing a person; the re-runs of the 23 suites follow in the break backlog. The three read again: `fd-7` and `af-3` redden (lanes 1 and 4, at `0911c6e`), and `sdp-4` reddens (lane 2, at `d86220d`, baseline 36/36).
 
 ### `found-29-sep/lane-push-errors-read-as-synced` — **closed** (test tooling, small; found closing `platform-flag-switches-apply-nowhere`)
 
@@ -1455,6 +1455,14 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 *Closed, 29 September:* `push_log_ok` (`lane-env.sh`) reads a push as done only when its log says the schema was applied or nothing changed, and holds no error. `fleet-sync.sh` reads every lane's log and pristine's before it stops anything: one that stopped is named, with its first error line, and nothing is restarted (exit 1), so the lanes keep serving what they served. `schema_ref_ensure` refuses to build the reference on a stopped push.
 - `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
 - Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
+
+### `found-29-sep/innertext-reads-hidden-leaves` — open, medium (test tooling; found closing `checks-read-textContent-not-what-is-shown`)
+
+**A check that reads an element's `innerText` still reads a hidden element's whole text**
+
+*Evidence, measured 29 September in the lanes' Chromium:* `innerText` leaves out hidden text inside an element that is drawn, but an element that is itself hidden (`hidden`, `display: none`) answers with its whole text, as `textContent` does; only `visibility: hidden` answers empty. There are 252 `innerText` / `allInnerTexts` reads in 86 suites, and about 35 have a visibility check on the same line. A read of a leaf — a count, a chip, a label — that stands for "shown" cannot fail on a patch that hides the leaf rather than removing it. `task-menu`'s print checks read the printed id out of a copy that is hidden on screen by design, so they say what the copy holds, not what paper shows.
+
+*To close:* measure which `innerText` reads decide a check that text is shown, and give `check-suite-text-reads.mjs` the same three outs for them (a message, a visibility guard on the read, a marker with a reason); convert; and read `task-menu`'s print checks under print media.
 
 ### `found-29-sep/unit-claims-read-a-nested-checkout` — **closed** (test tooling, small; found by the preflight for `workspace-audit-log-not-in-settings`)
 
@@ -1519,7 +1527,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 `own-capacity`, 6 checks:
 - Before: 1/6 on lane 1 (a manager setting a member's, and refused an admin's, which held).
 - After: 6/6 on lane 1.
-- Patches `ocp-1..7`: all seven redden (lane 2, at `0911c6e`, baseline 6/6); `pca-6` is re-aimed onto the inline key, and its run follows.
+- Patches `ocp-1..7`: all seven redden (lane 2, at `0911c6e`, baseline 6/6); `pca-6`, re-aimed onto the inline key, reddens (lane 4, at `d86220d`, baseline 8/8).
 - In CI (231).
 
 ### `found-28-sep/archived-tasks-unarchived-in-place` — **closed** (feature, small; found by the archived-tasks research)
@@ -1539,7 +1547,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 `unarchive-in-place`, 5 checks:
 - Before: 1/5 on lane 5 (Settings → Archived's answers, which the batching keeps).
 - After: 5/5 on lane 7.
-- Patches `uip-1..8`: all eight redden (lane 2, at `d86220d`, baseline 5/5); `ata-4` and `tsc-1` are re-aimed, and their runs follow.
+- Patches `uip-1..8`: all eight redden (lane 2, at `d86220d`, baseline 5/5); `ata-4` and `tsc-1`, re-aimed, redden (lane 2, at `d86220d`, baselines 7/7 and 5/5).
 - In CI (233).
 
 ### `found-28-sep/job-title-rule-and-message-disagree` — **closed** (permissions, small; found by the user-group research)
@@ -2858,7 +2866,7 @@ The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-men
 
 The break runs for `c55a088` found one wait that had cost a check its bite: `role-permissions-web` counted Save as template two frames after the member's keys answered, and the sheet still showed its skeleton then, so `rpw-5` (the button offered to everybody) ran 0 failed. The absence is now counted once the sheet has drawn the task (its cover band); `rpw-5`'s run follows the commit.
 
-*Break runs, 29 September* (lanes 1–4, at `0911c6e`, `394d3f9` and `d86220d`, every baseline green): in 14 of the 17 suites every patch reddens the check it names — `folder-dialog` 24 of 24, `space-default-permission` 22 of 22, `list-export` 10 of 10, `ai-activity-filters` 10 of 10, `addressability-live`, `panel-collapse`, `person-panel`, `task-menu`, `task-depth`, `video-regression`, `request-access`, `a61-meeting-record` and `settings-depth` 4 of 4 each, `video1-acceptance` 1 of 1. `role-permissions-web` (with `rpw-5`) and `chat-message-actions` were still running at this commit.
+*Break runs, 29 September* (lanes 1–4, at `0911c6e`, `394d3f9` and `d86220d`, every baseline green): in 16 of the 17 suites every patch reddens the check it names — `folder-dialog` 24 of 24, `space-default-permission` 22 of 22, `list-export` 10 of 10, `ai-activity-filters` 10 of 10, `role-permissions-web` 9 of 9 (`rpw-5` among them, at `d86220d`: the wait above gave it its bite back), `addressability-live`, `panel-collapse`, `person-panel`, `task-menu`, `task-depth`, `video-regression`, `request-access`, `a61-meeting-record`, `settings-depth` and `chat-message-actions` 4 of 4 each, `video1-acceptance` 1 of 1.
 
 `list-empty-states` was not measured: its baseline was red under the four runners' load (22 of 23 at `394d3f9`). The empty state read "No tasks yet" without its Create task, which the page draws once the list's access (`list-caps`) has answered, and under load that answer comes after the rows. Alone on lane 7 it passed 23/23 three times. It now waits (10 s at most) for the invitation before reading it, so a patch that takes the invitation away still fails the check; its set runs after the commit.
 
@@ -4163,13 +4171,26 @@ Measured:
 
 *Closed:* a picture is one we store, or none. `isPublicImagePath` (`public-images.controller.ts`, beside `publicImagePath`) accepts an upload's own address, one safe key segment under `avatars/` or `workspace-logos/`, so no `..` walks to another object. The sign-in provider writes its picture directly, not through the profile save. A save that sends back the picture already saved keeps it, so a profile form's round trip is not refused, and anything else is a 400. The settings page's logo is an upload with a Remove button; its address box, placeholder "https://…/logo.png", invited what the save now refuses. `settings-writes`: 0 of 4 before on lane 1, 5/5 after. Its checks: the admin's save; a logo at another host refused and not saved, beside the workspace's own upload; a profile picture the same, and none removing it; a provider's picture sent back kept, and a `..` walk refused; and the page offering the logo as an upload only. The page check was added after the first measurement; `stw-6` restores the box it guards. `stw-2..6`, each compiled, 5 of 5 reddened on lane 2. Regression: the sweep above. In CI.
 
-### `found-23-sep/checks-read-textContent-not-what-is-shown` — open, medium (found by `hr-9` reddening nothing)
+### `found-23-sep/checks-read-textContent-not-what-is-shown` — **closed** (test tooling, medium; found by `hr-9` reddening nothing)
 
 **A check that reads `textContent` cannot tell a shown message from a hidden one**
 
 *Evidence:* `hr-9` wraps Home's reminders empty state in `<div hidden>` — a blank panel to anybody looking — and `home-reminders` stayed green, because `textContent` includes hidden elements and still read "No reminders waiting". Fixed in that suite (`innerText`, which is what is rendered). The same read appears in 16 suites (`grep -l 'textContent(' test/e2e/*.mjs`, 23 September), and every one that asserts a sentence is SHOWN has the same blind spot to a patch that hides rather than removes.
 
 *To close:* a section-enders-style rule — a check whose condition asserts text through `textContent` — with the fix `innerText` or an explicit visibility check; measure the count first, then convert.
+
+*Closed, 29 September.* Measured first, each suite lexed with its comments stripped: 69 `textContent` / `allTextContents` reads in 28 suites, not 16 — most are property reads in page code and `allTextContents()` calls, which the grep did not see. 55 fed a check that text IS SHOWN (in the condition, or through a helper, a variable or the `waitUntil` before it), one more reads `task-menu`'s printed id out of a copy that is hidden on screen by design, and 13 decided nothing about showing (7 in a check's message, 1 in a variable only a message uses, 4 reading a row's text to find the row, 1 asserting absence).
+
+`innerText` alone is not the fix, measured in the lanes' Chromium: it leaves out hidden text INSIDE an element that is drawn (the `hr-9` shape, where `home-reminders` reads the panel), but an element that is itself hidden answers `innerText` with its whole text, as `textContent` does. So a read that stands for "shown" is now a visibility check on the element read (`.filter({ visible: true })` on the locator, `checkVisibility()` in page code) and `innerText` for anything hidden inside it.
+
+- 55 reads converted in 25 suites; 6 carry a marker saying why they may read hidden text (`key` 4, `absence` 1, `not-rendered` 1); `home-reminders` had two more unguarded reads (the reminder labels and the nav count). Every check sentence is byte-for-byte as before.
+- After: 21 reads in 14 suites, none resting a check that text is shown on text that may be hidden: 7 in a message, 1 in a message-only variable, 7 behind a visibility guard, 6 marked.
+- `scripts/check-suite-text-reads.mjs --mutate` (preflight, and CI's verify job): every read is in a message, visibility-guarded on the read itself, or marked with a known reason on its own line; unknown reasons, markers that exempt nothing, and fewer than 100 suites read all fail. 14 of 14 mutations bite, and a planted `hr-9`-shaped read is caught while the same read filtered to visible and read with `innerText` passes.
+- Demonstrated on lane 5: with a reminder's label hidden in the live page, `allTextContents()` and `allInnerTexts()` both still list it and the converted read drops it; with `hr-9` applied, `panel.textContent()` still says "No reminders waiting" and `panel.innerText()` is empty. In `timesheet-mine`, a hidden "Total this week" reads "1h 00m" through both properties, and `null` through the converted read.
+- The 28 changed suites on lanes 1, 3 and 5 at once, at this tree: 27 of 28 at first. `task-depth` read its add-tag control after a fixed 3.8 s, before the task's capabilities had drawn it under the three lanes' load; it now waits for the control (20 s at most), and a new patch, `td-tags-2`, takes the control away. Then 91/91.
+- Their break sets were measured before the change and run again after the commit.
+
+Not in this item, the same blind spot one step on: 252 `innerText` / `allInnerTexts` reads in 86 suites, about 35 with a visibility check on the same line. A leaf read among them cannot see a hidden element either (`found-29-sep/innertext-reads-hidden-leaves`).
 
 ### `found-23-sep/stale-chunk-recovery-writes-the-shared-tree` — **closed**
 
@@ -4805,13 +4826,26 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Research how ClickUp's comment composer handles Email and the Create Task split-button menu, build both, then rewrite task-mentions:378-409 to drive the built mode. Re-mark row B* as unbuilt until then.
 
-### `product-siblings/assign-with-ai-picker-unbuilt` — partly-fixed, medium
+### `product-siblings/assign-with-ai-picker-unbuilt` — **closed** (unbuilt control, medium)
 
 **'⚡ Assign with AI' is marked B in the ledger but closed only via the API; the assignee picker still says it is not built, for a reason that is no longer true**
 
 *Evidence:* The frame (docs/video2-frame-observations.md:396-399, 15:45) puts the control in the ASSIGNEE PICKER footer. docs/video2-reaudit.md:847 marks it 'B … closed by ai-assign.mjs', but :231-236 of the same doc says 'Not built there, on purpose'. task-detail-sheet.tsx:3256 and :3264-3270 say NOT built because the AI 'cannot CHOOSE the person'. That is stale: ai.service.ts:3036 suggestAssignee does exactly that, and ai.controller.ts:519-540 exposes it 'because the assignee picker is a menu'. The only callers of /ai/assignee-suggestion are test/e2e/ai-assign.mjs:99 and the chat tool (ai.service.ts:1814). No web code calls it (searched 'assignee-suggestion', 'suggestAssignee', 'assign with ai').
 
 *To close:* Add the picker footer item: call GET /ai/assignee-suggestion?taskId, show the pick and its numbers, and assign on confirm. Correct the comments at :786-790 and :3256-3270 and the two contradictory ledger passages. Add a UI check to ai-assign.mjs.
+
+*Closed, 29 September.* Frame `15:45` puts "⚡ Assign with AI" in the assignee picker's footer; `GET /ai/assignee-suggestion` already chose (each person who may take the task, ranked by the open work they carry — in the task's list, which counts for them, and overall — with the reason in their own numbers, needing no model). Measured on lane 7 at `d86220d` before: the picker had no such footer (0 of 2).
+
+- The picker's footer asks the route when pressed (not with the picker: it reads the workspace's open work), then shows the pick by name with the reason, the runner-up, and a button that assigns the pick. Nothing is assigned until it is pressed. A refusal (nobody else may take it, no permission) is said in the route's words. Four locales.
+- The comments at the picker that said it was not built "because the AI cannot CHOOSE the person" now say it is; `docs/video2-reaudit.md` no longer says both (its "not built there, on purpose" passage and its row say the same thing now).
+- The UI check is its own suite rather than a section of `ai-assign.mjs`, which stays the route's.
+
+`assign-with-ai-picker`, 2 checks:
+- Before: 0/2 on lane 7 (the picker had no footer).
+- After: 2/2 on lane 7. Its first run staged the other members' open work in the task's own list and read the busy member as the pick: work in the same list counts for whoever carries it (they hold the thread). That is the route's rule, and `ai-assign.mjs` stages its load in another list for the same reason; the suite now does too.
+- Patches `awa-1..6`: the footer gone, the runner-up offered as the pick, the reason dropped, the pick assigned before anybody confirms, the confirm dead, the confirm assigning the runner-up. Their runs follow the commit.
+- In CI (236).
+- Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 
 ### `ledger-rows/row-1060` — open, medium
 
@@ -5099,11 +5133,24 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Research ClickUp's merge rules for a parent and its subtask, then allow or refuse to match, with a check either way.
 
-### `product-siblings/other-get-routes-without-reader` — open, small
+### `product-siblings/other-get-routes-without-reader` — **closed** (unread routes, small)
 
 **Other GET routes with no web reader: digest preview, webhook deliveries, goal history**
 
 *Evidence:* notifications.controller.ts:45-52 (digest/preview), webhooks.controller.ts:74-80 (:webhookId/deliveries) and goals.controller.ts:105-108 (goals/:goalId/history). Searches of apps/web/src (excluding i18n catalogs) for 'digest/preview', 'deliveries' and '/history' returned nothing. A route survey that matched full paths found 52 GETs without a literal caller, most of them helper-built URLs; these three were checked by hand.
 
 *To close:* Either surface each one (a digest preview in the notification settings, a delivery log under webhooks, history on the goal page) or delete it.
+
+*Closed, 29 September: each is surfaced where it belongs.* ClickUp: a webhook's health is on the webhook (a failing delivery is retried five times, then counted in its `fail_count`, and at 100 the webhook is suspended); a Goal's history or activity says when its targets changed; notifications offer a daily summary email at a chosen time. Measured on lane 7 at `d86220d` before: no page asked any of the three routes (0 of 3).
+
+- Settings → Integrations → Webhooks: each webhook offers Deliveries, its last 50 — the event, delivered or failed, the answer's status, the attempts when there was more than one, and for a failed delivery the start of the endpoint's reply, or the error when nothing answered. Four locales.
+- A goal's page: History, each change of its value (from → to, right to left in Arabic and Urdu), by whom and when, newest first. `GET /goals/:goalId/history` now answers each change with its author's id and name instead of bare rows, at most 100.
+- Profile → Notifications, with the digest on: Preview the digest, asked for (it reads the person's whole window), showing the total and each group as the email groups them, or that there is nothing to send.
+
+`routes-with-readers`, 3 checks:
+- Before: 0/3 on lane 7.
+- After: 3/3 on lane 7.
+- Patches `rwr-1..5`: one or more per check (the toggle gone, the panel asking a route that is not there, the page reading no history, the history oldest first, the preview gone). Their runs follow the commit.
+- In CI (235).
+- Regression on lane 7, 22 suites (webhooks, goals, notification settings, the assignee picker, the AI assignment routes, settings tabs), with both new suites: 22/22.
 

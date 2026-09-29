@@ -671,7 +671,8 @@ try {
     els.map((el) => ({
       testid: el.getAttribute('data-testid'),
       because: el.getAttribute('data-because'),
-      lines: [...el.querySelectorAll('span')].map((s) => s.textContent?.trim() ?? ''),
+      // What is drawn: a span that is not shown reads '' (its own innerText would not say so).
+      lines: [...el.querySelectorAll('span')].map((s) => (s.checkVisibility() ? s.innerText : '').trim()),
     })),
   )
   chk(
@@ -810,8 +811,8 @@ try {
     'the word bar was up over an empty composer',
   )
   const wordsNow = async () =>
-    page.locator('[data-testid^="ai-word-suggestion-"]').evaluateAll((els) =>
-      els.map((el) => el.textContent?.trim() ?? ''),
+    page.locator('[data-testid^="ai-word-suggestion-"]').filter({ visible: true }).evaluateAll((els) =>
+      els.map((el) => el.innerText.trim()),
     )
   await box.fill('create a ')
   const barUp = await waitUntil(async () => (await wordsNow()).length === 3, { timeoutMs: 8_000 })

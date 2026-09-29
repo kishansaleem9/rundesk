@@ -167,10 +167,11 @@ try {
   }
 
   const header = page.getByTestId('task-attachments-header')
+  // DRAWN: the header is shown, and then its innerText leaves out a count hidden inside it.
   chk(
     (await header.isVisible().catch(() => false))
       && (await header.getAttribute('data-count')) === String(SEEDED)
-      && ((await header.textContent()) ?? '').includes(String(SEEDED)),
+      && ((await header.innerText()) ?? '').includes(String(SEEDED)),
     `the header carries the frame's count — ${SEEDED}, drawn as well as recorded`,
     `the header reads "${(await header.textContent().catch(() => '—'))?.trim()}" with data-count=` +
       `${await header.getAttribute('data-count').catch(() => '—')} against ${SEEDED} attachments`,

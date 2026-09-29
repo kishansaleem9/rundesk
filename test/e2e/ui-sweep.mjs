@@ -718,7 +718,7 @@ try {
     const rows = await page.locator('select[title="Reports to"]').evaluateAll((sels) =>
       sels.map((el) => ({
         name: /Who (.+) reports to/.exec(el.getAttribute('aria-label') ?? '')?.[1] ?? '',
-        email: /[\w.+-]+@[\w.-]+\.\w+/.exec(el.closest('li')?.textContent ?? '')?.[0] ?? '',
+        email: /[\w.+-]+@[\w.-]+\.\w+/.exec(el.closest('li')?.textContent ?? '')?.[0] ?? '', // text-read: key — finds the row by its email
       })),
     )
     const pickerFor = (row) =>
@@ -807,7 +807,8 @@ try {
   if (!haveTp) {
     typePicker.rest('skipped: there was no picker to read options from or apply')
   } else {
-    const opts = await tp.locator('option').allTextContents()
+    // Offered only while the picker is shown itself (an option's innerText is its textContent).
+    const opts = await tp.filter({ visible: true }).locator('option').allTextContents()
     typePicker.step(opts.some((o) => o.includes(TYPE)), `the new type is not offered: ${JSON.stringify(opts)}`,
       `the new type is offered: ${JSON.stringify(opts)}`)
     await tp.selectOption({ label: `🚀 ${TYPE}` })

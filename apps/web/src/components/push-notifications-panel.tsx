@@ -354,6 +354,9 @@ export function PushNotificationsPanel() {
                 ))}
               </select>
             </label>
+            <div className="sm:col-span-2">
+              <DigestPreview frequency={digestFrequency} />
+            </div>
           </div>
         )}
       </Card>
@@ -533,4 +536,55 @@ function urlBase64ToUint8Array(base64String: string): Uint8Array {
     outputArray[i] = rawData.charCodeAt(i)
   }
   return outputArray
+}
+
+/**
+ * WHAT THE DIGEST WOULD SAY NOW — `GET /notifications/digest/preview`, which no
+ * page read (`product-siblings/other-get-routes-without-reader`): the
+ * notifications of the last day or week, grouped as the email groups them.
+ * Asked for, not fetched with the settings: it reads a person's whole window.
+ */
+function DigestPreview({ frequency }: { frequency: 'daily' | 'weekly' }) {
+  const { t, tCount } = useTranslation()
+  const [asked, setAsked] = useState(false)
+  const query = useQuery({
+    queryKey: ['digest-preview', frequency],
+    queryFn: () =>
+      api<{ total: number; groups: Array<{ type: string; count: number; items: Array<{ title: string }> }> }>(
+        `/notifications/digest/preview?frequency=${frequency}`,
+      ),
+    enabled: asked,
+  })
+  return (
+    <div data-testid="digest-preview" className="rounded-md border border-border/60 p-3">
+      <Button type="button" size="sm" variant="outline" data-testid="digest-preview-open" onClick={() => setAsked(true)} disabled={asked && query.isFetching}>
+        <Eye className="h-3.5 w-3.5 mr-1.5" />
+        {t('pushNotifications.digestPreview')}
+      </Button>
+      {asked && (
+        <div className="mt-2 text-sm">
+          {query.isLoading ? (
+            <InlineSkeleton />
+          ) : query.isError ? (
+            <p className="text-destructive">{t('pushNotifications.digestPreviewFailed')}</p>
+          ) : query.data && query.data.total === 0 ? (
+            <p className="text-muted-foreground" data-testid="digest-preview-empty">{t('pushNotifications.digestPreviewEmpty')}</p>
+          ) : (
+            <div>
+              <p className="font-medium" data-testid="digest-preview-total">{tCount('pushNotifications.digestPreviewTotal', query.data?.total ?? 0)}</p>
+              <ul className="mt-1 space-y-1">
+                {(query.data?.groups ?? []).map((g) => (
+                  <li key={g.type} data-testid="digest-preview-group" className="text-xs">
+                    <span className="font-mono">{g.type}</span>
+                    <span className="text-muted-foreground"> · {g.count}</span>
+                    {g.items[0] && <span className="text-muted-foreground"> · {g.items[0].title}</span>}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
 }

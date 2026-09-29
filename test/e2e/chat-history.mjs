@@ -256,11 +256,12 @@ try {
   const edited = await api(`/chat/messages/${ids[0]}`, { method: 'PATCH', body: { body: `${TAG} m001 edited` } })
   const arrived = await post(CH, `${TAG} arrived live`)
   const oldRow = tab.getByTestId(`message-row-${ids[0]}`)
-  await waitUntil(async () => ((await oldRow.textContent().catch(() => '')) ?? '').includes('m001 edited'), { timeoutMs: 10_000 })
+  // Read as DRAWN — a shown row's `innerText` — here and below: text that is in the page but hidden is shown to nobody.
+  await waitUntil(async () => ((await oldRow.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? '').includes('m001 edited'), { timeoutMs: 10_000 })
   await waitUntil(async () => (await tab.getByTestId(`message-row-${arrived}`).count()) === 1, { timeoutMs: 10_000 })
   chk(
     edited.status < 300 &&
-      ((await oldRow.textContent().catch(() => '')) ?? '').includes('m001 edited') &&
+      ((await oldRow.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').includes('m001 edited') &&
       (await tab.getByTestId(`message-row-${arrived}`).count()) === 1,
     'an edit to the oldest message, three pages up, shows live — and a new message lands at the end',
     `edit answered ${edited.status}; old row reads ${JSON.stringify(((await oldRow.textContent().catch(() => '')) ?? '').slice(0, 80))}; new row present ${(await tab.getByTestId(`message-row-${arrived}`).count()) === 1}`,
@@ -281,9 +282,9 @@ try {
 
   await tab.goto(`${B}/app/${WS}/chat?channel=${CH}&message=${elsewhere}`, { waitUntil: 'domcontentloaded' })
   const toast = tab.locator('[data-sonner-toast]')
-  await waitUntil(async () => ((await toast.allTextContents().catch(() => [])).join(' ')).includes('isn’t in this channel'), { timeoutMs: 20_000 })
+  await waitUntil(async () => ((await toast.filter({ visible: true }).allInnerTexts().catch(() => [])).join(' ')).includes('isn’t in this channel'), { timeoutMs: 20_000 })
   chk(
-    ((await toast.allTextContents().catch(() => [])).join(' ')).includes('isn’t in this channel'),
+    ((await toast.filter({ visible: true }).allInnerTexts().catch(() => [])).join(' ')).includes('isn’t in this channel'),
     'and a link to a message this channel does not hold says so, after looking',
     `toasts: ${JSON.stringify((await toast.allTextContents().catch(() => [])).join(' | ').slice(0, 160))}`,
   )
@@ -293,17 +294,17 @@ try {
 
   await tab.goto(`${B}/app/${WS}/chat?channel=${CH}&thread=${PARENT}`, { waitUntil: 'domcontentloaded' })
   const panel = tab.getByTestId('chat-thread-panel')
-  await waitUntil(async () => ((await panel.textContent().catch(() => '')) ?? '').includes(`${TAG} r130`), { timeoutMs: 20_000 })
-  const panelText = (await panel.textContent().catch(() => '')) ?? ''
+  await waitUntil(async () => ((await panel.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? '').includes(`${TAG} r130`), { timeoutMs: 20_000 })
+  const panelText = (await panel.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? ''
   chk(
     panelText.includes(`${TAG} r130`) && !panelText.includes(`${TAG} r001`) && (await tab.getByTestId('thread-load-older').count()) === 1,
     'the thread panel shows r130, not r001, with "Load earlier replies" above them',
     `r130 ${panelText.includes(`${TAG} r130`)}, r001 ${panelText.includes(`${TAG} r001`)}, load control ${await tab.getByTestId('thread-load-older').count()}`,
   )
   await tab.getByTestId('thread-load-older').click({ timeout: 5000 }).catch(() => {})
-  await waitUntil(async () => ((await panel.textContent().catch(() => '')) ?? '').includes(`${TAG} r001`), { timeoutMs: 10_000 })
+  await waitUntil(async () => ((await panel.filter({ visible: true }).innerText({ timeout: 2000 }).catch(() => '')) ?? '').includes(`${TAG} r001`), { timeoutMs: 10_000 })
   chk(
-    ((await panel.textContent().catch(() => '')) ?? '').includes(`${TAG} r001`) && (await tab.getByTestId('thread-load-older').count()) === 0,
+    ((await panel.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '').includes(`${TAG} r001`) && (await tab.getByTestId('thread-load-older').count()) === 0,
     'and asking for them brings the first thirty, after which nothing earlier is offered',
     `r001 present ${((await panel.textContent().catch(() => '')) ?? '').includes(`${TAG} r001`)}, load control ${await tab.getByTestId('thread-load-older').count()}`,
   )

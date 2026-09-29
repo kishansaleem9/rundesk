@@ -436,16 +436,14 @@ try {
   await page.goto(`${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${taskId}`, {
     waitUntil: 'domcontentloaded',
   })
-  await page.waitForTimeout(3800)
-
+  // The control is drawn once the task and what this reader may do with it
+  // have answered, which under a sweep's load is later than a fixed wait.
   const addTag = page.getByTestId('task-tag-add')
-  check(await addTag.isVisible().catch(() => false), 'the task sheet offers a way to add a tag')
+  const tagOffered = await waitUntil(() => addTag.isVisible().catch(() => false), { timeoutMs: 20_000 })
+  check(tagOffered, 'the task sheet offers a way to add a tag')
   await addTag.click({ timeout: 10_000 }).catch(() => {})
-  await page.waitForTimeout(900)
-  check(
-    await page.getByTestId('task-tag-popover').isVisible().catch(() => false),
-    'it opens a tag box',
-  )
+  const tagBox = await waitUntil(() => page.getByTestId('task-tag-popover').isVisible().catch(() => false), { timeoutMs: 5_000 })
+  check(tagBox, 'it opens a tag box')
 
   // "likhke ENTER dabao to naya tag ban jaye" — the whole interaction.
   const TAG = `ui-tag-${Date.now()}`
@@ -609,7 +607,7 @@ try {
   const dateField = (label) =>
     page.evaluateHandle((lbl) => {
       for (const d of Array.from(document.querySelectorAll('div.text-xs.uppercase'))) {
-        if (d.textContent?.trim().startsWith(lbl)) return d.parentElement?.querySelector('input')
+        if (d.textContent?.trim().startsWith(lbl)) return d.parentElement?.querySelector('input') // text-read: key — finds a field by its uppercase label
       }
       return null
     }, label).then((h) => h.asElement())

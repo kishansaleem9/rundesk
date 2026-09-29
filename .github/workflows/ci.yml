@@ -285,6 +285,11 @@ jobs:
       - name: Nothing ends a section on a throw where a check belongs
         run: node scripts/check-suite-section-enders.mjs
 
+      # A check that says text is shown reads what is drawn, not textContent,
+      # which reads hidden text too (checks-read-textContent-not-what-is-shown).
+      - name: A check of shown text reads what is drawn, and that rule bites
+        run: node scripts/check-suite-text-reads.mjs --mutate
+
       # Rule six of that checker, which is a gate over a tree with zero sites
       # left in it — and zero is the number this audit has learnt not to take on
       # trust. The rule turns on two things that can be wrong without looking
@@ -530,11 +535,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND THIRTY-FOUR — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND THIRTY-SIX — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 257 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234.
+    # that is about 260 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236.
     #
     # The limit is 300, raised from 270 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
@@ -2920,6 +2925,24 @@ jobs:
       - name: The audit log is read in the workspace's Settings
         if: '!cancelled()'
         run: node test/e2e/audit-log-settings.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # Three GET routes no page read: a webhook's deliveries, a goal's
+      # history, the digest's preview (other-get-routes-without-reader).
+      - name: A webhook's deliveries, a goal's history and the digest preview are read
+        if: '!cancelled()'
+        run: node test/e2e/routes-with-readers.mjs --api 3011 --dist apps/web/dist
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # The assignee picker's footer asks who should take the task, and
+      # assigns only on confirm (assign-with-ai-picker-unbuilt).
+      - name: The assignee picker's Assign with AI suggests and assigns on confirm
+        if: '!cancelled()'
+        run: node test/e2e/assign-with-ai-picker.mjs --api 3011 --dist apps/web/dist
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

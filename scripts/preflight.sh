@@ -59,6 +59,7 @@ step "and that rule can fail at all"    node scripts/check-branches-cases.mjs --
 step "nothing ends a section on a throw" node scripts/check-suite-section-enders.mjs
 step "and rule six's reader holds up"    node scripts/check-suite-reads.mjs --mutate
 step "and every ender rule bites"        node scripts/check-suite-enders.mjs --mutate
+step "a check of shown text reads what is drawn" node scripts/check-suite-text-reads.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate
 step "a lane's old API stops before reuse" bash scripts/check-lane-api-down.sh --mutate
 step "a failed planner is never 'nothing left'" bash scripts/check-build-plan.sh --mutate

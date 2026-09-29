@@ -195,8 +195,9 @@ try {
   // and the read threw at 5 of 12 — with the gate above it already caught for
   // that same patch. The empty string is what a card with no title reads as,
   // which is what every caller here already compares against.
+  // Read as DRAWN, here and for the headline and position: a hidden title is no title.
   const readCard = async () =>
-    (await cardTitle().textContent({ timeout: 8000 }).catch(() => ''))?.trim() ?? ''
+    (await cardTitle().filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => ''))?.trim() ?? ''
 
   // ───────────────────────────────────────────────────────────────────────────
   console.log('\n▶ the screen frames `12:40`–`12:50` draw')
@@ -221,7 +222,7 @@ try {
   )
 
   const headline = (
-    await page.locator('[data-testid="planner-onboarding-title"]').textContent().catch(() => null)
+    await page.locator('[data-testid="planner-onboarding-title"]').filter({ visible: true }).innerText({ timeout: 8000 }).catch(() => null)
   )?.trim()
   chk(
     headline === HEADLINE,
@@ -317,7 +318,8 @@ try {
   // AND in the message — which `chk` evaluates whether the check passes or not.
   const position = await page
     .locator('[data-testid="planner-onboarding-position"]')
-    .textContent({ timeout: 6000 })
+    .filter({ visible: true })
+    .innerText({ timeout: 6000 })
     .then((t) => t?.trim() ?? null)
     .catch(() => null)
   chk(

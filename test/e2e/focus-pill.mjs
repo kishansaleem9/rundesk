@@ -238,8 +238,9 @@ try {
     })
 
   const pill = () => page.getByTestId('focus-block-pill')
+  // Read as DRAWN, here and for the label: a pill in the page but hidden is a header with no pill.
   const pillRemaining = () =>
-    page.getByTestId('focus-block-pill-remaining').textContent().catch(() => null)
+    page.getByTestId('focus-block-pill-remaining').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => null)
 
   await page.goto(`${stack.base}/login`, { waitUntil: 'domcontentloaded' })
   await page.fill('input[type=email]', ME.email)
@@ -319,7 +320,7 @@ try {
     (call) => call.from === window3Day.from && call.to === window3Day.to,
   )
   const labelText = appeared
-    ? await page.getByTestId('focus-block-pill-label').textContent().catch(() => null)
+    ? await page.getByTestId('focus-block-pill-label').filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => null)
     : null
   chk(
     appeared && (labelText ?? '').trim() === expectedLabel,

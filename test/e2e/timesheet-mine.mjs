@@ -117,7 +117,8 @@ try {
   await page.getByRole('button', { name: /^Accept$/ }).click({ timeout: 3000 }).catch(() => {})
   await page.goto(`${B}/app/${WS}/time`, { waitUntil: 'domcontentloaded' })
 
-  const stat = (id) => page.getByTestId(id).textContent({ timeout: 5000 }).then((t) => t?.trim() ?? null, () => null)
+  // Read as DRAWN, here and for the Team row: a figure in the page but hidden is a figure nobody reads.
+  const stat = (id) => page.getByTestId(id).filter({ visible: true }).innerText({ timeout: 5000 }).then((t) => t?.trim() ?? null, () => null)
   const rowsUsers = () =>
     page.getByTestId('time-entry-row').evaluateAll((els) => els.map((e) => e.getAttribute('data-user-id'))).catch(() => [])
 
@@ -165,7 +166,7 @@ try {
   await page.getByTestId('time-sheet-team').click({ timeout: 8000 }).catch(() => {})
   const memberRow = page.locator(`[data-testid="time-team-row"][data-user-id="${memberId}"]`)
   const shown = await waitUntil(async () => (await memberRow.count()) === 1, { timeoutMs: 15_000 })
-  const memberTotal = shown ? ((await memberRow.textContent().catch(() => '')) ?? '') : ''
+  const memberTotal = shown ? ((await memberRow.filter({ visible: true }).innerText({ timeout: 5000 }).catch(() => '')) ?? '') : ''
   chk(
     shown && memberTotal.includes('2h 00m'),
     'the member’s two hours are on the Team view — Mine was narrowed, the team was not',

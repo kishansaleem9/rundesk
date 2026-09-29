@@ -193,13 +193,27 @@ export class GoalsService {
     return { ok: true }
   }
 
+  /**
+   * The goal's progress over time, newest first, each change with who made it
+   * — the goal page's History (`product-siblings/other-get-routes-without-reader`:
+   * no page read this).
+   */
   async history(goalId: string, actor: ReadActor) {
     const goal = await this.goalOpenTo(goalId, actor)
     return this.db
-      .select()
+      .select({
+        id: goalUpdates.id,
+        fromValue: goalUpdates.fromValue,
+        toValue: goalUpdates.toValue,
+        note: goalUpdates.note,
+        createdAt: goalUpdates.createdAt,
+        author: { id: users.id, displayName: users.displayName },
+      })
       .from(goalUpdates)
+      .leftJoin(users, eq(users.id, goalUpdates.authorId))
       .where(eq(goalUpdates.goalId, goal.id))
       .orderBy(desc(goalUpdates.createdAt))
+      .limit(100)
   }
 
   // ─── Single goal detail (goal + owner + key results) ───────────────────────

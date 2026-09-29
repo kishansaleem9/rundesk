@@ -243,9 +243,10 @@ try {
   }
 
   console.log('\n▶ the Group chip names its current value `12:10`')
-  const groupText = () => page.getByTestId('list-group-by').evaluate(
-    (el) => el.options[el.selectedIndex]?.textContent?.trim() ?? '',
-  )
+  // A closed select shows its selected option's label, and only while the select itself is shown.
+  const groupText = () => page.getByTestId('list-group-by').filter({ visible: true }).evaluate(
+    (el) => el.options[el.selectedIndex]?.textContent?.trim() ?? '', undefined, { timeout: 5000 },
+  ).catch(() => '')
   chk(await groupText() === 'Group: Status', 'it reads "Group: Status" on arrival',
     `it read ${JSON.stringify(await groupText())} — the frame's chip names the value, not the axis`)
   chk(await page.locator('[data-testid="list-group-chip"] svg').count() > 0,
@@ -263,8 +264,9 @@ try {
   // options", which is the finding — thirty seconds of nothing is not.
   await page.getByTestId('list-subtasks').locator('summary').click({ timeout: 8000 }).catch(() => {})
   await page.waitForTimeout(400)
-  const optionTexts = await page.locator('[data-testid^="list-subtasks-"]').evaluateAll(
-    (els) => els.map((e) => (e.textContent ?? '').replace(/\s+/g, ' ').trim()),
+  // What the menu SHOWS: a closed menu still holds its items, and offers none of them.
+  const optionTexts = await page.locator('[data-testid^="list-subtasks-"]').filter({ visible: true }).evaluateAll(
+    (els) => els.map((e) => e.innerText.replace(/\s+/g, ' ').trim()),
   )
   chk(optionTexts.length === 3, 'the menu offers exactly three', `it offered ${optionTexts.length}: ${JSON.stringify(optionTexts)}`)
   chk(

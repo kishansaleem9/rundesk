@@ -165,7 +165,8 @@ async function paintedElements(page) {
       const painted =
         s.backgroundImage !== 'none' ||
         (s.backgroundColor !== 'rgba(0, 0, 0, 0)' && s.backgroundColor !== 'transparent')
-      if (painted || (el.textContent || '').trim().length > 0) seen.push(el.tagName)
+      // `innerText` of this shown element: text hidden inside it paints nothing.
+      if (painted || (el.innerText || '').trim().length > 0) seen.push(el.tagName)
     }
     return seen.length
   })

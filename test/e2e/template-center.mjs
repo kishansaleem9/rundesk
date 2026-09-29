@@ -248,7 +248,8 @@ try {
   chk(await scopeCount('all') === 10 && await scopeCount('custom') === 10 && await scopeCount('builtin') === 0,
     'the scope rail counts All 10 · Built-in 0 · Workspace 10',
     `it counted all=${await scopeCount('all')} builtin=${await scopeCount('builtin')} custom=${await scopeCount('custom')}`)
-  const ucOptions = await page.locator('[data-testid="templates-facet-usecase"] option').evaluateAll(
+  // A select offers its options only while it is shown itself (an option's innerText is its textContent).
+  const ucOptions = await page.locator('[data-testid="templates-facet-usecase"]').filter({ visible: true }).locator('option').evaluateAll(
     (els) => els.map((e) => [e.getAttribute('value'), (e.textContent ?? '').replace(/\s+/g, ' ').trim()]),
   )
   chk(JSON.stringify(ucOptions.map(([v]) => v)) ===

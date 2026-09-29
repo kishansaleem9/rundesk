@@ -330,7 +330,9 @@ try {
       // receive it. Reading the document afterwards is impossible now that the
       // app puts itself back — and this is the more faithful question anyway.
       const root = document.getElementById('task-print-root')
-      window.__printed = root ? { text: root.innerText, id: root.querySelector('[data-testid="task-print-id"]')?.textContent ?? '', display: getComputedStyle(root).display } : null
+      // The copy is `display: none` on SCREEN by design (checked below), and a hidden element's
+      // innerText is its whole text: both reads say what the copy holds, not what paper shows.
+      window.__printed = root ? { text: root.innerText, id: root.querySelector('[data-testid="task-print-id"]')?.textContent ?? '', display: getComputedStyle(root).display } : null // text-read: not-rendered — hidden on screen by design
       window.dispatchEvent(new Event('afterprint'))
     }
   })
