@@ -193,15 +193,27 @@ try {
   )
 
   /*
-   * AND THE OTHER DIRECTION, which had no check at all and the wrong sentence.
+   * AND THE OTHER DIRECTION IS A MERGE (`commit-log/log-b7ee313-1`). A subtask
+   * merged into its own parent was refused until 29 September, on a reason that
+   * described the opposite merge; nothing points into the bin when it happens,
+   * and ClickUp merges subtasks into another task, the parent included, from
+   * the parent's subtask toolbar. A pair of its own, so the fixtures the merge
+   * below reads are untouched.
    */
-  const childIntoParent = await A(`/tasks/${child.id}/merge`, { method: 'POST', body: { targetTaskId: source.id } })
+  const family = await makeTask(`A parent ${stamp}`)
+  const kid = family?.id ? await makeTask(`Its subtask ${stamp}`, { parentTaskId: family.id }) : null
+  if (kid?.id) await A(`/tasks/${kid.id}/comments`, { method: 'POST', body: { body: `THE KID'S NOTE ${stamp}` } })
+  const kidIntoParent = kid?.id
+    ? await A(`/tasks/${kid.id}/merge`, { method: 'POST', body: { targetTaskId: family.id } })
+    : { status: 0, error: { message: 'could not make the pair' } }
+  const familyComments = family?.id ? ((await A(`/tasks/${family.id}/comments`)).data ?? []) : []
+  const kidBinned = kid?.id ? !!(await A(`/tasks/${kid.id}`)).data?.isArchived : false
   chk(
-    JSON.stringify(childIntoParent).includes('A subtask cannot be merged into its own parent'),
-    'and a subtask merged into its parent is refused in those words',
-    `it said ${JSON.stringify(childIntoParent.error ?? null)} — this refusal spent its whole life ` +
-      'describing the opposite merge, because its condition reads the TARGET\'s children and its ' +
-      'name, comment, message and unit test all described the source\'s',
+    kidIntoParent.status >= 200 && kidIntoParent.status < 300
+      && familyComments.some((c) => String(c.body ?? '').includes(`THE KID'S NOTE ${stamp}`)) && kidBinned,
+    'and a subtask merged into its own parent is merged, as in ClickUp: its comment lands on the parent and the subtask goes to the bin',
+    `the merge answered ${kidIntoParent.status} ${JSON.stringify(kidIntoParent.error?.message ?? null)}; ` +
+      `the parent's comments ${JSON.stringify(familyComments.map((c) => c.body))}; the subtask binned ${kidBinned}`,
   )
 
   const intoNothing = await A(`/tasks/${source.id}/merge`, {
@@ -370,7 +382,7 @@ try {
   chk(done, 'and merging from the menu really merges',
     'the task was not binned — the dialog reported something the API never did')
 
-  for (const id of [source.id, target.id, third.id, child.id, live.id, liveTarget.id]) {
+  for (const id of [source.id, target.id, third.id, child.id, live.id, liveTarget.id, family?.id, kid?.id].filter(Boolean)) {
     const gone = await A(`/tasks/${id}`, { method: 'DELETE' })
     if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /tasks/${id} answered ${gone.status}`)
   }

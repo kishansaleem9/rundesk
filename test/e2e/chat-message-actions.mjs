@@ -31,7 +31,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
-import { waitUntil } from './lib/wait.mjs'
+import { waitUntil, readText, waitForCount } from './lib/wait.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -177,6 +177,50 @@ async function signIn(page, origin, who) {
   await page.waitForURL(/\/app\//, { timeout: LOGIN_NAV_TIMEOUT_MS })
 }
 
+/**
+ * Whether a control on the message's hover toolbar is SHOWN to a person: drawn,
+ * not `visibility: hidden`, and not at opacity 0 — or null when it is not there.
+ *
+ * `isVisible()` is not that question. Playwright counts an element at opacity 0
+ * as visible, and the toolbar is always in the DOM at opacity 0, shown by
+ * `group-hover`. So the toolbar checks passed on a build whose toolbar never
+ * appeared at all: 73/73 on lane 5, 29 September. `checkVisibility` with
+ * `opacityProperty` answers for the control and every ancestor, the toolbar's
+ * own `opacity-0` among them.
+ */
+const shownToAPerson = (control) =>
+  control
+    .evaluate((el) => el.checkVisibility({ opacityProperty: true, visibilityProperty: true }), undefined, {
+      timeout: 1000,
+    })
+    .catch(() => null)
+
+/**
+ * Each control's state before and after `hover()`, each read once settled
+ * (bounded): hidden with the pointer moved off the row, then shown with it on
+ * the row. That the hover is what shows the toolbar is the claim — one already
+ * showing before it proves nothing about the hover, and one still hidden after
+ * it is offered to nobody.
+ */
+async function shownOnHover(page, controls, hover) {
+  await page.mouse.move(5, 5)
+  const before = []
+  for (const control of controls) {
+    await waitUntil(async () => (await shownToAPerson(control)) === false, { timeoutMs: 10_000 })
+    before.push(await shownToAPerson(control))
+  }
+  await hover()
+  const after = []
+  for (const control of controls) {
+    await waitUntil(async () => (await shownToAPerson(control)) === true, { timeoutMs: 10_000 })
+    after.push(await shownToAPerson(control))
+  }
+  return controls.map((_, i) => ({ before: before[i], after: after[i] }))
+}
+
+/** A toolbar control's state, in a check's words. */
+const stateOf = (shown) => (shown === true ? 'shown' : shown === false ? 'hidden' : 'not there')
+
 const done = async (browser, stack, cleanup) => {
   // The cleanup returns [route, answer] for each channel it archives; one that
   // is refused stays behind, and is said above the totals.
@@ -271,12 +315,33 @@ try {
   const page = await ctx.newPage()
   await signIn(page, origin, ADMIN)
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(4000)
 
+  /*
+   * EVERY READ BELOW WAITS FOR WHAT IT READS, BOUNDED
+   * (`found-29-sep/chat-message-actions-reads-after-fixed-waits`).
+   *
+   * This suite slept a fixed time and then read, 53 times: 4 seconds before the
+   * empty channel's cards, 3.5 before the address /chat writes, 1.5 before the
+   * Replies row's next control. Under a sweep's load each of those was
+   * sometimes too short, and a different check failed each time — the cards,
+   * the address, the two Mark unread checks. So each read now waits for the
+   * thing it reads: the element, its state, the address, or the server's
+   * answer. Every wait is bounded and none of them fails anything itself — a
+   * check that never comes true still fails below it, in its own words, a
+   * few seconds later than a passing one would have read it.
+   *
+   * What the sleeps were standing in for, found by reading the page: every
+   * mutation here is answered by the server first and then refetched (none is
+   * optimistic), the hover toolbar is always in the DOM at opacity 0 (which
+   * Playwright counts as visible, so the pauses after a hover were padding),
+   * and the thread panel and its scrim mount in the same render.
+   */
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [14:16] — an empty channel offers something to do')
   // ---------------------------------------------------------------------
+  // The four cards are drawn in the same render as the box that holds them.
   const emptyActions = page.getByTestId('channel-empty-actions')
+  await waitUntil(() => emptyActions.isVisible(), { timeoutMs: 30_000 })
   check(await emptyActions.isVisible().catch(() => false), 'the empty channel shows action cards')
   for (const [id, label] of [
     ['empty-add-people', 'Add people'],
@@ -289,10 +354,16 @@ try {
   // Every card must go somewhere. A card that opens nothing is worse than no
   // card, because it reads as a broken product rather than a missing feature.
   await page.getByTestId('empty-add-doc').click()
-  await page.waitForTimeout(1800)
+  await waitUntil(() => /\/docs/.test(page.url()), { timeoutMs: 15_000 })
   check(/\/docs/.test(page.url()), '"Add a doc" actually opens Docs', page.url())
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3000)
+  /*
+   * Back in the channel, the probe is typed once the channel has been READ —
+   * its empty state drawn again — not three fixed seconds after landing. A
+   * message sent before that read answers is appended to no list, and the
+   * read that answers after it may not hold it either.
+   */
+  await waitUntil(() => emptyActions.isVisible(), { timeoutMs: 30_000 })
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [14:16] — the action bar ends in ⋯')
@@ -300,43 +371,57 @@ try {
   const BODY = `batch2 probe ${Date.now()}`
   await page.locator('textarea:visible').first().fill(BODY)
   await page.keyboard.press('Enter')
-  await page.waitForTimeout(2500)
   const message = page.locator('.group').filter({ hasText: BODY }).first()
+  // Drawn once the send is answered.
+  await waitUntil(async () => (await message.count()) > 0, { timeoutMs: 20_000 })
   check(await message.count() > 0, 'the probe message is on screen')
-  await message.hover()
-  await page.waitForTimeout(400)
 
+  // Hidden until the pointer is on the message, and shown once it is.
   const overflow = page.locator('[data-testid^="message-overflow-"]').first()
-  check(await overflow.isVisible().catch(() => false), 'the message toolbar has a ⋯ overflow')
+  const [overflowShown] = await shownOnHover(page, [overflow], () => message.hover())
+  check(
+    overflowShown.before === false && overflowShown.after === true,
+    'the message toolbar has a ⋯ overflow',
+    `the ⋯ is ${stateOf(overflowShown.before)} before the hover and ${stateOf(overflowShown.after)} after it`,
+  )
   await overflow.click()
-  await page.waitForTimeout(600)
-  const menu = page.getByTestId('message-overflow-menu')
+  const menu = page.getByTestId('message-overflow-menu').filter({ visible: true })
+  await waitUntil(() => menu.isVisible(), { timeoutMs: 10_000 })
   check(await menu.isVisible().catch(() => false), 'the ⋯ opens a menu')
-  const menuText = await menu.innerText().catch(() => '')
+  // Read once it holds what the two checks below look for (bounded: a menu
+  // without them is still read, and still fails them).
+  await waitUntil(async () => {
+    const shown = await menu.innerText({ timeout: 1000 })
+    return /Set reminder/i.test(shown) && /Forward/i.test(shown) && /Pin/i.test(shown)
+  }, { timeoutMs: 5_000 })
+  const menuText = await readText(menu, { timeoutMs: 2000 })
   check(/Set reminder/i.test(menuText), 'the overflow carries "Set reminder"', menuText.slice(0, 120))
   check(/Forward/i.test(menuText) && /Pin/i.test(menuText), 'the overflow carries the long tail (Forward, Pin)')
   await page.keyboard.press('Escape')
-  await page.waitForTimeout(400)
+  // Closed before the next press, which would otherwise land beside an open menu.
+  await waitUntil(async () => !(await menu.isVisible()), { timeoutMs: 10_000 })
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [15:36] — Assign actually assigns')
   // ---------------------------------------------------------------------
   await message.hover()
-  await page.waitForTimeout(300)
   const composerBefore = await page.locator('textarea:visible').first().inputValue().catch(() => '')
   await page.locator('[data-testid^="message-assign-"]').first().click()
-  await page.waitForTimeout(700)
   const optionOther = page.getByTestId(`assign-option-${other.user.id}`)
+  await waitUntil(() => optionOther.isVisible(), { timeoutMs: 10_000 })
   check(await optionOther.isVisible().catch(() => false), 'Assign opens a list of people who can see the channel')
   await optionOther.click({ timeout: 10_000 }).catch(() => {})
-  await page.waitForTimeout(2200)
 
-  const chip = page.locator('[data-testid^="message-assignments-"]').first()
+  // The chip is drawn from the messages read again once the server has
+  // answered the assignment; it is read when it says so.
+  const chip = page.locator('[data-testid^="message-assignments-"]').filter({ visible: true }).first()
+  await waitUntil(async () => /Assigned to/i.test(await chip.innerText({ timeout: 1000 })), { timeoutMs: 15_000 })
   check(await chip.isVisible().catch(() => false), 'the message now shows who it is assigned to')
-  const chipText = await chip.innerText().catch(() => '')
+  const chipText = await readText(chip, { timeoutMs: 2000 })
   check(/Assigned to/i.test(chipText), 'the chip says "Assigned to …"', chipText.slice(0, 80))
 
-  // The old behaviour, named so a regression is unmistakable.
+  // The old behaviour, named so a regression is unmistakable. Read after the
+  // wait for the chip: a mention is typed into the box on the press itself.
   const composerAfter = await page.locator('textarea:visible').first().inputValue().catch(() => '')
   check(
     composerAfter === composerBefore && !/<@/.test(composerAfter),
@@ -346,7 +431,11 @@ try {
 
   // The server agrees, which is the difference between an assignment and a chip.
   const B = apiAs(other.accessToken)
-  const assignedToThem = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+  let assignedToThem = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+  await waitUntil(async () => {
+    assignedToThem = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+    return (assignedToThem.data ?? []).some((a) => a.body === BODY)
+  }, { timeoutMs: 10_000, stepMs: 300 })
   check(
     (assignedToThem.data ?? []).some((a) => a.body === BODY),
     'the assignee sees it in their own assigned list',
@@ -365,31 +454,45 @@ try {
     'resolving takes it off the assignee’s list',
     'the resolved assignment stays on the message',
   )
-  const resolved = await chip
-    .locator(`[data-testid="assignment-resolve-${other.user.id}"]`)
+  const resolveControl = chip.locator(`[data-testid="assignment-resolve-${other.user.id}"]`)
+  // What the tick is titled while the assignment is open, so the page's
+  // resolved state can be told from it below. Short: the chip was waited for.
+  const openTitle = await resolveControl.getAttribute('title', { timeout: 2000 }).catch(() => null)
+  const resolved = await resolveControl
     .click({ timeout: 8000 })
     .then(() => true)
     .catch(() => false)
   if (!resolved) {
     resolve.rest('skipped: there was no assignment chip to resolve')
   } else {
-    await page.waitForTimeout(2000)
-    const stillAssigned = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+    let stillAssigned = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+    await waitUntil(async () => {
+      stillAssigned = await B(`/workspaces/${workspaceId}/chat/assigned-to-me`)
+      return !(stillAssigned.data ?? []).some((a) => a.body === BODY)
+    }, { timeoutMs: 15_000, stepMs: 300 })
     resolve.step(!(stillAssigned.data ?? []).some((a) => a.body === BODY), '')
-    // Resolved, not deleted: who did it is a fact worth keeping.
+    /*
+     * Resolved, not deleted: who did it is a fact worth keeping. Read once the
+     * page has the resolved assignment back — its tick no longer titled as it
+     * was while open — or once the chip is gone, which is what this catches.
+     */
+    await waitUntil(
+      async () =>
+        !(await chip.isVisible()) || (await resolveControl.getAttribute('title', { timeout: 1000 })) !== openTitle,
+      { timeoutMs: 15_000 },
+    )
     resolve.step(await chip.isVisible().catch(() => false), 'the chip went away instead of staying resolved')
   }
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G11 [15:19] — a reminder on the message')
   // ---------------------------------------------------------------------
+  // Each press waits for its own target; the dialog is waited for.
   await message.hover()
-  await page.waitForTimeout(300)
   await page.locator('[data-testid^="message-overflow-"]').first().click()
-  await page.waitForTimeout(500)
   await page.locator('[data-testid^="message-remind-"]').first().click()
-  await page.waitForTimeout(700)
   const dialog = page.getByTestId('remind-dialog')
+  await waitUntil(() => dialog.isVisible(), { timeoutMs: 10_000 })
   check(await dialog.isVisible().catch(() => false), 'the reminder dialog opens')
   const prefilled = await page.getByTestId('remind-when').inputValue().catch(() => '')
   /*
@@ -419,10 +522,15 @@ try {
     `${prefilled} where about ${wantLocal} was expected on this clock`,
   )
   await page.getByTestId('remind-confirm').click()
-  await page.waitForTimeout(2200)
+  // The dialog closes when the server has answered the reminder.
+  await waitUntil(async () => !(await dialog.isVisible()), { timeoutMs: 15_000 })
   check(!(await dialog.isVisible().catch(() => false)), 'the dialog closes once the reminder is set')
 
-  const upcoming = await A(`/workspaces/${workspaceId}/reminders`)
+  let upcoming = await A(`/workspaces/${workspaceId}/reminders`)
+  await waitUntil(async () => {
+    upcoming = await A(`/workspaces/${workspaceId}/reminders`)
+    return (upcoming.data ?? []).some((r) => r.messageBody === BODY)
+  }, { timeoutMs: 10_000, stepMs: 300 })
   const forThis = (upcoming.data ?? []).find((r) => r.messageBody === BODY)
   check(!!forThis, 'the reminder is stored against the message', JSON.stringify(upcoming.data ?? []).slice(0, 200))
   check(forThis?.taskId == null, 'the reminder invented no task to hang off')
@@ -452,29 +560,33 @@ try {
       body: { body: 'a reply, so this is a thread', parentMessageId: parentId },
     })
     await page.reload({ waitUntil: 'domcontentloaded' })
-    await page.waitForTimeout(3500)
+    // The hover waits for the row, and the row is drawn with its reply count.
     const msg2 = page.locator('.group').filter({ hasText: BODY }).first()
     await msg2.hover()
-    await page.waitForTimeout(400)
     await page.locator('[data-testid^="message-overflow-"]').first().click()
-    await page.waitForTimeout(600)
     const muteItem = page.locator('[data-testid^="thread-mute-"]').first()
+    await waitUntil(() => muteItem.isVisible(), { timeoutMs: 10_000 })
     const offered = await muteItem.isVisible().catch(() => false)
     mute.step(offered, reply.status < 300 ? '' : `the reply that makes it a thread answered ${reply.status}`)
     if (!offered) {
       mute.rest('skipped: there was no "Mute this thread" to press')
     } else {
       await muteItem.click()
-      await page.waitForTimeout(2000)
-
-      // The claim is that it PERSISTS — a toast is not state.
+      /*
+       * The claim is that it PERSISTS — a toast is not state. So the reload
+       * waits for the server to hold the mute (bounded: a press that stores
+       * nothing is reloaded all the same, and the check below says so).
+       */
+      await waitUntil(async () => {
+        const held = await A(`/chat/channels/${channelId}/messages`)
+        return (held.data ?? []).find((m) => m.id === parentId)?.threadFollowState === 'muted'
+      }, { timeoutMs: 15_000, stepMs: 300 })
       await page.reload({ waitUntil: 'domcontentloaded' })
-      await page.waitForTimeout(3500)
       await page.locator('.group').filter({ hasText: BODY }).first().hover()
-      await page.waitForTimeout(400)
       await page.locator('[data-testid^="message-overflow-"]').first().click()
-      await page.waitForTimeout(600)
-      const afterReload = await page.locator('[data-testid^="thread-mute-"]').first().innerText().catch(() => '')
+      const muteAfter = page.locator('[data-testid^="thread-mute-"]').filter({ visible: true }).first()
+      await waitUntil(async () => /Unmute/i.test(await muteAfter.innerText({ timeout: 1000 })), { timeoutMs: 10_000 })
+      const afterReload = await readText(muteAfter, { timeoutMs: 2000 })
       mute.step(/Unmute/i.test(afterReload), afterReload)
     }
   }
@@ -491,7 +603,8 @@ try {
    * anyone there — copying the address bar gave /chat, which lands in #general.
    */
   await page.goto(`${origin}/app/${workspaceId}/chat`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
+  // The page writes its choice into the address once the channel list answers.
+  await waitUntil(() => /[?&]channel=/.test(page.url()), { timeoutMs: 30_000 })
   check(
     /[?&]channel=/.test(page.url()),
     'landing on /chat puts the channel it chose in the address',
@@ -499,9 +612,11 @@ try {
   )
 
   const sidebarChannel = page.locator(`[data-testid="channel-row-${channelId}"]`).first()
+  // count() does not wait, and the sidebar draws its own read of the channels.
+  await waitUntil(async () => (await sidebarChannel.count()) > 0, { timeoutMs: 20_000 })
   check((await sidebarChannel.count()) > 0, 'the channel is listed in the sidebar')
   await sidebarChannel.click({ timeout: 10_000 }).catch(() => {})
-  await page.waitForTimeout(2500)
+  await waitUntil(() => page.url().includes(`channel=${channelId}`), { timeoutMs: 15_000 })
   check(
     page.url().includes(`channel=${channelId}`),
     'and clicking it puts that channel in the address',
@@ -563,14 +678,22 @@ try {
     'with that person already on it, not a blank form',
   )
   if ((await page.locator('[data-testid="chat-thread-panel"]').count()) > 0) {
-    const title = await page.getByTestId('thread-panel-title').innerText().catch(() => '')
     /*
      * THE STARTER'S NAME, NOT THE ABSENCE OF THE WORD "Thread". The probe that
      * starts this thread was posted by the admin, so the title has to carry
      * the admin's own display name. `!/^thread$/i` passed on any title that was
      * not that one word — a missing name, or the generic title reworded.
+     *
+     * Read when it names them (bounded): the panel says plain "Thread" until
+     * it has the parent's author. The header's two controls are drawn with it.
      */
     const starter = ((await A('/users/me')).data?.displayName ?? '').trim()
+    const titleShown = page.getByTestId('thread-panel-title').filter({ visible: true })
+    await waitUntil(
+      async () => starter.length > 0 && (await titleShown.innerText({ timeout: 1000 })).includes(starter),
+      { timeoutMs: 10_000 },
+    )
+    const title = await readText(titleShown, { timeoutMs: 2000 })
     header.step(
       starter.length > 0 && title.includes(starter),
       `the title reads "${title.trim()}" — the thread was started by ${JSON.stringify(starter)}`,
@@ -582,7 +705,9 @@ try {
     // The picker must offer real people, not an empty menu — the failure this
     // would otherwise hide is a members read that returned nothing.
     await assign.click().catch(() => {})
-    await page.waitForTimeout(800)
+    // The rows are the workspace's members, read on their own; counted once
+    // there is one beyond the trigger (count() does not wait).
+    await waitUntil(async () => (await page.locator('[data-testid^="thread-assign-"]').count()) > 1, { timeoutMs: 10_000 })
     const candidates = page.locator('[data-testid^="thread-assign-"]').filter({ hasNotText: /^$/ })
     header.step(
       (await page.locator('[data-testid^="thread-assign-"]').count()) > 1,
@@ -597,7 +722,8 @@ try {
     const someone = page.locator('[data-testid^="thread-assign-"]').nth(1)
     const pickedId = (await someone.getAttribute('data-testid').catch(() => '') ?? '').replace('thread-assign-', '')
     await someone.click().catch(() => {})
-    await page.waitForTimeout(1200)
+    // The draft opens with its assignee already set, in one render.
+    await waitUntil(async () => (await page.getByTestId('chat-task-draft').count()) > 0, { timeoutMs: 10_000 })
     header.step((await page.getByTestId('chat-task-draft').count()) > 0, 'nothing opened after picking a person')
     /*
      * The assertion that matters. "The draft opened" would also pass if the
@@ -610,8 +736,8 @@ try {
         pickedId.length > 0,
       `draft assignee is "${await page.getByTestId('chat-task-draft-assignee').inputValue().catch(() => '')}", expected "${pickedId}"`,
     )
+    // Nothing is read after this before the next section navigates away.
     await page.keyboard.press('Escape')
-    await page.waitForTimeout(500)
   } else {
     header.rest('skipped: there was no thread panel open to read its header')
   }
@@ -624,10 +750,20 @@ try {
    * the pointer is over the row. Move the mouse and there was nothing to say
    * the message was in Later, so "did that work?" meant hovering again. The
    * badge is checked with the pointer moved AWAY, which is the whole point.
+   *
+   * The badge is drawn from the page's own read of the saved list, not from
+   * the message — so "not marked saved" is read once that read has answered,
+   * and not merely before it has (bounded, like everything else here).
    */
+  const savedListRead = page
+    .waitForResponse((r) => r.url().includes(`/workspaces/${workspaceId}/chat/saved`) && r.request().method() === 'GET', {
+      timeout: 30_000,
+    })
+    .catch(() => null)
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
   const saveRow = page.locator('.group').filter({ hasText: BODY }).first()
+  await saveRow.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
+  await savedListRead
   const saveId = await saveRow
     .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
     .catch(() => null)
@@ -639,23 +775,38 @@ try {
     'the saved badge was already showing',
   )
 
-  await saveRow.hover()
-  await page.waitForTimeout(400)
+  // The row's toolbar is in the DOM whether or not the pointer is on it; its
+  // buttons are counted once it is drawn (bounded — count() does not wait).
+  await page.getByTestId(`message-overflow-${saveId}`).waitFor({ state: 'attached', timeout: 10_000 }).catch(() => {})
   // The bookmark is found by its title, which is the only stable handle the
   // action bar gives it. Emphatically NOT "click the first button with a
   // title" — that is a coin flip over a row whose toolbar includes Delete.
   const saveBtn = page.locator(`[data-testid="message-row-${saveId}"] button`).filter({ has: page.locator('svg') })
   const count = await saveBtn.count()
-  let clicked = false
+  let saveControl = null
   for (let i = 0; i < count; i += 1) {
     const title = (await saveBtn.nth(i).getAttribute('title', { timeout: 5000 }).catch(() => null)) ?? ''
     if (/save/i.test(title) && !/unsave/i.test(title)) {
-      await saveBtn.nth(i).click().catch(() => {})
-      clicked = true
+      saveControl = saveBtn.nth(i)
       break
     }
   }
-  check(clicked, 'the toolbar offers Save', 'no save control on the message')
+  // Offered means shown by the hover, like the rest of the toolbar.
+  const [saveShown] = saveControl
+    ? await shownOnHover(page, [saveControl], () => saveRow.hover())
+    : [{ before: null, after: null }]
+  let clicked = false
+  if (saveControl) {
+    await saveControl.click().catch(() => {})
+    clicked = true
+  }
+  check(
+    clicked && saveShown.before === false && saveShown.after === true,
+    'the toolbar offers Save',
+    clicked
+      ? `the Save control is ${stateOf(saveShown.before)} before the hover and ${stateOf(saveShown.after)} after it`
+      : 'no save control on the message',
+  )
 
   // Pointer deliberately moved off the row before looking — and then the badge
   // is waited for, bounded: it is drawn once the save has been answered, which
@@ -681,19 +832,26 @@ try {
    * server, because a row of emoji that posts nothing looks identical.
    */
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
   const reactRow = page.locator('.group').filter({ hasText: BODY }).first()
+  await reactRow.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
   const reactId = await reactRow
     .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
     .catch(() => null)
-  await reactRow.hover()
-  // The hover toolbar, once drawn (bounded) — its reactions are read below.
-  await page.getByTestId(`message-quick-👍-${reactId}`).waitFor({ state: 'visible', timeout: 10_000 }).catch(() => {})
+  // Each hidden until the pointer is on the message, and shown once it is.
+  const QUICK = ['👍', '✅', '🔥']
+  const quickShown = await shownOnHover(
+    page,
+    QUICK.map((emoji) => page.getByTestId(`message-quick-${emoji}-${reactId}`)),
+    () => reactRow.hover(),
+  )
   for (const emoji of ['👍', '✅', '🔥']) {
+    const { before, after } = quickShown[QUICK.indexOf(emoji)]
     check(
-      await page.getByTestId(`message-quick-${emoji}-${reactId}`).isVisible().catch(() => false),
+      before === false && after === true,
       `the toolbar offers ${emoji}`,
-      `${emoji} is not offered on a channel message`,
+      after === null
+        ? `${emoji} is not offered on a channel message`
+        : `${emoji} is ${stateOf(before)} before the hover and ${stateOf(after)} after it`,
     )
   }
   await page.getByTestId(`message-quick-✅-${reactId}`).click().catch(() => {})
@@ -728,20 +886,19 @@ try {
    * shape is satisfied just as well by one that lands on an empty channel.
    */
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
 
   const linkTarget = page.locator('.group').filter({ hasText: BODY }).first()
+  await linkTarget.waitFor({ state: 'visible', timeout: 30_000 }).catch(() => {})
   const targetId = await linkTarget
     .evaluate((el) => el.closest('[data-testid^="message-row-"]')?.getAttribute('data-testid')?.replace('message-row-', '') ?? null)
     .catch(() => null)
   check(!!targetId, 'the probe message can be identified to link to', 'no message row id found')
 
   await linkTarget.hover()
-  await page.waitForTimeout(400)
   await page.locator('[data-testid^="message-overflow-"]').first().click()
-  await page.waitForTimeout(600)
 
   const copyItem = page.locator(`[data-testid="message-copy-link-${targetId}"]`)
+  await waitUntil(() => copyItem.isVisible(), { timeoutMs: 10_000 })
   const hasCopy = await copyItem.isVisible().catch(() => false)
   check(hasCopy, 'the message menu offers "Copy link"', 'no per-message copy-link action')
 
@@ -757,7 +914,11 @@ try {
     )
   } else {
     await copyItem.click()
-    await page.waitForTimeout(900)
+    // The clipboard is written asynchronously; read it once it holds the link.
+    await waitUntil(async () => {
+      const held = await page.evaluate(() => navigator.clipboard.readText())
+      return held.includes(`message=${targetId}`) && held.includes(`channel=${channelId}`)
+    }, { timeoutMs: 10_000 })
 
     const copied = await page.evaluate(() => navigator.clipboard.readText().catch(() => '')).catch(() => '')
     permalink.step(
@@ -821,17 +982,16 @@ try {
   check(seededChannels.length === 12, 'twelve conversations to choose between', `${seededChannels.length} made`)
 
   await page.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
+  // Each press waits for its own target (the menu's Forward among them); the
+  // modal is waited for.
   const fwdRow = page.locator('.group').filter({ hasText: BODY }).first()
   await fwdRow.hover()
-  await page.waitForTimeout(500)
   const fwdOverflow = fwdRow.locator('button[data-testid^="message-overflow-"]').first()
   await fwdOverflow.click().catch(() => {})
-  await page.waitForTimeout(600)
   await page.getByRole('button', { name: /^forward$/i }).first().click().catch(() => {})
-  await page.waitForTimeout(900)
 
   const modal = page.getByTestId('forward-modal')
+  await waitUntil(() => modal.isVisible(), { timeoutMs: 10_000 })
   const modalOpen = await modal.isVisible().catch(() => false)
   check(modalOpen, 'Forward opens a modal, not a ten-item popover')
   /*
@@ -858,13 +1018,26 @@ try {
   if (!modalOpen) {
     forward.rest('skipped: Forward opened no modal, so there was nothing in it to use')
   } else {
+    // The preview, the confirm button and the list are drawn with the modal.
     forward.step(
-      (await page.getByTestId('forward-preview').innerText().catch(() => '')).includes(BODY.slice(0, 20)),
+      (await readText(page.getByTestId('forward-preview').filter({ visible: true }), { timeoutMs: 2000 })).includes(
+        BODY.slice(0, 20),
+      ),
       'the preview does not show the message being forwarded',
     )
+    /*
+     * THERE, AND DISABLED. This read `isDisabled().catch(() => true)`, so a
+     * modal with no Forward button in it passed as one holding the forward
+     * back: the read threw on the missing button, and the catch said
+     * "disabled".
+     */
+    const confirm = page.getByTestId('forward-confirm')
+    const confirmThere = await confirm.isVisible().catch(() => false)
     forward.step(
-      await page.getByTestId('forward-confirm').isDisabled().catch(() => true),
-      'the confirm button was live before a recipient was picked',
+      confirmThere && (await confirm.isDisabled({ timeout: 2000 }).catch(() => false)),
+      confirmThere
+        ? 'the confirm button was live before a recipient was picked'
+        : 'the modal has no Forward button to hold back',
     )
 
     /*
@@ -873,8 +1046,9 @@ try {
      * the list is capped.
      */
     await page.getByTestId('forward-search').fill(`${FWD_TAG}-11`)
-    await page.waitForTimeout(600)
     const eleventh = page.locator('[data-testid^="forward-target-"]')
+    // Counted once the list has narrowed to the one it should (bounded).
+    await waitForCount(eleventh, 1, { timeoutMs: 10_000 })
     const matches = await eleventh.count()
     forward.step(matches === 1, `${matches} matches for ${FWD_TAG}-11`)
 
@@ -888,15 +1062,23 @@ try {
       ).replace('forward-target-', '')
       await eleventh.first().click()
       await page.getByTestId('forward-note').fill('sharing this for context')
-      await page.waitForTimeout(300)
+      await waitUntil(async () => !(await confirm.isDisabled({ timeout: 1000 })), { timeoutMs: 10_000 })
       forward.step(
-        !(await page.getByTestId('forward-confirm').isDisabled().catch(() => true)),
-        'the confirm button stayed disabled with a recipient picked',
+        !(await confirm.isDisabled({ timeout: 2000 }).catch(() => true)),
+        confirmThere
+          ? 'the confirm button stayed disabled with a recipient picked'
+          : 'there is no Forward button to make sendable',
       )
-      await page.getByTestId('forward-confirm').click()
-      await page.waitForTimeout(2500)
+      // Bounded: with no button to press, the checks below fail in their own
+      // words rather than the run ending here on a thirty-second click.
+      await confirm.click({ timeout: 10_000 }).catch(() => {})
 
-      const landed = await A(`/chat/channels/${targetId}/messages`)
+      // Read off the server once the forward is there (bounded).
+      let landed = await A(`/chat/channels/${targetId}/messages`)
+      await waitUntil(async () => {
+        landed = await A(`/chat/channels/${targetId}/messages`)
+        return (landed.data ?? []).some((msg) => String(msg.body).includes(BODY.slice(0, 20)))
+      }, { timeoutMs: 15_000, stepMs: 300 })
       const got = (landed.data ?? []).find((msg) => String(msg.body).includes(BODY.slice(0, 20)))
       forward.step(!!got, `${(landed.data ?? []).length} messages there`)
       forward.step(
@@ -932,9 +1114,13 @@ try {
       await page.goto(`${origin}/app/${workspaceId}/chat?channel=${targetId}`, {
         waitUntil: 'domcontentloaded',
       })
-      await page.waitForTimeout(3500)
-      const banner = page.locator('[data-testid^="forwarded-"]').first()
-      const bannerText = (await banner.innerText().catch(() => '')).trim()
+      // Read once the banner names what the wire said it would (bounded).
+      const banner = page.locator('[data-testid^="forwarded-"]').filter({ visible: true }).first()
+      await waitUntil(async () => {
+        const shown = await banner.innerText({ timeout: 1000 })
+        return (!prov?.channelName || shown.includes(prov.channelName)) && (!prov?.authorName || shown.includes(prov.authorName))
+      }, { timeoutMs: 30_000 })
+      const bannerText = (await readText(banner, { timeoutMs: 2000 })).trim()
       forward.step(
         !!prov?.channelName && bannerText.includes(prov.channelName),
         `banner read ${JSON.stringify(bannerText)}`,
@@ -972,9 +1158,10 @@ try {
     await np.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, {
       waitUntil: 'domcontentloaded',
     })
-    await np.waitForTimeout(4000)
 
+    // Drawn once the channel's messages are (bounded).
     const threadLink = np.locator('[data-testid^="view-thread-"]').first()
+    await waitUntil(() => threadLink.isVisible(), { timeoutMs: 30_000 })
     const linkThere = await threadLink.isVisible().catch(() => false)
     check(linkThere, 'a message with replies offers to open the thread at 1200px')
 
@@ -997,7 +1184,8 @@ try {
       }
     } else {
       await threadLink.click()
-      await np.waitForTimeout(1200)
+      // The scrim and the header's Create task are drawn with the panel.
+      await waitUntil(() => np.getByTestId('chat-thread-panel').isVisible(), { timeoutMs: 15_000 })
       narrowOpens.step(
         await np.getByTestId('chat-thread-panel').isVisible().catch(() => false),
         'the panel stayed hidden — the control is inert at this width',
@@ -1025,7 +1213,9 @@ try {
       const ct = np.getByTestId('thread-create-task')
       if (await ct.isVisible().catch(() => false)) {
         await ct.click({ timeout: 8000 }).catch(() => {})
-        await np.waitForTimeout(1200)
+        // Hit-tested once the card is drawn (bounded; one that never is fails
+        // below as "the modal did not open").
+        await waitUntil(() => np.getByTestId('chat-task-draft').isVisible(), { timeoutMs: 10_000 })
         const reachable = await np.evaluate(() => {
           const card = document.querySelector('[data-testid="chat-task-draft"]')
           if (!card) return 'the modal did not open'
@@ -1054,7 +1244,7 @@ try {
           narrowDialog.rest('skipped: Create task opened no dialog, so there was none to close')
         } else {
           await np.locator('.fixed.inset-0.z-50').first().click({ position: { x: 5, y: 5 } }).catch(() => {})
-          await np.waitForTimeout(700)
+          await waitUntil(async () => !(await np.getByTestId('chat-task-draft').isVisible()), { timeoutMs: 10_000 })
           narrowDialog.step(
             !(await np.getByTestId('chat-task-draft').isVisible().catch(() => false)),
             'the task draft stayed open, which would block everything behind it',
@@ -1064,7 +1254,7 @@ try {
         narrowDialog.rest('skipped: there was no create-task control in the thread header')
       }
       await scrim.click({ position: { x: 5, y: 5 } }).catch(() => {})
-      await np.waitForTimeout(700)
+      await waitUntil(async () => !(await np.getByTestId('chat-thread-panel').isVisible()), { timeoutMs: 10_000 })
       narrowCloses.step(
         !(await np.getByTestId('chat-thread-panel').isVisible().catch(() => false)),
         'the drawer would not close',
@@ -1092,33 +1282,48 @@ try {
    * nothing to act on passes by not running.
    */
   {
-    // Snapshot first: the notification's title is the channel name, not the
-    // message, so the only reliable way to name the one we just caused is
-    // "the id that was not there before".
-    const before = new Set(((await A('/notifications?limit=50')).data ?? []).map((n) => n.id))
-
     const seedBody = `putback-${Date.now()}`
     const seed = await A(`/chat/channels/${channelId}/messages`, { method: 'POST', body: { body: seedBody } })
-    await B(`/chat/channels/${channelId}/messages`, {
+    const theirReply = await B(`/chat/channels/${channelId}/messages`, {
       method: 'POST',
       body: { body: 'someone else replies to it', parentMessageId: seed.data?.id },
     })
 
     /*
+     * THE REPLY'S OWN ID NAMES ITS NOTIFICATION. The notification's title is
+     * the channel's name and its body the reply's words, which are the same on
+     * every run, so this took the first unread `chat_reply` that was not there
+     * before the reply was sent. With a second run on the same lane, that can
+     * be the second run's: the list is newest first, and a reply of theirs that
+     * lands after this one and before the read comes first. Measured against
+     * lane 5's API with exactly that interleaving, 29 September — the old read
+     * took the other run's notification, this one its own. The notification
+     * points at the reply it is about (`target.entityId`), and the reply's id is
+     * in the answer to posting it, which used to be thrown away.
+     *
      * Polled, not slept against. The notification is written after the reply's
      * response returns, so reading immediately finds nothing — which is how
      * the first version of this check failed on working code. A fixed sleep
      * would trade that for a slower suite and a flake on a loaded runner.
      */
+    const replyId = theirReply.data?.id ?? null
     let mine = null
     let seen = 0
-    for (let i = 0; i < 16 && !mine; i++) {
-      const notifs = (await A('/notifications?limit=50')).data ?? []
-      seen = notifs.length
-      mine = notifs.find((n) => n.type === 'chat_reply' && !n.readAt && !before.has(n.id)) ?? null
-      if (!mine) await page.waitForTimeout(500)
+    if (replyId) {
+      await waitUntil(async () => {
+        const notifs = (await A('/notifications?limit=50')).data ?? []
+        seen = notifs.length
+        mine = notifs.find((n) => n.type === 'chat_reply' && !n.readAt && n.target?.entityId === replyId) ?? null
+        return !!mine
+      }, { timeoutMs: 15_000, stepMs: 500 })
     }
-    check(!!mine, 'a reply from somebody else lands in Replies', `no new unread chat_reply among ${seen}`)
+    check(
+      !!mine,
+      'a reply from somebody else lands in Replies',
+      replyId
+        ? `no unread chat_reply about reply ${replyId} among ${seen}`
+        : `the reply was not posted (it answered ${theirReply.status})`,
+    )
 
     const putBack = chain(
       'an unread reply offers to resolve it',
@@ -1138,15 +1343,17 @@ try {
       await page.goto(`${origin}/app/${workspaceId}/replies?filter=all`, {
         waitUntil: 'domcontentloaded',
       })
-      await page.waitForTimeout(3000)
 
+      // Each control is read once the page's read of the replies has drawn it:
+      // the row's resolve here, its Mark unread once the resolve is answered.
       const resolve = page.getByTestId(`reply-resolve-${mine.id}`)
+      await waitUntil(() => resolve.isVisible(), { timeoutMs: 30_000 })
       putBack.step(await resolve.isVisible().catch(() => false), 'no resolve control on the unread reply')
       await resolve.click({ timeout: 10_000 }).catch(() => {})
-      await page.waitForTimeout(1500)
 
       // The whole point: once read, there is a way back.
       const unread = page.getByTestId(`reply-unread-${mine.id}`)
+      await waitUntil(() => unread.isVisible(), { timeoutMs: 15_000 })
       const offered = await unread.isVisible().catch(() => false)
       putBack.step(offered, 'the row is read with no way back — the queue is destroyed by reading it')
       /*
@@ -1159,8 +1366,13 @@ try {
         putBack.rest('skipped: there was no Mark unread to press')
       } else {
         await unread.click({ timeout: 10_000 }).catch(() => {})
-        await page.waitForTimeout(1500)
-        const row = ((await A(`/notifications?limit=50`)).data ?? []).find((n) => n.id === mine.id)
+        // Read back off the server until it agrees (bounded: a press that
+        // changes only the screen is still read, and still fails).
+        let row = null
+        await waitUntil(async () => {
+          row = ((await A(`/notifications?limit=50`)).data ?? []).find((n) => n.id === mine.id)
+          return !!row && row.readAt == null
+        }, { timeoutMs: 15_000, stepMs: 300 })
         putBack.step(
           !!row && row.readAt == null,
           row ? 'the button changed the screen but not the record' : 'the reply is no longer among the notifications to read back',
@@ -1177,8 +1389,8 @@ try {
     await wp.goto(`${origin}/app/${workspaceId}/chat?channel=${channelId}`, {
       waitUntil: 'domcontentloaded',
     })
-    await wp.waitForTimeout(4000)
     const wideLink = wp.locator('[data-testid^="view-thread-"]').first()
+    await waitUntil(() => wideLink.isVisible(), { timeoutMs: 30_000 })
     const wideThread = chain(
       'and the wide layout still opens it too',
       'with no scrim, because there it is a column beside the conversation',
@@ -1187,7 +1399,8 @@ try {
       wideThread.rest('skipped: there was no thread link at 1680px to open')
     } else {
       await wideLink.click()
-      await wp.waitForTimeout(1200)
+      // The scrim, when there is one, mounts in the same render as the panel.
+      await waitUntil(() => wp.getByTestId('chat-thread-panel').isVisible(), { timeoutMs: 15_000 })
       const wideOpen = await wp.getByTestId('chat-thread-panel').isVisible().catch(() => false)
       wideThread.step(wideOpen, 'the panel does not open at 1680 either — this check is misfiring, not finding a bug')
       // "No scrim" is a claim about an OPEN panel: a panel that never opened has none either.

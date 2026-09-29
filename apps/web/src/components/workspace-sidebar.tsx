@@ -471,6 +471,27 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
    * question "which space" already answered.
    */
   const [spaceCreate, setSpaceCreate] = useState<{ spaceId: string; kind: CreateKind } | null>(null)
+  /*
+   * AND THE CREATOR OPENS ONLY ONCE THAT MENU HAS CLOSED
+   * (`found-29-sep/space-create-menu-keeps-focus-after-create`). An item opened
+   * it from its click, while the menu was still open: the creator's title took
+   * the cursor, the menu's focus trap took it straight back, and the menu
+   * animated out holding it, then gave it to the space's "+" behind the modal.
+   * Measured on lane 2, 29 September: the cursor in the closing menu at 16ms,
+   * on `<body>` at 256ms, on the "+" at 322ms; a name typed at once left the
+   * title empty, and its first space pressed the "+" and opened the menu again
+   * under the modal.
+   *
+   * So an item records its choice here and the menu's `onCloseAutoFocus`
+   * opens it, as the comment "+" menu does (`CommentPlusMenu`): by then the
+   * menu, its focus trap and its Escape layer have gone, and the title's own
+   * `autoFocus` keeps the cursor. Radix puts the cursor on the "+" first, which
+   * is what the creator gives it back to when it closes
+   * (`found-29-sep/create-modal-returns-focus-to-nothing`). One ref for every
+   * space's menu: only one is open at a time, and opening one drops a choice
+   * another had not finished closing on.
+   */
+  const spaceCreateChosen = useRef<{ spaceId: string; kind: CreateKind } | null>(null)
   // §2.2 — create a new Workspace under the caller's existing org from the
   // switcher (instead of bouncing to the full sign-up/registration flow).
   const [wsDialogOpen, setWsDialogOpen] = useState(false)
@@ -2489,7 +2510,12 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                     surfaces. Each lands on that type's creator with THIS space
                     already filled in.
                   */}
-                  <DropdownMenu>
+                  <DropdownMenu
+                    onOpenChange={(open) => {
+                      // Reopened before it had finished closing: that choice was dropped.
+                      if (open) spaceCreateChosen.current = null
+                    }}
+                  >
                     <DropdownMenuTrigger asChild>
                       <button
                         className="shrink-0 p-1 rounded-md text-muted-foreground opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-accent/20 hover:text-foreground data-[state=open]:opacity-100"
@@ -2500,7 +2526,18 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                         <Plus className="h-3.5 w-3.5" />
                       </button>
                     </DropdownMenuTrigger>
-                    <DropdownMenuContent align="start" className="w-60" data-testid="space-create-menu">
+                    <DropdownMenuContent
+                      align="start"
+                      className="w-60"
+                      data-testid="space-create-menu"
+                      onCloseAutoFocus={() => {
+                        // The menu has gone; the "+" has the cursor. Now the creator.
+                        const chosen = spaceCreateChosen.current
+                        if (!chosen) return
+                        spaceCreateChosen.current = null
+                        setSpaceCreate(chosen)
+                      }}
+                    >
                       <DropdownMenuLabel data-testid="space-create-menu-title">{t('createMenu.title')}</DropdownMenuLabel>
                       {typesForSpace(space.id).map((type, i, shown) => (
                         // A Fragment, not a <div>: a plain element between
@@ -2532,7 +2569,9 @@ export function WorkspaceSidebar({ drawer = false, onNavigate }: { drawer?: bool
                           )}
                           <DropdownMenuItem
                             data-testid={`space-create-${type.value}`}
-                            onClick={() => setSpaceCreate({ spaceId: space.id, kind: type.value })}
+                            onSelect={() => {
+                              spaceCreateChosen.current = { spaceId: space.id, kind: type.value }
+                            }}
                           >
                             <type.icon className="h-3.5 w-3.5 shrink-0" />
                             <span className="flex min-w-0 flex-col">

@@ -4632,15 +4632,10 @@ export class TasksService {
     const sourceChildren = source
       ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, taskId))
       : []
-    const targetChildren = target
-      ? await this.db.select({ id: tasks.id }).from(tasks).where(eq(tasks.parentTaskId, targetTaskId))
-      : []
-
     const refusal = mergeRefusal(
       source ?? null,
       target ?? null,
       sourceChildren.length > 0,
-      new Set(targetChildren.map((c) => c.id)),
     )
     if (refusal === 'source-missing' || refusal === 'target-missing') {
       throw new NotFoundException(MERGE_REFUSAL_MESSAGE[refusal])

@@ -6,19 +6,22 @@
 # nothing is broken in the sense a person would report; the frame's entry
 # point to it is simply gone.
 #
+# RE-AIMED 29 September (`found-29-sep/brain-loses-early-typing`): the row
+# now only records the choice and the menu opens the panel once it has
+# closed, so the block it removes reads differently. It removes the same row.
+#
 # Reddens: brain-entry-points: "the comment “+” menu offers Brain, beside Add emoji where frame `04:50` draws it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """          {/*
             Brain, beside Add emoji where frame `04:50` draws it
             (`ledger-rows/row-751`): the panel the space bar opens, through the
-            same opener (see above).
+            same opener, once this menu has closed (see above).
           */}
           <DropdownMenuItem
             data-testid="comment-plus-brain"
             onSelect={() => {
               brainChosen.current = true
-              onBrain()
             }}
           >
             <BrainIcon className="mr-2 h-4 w-4" />

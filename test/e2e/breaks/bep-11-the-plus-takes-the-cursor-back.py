@@ -7,14 +7,21 @@
 # passes any check that looks for the panel, and fails the one that asks where
 # the cursor is once the menu is gone.
 #
+# RE-AIMED 29 September (`found-29-sep/brain-loses-early-typing`): the panel
+# now opens from `onCloseAutoFocus`, drawn with the cursor in its prompt, and
+# `preventDefault` there is what keeps Radix from moving the cursor to the "+"
+# straight after. Without it, the same thing happens in a different order: the
+# prompt has the cursor for a moment, and the "+" has it after.
+#
 # Reddens: brain-entry-points: "choosing Brain opens the comment AI panel — the one the space bar opens, exactly one — with the cursor in its prompt"
 import io
 p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """            brainChosen.current = false
             e.preventDefault()
-            brainFocus.current?.focus()
+            onBrain()
 """
 b = """            brainChosen.current = false
+            onBrain()
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

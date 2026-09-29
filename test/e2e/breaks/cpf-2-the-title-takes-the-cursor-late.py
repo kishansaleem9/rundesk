@@ -7,6 +7,14 @@
 # the moment New Task has opened the creator goes nowhere. This is why the
 # suite types before it reads the cursor.
 #
+# SINCE `found-29-sep/create-modal-returns-focus-to-nothing` THE CURSOR CHECK
+# REDDENS WITH IT (17/19 on lane 2, 29 September). The "+" now has the cursor
+# when the creator opens, so the name typed at once goes to the "+", whose
+# first space opens the menu again under the modal, and that open menu keeps
+# the late focus out of the title: the cursor ends in the menu. Typing is still
+# the check this patch is for; the cursor check fails because of what the
+# typing did.
+#
 # Reddens: comment-plus-menu: "and a name typed straight after lands in the title, every character of it"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'

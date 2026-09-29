@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 46 open, 8 partly fixed, 285 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 341 items, 41 open, 8 partly fixed, 292 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1502,7 +1502,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - After: 107/107 on lanes 1, 5 and 7, three runs at once. `us-5` reddens "and marked it the default" alone (106/107, lane 6).
 - Sections 1–11 and 15 still wait fixed times. They were not seen failing, and they are not claimed here.
 
-### `found-29-sep/space-create-menu-keeps-focus-after-create` — open, small (visible bug; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+### `found-29-sep/space-create-menu-keeps-focus-after-create` — **closed** (visible bug, small; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
 
 **The sidebar's space "+" menu opens the creator while it closes around the cursor**
 
@@ -1510,7 +1510,17 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* open the creator from that menu's `onCloseAutoFocus`, as the comment "+" does now; a typing check in `space-create-menu`.
 
-### `found-29-sep/brain-loses-early-typing` — open, small (visible bug; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+*Closed, 29 September.* Measured on lane 2 at `e5501c8` before: Task from a space's "+" left the cursor in the closing menu and then on the space's "+" behind the creator, so "Plan the launch review", typed the moment the creator showed, left its title empty. The menu's items record the choice, and the menu opens the creator from `onCloseAutoFocus`, as the comment "+" does. By then the menu, its focus trap and its Escape layer have gone, Radix has put the cursor on the "+", and the title takes it as the creator opens (measured after: the item at 5ms, the "+" at 201ms, the title at 290ms). Reopening a menu before it has finished closing drops the choice.
+
+`space-create-menu`, 29 → 32 checks, in a last section: the name typed at once lands whole, one Escape closes the creator, and the cursor goes back to the space's "+".
+- Before: 31/32 on lane 2 (the typing). One Escape closed the creator before too, and the cursor stayed on the "+" because it had never left it.
+- After: 32/32 on lane 2.
+- Patches `scf-1..3` redden what they name (lane 2, baseline 32/32). `scf-1` and `scf-3` redden only their own; `scf-2` also reddens the cursor check, because the creator stays open. `space-create-menu-1..5` still redden theirs.
+- Regression on lane 2, 34 suites that open the comment composer, its "+", the space "+", Brain or the create modal: every suite ran its full count; 725 of 726 checks passed, the one failure being `brain-entry-points` check 16 on lane 2's stale API.
+- In CI already.
+- In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
+
+### `found-29-sep/brain-loses-early-typing` — **closed** (visible bug, small; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
 
 **Brain in the comment "+" menu loses what is typed before its prompt has the cursor**
 
@@ -1518,13 +1528,33 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* open the panel from the menu's `onCloseAutoFocus` too (the creator rows' fix); a typing check in `brain-entry-points`.
 
-### `found-29-sep/create-modal-returns-focus-to-nothing` — open, small (accessibility; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+*Closed, 29 September.* Measured on lane 2 at `e5501c8` before: "Summarize the thread for the team", typed as Brain's panel appeared, reached the prompt as "S". Brain's row records the choice, and the menu opens the panel from `onCloseAutoFocus`, with `preventDefault` so that Radix does not move the cursor to the "+" afterwards. The opener it shares with the space bar draws the panel with `flushSync` and puts the cursor in the prompt in the same step; it used to focus a frame later. Measured after: typed as the panel appears, the whole instruction lands.
+
+`brain-entry-points`, 16 → 17 checks: a last section on a fresh page, where Brain is chosen from the "+", the instruction typed at once, and the prompt read for all of it.
+- Before: 15/17 on lane 2.
+- After: 16/17 on lane 2. The one failure is check 16, the server refusing a turn about a missing or foreign task before it streams. It fails because lane 2's API process started at 05:38, before `0e4f0c0` changed `/ai/chat`. It fails the same before, after and under every patch, and needs the lane's API restarted.
+- Patch `blt-1` (the panel opens as the row is chosen, as it did) reddens the new check (lane 2, baseline 16/17). `bep-10`, `bep-11` and `cpm-1`, re-aimed at the new rows, redden theirs; `bep-12..14` still redden theirs.
+- Regression: as above.
+- In CI already.
+- In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
+
+### `found-29-sep/create-modal-returns-focus-to-nothing` — **closed** (accessibility, small; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
 
 **The create modal gives the cursor back to nobody when it closes**
 
 *Evidence, 29 September:* after Escape from a creator opened by the comment "+", the cursor is on `<body>`. Read in the code: the modal is a portal with a document Escape listener, not a Radix Dialog, and restores focus to nothing when it unmounts.
 
 *To close:* remember what had the focus when the modal opened and give it back on close (unless that is gone), as a dialog does; a check from the comment "+" and from the sidebar.
+
+*Closed, 29 September.* Measured on lane 2 at `e5501c8` before: after Escape the cursor was on `<body>`, both from the comment "+" and from the topbar's New. The create modal now remembers what had the cursor on its first render, before its title takes it, and every way it closes gives the cursor back first, unless that element has left the page. This is done in the close itself, not in an unmount cleanup, which StrictMode also runs on the first mount. The comment "+" and the space "+" let Radix put the cursor on their "+" before the creator opens, so that is what gets it back. Measured after: one Escape returns the cursor to the comment "+", the space's "+" and the topbar's New (by click and by keyboard). There was no ClickUp research, because the dialog rule decides this.
+
+`comment-plus-menu`, 18 → 19 checks: after one Escape, the cursor is on the "+" the creator was opened from. `space-create-menu`'s last check does the same from the space "+".
+- Before: 18/19 on lane 2 (the cursor on `<body>`).
+- After: 19/19 on lane 2.
+- Patches `cmr-1` (the creator gives the cursor to nothing) and `cmr-2` (the comment "+" keeps the cursor from its trigger) each redden the new check alone (lane 2, baseline 19/19). `cmr-1` also reddens `space-create-menu`'s cursor check alone (31/32). `cpf-1..5` and `cpm-2..4` still redden theirs; `cpf-2` now also reddens the New Task cursor check, and its header says why.
+- Regression: as above.
+- In CI already.
+- In main after the merge (lanes 6 and 7, `brain-entry-points` now 20 checks with the task actions): `brain-entry-points` 20/20 on both, `comment-plus-menu` 19/19, `space-create-menu` 32/32, and eight more suites that open the create modal, the task menu or the sidebar green.
 
 ### `found-29-sep/no-model-patches-run-with-a-model` — **closed** (test tooling, small; found by the break runs for `0e4f0c0`)
 
@@ -1540,7 +1570,36 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - Measured: the mixed set is refused on lane 4. Without the model at `d15081f`, `bep-7` reddens (14/16) and `bep-13` and `bep-14` (15/16 each), against a 16/16 baseline.
 - Only these three are marked. Other patches aimed at a refusal in a suite that holds either way would still run with a model if their set holds one that needs it; none is known.
 
-### `found-29-sep/task-brain-offers-list-starters` — **closed**, break run pending (feature, small; found closing `found-29-sep/ai-chat-takes-no-task`)
+### `found-29-sep/stub-mutants-time-out-unnamed` — **closed** (test tooling, small; found by the preflight for `commit-log/log-b7ee313-1`)
+
+**Under load, a stub gate's mutant run could fail without saying why, and the gate called it "proves nothing"**
+
+*Evidence, 29 September:* in a full preflight beside two agents' runs (load ~10), `check-s3-stub.mjs --mutate` reported "the list is empty whatever is in the bucket — it exited non-zero but named no case"; a second run with the model-stub gate beside it reported two others the same way; alone, 22 of 22 bite. Each mutant re-runs the whole gate: it waits 15 s for its stub to announce itself and is given 180 s in all, and a run ended by either limit exits non-zero with no case named, which the gate cannot tell from a harness fault.
+
+*Closed, 29 September:* both stub gates (`check-s3-stub.mjs`, `check-model-stub.mjs`) wait 60 s for a stub to announce itself and give a mutant's run 300 s. A run ended by the timeout says so ("its run was ended after 300 s (SIGTERM): a loaded machine, not the rule"; shown with the limit set to 2 s), and one that exits unnamed prints its last two lines, so the next one names its cause rather than leaving it to be guessed. Both still count as not biting.
+- The next preflight caught the cause. The run printed "(it said: at ChildProcess._handle.onexit …)": the mutant's stub had exited on EADDRINUSE. The gates drew their ports from their pid, `9300 + pid % 400` and `9500 + pid % 300`. Those ranges overlap each other, and stubs left by ended mutant runs were still listening in them (`found-29-sep/killed-mutants-outlive-their-run`). Both gates now take a port the OS chose (`scripts/lib/free-port.mjs`).
+- `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
+- After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
+
+### `found-29-sep/killed-mutants-outlive-their-run` — **closed** (test tooling, small; found committing `found-29-sep/stub-mutants-time-out-unnamed`)
+
+**A mutant run ended by its timeout left its stub listening and its probe file in apps/api, and `git add -A` staged the probes**
+
+*Evidence, 29 September:*
+- Before this commit, `git add -A` had staged eleven `apps/api/.s3-stub-probe-<pid>.ts` files.
+- Sixteen mutant stubs (`.s3-stub-mutant-*.mjs --port 9301…9661`) were still listening. The run that ended them had finished 46 minutes earlier; it was the 2 s check of the timed-out message.
+- The cause: spawnSync's timeout signals the mutant alone, so its stub, its `tsx` probe and the probe file it names after its pid all outlived it. A mutant that throws before stopping its stub leaves the stub the same way.
+- The stubs left behind held ports in the gates' own ranges.
+
+*Closed, 29 September:*
+- `scripts/lib/run-mutant.mjs` runs a mutant as the leader of its own process group. When the run returns, however it ended, the runner ends the group and removes what the caller says the child names after its pid.
+- The two stub gates run their mutants through it, and so does `proveMutationsBite`, which 17 gates use.
+- `.gitignore` keeps mutants and probes out of a commit.
+- `check-run-mutant.mjs --mutate` is in preflight and CI. A run its timeout ends leaves nothing running and no file, and so does one that exits by itself. 6 cases; 5 of 5 mutations caught.
+- Measured with the limit at 1.5 s, which ends every one of the S3 gate's 22 mutant runs. With the runner at `2c78436`, 22 stubs were still listening afterwards and 22 probe files were in apps/api. With this one, none were; all 22 runs said they had been ended. `git add -A --dry-run` staged none of the 22 probes once `.gitignore` held them.
+- At full limits, the two gates bite 22 of 22 and 11 of 11 and leave nothing running.
+
+### `found-29-sep/task-brain-offers-list-starters` — **closed** (feature, small; found closing `found-29-sep/ai-chat-takes-no-task`)
 
 **Brain opened from a task offers the list's starters, and Brain in a comment drafts no reply from the thread**
 
@@ -1555,7 +1614,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 `brain-entry-points` checks 4, 17 and 18 (19 checks now):
 - Before 16/19 on lanes 6 and 7: the list's cards were drawn, there was no reply mode, and there was no route.
 - After 19/19 on both lanes. On lane 7 the draft shown is the one the server sent.
-- `bep-19` (the task surface never asked for) and `bep-20` (the ask dropped) each redden their check alone (18/19, lanes 6 and 7). `bep-21` (a reply for any task): break run pending.
+- `bep-19` (the task surface never asked for) and `bep-20` (the ask dropped) each redden their check alone (18/19, lanes 6 and 7). `bep-21` (a reply for any task; its first version also dropped the missing-id check and did not build, so it takes the task rule alone now) reddens its check (18/19, lane 4, `2c78436`).
 - Regression, 8 suites on lanes 6 and 7 (the comment menu, the task's AI bar, the palette, AI reads, the create menu's AI, the dock's answers, the activity filters, AI value): all green.
 
 ### `found-29-sep/model-stub-never-streams` — **closed** (test tooling, small; found measuring `ledger-rows/row-743` on a model lane)
@@ -1644,7 +1703,7 @@ the whole name in it, and one Escape closing it.
 - On the committed tree (lane 4, `e5501c8`, baseline 18/18): `cpf-1..5` and `cpm-1..4` each redden again.
 - Found beside it: the sidebar's space "+" menu hands the creator's cursor on the same way (`found-29-sep/space-create-menu-keeps-focus-after-create`); Brain loses what is typed before its prompt has the cursor (`found-29-sep/brain-loses-early-typing`); the creator gives the cursor back to nobody when it closes (`found-29-sep/create-modal-returns-focus-to-nothing`).
 
-### `found-29-sep/chat-message-actions-reads-after-fixed-waits` — open, medium (test tooling; found by this batch's regression sweep)
+### `found-29-sep/chat-message-actions-reads-after-fixed-waits` — **closed** (test tooling, medium; found by this batch's regression sweep)
 
 **`chat-message-actions` reads what it checks after fixed waits, and fails under load**
 
@@ -1652,7 +1711,28 @@ the whole name in it, and one Escape closing it.
 
 *To close:* each read waits for what it reads (`waitUntil` on the element or the address), the fixed waits go, and the suite holds 73/73 on four lanes at once.
 
-### `found-29-sep/ai-chat-takes-no-task` — **closed**, break run pending (feature, small; found closing `ledger-rows/row-743`)
+*Closed, 29 September.* The suite waits for what it reads.
+- Its 53 fixed sleeps (85.8 s a run) are gone, and none is kept: nothing its checks read is debounced or timed.
+- Each read waits, bounded, for its own target: the empty channel's cards, the address `/chat` writes, each menu, picker, dialog and draft as it opens or closes, the clipboard, and the Replies row's controls.
+- Each press the server answers is read back once the server has it: the assignee's list, the reminders, the thread's mute, the forward, and the reply's `readAt`.
+- The 73 checks, their sentences and both sides of every branch are unchanged. A run takes 51–56 s instead of 107–112 s.
+
+Before:
+- One copy with three CPU hogs, all pinned to one core: 59, 60 and 59 of 73, failing the empty channel's cards, the thread link at 1200 and 1680 (with the checks after each) and the Replies row's resolve.
+- An idle lane: 73/73.
+
+Three more defects in the same suite, found and fixed while closing it:
+- **The Replies section took any new unread reply notification as its own**, so two runs on one lane could take each other's. Measured with the interleaving arranged: the old match took the other run's. It keeps the id of the reply it posted now, and takes the notification that names it.
+- **The five hover-toolbar checks passed on a toolbar that never shows.** Playwright counts opacity 0 as visible, and a build keeping it hidden passed 73/73. Each now reads the control with `checkVisibility({ opacityProperty: true })`, hidden with the pointer off the row and shown after the hover. New patch `cma-5` reddens those five and nothing else (68/73).
+- **"and it will not send until somebody is chosen" read a missing Forward button as disabled**, and the unbounded press after it ended the run at 55 of 73. It requires the button to be shown and disabled now, and the press is bounded, so a missing button fails its checks in their own words and the run reaches its end.
+
+After:
+- 73/73 three times under the pinned load, and idle.
+- Three copies at once on lane 5: 73/73 each.
+- Four lanes at once in main (lanes 1, 2, 4 and 5, load ~19): 73/73 on each.
+- `cma-1..5` each redden exactly what they claim (67, 70, 72, 72 and 68 of 73, lane 5).
+
+### `found-29-sep/ai-chat-takes-no-task` — **closed** (feature, small; found closing `ledger-rows/row-743`)
 
 **The AI dock pointed at a task knows its title and id, not its contents**
 
@@ -1668,7 +1748,7 @@ the whole name in it, and one Escape closing it.
 `brain-entry-points` checks 15 and 16:
 - Before 14/16 on lanes 6 and 7: no id on the wire, and a turn about a task that is not there answered 503 with no model and a streamed 201 with one.
 - After 16/16 on both; on lane 7 the model's prompt holds the task's description.
-- `bep-16` (the dock keeps the id to itself) reddens check 15 alone on lanes 6 and 7. `bep-17` (the task named, not read; model lane) and `bep-18` (no task rule): break run pending.
+- `bep-16` (the dock keeps the id to itself) reddens check 15 alone on lanes 6 and 7. `bep-17` (the task named, not read) reddens it on a lane with a model and `bep-18` (no task rule) check 16, each alone (18/19, lane 4, `85ab443`).
 - Regression, 16 suites on lanes 5, 6 and 7 (the AI surfaces, the palette, the task's AI bar, the create menu's AI, the comment menu, `video-regression`): all green.
 - Two suite defects found by these runs and fixed: check 14 staged its failure before the turn before it had called the model (lane 7), and read the other workspace from the wrong field.
 
@@ -5095,7 +5175,7 @@ FAILs. video-regression 94/94.
 `ai-answer-rendering`:
 - Its placeholder check asked for "Ask Rundesk AI anything…" where a model answers, and now takes any of the four. A new check reads two turns, each the next of the four, and where no model answers, that the refusal holds still.
 - Before 50/52 on lane 7 (the old invitation, never turning) and 52/52 on lane 6. After 52/52 on both.
-- `aar-24` (no timer; model lane) reddens the new check alone (51/52). `aar-10`, re-aimed onto the new resting state, reddens its check again with the two that follow from it (49/52).
+- `aar-24` (no timer; model lane) reddens the new check alone (51/52). `aar-10`, re-aimed onto the new resting state, reddens its check again with the two that follow from it (49/52). The same on the committed tree (lane 4 with a model, `2c78436`).
 - Regression on lane 7: `brain-entry-points` 19/19, `command-palette` 43/43, `ai-create-containers` 33/33.
 - Row 853 of the reaudit keeps its `M` for the credit meter, the composer "+" and the generated artefacts (`ledger-rows/row-853`).
 
@@ -5766,13 +5846,19 @@ longer claims a schedule.
 
 *To close:* Check whether the bundles contain any break patch, git rm them, and add dist-* to .gitignore.
 
-### `commit-log/log-b7ee313-1` — open, small
+### `commit-log/log-b7ee313-1` — **closed**, break run pending (small)
 
 **Whether a subtask may be merged into its own parent is still an unanswered product question**
 
 *Evidence:* Commits b7ee313 and 13bc7b4 record 'a decision not taken'. task-merge.ts:133 and :149 still refuse with 'A subtask cannot be merged into its own parent', although the ledger says the stated reason never applied (lines 102-115).
 
 *To close:* Research ClickUp's merge rules for a parent and its subtask, then allow or refuse to match, with a check either way.
+
+*Closed, 29 September, allowed.* ClickUp (help centre "Merge tasks", "Manage subtasks in a task window using the Bulk Action Toolbar" and "Work with subtasks from tasks", read through search summaries because the proxy refuses the pages): subtasks are merged into another task from the parent's own subtask toolbar, or from a subtask's menu, and nothing excludes the parent. Merging carries descriptions, assignees, comments, attachments and subtasks into the task merged into.
+- The refusal went. Its reason had described the opposite merge since it was written, and nothing points into the bin when a subtask is merged into its parent: its comments, files and the rest land on the parent, and the binned subtask was the parent's child anyway. Merging a task into its OWN subtask is still refused, by the nesting rule, as before.
+- `mergeRefusal` loses the rule and its now-unused argument; the unit test holds that the merge is allowed.
+- `task-merge`: the check that asserted the refusal ("and a subtask merged into its parent is refused in those words") became "and a subtask merged into its own parent is merged, as in ClickUp: its comment lands on the parent and the subtask goes to the bin", on a pair of its own so the fixtures the rest of the suite reads are untouched. Before 27/28 on lane 6 (400, "A subtask cannot be merged into its own parent"); after 28/28 on lane 7.
+- `task-merge-2`, re-aimed, puts a refusal back: break run pending.
 
 ### `product-siblings/other-get-routes-without-reader` — **closed** (unread routes, small)
 

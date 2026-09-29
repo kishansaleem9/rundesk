@@ -239,6 +239,14 @@ jobs:
       - name: The chain helper holds its contract
         run: node scripts/check-chain-helper.mjs --mutate
 
+      # Every gate that re-runs itself against a mutant goes through one runner.
+      # spawnSync's timeout signals the mutant alone: ended mid-probe, a stub
+      # gate's mutant left its stub listening and its probe in apps/api, and
+      # `git add -A` staged eleven probes. The runner ends the mutant's process
+      # group, and removes what it named after its pid, however it ended.
+      - name: A mutant run ends with everything it started
+        run: node scripts/check-run-mutant.mjs --mutate
+
       # And the matcher that decides whether a claim counts as verified, for 798
       # patches across two checkers. Every one of its rules is a LOOSENING that
       # exists because a real claim was being misread, and a loosening is one

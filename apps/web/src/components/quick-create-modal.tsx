@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useNavigate, useParams } from '@tanstack/react-router'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
@@ -43,7 +43,7 @@ type TaskType = { id: string; name: string; isDefault?: boolean }
 type Mode = CreateKind
 
 export function QuickCreateModal({
-  onClose,
+  onClose: onCloseProp,
   initialMode,
   initialSpaceId,
 }: {
@@ -66,6 +66,31 @@ export function QuickCreateModal({
   const { t } = useTranslation()
   const params = useParams({ strict: false }) as { workspaceId?: string }
   const workspaceId = params.workspaceId
+  /*
+   * THE CURSOR GOES BACK WHERE IT CAME FROM
+   * (`found-29-sep/create-modal-returns-focus-to-nothing`). This is a portal
+   * with a document Escape listener, not a dialog, and it restored focus to
+   * nothing: whatever had the cursor lost it to `<body>` when the modal
+   * unmounted. A dialog gives it back to what had it when it opened, so this
+   * remembers that — read on the first render, before the form's title takes
+   * the cursor — and every way the modal closes goes through `onClose` below,
+   * which hands it back first. Not if it has left the page (a navigation, a
+   * sheet that closed): a detached element cannot take the cursor.
+   *
+   * The menus that open this let the cursor settle on their own "+" before it
+   * opens (`CommentPlusMenu`, the space "+" in the sidebar), so that is what
+   * it returns to. Given back in the close itself, not in an unmount cleanup:
+   * under StrictMode a cleanup also runs on the first mount, and would take the
+   * cursor out of the title the moment it arrived.
+   */
+  const [opener] = useState(() => {
+    const el = document.activeElement
+    return el instanceof HTMLElement && el !== document.body ? el : null
+  })
+  const onClose = useCallback(() => {
+    if (opener?.isConnected) opener.focus({ preventScroll: true })
+    onCloseProp()
+  }, [opener, onCloseProp])
   const [mode, setMode] = useState<Mode>(initialMode ?? 'task')
   /*
    * §V2-S07 frame `06:40` — the box above the menu, "Describe anything to

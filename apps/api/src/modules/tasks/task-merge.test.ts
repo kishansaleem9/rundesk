@@ -17,30 +17,28 @@ const task = (over: Partial<MergeSubject> & { id: string }): MergeSubject => ({
 })
 const A = task({ id: 'a' })
 const B = task({ id: 'b' })
-const none = new Set<string>()
 
 test('an ordinary merge is allowed', () => {
-  assert.equal(mergeRefusal(A, B, false, none), null)
+  assert.equal(mergeRefusal(A, B, false), null)
 })
 
 test('a task cannot be merged into itself', () => {
-  assert.equal(mergeRefusal(A, A, false, none), 'same-task')
+  assert.equal(mergeRefusal(A, A, false), 'same-task')
 })
 
 test('a missing task on either side is a not-found, not a bad request', () => {
   // The distinction matters at the controller: one is a typo in a URL, the
   // other is a rule being broken.
-  assert.equal(mergeRefusal(null, B, false, none), 'source-missing')
-  assert.equal(mergeRefusal(A, null, false, none), 'target-missing')
+  assert.equal(mergeRefusal(null, B, false), 'source-missing')
+  assert.equal(mergeRefusal(A, null, false), 'target-missing')
 })
 
-test('a subtask cannot be merged into its own parent', () => {
-  // `new Set(['a'])` is the TARGET's children containing the SOURCE — so the
-  // source is the descendant. This test was titled "a task cannot be merged
-  // into its own subtask", which is the opposite relationship, and it passed:
-  // the name, the comment, the message and the assertion all described a case
-  // none of them tested. The case they described is the one below.
-  assert.equal(mergeRefusal(A, B, false, new Set(['a'])), 'source-is-descendant')
+test('a subtask may be merged into its own parent', () => {
+  // Refused until 29 September as "a decision not taken" (`commit-log/log-b7ee313-1`):
+  // nothing points into the bin when it happens, and ClickUp merges subtasks
+  // into another task, their parent included, from the subtask toolbar.
+  const child = task({ id: 'a', parentTaskId: 'b' })
+  assert.equal(mergeRefusal(child, B, false), null)
 })
 
 test('and merging a task INTO its own subtask is the nesting rule, not that one', () => {
@@ -49,7 +47,7 @@ test('and merging a task INTO its own subtask is the nesting rule, not that one'
   // because the rule above was believed to be doing this for a long time, and
   // a break patch deleting it left every check green.
   const ownSubtask = task({ id: 'b', parentTaskId: 'a' })
-  assert.equal(mergeRefusal(A, ownSubtask, true, none), 'would-nest-twice')
+  assert.equal(mergeRefusal(A, ownSubtask, true), 'would-nest-twice')
 })
 
 test('a task with subtasks cannot be merged into a subtask', () => {
@@ -57,21 +55,21 @@ test('a task with subtasks cannot be merged into a subtask', () => {
   // `updateTask` refuses everywhere else. Refused rather than flattened,
   // because flattening loses the grouping somebody built.
   const subtaskTarget = task({ id: 'b', parentTaskId: 'c' })
-  assert.equal(mergeRefusal(A, subtaskTarget, true, none), 'would-nest-twice')
+  assert.equal(mergeRefusal(A, subtaskTarget, true), 'would-nest-twice')
   // ...but a childless task merging into a subtask is fine.
-  assert.equal(mergeRefusal(A, subtaskTarget, false, none), null)
+  assert.equal(mergeRefusal(A, subtaskTarget, false), null)
 })
 
 test('a binned task cannot be merged', () => {
   // Otherwise a merge could quietly resurrect work from the bin into a live
   // task, which nobody watching the live task asked for.
-  assert.equal(mergeRefusal(task({ id: 'a', isArchived: true }), B, false, none), 'already-binned')
+  assert.equal(mergeRefusal(task({ id: 'a', isArchived: true }), B, false), 'already-binned')
 })
 
 test('the refusal order puts identity before every other rule', () => {
   // Merging a task into itself while it also looks like its own descendant
   // must report the simple truth, not the exotic one.
-  assert.equal(mergeRefusal(A, A, true, new Set(['a'])), 'same-task')
+  assert.equal(mergeRefusal(A, A, true), 'same-task')
 })
 
 test('every kind of thing that moves is counted, starting at zero', () => {

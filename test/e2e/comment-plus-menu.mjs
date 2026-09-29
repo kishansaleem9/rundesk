@@ -34,7 +34,9 @@
  * mounted, marked the first Escape as its own. The New Doc, New Whiteboard and
  * New Task sections read where the cursor is once the creator has opened —
  * `document.activeElement`, by its test id — and the last types a title the
- * moment the creator is on screen and presses Escape once.
+ * moment the creator is on screen and presses Escape once. Since
+ * `found-29-sep/create-modal-returns-focus-to-nothing` it also reads where the
+ * cursor went after that Escape: back to the "+", not to the page.
  *
  * WHAT THE CHECKS ARE FOR. A menu is the easiest thing in a UI to fake: ten
  * rows that open and close and do nothing photograph perfectly. So no check
@@ -57,7 +59,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 18
+const EXPECTED_CHECKS = 19
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -489,6 +491,21 @@ try {
     oneEscapeClosed,
     'and ONE Escape closes the creator — nothing left under it takes the key first',
     taskCreatorOpened ? 'the creator is still open after one Escape' : 'the row opened no creator for an Escape to close',
+  )
+  /*
+   * AND THE CURSOR GOES BACK (`found-29-sep/create-modal-returns-focus-to-nothing`).
+   * The creator is a portal with a document Escape listener, not a dialog,
+   * and it gave the cursor back to nothing: after the Escape above it was on
+   * `<body>`. It goes back to the "+" the creator was opened from.
+   */
+  const cursorBack =
+    oneEscapeClosed &&
+    (await waitUntil(async () => (await cursor()) === 'comment-plus', { timeoutMs: 5_000 }))
+  const cursorBackOn = cursorBack ? 'comment-plus' : await cursor().catch(() => null)
+  chk(
+    cursorBack,
+    'and the cursor goes back to the “+” the creator was opened from, not to the page',
+    oneEscapeClosed ? `the cursor is on ${JSON.stringify(cursorBackOn)}` : 'the creator did not close, so nothing was given back',
   )
 } catch (err) {
   failed += 1

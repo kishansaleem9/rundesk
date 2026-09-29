@@ -38,6 +38,15 @@
  *     hand-kept copies is the duplicated-list defect, and this audit has found
  *     five instances of it, two already drifted.
  *
+ *   · WHERE THE CURSOR IS (29 September,
+ *     `found-29-sep/space-create-menu-keeps-focus-after-create` and
+ *     `found-29-sep/create-modal-returns-focus-to-nothing`). An item opened the
+ *     creator while the menu was still closing, so the menu kept the cursor and
+ *     then gave it to the space's "+" behind the modal: a name typed at once
+ *     never reached the title. The last section types one the moment the
+ *     creator is on screen, presses Escape once, and reads where the cursor
+ *     went — back to the "+", which the creator now gives it back to.
+ *
  *   node test/e2e/space-create-menu.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -59,7 +68,8 @@ const argOf = (name, fallback) => {
 // against `create-types.ts`, which is what a DERIVED list was briefly used for
 // — until `space-create-menu-4-spaceinspace` patched that file and the run came
 // back 29 of 28, because a derived fixture makes the length depend on the patch.
-const EXPECTED_CHECKS = 29
+// 32 since 29 September: the last section's three, on the cursor.
+const EXPECTED_CHECKS = 32
 
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -209,6 +219,19 @@ const page = await ctx.newPage()
 const menuOpen = () => page.locator('[data-testid="space-create-menu"]').count().then((n) => n > 0)
 /** The quick-create modal renders all nine tabs, so any one of them proves it is up. */
 const modalOpen = () => page.locator('[data-testid="create-tab-task"]').count().then((n) => n > 0)
+/**
+ * WHERE THE CURSOR IS, read in the page: the focused element's test id (its tag
+ * when it has none, `body` when nothing has it), and whether it sits in a menu,
+ * open or still closing. (`dataset`, the page's own property: nothing here can
+ * throw.)
+ */
+const cursor = () =>
+  page.evaluate(() => {
+    const el = document.activeElement
+    if (!el || el === document.body) return 'body'
+    const where = el.dataset?.testid ?? el.tagName.toLowerCase()
+    return el.closest('[role="menu"]') ? `${where} (in a menu)` : where
+  })
 
 /**
  * Put the page back to a quiet sidebar, and REFUSE to continue if it will not go.
@@ -633,6 +656,64 @@ try {
         'menu and then does nothing is the dead control the sidebar comment promises it is not',
     )
   }
+
+  /*
+   * `found-29-sep/space-create-menu-keeps-focus-after-create`, as a person meets
+   * it: Task from the space's "+", then the task's name typed the moment the
+   * creator is on screen — no wait for the cursor, no click into the title —
+   * then one Escape. Measured before on lane 2: the cursor sat in the closing
+   * menu, then on `<body>`, then on the space's "+" behind the modal; the name
+   * left the title empty, and its first space pressed the "+" and opened the
+   * menu again under the modal.
+   *
+   * And `found-29-sep/create-modal-returns-focus-to-nothing`: where the cursor
+   * is once that Escape has closed the creator. Back on the space's "+", which
+   * had it when the creator opened.
+   *
+   * LAST IN THE FILE ON PURPOSE, after the footer that leaves the space's page:
+   * a creator one Escape does not close stays over the page, and `dismissAll`
+   * in a later section would stop the run on it rather than report.
+   */
+  console.log('\n▶ Task from the space’s "+": a name typed at once lands in the title, and one Escape gives the cursor back')
+  await dismissAll()
+  await page.goto(`${B}/app/${WS}/${SPACE}`, { waitUntil: 'domcontentloaded' })
+  await page.waitForSelector(`[data-testid="space-link-${SPACE}"]`, { timeout: 15_000 })
+  await openMenu()
+  await page.getByTestId('space-create-task').click({ timeout: 8000 }).catch(() => {})
+  const taskTab = page.getByTestId('create-tab-task')
+  const taskTitle = page.getByTestId('quick-create-task-title').filter({ visible: true })
+  const creatorUp = await waitUntil(() => taskTab.isVisible().catch(() => false), { timeoutMs: 10_000 })
+  const NAME = 'Plan the launch review'
+  await page.keyboard.type(NAME).catch(() => {})
+  const named =
+    creatorUp &&
+    (await waitUntil(async () => (await taskTitle.inputValue({ timeout: 1000 })) === NAME, { timeoutMs: 5_000 }))
+  const titleHeld = await taskTitle.inputValue({ timeout: 3000 }).catch(() => null)
+  const cursorThen = named ? 'quick-create-task-title' : await cursor().catch(() => null)
+  chk(
+    named,
+    'Task from the space’s “+” opens the creator with the cursor in its title: a name typed the moment it shows lands there whole',
+    creatorUp
+      ? `the title holds ${JSON.stringify(titleHeld)} of the ${JSON.stringify(NAME)} typed; the cursor is on ${JSON.stringify(cursorThen)}`
+      : 'the item opened no creator',
+  )
+  await page.keyboard.press('Escape').catch(() => {})
+  const closedByOne =
+    creatorUp && (await waitUntil(async () => !(await taskTab.isVisible().catch(() => false)), { timeoutMs: 5_000 }))
+  chk(
+    closedByOne,
+    'and ONE Escape closes the creator the space’s “+” opened',
+    creatorUp ? 'the creator is still open after one Escape' : 'the item opened no creator for an Escape to close',
+  )
+  const plusId = `space-create-open-${SPACE}`
+  const backOnPlus =
+    closedByOne && (await waitUntil(async () => (await cursor()) === plusId, { timeoutMs: 5_000 }))
+  const cursorAfter = backOnPlus ? plusId : await cursor().catch(() => null)
+  chk(
+    backOnPlus,
+    'and the cursor goes back to the space’s “+” the creator was opened from, not to the page',
+    closedByOne ? `the cursor is on ${JSON.stringify(cursorAfter)}` : 'the creator did not close, so nothing was given back',
+  )
 } catch (e) {
   bad(`threw: ${String(e?.message ?? e).split('\n')[0]}`)
   await page.screenshot({ path: '/tmp/claude-0/shots/space-create-menu-fail.png', fullPage: true }).catch(() => {})

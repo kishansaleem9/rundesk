@@ -48,3 +48,11 @@ vite.config.ts.timestamp-*.mjs
 *.timestamp-*.mjs
 # stale-chunk-recovery builds its two releases in a throwaway copy of apps/web
 apps/.web-release-*/
+
+# What a gate writes beside its subject while it runs and removes afterwards:
+# a mutant (`scripts/lib/mutate.mjs`) and the stub gates' probes. A gate ended
+# before it could remove them left eleven probes that `git add -A` staged
+# (found-29-sep/killed-mutants-outlive-their-run).
+.*-mutant-*
+apps/api/.s3-stub-probe-*.ts
+apps/api/.model-stub-probe-*.ts

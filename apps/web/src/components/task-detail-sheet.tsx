@@ -23,6 +23,7 @@ import {
   toast,
 } from '@rundesk/ui'
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react'
+import { flushSync } from 'react-dom'
 import {
   ImageIcon,
   Maximize2,
@@ -6307,15 +6308,25 @@ function CommentsPanel({
    * ONE OPENER for the panel, and both ways in call it: the space bar on an
    * empty box, and the "+" menu's Brain (`ledger-rows/row-751`) — ClickUp's
    * own two, the Space key and the Brain icon in the comment field. Two copies
-   * of these four lines would be two panels that open differently. (From the
-   * menu, the menu has to let go of the cursor first; it puts it in the prompt
-   * as it closes — see `CommentPlusMenu`.)
+   * of these lines would be two panels that open differently. (From the menu,
+   * Brain calls it once the menu has let go of the cursor — see
+   * `CommentPlusMenu`.)
+   *
+   * DRAWN AND GIVEN THE CURSOR IN ONE STEP (`found-29-sep/brain-loses-early-typing`).
+   * The prompt used to be focused a frame later, from `requestAnimationFrame`,
+   * so there was always a moment with the panel on screen and the cursor
+   * elsewhere, and from the menu that moment lasted until the menu had gone:
+   * "Summarize the thread", typed as the panel appeared, reached the prompt as
+   * "ize the thread". `flushSync` draws the panel before this returns, so the
+   * prompt exists to take the cursor here and now.
    */
   const openCommentAi = () => {
-    setAiOpen(true)
-    setAiDraft(null)
-    setAiError(null)
-    requestAnimationFrame(() => aiPromptRef.current?.focus())
+    flushSync(() => {
+      setAiOpen(true)
+      setAiDraft(null)
+      setAiError(null)
+    })
+    aiPromptRef.current?.focus()
   }
   const [emojiOpen, setEmojiOpen] = useState(false)
   const [quickCreate, setQuickCreate] = useState<'task' | 'doc' | 'whiteboard' | null>(null)
@@ -7637,7 +7648,6 @@ function CommentsPanel({
               }}
               onEmoji={() => setEmojiOpen((v) => !v)}
               onBrain={openCommentAi}
-              brainFocus={aiPromptRef}
               onSlash={() => {
                 // Same menu the "/" key opens, reached from the "+" instead.
                 setText((prev) => (prev.endsWith('/') ? prev : `${prev}/`))
@@ -7755,6 +7765,7 @@ function CommentsPanel({
  * own `start`, and New Task / New Doc / New Whiteboard open the quick-create
  * modal on the matching tab rather than being three more creators — once this
  * menu has closed, so the modal's title has the cursor (see `createChosen`).
+ * Brain opens its panel at the same point, for the same reason.
  */
 function CommentPlusMenu({
   members,
@@ -7765,7 +7776,6 @@ function CommentPlusMenu({
   onMentionTask,
   onEmoji,
   onBrain,
-  brainFocus,
   onSlash,
   onQuickCreate,
 }: {
@@ -7776,9 +7786,8 @@ function CommentPlusMenu({
   onRecordClip: () => void
   onMentionTask: () => void
   onEmoji: () => void
+  /** Opens the panel and puts the cursor in its prompt, in one step. */
   onBrain: () => void
-  /** The panel's prompt: where the cursor goes once this menu has let go of it. */
-  brainFocus: { current: HTMLTextAreaElement | null }
   onSlash: () => void
   onQuickCreate: (mode: 'task' | 'doc' | 'whiteboard') => void
 }) {
@@ -7787,12 +7796,19 @@ function CommentPlusMenu({
   /*
    * WHERE THE CURSOR GOES, MEASURED RATHER THAN ASSUMED. Brain calls the opener
    * the space bar calls, and the opener puts the cursor in the panel's prompt —
-   * which holds from the space bar and did not from here. Sampled every 50ms
+   * which held from the space bar and did not from here. Sampled every 50ms
    * after the press: the prompt had focus at 0ms, the closing menu had taken it
    * back to its own container by 50ms, and it fell to <body> when the menu
-   * unmounted. A menu hands focus on only once it has closed, through
-   * `onCloseAutoFocus`, so that is where Brain puts it: in the prompt, rather
-   * than back on the "+".
+   * unmounted. So Brain put the cursor back in the prompt from
+   * `onCloseAutoFocus`, the point where a menu hands focus on.
+   *
+   * THEN THE PANEL MOVED THERE TOO (`found-29-sep/brain-loses-early-typing`).
+   * Opened at the choice and given the cursor only once the menu had gone,
+   * the panel sat on screen for that long with the cursor in the closing menu:
+   * "Summarize the thread", typed as it appeared, reached the prompt as "ize
+   * the thread". Now the row only records the choice, and the panel opens from
+   * `onCloseAutoFocus`, drawn and given the cursor in one step by the opener;
+   * `preventDefault` keeps Radix from moving it to the "+" after.
    */
   const brainChosen = useRef(false)
   /*
@@ -7812,9 +7828,13 @@ function CommentPlusMenu({
    * `onCloseAutoFocus`, the point at which the menu, its focus trap and its
    * Escape layer have gone: the title's own `autoFocus` keeps the cursor, and
    * the first Escape reaches the modal with nothing before it. Opening the
-   * modal at once and sending the cursor after it, as Brain does, loses what
-   * is typed in between: measured the same day, "Summarize the thread" typed
-   * as Brain's panel appeared reached its prompt as "ize the thread".
+   * modal at once and sending the cursor after it, as Brain did, loses what is
+   * typed in between: measured the same day, "Summarize the thread" typed as
+   * Brain's panel appeared reached its prompt as "ize the thread".
+   *
+   * WITHOUT `preventDefault` (`found-29-sep/create-modal-returns-focus-to-nothing`):
+   * Radix puts the cursor back on the "+" first, and the modal, which remembers
+   * what had the cursor when it opened, gives it back there when it closes.
    */
   const createChosen = useRef<'task' | 'doc' | 'whiteboard' | null>(null)
 
@@ -7823,7 +7843,10 @@ function CommentPlusMenu({
       <DropdownMenu
         onOpenChange={(open) => {
           // Reopened before it had finished closing: that choice was dropped.
-          if (open) createChosen.current = null
+          if (open) {
+            createChosen.current = null
+            brainChosen.current = false
+          }
         }}
       >
         <DropdownMenuTrigger asChild>
@@ -7844,15 +7867,15 @@ function CommentPlusMenu({
             const chosen = createChosen.current
             if (chosen) {
               createChosen.current = null
-              // Not back to the "+": the creator's title takes the cursor as it opens.
-              e.preventDefault()
+              // The "+" has the cursor when the creator opens, and gets it back
+              // when it closes; the title takes it as it opens.
               onQuickCreate(chosen)
               return
             }
             if (!brainChosen.current) return
             brainChosen.current = false
             e.preventDefault()
-            brainFocus.current?.focus()
+            onBrain()
           }}
         >
           {/*
@@ -7899,13 +7922,12 @@ function CommentPlusMenu({
           {/*
             Brain, beside Add emoji where frame `04:50` draws it
             (`ledger-rows/row-751`): the panel the space bar opens, through the
-            same opener (see above).
+            same opener, once this menu has closed (see above).
           */}
           <DropdownMenuItem
             data-testid="comment-plus-brain"
             onSelect={() => {
               brainChosen.current = true
-              onBrain()
             }}
           >
             <BrainIcon className="mr-2 h-4 w-4" />

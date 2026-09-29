@@ -25,7 +25,10 @@
  *     reader may open it (checks 15 and 16, `found-29-sep/ai-chat-takes-no-task`).
  *   · Brain in the "+" menu opens the comment AI panel the space bar opens, and
  *     the panel's Summarize this task sends the task's id to
- *     `POST /ai/summarize`, which drafts from what is in the task.
+ *     `POST /ai/summarize`, which drafts from what is in the task. It opens
+ *     once the menu has closed, drawn with the cursor already in its prompt, so
+ *     what is typed as it appears lands there whole (check 17,
+ *     `found-29-sep/brain-loses-early-typing`).
  *
  * ON A LANE WITH NO MODEL, WHICH IS THE POINT. The dock and the panel open and
  * carry the task whether or not anything can answer, so every check here holds
@@ -59,7 +62,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 19
+const EXPECTED_CHECKS = 20
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -614,6 +617,44 @@ try {
     replied && composerNow === '' && before !== null && after === before,
     'and nothing reached the comment: the box is as it was and the task has no new comment — a draft goes in only by Keep',
     `the box reads ${JSON.stringify(composerNow)}; comments ${before} → ${after} (${said(commentsAfter)})`,
+  )
+
+  // ══ 17. WHAT IS TYPED AS THE PANEL APPEARS LANDS IN ITS PROMPT ════════════
+  /*
+   * `found-29-sep/brain-loses-early-typing`. The panel opened at the choice
+   * and the cursor followed only once the menu had gone: "Summarize the
+   * thread", typed as the panel appeared, reached the prompt as "ize the
+   * thread". Check 10 cannot see that — it waits for the cursor, and the
+   * cursor does arrive. So the instruction is typed the moment the panel is on
+   * screen, with no wait for the cursor, and the prompt is read for all of it.
+   *
+   * A NEW PAGE, AND LAST IN THE FILE. Summarize above leaves the panel in the
+   * mode whose prompt takes nothing, and the page load starts it again; and
+   * on a build where the cursor lands elsewhere the typing goes elsewhere (a
+   * space on the "+" opens the menu again), which no check after this one
+   * should have to stand in.
+   */
+  console.log('\n▶ Brain from the “+”: what is typed as its panel appears lands in the prompt')
+  const sheetAgain = await openTask()
+  await page.getByTestId('task-tab-comments').click({ timeout: 15_000 }).catch(() => {})
+  await page.getByTestId('comment-plus').click({ timeout: 15_000 }).catch(() => {})
+  await waitUntil(() => plusBrain.isVisible().catch(() => false), { timeoutMs: 10_000 })
+  await plusBrain.click({ timeout: 8000 }).catch(() => {})
+  const panelAgain = await waitUntil(() => panel.isVisible().catch(() => false), { timeoutMs: 10_000 })
+  const ASKED = 'Summarize the thread for the team'
+  await page.keyboard.type(ASKED).catch(() => {})
+  const prompt = page.getByTestId('comment-ai-prompt').filter({ visible: true })
+  const askedWhole =
+    panelAgain && (await waitUntil(async () => (await prompt.inputValue({ timeout: 1000 })) === ASKED, { timeoutMs: 5000 }))
+  const promptHeld = await prompt.inputValue({ timeout: 3000 }).catch(() => null)
+  chk(
+    askedWhole,
+    'and what is typed as Brain’s panel appears lands in its prompt, every character of it',
+    !sheetAgain
+      ? 'the task sheet did not open a third time'
+      : panelAgain
+        ? `the prompt holds ${JSON.stringify(promptHeld)} of the ${JSON.stringify(ASKED)} typed`
+        : 'Brain opened no panel',
   )
 } catch (err) {
   failed += 1

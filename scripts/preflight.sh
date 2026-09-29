@@ -78,6 +78,7 @@ step "a new table proves a lane current too" bash scripts/check-schema-witness.s
 step "bail stops the file and loses nothing" node scripts/check-bail.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
+step "a mutant run ends with all it started" node scripts/check-run-mutant.mjs --mutate
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs --mutate
 step "patch-to-suite attribution holds"  node scripts/check-suite-of-patch.mjs --mutate
 step "log-to-tree provenance holds"      node scripts/check-log-tree.mjs --mutate

@@ -38,6 +38,8 @@ const HERE = dirname(fileURLToPath(import.meta.url))
 // The shared counter, and `lib/mutate.mjs` records why it is not `FAIL`
 // and not `includes('FAIL')` — both were tried here and both were wrong.
 import { namedFailures } from './lib/mutate.mjs'
+import { freePort } from './lib/free-port.mjs'
+import { runMutant } from './lib/run-mutant.mjs'
 
 const ROOT = join(HERE, '..')
 const STUB = process.env.S3_STUB ?? join(HERE, 'e2e-lanes/s3-stub.mjs')
@@ -61,7 +63,9 @@ const chk = (cond, good, bad) => {
  * `--mutate` runs this file inside itself and two copies on one port would give
  * whichever bound first a monopoly and the other a confusing refusal.
  */
-const PORT = 9300 + (process.pid % 400)
+// Asked of the OS, not drawn from the pid: a pid-chosen port could be a lane
+// stub's, taken (`scripts/lib/free-port.mjs`).
+const PORT = await freePort()
 const BUCKET = 'rundesk-stub-cases'
 const KEY_NAME = 'tasks/probe/cover.png'
 
@@ -150,7 +154,7 @@ const startStub = () => {
   })
   return new Promise((resolve, reject) => {
     let seen = ''
-    const bail = setTimeout(() => reject(new Error(`the stub never announced itself: ${seen}`)), 15_000)
+    const bail = setTimeout(() => reject(new Error(`the stub never announced itself: ${seen}`)), 60_000)
     child.stdout.on('data', (d) => {
       seen += d
       /*
@@ -171,8 +175,11 @@ const startStub = () => {
   })
 }
 
+// Named after the process that writes it; a mutant's is removed by the gate
+// that ran it, however that run ended.
+const probeFileOf = (pid) => join(ROOT, 'apps/api', `.s3-stub-probe-${pid}.ts`)
 const probe = () => {
-  const file = join(ROOT, 'apps/api', `.s3-stub-probe-${process.pid}.ts`)
+  const file = probeFileOf(process.pid)
   try {
     writeFileSync(file, PROBE)
     const r = spawnSync('pnpm', ['exec', 'tsx', file], {
@@ -292,6 +299,9 @@ console.log(
  * that proves nothing, and a test double is exactly where that rots unnoticed.
  */
 if (process.argv.includes('--mutate')) {
+  // Each mutant runs this whole file again, a probe included; a loaded machine
+  // took one past the old 180 s.
+  const MUTANT_TIMEOUT_MS = Number(process.env.STUB_GATE_MUTANT_TIMEOUT_MS) || 300_000
   const ORIGINAL = readFileSync(STUB, 'utf8')
   let blind = 0
   const MUTATIONS = [
@@ -348,13 +358,22 @@ if (process.argv.includes('--mutate')) {
     const mutant = join(dirname(STUB), `.s3-stub-mutant-${label.replace(/\W+/g, '-')}.mjs`)
     try {
       writeFileSync(mutant, ORIGINAL.split(from).join(to))
-      const r = spawnSync(process.execPath, [fileURLToPath(import.meta.url)], {
-        encoding: 'utf8',
-        timeout: 180_000,
+      const r = runMutant([fileURLToPath(import.meta.url)], {
+        timeout: MUTANT_TIMEOUT_MS,
         env: { ...process.env, S3_STUB: mutant },
+        leftBehind: (pid) => [probeFileOf(pid)],
       })
       if (/the probe printed no result/.test(r.stderr ?? '')) {
         console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — the mutant never got a result back`)
+        blind += 1
+        continue
+      }
+      // A run the timeout ended is about the machine, not the rule: said as
+      // such, and still not credited. Under a full preflight beside other runs
+      // one of these went past 180 s and read as "exited non-zero but named no
+      // case" (`found-29-sep/stub-mutants-time-out-unnamed`).
+      if (r.error?.code === 'ETIMEDOUT' || r.signal) {
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — its run was ended after ${MUTANT_TIMEOUT_MS / 1000} s (${r.signal ?? r.error.code}): a loaded machine, not the rule; run it again`)
         blind += 1
         continue
       }
@@ -367,7 +386,9 @@ if (process.argv.includes('--mutate')) {
         // before it could report, so the exit code is about the harness
         // rather than about the rule. Crediting it would be the same mistake
         // as crediting a mutant that never ran.
-        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — it exited non-zero but named no case`)
+        // With what it said last, so the reason is on the page, not guessed at.
+        const said = String(r.stderr ?? '').trim().split('\n').filter(Boolean).slice(-2).join(' | ').slice(0, 240)
+        console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${label} — it exited non-zero but named no case${said ? ` (it said: ${said})` : ''}`)
         blind += 1
       } else {
         console.log(`  \x1b[32mreddens\x1b[0m ${label} (${named} case(s))`)

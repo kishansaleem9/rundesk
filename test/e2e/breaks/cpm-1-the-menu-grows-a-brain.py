@@ -8,6 +8,11 @@
 # AI panel the space bar opens is that engine, so the row is there now, wired
 # to the same opener the space bar calls.
 #
+# RE-AIMED AGAIN the same day (`found-29-sep/brain-loses-early-typing`): the
+# row now only records the choice, and the menu opens the panel once it has
+# closed. So the row that does nothing is a row that records nothing — the
+# handler this patch empties is that one line.
+#
 # The facade this file was written against is unchanged, and so is its name:
 # the menu grows a Brain with nothing behind it. A `DropdownMenuItem` with an
 # icon and a label whose handler opens nothing. Ten of ten items, exactly as
@@ -25,13 +30,10 @@ p = '/home/user/rundesk/apps/web/src/components/task-detail-sheet.tsx'
 a = """            data-testid="comment-plus-brain"
             onSelect={() => {
               brainChosen.current = true
-              onBrain()
             }}
 """
 b = """            data-testid="comment-plus-brain"
-            onSelect={() => {
-              brainChosen.current = true
-            }}
+            onSelect={() => {}}
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

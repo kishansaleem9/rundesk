@@ -44,7 +44,7 @@
  */
 import { readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { join, dirname, basename, extname } from 'node:path'
-import { spawnSync } from 'node:child_process'
+import { runMutant } from './run-mutant.mjs'
 
 /*
  * `FAIL` NOT FOLLOWED BY A LETTER, and the two rejected spellings are both
@@ -111,11 +111,7 @@ export function proveMutationsBite({ subject, caseFile, envVar, mutations, alive
         }
       }
 
-      const r = spawnSync(process.execPath, [caseFile], {
-        encoding: 'utf8',
-        timeout: 180_000,
-        env: { ...process.env, [envVar]: mutant },
-      })
+      const r = runMutant([caseFile], { timeout: 180_000, env: { ...process.env, [envVar]: mutant } })
       const named = namedFailures(r.stdout)
       if (r.status === 0) {
         console.log(`  \x1b[31mPROVES NOTHING\x1b[0m ${name} — every case still passes`)
