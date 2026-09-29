@@ -40,6 +40,22 @@ done
 ) &
 wait
 
+# Every push is read from its log, not its status (`push_log_ok`, lane-env.sh):
+# a push that stopped on a question exits 0 having applied nothing, and this
+# said "synced" (`found-29-sep/lane-push-errors-read-as-synced`). Nothing is
+# restarted when one stopped: the lanes keep serving what they served.
+stopped=""
+for f in $(seq 1 "$N" | sed 's#.*#/tmp/claude-0/push-v&.log#') /tmp/claude-0/push-pristine.log; do
+  push_log_ok "$f" || stopped="$stopped $f"
+done
+if [ -n "$stopped" ]; then
+  for f in $stopped; do
+    echo "schema push STOPPED: $f — $(grep -m1 -E '^Error|Interactive prompts require|PostgresError' "$f" || echo 'no change was reported')"
+  done
+  echo "nothing restarted; fix the push and run this again"
+  exit 1
+fi
+
 for k in $(seq 1 "$N"); do
   PORT=$((3020 + k))
   pkill -f "PORTMARK=$k " 2>/dev/null

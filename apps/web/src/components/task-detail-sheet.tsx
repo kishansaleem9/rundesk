@@ -396,6 +396,9 @@ const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 type TaskDetail = {
   id: string
   listId: string
+  isArchived?: boolean
+  /** In the Trash, not archived: the Trash restores it. */
+  deletedAt?: string | null
   createdById?: string | null
   title: string
   description: string | null
@@ -519,9 +522,10 @@ function isNotWired(err: unknown): boolean {
  *   comment  — a comment.
  */
 /** `full` is Full edit: deleting the task, and adding a subtask (`found-25-sep/full-edit-enforced-nowhere`). */
-type TaskCaps = { edit: boolean; progress: boolean; comment: boolean; full: boolean }
-const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true, full: true }
-const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false, full: false }
+/** `restore` is Unarchive, on an archived task (`found-28-sep/archived-tasks-unarchived-in-place`). */
+type TaskCaps = { edit: boolean; progress: boolean; comment: boolean; full: boolean; restore?: boolean }
+const CAPS_ALL: TaskCaps = { edit: true, progress: true, comment: true, full: true, restore: false }
+const CAPS_NONE: TaskCaps = { edit: false, progress: false, comment: false, full: false, restore: false }
 const TaskCapsContext = createContext<TaskCaps>(CAPS_ALL)
 const isTaskCaps = (x: unknown): x is TaskCaps =>
   !!x && typeof (x as TaskCaps).edit === 'boolean' && typeof (x as TaskCaps).progress === 'boolean' && typeof (x as TaskCaps).comment === 'boolean'
@@ -1162,6 +1166,21 @@ export function TaskDetailSheet({
    * the clock. Different request, different column, different surface: the two
    * rows are two actions, which is the only reason both are here.
    */
+  /*
+   * UNARCHIVE, WHERE THE TASK IS SHOWN (`found-28-sep/archived-tasks-unarchived-in-place`).
+   * An archived task opened from search or a link said nothing of being
+   * archived, and only Settings → Archived restored it. ClickUp puts Unarchive
+   * on the task; here it is offered by `restore`, the rule the route asks.
+   */
+  const unarchiveTask = useMutation({
+    mutationFn: () => api(`/tasks/${taskId}/restore`, { method: 'POST' }),
+    onSuccess: async () => {
+      toast.success(t('taskDetail.taskUnarchived'))
+      await qc.invalidateQueries()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('taskDetail.couldNotUnarchive')),
+  })
+
   const archiveTask = useMutation({
     mutationFn: () => api(`/tasks/${taskId}`, { method: 'DELETE' }),
     onSuccess: async () => {
@@ -1293,6 +1312,25 @@ export function TaskDetailSheet({
           <TaskSheetSkeleton />
         ) : detailQuery.data ? (
           <>
+            {detailQuery.data.isArchived && !detailQuery.data.deletedAt && (
+              <div
+                data-testid="task-archived-banner"
+                className="mx-4 mt-3 flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[13px]"
+              >
+                <span>{t('taskDetail.archivedBanner')}</span>
+                {caps.restore === true && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    data-testid="task-unarchive"
+                    disabled={unarchiveTask.isPending}
+                    onClick={() => unarchiveTask.mutate()}
+                  >
+                    {t('taskDetail.unarchive')}
+                  </Button>
+                )}
+              </div>
+            )}
             {/*
               §V2-09 — the cover band: an image if there is one, else a colour,
               else the brand gradient. `coverUrl` is what the API resolved from

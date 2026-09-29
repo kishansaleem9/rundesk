@@ -157,6 +157,13 @@ try {
     if (Array.isArray(held) && held.includes('template.manage')) {
       await waitUntil(async () => (await button.count()) > 0, { timeoutMs: 15_000 })
     } else {
+      /*
+       * THE ABSENCE IS READ ONCE THE SHEET HAS DRAWN THE TASK — its cover band,
+       * drawn with the task — not while it still shows the skeleton, which draws
+       * no button whatever the keys say: counted two frames after the keys,
+       * `rpw-5` (the button offered to everybody) read 0 and reddened nothing.
+       */
+      await page.getByTestId('task-sheet').getByTestId('task-cover').first().waitFor({ state: 'visible', timeout: 15_000 }).catch(() => {})
       await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)))).catch(() => {})
     }
     return button.count()

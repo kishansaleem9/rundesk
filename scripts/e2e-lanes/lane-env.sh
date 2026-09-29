@@ -473,6 +473,16 @@ break_locks_drop () {
 # foreign key `…_fk` where a migration's `REFERENCES` makes `…_fkey`, and the
 # same key under two names is not drift. What it constrains is.
 SCHEMA_REF_DB=rundesk_schema_ref
+# A PUSH THAT STOPPED IS NOT A PUSH (`found-29-sep/lane-push-errors-read-as-synced`).
+# drizzle-kit 0.31 exits 0 when it stops on a question no pipe can answer
+# ("Interactive prompts require a TTY terminal"), having applied nothing, so
+# its status says nothing. A push is read as done only when its log says it
+# applied the schema or found nothing to change, and holds no error.
+push_log_ok () {
+  [ -s "$1" ] || return 1
+  grep -qE '\[✓\] Changes applied|No changes detected' "$1" || return 1
+  ! grep -qE '^Error|Interactive prompts require' "$1"
+}
 schema_describe () {
   # psql's own status, not `sort`'s: piped straight into sort, a database that
   # could not be read described as nothing, and every line of the reference
@@ -512,7 +522,8 @@ schema_ref_ensure () {
            && sudo -u postgres psql -q -c "CREATE DATABASE $SCHEMA_REF_DB OWNER rundesk" >/dev/null 2>&1 \
            && pg_restore -h 127.0.0.1 -U rundesk -d "$SCHEMA_REF_DB" --no-owner --role=rundesk "$dir/pristine.dump" >"$dir/schema-ref-restore.log" 2>&1; true; } \
      || ! ( cd "$R/packages/db" && export DATABASE_URL="postgres://rundesk:rundesk@127.0.0.1:5432/$SCHEMA_REF_DB" \
-            && yes | pnpm exec drizzle-kit push --force > "$dir/schema-ref-push.log" 2>&1 ) \
+            && yes | pnpm exec drizzle-kit push --force > "$dir/schema-ref-push.log" 2>&1 \
+            && push_log_ok "$dir/schema-ref-push.log" ) \
      || ! schema_describe "$SCHEMA_REF_DB" > "$dir/schema-ref.txt.new" \
      || [ ! -s "$dir/schema-ref.txt.new" ]; then
     echo "schema reference: could not build it — see $dir/schema-ref-push.log" >&2

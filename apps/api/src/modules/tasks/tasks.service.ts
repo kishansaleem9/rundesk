@@ -93,7 +93,7 @@ import { SecurityService } from '../security/security.service'
 import { assertCanCreateInSpace } from '../../common/permissions/container-access'
 import { assertSpaceLevel, resolveSpaceLevel, spaceLevelReaches } from '../../common/permissions/space-default-permission'
 import { assertTaskNotInBin, assertTaskWritable, taskCommentAllowed } from '../../common/permissions/task-write'
-import { assertManagerTaskScope } from '../../common/permissions/task-restore'
+import { assertManagerTaskScope, taskRestorable } from '../../common/permissions/task-restore'
 import { assertCanCreateTaskIn, canCreateTaskIn } from '../../common/permissions/task-create'
 import { assertMayShapeStatuses } from '../../common/permissions/status-access'
 import { assertMayDefineFields } from '../../common/permissions/field-access'
@@ -5133,13 +5133,24 @@ export class TasksService {
           throw e
         },
       )
-    const [edit, progress, comment, full] = await Promise.all([
+    /*
+     * `restore` — Unarchive, where the task is shown (`found-28-sep/archived-tasks-unarchived-in-place`):
+     * an archived task, not one in the Trash, that `POST /tasks/:id/restore`
+     * would take from this person. It was offered only in Settings → Archived.
+     */
+    const [row] = await this.db
+      .select({ isArchived: tasks.isArchived, deletedAt: tasks.deletedAt })
+      .from(tasks)
+      .where(eq(tasks.id, taskId))
+      .limit(1)
+    const [edit, progress, comment, full, restore] = await Promise.all([
       allowed(this.assertTaskWriteAccess(taskId, actorId)),
       allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'comment' })),
       allowed(this.assertMayComment(taskId, actorId)),
       allowed(this.assertTaskWriteAccess(taskId, actorId, { level: 'full' })),
+      row?.isArchived && !row.deletedAt ? taskRestorable(this.db, taskId, actorId) : Promise.resolve(false),
     ])
-    return { edit, progress, comment, full }
+    return { edit, progress, comment, full, restore }
   }
 
   async createComment(taskId: string, authorId: string, body: string, parentCommentId?: string, mentions?: Array<{ userId: string; offset: number; length: number }>, attachmentIds?: string[]) {

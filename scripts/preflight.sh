@@ -35,6 +35,7 @@ step "every ledger id cited is an item" node scripts/check-ledger-ids.mjs
 step "and that gate bites as well"      node scripts/check-ledger-ids-cases.mjs --mutate
 step "the sweep fixture builds where it picked" node scripts/check-sweep-fixture-cases.mjs --mutate
 step "a drifted lane database is caught" bash scripts/e2e-lanes/schema-drift-selfcheck.sh
+step "a push that stops is not read as synced" bash scripts/e2e-lanes/push-log-selfcheck.sh --mutate
 step "a routing suite says what its worker does" node scripts/check-suite-routes.mjs
 step "and that gate bites, case by case"  node scripts/check-suite-routes-cases.mjs --mutate
 step "the e2e proxy keeps what it advertises" node scripts/check-local-stack-keepalive.mjs --mutate

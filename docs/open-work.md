@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 321 items, 90 open, 11 partly fixed, 220 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 321 items, 88 open, 11 partly fixed, 222 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1216,7 +1216,7 @@ The editor starts read only and is made editable only when the doc's capabilitie
 `doc-level-controls`, 7 checks, a View, a Comment and an Edit share on one doc:
 - Before: 1/7 on lane 2 (the API's capabilities, which were right).
 - After: 7/7 on lane 2.
-- Patches `dlc-1..11`, one or more per check. Their runs follow the commit.
+- Patches `dlc-1..11`, one or more per check: all eleven redden (lane 3, at `0911c6e`, baseline 7/7).
 - In CI (229).
 - Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
 
@@ -1392,7 +1392,7 @@ Now:
 `announcement-views`, 9 checks:
 - Before: 0/9 on lane 1.
 - After: 9/9 on lane 1.
-- Patches `anv-1..10`, one or more per check. Their runs follow the commit.
+- Patches `anv-1..10`, one or more per check: all ten redden (lane 4, at `0911c6e`, baseline 9/9).
 - In CI (229).
 - Regression on lanes 1, 2, 3 and 7 at once, 49 suites: every suite that opens a doc, reads announcements, flags, the home page or the planner's What's new, and the 19 of `three-suites-fail-under-a-full-sweep`: 49/49.
 
@@ -1444,13 +1444,17 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *Closed:* every suite's `chk` prints the sentence, then the reason (the 70 that were fixed on 26 September, and now these 23); `sdp-4`'s claim is in the checker's shape. After: `check-plan-population.mjs` agrees with the reddened checker on every patch (1703 needing a run), with none needing a person; the re-runs of the 23 suites follow in the break backlog.
 
-### `found-29-sep/lane-push-errors-read-as-synced` — open, test tooling, small (found closing `platform-flag-switches-apply-nowhere`)
+### `found-29-sep/lane-push-errors-read-as-synced` — **closed** (test tooling, small; found closing `platform-flag-switches-apply-nowhere`)
 
 **A schema push that stops on an error is reported as synced**
 
 *Evidence, 29 September:* drizzle-kit 0.31 asks before adding a unique key to a table with rows, and with no terminal it prints "Error: Interactive prompts require a TTY terminal" and exits 0, having applied nothing. `fleet-sync.sh` pipes `yes` into the push, reads no status and no log, and said "7/7 lanes synced and up"; `schema_ref_ensure` (`lane-env.sh`) trusts the same exit status, so the schema reference was built without the table migration 0165 adds, and `build-api.sh` then refused every lane as drifted — the right answer, from the wrong database.
 
 *To close:* read the push's log for an error as well as its status, in both places, and fail loudly; prove it with a push that is made to stop.
+
+*Closed, 29 September:* `push_log_ok` (`lane-env.sh`) reads a push as done only when its log says the schema was applied or nothing changed, and holds no error. `fleet-sync.sh` reads every lane's log and pristine's before it stops anything: one that stopped is named, with its first error line, and nothing is restarted (exit 1), so the lanes keep serving what they served. `schema_ref_ensure` refuses to build the reference on a stopped push.
+- `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
+- Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
 
 ### `found-28-sep/copy-points-admins-to-the-console` — **closed** (stale reason, small; found by the ClickApps research)
 
@@ -1505,16 +1509,28 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 `own-capacity`, 6 checks:
 - Before: 1/6 on lane 1 (a manager setting a member's, and refused an admin's, which held).
 - After: 6/6 on lane 1.
-- Patches `ocp-1..7`; `pca-6` is re-aimed onto the inline key. Their runs follow the commit.
+- Patches `ocp-1..7`: all seven redden (lane 2, at `0911c6e`, baseline 6/6); `pca-6` is re-aimed onto the inline key, and its run follows.
 - In CI (231).
 
-### `found-28-sep/archived-tasks-unarchived-in-place` — open, feature, small (found by the archived-tasks research)
+### `found-28-sep/archived-tasks-unarchived-in-place` — **closed** (feature, small; found by the archived-tasks research)
 
 **An archived task is restored only from Settings → Archived**
 
 *Evidence:* The task sheet and the list page's archived rows offer no Unarchive, though the API lets whoever may change the task restore it. ClickUp puts Unarchive on the task. `listArchivedTasks` also asks the write rule once per row (up to 200).
 
 *To close:* Offer Unarchive where the row is shown, by `canRestore`, and batch the rule.
+
+*Closed, 29 September.* Measured on lane 5 at `394d3f9` before: an archived task opened in its sheet (from search or a link) said nothing of being archived and offered no way back, and its capabilities carried no answer for restoring it. ClickUp: Unarchive is on the task, and unarchiving needs Edit on its location.
+
+- The task's capabilities carry `restore`: an archived task, not one in the Trash, that `POST /tasks/:id/restore` would take from this person (`taskRestorable`, the rule the route asks).
+- The sheet says "This task is archived." on one, with Unarchive where `restore` allows, which restores it in place. Four locales. The list page shows no archived rows, so the sheet is where an archived task is shown outside Settings → Archived.
+- Settings → Archived asks the rule once for a role that decides it: an admin restores every listed row, a manager the rows of the spaces they belong to (one read), and only a member's or guest's answer, which turns on each task's own shares and assignees, is still asked per row.
+
+`unarchive-in-place`, 5 checks:
+- Before: 1/5 on lane 5 (Settings → Archived's answers, which the batching keeps).
+- After: 5/5 on lane 7.
+- Patches `uip-1..8`; `ata-4` and `tsc-1` are re-aimed. Their runs follow the commit.
+- In CI (233).
 
 ### `found-28-sep/job-title-rule-and-message-disagree` — **closed** (permissions, small; found by the user-group research)
 
@@ -2829,6 +2845,8 @@ Each passed alone right after, on this build (28/28, 9/9, 37/37). The failing ch
 The `fetch failed` in `list-empty-states`, `ai-answer-rendering` and `create-menu-ai` was the proxy's keep-alive, closed as `e2e-proxy-advertises-the-apis-keep-alive`. Each suite passed alone on lane 5, and a sweep of the 17 with `ai-answer-rendering` and `create-menu-ai` on lane 7 at `f8a799d` passed 19/19 (28/28, 9/9, 37/37, 93/93, 56/56, 5/5, 34/34, 25/25, 91/91, 36/36, 18/18, 73/73, 23/23, 59/59, 30/30, 29/29, 61/61, 51/51, 24/24).
 
 *Closed, 29 September:* the same 19 under a four-lane sweep's load (lanes 1, 2, 3 and 7 at once on four cores, which is where they failed), with 30 more suites in the same sweep: 49/49 at `c55a088`. Each read the same numbers as alone.
+
+The break runs for `c55a088` found one wait that had cost a check its bite: `role-permissions-web` counted Save as template two frames after the member's keys answered, and the sheet still showed its skeleton then, so `rpw-5` (the button offered to everybody) ran 0 failed. The absence is now counted once the sheet has drawn the task (its cover band); `rpw-5`'s run follows the commit.
 
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)

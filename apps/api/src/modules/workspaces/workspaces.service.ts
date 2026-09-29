@@ -1,11 +1,11 @@
 import { ASSIGNABLE_WORKSPACE_ROLES, isAssignableWorkspaceRole, roleRank } from '../../common/permissions/workspace-roles'
 import { ConflictException, Injectable, Inject, NotFoundException, BadRequestException, ForbiddenException } from '@nestjs/common'
-import { and, asc, desc, eq, isNotNull, isNull, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, isNotNull, isNull, sql, inArray } from 'drizzle-orm'
 import { alias } from 'drizzle-orm/pg-core'
 import * as crypto from 'crypto'
 import { randomBytes } from 'node:crypto'
 import * as dns from 'dns'
-import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, folders, projects, spaces, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
+import { organizationMembers, organizations, workspaces, workspaceMembers, users, tasks, lists, folders, projects, spaces, spaceMembers, aiUsage, invitations, workspaceGroups, workspaceGroupMembers, workspaceHolidays, taskTypes, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 
 import { DB_TOKEN } from '../../common/database/database.module'
@@ -293,6 +293,7 @@ export class WorkspacesService {
         listName: lists.name,
         projectName: projects.name,
         updatedAt: tasks.updatedAt,
+        spaceId: spaces.id,
       })
       .from(tasks)
       .innerJoin(lists, eq(tasks.listId, lists.id))
@@ -318,8 +319,34 @@ export class WorkspacesService {
       .orderBy(desc(tasks.updatedAt))
       .limit(200)
     // A trusted caller with no actor restores nothing on anybody's behalf.
-    const restorable = await Promise.all(rows.map((row) => (actor ? taskRestorable(this.db, row.id, actor.id) : false)))
-    return rows.map((row, i) => ({ ...row, canRestore: restorable[i] }))
+    const restorable = actor ? await this.restorableRows(workspaceId, actor.id, rows) : rows.map(() => false)
+    return rows.map(({ spaceId: _spaceId, ...row }, i) => ({ ...row, canRestore: restorable[i] }))
+  }
+
+  /**
+   * THE RESTORE RULE, ASKED ONCE FOR A ROLE THAT DECIDES IT
+   * (`found-28-sep/archived-tasks-unarchived-in-place`). It was asked per row,
+   * up to 200 times, each several queries. An admin passes the write rule and
+   * has no space scope, so every listed row is theirs to restore; a manager
+   * passes the write rule and restores in the spaces they belong to — one read
+   * of those; anybody else's answer turns on each task's own shares and
+   * assignees, so it is still asked per row (`taskRestorable`, the rule
+   * `POST /tasks/:id/restore` asks).
+   */
+  private async restorableRows(workspaceId: string, actorId: string, rows: Array<{ id: string; spaceId: string }>): Promise<boolean[]> {
+    const membership = await this.getMembership(workspaceId, actorId)
+    const role = membership?.role as string | undefined
+    if (role === 'workspace_admin' || role === 'super_admin') return rows.map(() => true)
+    if (role === 'manager') {
+      const spaceIds = [...new Set(rows.map((r) => r.spaceId))]
+      const mine = spaceIds.length === 0 ? [] : await this.db
+        .select({ spaceId: spaceMembers.spaceId })
+        .from(spaceMembers)
+        .where(and(eq(spaceMembers.userId, actorId), inArray(spaceMembers.spaceId, spaceIds)))
+      const inMine = new Set(mine.map((m) => m.spaceId))
+      return rows.map((r) => inMine.has(r.spaceId))
+    }
+    return Promise.all(rows.map((row) => taskRestorable(this.db, row.id, actorId)))
   }
 
   /**
