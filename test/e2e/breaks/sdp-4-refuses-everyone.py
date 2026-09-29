@@ -3,9 +3,9 @@
 # always allowed. A gate that refuses everybody is not this feature, and a
 # suite that only ever asserts refusals cannot tell the two apart.
 # Re-aimed 25 September: managing asks Edit and deleting Full edit now (`full-edit-enforced-nowhere`); the patch asks Full edit of managing too, so an Edit space refuses renames it allows.
-# Reddens: space-default-permission:
-#   "the SAME member renaming the SAME kind of list succeeds where the default is `edit`"
-#   "while the Full edit space still is — the filter is the permission, not an empty answer"
+# Re-aimed 29 September: the claim in the one shape the checker reads (it read as unreadable), naming what the patch reddens.
+# Reddens: space-default-permission: "the SAME member renaming the SAME kind of list succeeds where the default is `edit`"
+#   or "and now the same PUT succeeds — the default is a FALLBACK, not a ceiling"
 import io
 p = '/home/user/rundesk/apps/api/src/common/permissions/container-access.ts'
 a = "      required: action === 'delete' ? 'admin' : 'edit',\n      kind: params.kind,\n"

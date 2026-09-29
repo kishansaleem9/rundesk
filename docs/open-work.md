@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 320 items, 91 open, 11 partly fixed, 218 closed, counted from this file's headings early on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 321 items, 90 open, 11 partly fixed, 220 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1322,13 +1322,25 @@ Now:
 - Regression: `client-access` and `oauth-start-readiness` 2/2.
 - In CI (219).
 
-### `found-28-sep/clients-cannot-be-edited` — open, feature, small (found implementing `client.manage`)
+### `found-28-sep/clients-cannot-be-edited` — **closed** (feature, small; found implementing `client.manage`)
 
 **No page renames a client, changes its contact email or deletes it**
 
 *Evidence:* There is no update route. The contact email the invoice prints (`client-invoicing.service.ts:125`) can only be set through the API.
 
 *To close:* An edit and a delete in the web, asking `client.manage`.
+
+*Closed, 29 September.* Measured on lane 7 at `0911c6e` before: `PATCH` a client answered 404 (no route), and the project page's client row made a client by name and did nothing else. ClickUp has no clients; its nearest library, the Custom Field Manager, is changed by whoever may manage it.
+
+- `PATCH /workspaces/:id/clients/:clientId` asks `client.manage`: a name sent is required and unique in the workspace (a taken one is a 400, "already exists", not the index's 500), a contact email must be an address, and an empty one clears it.
+- The project page's client row offers a holder of `client.manage` Manage clients: a dialog listing every client, each with its name and contact email to save, and Delete (a client with invoices is refused its delete, and the refusal is shown). Four locales.
+
+`client-edit`, 6 checks:
+- Before: 1/6 on lane 7 (a plain member was offered nothing, which held).
+- After: 6/6 on lane 7.
+- Patches `cle-1..8`; `cki-2` is re-aimed onto the delete's own line. Their runs follow the commit.
+- Regression on lanes 5, 6 and 7: the client, invoice, billable-time and project-page suites, 8/8.
+- In CI (232).
 
 ### `found-28-sep/project-folder-unchecked-across-workspaces` — **closed** (security, small; found implementing `client.manage`)
 
@@ -1423,6 +1435,14 @@ The platform console's announcements page still lists only the workspaces its su
 *Closed:* a workspace read loads the platform's rows and the workspace's, and applies them platform first, then the workspace's, a role's, a person's — the more specific wins. A switch updates its own row, found with NULLs equal, under a lock per flag, and makes one only when there is none. Migration `0166` keeps the newest of each duplicate and makes the key NULLS NOT DISTINCT. The drizzle schema cannot say NULLS NOT DISTINCT: drizzle-kit 0.31 does not read it back, and tried to rebuild the key, asking about the table's rows, on every lane push, which failed without a terminal. So the rule is kept in code, and a database built by `drizzle-kit push` (CI's) holds one row too.
 
 The seeded platform rows are all on (the default-enabled flags), so applying them changes nothing by itself; a feature the console had switched off would now be off in every workspace that says nothing of its own. Three checks in `flag-resolution` (above); patches `flr-1`, `flr-2`, `flr-4`.
+
+### `found-29-sep/failing-checks-print-only-their-reason` — **closed** (test tooling, small; found by the break runs for `c55a088`)
+
+**23 suites printed a failing check's reason alone, so a patch whose reason was built from the run reddened no check the checker could name**
+
+*Evidence, 29 September:* `check-plan-population.mjs` stopped the preflight on three patches "that need a person": `fd-7-toggle-latches`, `af-3-no-failure-recorded` and `sdp-4-refuses-everyone` read as `unreadable`. `folder-dialog` and `ai-activity-filters` printed `FAIL <reason>` without the check's sentence — `af-3`'s reason is built from the run's numbers ("0 new failed rows appeared …"), and `fd-7`'s is two strings joined — so `check-break-reddened.mjs` could not map either back to the check a claim names. 21 more suites had the same helper. `sdp-4`'s claim listed two sentences with no `or`, a shape the checker does not read.
+
+*Closed:* every suite's `chk` prints the sentence, then the reason (the 70 that were fixed on 26 September, and now these 23); `sdp-4`'s claim is in the checker's shape. After: `check-plan-population.mjs` agrees with the reddened checker on every patch (1703 needing a run), with none needing a person; the re-runs of the 23 suites follow in the break backlog.
 
 ### `found-29-sep/lane-push-errors-read-as-synced` — open, test tooling, small (found closing `platform-flag-switches-apply-nowhere`)
 

@@ -77,7 +77,10 @@ const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
-const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+// The SENTENCE, then the reason: a failing check that printed only its reason
+// never named itself, and `check-break-reddened.mjs` could not tell which
+// check a patch reddened (`fd-7` read as unreadable; `found-29-sep/failing-checks-print-only-their-reason`).
+const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ? `${good} \u2014 ${badMsg}` : good))
 
 const TAG = `e2e-fd-${Date.now()}`
 const OPEN_NAME = `Shared ${TAG}`

@@ -1,4 +1,4 @@
-import { Body, Controller, Delete, ForbiddenException, Get, Param, Post, Req, UseGuards } from '@nestjs/common'
+import { Body, Controller, Delete, ForbiddenException, Get, Param, Patch, Post, Req, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger'
 import { ClientsService } from './clients.service'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
@@ -8,8 +8,8 @@ import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import type { CurrentUserPayload } from '../tasks/types'
 
 /*
- * A workspace's clients — the names a project's time is billed to — are made
- * and deleted by whoever holds `client.manage`, a manager's and an admin's by
+ * A workspace's clients — the names a project's time is billed to — are made,
+ * changed and deleted by whoever holds `client.manage`, a manager's and an admin's by
  * default and grantable to a member by a custom role. `WorkspaceAdminGuard`
  * admitted managers and no key could hand either to anybody
  * (`found-25-sep/admin-guard-admits-managers-where-the-web-says-admin`).
@@ -40,6 +40,18 @@ export class ClientsController {
     @Body() body: { name: string; contactEmail?: string },
   ) {
     return this.clients.create(workspaceId, body.name, body.contactEmail, user.id)
+  }
+
+  // A client's name and contact email (`found-28-sep/clients-cannot-be-edited`):
+  // the address an invoice prints could be set only by the API's create.
+  @Patch(':clientId')
+  @RequirePermissions('client.manage')
+  update(
+    @Param('workspaceId') workspaceId: string,
+    @Param('clientId') clientId: string,
+    @Body() body: { name?: unknown; contactEmail?: unknown },
+  ) {
+    return this.clients.update(clientId, workspaceId, body ?? {})
   }
 
   @Delete(':clientId')

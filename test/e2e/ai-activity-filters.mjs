@@ -73,7 +73,10 @@ if (!B) {
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
-const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+// The SENTENCE, then the reason: this reason is built from the run's numbers,
+// so printed alone it named no check `check-break-reddened.mjs` could find
+// (`af-3` read as unreadable; `found-29-sep/failing-checks-print-only-their-reason`).
+const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ? `${good} \u2014 ${badMsg}` : good))
 
 /*
  * READS THAT ANSWER `null` INSTEAD OF ENDING THE SECTION. Both verbs wait for

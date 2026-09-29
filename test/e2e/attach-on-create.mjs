@@ -89,7 +89,10 @@ const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
 const results = []
 const ok = (m) => { results.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
-const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg ?? good))
+// THE SENTENCE, THEN THE REASON: a failing check that printed only its reason
+// named no check `check-break-reddened.mjs` could find when the reason was
+// built from the run (`found-29-sep/failing-checks-print-only-their-reason`).
+const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ? `${good} \u2014 ${badMsg}` : good))
 
 const TAG = `e2e-aoc-${Date.now()}`
 const TITLE = `Attach ${TAG}`

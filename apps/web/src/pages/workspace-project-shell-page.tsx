@@ -8,6 +8,10 @@ import {
   Badge,
   cn,
   toast,
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
@@ -1123,6 +1127,7 @@ function ProjectTimeSettingsSection({ projectId, workspaceId, canEdit }: { proje
   const { t } = useTranslation()
   const qc = useQueryClient()
   const [newClientName, setNewClientName] = useState('')
+  const [manageClients, setManageClients] = useState(false)
   const { role } = useWorkspaceRole(workspaceId)
   const readsClients = role !== 'guest'
   const mayAddClient = usePermissions(workspaceId).can('client.manage')
@@ -1132,7 +1137,7 @@ function ProjectTimeSettingsSection({ projectId, workspaceId, canEdit }: { proje
   })
   const clientsQuery = useQuery({
     queryKey: ['clients', workspaceId],
-    queryFn: () => api<Array<{ id: string; name: string }>>(`/workspaces/${workspaceId}/clients`),
+    queryFn: () => api<Array<{ id: string; name: string; contactEmail?: string | null }>>(`/workspaces/${workspaceId}/clients`),
     enabled: readsClients,
   })
   const defaultBillable = projectQuery.data?.defaultBillable ?? false
@@ -1230,7 +1235,27 @@ function ProjectTimeSettingsSection({ projectId, workspaceId, canEdit }: { proje
                   </option>
                 ))}
               </select>
+              {mayAddClient === true && clients.length > 0 && (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  data-testid="project-manage-clients"
+                  onClick={() => setManageClients(true)}
+                >
+                  <Pencil className="h-3.5 w-3.5 mr-1" />
+                  {t('projectShell.manageClients')}
+                </Button>
+              )}
             </div>
+            {mayAddClient === true && (
+              <ManageClientsDialog
+                workspaceId={workspaceId}
+                clients={clients}
+                open={manageClients}
+                onOpenChange={setManageClients}
+              />
+            )}
             {mayAddClient === true ? (
               <form
                 className="mt-2 flex items-center gap-2"
@@ -1258,6 +1283,116 @@ function ProjectTimeSettingsSection({ projectId, workspaceId, canEdit }: { proje
         )}
       </Card>
     </section>
+  )
+}
+
+/**
+ * THE WORKSPACE'S CLIENTS, CHANGED AND DELETED where one is picked, by whoever
+ * holds `client.manage` (`found-28-sep/clients-cannot-be-edited`): nothing
+ * renamed a client, set the contact email an invoice prints, or deleted one.
+ * A client with invoices is refused its delete, and the refusal says why.
+ */
+function ManageClientsDialog({
+  workspaceId,
+  clients,
+  open,
+  onOpenChange,
+}: {
+  workspaceId: string
+  clients: Array<{ id: string; name: string; contactEmail?: string | null }>
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const { t } = useTranslation()
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t('projectShell.manageClients')}</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-3 max-h-[60vh] overflow-auto">
+          {clients.map((client) => (
+            <ClientRow key={client.id} workspaceId={workspaceId} client={client} />
+          ))}
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ClientRow({
+  workspaceId,
+  client,
+}: {
+  workspaceId: string
+  client: { id: string; name: string; contactEmail?: string | null }
+}) {
+  const { t } = useTranslation()
+  const qc = useQueryClient()
+  const [name, setName] = useState(client.name)
+  const [email, setEmail] = useState(client.contactEmail ?? '')
+  const changed = name.trim() !== client.name || email.trim() !== (client.contactEmail ?? '')
+  const refresh = () => qc.invalidateQueries({ queryKey: ['clients', workspaceId] })
+  const save = useMutation({
+    mutationFn: () =>
+      api(`/workspaces/${workspaceId}/clients/${client.id}`, {
+        method: 'PATCH',
+        body: { name: name.trim(), contactEmail: email.trim() },
+      }),
+    onSuccess: async () => {
+      toast.success(t('projectShell.clientSaved'))
+      await refresh()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('projectShell.clientNotSaved')),
+  })
+  const remove = useMutation({
+    mutationFn: () => api(`/workspaces/${workspaceId}/clients/${client.id}`, { method: 'DELETE' }),
+    onSuccess: async () => {
+      toast.success(t('projectShell.clientDeleted', { name: client.name }))
+      await refresh()
+    },
+    onError: (err) => toast.error(err instanceof ApiError ? err.message : t('projectShell.clientNotDeleted')),
+  })
+  return (
+    <form
+      data-testid={`client-row-${client.id}`}
+      className="rounded-md border border-border/70 p-3 space-y-2"
+      onSubmit={(e) => {
+        e.preventDefault()
+        if (changed && name.trim()) save.mutate()
+      }}
+    >
+      <Input
+        aria-label={t('projectShell.clientName')}
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        className="h-8"
+      />
+      <Input
+        aria-label={t('projectShell.clientEmail')}
+        type="email"
+        placeholder={t('projectShell.clientEmailPlaceholder')}
+        value={email}
+        onChange={(e) => setEmail(e.target.value)}
+        className="h-8"
+      />
+      <div className="flex items-center justify-between gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant="ghost"
+          className="text-destructive"
+          disabled={remove.isPending}
+          onClick={() => remove.mutate()}
+        >
+          <Trash2 className="h-3.5 w-3.5 mr-1" />
+          {t('projectShell.deleteClient')}
+        </Button>
+        <Button type="submit" size="sm" disabled={!changed || !name.trim() || save.isPending}>
+          {t('common.save')}
+        </Button>
+      </div>
+    </form>
   )
 }
 
