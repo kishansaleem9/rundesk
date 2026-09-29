@@ -20,8 +20,9 @@
  *   · Brain² opens the shell's AI dock pointed at the task — a chip naming it,
  *     and the task's title and id in the view every turn carries to the
  *     server — beside the sheet rather than under it. Closing the task hands
- *     the dock back to the page. The dock does not read the task's CONTENTS:
- *     `POST /ai/chat` takes no task id, and that is an API change.
+ *     the dock back to the page. The turn carries the task's id, and the
+ *     server reads the task into the model's context once it has checked the
+ *     reader may open it (checks 15 and 16, `found-29-sep/ai-chat-takes-no-task`).
  *   · Brain in the "+" menu opens the comment AI panel the space bar opens, and
  *     the panel's Summarize this task sends the task's id to
  *     `POST /ai/summarize`, which drafts from what is in the task.
@@ -58,7 +59,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 14
+const EXPECTED_CHECKS = 16
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -95,6 +96,8 @@ const HOUSE_LINE = 'Sorry, I encountered an error. Please try again.'
 const stamp = Date.now()
 const TAG = `bep${stamp}`
 const TITLE = `Brain subject ${TAG}`
+/** The task's description: what the model is given when the dock reads the task. */
+const DESCRIPTION = `Kick-off notes from the vendor call ${TAG}.`
 const stack = await startLocalStack({ dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')), apiPort: API_PORT })
 const B = stack.base
 const API = `${B}/api/v1`
@@ -113,7 +116,7 @@ try {
   const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} list` } })
   const made2 = await A('/tasks', {
     method: 'POST',
-    body: { listId: list.data?.id, title: TITLE, description: 'Kick-off notes from the vendor call.' },
+    body: { listId: list.data?.id, title: TITLE, description: DESCRIPTION },
   })
   if (!made2.data?.id) {
     throw new Error(`could not stage the task: space ${said(space)}, project ${said(project)}, list ${said(list)}, task ${said(made2)}`)
@@ -261,6 +264,17 @@ try {
       return null
     }
   }
+  /*
+   * The lane's model stub, where there is a model: it keeps every call made to
+   * it, so what the model was GIVEN can be read, and it can be told to fail.
+   * Reset before the first turn, because it outlives every run.
+   */
+  const stubAt = `http://127.0.0.1:${9200 + (API_PORT - 3020)}`
+  const stubCtl = (route, body) =>
+    fetch(`${stubAt}/__control/${route}`, { method: 'POST', ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) })
+      .then((r) => r.ok)
+      .catch(() => false)
+  if (modelOn) await stubCtl('reset')
   const starter = page.locator('[data-testid^="ai-starter-"]').first()
   await waitUntil(() => starter.isVisible().catch(() => false), { timeoutMs: 15_000 })
   const firstTurn = chatTurn()
@@ -299,6 +313,52 @@ try {
       : turnStatus === 503 && turnSaid.includes(REFUSAL) && answerText === REFUSAL,
     'and the dock answers that turn as /ai/status says it will — with no model, in the server’s own words: “AI features are not configured”',
     `the turn answered ${turnStatus} ${JSON.stringify(turnSaid.slice(0, 120))}${modelOn ? `, its deltas joining to ${JSON.stringify(deltasSent.slice(0, 80))}` : ''}; the dock said ${JSON.stringify(answerText.slice(0, 120))}`,
+  )
+
+  // ══ 15–16. THE TASK ITSELF, NOT ONLY ITS NAME ═════════════════════════════
+  /*
+   * `found-29-sep/ai-chat-takes-no-task`: the dock named the task and the server
+   * never read it. The turn carries the task's id now; where a model answers,
+   * what the model was given holds the task's description, read at the stub,
+   * and the trace names the step. Without a model nothing reaches one, so the
+   * wire is what can be read there.
+   */
+  const sentTaskId = (() => {
+    try {
+      return JSON.parse(turn?.request().postData() ?? 'null')?.taskId ?? null
+    } catch {
+      return null
+    }
+  })()
+  const seenCalls = modelOn
+    ? await fetch(`${stubAt}/__control/seen`).then((r) => r.json()).then((j) => j.calls ?? []).catch(() => [])
+    : []
+  const promptHadTask = seenCalls.some((c) => JSON.stringify(c.system ?? '').includes(DESCRIPTION))
+  const traced = /"step":"task"/.test(turnSaid)
+  chk(
+    sentTaskId === TASK && (modelOn ? promptHadTask && traced : true),
+    'and the turn carries the task itself: its id goes to the server, and where a model answers, the task’s description is in what the model is given, with the task step in the trace',
+    `taskId went out as ${JSON.stringify(sentTaskId)}` +
+      (modelOn ? `; ${seenCalls.length} call(s) reached the model, ${promptHadTask ? 'one' : 'none'} holding the description; the trace ${traced ? 'named' : 'did not name'} the task step` : ''),
+  )
+
+  /*
+   * A turn about a task is answered only for a task its asker may open, in the
+   * workspace the turn names — refused before anything is streamed, and before
+   * whether a model is configured, so it reads the same on every lane.
+   */
+  const others = await A('/workspaces')
+  // Each entry is `{ workspace, role }`.
+  const OTHER_WS = (Array.isArray(others.data) ? others.data : []).map((w) => w.workspace?.id ?? w.id).find((id) => id && id !== WS) ?? null
+  const aboutTask = (extra) => ({ messages: [{ role: 'user', content: 'What is this task about?' }], ...extra })
+  const notThere = await A('/ai/chat', { method: 'POST', body: aboutTask({ workspaceId: WS, taskId: '00000000-0000-4000-8000-000000000000' }) })
+  const elsewhere = OTHER_WS
+    ? await A('/ai/chat', { method: 'POST', body: aboutTask({ workspaceId: OTHER_WS, taskId: TASK }) })
+    : { status: 0, error: { message: 'the admin belongs to no other workspace' } }
+  chk(
+    notThere.status === 404 && elsewhere.status === 400 && /not in this workspace/.test(elsewhere.error?.message ?? ''),
+    'a turn about a task is refused before anything is streamed when the task is not there (404) or is not in the workspace the turn names (400), with or without a model',
+    `a task that is not there answered ${said(notThere)}; this task, named from another workspace, answered ${said(elsewhere)}`,
   )
 
   // ══ 7–8. CLOSING THE TASK HANDS THE DOCK BACK TO THE PAGE ═════════════════
@@ -347,11 +407,14 @@ try {
    * so the same frames are handed to the dock in the server's own shape — the
    * one `chatStream`'s catch writes.
    */
-  const stubAt = `http://127.0.0.1:${9200 + (API_PORT - 3020)}`
-  const stubCtl = (route, body) =>
-    fetch(`${stubAt}/__control/${route}`, { method: 'POST', ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}) })
-      .then((r) => r.ok)
-      .catch(() => false)
+  /*
+   * THE LAST TURN HAS FINISHED FIRST. `chatTurn` resolves on the response's
+   * headers, and the model is called after them: a failure staged while the
+   * turn before was still on its way failed THAT turn, and the last answer
+   * read the house line before this one was asked (lane 7, 29 September).
+   */
+  if (turn2) await turn2.text().catch(() => '')
+  await waitUntil(async () => (await dock.getByTestId('ai-answer-streaming').count()) === 0, { timeoutMs: 15_000 })
   let arrangedFailure = false
   if (modelOn) {
     arrangedFailure = (await stubCtl('reset')) && (await stubCtl('next', { status: 500, message: `arranged by brain-entry-points ${stamp}`, count: 8 }))

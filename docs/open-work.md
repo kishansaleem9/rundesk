@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 333 items, 46 open, 8 partly fixed, 279 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 334 items, 46 open, 8 partly fixed, 280 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1457,7 +1457,7 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `scripts/e2e-lanes/push-log-selfcheck.sh --mutate` (preflight, and CI's verify job — it needs no database): six push logs in the shapes real ones take — applied, nothing to change, stopped on the question (its line verbatim from 29 September), a database error, empty, missing — only the first two read as done; and a `push_log_ok` that trusts the exit status is caught by four of them.
 - Before, on 29 September: `fleet-sync.sh 7` answered "7/7 lanes synced and up" over a push that had stopped; after, the same log reads as stopped. The real logs on disk now (lanes 1 and 7, pristine, the reference) read as done.
 
-### `found-29-sep/workspace-delete-leaves-stored-files` — **closed**, break run pending (found closing `workspace-permanent-delete-unbuilt`)
+### `found-29-sep/workspace-delete-leaves-stored-files` — **closed** (found closing `workspace-permanent-delete-unbuilt`)
 
 **Deleting a workspace for good leaves its stored files in the store**
 
@@ -1472,17 +1472,25 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 `workspace-delete-for-good`, check 5, stages an attachment (presigned, PUT to the store stub, recorded on a task) and a clip (named only by its prefix), deletes for good, and reads the stub's DELETE requests for both keys:
 - Before 4/5 (the store untouched), after 5/5 on lane 7.
-- Patches `wdg-9..11` (the store untouched; the prefixes unread; the keys read after the rows): break run pending.
+- Patches `wdg-9..11` (the store untouched; the prefixes unread; the keys read after the rows): each reddens check 5 (4/5; lane 1, `096fa62`, baseline 5/5).
 - The suite read the deletion's record as soon as the row had gone. With the store emptied between the row going and the record being written, a loaded lane read 0 records (lane 6, in the batch's sweep); it reads once the deletion has answered now, 5/5 on lane 6.
 - In CI with the suite. Regression: the batch's sweep on the final bundles, 57 suites on five lanes at once (1,289 checks): 53 green, and the four that were not are accounted for — `brain-entry-points` twice (its fourteenth check counted answers, which a regenerate keeps level, and a cookie card drawn late covered the scope chip on lane 1; both fixed in the suite, 14/14 on lanes 1, 3 and 7), `workspace-delete-for-good` once (below), and `chat-message-actions` under the load (`found-29-sep/chat-message-actions-reads-after-fixed-waits`; 73/73 on an idle lane).
 
-### `found-29-sep/rail-sections-kept-as-sent` — **closed**, break run pending (API rule, small; found closing `ledger-rows/row-835-reorder`)
+### `found-29-sep/rail-sections-kept-as-sent` — **closed** (API rule, small; found closing `ledger-rows/row-835-reorder`)
 
 **The planner kept any rail order it was sent**
 
 *Evidence, 29 September:* `updateSettings` (planner.service) validated every other planner setting and had no rule for `railSections`, which `PlannerSettings` did not declare. The web passes over a name that is no section and a repeat when it draws the rail, but the server stored them: measured on lane 5, a PATCH of `["priorities","nonsense"]` and one of `["backlog","backlog"]` each answered 200, and Postgres held `["backlog","backlog"]`.
 
-*Closed, 29 September:* the planner service stores the rail's five sections (`RAIL_SECTIONS`, the web's list), each at most once, and refuses anything else with the reason ("The rail's sections are …", "The rail names a section twice"). `PlannerSettings` declares `railSections`. Every value the Sidebar page has ever written is a subset of the five, so no stored order is made unwritable. `rail-reorder` check 13: before 12/13, after 13/13 on lane 5; patch `rro-10`, break run pending.
+*Closed, 29 September:* the planner service stores the rail's five sections (`RAIL_SECTIONS`, the web's list), each at most once, and refuses anything else with the reason ("The rail's sections are …", "The rail names a section twice"). `PlannerSettings` declares `railSections`. Every value the Sidebar page has ever written is a subset of the five, so no stored order is made unwritable. `rail-reorder` check 13: before 12/13, after 13/13 on lane 5; patch `rro-10` reddens it (12/13; lane 1, `096fa62`, baseline 13/13).
+
+### `found-29-sep/task-brain-offers-list-starters` — open, small (feature; found closing `found-29-sep/ai-chat-takes-no-task`)
+
+**Brain opened from a task offers the list's starters, and Brain in a comment drafts no reply from the thread**
+
+*Evidence, 29 September:* with the dock pointed at a task, the starter cards are the list's (`starterSurface` maps any view but `list` to the workspace's, and `isStarterSurface` refuses `task`, a surface its comment says no caller could send — Brain² sends one now). ClickUp offers Summarize, Progress update and Find similar tasks from a task's Brain, and from a comment's Brain a reply drafted from the thread (help centre, search summaries). The comment AI panel's modes are four writing modes over a typed instruction, and Summarize this task.
+
+*To close:* a `task` starter surface (Summarize this task, Write a progress update, Find similar tasks, and a floor card), chosen when the dock is pointed at a task, each sending through the turn that now carries the task; and a "Draft a reply" mode in the comment panel that sends the task (its comments are in `buildTaskSummaryInput`) and lands in the box only by Keep. Checks for both, on a lane with a model and one without.
 
 ### `found-29-sep/model-stub-never-streams` — **closed** (test tooling, small; found measuring `ledger-rows/row-743` on a model lane)
 
@@ -1540,13 +1548,27 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *To close:* each read waits for what it reads (`waitUntil` on the element or the address), the fixed waits go, and the suite holds 73/73 on four lanes at once.
 
-### `found-29-sep/ai-chat-takes-no-task` — open, small (feature; found closing `ledger-rows/row-743`)
+### `found-29-sep/ai-chat-takes-no-task` — **closed**, break run pending (feature, small; found closing `ledger-rows/row-743`)
 
 **The AI dock pointed at a task knows its title and id, not its contents**
 
 *Evidence, 29 September:* Brain² opens the dock pointed at the task, and each turn names the task to the server (`list / task "<title>" (id <uuid>)`). `POST /ai/chat` takes no `taskId`, so the model never reads the task's description, comments or subtasks. ClickUp's task Brain reads the location it is opened from, and offers Summarize, Progress update and Find similar tasks there (help centre, through search summaries). The comment panel's Summarize this task already reads the task, through `/ai/summarize`.
 
 *To close:* take an optional `taskId` on `POST /ai/chat`, resolved before the stream opens the way `skillId` is: `assertTaskReadable`, then `buildTaskSummaryInput` appended to the context, and a `step('task')` line in the trace. The web sends the `scope.id` it already holds. Then the task-surface starters (`GET /ai/starters?surface=task&taskId=`: Progress update, Find similar tasks), and a reply drafted from the comment thread (`POST /ai/comment-draft`), both of which need the first.
+
+*Closed, 29 September.* ClickUp ("Use Brain AI on tasks", "Collaborate with ClickUp Brain anywhere in your Workspace", read through search summaries): Brain opened from a task reads that task, the location it was opened from. `POST /ai/chat` takes the task's id now:
+- Before anything else, and before whether a model is configured, the reader must be able to open the task (`assertTaskReadable`) and it must be in the workspace the turn names. A refusal is a status code (404, 403 or 400) and nothing is streamed.
+- Then what Summarize reads — the task's title, status, priority, description, recent activity, open subtasks, blockers and comments (`buildTaskSummaryInput`) — goes into the context under "The task this conversation is about", with a `task` step in the trace ("Reading this task", four locales).
+- The dock sends the id of the task it is pointed at, beside the view it already sent.
+
+`brain-entry-points` checks 15 and 16:
+- Before 14/16 on lanes 6 and 7: no id on the wire, and a turn about a task that is not there answered 503 with no model and a streamed 201 with one.
+- After 16/16 on both; on lane 7 the model's prompt holds the task's description.
+- `bep-16` (the dock keeps the id to itself) reddens check 15 alone on lanes 6 and 7. `bep-17` (the task named, not read; model lane) and `bep-18` (no task rule): break run pending.
+- Regression, 16 suites on lanes 5, 6 and 7 (the AI surfaces, the palette, the task's AI bar, the create menu's AI, the comment menu, `video-regression`): all green.
+- Two suite defects found by these runs and fixed: check 14 staged its failure before the turn before it had called the model (lane 7), and read the other workspace from the wrong field.
+
+What ClickUp offers from a task beyond reading it — its own actions, and a reply drafted from the thread — is `found-29-sep/task-brain-offers-list-starters`.
 
 ### `found-29-sep/innertext-reads-hidden-leaves` — open, medium (test tooling; found closing `checks-read-textContent-not-what-is-shown`)
 
@@ -5289,7 +5311,7 @@ sharpened-reason paragraph and the "one direction" paragraph of
 reddened the check it names (lane 4, `3ccd85d` with this change, baseline
 12/12); regression on lane 4, the 24 suites that open the planner, its settings
 or the Teams page, 24/24. In CI (240).
-- The server's half, which the build left open (`found-29-sep/rail-sections-kept-as-sent`): `railSections` was kept as sent. `updateSettings` now stores the five sections, each at most once, and refuses anything else, saying which. The check that the rail passes over a stranger and a repeat writes them in Postgres now, and a thirteenth check reads the refusal: before 12/13 on lane 5 (the server stored `["backlog","backlog"]`), after 13/13. Patch `rro-10`: break run pending.
+- The server's half, which the build left open (`found-29-sep/rail-sections-kept-as-sent`): `railSections` was kept as sent. `updateSettings` now stores the five sections, each at most once, and refuses anything else, saying which. The check that the rail passes over a stranger and a repeat writes them in Postgres now, and a thirteenth check reads the refusal: before 12/13 on lane 5 (the server stored `["backlog","backlog"]`), after 13/13. Patch `rro-10` reddens it (12/13; lane 1, `096fa62`), and `rro-1..9`, re-run there, redden again.
 - In main after the merge: `rail-reorder` 13/13 and `teams-people-count` 6/6, and the batch's sweep on the final bundles, 57 suites on five lanes at once (1,289 checks): 53 green, and the four that were not are accounted for — `brain-entry-points` twice (its fourteenth check counted answers, which a regenerate keeps level, and a cookie card drawn late covered the scope chip on lane 1; both fixed in the suite, 14/14 on lanes 1, 3 and 7), `workspace-delete-for-good` once (below), and `chat-message-actions` under the load (`found-29-sep/chat-message-actions-reads-after-fixed-waits`; 73/73 on an idle lane).
 
 ## Stale documentation — 18

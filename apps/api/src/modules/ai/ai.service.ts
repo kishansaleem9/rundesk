@@ -3252,12 +3252,15 @@ Only use filters/params that fit the action (e.g. set_priority -> { "priority": 
    * them (`ai-task-paths-skip-the-read-rule`). The routes ask it BEFORE they ask
    * whether a model is configured, so a refusal reads the same either way.
    */
-  async assertTaskReadable(taskId: string, reader: { id: string; role?: string | null }): Promise<void> {
+  async assertTaskReadable(taskId: string, reader: { id: string; role?: string | null }): Promise<string> {
     const workspaceId = isUuid(taskId) ? await this.resolveTaskWorkspaceId(taskId) : null
     if (!workspaceId) throw new NotFoundException('Task not found')
     if (!(await readableTask(this.db, workspaceId, taskId, reader))) {
       throw new ForbiddenException('You do not have access to this task')
     }
+    // The task's workspace, for a caller that also names one: a turn about a
+    // task is answered inside that task's workspace or not at all.
+    return workspaceId
   }
 
   /**

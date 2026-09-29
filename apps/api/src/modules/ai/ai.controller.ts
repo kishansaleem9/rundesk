@@ -382,9 +382,27 @@ export class AiController {
       skillId?: string
       /** §15 — 'fast' | 'deep'; anything else falls back to the default. */
       tier?: string
+      /**
+       * The task the dock is pointed at (Brain² in the task header). Its
+       * contents are read into the context, as Summarize reads them
+       * (`found-29-sep/ai-chat-takes-no-task`).
+       */
+      taskId?: string
     },
     @Res() res: any,
   ) {
+    /*
+     * A TASK THE TURN IS ABOUT is asked about first, before whether a model is
+     * configured, as Summarize asks it: the reader may open it, and it is in
+     * the workspace the turn names. A refusal is then a status code, the same
+     * on every instance, and nothing has been streamed.
+     */
+    if (body.taskId) {
+      const taskWorkspace = await this.ai.assertTaskReadable(body.taskId, { id: user.id, role: user.role })
+      if (body.workspaceId && taskWorkspace !== body.workspaceId) {
+        throw new HttpException('That task is not in this workspace', HttpStatus.BAD_REQUEST)
+      }
+    }
     if (!this.ai.isAvailable()) {
       // §V2-11 — recorded before the 503, like `assertAvailable`. This route
       // owns its own response (it streams), so it sends rather than throws.
@@ -453,6 +471,15 @@ export class AiController {
       })
     } else {
       context = body.workspaceContext ?? ''
+    }
+
+    // ClickUp's Brain opened from a task reads that task: its description,
+    // status, recent activity, open subtasks and blockers, and comments — the
+    // input Summarize already builds, under a heading that says what it is.
+    if (body.taskId) {
+      step('task')
+      const taskInput = await this.ai.buildTaskSummaryInput(body.taskId)
+      context = `${context}\n\nThe task this conversation is about:\n${taskInput}`
     }
 
     // The trace still names the skill, in the place it always appeared. It

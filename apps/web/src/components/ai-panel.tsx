@@ -511,6 +511,7 @@ function AiTrace({ steps, t }: { steps: string[]; t: (k: TranslationKey) => stri
 const AI_STEP_LABEL: Record<string, TranslationKey> = {
   workspace: 'aiPanel.stepWorkspace',
   skill: 'aiPanel.stepSkill',
+  task: 'aiPanel.stepTask',
   writing: 'aiPanel.stepWriting',
   // §V2-S16 frame `18:45` — *"Creating the new rundesk list"*. Written by the
   // server immediately before the write, so a step that is here is a write that
@@ -1207,6 +1208,9 @@ export function AiPanel({
           // (`ledger-rows/row-743`).
           workspaceId,
           currentView: viewWithScope(currentView, scope),
+          // And the task itself, whose contents the server reads into the
+          // turn's context (`found-29-sep/ai-chat-takes-no-task`).
+          ...(scope?.id ? { taskId: scope.id } : {}),
           // §15 — omitted entirely when absent, so a normal chat turn is
           // byte-identical to what it was before skills existed.
           ...(skillId ? { skillId } : {}),

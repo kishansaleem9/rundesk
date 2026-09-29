@@ -21,10 +21,11 @@
  * as "Current view: …" (`formatWorkspaceContext`). Pointed at a task, that line
  * names the task — its title and its id — so the model knows which task "this
  * task" is, and may write it as a `[[task:<id>]]` chip, since the id is in its
- * context. It does NOT hand the model the task's description or comments:
- * `POST /ai/chat` takes no task id, and reading the task server-side is an API
- * change (`docs/clickup-research.md`, clickup-ai item 8). The chip on the
- * dock's composer names the task and claims nothing more.
+ * context. And the turn carries the task's id, so the server reads the task
+ * itself into the context — its description, activity, subtasks, blockers and
+ * comments, what Summarize reads — once it has checked the reader may open it
+ * (`found-29-sep/ai-chat-takes-no-task`; until 29 September the id was not
+ * sent and the chip claimed only the name).
  */
 import { createContext, useContext } from 'react'
 
