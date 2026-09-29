@@ -198,6 +198,18 @@ describe('SearchService file search (§11.1 uploaded files)', () => {
     assert.ok(!fromTables.includes('docs'), 'docs not queried for a file-only search')
     assert.ok(!fromTables.includes('chat_channel_members'), 'chat extras not queried')
   })
+
+  // `found-29-sep/files-of-binned-tasks-found`: a search withheld an archived
+  // or binned task and still found the file on it.
+  it('withholds the file of an archived or binned task unless archived work is asked for', async () => {
+    const ask = async (filters: Record<string, unknown>) => {
+      const { db, wheres } = makeDb({ task_attachments: [] })
+      await new SearchService(db, config).search('w1', 'u1', 'invoice', 10, { types: ['file'], ...filters })
+      return sqlFor(wheres, 'task_attachments')?.sql ?? ''
+    }
+    assert.match(await ask({}), /"tasks"\."is_archived"/, 'the file search does not ask whether its task is archived')
+    assert.doesNotMatch(await ask({ includeArchived: true }), /"tasks"\."is_archived"/, 'a search for archived work still withholds archived files')
+  })
 })
 
 describe('SearchService.merge', () => {
@@ -765,6 +777,55 @@ describe('SearchService holds Meili hits to the read rules', () => {
     const q = sqlFor(wheres, 'tasks')
     assert.ok(q && !/"visibility"/.test(q.sql), `a manager's task hits were filtered: ${q?.sql}`)
     assert.ok(res.some((h) => h.id === 'doc-d-refused'), 'a manager lost a doc hit')
+  })
+
+  // `found-29-sep/meili-file-hits-skip-the-read-rule`: file hits passed through
+  // untouched, so a member refused a private space found its file by name.
+  it('holds a file hit to its task’s reach, privacy and bin, and drops one the database does not return', async () => {
+    const { svc, wheres } = svcWith(
+      indexOf([{ id: 'file-f-open', entityType: 'file' }, { id: 'file-f-refused', entityType: 'file' }]),
+      // What the database lets through: the open file alone.
+      { task_attachments: [{ id: 'f-open' }] },
+    )
+    const res = await svc.search('w1', 'u1', 'probe', 10, {})
+    assert.deepEqual(res.filter((h) => h.entityType === 'file').map((h) => h.id), ['file-f-open'])
+    const q = sqlFor(wheres, 'task_attachments')
+    assert.ok(q, 'the file hits were never checked against the database')
+    assert.match(q.sql, /"tasks"\."visibility"/, `no private-item rule on the file hits: ${q.sql}`)
+    assert.match(q.sql, /"tasks"\."is_archived"/, `the file of an archived task is not withheld: ${q.sql}`)
+    const reaches = subqueriesOf(q.params)
+      .filter((w) => w.table === 'lists' && w.condition != null)
+      .map((w) => dialect.sqlToQuery(w.condition as never).sql)
+      .filter((sql) => /"visibility"/.test(sql))
+    assert.ok(reaches.length > 0, `no reach on the file hits: ${q.sql}`)
+  })
+
+  // `found-29-sep/meili-finds-deleted-docs`: nothing removes a doc from the
+  // index, and nothing held a doc hit to the archived rule.
+  it('holds a doc hit to the archived rule, a manager’s too, and drops one the database does not return', async () => {
+    const { svc, wheres } = svcWith(
+      indexOf([{ id: 'doc-d-live', entityType: 'doc' }, { id: 'doc-d-deleted', entityType: 'doc' }]),
+      {
+        workspace_members: [{ role: 'workspace_admin' }],
+        // What the database lets through: the live doc alone.
+        docs: [{ id: 'd-live', spaceId: null, parentDocId: null }],
+      },
+    )
+    const res = await svc.search('w1', 'u1', 'probe', 10, {})
+    assert.deepEqual(res.filter((h) => h.entityType === 'doc').map((h) => h.id), ['doc-d-live'])
+    const q = sqlFor(wheres, 'docs')
+    assert.match(q?.sql ?? '', /"docs"\."is_archived"/, `a deleted doc is not withheld: ${q?.sql}`)
+  })
+
+  // `found-29-sep/meili-gone-after-boot-fails-every-search`: only a failed init
+  // fell back, so a Meilisearch gone after boot made every plain search a 500.
+  it('answers from Postgres when Meilisearch fails after boot', async () => {
+    const gone = { search: async () => { throw new Error('fetch failed') } }
+    const { svc } = svcWith(gone, {
+      tasks: [{ id: 't1', title: 'probe task', description: '', listId: 'l1', projectId: 'p1', spaceId: 's1', createdAt: new Date(0), updatedAt: new Date(0) }],
+    })
+    const res = await svc.search('w1', 'u1', 'probe', 10, {})
+    assert.ok(res.some((h) => h.id === 'task-t1'), `the search did not answer from Postgres: ${JSON.stringify(res)}`)
   })
 })
 

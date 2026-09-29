@@ -380,9 +380,11 @@ lane_model_add () {
 # WHAT A LANE IS SERVING, for the break runner's stamp: the revision, and
 # whether the API was started with a model. A lane serving the right revision
 # WITHOUT one is not serving what a set that needs one asked for, and the
-# revision alone could not tell the two apart.
+# revision alone could not tell the two apart. And with a search index, for the
+# same reason (`patches_needing_search`).
 lane_serving_id () {
   local rev="$1" k="$2"
+  lane_has_search "$k" && rev="$rev +search"
   if lane_has_model "$k"; then echo "$rev +model"; else echo "$rev"; fi
 }
 
@@ -420,6 +422,126 @@ lane_model_up () {
   echo "lane $k: the model stub never announced itself on $port" >&2
   tail -3 "$log" 2>/dev/null >&2
   return 1
+}
+
+# ── THE LANE'S SEARCH ENGINE, AND WHY IT IS OFF BY DEFAULT ──────────────────
+#
+#   lane_search_up    <k>   start lane k's Meilisearch stub, wait for it to say ready
+#   lane_search_env   <k>   export the two variables that point the API at it
+#   lane_search_ready <k>   after the API is up: it searches through that stub
+#
+# THE SAME SEAM A THIRD TIME (`commit-log/log-68c0345-1`). `SearchService`
+# builds `new MeiliSearch({ host, apiKey })` from MEILISEARCH_URL and
+# MEILISEARCH_MASTER_KEY when the first is set, and searches Postgres when it
+# is not. No lane set it, so the indexers — `indexTask`, `indexDoc`, the file
+# indexer, `removeTask`, the workspace rebuild — ran nowhere, and `doc-import`
+# recorded indexing as unmeasurable. `meili-stub.mjs` is something to talk to;
+# `check-meili-stub.mjs` drives the real service and client against it.
+#
+# GATED ON `RUNDESK_LANE_SEARCH`, in `RUNDESK_LANE_MODEL`'s spellings — `all`, a
+# list of lane numbers, unset for none (`lane_has_search`). Off by default
+# because it is a different path, not a better one: where it is on, a plain
+# search reads tasks, docs and files from the index alone, so a row written
+# without the API (a suite planting an attachment by SQL) is not found there,
+# and a break patch aimed at the Postgres query reddens nothing. The suites that
+# read the index ask which engine answered (`test/e2e/lib/search.mjs`) and hold
+# either way; a patch that reddens only through the index says so in its header
+# (`patches_needing_search`) and gets a lane with one.
+#
+# THE MAIN TREE'S `.env` NAMES A MEILISEARCH NOTHING RUNS. A lane started from
+# /home/user/rundesk reads `../../.env`, which sets
+# MEILISEARCH_URL=http://localhost:7700, so its init fails ("Meilisearch init
+# failed: fetch failed") and it falls back; one started from a worktree has no
+# `.env` and logs "MEILISEARCH_URL not set". The database answers either way,
+# and what is exported here wins over the file.
+#
+# THE INDEX IS IN THE STUB'S MEMORY AND THE API MAKES IT ONCE, AT BOOT. A stub
+# restarted under a running API leaves it searching an index that no longer
+# exists — a 404 from the stub, a 500 from every search — so the stub is started
+# here, before its API, and nowhere else: a sweep that finds one dead or stale
+# restarts the lane (`sweep-until-clean.sh`). A running stub that is current is
+# kept, with its documents, for the reason the store keeps its objects.
+#
+# Lane k gets port 93<k>, beside the model on 92<k>, and a master key of its
+# own, which the stub enforces as Meilisearch does: an API pointed at another
+# lane's stub is refused rather than served.
+lane_search_port () { echo $((9300 + $1)); }
+lane_search_key () { echo "stub-search-key-v$1"; }
+
+lane_has_search () {
+  local k="$1" want="${RUNDESK_LANE_SEARCH:-}" n
+  [ -n "$want" ] || return 1
+  [ "$want" = "all" ] && return 0
+  for n in $want; do [ "$n" = "$k" ] && return 0; done
+  return 1
+}
+
+# This lane, added to the lanes with search, for this process and its children:
+# the break runner's answer to a set with a patch that needs the index.
+lane_search_add () {
+  local k="$1"
+  lane_has_search "$k" && return 0
+  export RUNDESK_LANE_SEARCH="${RUNDESK_LANE_SEARCH:+$RUNDESK_LANE_SEARCH }$k"
+}
+
+# A PATCH THAT CAN REDDEN ONLY WHERE MEILISEARCH ANSWERS says so in its header,
+#
+#     # Reddens only where Meilisearch answers: run it on a lane RUNDESK_LANE_SEARCH names.
+#
+# The model's rule (`patches_needing_model`), for the index: the indexers write
+# to nothing else, so a patch that stops `indexTask` changes nothing a suite can
+# see on a lane without one and would read as reddening nothing. Prints the
+# names that need one, one per line.
+patches_needing_search () {
+  local dir="$1" p
+  shift
+  for p in "$@"; do
+    grep -q '^# Reddens only where Meilisearch answers' "$dir/$p.py" 2>/dev/null && echo "$p"
+  done
+  return 0
+}
+
+lane_search_env () {
+  local k="$1"
+  lane_has_search "$k" || return 0
+  export MEILISEARCH_URL="http://127.0.0.1:$(lane_search_port "$k")"
+  export MEILISEARCH_MASTER_KEY="$(lane_search_key "$k")"
+}
+
+lane_search_up () {
+  local k="$1"
+  lane_has_search "$k" || return 0
+  local port log
+  port="$(lane_search_port "$k")"
+  log="/tmp/claude-0/meili-v$k.log"
+
+  if grep -q '"ready":true' "$log" 2>/dev/null && stub_is_current "$port" "$LANE_ENV_DIR/meili-stub.mjs"; then
+    return 0
+  fi
+
+  stub_down "$port" "$LANE_ENV_DIR/meili-stub.mjs"
+  : > "$log"
+  RUNDESK_MEILI_STUB=1 nohup node "$LANE_ENV_DIR/meili-stub.mjs" --port "$port" --key "$(lane_search_key "$k")" >> "$log" 2>&1 &
+
+  for _ in $(seq 1 50); do
+    grep -q '"ready":true' "$log" 2>/dev/null && return 0
+    sleep 0.2
+  done
+  echo "lane $k: the search stub never announced itself on $port" >&2
+  tail -3 "$log" 2>/dev/null >&2
+  return 1
+}
+
+# AN API THAT ANSWERS HEALTH IS NOT ONE THAT SEARCHES THROUGH ITS STUB. Its
+# init can fail — a wrong key, a stub that died — and it then falls back to
+# Postgres in silence, so a lane reported UP would measure the path it was
+# started to leave. The API logs the connection before it listens, so by the
+# time health answers the line is there or it never will be. 0 for a lane
+# without search. LANE_LOG_DIR moves the log it reads, for a self-check.
+lane_search_ready () {
+  local k="$1"
+  lane_has_search "$k" || return 0
+  grep -a -q "Meilisearch connected at http://127.0.0.1:$(lane_search_port "$k")" "${LANE_LOG_DIR:-/tmp/claude-0}/api-v$k.log" 2>/dev/null
 }
 
 # ── STOP A LANE'S API, AND WAIT UNTIL IT HAS GONE ──────────────────────────

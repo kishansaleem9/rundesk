@@ -54,5 +54,4 @@ apps/.web-release-*/
 # before it could remove them left eleven probes that `git add -A` staged
 # (found-29-sep/killed-mutants-outlive-their-run).
 .*-mutant-*
-apps/api/.s3-stub-probe-*.ts
-apps/api/.model-stub-probe-*.ts
+apps/api/.*-stub-probe-*.ts

@@ -242,6 +242,15 @@ try {
     `the shared task ${gShared.status}, its subtask ${gSub.status}, the task beside ${gBesideTask.status}; the list names the shared ${names(gTasksList, `${TAG} sharedalonetask`)} and the beside ${names(gTasksList, `${TAG} besidesharedtask`)}`,
   )
 
+  /*
+   * These rows were written by SQL, which no indexer sees. Where Meilisearch
+   * answers, search reads tasks, docs and files from the index alone, so the
+   * workspace's index is rebuilt from its rows first: the manager's own repair,
+   * and nothing at all where Postgres answers (`search-index`, section 5).
+   */
+  const reindexed = await A(`/search/${WS}/reindex`, { method: 'POST', body: {} })
+  if (reindexed.status >= 300) throw new Error(`could not rebuild the workspace's search index: ${reindexed.status}`)
+
   // ══ 8. ACROSS THE WORKSPACE ══════════════════════════════════════════════
   console.log('\n▶ the workspace’s task listing, and search')
   const gAll = await G(`/tasks/workspace/${WS}?limit=500`)

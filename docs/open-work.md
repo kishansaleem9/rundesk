@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 341 items, 41 open, 8 partly fixed, 292 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 346 items, 40 open, 8 partly fixed, 298 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1580,6 +1580,17 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - The next preflight caught the cause. The run printed "(it said: at ChildProcess._handle.onexit …)": the mutant's stub had exited on EADDRINUSE. The gates drew their ports from their pid, `9300 + pid % 400` and `9500 + pid % 300`. Those ranges overlap each other, and stubs left by ended mutant runs were still listening in them (`found-29-sep/killed-mutants-outlive-their-run`). Both gates now take a port the OS chose (`scripts/lib/free-port.mjs`).
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
+
+### `found-29-sep/ui-sweep-teardown-skips-the-press` — **closed** (test tooling, small; found by the break run for `15e2681`)
+
+**ui-sweep pressed Saturday back only if the button said so the moment it was drawn, so a six-day week could stay behind**
+
+*Evidence, 29 September:* the break set for `ui-sweep` on lane 3, beside three other break runs, stopped at its baseline, 106/107. The teardown found "Saturday left as aria-pressed=true". At the end of section 14 the suite read the Sat button once, as soon as the settings page had drawn it, and pressed it only if that read said "true". A button drawn before the week has loaded says "false", so the press was skipped and the shared workspace kept a six-day week for every run after it. The teardown's own read had the same hole the other way: a button read before the week loads also says "false".
+
+*Closed, 29 September:*
+- The press back is decided by what the server holds (`GET /workspaces/:id/work-schedule`, Saturday is ISO day 6). The button is waited for until it shows the six-day week, pressed, and the server is waited for until it no longer holds Saturday.
+- The teardown's check asks the server as well as the button, and puts the week back through the API when the press failed, so a failed run no longer leaves the next one a six-day week.
+- After: 107/107 on lane 3 beside three break runs, two regression runs and an agent's (load about 13). The failing run was the break set's baseline under the same kind of load; its set is queued again on the next commit.
 
 ### `found-29-sep/killed-mutants-outlive-their-run` — **closed** (test tooling, small; found committing `found-29-sep/stub-mutants-time-out-unnamed`)
 
@@ -3575,13 +3586,68 @@ where they stand. *Not done:* a `switch`, a check on either side of `?:` or behi
 reports that way today — and conditions are not tracked, so a `.rest()` able to run after an `if` is assumed to
 complete its chain on every path.
 
-### `commit-log/log-68c0345-1` — open, medium
+### `commit-log/log-68c0345-1` — **closed** (test tooling, medium)
 
 **Search indexing cannot be measured on any lane because none runs Meilisearch**
 
 *Evidence:* Commit 68c0345: 'Indexing is unmeasurable in this environment, so it is RECORDED as unmeasurable'. doc-import.mjs:252-267 says so. There is no 'meili' anywhere in scripts/e2e-lanes. This is the same kind of reason that storage and the model both shed this week by getting a stub.
 
 *To close:* Give the lanes a search stub or a real Meilisearch the way s3-stub and model-stub work. Then aim doc-import-2 at indexing again and check indexDocInSearch across docs, tasks and the rest.
+
+*Closed, 29 September.* `scripts/e2e-lanes/meili-stub.mjs` is an in-memory Meilisearch speaking the subset `SearchService` uses:
+- index create and get, settings, documents added and deleted by id and by filter, tasks, and search with `attr = "value"`/`OR` filters, sort, limit and offset;
+- an unknown index is a 404, a filter form the service does not build is a 400, and the master key is enforced;
+- `POST /__control/away` drops every product request unanswered, as a Meilisearch that has stopped does, until it is asked back or reset.
+
+`check-meili-stub.mjs --mutate` drives the real service and the real client against it: 30 cases, 35 of 35 mutations caught. It runs in preflight and CI, on a port the OS chose, through the mutant runner (`scripts/lib/run-mutant.mjs`).
+
+A lane that `RUNDESK_LANE_SEARCH` names gets the stub on 93k and an API started against it, and is reported up only once that API has connected. `check-model-lanes.sh` holds the wiring (14 of 14 search mutations). A break patch headed `# Reddens only where Meilisearch answers` gets a searching lane from the runner.
+
+`doc-import` asks which engine answers and asserts the index's half or the database's, 16 checks either way. `search-index` does the same for a task made, edited, given a file, put in the Trash and archived, and for a workspace rebuild; its section 6 holds what a hit is held to. `guest-read-scope` and `search-read-access` plant rows by SQL, which nothing indexes, so each rebuilds its workspace's index after planting (nothing where Postgres answers).
+
+Measuring with the stub found four defects in the product, each an item of its own and closed with this one: `found-29-sep/meili-file-hits-skip-the-read-rule`, `found-29-sep/meili-finds-deleted-docs`, `found-29-sep/meili-gone-after-boot-fails-every-search` and `found-29-sep/files-of-binned-tasks-found`. The measurements are there.
+
+Regression, after the fix: every suite that searches (24, `search-index` and `doc-import` among them) on lane 5, where the stub answers, and on lane 6, where Postgres does. 24 of 24 green on each, every run its full count (477 checks a lane). `guest-read-scope` and `search-read-access`, which failed on a search lane before they rebuilt their index, are green on both.
+
+### `found-29-sep/meili-file-hits-skip-the-read-rule` — **closed** (security, small; found measuring `commit-log/log-68c0345-1` with the new search stub)
+
+**Where Meilisearch answers, a member refused a private space finds the files on its tasks by name**
+
+*Evidence, 29 September:* measured on lane 3 with the search stub. A member of the workspace, refused a private space, opened its task and was refused (403); their search withheld the task, its list and the space, and returned the file attached to the task. `dropUnsearchableTaskHits` held doc and task hits to the read rules; file hits "pass through untouched". On Postgres, `searchTaskAttachments` holds a file to its task's container and private-item rules, and the same search withheld it.
+
+*Closed, 29 September:* a file hit is held to its task's rules, as the database's file search is: the task's reach and privacy, the bin, and the workspace. One query over the attachments joined to their task, list, project and space; a hit whose row is gone is dropped.
+- Measured with `search-index` section 6 on lane 5, where the stub answers: before, the member's search found the file (8/12 in all); after, it does not while the admin's does (12/12).
+- Unit: "holds a file hit to its task’s reach, privacy and bin, and drops one the database does not return" (47/51 before, 51/51 after). Patches `sst-4` (unit) and `search-index-7` (suite).
+
+### `found-29-sep/meili-finds-deleted-docs` — **closed** (visible bug, small; found measuring `commit-log/log-68c0345-1`)
+
+**Where Meilisearch answers, a deleted doc is still found**
+
+*Evidence, 29 September:* measured on lane 3 with the search stub. After `DELETE /docs/:id`, which archives the doc, a plain search still returned `doc-<id>`. Nothing removes a doc from the index, and a doc hit was held to the doc rule alone, and for non-managers only; the archived rule never. On Postgres the same search withheld it.
+
+*Closed, 29 September:* a doc hit is held to the archived rule, for managers too, as a task hit is, and dropped when its doc is gone; the doc rule still applies to everyone else. The read is the authority, so nothing has to remember to take a doc out of the index.
+- Measured on lane 5: before, the deleted doc was found; after, it is found before its delete and not after (`search-index` section 6).
+- Unit: "holds a doc hit to the archived rule, a manager’s too, and drops one the database does not return". Patches `sst-5` and `search-index-8`. `sst-1` is re-aimed onto the new doc rule.
+
+### `found-29-sep/meili-gone-after-boot-fails-every-search` — **closed** (visible bug, small; found measuring `commit-log/log-68c0345-1`)
+
+**A Meilisearch that stops after the API started makes every plain search a 500**
+
+*Evidence, 29 September:* measured on lane 3. With the lane's stub stopped under the running API, a plain search answered 500 "Internal server error", while a task-filtered search, which takes the Postgres path, answered 200. Only a failed init fell back to Postgres; the search itself had no fallback.
+
+*Closed, 29 September:* the Meilisearch half of a search is caught; the search is answered from Postgres, a warning is logged, and the next search asks Meilisearch again.
+- Measured on lane 5 with the stub sent away under the running API: before, 500; after, 200 with the task found, and the API's log says "Meilisearch search failed, answered from Postgres: fetch failed".
+- Unit: "answers from Postgres when Meilisearch fails after boot". Patches `sst-6` and `search-index-9`.
+
+### `found-29-sep/files-of-binned-tasks-found` — **closed** (visible bug, small; found reading the search stub's notes, measured on lane 1)
+
+**Search withholds an archived or binned task and still finds the file on it**
+
+*Evidence, 29 September:* measured on lane 1, where Postgres answers. A task with a file; once the task was archived (`DELETE /tasks/:id`), and on another task once it was put in the Trash, a search no longer found the task and still found its file. `searchTaskAttachments` asked nothing of the task's archived flag. The index drops such a file at a rebuild (`reindexWorkspace` reads live tasks), so the two engines disagreed as well. In ClickUp, "any files that are attached to the task will also be archived", and a search finds archived items only when its Archived filter, or the setting to always include them, asks for them (help centre, "Archive a task").
+
+*Closed, 29 September:* a file goes where its task goes. Both engines withhold the file of an archived or binned task unless archived work is asked for.
+- Measured: before, lane 6 (Postgres) 11/12 and lane 5 (index) 8/12 with this check red on both; after, 12/12 on both.
+- Unit: "withholds the file of an archived or binned task unless archived work is asked for". Patches `sst-7` and `search-index-10`, which takes both engines' rule out and so reddens on either.
 
 ### `commit-log/log-ad00a7c-1` — **closed** (test tooling, medium; the same work as `harness/model-lane-routing-unbuilt`)
 
@@ -5096,6 +5162,11 @@ FAILs. video-regression 94/94.
 
 *To close:* Research how ClickUp's Planner or Calendar sidebar custom sections work: their name and the rule for what falls into them. Build storage for them, show them in the rail, and add checks.
 
+*Researched, 29 September* (help centre, through search excerpts). Not settled:
+- The help centre documents the Planner sidebar's categories as fixed: Priorities, Assigned to me, Today & overdue, and Backlog. Backlog alone is configured (a List and filters). "Meet with" is a people search. Categories collapse and expand, and the whole sidebar hides. Planner settings have no Sidebar page ("Appearance, Accounts, Upcoming meetings, Time blocking, and AI Notetaker").
+- The "+ Add a new section" the frame shows has no documented counterpart for the Planner or Calendar. The nearest is ClickUp 4.0's Home Sidebar custom sections: made with + › Section, named with an optional emoji, filled by hand (spaces, lists, tasks, docs, channels), each item in one section at a time, reordered in Customize › Sections, deleted without deleting what they hold.
+- The Planner's help pages are moving under "Calendar" names, so the docs may lag the app. What a new Calendar section would hold stays a decision for the owner: hand-picked tasks, as the Home Sidebar does, or a filter, as Backlog does.
+
 ### `harness/model-lane-routing-unbuilt` — **closed** (test tooling, medium)
 
 **No suite can be routed to a lane with or without a model; the model stub is wired but no suite exercises it**
@@ -5264,6 +5335,15 @@ FAILs. video-regression 94/94.
 *Evidence:* reaudit.md:850 (M, 'the write takes no :userId, deliberately'). people.controller.ts:100-119: PrioritiesController writes only the caller's own. Reading someone else's already exists at people.controller.ts:90-97 (GET /people/:userId/priorities). task-detail-sheet.tsx:2611-2635 shows the prompt only when `userId === currentUserId`.
 
 *To close:* Decide from ClickUp's behaviour whether assigning someone else offers to add the task to THEIR priorities. If yes, add a permissioned write, for example allowed to managers or the assigner of a task they can see.
+
+*Researched, 29 September* (help centre, read through search excerpts; the hosts are not reachable from this environment). ClickUp settles it:
+- "Members, Admins, and Owners can add tasks to other people's priorities" ("What are Personal Priorities?"; LineUp is now Personal Priorities). A guest cannot.
+- A task's Priority field has "Add to Personal Priorities": pick a person's avatar. The task menu has Add to › Someone's Priorities.
+- My Settings has "Ask to add task to priorities after assigning: Show a prompt asking if you'd like to add the task to the assigned member's priorities."
+- The expanded view shows who added each task and when ("Added by", "Added at").
+- A colleague's priorities are shown on their profile and in Teams Hub; a task the viewer cannot open reads "Private task".
+
+So the write takes a person: a member, admin or owner may add a task they can see to anyone's priorities, and the prompt after assigning offers the assignee's. Not settled by the sources: whether a task the colleague cannot open may be added; the safe rule is to refuse it.
 
 ### `found-24-sep/workspace-audit-log-not-in-settings` — **closed** (unbuilt, medium; found fixing the console's audit log)
 

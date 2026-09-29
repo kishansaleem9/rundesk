@@ -535,6 +535,16 @@ jobs:
       - name: The model seam is really a seam, and each case bites
         run: node scripts/check-model-stub.mjs --mutate
 
+      # And for search (commit-log/log-68c0345-1). `SearchService` builds
+      # `new MeiliSearch({ host, apiKey })` from MEILISEARCH_URL and
+      # MEILISEARCH_MASTER_KEY, so the seam is in the product, and no lane or
+      # job ran a Meilisearch, so indexing was recorded as unmeasurable. The
+      # cases drive the real service's own indexers and search, and the real
+      # client, against the stub the lanes start (RUNDESK_LANE_SEARCH): 28
+      # cases, 32 of 32 mutations redden one.
+      - name: The search seam is really a seam, and each case bites
+        run: node scripts/check-meili-stub.mjs --mutate
+
       # And the other direction from the ledger's own reconciliations: does a
       # line of the SPECIFICATION appear anywhere in the evidence? 115
       # timestamped frame observations, and asking found `03:15` — a cover
@@ -1918,6 +1928,18 @@ jobs:
       - name: Search finds only what the searcher may open
         if: '!cancelled()'
         run: node test/e2e/search-read-access.mjs --api 3011
+        env:
+          E2E_EMAIL: admin@rundesk.internal
+          E2E_PASSWORD: Admin@123!
+
+      # What the search indexers write and what search then finds: a task
+      # made, an edit, a file attached, a task deleted, the workspace rebuild.
+      # This job starts no Meilisearch, so each check reads its Postgres half
+      # here; a lane that RUNDESK_LANE_SEARCH names reads the index itself
+      # (commit-log/log-68c0345-1). One task is archived by SQL.
+      - name: What the search indexers write, and what search finds
+        if: '!cancelled()'
+        run: node test/e2e/search-index.mjs --api 3011
         env:
           E2E_EMAIL: admin@rundesk.internal
           E2E_PASSWORD: Admin@123!

@@ -9,10 +9,12 @@
 # THIS PATCH ORIGINALLY REMOVED `indexDocInSearch` AND REDDENED NOTHING, which
 # is worth recording. `SearchService.search` uses Meilisearch only `if
 # (this.enabled && this.index && …)` and otherwise falls back to a database
-# query — and no Meilisearch runs in a lane, so the index call has no
-# observable effect here at all. The check it aimed at passed with the call
-# removed. Indexing is unmeasurable in this environment and is recorded as
-# unmeasurable rather than covered by a check that cannot see it.
+# query — and no Meilisearch ran in a lane, so the index call had no
+# observable effect at all. The check it aimed at passed with the call
+# removed, and indexing was recorded as unmeasurable. It is measurable now on
+# a lane RUNDESK_LANE_SEARCH names, and `doc-import-5-an-import-is-never-indexed`
+# is that patch; this one keeps the revision, which nothing else reddens
+# (`commit-log/log-68c0345-1`).
 #
 # `snapshotRevision` is the follow-up that CAN be broken and observed, through
 # `GET /docs/:id/revisions`, so that is what this takes. Only that one: a patch

@@ -936,6 +936,9 @@ try {
   // answered — each waited for (bounded): a loaded machine outlasts fixed waits,
   // and a missed press on the way back would leave the shared week at six days.
   const sat = page.getByRole('button', { name: 'Sat', exact: true })
+  // Saturday is ISO weekday 6 in what the server holds.
+  const serverHasSaturday = async () =>
+    ((await sweepApi(`/workspaces/${WS}/work-schedule`).catch(() => null))?.data?.workDays ?? []).includes(6)
   await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
   await sat.click({ timeout: 10_000 }).catch(() => {})
   // The press is a write, then a re-read: 10 s was outlasted on a loaded lane
@@ -948,9 +951,17 @@ try {
   check(workloadDrawn, 'the workload report still renders with a six-day week', 'workload failed to render')
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
   await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
-  if ((await sat.getAttribute('aria-pressed', { timeout: 5000 }).catch(() => null)) === 'true') {
+  /*
+   * Pressed back from what the SERVER holds, once the button shows it. Read as
+   * soon as it was drawn, the button said "false" over a six-day week that had
+   * not loaded yet, the press was skipped, and the shared week stayed at six
+   * days: the teardown found Saturday pressed (29 September, lane 3 beside
+   * three other break runs).
+   */
+  if (await serverHasSaturday()) {
+    await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 20_000 })
     await sat.click({ timeout: 10_000 }).catch(() => {})
-    await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'false', { timeoutMs: 10_000 })
+    await waitUntil(async () => !(await serverHasSaturday()), { timeoutMs: 20_000 })
   }
 
   say('15. Other surfaces still render')
@@ -1042,8 +1053,16 @@ try {
     satState = await satBack.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)
     return satState === 'false'
   }, { timeoutMs: 10_000 })
-  check(satState === 'false', 'the working week is back to Mon–Fri',
-    `Saturday left as aria-pressed=${satState}`)
+  // The server's week too: a button drawn before the week loads also says "false".
+  const saturdayHeld = await serverHasSaturday()
+  check(satState === 'false' && !saturdayHeld, 'the working week is back to Mon–Fri',
+    `Saturday left as aria-pressed=${satState}; the server's week ${saturdayHeld ? 'still holds' : 'does not hold'} it`)
+  // Put back either way, so a failed press does not leave the shared week at six days for the next run.
+  if (saturdayHeld) {
+    const week = (await sweepApi(`/workspaces/${WS}/work-schedule`).catch(() => null))?.data?.workDays ?? []
+    const putBack = await sweepApi(`/workspaces/${WS}/work-schedule`, { method: 'PATCH', body: { workDays: week.filter((d) => d !== 6) } })
+    if (putBack.status >= 300) console.log(`  cleanup left behind: the working week was not put back (${putBack.status})`)
+  }
 
   say('17. Console health')
   const real = consoleErrors.filter((e) =>

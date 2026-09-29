@@ -109,6 +109,7 @@ restart() {
   # suite mentions.
   lane_store_up "$LANE"
   lane_model_up "$LANE"
+  lane_search_up "$LANE"
   (
     cd "$WT/apps/api"
     export PORT="$PORT" PORTMARK="$LANE"
@@ -120,13 +121,17 @@ restart() {
     # measures the refusal path instead of the real one.
     lane_store_env "$LANE"
     lane_model_env "$LANE"
+    lane_search_env "$LANE"
     lane_oauth_env "$LANE"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
       dist/apps/api/src/main.js > "/tmp/claude-0/api-v$LANE.log" 2>&1 &
   )
+  # Up is health AND, where the set needs the index, an API searching through
+  # its stub (`lane_search_ready`): one whose init failed would measure every
+  # patch on the Postgres path and read as reddening nothing.
   for i in $(seq 1 40); do
-    curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health" && return 0
+    curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health" && { lane_search_ready "$LANE"; return; }
     sleep 2
   done
   return 1
@@ -163,6 +168,11 @@ if [ -n "$NEEDS_MODEL" ] && [ -n "$NEEDS_NO_MODEL" ]; then
 fi
 [ -n "$NEEDS_MODEL" ] && lane_model_add "$LANE"
 [ -n "$NEEDS_NO_MODEL" ] && lane_model_remove "$LANE"
+# AND A SET WITH A PATCH ONLY THE INDEX CAN REDDEN RUNS WITH A SEARCH STUB,
+# baseline and all (`patches_needing_search`, lane-env.sh): the indexers write
+# to nothing a lane without one can read.
+NEEDS_SEARCH=$(patches_needing_search "$REPO/test/e2e/breaks" "$@" | tr '\n' ' ' | sed 's/ *$//')
+[ -n "$NEEDS_SEARCH" ] && lane_search_add "$LANE"
 # AND THE SUITE'S OWN NEED (`suite_lane_need`, lane-env.sh): one that stands on
 # the assistant's refusal runs without a model, and one that stages the stub
 # with one. A set whose patches need a model its suite refuses cannot be
@@ -273,6 +283,7 @@ REV=$(git -C /home/user/rundesk rev-parse HEAD)
 # on "no progress" against sets that were running perfectly.
 echo "== syncing $WT to $(echo "$REV" | cut -c1-8)" >> "$OUT"
 echo "-- model: $(lane_has_model "$LANE" && echo on || echo off)${NEEDS_MODEL:+ — needed by $NEEDS_MODEL}" >> "$OUT"
+echo "-- search: $(lane_has_search "$LANE" && echo on || echo off)${NEEDS_SEARCH:+ — needed by $NEEDS_SEARCH}" >> "$OUT"
 # WHAT THE LANE IS SERVING, NOT WHAT THE WORKTREE HOLDS. The sync used to run
 # only when the worktree's checkout differed from HEAD, and assumed the API
 # serving the lane had been built from it. A run killed between the checkout

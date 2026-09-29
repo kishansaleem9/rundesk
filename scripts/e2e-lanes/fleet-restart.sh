@@ -25,10 +25,16 @@
 # `exit`, so nothing appended after it runs either.
 {
 set -u
-R=/home/user/rundesk
+# THE CHECKOUT THIS COPY IS IN, not /home/user/rundesk by name. From the main
+# tree that is the main tree, as it always was. From a worktree it is that
+# worktree: its API build, and its lane helpers and stubs. The copy in a
+# worktree started the MAIN tree's build with the MAIN tree's helpers, so a
+# lane restarted from a worktree never served what the worktree held — and a
+# helper the worktree had added did not exist for it (`lane_search_up`).
+R="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 TSX="$R/node_modules/.pnpm/tsx@4.21.0/node_modules/tsx"
 # Storage, in one place — see lane-env.sh for why it is not inlined here.
-. "/home/user/rundesk/scripts/e2e-lanes/lane-env.sh"
+. "$R/scripts/e2e-lanes/lane-env.sh"
 export PGPASSWORD=rundesk
 
 # A LIST, ALWAYS. NEVER A COUNT.
@@ -152,6 +158,9 @@ for k in "${LANES[@]}"; do
   # numbers) — see lane-env.sh for which suites need a lane without a model,
   # and why a fleet mixes the two.
   lane_model_up "$k"
+  # And its search engine, when RUNDESK_LANE_SEARCH names it — before the API,
+  # which makes its index at boot (lane-env.sh).
+  lane_search_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -164,6 +173,7 @@ for k in "${LANES[@]}"; do
     # measures the refusal path instead of the real one.
     lane_store_env "$k"
     lane_model_env "$k"
+    lane_search_env "$k"
     lane_oauth_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
@@ -186,7 +196,14 @@ for k in "${LANES[@]}"; do
     if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health"; then up=yes; break; fi
     sleep 2
   done
-  if [ -n "$up" ]; then echo "lane $k: UP on $PORT ($DB)"; ok=$((ok+1))
+  # A lane RUNDESK_LANE_SEARCH names is up when its API searches through its
+  # stub, not when it answers health: an init that failed falls back to
+  # Postgres in silence (`lane_search_ready`).
+  if [ -n "$up" ] && lane_search_ready "$k"; then
+    echo "lane $k: UP on $PORT ($DB)$(lane_has_search "$k" && echo ", searching through its stub on $(lane_search_port "$k")")"; ok=$((ok+1))
+  elif [ -n "$up" ]; then
+    echo "lane $k: API UP on $PORT but NOT SEARCHING THROUGH ITS STUB on $(lane_search_port "$k") — the index would not be measured"
+    sed 's/\x1b\[[0-9;]*m//g' "/tmp/claude-0/api-v$k.log" | grep -a -m2 -E 'SearchService|Meilisearch'
   else echo "lane $k: DID NOT COME UP"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok of ${#LANES[@]} lanes up"

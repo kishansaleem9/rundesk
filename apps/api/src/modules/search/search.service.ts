@@ -460,6 +460,7 @@ export class SearchService implements OnModuleInit {
     // Postgres path, and because the two engines match differently — Meili
     // tokenises, Postgres does substring ILIKE — reordering a result list also
     // changed which rows were in it.
+    let safeMeili: SearchHit[] | null = null
     if (this.enabled && this.index && trimmed && !hasTaskFilter && !filters.includeArchived) {
       const filterExpr = [`workspaceId = "${workspaceId}"`]
       // Narrow to every requested type, not just a lone one. With two or more
@@ -470,7 +471,15 @@ export class SearchService implements OnModuleInit {
       if (filters.types?.length) {
         filterExpr.push(`(${filters.types.map((t) => `entityType = "${t}"`).join(' OR ')})`)
       }
-      const safeMeili = await this.visibleMeiliHits(
+      /*
+       * A Meilisearch that answered at boot and has gone since is not a reason
+       * to fail the search. Only a failed init fell back: stopped under a
+       * running API, every plain search answered 500 while a task-filtered one,
+       * which takes the Postgres path, answered 200
+       * (`found-29-sep/meili-gone-after-boot-fails-every-search`). This search
+       * is answered from Postgres; the next one asks Meilisearch again.
+       */
+      safeMeili = await this.visibleMeiliHits(
         trimmed,
         filterExpr,
         filters.sort,
@@ -479,7 +488,12 @@ export class SearchService implements OnModuleInit {
         userId,
         isManager,
         Boolean(filters.includeArchived),
-      )
+      ).catch((err: unknown) => {
+        this.logger.warn(`Meilisearch search failed, answered from Postgres: ${(err as Error).message}`)
+        return null
+      })
+    }
+    if (safeMeili) {
       const extras = await this.searchExtras(workspaceId, userId, likeContaining(trimmed), limit, isManager, filters.types)
       // Clips live in R2, never in Meili, so they're queried separately.
       const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
@@ -587,7 +601,9 @@ export class SearchService implements OnModuleInit {
       : []
 
     // Uploaded files: task attachments (Postgres, access-scoped) + clips (R2).
-    const fileHits = wantFiles ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit) : []
+    const fileHits = wantFiles
+      ? await this.searchTaskAttachments(workspaceId, userId, isManager, like, limit, Boolean(filters.includeArchived))
+      : []
     const clipHits = wantFiles ? await this.searchClips(workspaceId, trimmed, limit) : []
     const driveHits = wantDrive ? await this.searchDrive(workspaceId, trimmed, limit, userId) : []
     const gmailHits = wantGmail ? await this.searchGmail(workspaceId, trimmed, limit, userId) : []
@@ -906,9 +922,16 @@ export class SearchService implements OnModuleInit {
    * A doc hit is held to the doc rule (`doc-access.ts`), and a task hit to the
    * container rule as well as the private-item rule: the index carries neither,
    * and this let through every task and doc of a private space to a member
-   * refused it — on a deployment running Meilisearch, which no lane is, so
-   * `search.service.test.ts` holds this half. Other hits pass through
-   * untouched.
+   * refused it. `search.service.test.ts` holds this half, and a lane that
+   * `RUNDESK_LANE_SEARCH` names measures it (`search-index`).
+   *
+   * A file hit is held to its task's rules, as the Postgres path's file search
+   * is: a member refused a private space found, by name, the file on its task
+   * (`found-29-sep/meili-file-hits-skip-the-read-rule`). And a doc hit is held
+   * to the archived rule, for managers too, as a task hit is: nothing removes a
+   * doc from the index, so a deleted doc was still found
+   * (`found-29-sep/meili-finds-deleted-docs`). A hit whose row is gone is
+   * dropped. Other hits pass through untouched.
    */
   private async dropUnsearchableTaskHits<T extends { id: string; entityType: string }>(
     hits: T[],
@@ -917,11 +940,47 @@ export class SearchService implements OnModuleInit {
     isManager: boolean,
     includeArchived: boolean,
   ): Promise<T[]> {
+    // Nothing to ask the database when neither rule applies to this caller.
+    if (isManager && includeArchived) return hits
+
     const docHits = hits.filter((h) => h.entityType === 'doc')
-    if (docHits.length > 0 && !isManager) {
-      const hidden = new Set(await hiddenDocIds(this.db, workspaceId, userId, false))
-      if (hidden.size > 0) hits = hits.filter((h) => h.entityType !== 'doc' || !hidden.has(h.id.replace(/^doc-/, '')))
+    if (docHits.length > 0) {
+      const docId = (hitId: string) => hitId.replace(/^doc-/, '')
+      const live = await this.db
+        .select({ id: docs.id })
+        .from(docs)
+        .where(and(
+          inArray(docs.id, docHits.map((h) => docId(h.id))),
+          eq(docs.workspaceId, workspaceId),
+          includeArchived ? undefined : eq(docs.isArchived, false),
+        ))
+      const found = new Set(live.map((r) => r.id))
+      const hidden = isManager ? new Set<string>() : new Set(await hiddenDocIds(this.db, workspaceId, userId, false))
+      hits = hits.filter((h) => h.entityType !== 'doc' || (found.has(docId(h.id)) && !hidden.has(docId(h.id))))
     }
+
+    const fileHits = hits.filter((h) => h.entityType === 'file')
+    if (fileHits.length > 0) {
+      const fileId = (hitId: string) => hitId.replace(/^file-/, '')
+      const fileConds: Array<SQL | undefined> = [
+        inArray(taskAttachments.id, fileHits.map((h) => fileId(h.id))),
+        eq(spaces.workspaceId, workspaceId),
+        includeArchived ? undefined : eq(tasks.isArchived, false),
+        taskInReachFilter(this.db, workspaceId, userId, isManager),
+        taskVisibilityFilter(this.db, userId, isManager),
+      ]
+      const keepFiles = await this.db
+        .select({ id: taskAttachments.id })
+        .from(taskAttachments)
+        .innerJoin(tasks, eq(tasks.id, taskAttachments.taskId))
+        .innerJoin(lists, eq(lists.id, tasks.listId))
+        .innerJoin(projects, eq(projects.id, lists.projectId))
+        .innerJoin(spaces, eq(spaces.id, projects.spaceId))
+        .where(and(...fileConds))
+      const okFiles = new Set(keepFiles.map((r) => r.id))
+      hits = hits.filter((h) => h.entityType !== 'file' || okFiles.has(fileId(h.id)))
+    }
+
     /*
      * A Meili hit's id is the DOCUMENT id, which `indexTask` writes as
      * `task-<uuid>` — not a uuid. Handing those straight to a uuid column is a
@@ -934,8 +993,6 @@ export class SearchService implements OnModuleInit {
     const taskHits = hits.filter((h) => h.entityType === 'task')
     if (taskHits.length === 0) return hits
     const rawId = (docId: string) => docId.replace(/^task-/, '')
-    // Nothing to ask the database when neither rule applies to this caller.
-    if (isManager && includeArchived) return hits
 
     const conds: Array<SQL | undefined> = [inArray(tasks.id, taskHits.map((h) => rawId(h.id)))]
     if (!includeArchived) conds.push(eq(tasks.isArchived, false))
@@ -1486,6 +1543,7 @@ export class SearchService implements OnModuleInit {
     isManager: boolean,
     like: string | null,
     limit: number,
+    includeArchived = false,
   ): Promise<Array<{ id: string; entityType: string; title: string; content: string; url: string }>> {
     const conds: Array<SQL | undefined> = [
       eq(spaces.workspaceId, workspaceId),
@@ -1493,6 +1551,9 @@ export class SearchService implements OnModuleInit {
       // whether the caller may open it (measured, a private space's file).
       taskInReachFilter(this.db, workspaceId, userId, isManager),
       taskVisibilityFilter(this.db, userId, isManager),
+      // A file goes where its task goes: search withheld an archived or binned
+      // task and still found its file (`found-29-sep/files-of-binned-tasks-found`).
+      includeArchived ? undefined : eq(tasks.isArchived, false),
     ]
     if (like) conds.push(or(ilike(taskAttachments.fileName, like), ilike(taskAttachments.contentType, like)))
     const rows = await this.db

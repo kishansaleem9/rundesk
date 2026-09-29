@@ -120,6 +120,14 @@ try {
   }
   const hiddenSide = await plant('hidden', 'private')
   const openSide = await plant('open')
+  /*
+   * These rows were written by SQL, which no indexer sees. Where Meilisearch
+   * answers, search reads tasks, docs and files from the index alone, so the
+   * workspace's index is rebuilt from its rows first: the manager's own repair,
+   * and nothing at all where Postgres answers (`search-index`, section 5).
+   */
+  const reindexed = await A(`/search/${WS}/reindex`, { method: 'POST', body: {} })
+  if (reindexed.status >= 300) throw new Error(`could not rebuild the workspace's search index: ${reindexed.status}`)
   const KINDS = ['channel', 'comment', 'doc', 'file', 'folder', 'list', 'message', 'space', 'task']
   const sideOf = (hit) => {
     const s = JSON.stringify(hit)

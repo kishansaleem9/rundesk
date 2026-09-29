@@ -58,6 +58,17 @@ heal () {
   # a healthy one and its objects, so this is cheap when nothing is wrong.
   . scripts/e2e-lanes/lane-env.sh
   for k in $LANES; do lane_store_up "$k" >> "$LOG" 2>&1; lane_model_up "$k" >> "$LOG" 2>&1; done
+  # NOT THE SEARCH STUB, which is not restarted under a running API: the index
+  # is in its memory and the API makes it only at boot, so a fresh stub beside
+  # an old API answers every search 404 (lane-env.sh). A lane whose stub is
+  # gone or stale is restarted whole, stub first.
+  for k in $LANES; do
+    lane_has_search "$k" || continue
+    stub_is_current "$(lane_search_port "$k")" "$LANE_ENV_DIR/meili-stub.mjs" && continue
+    say "lane $k: its search stub is gone or stale — restarting the lane"
+    bash scripts/e2e-lanes/fleet-restart.sh "$k" >> "$LOG" 2>&1 \
+      || say "fleet-restart could not bring lane $k back searching — see $LOG"
+  done
 }
 
 # The shared loop, with the fleet healed before each round. Exit codes are the

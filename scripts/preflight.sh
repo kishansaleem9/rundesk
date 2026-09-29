@@ -77,6 +77,7 @@ step "a lane number is one lane, never a count" bash scripts/check-lane-lists.sh
 step "a new table proves a lane current too" bash scripts/check-schema-witness.sh --mutate
 step "bail stops the file and loses nothing" node scripts/check-bail.mjs --mutate
 step "and the model seam is really a seam" node scripts/check-model-stub.mjs --mutate
+step "and the search seam is really a seam" node scripts/check-meili-stub.mjs --mutate
 step "the chain helper holds its contract" node scripts/check-chain-helper.mjs --mutate
 step "a mutant run ends with all it started" node scripts/check-run-mutant.mjs --mutate
 step "the claim matcher holds its contract" node scripts/check-claim-match.mjs --mutate

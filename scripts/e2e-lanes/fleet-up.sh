@@ -74,6 +74,10 @@ for k in "${LANES[@]}"; do
     /tmp/claude-0/pristine.dump > "/tmp/claude-0/restore-v$k.log" 2>&1
   lane_store_up "$k"
   lane_model_up "$k"
+  # The database was just re-created, so the lane's index starts empty too: a
+  # running search stub would answer for rows that no longer exist.
+  lane_has_search "$k" && stub_down "$(lane_search_port "$k")" "$LANE_ENV_DIR/meili-stub.mjs"
+  lane_search_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT"
@@ -85,6 +89,7 @@ for k in "${LANES[@]}"; do
     # presign. No product change; `R2Service` has read these all along.
     lane_store_env "$k"
     lane_model_env "$k"
+    lane_search_env "$k"
     lane_oauth_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
@@ -106,7 +111,12 @@ for k in "${LANES[@]}"; do
   # fail, which is the kind of quiet the rest of this harness exists to stop.
   S3PORT=$((9100 + k))
   s3=$(grep -o '"ready":true' "/tmp/claude-0/s3-v$k.log" 2>/dev/null | head -1)
-  if [ -n "$up" ] && [ -n "$s3" ]; then echo "lane $k: UP on $PORT (rundesk_v$k), store on $S3PORT"; ok=$((ok+1))
+  if [ -n "$up" ] && [ -n "$s3" ] && lane_search_ready "$k"; then
+    echo "lane $k: UP on $PORT (rundesk_v$k), store on $S3PORT$(lane_has_search "$k" && echo ", search on $(lane_search_port "$k")")"; ok=$((ok+1))
+  elif [ -n "$up" ] && [ -n "$s3" ]; then
+    # The same quiet as a lane without its store: an API whose search init
+    # failed falls back to Postgres and measures the path it was meant to leave.
+    echo "lane $k: API UP on $PORT but NOT SEARCHING THROUGH ITS STUB on $(lane_search_port "$k") — the index will not be measurable"
   elif [ -n "$up" ]; then echo "lane $k: API UP on $PORT but NO STORE on $S3PORT — uploads will not be measurable"; tail -3 "/tmp/claude-0/s3-v$k.log" 2>/dev/null
   else echo "lane $k: DID NOT COME UP"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done

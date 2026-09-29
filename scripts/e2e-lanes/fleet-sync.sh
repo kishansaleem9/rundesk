@@ -74,6 +74,7 @@ for k in $(seq 1 "$N"); do
   # suite mentions.
   lane_store_up "$k"
   lane_model_up "$k"
+  lane_search_up "$k"
   (
     cd "$R/apps/api"
     export PORT="$PORT" PORTMARK="$k"
@@ -85,6 +86,7 @@ for k in $(seq 1 "$N"); do
     # measures the refusal path instead of the real one.
     lane_store_env "$k"
     lane_model_env "$k"
+    lane_search_env "$k"
     lane_oauth_env "$k"
     nohup node --require "$TSX/dist/preflight.cjs" \
       --import "file://$TSX/dist/loader.mjs" \
@@ -99,7 +101,8 @@ for k in $(seq 1 "$N"); do
     if curl -s --noproxy '*' -o /dev/null --max-time 2 "http://127.0.0.1:$PORT/api/v1/health"; then up=yes; break; fi
     sleep 2
   done
-  if [ -n "$up" ]; then echo "lane $k: UP on $PORT"; ok=$((ok+1))
+  if [ -n "$up" ] && lane_search_ready "$k"; then echo "lane $k: UP on $PORT"; ok=$((ok+1))
+  elif [ -n "$up" ]; then echo "lane $k: API UP on $PORT but NOT SEARCHING THROUGH ITS STUB on $(lane_search_port "$k")"
   else echo "lane $k: DOWN"; tail -5 "/tmp/claude-0/api-v$k.log"; fi
 done
 echo "$ok/$N lanes synced and up"

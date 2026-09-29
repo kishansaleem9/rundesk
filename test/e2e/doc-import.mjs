@@ -20,7 +20,10 @@
  * endpoint before it shipped, and none of which any content check can see:
  *
  *   · the doc must be IN THE SEARCH INDEX — you import a document in order to
- *     find it later, and an unindexed one is there and unreachable;
+ *     find it later, and an unindexed one is there and unreachable. Measurable
+ *     only where the API searches through Meilisearch, which a lane named in
+ *     RUNDESK_LANE_SEARCH does (`meili-stub.mjs`); elsewhere the same two
+ *     checks read the Postgres half (`lib/search.mjs`);
  *   · the title must come from the file's leading H1 and be CONSUMED, or every
  *     export/import cycle adds another heading while the content round trip
  *     stays green;
@@ -32,7 +35,7 @@
  * of scope, so a `.docx` is refused — and "unsupported file" would tell the
  * person holding one nothing about what to do next.
  *
- *   DATABASE_URL=postgres://…/rundesk_v1 node test/e2e/doc-import.mjs --api 3021 --dist apps/web/dist
+ *   DATABASE_URL=postgres://…/rundesk_v1 node test/e2e/doc-import.mjs --api 3021 --dist apps/web/dist [--search 9301]
  */
 import path from 'node:path'
 import { writeFileSync } from 'node:fs'
@@ -42,6 +45,7 @@ import { apiClient, login } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { searchStubBase, searchEngine, stubDocument, stubRequests, searchesSince } from './lib/search.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -59,11 +63,17 @@ const argOf = (name, fallback) => {
  * skipped branch and was a miscount — the same slip `task-cover` made going
  * from 32 to 37. An exact comparison is what turned a wrong number into a
  * visible one instead of a quiet pass.
+ *
+ * SIXTEEN since the index became measurable: the search section asserts what
+ * the index holds as well as what the endpoint finds, with the same two checks
+ * whichever engine answers.
  */
-const EXPECTED_CHECKS = 15
+const EXPECTED_CHECKS = 16
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
+/** The lane's Meilisearch stub, where it has one: 9300 + lane, `--search` or E2E_SEARCH_PORT. */
+const SEARCH = searchStubBase(API_PORT, argOf('--search', undefined))
 const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
 const EMAIL = process.env.E2E_EMAIL ?? 'admin@rundesk.internal'
 const PASSWORD = process.env.E2E_PASSWORD ?? 'Admin@123!'
@@ -249,23 +259,34 @@ try {
   )
 
   // ── the two that fail silently ────────────────────────────────────────────
-  console.log('\n▶ the imported doc can be found again')
   /*
-   * WHAT THIS CAN AND CANNOT PROVE, corrected after a break run.
+   * WHAT THIS PROVES, AND ON WHICH ENGINE (`commit-log/log-68c0345-1`).
    *
-   * It was written to assert that `indexDocInSearch` runs, and it cannot:
-   * `SearchService.search` uses Meilisearch only `if (this.enabled &&
-   * this.index && …)` and otherwise falls back to a database query. No
-   * Meilisearch is configured in a lane, so removing the index call changes
-   * nothing here and `doc-import-2` reddened NOTHING against it.
+   * It was written to assert that `indexDocInSearch` runs, and for a week it
+   * could not: `SearchService.search` uses Meilisearch only when the API was
+   * started with one, no lane was, and `doc-import-2` reddened NOTHING when it
+   * removed the index call. So indexing was recorded as unmeasurable, and
+   * `doc-import-2` was re-aimed at the opening revision below.
    *
-   * The check is kept because what it DOES prove is real and user-facing: the
-   * imported doc is reachable through the search endpoint by whichever path
-   * this deployment uses. The indexing call itself is unmeasurable without a
-   * Meilisearch, and is recorded as such rather than asserted by a check that
-   * cannot see it. The revision check below is the one that holds the
-   * follow-ups honest, because it CAN be broken.
+   * A lane that RUNDESK_LANE_SEARCH names now searches through
+   * `meili-stub.mjs`, and this section asks which engine answers
+   * (`lib/search.mjs` — the index configured by the API running now) and
+   * holds either way, with the same two checks:
+   *
+   *   · where Meilisearch answers, the doc is IN THE INDEX — read back from
+   *     the stub's own record under its title, its text and its workspace —
+   *     and the endpoint finds it THROUGH the index: the stub received this
+   *     run's query with the workspace filter, and on that path a doc comes
+   *     from the index and from nowhere else, so an import that was never
+   *     indexed is never found (`doc-import-5`, which needs such a lane);
+   *   · where it does not, the doc is in the docs table under the title and
+   *     the plaintext the database search matches, and the endpoint finds it.
    */
+  const engine = await searchEngine(API, SEARCH)
+  console.log(
+    `\n▶ the imported doc can be found again — this lane searches through ${engine.meili ? 'Meilisearch' : 'Postgres'} (${engine.said})`,
+  )
+  const searchedFrom = engine.meili ? (await stubRequests(SEARCH))?.seq ?? 0 : 0
   const found = await waitUntil(
     async () => {
       const r = await api(`/search/${workspaceId}?q=${encodeURIComponent(TAG)}`)
@@ -286,10 +307,33 @@ try {
     },
     { timeoutMs: 20_000 },
   )
+  /*
+   * Written AFTER the import answers (`void this.indexDocInSearch`), so it is
+   * waited for rather than sampled — and by the time search found it through
+   * the index, the index had it.
+   */
+  let indexed = null
+  if (engine.meili && madeDocId) {
+    await waitUntil(async () => (indexed = await stubDocument(SEARCH, `doc-${madeDocId}`)) !== null, { timeoutMs: 15_000 })
+  }
+  const plaintext = String(docRes.data?.plaintext ?? '')
   chk(
-    found,
-    'the search endpoint finds it, so an imported document is reachable again',
-    'search returned no hit for this doc — it exists and cannot be found, which no check about its content would notice',
+    engine.meili
+      ? indexed?.title === TITLE && indexed?.entityType === 'doc' && indexed?.workspaceId === workspaceId &&
+          String(indexed?.content ?? '').includes('Opening prose')
+      : docRes.status < 300 && docRes.data?.title === TITLE && plaintext.includes('Opening prose'),
+    'the doc is in what this lane’s search reads — the Meilisearch index, under its title, its text and its workspace, where one answers; the docs table the database search matches, where none does',
+    engine.meili
+      ? `the index holds ${indexed ? JSON.stringify({ title: indexed.title, entityType: indexed.entityType, workspaceId: indexed.workspaceId, content: String(indexed.content ?? '').slice(0, 40) }) : 'nothing'} under doc-${madeDocId} — the import was not indexed`
+      : `GET /docs/:id answered ${docRes.status} with title ${JSON.stringify(docRes.data?.title ?? null)} and plaintext ${JSON.stringify(plaintext.slice(0, 40))}`,
+  )
+  const throughIndex = engine.meili ? await searchesSince(SEARCH, searchedFrom, TAG) : []
+  chk(
+    found && (!engine.meili || throughIndex.some((r) => (r.filter ?? []).includes(`workspaceId = "${workspaceId}"`))),
+    'the search endpoint finds it, so an imported document is reachable again — through the index, with its workspace’s filter, where Meilisearch answers',
+    !found
+      ? 'search returned no hit for this doc — it exists and cannot be found, which no check about its content would notice'
+      : `search found it, and the stub received ${throughIndex.length} search(es) for it with the workspace filter — found, but not through the index this lane runs`,
   )
 
   /*
