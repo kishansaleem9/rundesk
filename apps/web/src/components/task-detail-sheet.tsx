@@ -7737,7 +7737,8 @@ function CommentsPanel({
  * Everything here goes to the SAME code the direct controls use: Add a file
  * clicks the composer's own file input, Record a Video Clip calls the recorder's
  * own `start`, and New Task / New Doc / New Whiteboard open the quick-create
- * modal on the matching tab rather than being three more creators.
+ * modal on the matching tab rather than being three more creators — once this
+ * menu has closed, so the modal's title has the cursor (see `createChosen`).
  */
 function CommentPlusMenu({
   members,
@@ -7778,10 +7779,37 @@ function CommentPlusMenu({
    * than back on the "+".
    */
   const brainChosen = useRef(false)
+  /*
+   * AND THE THREE CREATORS OPEN ONLY ONCE IT HAS
+   * (`found-29-sep/comment-plus-menu-keeps-focus-after-create`). New Task, New
+   * Doc and New Whiteboard opened the modal from `onSelect`, while this menu was
+   * still open: the modal's title took the cursor, the menu's focus trap took it
+   * straight back, and the menu animated out holding it, then gave it to the
+   * "+" behind the modal. Measured on lane 2, 29 September: the cursor in the
+   * closing menu at 77ms and on the "+" at 185ms. A name typed at once went
+   * into the closing menu; typed a moment later it went to the "+", whose first
+   * space opened this menu again under the modal. While it animates out the
+   * menu also keeps its Escape layer, which takes the first Escape and marks it
+   * handled (the modal, which ignores the mark, closed on it all the same).
+   *
+   * So a row only says which creator was chosen, and the modal opens from
+   * `onCloseAutoFocus`, the point at which the menu, its focus trap and its
+   * Escape layer have gone: the title's own `autoFocus` keeps the cursor, and
+   * the first Escape reaches the modal with nothing before it. Opening the
+   * modal at once and sending the cursor after it, as Brain does, loses what
+   * is typed in between: measured the same day, "Summarize the thread" typed
+   * as Brain's panel appeared reached its prompt as "ize the thread".
+   */
+  const createChosen = useRef<'task' | 'doc' | 'whiteboard' | null>(null)
 
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu
+        onOpenChange={(open) => {
+          // Reopened before it had finished closing: that choice was dropped.
+          if (open) createChosen.current = null
+        }}
+      >
         <DropdownMenuTrigger asChild>
           <button
             type="button"
@@ -7797,6 +7825,14 @@ function CommentPlusMenu({
           align="start"
           className="w-56"
           onCloseAutoFocus={(e) => {
+            const chosen = createChosen.current
+            if (chosen) {
+              createChosen.current = null
+              // Not back to the "+": the creator's title takes the cursor as it opens.
+              e.preventDefault()
+              onQuickCreate(chosen)
+              return
+            }
             if (!brainChosen.current) return
             brainChosen.current = false
             e.preventDefault()
@@ -7860,17 +7896,30 @@ function CommentPlusMenu({
             {t('commentPlus.brain')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
-          <DropdownMenuItem data-testid="comment-plus-new-task" onSelect={() => onQuickCreate('task')}>
+          {/* Each records its choice; `onCloseAutoFocus` above opens it. */}
+          <DropdownMenuItem
+            data-testid="comment-plus-new-task"
+            onSelect={() => {
+              createChosen.current = 'task'
+            }}
+          >
             <CheckSquare className="mr-2 h-4 w-4" />
             {t('commentPlus.newTask')}
           </DropdownMenuItem>
-          <DropdownMenuItem data-testid="comment-plus-new-doc" onSelect={() => onQuickCreate('doc')}>
+          <DropdownMenuItem
+            data-testid="comment-plus-new-doc"
+            onSelect={() => {
+              createChosen.current = 'doc'
+            }}
+          >
             <FileText className="mr-2 h-4 w-4" />
             {t('commentPlus.newDoc')}
           </DropdownMenuItem>
           <DropdownMenuItem
             data-testid="comment-plus-new-whiteboard"
-            onSelect={() => onQuickCreate('whiteboard')}
+            onSelect={() => {
+              createChosen.current = 'whiteboard'
+            }}
           >
             <PenTool className="mr-2 h-4 w-4" />
             {t('commentPlus.newWhiteboard')}

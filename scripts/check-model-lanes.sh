@@ -27,13 +27,17 @@ trap 'rm -rf "$TMP"' EXIT
 mkdir -p "$TMP/breaks"
 printf '# Reddens only where a model answers: run it on a lane with a model.\n# Reddens: s: "x"\n' > "$TMP/breaks/needs-1.py"
 printf '# Reddens: s: "y"\n# a comment that mentions where a model answers, not as the header says it\n' > "$TMP/breaks/plain-1.py"
+printf '# Reddens only where no model answers: the refusal is its target.\n# Reddens: s: "z"\n' > "$TMP/breaks/none-1.py"
 
 cases () {
   local env="$1" runner="$2" bad=0 out
   fail () { echo "  $1"; bad=$((bad + 1)); }
 
-  out=$(bash -c ". '$env'; patches_needing_model '$TMP/breaks' plain-1 needs-1 absent-1")
+  out=$(bash -c ". '$env'; patches_needing_model '$TMP/breaks' plain-1 needs-1 none-1 absent-1")
   [ "$out" = "needs-1" ] || fail "the header: named '$(echo "$out" | tr '\n' ' ')', not 'needs-1'"
+  # And the other way round (`found-29-sep/no-model-patches-run-with-a-model`).
+  out=$(bash -c ". '$env'; patches_needing_no_model '$TMP/breaks' plain-1 needs-1 none-1 absent-1")
+  [ "$out" = "none-1" ] || fail "the no-model header: named '$(echo "$out" | tr '\n' ' ')', not 'none-1'"
 
   out=$(env -u RUNDESK_LANE_MODEL bash -c ". '$env'; lane_model_add 7; echo \"\$RUNDESK_LANE_MODEL\"")
   [ "$out" = "7" ] || fail "the lane list, none before: '$out'"
@@ -53,6 +57,9 @@ cases () {
 
   grep -q 'patches_needing_model "$REPO/test/e2e/breaks" "$@"' "$runner" || fail 'the runner: does not ask the set’s patches'
   grep -q '^\[ -n "$NEEDS_MODEL" \] && lane_model_add "$LANE"$' "$runner" || fail 'the runner: does not add the lane'
+  grep -q 'patches_needing_no_model "$REPO/test/e2e/breaks" "$@"' "$runner" || fail 'the runner: does not ask which patches need no model'
+  grep -q '^if \[ -n "$NEEDS_MODEL" \] && \[ -n "$NEEDS_NO_MODEL" \]; then$' "$runner" || fail 'the runner: runs a set wanting a model and none on one lane'
+  grep -q '^\[ -n "$NEEDS_NO_MODEL" \] && lane_model_remove "$LANE"$' "$runner" || fail 'the runner: leaves the model on for a set that needs none'
   grep -q '^SERVING="$(lane_serving_id "$REV" "$LANE")"$' "$runner" || fail 'the runner: does not work out what it serves'
   grep -q '!= "$SERVING" \]; then$' "$runner" || fail 'the runner: compares the stamp with the revision alone'
   grep -q '"$REV" > "$STAMP"' "$runner" && fail 'the runner: stamps the revision alone'
@@ -85,6 +92,12 @@ MUTANTS=(
   "env|s/^  if lane_has_model \"\\\$k\"; then echo \"\\\$rev \\+model\"; else echo \"\\\$rev\"; fi\$/  echo \"\\\$rev\"/"
   # The runner never adds the lane.
   "runner|s/^\\[ -n \"\\\$NEEDS_MODEL\" \\] \\&\\& lane_model_add \"\\\$LANE\"\$/:/"
+  # The no-model header not read.
+  "env|s/^    grep -q '\\^# Reddens only where no model answers' \"\\\$dir\\/\\\$p.py\" 2>\\/dev\\/null \\&\\& echo \"\\\$p\"\$/    :/"
+  # A set wanting both, run on one lane.
+  "runner|s/^if \\[ -n \"\\\$NEEDS_MODEL\" \\] \\&\\& \\[ -n \"\\\$NEEDS_NO_MODEL\" \\]; then\$/if false; then/"
+  # The model left on for a set that needs none.
+  "runner|s/^\\[ -n \"\\\$NEEDS_NO_MODEL\" \\] \\&\\& lane_model_remove \"\\\$LANE\"\$/:/"
   # The runner stamps the revision alone, after the sync and at the end of a
   # set (the restore's stamp moved inside its checked branch in 8e398c1).
   "runner|s/^  echo \"\\\$SERVING\" > \"\\\$STAMP\"\$/  echo \"\\\$REV\" > \"\\\$STAMP\"/"

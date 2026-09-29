@@ -1,6 +1,6 @@
 # Break patches
 
-573 one-line defects, each aimed at exactly one check in `test/e2e/`.
+One-line defects, one per file (2,040 on 29 September; `ls *.py | wc -l` for today's), each aimed at exactly one check in `test/e2e/`.
 
 A green suite is not evidence. **A check is only worth its line in the log once
 something has watched it go red**, and these are the somethings: each file edits
@@ -43,7 +43,7 @@ rendering the patch must decide about deliberately.
 ## Checking them without running them
 
 ```
-python3 scripts/check-break-patches.py     # dry-apply all 573, report the misses
+python3 scripts/check-break-patches.py     # dry-apply every one, report the misses
 node scripts/check-break-freshness.mjs     # was each run made against today's suite?
 ```
 

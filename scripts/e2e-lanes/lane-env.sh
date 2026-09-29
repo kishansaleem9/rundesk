@@ -300,6 +300,21 @@ patches_needing_model () {
   return 0
 }
 
+# AND THE OTHER WAY ROUND: a patch aimed at the assistant's refusal ("AI
+# features are not configured") changes nothing where a model answers, so it
+# says `# Reddens only where no model answers`. One set holding both kinds
+# cannot be measured on one lane: the runner gave it the model for the one that
+# needed it, and `bep-7`, `bep-13` and `bep-14` read as reddening nothing
+# (`found-29-sep/no-model-patches-run-with-a-model`).
+patches_needing_no_model () {
+  local dir="$1" p
+  shift
+  for p in "$@"; do
+    grep -q '^# Reddens only where no model answers' "$dir/$p.py" 2>/dev/null && echo "$p"
+  done
+  return 0
+}
+
 # WHAT A SUITE NEEDS OF A LANE'S MODEL, from its header (`harness/model-lane-routing-unbuilt`):
 #
 #     // Lane: no-model — it asserts the assistant's "not configured" answer

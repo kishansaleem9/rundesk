@@ -154,7 +154,15 @@ trap 'cp "$OUT" "$OUT_RUN" 2>/dev/null; break_locks_drop "$LANE" "$SUITE"' EXIT
 # (`patches_needing_model`, lane-env.sh). Said in the log, on a line that is
 # not a `== ` header, so every reader of these logs passes over it.
 NEEDS_MODEL=$(patches_needing_model "$REPO/test/e2e/breaks" "$@" | tr '\n' ' ' | sed 's/ *$//')
+NEEDS_NO_MODEL=$(patches_needing_no_model "$REPO/test/e2e/breaks" "$@" | tr '\n' ' ' | sed 's/ *$//')
+# One lane is either answered by a model or not: a set wanting both is two sets
+# (`build-plan.sh` writes them so), and run as one it measures half of itself.
+if [ -n "$NEEDS_MODEL" ] && [ -n "$NEEDS_NO_MODEL" ]; then
+  echo "== REFUSING — $NEEDS_MODEL need a model and $NEEDS_NO_MODEL need none: run them as two sets" >> "$OUT"
+  exit 4
+fi
 [ -n "$NEEDS_MODEL" ] && lane_model_add "$LANE"
+[ -n "$NEEDS_NO_MODEL" ] && lane_model_remove "$LANE"
 # AND THE SUITE'S OWN NEED (`suite_lane_need`, lane-env.sh): one that stands on
 # the assistant's refusal runs without a model, and one that stages the stub
 # with one. A set whose patches need a model its suite refuses cannot be

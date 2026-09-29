@@ -26,6 +26,16 @@
  *
  * So this is a menu plus the three pieces that make its entries real.
  *
+ * AND THE THREE "NEW …" ROWS HAND THE CURSOR ON
+ * (`found-29-sep/comment-plus-menu-keeps-focus-after-create`, 29 September).
+ * They opened the create modal while the menu was still closing: the menu kept
+ * the cursor and then gave it to the "+" behind the modal, so a name typed
+ * straight after New Task never reached the title, and the menu, still
+ * mounted, marked the first Escape as its own. The New Doc, New Whiteboard and
+ * New Task sections read where the cursor is once the creator has opened —
+ * `document.activeElement`, by its test id — and the last types a title the
+ * moment the creator is on screen and presses Escape once.
+ *
  * WHAT THE CHECKS ARE FOR. A menu is the easiest thing in a UI to fake: ten
  * rows that open and close and do nothing photograph perfectly. So no check
  * here stops at "the item is in the menu" — each one follows the item to the
@@ -47,7 +57,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 13
+const EXPECTED_CHECKS = 18
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -142,6 +152,20 @@ try {
     )
     if (!opened) throw new Error('the "+" menu did not open')
   }
+  /*
+   * WHERE THE CURSOR IS, read in the page: the focused element's test id (its
+   * tag when it has none, `body` when nothing has it), and whether it sits in a
+   * menu, open or still closing. The "New …" sections compare it with the
+   * creator's title once the creator has opened. (`dataset`, the page's own
+   * property: nothing here can throw.)
+   */
+  const cursor = () =>
+    page.evaluate(() => {
+      const el = document.activeElement
+      if (!el || el === document.body) return 'body'
+      const where = el.dataset?.testid ?? el.tagName.toLowerCase()
+      return el.closest('[role="menu"]') ? `${where} (in a menu)` : where
+    })
 
   // -------------------------------------------------------------------------
   console.log('\n▶ frame `04:50` — the menu exists, and gathers what is real')
@@ -293,6 +317,49 @@ try {
     `the Doc tab reads aria-pressed=${await docTab.getAttribute('aria-pressed').catch(() => null)} — ` +
       '"New Doc" opened the creator on somebody else\'s tab',
   )
+  /*
+   * AND THE CURSOR WENT WITH IT
+   * (`found-29-sep/comment-plus-menu-keeps-focus-after-create`). The modal
+   * opened while the menu was closing, the menu kept the cursor and gave it
+   * back to the "+" behind the modal: a doc named by typing was named nowhere.
+   * Read once the creator is on its Doc tab.
+   */
+  const docCursor = await waitUntil(async () => (await cursor()) === 'quick-create-doc-title', {
+    timeoutMs: 10_000,
+  })
+  const docCursorOn = docCursor ? 'quick-create-doc-title' : await cursor().catch(() => null)
+  chk(
+    docCursor,
+    'and the cursor is in the doc’s title, not left in the “+” menu or on the “+” behind the creator',
+    `the cursor is on ${JSON.stringify(docCursorOn)}`,
+  )
+  await page.keyboard.press('Escape').catch(() => {})
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ New Whiteboard opens its creator, with the cursor in the title')
+
+  /*
+   * The frame's third "New …" row, which nothing followed: the "all buildable
+   * items" check above sees it in the menu and stops there. It opens the same
+   * creator on the Whiteboard form, and the cursor goes to that form's title.
+   */
+  await openPlus()
+  await item('comment-plus-new-whiteboard').click({ timeout: 8000 }).catch(() => {})
+  const whiteboardOpened = await waitUntil(
+    () => page.getByTestId('create-tab-whiteboard').isVisible().catch(() => false),
+    { timeoutMs: 10_000 },
+  )
+  const whiteboardCursor =
+    whiteboardOpened &&
+    (await waitUntil(async () => (await cursor()) === 'whiteboard-title', { timeoutMs: 10_000 }))
+  const whiteboardCursorOn = whiteboardCursor ? 'whiteboard-title' : await cursor().catch(() => null)
+  chk(
+    whiteboardCursor,
+    'New Whiteboard opens the creator on the Whiteboard form, with the cursor in the whiteboard’s title',
+    whiteboardOpened
+      ? `the creator opened with the cursor on ${JSON.stringify(whiteboardCursorOn)}`
+      : 'the row opened no creator',
+  )
   await page.keyboard.press('Escape').catch(() => {})
 
   // -------------------------------------------------------------------------
@@ -362,6 +429,66 @@ try {
     }),
     'and Brain, which now has the comment AI panel behind it, opens that panel',
     'the Brain row opened nothing — a label over nothing, which is what this check used to keep out',
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ New Task gives the creator’s title the cursor, and ONE Escape closes it')
+
+  /*
+   * `found-29-sep/comment-plus-menu-keeps-focus-after-create`, as a person
+   * meets it: New Task, then the task's name typed the moment the creator is on
+   * screen, with no wait for the cursor and no click into the title, then one
+   * Escape. Before the fix, on lane 2: the name went into the closing menu and
+   * the cursor ended on the "+" behind the modal (typed a moment later, it went
+   * to the "+", whose first space opened the menu again under the modal).
+   *
+   * THE TYPING COMES FIRST, the cursor is read after it. A creator whose title
+   * takes the cursor only some time after it is drawn passes a check that
+   * waits for the cursor, and still loses the first thing typed.
+   *
+   * THE ESCAPE HELD BEFORE THE FIX TOO: the closing menu marked it, and the
+   * modal, which ignores the mark, closed on it anyway. It is here for the day
+   * either changes — a modal that honours the mark, or anything else that
+   * keeps the first Escape from it.
+   *
+   * LAST IN THE FILE ON PURPOSE: a creator that one Escape does not close
+   * stays over the page, and a section after it could not reach the "+".
+   */
+  await openPlus()
+  await item('comment-plus-new-task').click({ timeout: 8000 }).catch(() => {})
+  const taskTab = page.getByTestId('create-tab-task')
+  const taskTitle = page.getByTestId('quick-create-task-title').filter({ visible: true })
+  const taskCreatorOpened = await waitUntil(() => taskTab.isVisible().catch(() => false), {
+    timeoutMs: 10_000,
+  })
+  const TYPED = 'Follow up on this comment'
+  await page.keyboard.type(TYPED).catch(() => {})
+  const taskCursor =
+    taskCreatorOpened &&
+    (await waitUntil(async () => (await cursor()) === 'quick-create-task-title', { timeoutMs: 10_000 }))
+  const taskCursorOn = taskCursor ? 'quick-create-task-title' : await cursor().catch(() => null)
+  chk(
+    taskCursor,
+    'New Task opens the creator with the cursor in its title — not in the closing “+” menu, nor on the “+” behind it',
+    taskCreatorOpened ? `the cursor is on ${JSON.stringify(taskCursorOn)}` : 'the row opened no creator',
+  )
+  const typedLanded =
+    taskCreatorOpened &&
+    (await waitUntil(async () => (await taskTitle.inputValue({ timeout: 1000 })) === TYPED, { timeoutMs: 5_000 }))
+  const titleHeld = await taskTitle.inputValue({ timeout: 3000 }).catch(() => null)
+  chk(
+    typedLanded,
+    'and a name typed straight after lands in the title, every character of it',
+    `the title holds ${JSON.stringify(titleHeld)} of the ${JSON.stringify(TYPED)} typed`,
+  )
+  await page.keyboard.press('Escape').catch(() => {})
+  const oneEscapeClosed =
+    taskCreatorOpened &&
+    (await waitUntil(async () => !(await taskTab.isVisible().catch(() => false)), { timeoutMs: 5_000 }))
+  chk(
+    oneEscapeClosed,
+    'and ONE Escape closes the creator — nothing left under it takes the key first',
+    taskCreatorOpened ? 'the creator is still open after one Escape' : 'the row opened no creator for an Escape to close',
   )
 } catch (err) {
   failed += 1

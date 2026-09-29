@@ -1,4 +1,5 @@
 # A REFUSED SUMMARY IS WRITTEN INTO THE COMMENT BOX.
+# Reddens only where no model answers: with one, there is no refusal to land anywhere.
 #
 # The panel reports the refusal correctly AND drops the same sentence into an
 # empty comment box, where one press of Comment posts "AI features are not

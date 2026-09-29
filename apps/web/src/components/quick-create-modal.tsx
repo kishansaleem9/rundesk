@@ -1766,7 +1766,9 @@ function TaskForm({
               spent closing this menu must not throw away the half-filled task.
               Stopped here rather than read as `defaultPrevented` there, since
               any Radix layer on the page marks its Escape so — a comment's "+"
-              menu still unmounting took the one meant for the modal.
+              menu still unmounting took the one meant for the modal. (That
+              menu now opens the modal only once it has gone,
+              `found-29-sep/comment-plus-menu-keeps-focus-after-create`.)
             */}
             <DropdownMenuContent
               align="end"
@@ -2300,7 +2302,13 @@ function DocForm({ workspaceId, onClose }: { workspaceId: string; onClose: () =>
         create.mutate()
       }}
     >
-      <Input autoFocus placeholder={t('quickCreate.docTitlePlaceholder')} value={title} onChange={(e) => setTitle(e.target.value)} />
+      <Input
+        autoFocus
+        data-testid="quick-create-doc-title"
+        placeholder={t('quickCreate.docTitlePlaceholder')}
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
       <div className="flex justify-end gap-2 pt-1">
         <Button type="button" variant="outline" size="sm" onClick={onClose}>{t('common.cancel')}</Button>
         <Button type="submit" size="sm" disabled={create.isPending}>{t('quickCreate.createDoc')}</Button>

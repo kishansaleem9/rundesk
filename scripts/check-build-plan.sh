@@ -28,6 +28,13 @@ planner dies-after  'console.error("[never-run-plan] 1 patch(es) across 1 suite(
 planner silent      'if (!drifted) console.log("s p1")'
 planner empty       'console.error("[never-run-plan] 0 patch(es) across 0 suite(s)")'
 planner overlapping 'console.log(drifted ? "a p2 p3" : "a p1 p2\nb q1"); console.error("[never-run-plan] 2 patch(es) across 2 suite(s)")'
+# A suite whose patches want a model and no model: two sets, one per lane kind.
+planner mixed       'if (!drifted) console.log("m m1 m2 n1 p1"); console.error("[never-run-plan] 4 patch(es) across 1 suite(s)")'
+mkdir -p "$TMP/breaks"
+printf '# Reddens only where a model answers: x\n' > "$TMP/breaks/m1.py"
+printf '# Reddens only where a model answers: x\n' > "$TMP/breaks/m2.py"
+printf '# Reddens only where no model answers: x\n' > "$TMP/breaks/n1.py"
+printf '# a plain patch\n' > "$TMP/breaks/p1.py"
 
 # run_cases <build-plan.sh> — one line per failing case; returns their count.
 run_cases () {
@@ -47,6 +54,10 @@ run_cases () {
   if expect overlapping 0; then
     local got; got=$(tr '\n' '|' < "$TMP/plan-overlapping.txt")
     [ "$got" = "a p1 p2 p3|b q1|" ] || { echo "  overlapping: merged into '$got'"; bad=$((bad + 1)); }
+  fi
+  if BREAKS_DIR="$TMP/breaks" expect mixed 0; then
+    local got; got=$(tr '\n' '|' < "$TMP/plan-mixed.txt")
+    [ "$got" = "m n1 p1|m m1 m2|" ] || { echo "  mixed: a set needing a model and one needing none came out as '$got'"; bad=$((bad + 1)); }
   fi
   return $bad
 }
@@ -68,6 +79,8 @@ MUTANTS=(
   '0,/^    exit 4$/s//    exit 0/'
   # Merged on nothing: both modes' lines kept as they came.
   's/^mv "\$plan.merged" "\$plan"$/rm -f "$plan.merged"/'
+  # A mixed suite written as one set, as before.
+  's/^  if \(model.length \&\& all.some\(wantsNone\)\) \{$/  if (false) {/'
 )
 caught=0
 for i in "${!MUTANTS[@]}"; do

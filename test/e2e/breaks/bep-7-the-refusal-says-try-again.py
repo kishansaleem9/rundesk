@@ -1,4 +1,5 @@
 # A TURN THE SERVER REFUSED IS ANSWERED "SORRY, I ENCOUNTERED AN ERROR. PLEASE TRY AGAIN."
+# Reddens only where no model answers: with one, the turn is answered and nothing is refused.
 #
 # What the dock did until the reason reached the message: `sendMessage` read
 # the server's sentence out of the refusal and the catch replaced it with the

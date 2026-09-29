@@ -1,4 +1,5 @@
 # THE COMMENT PANEL ANSWERS EVERY REFUSAL WITH ITS OWN "AI IS UNAVAILABLE".
+# Reddens only where no model answers: with one, the summary is drafted and nothing is refused.
 #
 # The server says "AI features are not configured"; the panel says something
 # of its own. Two different problems — nobody configured a model, or the model

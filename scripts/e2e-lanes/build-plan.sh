@@ -68,8 +68,20 @@ for (const line of readFileSync(process.argv[2], 'utf8').split('\n')) {
   if (!by.has(suite)) by.set(suite, new Set())
   for (const p of patches) by.get(suite).add(p)
 }
-for (const [suite, patches] of [...by].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0])))
-  console.log([suite, ...[...patches].sort()].join(' '))
+// A suite whose patches want a model AND no model is two sets, one per lane
+// kind: wt-break refuses the mixture (`found-29-sep/no-model-patches-run-with-a-model`).
+const BREAKS = process.env.BREAKS_DIR ?? 'test/e2e/breaks'
+const header = (p) => { try { return readFileSync(`${BREAKS}/${p}.py`, 'utf8') } catch { return '' } }
+const wantsModel = (p) => /^# Reddens only where a model answers/m.test(header(p))
+const wantsNone = (p) => /^# Reddens only where no model answers/m.test(header(p))
+for (const [suite, patches] of [...by].sort((a, b) => b[1].size - a[1].size || a[0].localeCompare(b[0]))) {
+  const all = [...patches].sort()
+  const model = all.filter(wantsModel)
+  if (model.length && all.some(wantsNone)) {
+    console.log([suite, ...all.filter((p) => !wantsModel(p))].join(' '))
+    console.log([suite, ...model].join(' '))
+  } else console.log([suite, ...all].join(' '))
+}
 JS
 then
   echo "planner failed: merging the two plans failed" >> "$log"

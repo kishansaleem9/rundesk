@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 335 items, 46 open, 8 partly fixed, 281 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 339 items, 48 open, 8 partly fixed, 283 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -1502,6 +1502,44 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - After: 107/107 on lanes 1, 5 and 7, three runs at once. `us-5` reddens "and marked it the default" alone (106/107, lane 6).
 - Sections 1–11 and 15 still wait fixed times. They were not seen failing, and they are not claimed here.
 
+### `found-29-sep/space-create-menu-keeps-focus-after-create` — open, small (visible bug; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+
+**The sidebar's space "+" menu opens the creator while it closes around the cursor**
+
+*Evidence, measured on lane 2, 29 September:* Task from a space's "+" (`space-create-<type>` in `workspace-sidebar.tsx`, opened from `onClick`) puts the cursor in the closing menu (+16 ms), then on `<body>` (+256 ms), then on the space's "+" (+322 ms). A name typed straight after left the title empty, its space opened the space menu again under the modal, and one Escape closed both.
+
+*To close:* open the creator from that menu's `onCloseAutoFocus`, as the comment "+" does now; a typing check in `space-create-menu`.
+
+### `found-29-sep/brain-loses-early-typing` — open, small (visible bug; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+
+**Brain in the comment "+" menu loses what is typed before its prompt has the cursor**
+
+*Evidence, measured on lane 2, 29 September:* the comment AI panel opens at the choice and the cursor follows when the menu has gone; "Summarize the thread" typed as the panel appeared reached the prompt as "ize the thread", and whole when typed 1.5 s later.
+
+*To close:* open the panel from the menu's `onCloseAutoFocus` too (the creator rows' fix); a typing check in `brain-entry-points`.
+
+### `found-29-sep/create-modal-returns-focus-to-nothing` — open, small (accessibility; found closing `found-29-sep/comment-plus-menu-keeps-focus-after-create`)
+
+**The create modal gives the cursor back to nobody when it closes**
+
+*Evidence, 29 September:* after Escape from a creator opened by the comment "+", the cursor is on `<body>`. Read in the code: the modal is a portal with a document Escape listener, not a Radix Dialog, and restores focus to nothing when it unmounts.
+
+*To close:* remember what had the focus when the modal opened and give it back on close (unless that is gone), as a dialog does; a check from the comment "+" and from the sidebar.
+
+### `found-29-sep/no-model-patches-run-with-a-model` — **closed** (test tooling, small; found by the break runs for `0e4f0c0`)
+
+**A break set holding a patch that needs a model and ones that need none ran all of them with a model**
+
+*Evidence, 29 September:* `wt-break.sh` gave the lane a model when any patch in the set said "Reddens only where a model answers". `brain-entry-points` holds either way, and its set carried `bep-17` (model) beside `bep-7`, `bep-13` and `bep-14`, which break the refusal a lane without a model gives. Run as one set on lane 4 at `0e4f0c0`, with the model on, those three read 16/16: they reddened nothing, for the lane's reason, not the product's.
+
+*Closed, 29 September:*
+- A patch aimed at the refusal says `# Reddens only where no model answers` (`patches_needing_no_model`, lane-env.sh); the three are marked.
+- `wt-break.sh` refuses a set holding both kinds ("run them as two sets", exit 4), and takes the model away for a set that needs none.
+- `build-plan.sh` writes a suite whose patches want both as two sets.
+- `check-model-lanes.sh --mutate`: the no-model header is named, and the runner asks it, refuses the mixture and takes the model away; 8 of 8 mutations caught. `check-build-plan.sh --mutate`: a mixed suite comes out as two sets; 5 of 5 caught.
+- Measured: the mixed set is refused on lane 4. Without the model at `d15081f`, `bep-7` reddens (14/16) and `bep-13` and `bep-14` (15/16 each), against a 16/16 baseline.
+- Only these three are marked. Other patches aimed at a refusal in a suite that holds either way would still run with a model if their set holds one that needs it; none is known.
+
 ### `found-29-sep/task-brain-offers-list-starters` — open, small (feature; found closing `found-29-sep/ai-chat-takes-no-task`)
 
 **Brain opened from a task offers the list's starters, and Brain in a comment drafts no reply from the thread**
@@ -1550,13 +1588,50 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 
 *Closed, 29 September:* the refusal is said in the server's words (or "That task could not be created." when there are none; four locales), and the form keeps what was typed. Check 9: before failed on lane 5, after 9/9 on lane 3. Patch `ctc-14` (no `onError`) reddens check 9 alone (8/9, lane 3).
 
-### `found-29-sep/comment-plus-menu-keeps-focus-after-create` — open, small (visible bug; found building `commit-log/log-6b140c5-1`)
+### `found-29-sep/comment-plus-menu-keeps-focus-after-create` — **closed** (visible bug, small; found building `commit-log/log-6b140c5-1`)
 
 **After New Task, New Doc or New Whiteboard from a comment's "+" menu, the menu stays mounted and holds the focus**
 
 *Evidence, 29 September (the chevron build's regression, instrumented):* choosing one of the three opens the create modal, and the comment's "+" menu stays mounted, `data-state="closed"`, with the focus still in it, until an Escape dismisses it. Its Radix layer takes that first Escape and marks it handled, so an Escape meant for the modal went to the menu (which is why the create modal's first Escape guard broke `comment-plus-menu`'s New Doc section).
 
 *To close:* close the "+" menu before the create modal opens (or open the modal from the menu's `onCloseAutoFocus`, as Brain opens the comment AI panel), so the modal's title has the focus; a check that typing straight after New Task lands in the title, and that one Escape closes the modal.
+
+*Closed, 29 September.* Measured on lane 2 at `096fa62` before: after New
+Task, New Doc or New Whiteboard from a comment's "+" menu, the creator opened
+at once while the menu closed around the cursor, and the menu handed it
+185–254ms later to the "+" behind the modal. A name typed at once went into
+the closing menu; typed a moment later, into the "+", whose first space opened
+the menu again under the modal. The menu did not stay mounted until an Escape:
+the suite's New Doc section pressed its Escape inside that window. ClickUp
+(help centre "Create tasks from task, Inbox, and Doc comments" and "Use
+keyboard shortcuts", from search snippets; the pages are refused by this
+machine's proxy): the creator opens to be named, and Esc closes the topmost
+layer; nothing found says where the cursor goes.
+
+- The three rows record which creator was chosen, and the menu opens it from
+  `onCloseAutoFocus`, once it has unmounted with its focus trap and Escape
+  layer, without putting the cursor back on the "+". The creator's title keeps
+  the cursor its `autoFocus` gives it, and the first Escape is the creator's.
+  The creator appears about a quarter of a second after the choice (the menu's
+  closing animation) instead of at once. Brain is unchanged. The Doc form's
+  title has a test id.
+
+`comment-plus-menu`, 13 → 18 checks: the cursor in the doc's title after New
+Doc; New Whiteboard followed to its form, the cursor in its title; New Task
+with a name typed the moment the creator shows, then the cursor in the title,
+the whole name in it, and one Escape closing it.
+- Before: 14/18 on lane 2 (the four cursor and typing checks; one Escape closed
+  the creator before too, the modal ignoring the menu's mark).
+- After: 18/18 on lane 2.
+- Patches `cpf-1..5` each redden what they name (lane 2, baseline 18/18),
+  `cpf-2..5` that alone and `cpf-1` its check and the typing one; `cpm-4`,
+  re-aimed at the rows' new shape, reddens its check and the doc-cursor one;
+  `cpm-1..3` still redden theirs.
+- Regression on lane 2, the 33 suites that open the comment composer, its "+"
+  or the create modal: 33/33, 694 checks.
+- In CI already.
+- In main after the merge: `comment-plus-menu` 18/18 on lane 5, and 10 suites that open the composer, its "+", the create modal or Brain green on lanes 5 and 6.
+- Found beside it: the sidebar's space "+" menu hands the creator's cursor on the same way (`found-29-sep/space-create-menu-keeps-focus-after-create`); Brain loses what is typed before its prompt has the cursor (`found-29-sep/brain-loses-early-typing`); the creator gives the cursor back to nobody when it closes (`found-29-sep/create-modal-returns-focus-to-nothing`).
 
 ### `found-29-sep/chat-message-actions-reads-after-fixed-waits` — open, medium (test tooling; found by this batch's regression sweep)
 
