@@ -385,16 +385,17 @@ try {
       'somebody staring at two date fields with no idea which one to move',
   )
 
+  const removal = chain('and taking it back off removes it too — plans change')
   if (savedRow) {
     await page.getByTestId(`person-time-off-remove-${savedRow.id}`).click()
     await page.waitForTimeout(2000)
     const afterRemove = await A(`/workspaces/${workspaceId}/time-off`)
-    check(
-      !(afterRemove.data ?? []).some((e) => e.id === savedRow.id),
-      'and taking it back off removes it too — plans change',
+    removal.step(
+      afterRemove.status === 200 && !(afterRemove.data ?? []).some((e) => e.id === savedRow.id),
+      `the time off list (${afterRemove.status}) still holds ${savedRow.id}`,
     )
   } else {
-    check(false, 'and taking it back off removes it too — plans change', 'nothing was saved to remove')
+    removal.rest('skipped: nothing was saved to remove')
   }
 
   // ---------------------------------------------------------------------
@@ -610,13 +611,23 @@ try {
     process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
   ).catch(() => null)
 
+  /*
+   * SIX CHECKS WHICHEVER WAY THIS GOES, UNDER THEIR OWN SENTENCES. Without the
+   * second account this used to report six sentences about the fixture — "a
+   * second account to delegate to", "so DONE was never driven" — that no
+   * passing run prints, so a failure could not be matched to the check it
+   * stood in for. The reason belongs in the detail.
+   */
+  const handedOver = chain(
+    'DELEGATED holds what you handed to somebody else',
+    'DONE holds what you actually finished',
+    'and a task you created and kept is not "delegated"',
+    'and DONE holds only finished work, not everything assigned to you',
+    'and one you assigned to nobody is dropped, not delegated',
+    'and finished work is not still counted as owed',
+  )
   if (!otherForBuckets?.user?.id) {
-    check(false, 'a second account to delegate to', 'could not sign in as the second user')
-    check(false, 'so DELEGATED was never driven', 'skipped')
-    check(false, 'so DONE was never driven', 'skipped')
-    check(false, 'and the two were never told apart', 'skipped')
-    check(false, 'nor unassigned from delegated', 'skipped')
-    check(false, 'nor open work from done', 'skipped')
+    handedOver.rest('skipped: could not sign in as the second user, so there was nobody to delegate to')
   } else {
     // Delegated: created by me, assigned to somebody who is not me.
     const bDelegated = await seedTask(`bucket delegated ${Date.now()}`, null, false)
@@ -632,8 +643,8 @@ try {
     const b2 = withBoth.data?.taskBuckets ?? {}
     const holds2 = (key, id) => (b2[key] ?? []).some((row) => row.id === id)
 
-    check(holds2('delegated', bDelegated.id), 'DELEGATED holds what you handed to somebody else')
-    check(holds2('done', bDone.id), 'DONE holds what you actually finished')
+    handedOver.step(holds2('delegated', bDelegated.id), 'the delegated task is not in DELEGATED')
+    handedOver.step(holds2('done', bDone.id), 'the finished task is not in DONE')
     /*
      * The distinction that would be easy to get wrong: a task you created and
      * kept is your own work, not something you delegated. Without the
@@ -649,21 +660,13 @@ try {
      * changed nothing about it. A break test caught that; the fixture has to
      * be something delegated would otherwise be willing to include.
      */
-    check(
-      !holds2('delegated', bToday?.id),
-      'and a task you created and kept is not "delegated"',
-      'your own work is being counted as handed over',
-    )
+    handedOver.step(!holds2('delegated', bToday?.id), 'your own work is being counted as handed over')
     /*
      * And DONE must mean finished. Asserting only that the finished task is
      * present leaves the bucket free to contain everything else too — which is
      * exactly what dropping the closed-status filter does.
      */
-    check(
-      !holds2('done', bToday?.id),
-      'and DONE holds only finished work, not everything assigned to you',
-      'an open task is being reported as done',
-    )
+    handedOver.step(!holds2('done', bToday?.id), 'an open task is being reported as done')
     /*
      * The other half of the same distinction, and the one a "nobody who is me
      * is on it" clause alone would get wrong: a task you created and assigned
@@ -671,15 +674,13 @@ try {
      * createdUnassigned is for. Without an "somebody IS on it" clause the two
      * buckets would show the same rows.
      */
-    check(
+    handedOver.step(
       !holds2('delegated', bMine?.id) && holds2('createdUnassigned', bMine?.id),
-      'and one you assigned to nobody is dropped, not delegated',
       'created-unassigned work is being counted as handed over',
     )
     // …and DONE must not leak into the buckets that mean "still owed".
-    check(
+    handedOver.step(
       !holds2('today', bDone.id) && !holds2('overdue', bDone.id) && !holds2('unscheduled', bDone.id),
-      'and finished work is not still counted as owed',
       'a done task is still sitting in an open bucket',
     )
     await A(`/tasks/${bDelegated.id}`, { method: 'DELETE' })
@@ -843,12 +844,22 @@ try {
   const standupBtn = page.getByTestId('person-standup')
   const hasBtn = await standupBtn.isVisible().catch(() => false)
   check(hasBtn, 'the profile panel offers it beside the message button')
+  /*
+   * THREE CHECKS EITHER WAY. With no button this reported one, where the path
+   * with a button reports three, so a missing Get StandUp read as the run
+   * stopping early — and "does not spend a model call before anybody asks" was
+   * never reported at all on that path.
+   */
+  const standupPanel = chain(
+    'and does not spend a model call before anybody asks',
+    'and pressing it writes a summary into the panel',
+    'with something actually in it',
+  )
   if (!hasBtn) {
-    check(false, 'and pressing it writes a summary into the panel', 'there was no button to press')
+    standupPanel.rest('skipped: there was no Get StandUp button to press')
   } else {
-    check(
+    standupPanel.step(
       !(await page.getByTestId('person-standup-result').isVisible().catch(() => false)),
-      'and does not spend a model call before anybody asks',
       'the summary was already on screen before the button was pressed',
     )
     await standupBtn.click()
@@ -857,16 +868,12 @@ try {
       .waitFor({ timeout: 25000 })
       .then(() => true)
       .catch(() => false)
-    const standup = chain(
-      'and pressing it writes a summary into the panel',
-      'with something actually in it',
-    )
-    standup.step(wrote, 'nothing appeared after pressing Get StandUp')
+    standupPanel.step(wrote, 'nothing appeared after pressing Get StandUp')
     if (!wrote) {
-      standup.rest('skipped: nothing was written, so there was nothing to read')
+      standupPanel.rest('skipped: nothing was written, so there was nothing to read')
     } else {
       const shown = (await page.getByTestId('person-standup-result').innerText().catch(() => '')) ?? ''
-      standup.step(shown.trim().length > 10, JSON.stringify(shown.slice(0, 120)))
+      standupPanel.step(shown.trim().length > 10, JSON.stringify(shown.slice(0, 120)))
     }
   }
   await page.keyboard.press('Escape')

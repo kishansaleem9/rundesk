@@ -431,31 +431,53 @@ try {
   console.log('\n▶ §G12 [17:13] — mute one thread')
   // ---------------------------------------------------------------------
   // A thread needs a reply before there is anything to be noisy about.
-  await A(`/chat/channels/${channelId}/messages`, {
-    method: 'POST',
-    body: { body: 'a reply, so this is a thread', parentMessageId: (await A(`/chat/channels/${channelId}/messages`)).data.find((m) => m.body === BODY).id },
-  })
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
-  const msg2 = page.locator('.group').filter({ hasText: BODY }).first()
-  await msg2.hover()
-  await page.waitForTimeout(400)
-  await page.locator('[data-testid^="message-overflow-"]').first().click()
-  await page.waitForTimeout(600)
-  const muteItem = page.locator('[data-testid^="thread-mute-"]').first()
-  check(await muteItem.isVisible().catch(() => false), 'a thread offers "Mute this thread"')
-  await muteItem.click()
-  await page.waitForTimeout(2000)
+  /*
+   * THE PARENT'S ID IS READ OPTIONALLY, AND THE MUTE CHECKS ARE GATED ON IT.
+   * This was `(await A(…)).data.find(…).id` inline in the reply's body: a read
+   * that answered with no `data`, or a channel that did not hold the probe,
+   * threw two ways here and ended the run with most of its checks unreported.
+   * Now a missing parent fails the two checks that needed a thread, naming it.
+   */
+  const channelRead = await A(`/chat/channels/${channelId}/messages`)
+  const parentId = (channelRead.data ?? []).find((m) => m.body === BODY)?.id
+  const mute = chain('a thread offers "Mute this thread"', 'the mute survives a reload')
+  if (!parentId) {
+    mute.rest(
+      `skipped: the probe message was not in the channel's messages (GET answered ${channelRead.status}), ` +
+        'so there was no thread to mute',
+    )
+  } else {
+    const reply = await A(`/chat/channels/${channelId}/messages`, {
+      method: 'POST',
+      body: { body: 'a reply, so this is a thread', parentMessageId: parentId },
+    })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    await page.waitForTimeout(3500)
+    const msg2 = page.locator('.group').filter({ hasText: BODY }).first()
+    await msg2.hover()
+    await page.waitForTimeout(400)
+    await page.locator('[data-testid^="message-overflow-"]').first().click()
+    await page.waitForTimeout(600)
+    const muteItem = page.locator('[data-testid^="thread-mute-"]').first()
+    const offered = await muteItem.isVisible().catch(() => false)
+    mute.step(offered, reply.status < 300 ? '' : `the reply that makes it a thread answered ${reply.status}`)
+    if (!offered) {
+      mute.rest('skipped: there was no "Mute this thread" to press')
+    } else {
+      await muteItem.click()
+      await page.waitForTimeout(2000)
 
-  // The claim is that it PERSISTS — a toast is not state.
-  await page.reload({ waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(3500)
-  await page.locator('.group').filter({ hasText: BODY }).first().hover()
-  await page.waitForTimeout(400)
-  await page.locator('[data-testid^="message-overflow-"]').first().click()
-  await page.waitForTimeout(600)
-  const afterReload = await page.locator('[data-testid^="thread-mute-"]').first().innerText().catch(() => '')
-  check(/Unmute/i.test(afterReload), 'the mute survives a reload', afterReload)
+      // The claim is that it PERSISTS — a toast is not state.
+      await page.reload({ waitUntil: 'domcontentloaded' })
+      await page.waitForTimeout(3500)
+      await page.locator('.group').filter({ hasText: BODY }).first().hover()
+      await page.waitForTimeout(400)
+      await page.locator('[data-testid^="message-overflow-"]').first().click()
+      await page.waitForTimeout(600)
+      const afterReload = await page.locator('[data-testid^="thread-mute-"]').first().innerText().catch(() => '')
+      mute.step(/Unmute/i.test(afterReload), afterReload)
+    }
+  }
   await page.keyboard.press('Escape')
 
   // ---------------------------------------------------------------------
@@ -498,22 +520,24 @@ try {
    */
   const openThread = page.locator('[data-testid^="view-thread-"]').first()
   await openThread.waitFor({ state: 'attached', timeout: 15_000 }).catch(() => {})
+  const threadAddress = chain(
+    'opening a thread puts it in the address',
+    'and the thread is still open when that address is reopened',
+  )
   if ((await openThread.count()) > 0) {
     await openThread.click()
     await waitUntil(() => /[?&]thread=/.test(page.url()), { timeoutMs: 15_000 })
-    check(/[?&]thread=/.test(page.url()), 'opening a thread puts it in the address', page.url())
+    threadAddress.step(/[?&]thread=/.test(page.url()), page.url())
     const threadUrl = page.url()
     await page.goto(threadUrl, { waitUntil: 'domcontentloaded' })
     await page.locator('[data-testid="chat-thread-panel"]').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
-    check(
+    threadAddress.step(
       /[?&]thread=/.test(page.url()) &&
         (await page.locator('[data-testid="chat-thread-panel"]').count()) > 0,
-      'and the thread is still open when that address is reopened',
       page.url(),
     )
   } else {
-    check(false, 'no "open thread" control to drive')
-    check(false, 'so the thread address was never exercised')
+    threadAddress.rest('skipped: there was no "open thread" control to drive')
   }
 
   /*
@@ -530,29 +554,38 @@ try {
    * Driven from the panel that is already open above.
    */
   console.log('\n▶ G11-9 / G12-10 — the thread header names the thread, and can turn it into work')
+  const header = chain(
+    'the panel is named after whoever started the thread, not "Thread"',
+    'and "Create Task" is offered on the header',
+    'and "Assign to" beside it',
+    'which opens the people it could be assigned to',
+    'and picking somebody opens the task draft',
+    'with that person already on it, not a blank form',
+  )
   if ((await page.locator('[data-testid="chat-thread-panel"]').count()) > 0) {
     const title = await page.getByTestId('thread-panel-title').innerText().catch(() => '')
-    check(
-      title.trim().length > 0 && !/^thread$/i.test(title.trim()),
-      'the panel is named after whoever started the thread, not "Thread"',
-      `the title reads "${title.trim()}"`,
+    /*
+     * THE STARTER'S NAME, NOT THE ABSENCE OF THE WORD "Thread". The probe that
+     * starts this thread was posted by the admin, so the title has to carry
+     * the admin's own display name. `!/^thread$/i` passed on any title that was
+     * not that one word — a missing name, or the generic title reworded.
+     */
+    const starter = ((await A('/users/me')).data?.displayName ?? '').trim()
+    header.step(
+      starter.length > 0 && title.includes(starter),
+      `the title reads "${title.trim()}" — the thread was started by ${JSON.stringify(starter)}`,
     )
-    check(
-      (await page.getByTestId('thread-create-task').count()) > 0,
-      'and "Create Task" is offered on the header',
-      'no create-task control in the thread header',
-    )
+    header.step((await page.getByTestId('thread-create-task').count()) > 0, 'no create-task control in the thread header')
     const assign = page.getByTestId('thread-assign-to')
-    check((await assign.count()) > 0, 'and "Assign to" beside it')
+    header.step((await assign.count()) > 0, 'no assign-to control in the thread header')
 
     // The picker must offer real people, not an empty menu — the failure this
     // would otherwise hide is a members read that returned nothing.
     await assign.click().catch(() => {})
     await page.waitForTimeout(800)
     const candidates = page.locator('[data-testid^="thread-assign-"]').filter({ hasNotText: /^$/ })
-    check(
+    header.step(
       (await page.locator('[data-testid^="thread-assign-"]').count()) > 1,
-      'which opens the people it could be assigned to',
       `${await candidates.count()} row(s) in the assign menu`,
     )
 
@@ -565,32 +598,22 @@ try {
     const pickedId = (await someone.getAttribute('data-testid').catch(() => '') ?? '').replace('thread-assign-', '')
     await someone.click().catch(() => {})
     await page.waitForTimeout(1200)
-    check(
-      (await page.getByTestId('chat-task-draft').count()) > 0,
-      'and picking somebody opens the task draft',
-      'nothing opened after picking a person',
-    )
+    header.step((await page.getByTestId('chat-task-draft').count()) > 0, 'nothing opened after picking a person')
     /*
      * The assertion that matters. "The draft opened" would also pass if the
      * picker merely opened an empty dialog — and the point of Assign to is
      * that the person you chose is already on it, not that you get a second
      * form to fill in.
      */
-    check(
+    header.step(
       (await page.getByTestId('chat-task-draft-assignee').inputValue().catch(() => '')) === pickedId &&
         pickedId.length > 0,
-      'with that person already on it, not a blank form',
       `draft assignee is "${await page.getByTestId('chat-task-draft-assignee').inputValue().catch(() => '')}", expected "${pickedId}"`,
     )
     await page.keyboard.press('Escape')
     await page.waitForTimeout(500)
   } else {
-    check(false, 'no thread panel open to read its header')
-    check(false, 'so "Create Task" was never checked')
-    check(false, 'so "Assign to" was never checked')
-    check(false, 'so the assign menu was never opened')
-    check(false, 'so assigning was never driven')
-    check(false, 'so the pre-filled assignee was never checked')
+    header.rest('skipped: there was no thread panel open to read its header')
   }
 
   // ---------------------------------------------------------------------
@@ -722,17 +745,23 @@ try {
   const hasCopy = await copyItem.isVisible().catch(() => false)
   check(hasCopy, 'the message menu offers "Copy link"', 'no per-message copy-link action')
 
+  const permalink = chain(
+    'and it copies an address for THAT message',
+    'and opening it lands on the message, highlighted',
+  )
   if (!hasCopy || !targetId) {
-    check(false, 'and it copies an address for THAT message', 'there was no control to press')
-    check(false, 'and opening it lands on the message, highlighted', 'nothing was copied to open')
+    permalink.rest(
+      !targetId
+        ? 'skipped: the probe message had no row id to link to, so nothing was copied to open'
+        : 'skipped: there was no Copy link to press, so nothing was copied to open',
+    )
   } else {
     await copyItem.click()
     await page.waitForTimeout(900)
 
     const copied = await page.evaluate(() => navigator.clipboard.readText().catch(() => '')).catch(() => '')
-    check(
+    permalink.step(
       copied.includes(`message=${targetId}`) && copied.includes(`channel=${channelId}`),
-      'and it copies an address for THAT message',
       `clipboard held ${JSON.stringify(copied.slice(0, 160))}`,
     )
 
@@ -751,7 +780,7 @@ try {
       )
       .then(() => true)
       .catch(() => false)
-    check(landed, 'and opening it lands on the message, highlighted', `${copied} did not highlight the message`)
+    permalink.step(landed, `${copied} did not highlight the message`)
     await recipient.close()
   }
 
@@ -803,20 +832,38 @@ try {
   await page.waitForTimeout(900)
 
   const modal = page.getByTestId('forward-modal')
-  check(await modal.isVisible().catch(() => false), 'Forward opens a modal, not a ten-item popover')
-  if (!(await modal.isVisible().catch(() => false))) {
-    check(false, 'with the message it is about', 'no modal')
-    check(false, 'and the eleventh conversation is reachable', 'no modal')
-    check(false, 'and it will not send until somebody is chosen', 'no modal')
-    check(false, 'and the note travels with it', 'no modal')
+  const modalOpen = await modal.isVisible().catch(() => false)
+  check(modalOpen, 'Forward opens a modal, not a ten-item popover')
+  /*
+   * ONE CHAIN FOR EVERYTHING THE MODAL LEADS TO. Without a modal this reported
+   * four checks — two of them under sentences of their own that no passing run
+   * prints ("with the message it is about", "and the eleventh conversation is
+   * reachable") — where the modal's path reports eleven, so losing the modal
+   * read as the run stopping early. Every path reports these eleven now, and a
+   * path that stops fails the rest with the reason it stopped.
+   */
+  const forward = chain(
+    'with the message it is about, so you can see you picked the right one',
+    'and it will not send until somebody is chosen',
+    'and a conversation past the old ten-item cap can still be found',
+    'picking somebody makes it sendable',
+    'and it arrives in the conversation you chose',
+    'and the note travels with it',
+    'the forward carries the channel it came from',
+    'and who wrote it',
+    'and when they wrote it',
+    'and the banner on screen names that channel, not just "Forwarded"',
+    'and names the person who wrote it',
+  )
+  if (!modalOpen) {
+    forward.rest('skipped: Forward opened no modal, so there was nothing in it to use')
   } else {
-    check(
+    forward.step(
       (await page.getByTestId('forward-preview').innerText().catch(() => '')).includes(BODY.slice(0, 20)),
-      'with the message it is about, so you can see you picked the right one',
+      'the preview does not show the message being forwarded',
     )
-    check(
+    forward.step(
       await page.getByTestId('forward-confirm').isDisabled().catch(() => true),
-      'and it will not send until somebody is chosen',
       'the confirm button was live before a recipient was picked',
     )
 
@@ -828,13 +875,12 @@ try {
     await page.getByTestId('forward-search').fill(`${FWD_TAG}-11`)
     await page.waitForTimeout(600)
     const eleventh = page.locator('[data-testid^="forward-target-"]')
-    check(
-      (await eleventh.count()) === 1,
-      'and a conversation past the old ten-item cap can still be found',
-      `${await eleventh.count()} matches for ${FWD_TAG}-11`,
-    )
+    const matches = await eleventh.count()
+    forward.step(matches === 1, `${matches} matches for ${FWD_TAG}-11`)
 
-    if ((await eleventh.count()) === 1) {
+    if (matches !== 1) {
+      forward.rest(`skipped: ${matches} conversations matched ${FWD_TAG}-11, so there was no one match to pick`)
+    } else {
       // `?? ''` before `.replace`: the row is one a check above may find
       // absent, and `.replace` on a caught null throws.
       const targetId = (
@@ -843,19 +889,18 @@ try {
       await eleventh.first().click()
       await page.getByTestId('forward-note').fill('sharing this for context')
       await page.waitForTimeout(300)
-      check(
+      forward.step(
         !(await page.getByTestId('forward-confirm').isDisabled().catch(() => true)),
-        'picking somebody makes it sendable',
+        'the confirm button stayed disabled with a recipient picked',
       )
       await page.getByTestId('forward-confirm').click()
       await page.waitForTimeout(2500)
 
       const landed = await A(`/chat/channels/${targetId}/messages`)
       const got = (landed.data ?? []).find((msg) => String(msg.body).includes(BODY.slice(0, 20)))
-      check(!!got, 'and it arrives in the conversation you chose', `${(landed.data ?? []).length} messages there`)
-      check(
+      forward.step(!!got, `${(landed.data ?? []).length} messages there`)
+      forward.step(
         !!got && String(got.body).includes('sharing this for context'),
-        'and the note travels with it',
         `body: ${String(got?.body ?? '').slice(0, 80)}`,
       )
 
@@ -871,19 +916,16 @@ try {
        * broken.
        */
       const prov = got?.forwardedFrom
-      check(
+      forward.step(
         !!prov && typeof prov.channelName === 'string' && prov.channelName.length > 0,
-        'the forward carries the channel it came from',
         `forwardedFrom: ${JSON.stringify(prov)}`,
       )
-      check(
+      forward.step(
         !!prov && typeof prov.authorName === 'string' && prov.authorName.length > 0,
-        'and who wrote it',
         `authorName: ${JSON.stringify(prov?.authorName)}`,
       )
-      check(
+      forward.step(
         !!prov && !!prov.sentAt && !Number.isNaN(new Date(prov.sentAt).getTime()),
-        'and when they wrote it',
         `sentAt: ${JSON.stringify(prov?.sentAt)}`,
       )
 
@@ -893,25 +935,14 @@ try {
       await page.waitForTimeout(3500)
       const banner = page.locator('[data-testid^="forwarded-"]').first()
       const bannerText = (await banner.innerText().catch(() => '')).trim()
-      check(
+      forward.step(
         !!prov?.channelName && bannerText.includes(prov.channelName),
-        'and the banner on screen names that channel, not just "Forwarded"',
         `banner read ${JSON.stringify(bannerText)}`,
       )
-      check(
+      forward.step(
         !!prov?.authorName && bannerText.includes(prov.authorName),
-        'and names the person who wrote it',
         `banner read ${JSON.stringify(bannerText)}`,
       )
-    } else {
-      check(false, 'picking somebody makes it sendable', 'no match to pick')
-      check(false, 'and it arrives in the conversation you chose', 'no match to pick')
-      check(false, 'and the note travels with it', 'no match to pick')
-      check(false, 'the forward carries the channel it came from', 'no match to pick')
-      check(false, 'and who wrote it', 'no match to pick')
-      check(false, 'and when they wrote it', 'no match to pick')
-      check(false, 'and the banner on screen names that channel, not just "Forwarded"', 'no match to pick')
-      check(false, 'and names the person who wrote it', 'no match to pick')
     }
   }
 
@@ -947,18 +978,33 @@ try {
     const linkThere = await threadLink.isVisible().catch(() => false)
     check(linkThere, 'a message with replies offers to open the thread at 1200px')
 
-    if (linkThere) {
+    /*
+     * THREE CHAINS, IN THE ORDER THEY RUN, so each `rest` fills its own section
+     * and nothing else. The no-link path reported three of these five and the
+     * no-Create-task path four, where the full path reports five — a short run
+     * either way — and one of the three the no-link path did report was typed
+     * again rather than taken from its pass twin.
+     */
+    const narrowOpens = chain('and clicking it actually opens the thread', 'the drawer dims the conversation behind it')
+    const narrowDialog = chain(
+      'and a dialog opened from inside the drawer is clickable, not buried under it',
+      'and that dialog closes again',
+    )
+    const narrowCloses = chain('and clicking away closes it again')
+    if (!linkThere) {
+      for (const section of [narrowOpens, narrowDialog, narrowCloses]) {
+        section.rest('skipped: there was no thread link at 1200px to open')
+      }
+    } else {
       await threadLink.click()
       await np.waitForTimeout(1200)
-      check(
+      narrowOpens.step(
         await np.getByTestId('chat-thread-panel').isVisible().catch(() => false),
-        'and clicking it actually opens the thread',
         'the panel stayed hidden — the control is inert at this width',
       )
       const scrim = np.getByTestId('thread-scrim')
-      check(
+      narrowOpens.step(
         await scrim.isVisible().catch(() => false),
-        'the drawer dims the conversation behind it',
         'no scrim, so there is nothing to click to dismiss it',
       )
 
@@ -990,11 +1036,7 @@ try {
             ? 'ok'
             : 'buried under ' + (top?.getAttribute('data-testid') || String(top?.className).slice(0, 60))
         })
-        check(
-          reachable === 'ok',
-          'and a dialog opened from inside the drawer is clickable, not buried under it',
-          reachable,
-        )
+        narrowDialog.step(reachable === 'ok', reachable)
         /*
          * Dismissed by clicking its own backdrop, and confirmed gone.
          *
@@ -1003,29 +1045,30 @@ try {
          * click on the scrim landed on the backdrop instead and the drawer
          * never closed. A step that leaves state behind fails the check after
          * it, which reads as a defect in something that is fine.
+         *
+         * AND ONLY A DIALOG THAT OPENED CAN BE SHOWN TO CLOSE. "It is not on
+         * screen" is also what a dialog that never opened looks like, so that
+         * case fails here with its reason rather than passing on nothing.
          */
-        await np.locator('.fixed.inset-0.z-50').first().click({ position: { x: 5, y: 5 } }).catch(() => {})
-        await np.waitForTimeout(700)
-        check(
-          !(await np.getByTestId('chat-task-draft').isVisible().catch(() => false)),
-          'and that dialog closes again',
-          'the task draft stayed open, which would block everything behind it',
-        )
+        if (reachable === 'the modal did not open') {
+          narrowDialog.rest('skipped: Create task opened no dialog, so there was none to close')
+        } else {
+          await np.locator('.fixed.inset-0.z-50').first().click({ position: { x: 5, y: 5 } }).catch(() => {})
+          await np.waitForTimeout(700)
+          narrowDialog.step(
+            !(await np.getByTestId('chat-task-draft').isVisible().catch(() => false)),
+            'the task draft stayed open, which would block everything behind it',
+          )
+        }
       } else {
-        check(false, 'and a dialog opened from inside the drawer is clickable, not buried under it',
-          'no create-task control in the thread header')
+        narrowDialog.rest('skipped: there was no create-task control in the thread header')
       }
       await scrim.click({ position: { x: 5, y: 5 } }).catch(() => {})
       await np.waitForTimeout(700)
-      check(
+      narrowCloses.step(
         !(await np.getByTestId('chat-thread-panel').isVisible().catch(() => false)),
-        'and clicking away closes it again',
         'the drawer would not close',
       )
-    } else {
-      check(false, 'and clicking it actually opens the thread', 'no thread link at 1200px')
-      check(false, 'the drawer dims the conversation behind it', 'no thread link at 1200px')
-      check(false, 'and clicking away closes it again', 'no thread link at 1200px')
     }
     await narrow.close()
   }
@@ -1077,7 +1120,14 @@ try {
     }
     check(!!mine, 'a reply from somebody else lands in Replies', `no new unread chat_reply among ${seen}`)
 
-    if (mine) {
+    const putBack = chain(
+      'an unread reply offers to resolve it',
+      'and once read, it offers to mark it unread again',
+      'and the server agrees it is unread again',
+    )
+    if (!mine) {
+      putBack.rest('skipped: no reply from somebody else arrived, so there was nothing to read or put back')
+    } else {
       /*
        * On the All tab, because the page defaults to `unread`
        * (workspace-replies-page.tsx:65) and a resolved row leaves that list
@@ -1091,28 +1141,31 @@ try {
       await page.waitForTimeout(3000)
 
       const resolve = page.getByTestId(`reply-resolve-${mine.id}`)
-      check(await resolve.isVisible().catch(() => false), 'an unread reply offers to resolve it')
+      putBack.step(await resolve.isVisible().catch(() => false), 'no resolve control on the unread reply')
       await resolve.click({ timeout: 10_000 }).catch(() => {})
       await page.waitForTimeout(1500)
 
       // The whole point: once read, there is a way back.
       const unread = page.getByTestId(`reply-unread-${mine.id}`)
-      check(
-        await unread.isVisible().catch(() => false),
-        'and once read, it offers to mark it unread again',
-        'the row is read with no way back — the queue is destroyed by reading it',
-      )
-      await unread.click({ timeout: 10_000 }).catch(() => {})
-      await page.waitForTimeout(1500)
-      check(
-        (await A(`/notifications?limit=50`)).data?.find((n) => n.id === mine.id)?.readAt == null,
-        'and the server agrees it is unread again',
-        'the button changed the screen but not the record',
-      )
-    } else {
-      check(false, 'an unread reply offers to resolve it', 'nothing seeded')
-      check(false, 'and once read, it offers to mark it unread again', 'nothing seeded')
-      check(false, 'and the server agrees it is unread again', 'nothing seeded')
+      const offered = await unread.isVisible().catch(() => false)
+      putBack.step(offered, 'the row is read with no way back — the queue is destroyed by reading it')
+      /*
+       * "Unread again" is only a claim about a row that was read and then put
+       * back. Without the control the row may never have been read at all, and
+       * a row that was never read reads as unread — so that path fails here
+       * with its reason, and the server's copy has to be FOUND to be believed.
+       */
+      if (!offered) {
+        putBack.rest('skipped: there was no Mark unread to press')
+      } else {
+        await unread.click({ timeout: 10_000 }).catch(() => {})
+        await page.waitForTimeout(1500)
+        const row = ((await A(`/notifications?limit=50`)).data ?? []).find((n) => n.id === mine.id)
+        putBack.step(
+          !!row && row.readAt == null,
+          row ? 'the button changed the screen but not the record' : 'the reply is no longer among the notifications to read back',
+        )
+      }
     }
   }
 
@@ -1126,22 +1179,26 @@ try {
     })
     await wp.waitForTimeout(4000)
     const wideLink = wp.locator('[data-testid^="view-thread-"]').first()
-    if (await wideLink.isVisible().catch(() => false)) {
+    const wideThread = chain(
+      'and the wide layout still opens it too',
+      'with no scrim, because there it is a column beside the conversation',
+    )
+    if (!(await wideLink.isVisible().catch(() => false))) {
+      wideThread.rest('skipped: there was no thread link at 1680px to open')
+    } else {
       await wideLink.click()
       await wp.waitForTimeout(1200)
-      check(
-        await wp.getByTestId('chat-thread-panel').isVisible().catch(() => false),
-        'and the wide layout still opens it too',
-        'the panel does not open at 1680 either — this check is misfiring, not finding a bug',
-      )
-      check(
-        !(await wp.getByTestId('thread-scrim').isVisible().catch(() => false)),
-        'with no scrim, because there it is a column beside the conversation',
-        'the wide layout dims the conversation it sits next to',
-      )
-    } else {
-      check(false, 'and the wide layout still opens it too', 'no thread link at 1680px')
-      check(false, 'with no scrim, because there it is a column beside the conversation', 'no link')
+      const wideOpen = await wp.getByTestId('chat-thread-panel').isVisible().catch(() => false)
+      wideThread.step(wideOpen, 'the panel does not open at 1680 either — this check is misfiring, not finding a bug')
+      // "No scrim" is a claim about an OPEN panel: a panel that never opened has none either.
+      if (!wideOpen) {
+        wideThread.rest('skipped: the panel did not open, so there was no scrim to be absent beside it')
+      } else {
+        wideThread.step(
+          !(await wp.getByTestId('thread-scrim').isVisible().catch(() => false)),
+          'the wide layout dims the conversation it sits next to',
+        )
+      }
     }
     await wide.close()
   }

@@ -142,8 +142,10 @@ lane_store_up () {
 # AND THE COUNT MISSED ONE. `ai-activity-filters` forces its failed run by
 # asking for a task with no model and asserts the 503 without the words
 # (`forced.status === 503`); its status checks count that failure. Two of the
-# four have since been re-aimed (below), so THREE suites stand on the refusal
-# today: `create-menu-ai`, `task-ai-bar` and `ai-activity-filters`.
+# four have since been re-aimed (below), and on 29 September `ai-activity-filters`
+# was too: it reads `/ai/status` and, on a model lane, stages a real provider
+# failure through the stub (`suite-hygiene/ai-activity-filters-model-refusal`).
+# So TWO suites stand on the refusal today: `create-menu-ai` and `task-ai-bar`.
 #
 # It is the defect class found twice in one night — a green that depended on
 # the environment being broken — except known in advance.
@@ -176,15 +178,15 @@ lane_store_up () {
 # wired: a break set whose patch says it needs a model gets one, and the
 # runner's stamp re-syncs a lane whose model differs from what the set asked
 # for (`patches_needing_model`, `lane_serving_id`, below). Routing a SUITE by
-# its need — the dispatcher sending `create-menu-ai`, `task-ai-bar` and
-# `ai-activity-filters` only to a lane without one — is NOT done
+# its need — the dispatcher sending `create-menu-ai` and `task-ai-bar` only to
+# a lane without one — is NOT done
 # (`harness/model-lane-routing-unbuilt`).
 #
 # The two stale header sentences on `ai-assign` and `clip-created-card` were
 # fixed at the same time; neither is a check, so neither blocks anything.
 #
 # Turning this on for every lane before that work is done would take the
-# refusal away from the three suites that stand on it, and their checks would
+# refusal away from the two suites that stand on it, and their checks would
 # fail over the lane rather than the product — which is worse than a gate that
 # fails loudly, because it reads as a regression.
 #

@@ -120,7 +120,7 @@ const check = (ok, label, detail = '') => {
 
 const chain = makeChain(check)
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
-const EXPECTED_CHECKS = 91
+const EXPECTED_CHECKS = 92
 
 const ADMIN = {
   email: process.env.RUNDESK_EMAIL ?? 'admin@rundesk.internal',
@@ -182,9 +182,18 @@ try {
 
   // A task of this suite's own, so the tag checks are not reading somebody's
   // real task and the description starts empty.
+  /*
+   * READ OPTIONALLY, AND NAMED WHEN MISSING. `spaces.data[0].id` threw a
+   * TypeError naming no fixture when the read came back empty; every check
+   * below needs this list, so a missing one still ends the run, as a sentence.
+   */
   const spaces = await A(`/spaces/workspace/${workspaceId}`)
-  const projects = await A(`/projects/space/${spaces.data[0].id}`)
-  const lists = await A(`/lists/project/${projects.data[0].id}`)
+  const spaceId = spaces.data?.[0]?.id
+  if (!spaceId) throw new Error(`no space to create a task in (GET /spaces/workspace answered ${spaces.status})`)
+  const projects = await A(`/projects/space/${spaceId}`)
+  const projectId = projects.data?.[0]?.id
+  if (!projectId) throw new Error(`the first space has no project (GET /projects/space answered ${projects.status})`)
+  const lists = await A(`/lists/project/${projectId}`)
   const listId = lists.data?.[0]?.id
   if (!listId) throw new Error('no list to create a task in — seed a space/project/list first')
   const TITLE = `depth probe ${Date.now()}`
@@ -290,46 +299,65 @@ try {
   await page.locator('form input[placeholder]').first().fill(CREATED)
 
   /*
-   * Space → Project → List, each enabling the next. Waited on rather than
-   * timed: every step fires a query for the next level, and a fixed 700ms was
-   * sometimes not enough — the list stayed unset, the Create button stayed
-   * disabled, and the failure surfaced 30 seconds later as an unhelpful
-   * "element is not enabled" on a button nobody had explained.
+   * §G15 [21:59] — "agar main list nahi banaoongi to yeh nahi create karega."
+   * If this project genuinely has no list, the form must let her make one
+   * WITHOUT leaving the task she is describing. That is the whole gap.
+   *
+   * SO THE PROJECT IS ONE WITH NO LIST, MADE FOR THIS RUN. This used to pick
+   * the first project and ask whether it happened to have no list — and on
+   * the seeded database it always had one, so the check never ran: the run
+   * printed "this project already has a list" and reported one check fewer
+   * than the path that exercised the creator, and the inline creator itself
+   * was never driven by anything (`suite-hygiene/task-depth-inline-list-
+   * unbalanced`). A precondition that is read from ambient data is one that
+   * decides whether the check exists; one that is arranged decides nothing.
    */
-  for (const id of ['quick-create-space', 'quick-create-project', 'quick-create-list']) {
+  const bare = await A('/projects', {
+    method: 'POST',
+    body: { spaceId: spaces.data[0].id, name: `depth no-list project ${Date.now()}` },
+  })
+  const bareProjectId = bare.data?.id
+  if (!bareProjectId) throw new Error(`could not make a project with no list: ${bare.status} ${JSON.stringify(bare.error)}`)
+
+  /*
+   * Space → Project, each enabling the next, by VALUE: the space the project
+   * was made in and the project itself. Waited on rather than timed: every
+   * step fires a query for the next level, and a fixed 700ms was sometimes not
+   * enough — the list stayed unset, the Create button stayed disabled, and the
+   * failure surfaced 30 seconds later as an unhelpful "element is not enabled"
+   * on a button nobody had explained.
+   */
+  for (const [id, value] of [['quick-create-space', spaces.data[0].id], ['quick-create-project', bareProjectId]]) {
     // By testid, not by position: the form gained selects for priority and
     // assignee, and `form select` nth(2) is only the list until somebody adds
     // a control above it. Waited on because each choice fires the query that
     // fills the next.
     await page
       .waitForFunction(
-        (sel) => (document.querySelector(`[data-testid="${sel}"]`)?.options?.length ?? 0) > 1,
-        id,
+        ([sel, want]) => [...(document.querySelector(`[data-testid="${sel}"]`)?.options ?? [])].some((o) => o.value === want),
+        [id, value],
         { timeout: 15000 },
       )
       .catch(() => {})
-    await page.getByTestId(id).selectOption({ index: 1 }).catch(() => {})
+    await page.getByTestId(id).selectOption(value).catch(() => {})
   }
+  await page.waitForTimeout(700)
 
-  /*
-   * §G15 [21:59] — "agar main list nahi banaoongi to yeh nahi create karega."
-   * If this project genuinely has no list, the form must let her make one
-   * WITHOUT leaving the task she is describing. That is the whole gap.
-   */
   const listSelect = page.getByTestId('quick-create-list')
-  if ((await listSelect.locator('option').count().catch(() => 0)) <= 1) {
-    const offered = await page.getByTestId('quick-create-new-list').isVisible().catch(() => false)
-    check(offered, 'a project with no list offers to make one right here', 'the task form is a dead end without a list')
-    if (offered) {
-      await page.getByTestId('quick-create-new-list').click()
-      await page.getByTestId('quick-create-new-list-name').fill(`inline list ${Date.now()}`)
-      await page.getByTestId('quick-create-new-list-save').click()
-      await page.waitForTimeout(2000)
-    }
-  } else {
-    // There was a list, so the dead-end path is not exercised — said out loud
-    // rather than passing a check that never ran.
-    console.log('  ·  this project already has a list, so the inline creator was not needed')
+  const listsOffered = (await listSelect.locator('option').count().catch(() => 0)) - 1
+  const offered = await page.getByTestId('quick-create-new-list').isVisible().catch(() => false)
+  check(
+    listsOffered <= 0 && offered,
+    'a project with no list offers to make one right here',
+    listsOffered > 0
+      ? `the project made with no list offered ${listsOffered} list(s) to choose from`
+      : 'the task form is a dead end without a list',
+  )
+  if (offered) {
+    await page.getByTestId('quick-create-new-list').click()
+    await page.getByTestId('quick-create-new-list-name').fill(`inline list ${Date.now()}`)
+    await page.getByTestId('quick-create-new-list-save').click()
+    await page.waitForTimeout(2000)
   }
 
   const hasDesc = await page.getByTestId('quick-create-description').isVisible().catch(() => false)
@@ -434,11 +462,14 @@ try {
     const gone = await A(`/tasks/${made.id}`, { method: 'DELETE' })
     if (![200, 204, 404].includes(gone.status)) leftBehind.push(`DELETE /tasks/${made.id} answered ${gone.status}`)
   }
+  // The project made with no list, and the list made inside it, go with it.
+  const bareGone = await A(`/projects/${bareProjectId}`, { method: 'DELETE' })
+  if (![200, 204, 404].includes(bareGone.status)) leftBehind.push(`DELETE /projects/${bareProjectId} answered ${bareGone.status}`)
 
   // ---------------------------------------------------------------------
   console.log('\n▶ §G15 [23:16] — a tag can reach a task')
   // ---------------------------------------------------------------------
-  await page.goto(`${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${taskId}`, {
+  await page.goto(`${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`, {
     waitUntil: 'domcontentloaded',
   })
   // The control is drawn once the task and what this reader may do with it
@@ -480,12 +511,29 @@ try {
     body: { name: TAG, color: '#111111' },
   })
   check(reuse.status < 300 && reuse.data?.id === applied?.id, 'reusing the same name returns the same tag')
-  await A(`/tasks/${second.data.id}/labels/${reuse.data.id}`, { method: 'POST' })
-  const secondDetail = await A(`/tasks/${second.data.id}`)
-  check(
-    (secondDetail.data?.labels ?? []).some((l) => l.id === applied?.id),
-    'so a second task can carry the same tag',
-  )
+  /*
+   * BOTH IDS READ OPTIONALLY, AND THE CHECK THAT NEEDS THEM GATED ON THEM. The
+   * check above is allowed to fail — a 500 on the unique index is the case
+   * under test — and `reuse.data.id` then threw here, taking every check after
+   * it in this one-`try` suite with it.
+   */
+  const secondTaskId = second.data?.id
+  const reusedTagId = reuse.data?.id
+  const carries = chain('so a second task can carry the same tag')
+  if (!secondTaskId || !reusedTagId) {
+    carries.rest(
+      !secondTaskId
+        ? `skipped: the second task was never made (POST /tasks answered ${second.status})`
+        : `skipped: reusing the name answered ${reuse.status} with no tag to put on the second task`,
+    )
+  } else {
+    await A(`/tasks/${secondTaskId}/labels/${reusedTagId}`, { method: 'POST' })
+    const secondDetail = await A(`/tasks/${secondTaskId}`)
+    carries.step(
+      (secondDetail.data?.labels ?? []).some((l) => l.id === applied?.id),
+      `the second task carries ${JSON.stringify((secondDetail.data?.labels ?? []).map((l) => l.id))}`,
+    )
+  }
 
   /*
    * TAKING IT OFF, FROM THE BADGE ITSELF — and this used to read `applied.id`
@@ -574,7 +622,7 @@ try {
    * asks for the task.
    */
   await page.goto(
-    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${taskId}`,
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${taskId}`,
     { waitUntil: 'domcontentloaded' },
   )
   await page.waitForTimeout(3800)
@@ -603,7 +651,7 @@ try {
   check(Boolean(datedId), 'a task with a due time can be created')
 
   await page.goto(
-    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${datedId}`,
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${datedId}`,
     {
       waitUntil: 'domcontentloaded',
     },
@@ -710,19 +758,19 @@ try {
    */
   const privateList = await A('/lists', {
     method: 'POST',
-    body: { projectId: projects.data[0].id, name: `depth private ${Date.now()}`, visibility: 'private' },
+    body: { projectId, name: `depth private ${Date.now()}`, visibility: 'private' },
   })
   check(privateList.data?.visibility === 'private', 'a list can be created private',
     `visibility=${privateList.data?.visibility}`)
   const publicList = await A('/lists', {
     method: 'POST',
-    body: { projectId: projects.data[0].id, name: `depth public ${Date.now()}` },
+    body: { projectId, name: `depth public ${Date.now()}` },
   })
   check(publicList.data?.visibility === 'public', 'and omitting it still means public',
     `visibility=${publicList.data?.visibility}`)
   const oddList = await A('/lists', {
     method: 'POST',
-    body: { projectId: projects.data[0].id, name: `depth odd ${Date.now()}`, visibility: 'sneaky' },
+    body: { projectId, name: `depth odd ${Date.now()}`, visibility: 'sneaky' },
   })
   check(oddList.data?.visibility === 'public', 'an unknown visibility is ignored, not trusted into the column',
     `visibility=${oddList.data?.visibility}`)
@@ -744,7 +792,7 @@ try {
     },
   })
   await page.goto(
-    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${imgTask.data?.id}`,
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${imgTask.data?.id}`,
     { waitUntil: 'domcontentloaded' },
   )
   await page.waitForTimeout(4000)
@@ -782,7 +830,7 @@ try {
     body: { listId, title: `preset depth ${Date.now()}`, dueDate: new Date(2026, 8, 15, 17, 30).toISOString() },
   })
   await page.goto(
-    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}?task=${presetTask.data?.id}`,
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}?task=${presetTask.data?.id}`,
     { waitUntil: 'domcontentloaded' },
   )
   await page.waitForTimeout(4000)
@@ -920,7 +968,7 @@ try {
    * exercises reading it — the direction that already worked. These drive the
    * other half, from the list.
    */
-  const listUrl = `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}`
+  const listUrl = `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`
   const SECOND = `depth probe second ${Date.now()}`
   const otherTask = await A('/tasks', { method: 'POST', body: { listId, title: SECOND } })
   const secondId = otherTask.data?.id
@@ -956,6 +1004,12 @@ try {
    * missing: arrive at ?task=A, move to task B, and the URL still said A — so
    * a reload reopened the task you had already moved on from.
    */
+  // Two checks both ways: without a second task this reported one, under a
+  // sentence about the fixture, where the path with one reports these two.
+  const staleParam = chain(
+    'closing the sheet takes the task back out of the address',
+    'opening a second task replaces the first in the address',
+  )
   if (secondId) {
     await page.goto(`${listUrl}?task=${taskId}`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3200)
@@ -963,21 +1017,16 @@ try {
     // intercepts pointer events, so the next click never reaches a task row.
     await page.locator('[aria-label="Close sheet overlay"]').first().click()
     await page.waitForTimeout(1500)
-    check(
-      !/[?&]task=/.test(page.url()),
-      'closing the sheet takes the task back out of the address',
-      page.url(),
-    )
+    staleParam.step(!/[?&]task=/.test(page.url()), page.url())
     await page.getByText(SECOND, { exact: true }).first().click()
     await page.waitForTimeout(1800)
-    check(
+    staleParam.step(
       page.url().includes(`task=${secondId}`) && !page.url().includes(`task=${taskId}`),
-      'opening a second task replaces the first in the address',
       page.url(),
     )
     await A(`/tasks/${secondId}`, { method: 'DELETE' })
   } else {
-    check(false, 'could not create a second task to check the stale-param case')
+    staleParam.rest(`skipped: a second task could not be created (POST /tasks answered ${otherTask.status})`)
   }
 
   // ---------------------------------------------------------------------
@@ -998,17 +1047,18 @@ try {
     'the sidebar offers a way into Sprints',
     ((await page.locator('[data-testid="workspace-sidebar"]').innerText({ timeout: 5000 }).catch(() => '')) ?? '').replace(/\s+/g, ' ').slice(0, 160),
   )
+  const sprintsPage = chain(
+    'and it goes to the sprints page',
+    'which renders something rather than an empty shell',
+  )
   if ((await sprintLink.count()) > 0) {
     await sprintLink.first().click()
     await page.waitForTimeout(3000)
-    check(/\/sprints$/.test(new URL(page.url()).pathname), 'and it goes to the sprints page', page.url())
-    check(
-      (await page.locator('body').innerText()).length > 200,
-      'which renders something rather than an empty shell',
-    )
+    sprintsPage.step(/\/sprints$/.test(new URL(page.url()).pathname), page.url())
+    const sprintsText = await page.locator('body').innerText()
+    sprintsPage.step(sprintsText.length > 200, `the page held ${sprintsText.length} characters`)
   } else {
-    check(false, 'no sprints link to follow')
-    check(false, 'no sprints page to render')
+    sprintsPage.rest('skipped: there was no sprints link to follow')
   }
 
   /*
@@ -1037,61 +1087,84 @@ try {
     process.env.RUNDESK_EMAIL_2 ?? 'org-admin@rundesk.internal',
     process.env.RUNDESK_PASSWORD_2 ?? 'OrgAdmin@123!',
   ).catch(() => null)
+  /*
+   * FOUR CHECKS, UNDER THEIR OWN SENTENCES, WHICHEVER WAY THIS GOES. Without the
+   * second account this reported four sentences about the fixture ("a second
+   * account to be notified", "so comment_resolved was never driven") that no
+   * passing run prints.
+   *
+   * AND EVERY ID IS READ OPTIONALLY. The parent and both comments were made
+   * with their answers unread — `parent.data.id`, `c1.data.id`, `c2.data.id` —
+   * so one refused create threw here and ended the run. A missing parent fails
+   * all four with its reason; a missing comment fails the one kind it drives.
+   */
+  const news = chain(
+    'the second account hears about all of it',
+    'an assigned comment arrives as its own kind, not as a task assignment',
+    'and a resolved comment as its own kind, not as a new comment',
+    'and a subtask under your task is news in its own right',
+  )
+  const parent = other?.accessToken
+    ? await A('/tasks', { method: 'POST', body: { listId, title: `notify probe ${Date.now()}` } })
+    : null
+  const parentId = parent?.data?.id
   if (!other?.accessToken) {
-    check(false, 'a second account to be notified', 'could not sign in as the second user')
-    check(false, 'so comment_assigned was never driven')
-    check(false, 'so comment_resolved was never driven')
-    check(false, 'so subtask_created was never driven')
+    news.rest('skipped: could not sign in as the second user, so there was nobody to notify')
+  } else if (!parentId) {
+    news.rest(`skipped: the task to comment on was never made (POST /tasks answered ${parent.status})`)
   } else {
     const B = apiAs(other.accessToken)
     const stamp = Date.now()
     // The parent belongs to the OTHER account, so they are the audience for
     // everything below and the actor is never the recipient.
-    const parent = await A('/tasks', { method: 'POST', body: { listId, title: `notify probe ${stamp}` } })
-    await A(`/tasks/${parent.data.id}/assignees`, { method: 'POST', body: { userId: other.user.id } })
+    await A(`/tasks/${parentId}/assignees`, { method: 'POST', body: { userId: other.user.id } })
 
     const before = await B('/notifications?limit=60')
     const seenBefore = new Set((before.data ?? []).map((n) => n.id))
 
-    await A('/tasks', {
+    const sub = await A('/tasks', {
       method: 'POST',
-      body: { listId, title: `notify probe sub ${stamp}`, parentTaskId: parent.data.id },
+      body: { listId, title: `notify probe sub ${stamp}`, parentTaskId: parentId },
     })
-    const c1 = await A(`/tasks/${parent.data.id}/comments`, { method: 'POST', body: { body: `probe ${stamp}` } })
-    await A(`/tasks/${parent.data.id}/comments/${c1.data.id}/assign`, {
-      method: 'POST',
-      body: { userId: other.user.id },
-    })
-    const c2 = await B(`/tasks/${parent.data.id}/comments`, { method: 'POST', body: { body: `probe reply ${stamp}` } })
+    const c1 = await A(`/tasks/${parentId}/comments`, { method: 'POST', body: { body: `probe ${stamp}` } })
+    const c1Id = c1.data?.id
+    if (c1Id) {
+      await A(`/tasks/${parentId}/comments/${c1Id}/assign`, {
+        method: 'POST',
+        body: { userId: other.user.id },
+      })
+    }
+    const c2 = await B(`/tasks/${parentId}/comments`, { method: 'POST', body: { body: `probe reply ${stamp}` } })
+    const c2Id = c2.data?.id
     // `resolved: true` matters — the route takes a boolean, and sending an
     // empty body silently un-resolves instead, which made an earlier version
     // of this check report a missing notification that was never asked for.
-    await A(`/tasks/${parent.data.id}/comments/${c2.data.id}/resolve`, {
-      method: 'POST',
-      body: { resolved: true },
-    })
+    if (c2Id) {
+      await A(`/tasks/${parentId}/comments/${c2Id}/resolve`, {
+        method: 'POST',
+        body: { resolved: true },
+      })
+    }
 
     await new Promise((r) => setTimeout(r, 2500))
     const after = await B('/notifications?limit=60')
     const fresh = (after.data ?? []).filter((n) => !seenBefore.has(n.id))
     const kinds = fresh.map((n) => n.type)
-    check(fresh.length > 0, 'the second account hears about all of it', `${fresh.length} new notifications`)
-    check(
-      kinds.includes('comment_assigned'),
-      'an assigned comment arrives as its own kind, not as a task assignment',
-      `kinds: ${kinds.join(', ') || '(none)'}`,
+    const heard = `kinds: ${kinds.join(', ') || '(none)'}`
+    news.step(fresh.length > 0, `${fresh.length} new notifications`)
+    news.step(
+      !!c1Id && kinds.includes('comment_assigned'),
+      c1Id ? heard : `the comment to assign was never made (POST answered ${c1.status})`,
     )
-    check(
-      kinds.includes('comment_resolved'),
-      'and a resolved comment as its own kind, not as a new comment',
-      `kinds: ${kinds.join(', ') || '(none)'}`,
+    news.step(
+      !!c2Id && kinds.includes('comment_resolved'),
+      c2Id ? heard : `the reply to resolve was never made (POST answered ${c2.status})`,
     )
-    check(
-      kinds.includes('subtask_created'),
-      'and a subtask under your task is news in its own right',
-      `kinds: ${kinds.join(', ') || '(none)'}`,
+    news.step(
+      !!sub.data?.id && kinds.includes('subtask_created'),
+      sub.data?.id ? heard : `the subtask was never made (POST answered ${sub.status})`,
     )
-    await A(`/tasks/${parent.data.id}`, { method: 'DELETE' })
+    await A(`/tasks/${parentId}`, { method: 'DELETE' })
   }
 
   /*
@@ -1110,7 +1183,7 @@ try {
    */
   console.log('\n▶ §G01-8 — a list tells you how old it is')
   await page.goto(
-    `${origin}/app/${workspaceId}/${spaces.data[0].id}/${projects.data[0].id}/${listId}`,
+    `${origin}/app/${workspaceId}/${spaceId}/${projectId}/${listId}`,
     { waitUntil: 'domcontentloaded' },
   )
   await page.waitForTimeout(4000)

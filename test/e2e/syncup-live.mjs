@@ -40,6 +40,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { storeBase } from './lib/store.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -95,6 +96,14 @@ const API_PORT =
   Number(argOf('--api', '')) ||
   (REMOTE ? Number(fromEnvFile('API_HOST_PORT')) || 3010 : 3011)
 const DIST = path.resolve(REPO, argOf('--dist', 'apps/web/dist'))
+/*
+ * WHERE THIS RUN'S OBJECT STORE WOULD BE, if the machine gives the API one.
+ * The lanes start `s3-stub.mjs` beside every API on 91<k> (`lane-env.sh`), CI
+ * on `E2E_STORE_PORT`; `lib/store.mjs` holds that formula for every suite, and
+ * `--store` overrides it. Section 5b asks it whether it is there, because that
+ * — and not an error from the product — is what may excuse the storage checks.
+ */
+const STORE = storeBase(API_PORT, argOf('--store', undefined))
 
 /*
  * Playwright, wherever it lives.
@@ -773,7 +782,7 @@ const peerState = async (p) =>
 const bothConnected = async () => {
   for (let i = 0; i < 40; i += 1) {
     const [a, b] = await Promise.all([peerState(A.page), peerState(B.page)])
-    if (!a.instrumented) return { instrumented: false }
+    if (!a.instrumented || !b.instrumented) return { instrumented: false, a, b }
     const ok = (s) => s.states.some((x) => x.connection === 'connected' || x.ice === 'connected' || x.ice === 'completed')
     if (ok(a) && ok(b)) return { instrumented: true, a, b, connected: true }
     await new Promise((r) => setTimeout(r, 500))
@@ -782,26 +791,39 @@ const bothConnected = async () => {
   return { instrumented: true, a, b, connected: false }
 }
 
+/*
+ * THE WRAPPER IS THIS SUITE'S, SO ITS ABSENCE IS THIS RUN FAILING — NOT A SKIP.
+ *
+ * `window.__rundeskPeers` is set by the init script `signIn` adds to every
+ * context, before any app code runs; nothing in the app sets it, and the
+ * comment there says why no test-only hook was built. This read used to have
+ * a branch for the wrapper being missing that printed "peer state is not
+ * exposed for tests — falling back to the rendered tiles": an uncounted SKIP
+ * (so the run would have ended one check short), describing a product hook
+ * that does not exist and a fallback that was never written. It could not be
+ * reached. Should the wrapper ever fail to install, the check it would have
+ * answered fails and says so.
+ */
 const peers = await bothConnected()
-if (!peers.instrumented) {
-  console.log('  SKIP  peer state is not exposed for tests — falling back to the rendered tiles')
-} else {
-  check(
-    peers.connected,
-    'the two browsers reach a connected peer connection',
-    `A: ${JSON.stringify(peers.a.states)} B: ${JSON.stringify(peers.b.states)}`,
-  )
-  if (!peers.connected) {
-    // The sequence, not the end state. Which side offered, when it was closed,
-    // and whether anything was rebuilt afterwards is the whole diagnosis.
-    const [la, lb] = await Promise.all([
-      A.page.evaluate(() => window.__rtcLog ?? []),
-      B.page.evaluate(() => window.__rtcLog ?? []),
-    ])
-    const fmt = (l) => l.map((e) => `${e.ms}ms pc${e.pc} ${e.kind}${e.extra ? `(${e.extra})` : ''}`).join('\n      ')
-    console.log(`\n    A timeline:\n      ${fmt(la)}`)
-    console.log(`\n    B timeline:\n      ${fmt(lb)}`)
-  }
+check(
+  peers.instrumented && peers.connected,
+  'the two browsers reach a connected peer connection',
+  peers.instrumented
+    ? `A: ${JSON.stringify(peers.a.states)} B: ${JSON.stringify(peers.b.states)}`
+    : "the suite's own RTCPeerConnection wrapper did not install (no window.__rundeskPeers on " +
+        `${[!peers.a?.instrumented && 'A', !peers.b?.instrumented && 'B'].filter(Boolean).join(' or ')}), ` +
+        'so there was no connection to read — the init script in signIn failed, not the call',
+)
+if (peers.instrumented && !peers.connected) {
+  // The sequence, not the end state. Which side offered, when it was closed,
+  // and whether anything was rebuilt afterwards is the whole diagnosis.
+  const [la, lb] = await Promise.all([
+    A.page.evaluate(() => window.__rtcLog ?? []),
+    B.page.evaluate(() => window.__rtcLog ?? []),
+  ])
+  const fmt = (l) => l.map((e) => `${e.ms}ms pc${e.pc} ${e.kind}${e.extra ? `(${e.extra})` : ''}`).join('\n      ')
+  console.log(`\n    A timeline:\n      ${fmt(la)}`)
+  console.log(`\n    B timeline:\n      ${fmt(lb)}`)
 }
 
 /*
@@ -864,6 +886,9 @@ console.log('\n4b. the three in-call controls the walkthrough shows')
 const outgoingVideoLabel = async (p) =>
   p.evaluate(() => {
     const peers = window.__rundeskPeers
+    // The suite's own wrapper again (see section 4). Without it there is no
+    // sender to read, and null FAILS the steps below, naming the wrapper — it
+    // is never read as the product having nothing to send, and never skipped.
     if (!Array.isArray(peers)) return null
     for (const pc of peers) {
       const s = pc.getSenders?.().find((x) => x.track?.kind === 'video')
@@ -892,7 +917,10 @@ if (!hasShare) {
   const camLabel = await outgoingVideoLabel(A.page)
   shareChain.step(
     camLabel !== null && !isScreen(camLabel),
-    'no outgoing video sender to swap — the rest of this section would prove nothing',
+    peers.instrumented
+      ? 'no outgoing video sender to swap — the rest of this section would prove nothing'
+      : "no sender could be read — the suite's own RTCPeerConnection wrapper did not install (section 4), " +
+          'so the rest of this section would prove nothing',
     `A is sending their camera before sharing (${camLabel ?? 'no sender'})`,
   )
 
@@ -1097,8 +1125,39 @@ const recordChain = chain(
   'and so does everybody else in the call',
   'and the call row says it is recording',
 )
+/*
+ * THE ENTITLEMENT IS READ FROM THE API, NOT INFERRED FROM THE SCREEN.
+ *
+ * This skipped whenever the Record button was not visible, calling that "the
+ * AI Notes entitlement is off" — so a regression that hid the button read as
+ * three SKIPs and exit 0, and because the call was then never recorded, the
+ * storage chain below was refused ("This call was never recorded") and
+ * skipped its five as well. The premise was wrong too: the button is offered
+ * in every channel call (`canRecord` is "not a DM"), and with AI Notes off
+ * pressing it opens the "Unlock AI Notetaker" gate instead of the consent.
+ *
+ * So the tenant's switch is asked of `/feature-flags/resolved` — the same
+ * resolution `setRecording` refuses by — and only an explicit `false` there
+ * skips. On, or unreadable, the button has to be there and recording has to
+ * announce itself; anything else is the product and FAILS. An absent flag is
+ * not the tenant's choice either: it is the product's default set.
+ */
+const notesFlags = await api(admin.accessToken, 'GET', `/feature-flags/resolved?workspaceId=${WS}`)
+const notesOn = notesFlags.data?.flags?.['ai.meeting_notes']
 const recordBtn = A.page.locator('[data-testid="call-record"], button[title*="Record" i]').first()
-if (await recordBtn.isVisible().catch(() => false)) {
+if (notesOn === false) {
+  // THE TENANT, not the product: recording is switched off for this workspace,
+  // so nothing about it can be asked. Counted as SKIP, so the run total is the
+  // same number on a workspace that has the entitlement and one that does not.
+  recordChain.skipRest('AI Notes is switched off for this workspace (feature-flags/resolved: ai.meeting_notes is false)')
+} else if (!(await recordBtn.isVisible().catch(() => false))) {
+  recordChain.rest(
+    notesOn === true
+      ? 'AI Notes is on for this workspace (feature-flags/resolved) and the call offers no Record control'
+      : `the call offers no Record control, and the entitlement does not excuse it — it is not switched ` +
+          `off (feature-flags/resolved -> ${notesFlags.status}, ai.meeting_notes ${JSON.stringify(notesOn)})`,
+  )
+} else {
   await recordBtn.click().catch(() => {})
   const consent = A.page.locator('[data-testid="call-consent-confirm"]')
   if (await consent.isVisible({ timeout: 4000 }).catch(() => false)) await consent.click().catch(() => {})
@@ -1108,11 +1167,6 @@ if (await recordBtn.isVisible().catch(() => false)) {
   recordChain.step(bannerB, 'somebody was being recorded without being told')
   const flag = await api(admin.accessToken, 'GET', `/workspaces/${WS}/calls/live?channelId=${CHANNEL}`)
   recordChain.step(flag.data?.recording === true, `recording: ${flag.data?.recording}`)
-} else {
-  // THE TENANT, not the product: with AI Notes off there is no control to
-  // press, so nothing can be asked. Counted as SKIP, so the run total is the
-  // same number on a workspace that has the entitlement and one that does not.
-  recordChain.skipRest('the AI Notes entitlement is off for this workspace, so there is no control')
 }
 
 // ---------------------------------------------------------------------------
@@ -1131,10 +1185,31 @@ console.log('\n5b. the recording reaches storage, from the browser')
  * So the PUT is made from INSIDE the page, which is the only place the
  * question can be asked honestly. Same for playback afterwards.
  *
- * Skipped rather than failed where storage is unconfigured — an API started
- * without the R2 variables has no bucket (the lanes and CI start
- * `s3-stub.mjs`, so there it runs), and a check that cannot run must say so
- * rather than report a verdict it did not reach.
+ * SKIPPED ONLY WHERE THE MACHINE HAS NO STORE AND THE DEPLOYMENT SAYS SO — and
+ * both halves are asked, neither is inferred from a failure. This used to skip
+ * all five whenever upload-url answered anything at or above 400, under the
+ * sentence "object storage is not configured here". Every lane and CI run
+ * gives the API `s3-stub.mjs`, so there a refusal was never the storage: a 5xx
+ * from the presign, or the 400 "This call was never recorded" that a recording
+ * that never started produces — the exact historical bug the service's comment
+ * on `recordingUploadUrl` describes — each read as SKIP and exited 0.
+ *
+ *   · THE MACHINE: the store this run would have (`STORE`, above) is asked
+ *     whether it is there. `POST /__control/reset` is the stub's own rule for
+ *     the start of a section — a refusal some earlier run armed and never
+ *     fired stays armed, and would refuse this run's PUT — and answering it is
+ *     the machine saying it gives the API a store.
+ *   · THE DEPLOYMENT: the API's own configuration refusal, the 400 "Storage is
+ *     not configured" `recordingUploadUrl` answers when R2 has no endpoint,
+ *     keys or bucket. Any other refusal is the product.
+ *
+ * Only both together skip. Where a store answers, storage is configured for
+ * this run, so even "Storage is not configured" is a FAILURE — of the API not
+ * using the store it was started with. A failure after the presign (a PUT the
+ * store refuses, a key the call will not keep, bytes that do not come back)
+ * fails its own step; the stub's `POST /__control/fail-next-put` arranges that
+ * case whenever it needs showing, rather than an unconfigured environment
+ * supplying it.
  */
 let storageChecked = false
 const storageChain = chain(
@@ -1145,14 +1220,29 @@ const storageChain = chain(
   'and it plays back the bytes that were stored',
 )
 {
+  const storeHere = await fetch(`${STORE}/__control/reset`, { method: 'POST' })
+    .then((r) => r.ok)
+    .catch(() => false)
   const up = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/upload-url`, {
     contentType: 'audio/webm',
   })
-  if (up.status >= 400) {
-    // THE DEPLOYMENT, not the product: with no bucket configured there is
-    // nothing to upload to. Counted as SKIP rather than left absent, so the
-    // run total is the same number here and where storage is set up.
-    storageChain.skipRest(`object storage is not configured here (upload-url -> ${up.status})`)
+  // The envelope's message, where the API refused: `api()` keeps the whole
+  // `{ data: null, error }` body as `data` when there is no `data` in it.
+  const refusal = `upload-url -> ${up.status} ${JSON.stringify(up.data?.error?.message ?? null)}`
+  const saysUnconfigured = up.status === 400 && up.data?.error?.message === 'Storage is not configured'
+  if (saysUnconfigured && !storeHere) {
+    // THE DEPLOYMENT, not the product: no store here, and the API says it has
+    // none. Counted as SKIP rather than left absent, so the run total is the
+    // same number here and where storage is set up.
+    storageChain.skipRest(`object storage is not configured here — nothing answers on ${STORE}, and ${refusal}`)
+  } else if (up.status >= 400) {
+    // THE PRODUCT: a refusal that is not the deployment's, or the deployment's
+    // on a machine that gave it a store.
+    storageChain.rest(
+      saysUnconfigured
+        ? `${refusal}, although this run's store answers on ${STORE} — the API is not using the storage it was started with`
+        : `${refusal} — not the deployment's "Storage is not configured", so this is the product failing, not an unknown`,
+    )
   } else {
     storageChecked = true
     storageChain.step(Boolean(up.data?.uploadUrl && up.data?.storageKey), JSON.stringify(up.data)?.slice(0, 140))
@@ -1166,7 +1256,7 @@ const storageChain = chain(
       } catch (e) {
         return { ok: false, error: String(e) }
       }
-    }, [up.data.uploadUrl, SIZE])
+    }, [up.data?.uploadUrl, SIZE])
     storageChain.step(
       put.ok === true,
       `${put.error ?? `HTTP ${put.status}`} — this is what bucket CORS refusing the app's origin looks like; every server-side check still passes`,
@@ -1174,7 +1264,7 @@ const storageChain = chain(
     )
 
     const attached = await api(admin.accessToken, 'POST', `/workspaces/${WS}/calls/${callId}/recording/attach`, {
-      storageKey: up.data.storageKey,
+      storageKey: up.data?.storageKey,
     })
     storageChain.step(attached.status < 400, `attach -> ${attached.status}`)
     globalThis.__expectBytes = SIZE
@@ -1251,7 +1341,8 @@ check(Array.isArray(record?.recordings), 'with a place for every piece of its re
 // And the bytes come back — read from the page, so playback is exercised
 // across the same origin boundary the app plays them across.
 if (!storageChecked) {
-  // Already skipped above, with the reason; nothing left to do here.
+  // Already reported above, all five, with the reason: skipped where the
+  // machine has no store and the deployment says it has none, failed otherwise.
 } else {
   const url = (record?.recordings ?? [])[0]
   storageChain.step(typeof url === 'string' && url.length > 0, `recordings: ${JSON.stringify(record?.recordings)?.slice(0, 160)}`)

@@ -13,27 +13,28 @@
 # watches it — no error, no explanation, no way to read what went wrong. The
 # cooldown is what converts "this is not working" into an honest error boundary.
 #
-# PREDICTED TWO AND IT IS ONE, and the one that stayed green is worth the note.
-# The pair is meant to be complementary — the boundary must appear AND the
-# reload count must stay bounded — and the run reports
-# `PASS no reload loop (2 document loads)` beside the boundary check failing.
+# PREDICTED TWO, AND IT IS TWO SINCE 29 SEPTEMBER. The pair is complementary —
+# the boundary must appear AND the recovery must stand down — and the reload
+# check used to be `reloads <= 3`, which this patch left green at
+# `no reload loop (2 document loads)`: the chunk is only asked for on a click,
+# the suite clicks twice, and without the cooldown each click reloads once. Two
+# is under three, so the ceiling could not see a missing cooldown in the window
+# the suite waits (`commit-log/log-641be6c-1`).
 #
-# Two is under the check's ceiling of three, so the loop check cannot see a
-# missing cooldown inside the window the suite waits: the suite clicks, waits
-# four seconds, clicks again, waits five, and an unbounded reload gets through
-# two documents in that time rather than thirty. **The bound is real and the
-# check is loose**, which is a fact about the check rather than about the code —
-# and the honest place for it is here, where the next person reading this patch
-# can see that one of its two checks is not load-bearing. Tightening the ceiling
-# would need the suite to wait longer, which costs every run; naming it costs
-# nothing.
+# The check asserts the cooldown itself now: exactly ONE recovery reload, the
+# second failure inside the cooldown standing down to the boundary instead. On
+# the builds this was measured against (outside the repository, the suite's own
+# two releases with this replacement made in release A's copy), the run reads
+# `FAIL … (2 document loads) — the second failure, inside the cooldown,
+# reloaded again instead of standing down` beside the boundary check, 25 passed
+# and 2 failed; unpatched it is 27 of 27 with one document load.
 #
 # The `force` path is untouched, so the Try again button still works — which is
 # what keeps this from being the obvious deletion. Only the automatic recovery
 # loses its bound.
 #
-# Reddens: stale-chunk-recovery: "the error boundary is shown once reloading has not helped"
-#   (`no reload loop (${reloads} document loads)` stays green — see the paragraph above)
+# Reddens: stale-chunk-recovery: "the error boundary is shown once reloading has not helped" and
+#   "no reload loop: one recovery reload, and no second inside the cooldown"
 import io
 p = '/home/user/rundesk/apps/web/src/lib/chunk-reload.ts'
 a = """export function reloadForStaleChunks(force = false): boolean {

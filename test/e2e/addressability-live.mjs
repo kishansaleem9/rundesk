@@ -18,6 +18,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -68,6 +69,9 @@ const check = (ok, label, detail = '') => {
   else { failed++; console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`) }
 }
 const say = (s) => console.log(`\n▶ ${s}`)
+// A branch that could not run fails its checks with the reason, under the
+// sentences the branch that did run prints — see `lib/chain.mjs`.
+const chain = makeChain(check)
 
 /** Raise when checks are added — a suite that quietly shrinks reads as green. */
 const EXPECTED_CHECKS = 28
@@ -119,12 +123,22 @@ try {
   const A = apiAs(admin.accessToken)
   const WS = admin.workspaces[0].id
 
+  /*
+   * THE FIXTURE, READ OPTIONALLY AND NAMED WHEN IT IS MISSING. This was
+   * `spaces.data[0].id` and `projects.data[0].id`, which throw a TypeError that
+   * names no fixture when a read answers with nothing. Every check below needs
+   * this list, so a missing one still ends the run — as a sentence saying which.
+   */
   const spaces = await A(`/spaces/workspace/${WS}`)
-  const projects = await A(`/projects/space/${spaces.data[0].id}`)
-  const lists = await A(`/lists/project/${projects.data[0].id}`)
+  const spaceId = spaces.data?.[0]?.id
+  if (!spaceId) throw new Error(`the workspace has no space to use (GET /spaces/workspace answered ${spaces.status})`)
+  const projects = await A(`/projects/space/${spaceId}`)
+  const projectId = projects.data?.[0]?.id
+  if (!projectId) throw new Error(`the first space has no project to use (GET /projects/space answered ${projects.status})`)
+  const lists = await A(`/lists/project/${projectId}`)
   const listId = lists.data?.[0]?.id
   if (!listId) throw new Error('no list in the seeded workspace')
-  const listPath = `${WS}/${spaces.data[0].id}/${projects.data[0].id}/${listId}`
+  const listPath = `${WS}/${spaceId}/${projectId}/${listId}`
 
   stack = await startLocalStack({ dist: DIST, apiPort: API_PORT })
   const origin = stack.base
@@ -174,7 +188,20 @@ try {
     'a task whose TITLE does not contain the word is still shown',
     paletteText.slice(0, 140),
   )
-  check(!/No matches/i.test(paletteText), 'and the palette does not claim "no matches"', paletteText.slice(0, 90))
+  /*
+   * THE PALETTE'S OWN EMPTY STATE, BY ITS ELEMENT. `!/No matches/` passed on
+   * any wording but today's: cmdk draws `[cmdk-empty]` exactly when its list
+   * holds nothing, so that element is what "claims no matches" — counted inside
+   * a list that is on screen, since a palette that never drew one has no empty
+   * state either.
+   */
+  const paletteLists = await page.locator('[cmdk-list]').count()
+  const paletteEmpty = await page.locator('[cmdk-list] [cmdk-empty]').count()
+  check(
+    paletteLists > 0 && paletteEmpty === 0,
+    'and the palette does not claim "no matches"',
+    paletteLists ? `the list draws its empty state over: ${paletteText.slice(0, 90)}` : 'no palette list was on screen to read',
+  )
 
   /*
    * G03-9 — her Status submenu (frames 047/052) reads "All ✓ / Active /
@@ -189,18 +216,14 @@ try {
     // link above. A missing All chip used to shorten the run by one rather
     // than failing the claim that it starts selected.
     check(present > 0, `the ${group} filter offers an explicit All`, `no All chip in the ${group} group`)
+    const startsAll = chain(`and All is the state it starts in for ${group}`)
     if (present === 0) {
-      check(
-        false,
-        `and All is the state it starts in for ${group}`,
-        'skipped: there was no All chip to read the state off',
-      )
+      startsAll.rest('skipped: there was no All chip to read the state off')
     } else {
-      check(
+      startsAll.step(
         (await all.getAttribute('aria-pressed')) === 'true' ||
           (await all.getAttribute('data-active')) === 'true' ||
           /bg-|text-foreground/.test((await all.getAttribute('class')) ?? ''),
-        `and All is the state it starts in for ${group}`,
         'All is offered but does not read as selected with nothing filtered',
       )
     }
@@ -231,12 +254,13 @@ try {
    * suite in this audit with this shape; the rule is that every branch reports
    * the same number of checks.
    */
+  const returns = chain('and clicking it returns there')
   if (haveBackLink) {
     await backLink.click()
     await page.waitForTimeout(2500)
-    check(page.url().endsWith(`/app/${WS}`), 'and clicking it returns there', page.url())
+    returns.step(page.url().endsWith(`/app/${WS}`), page.url())
   } else {
-    check(false, 'and clicking it returns there', 'skipped: there was no back link to click')
+    returns.rest('skipped: there was no back link to click')
   }
 
   // ── 3. the profile tab is an address ─────────────────────────────────────
@@ -244,12 +268,14 @@ try {
   await page.goto(`${origin}/app/profile`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(2500)
   const secTab = page.getByRole('button', { name: /security/i }).first()
+  // The claim's own sentence on both paths — the missing tab is the reason, not the claim.
+  const securityTab = chain('choosing Security puts it in the address')
   if ((await secTab.count()) === 0) {
-    check(false, 'no Security tab to click')
+    securityTab.rest('skipped: there was no Security tab to click')
   } else {
     await secTab.click()
     await page.waitForTimeout(1500)
-    check(/[?&]tab=security/.test(page.url()), 'choosing Security puts it in the address', page.url())
+    securityTab.step(/[?&]tab=security/.test(page.url()), page.url())
   }
 
   // ── 4. a task opened from the list has an address ────────────────────────
@@ -300,13 +326,14 @@ try {
   const sprint = page.locator('[data-testid="workspace-sidebar"] a[href$="/sprints"]').first()
   const haveSprint = (await sprint.count()) > 0
   check(haveSprint, 'the sidebar carries a Sprints entry')
+  // Reported, not skipped — see the note on the back link above.
+  const sprintsPage = chain('and it opens the sprints page')
   if (haveSprint) {
     await sprint.click()
     await page.waitForTimeout(2800)
-    check(/\/sprints$/.test(new URL(page.url()).pathname), 'and it opens the sprints page', page.url())
+    sprintsPage.step(/\/sprints$/.test(new URL(page.url()).pathname), page.url())
   } else {
-    // Reported, not skipped — see the note on the back link above.
-    check(false, 'and it opens the sprints page', 'skipped: there was no Sprints entry to click')
+    sprintsPage.rest('skipped: there was no Sprints entry to click')
   }
 
   // ── 6. chat: channel and thread ──────────────────────────────────────────
@@ -330,21 +357,21 @@ try {
   // read then, not four fixed seconds after landing, which a sweep's load outran.
   await waitUntil(() => /[?&]doc=/.test(page.url()), { timeoutMs: 20_000 })
   check(/[?&]doc=/.test(page.url()), 'landing on docs names the doc it opened', page.url())
-  if (!secondDoc.data?.id) {
-    // Two checks, not one — see the note on the back link above. Without the
-    // second doc neither claim can be made, and saying so twice keeps the run
-    // the same length as one that could.
-    check(false, 'switching doc changes the address', 'skipped: no second doc could be created')
-    check(
-      false,
-      'and coming back to that address reopens THAT doc, not the first one',
-      'skipped: no second doc could be created',
-    )
+  // Two checks, not one — see the note on the back link above. Without the
+  // second doc neither claim can be made, and failing both keeps the run the
+  // same length as one that could.
+  const secondDocId = secondDoc.data?.id
+  const docAddress = chain(
+    'switching doc changes the address',
+    'and coming back to that address reopens THAT doc, not the first one',
+  )
+  if (!secondDocId) {
+    docAddress.rest(`skipped: no second doc could be created (POST answered ${secondDoc.status})`)
   } else {
-    await page.getByTestId(`docs-tree-item-${secondDoc.data.id}`).first().click()
+    await page.getByTestId(`docs-tree-item-${secondDocId}`).first().click()
     await page.waitForTimeout(2000)
     const docUrl = page.url()
-    check(docUrl.includes(`doc=${secondDoc.data.id}`), 'switching doc changes the address', docUrl)
+    docAddress.step(docUrl.includes(`doc=${secondDocId}`), docUrl)
     await page.goto(`${origin}/app/${WS}/inbox`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(1500)
     await page.goto(docUrl, { waitUntil: 'domcontentloaded' })
@@ -355,12 +382,8 @@ try {
       { timeoutMs: 20_000 },
     )
     const reopened = await page.getByTestId('docs-active-title').innerText().catch(() => '')
-    check(
-      reopened.includes(SECOND_DOC),
-      'and coming back to that address reopens THAT doc, not the first one',
-      `reopened "${reopened.trim()}"`,
-    )
-    tidy(await A(`/docs/${secondDoc.data.id}`, { method: 'DELETE' }), `/docs/${secondDoc.data.id}`)
+    docAddress.step(reopened.includes(SECOND_DOC), `reopened "${reopened.trim()}"`)
+    tidy(await A(`/docs/${secondDocId}`, { method: 'DELETE' }), `/docs/${secondDocId}`)
   }
 
   // ── 8. dashboard: mode in the address, and counts that are the caller's ──
@@ -369,12 +392,13 @@ try {
   await page.waitForTimeout(3500)
   check(!/[?&]mode=/.test(page.url()), 'the dashboard starts on Overview with a clean address', page.url())
   const custom = page.getByText('Custom', { exact: false }).first()
+  const customMode = chain('switching to Custom puts it in the address')
   if ((await custom.count()) > 0) {
     await custom.click()
     await page.waitForTimeout(2000)
-    check(/[?&]mode=custom/.test(page.url()), 'switching to Custom puts it in the address', page.url())
+    customMode.step(/[?&]mode=custom/.test(page.url()), page.url())
   } else {
-    check(false, 'no Custom tab to switch to')
+    customMode.rest('skipped: there was no Custom tab to switch to')
   }
   // The server-side half: the scoped listing agrees with the member endpoint.
   // That endpoint is OPEN work only since `home-today-overdue-includes-closed`
@@ -409,16 +433,13 @@ try {
   await page.goto(`${origin}/app/${WS}/settings?tab=members`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
   const trash = page.getByTestId('settings-tab-trash')
+  const trashTab = chain('moving to Trash replaces Members in the address')
   if ((await trash.count()) === 0) {
-    check(false, 'no Trash tab to move to')
+    trashTab.rest('skipped: there was no Trash tab to move to')
   } else {
     await trash.first().click()
     await page.waitForTimeout(2000)
-    check(
-      /[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()),
-      'moving to Trash replaces Members in the address',
-      page.url(),
-    )
+    trashTab.step(/[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()), page.url())
   }
 
   // ── 10. the type picker, which needs the seeded task types ───────────────

@@ -35,6 +35,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -63,6 +64,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A check whose fixture is missing fails with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -166,14 +169,21 @@ try {
   /*
    * A name in the bin does not reserve itself forever. Deleting a list and
    * making a new one with the same name is an ordinary thing to do.
+   *
+   * THE ID IS READ OPTIONALLY. "The first list is created" may fail, and
+   * `first.data.id` inside the SQL then threw, ending the run eight checks
+   * short. Without a first list there is nothing to bin, so this check fails
+   * naming it and the checks below still run.
    */
-  await sql`update lists set is_archived = true where id = ${first.data.id}`
-  const reused = await A('/lists', { method: 'POST', body: { projectId: project.id, name: NAME } })
-  chk(
-    reused.status < 400,
-    'and an archived list does not hold its name hostage',
-    `the name stayed reserved by a binned list (${reused.status})`,
-  )
+  const firstId = first.data?.id
+  const binned = chain('and an archived list does not hold its name hostage')
+  if (!firstId) {
+    binned.rest(`skipped: the first list was never made (POST answered ${first.status}), so there was none to bin`)
+  } else {
+    await sql`update lists set is_archived = true where id = ${firstId}`
+    const reused = await A('/lists', { method: 'POST', body: { projectId: project.id, name: NAME } })
+    binned.step(reused.status < 400, `the name stayed reserved by a binned list (${reused.status})`)
+  }
 
   // -------------------------------------------------------------------------
   console.log('\n▶ THE CONSTRAINT IS IN THE DATABASE, not only in the service')

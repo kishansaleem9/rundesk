@@ -12,6 +12,7 @@ import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixtu
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { makeChain } from './lib/chain.mjs'
+import { waitUntil } from './lib/wait.mjs'
 const chromium = await resolveChromium()
 
 const argOf = (name, fallback) => {
@@ -394,16 +395,18 @@ try {
 
   say('4. Watchers / followers popover (V7)')
   const bell = sheet.getByRole('button', { name: /watcher|follow/i }).first()
+  // FOUR CHECKS WHICHEVER WAY THIS GOES: with no bell the else used to report
+  // one `bad()` against the chain of four the bell leads to.
+  const followers = chain(
+    'the followers dialog opens from the header bell',
+    'it shows the follower count',
+    'and a control to change your own follow state',
+    'and a way to add a teammate as a follower',
+  )
   if (await bell.count()) {
     await bell.click()
     await page.waitForTimeout(1200)
     const dlg = page.locator('[role=dialog]:visible')
-    const followers = chain(
-      'the followers dialog opens from the header bell',
-      'it shows the follower count',
-      'and a control to change your own follow state',
-      'and a way to add a teammate as a follower',
-    )
     const haveDlg = (await dlg.count()) > 0
     followers.step(haveDlg, 'no followers dialog')
     if (!haveDlg) {
@@ -420,7 +423,7 @@ try {
       await page.waitForTimeout(800)
     }
   } else {
-    bad('no watchers control in the task header')
+    followers.rest('no watchers control in the task header')
   }
 
   say('5. Checklists tab (V4)')
@@ -428,9 +431,34 @@ try {
   await page.waitForTimeout(1400)
   const clText = await sheet.innerText({ timeout: 5000 }).catch(() => '')
   check(/checklist/i.test(clText), 'the checklists tab renders', `tab body: ${clText.slice(0, 140)}`)
-  check(!/Due date.*checklist item/i.test(clText),
+  /*
+   * THE CONTROL ITSELF, NOT THE ABSENCE OF A PHRASE. `!/Due date.*checklist
+   * item/` passed on any date control labelled any other way, and on a tab
+   * that drew no item form at all. An item is added with its text and then
+   * its first control after the text; V4 made that control the assignee
+   * picker — a select whose first option is nobody and whose others are the
+   * workspace's people — so that is what is read, off the add-item form.
+   */
+  const itemForm = await sheet
+    .locator('[data-testid="checklist-item-form"]')
+    .first()
+    .evaluate((form) => {
+      const fields = [...form.querySelectorAll('input, select, textarea')]
+        .filter((el) => el.dataset.testid !== 'checklist-item-input')
+      const first = fields[0]
+      if (!first) return { first: null, options: [] }
+      const options = first.tagName === 'SELECT' ? [...first.options].map((o) => o.value) : []
+      return { first: first.tagName === 'INPUT' ? `input[type=${first.type}]` : first.tagName.toLowerCase(), options }
+    }, undefined, { timeout: 5000 })
+    .catch(() => null)
+  check(
+    itemForm?.first === 'select' && itemForm.options[0] === '' && itemForm.options.length > 1,
     'checklist items are not date-first (V4 replaced the date with an assignee)',
-    'a due-date control is still the primary checklist item field')
+    itemForm
+      ? `the item's first control after its text is ${JSON.stringify(itemForm.first)} with options ` +
+          `${JSON.stringify(itemForm.options.slice(0, 4))} — not an assignee picker`
+      : 'no add-item form on the Checklists tab to read',
+  )
 
   say('6. Subtasks tab (V5)')
   await sheet.getByRole('button', { name: 'Subtasks', exact: true }).click()
@@ -441,26 +469,43 @@ try {
 
   // ═════════════════════════════════════ Board view ════════════════════
   say('7. Board view (V3)')
+  /*
+   * TWO CHECKS ON EVERY PATH, AND NEITHER OF THEM A SKIP.
+   *
+   * The card this clicks is the task THIS RUN added (`SWEEP_TASK`, through the
+   * list's own quick-add, on a list `ensureSweepFixture` has already filled
+   * with six more). So a board with no card for it is not a board with nothing
+   * to click — it is a board that does not show a task the list holds, which
+   * is the product failing. It used to be a counted SKIP, "no known card on the
+   * board to click", so exactly that regression exited 0. A skip is for the
+   * machine, the deployment or the invocation, never for what the product
+   * rendered; this one now fails with the reason. (The missing-tab `else` was
+   * one check against the tab's two, so losing the tab also shortened the run.)
+   */
+  const board = chain(
+    'the board renders its status columns',
+    'clicking a card opens the task — the click is not swallowed by drag-and-drop',
+  )
   const viewTab = page.getByRole('button', { name: 'Board', exact: true }).first()
   if (await viewTab.count()) {
     await viewTab.click()
     await page.waitForTimeout(2600)
     const body = await page.locator('body').innerText()
-    check(/Backlog|To do|In progress/.test(body), 'the board renders its status columns',
-      `board body: ${body.slice(0, 160)}`)
+    board.step(/Backlog|To do|In progress/.test(body), `board body: ${body.slice(0, 160)}`)
     const card = firstTaskCard()
     if (await card.count()) {
       await card.click()
       await page.waitForTimeout(2200)
-      check(await page.locator('div.shadow-2xl.border-l').count() > 0,
-        'clicking a card opens the task — the click is not swallowed by drag-and-drop',
-        'clicking a board card did not open the task')
+      board.step(await page.locator('div.shadow-2xl.border-l').count() > 0, 'clicking a board card did not open the task')
       await closeSheet()
     } else {
-      skip('no known card on the board to click')
+      board.rest(
+        `the board shows no card for ${JSON.stringify(SWEEP_TASK)}, the task this run added to the list it is ` +
+          'showing — a task the list holds and the board does not draw is the product failing, not the machine',
+      )
     }
   } else {
-    bad('no Board view tab in the view strip')
+    board.rest('no Board view tab in the view strip')
   }
 
   // ═══════════════════════════════════════ Share panel ═════════════════
@@ -533,6 +578,14 @@ try {
   await page.keyboard.press('Control+k')
   await page.waitForTimeout(1200)
   const palette = page.locator('[role=dialog]:visible, [cmdk-root]').first()
+  /*
+   * THREE CHAINS, IN THE ORDER THEY RUN, and the middle one is the ⋯'s own.
+   * This was one seventeen-sentence chain, and a missing ⋯ filled its section
+   * with `for (let n = 0; n < 4; n += 1) pal.step(false, …)` — so the day that
+   * section gained or lost a step, the literal 4 would have reported every
+   * later sentence against the wrong check rather than failing. With the ⋯'s
+   * four in a chain of their own, `rest` fills exactly that section.
+   */
   const pal = chain(
     'the palette opens on Ctrl+K',
     'it returns results',
@@ -541,10 +594,14 @@ try {
     'the Files type chip is on the bar',
     'the People type chip is on the bar',
     'and a ⋯ for the rest',
+  )
+  const palMore = chain(
     'comment is reachable from the ⋯',
     'channel is reachable from the ⋯',
     'message is reachable from the ⋯',
     'and choosing one promotes it onto the bar',
+  )
+  const palSort = chain(
     'the "Relevance" sort chip is offered',
     'the "Last updated" sort chip is offered',
     'the "Last created" sort chip is offered',
@@ -555,7 +612,9 @@ try {
   const havePalette = (await palette.count()) > 0
   pal.step(havePalette, 'Ctrl+K did not open the palette')
   if (!havePalette) {
-    pal.rest('skipped: the palette never opened, so nothing in it could be read')
+    for (const section of [pal, palMore, palSort]) {
+      section.rest('skipped: the palette never opened, so nothing in it could be read')
+    }
   } else {
     const input = page.locator('input:visible').last()
     await input.fill('task')
@@ -584,26 +643,27 @@ try {
     const haveMore = (await more.count()) > 0
     pal.step(haveMore, 'no overflow control for the other types')
     if (!haveMore) {
-      // Four checks depend on the ⋯: the three types behind it and the
-      // promotion. Reported, not skipped — see the chain note at the top.
-      for (let n = 0; n < 4; n += 1) pal.step(false, 'skipped: there was no ⋯ to open')
+      // The checks that depend on the ⋯ — the types behind it and the
+      // promotion — are its own chain's. Reported, not skipped — see the
+      // chain note at the top.
+      palMore.rest('skipped: there was no ⋯ to open')
     } else {
       await more.click()
       await page.waitForTimeout(900)
       for (const ty of ['comment', 'channel', 'message']) {
         const entry = palette.locator(`[data-testid=palette-add-type-${ty}]`)
-        pal.step((await entry.count()) > 0, `${ty} is offered nowhere`)
+        palMore.step((await entry.count()) > 0, `${ty} is offered nowhere`)
       }
       // Promoting one has to actually put it on the bar, or the ⋯ is a menu
       // that leads nowhere — which is the failure this section exists to catch.
       await palette.locator('[data-testid=palette-add-type-comment]').first().click().catch(() => {})
       await page.waitForTimeout(1200)
       const promoted = await palette.locator('button:visible').allInnerTexts()
-      pal.step(promoted.includes('Comments'),
+      palMore.step(promoted.includes('Comments'),
         `Comments never appeared: ${JSON.stringify(promoted.slice(0, 14))}`)
     }
     for (const so of ['Relevance', 'Last updated', 'Last created']) {
-      pal.step(chips.includes(so), `no "${so}" chip`)
+      palSort.step(chips.includes(so), `no "${so}" chip`)
     }
 
     // Multi-select is the case that was broken in production — prove the chips
@@ -612,11 +672,11 @@ try {
     await palette.getByRole('button', { name: 'Docs', exact: true }).click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1600)
     const afterDocs = await palette.innerText({ timeout: 5000 }).catch(() => '')
-    pal.step(!/^TASKS$/m.test(afterDocs), 'tasks still listed with only Docs selected')
+    palSort.step(!/^TASKS$/m.test(afterDocs), 'tasks still listed with only Docs selected')
     await palette.getByRole('button', { name: 'Tasks', exact: true }).click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1600)
     const both = await palette.innerText({ timeout: 5000 }).catch(() => '')
-    pal.step(/^TASKS$/m.test(both), `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
+    palSort.step(/^TASKS$/m.test(both), `task group missing with Tasks+Docs selected: ${both.slice(0, 200)}`)
     // By testid: Status and Priority now offer their own "All" chip, so a
     // click matched on the visible label alone is ambiguous between three
     // buttons and throws on strict mode. This one means the TYPE group.
@@ -625,7 +685,7 @@ try {
 
     await palette.getByRole('button', { name: 'Last updated', exact: true }).click()
     await page.waitForTimeout(1600)
-    pal.step((await palette.innerText()).length > 60, 'sorting emptied the palette')
+    palSort.step((await palette.innerText()).length > 60, 'sorting emptied the palette')
     await page.keyboard.press('Escape')
     await page.waitForTimeout(700)
   }
@@ -828,19 +888,25 @@ try {
 
   say('14. Work schedule from the UI, and Workload reacts')
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  await page.getByRole('button', { name: 'Sat', exact: true }).click()
-  await page.waitForTimeout(1600)
-  check(await page.getByRole('button', { name: 'Sat', exact: true }).getAttribute('aria-pressed') === 'true',
+  // The day buttons are pressed once drawn, and read once their state has
+  // answered — each waited for (bounded): a loaded machine outlasts fixed waits,
+  // and a missed press on the way back would leave the shared week at six days.
+  const sat = page.getByRole('button', { name: 'Sat', exact: true })
+  await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  await sat.click({ timeout: 10_000 }).catch(() => {})
+  await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'true', { timeoutMs: 10_000 })
+  check(await sat.getAttribute('aria-pressed', { timeout: 5000 }).catch(() => null) === 'true',
     'Saturday toggled on', 'Saturday did not toggle')
   await page.goto(`${B}/app/${WS}/workload`, { waitUntil: 'domcontentloaded' })
   await page.waitForTimeout(3000)
   check(/Workload/i.test(await page.locator('body').innerText()),
     'the workload report still renders with a six-day week', 'workload failed to render')
   await page.goto(`${B}/app/${WS}/settings?tab=workSchedule`, { waitUntil: 'domcontentloaded' })
-  await page.waitForTimeout(2000)
-  await page.getByRole('button', { name: 'Sat', exact: true }).click()
-  await page.waitForTimeout(1400)
+  await sat.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
+  if ((await sat.getAttribute('aria-pressed', { timeout: 5000 }).catch(() => null)) === 'true') {
+    await sat.click({ timeout: 10_000 }).catch(() => {})
+    await waitUntil(async () => (await sat.getAttribute('aria-pressed', { timeout: 2000 }).catch(() => null)) === 'false', { timeoutMs: 10_000 })
+  }
 
   say('15. Other surfaces still render')
   for (const [name, path] of [['Docs', 'docs'], ['Chat', 'chat'], ['Shared with me', 'shared'],

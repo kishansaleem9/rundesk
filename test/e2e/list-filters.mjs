@@ -16,6 +16,7 @@
  *   node test/e2e/list-filters.mjs --api 3011
  */
 import { signInApi } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -42,6 +43,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A check whose fixture is missing fails with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -197,13 +200,23 @@ try {
     'another member on the same list sees none of yours',
     `they saw ${JSON.stringify(theirs.map((f) => f.name))}`,
   )
-  const theirDelete = await B(`/lists/${list.id}/filters/${saved.data.id}`, { method: 'DELETE' })
-  chk(theirDelete.status === 404, 'and cannot delete one',
-    `deleting somebody else's saved filter returned ${theirDelete.status}`)
+  /*
+   * THE ID IS READ OPTIONALLY. "A filter saves" is a check that may fail, and
+   * `saved.data.id` then threw here, ending the run two checks short. The two
+   * deletes need the filter, so they fail naming it instead.
+   */
+  const savedId = saved.data?.id
+  const deletes = chain('and cannot delete one', 'while you can delete your own')
+  if (!savedId) {
+    deletes.rest(`skipped: the filter was never saved (POST answered ${saved.status}), so there was none to delete`)
+  } else {
+    const theirDelete = await B(`/lists/${list.id}/filters/${savedId}`, { method: 'DELETE' })
+    deletes.step(theirDelete.status === 404,
+      `deleting somebody else's saved filter returned ${theirDelete.status}`)
 
-  const mineGone = await A(`/lists/${list.id}/filters/${saved.data.id}`, { method: 'DELETE' })
-  chk(mineGone.status < 400, 'while you can delete your own',
-    `deleting your own returned ${mineGone.status}`)
+    const mineGone = await A(`/lists/${list.id}/filters/${savedId}`, { method: 'DELETE' })
+    deletes.step(mineGone.status < 400, `deleting your own returned ${mineGone.status}`)
+  }
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)

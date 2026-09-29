@@ -19,16 +19,31 @@
  *      had one reachable value — the facade, exactly. Migration 0150 adds the
  *      column AND the write, so the filter has something to discriminate.
  *
- * A REAL FAILURE IS FORCED, not simulated. `POST /ai/task/generate` against an
- * API with no model configured — CI, and every lane `RUNDESK_LANE_MODEL` does
- * not name — is a genuine failed run: it is the most common AI failure this
- * product has, and until 0150 it left no trace anywhere. The suite checks the
- * 503 explicitly (the fixture's `apiClient` NEVER THROWS, so a `.catch` on it
- * would be inert and a failed call would read as success), then proves exactly
- * one new failed row appeared and that the two status filters put it on
- * opposite sides. So this suite needs a lane WITHOUT a model: where one
- * answers, the request succeeds, the 503 check says so, and the failed-row
- * checks after it have nothing to count (`lane-env.sh`).
+ * A REAL FAILURE IS CAUSED, not simulated — and WHICH failure is read from the
+ * configuration before it is caused. `/ai/status` says whether a model is
+ * configured, and `POST /ai/task/generate` is made to fail the way that
+ * configuration makes real:
+ *
+ *   · no model (CI, and every lane `RUNDESK_LANE_MODEL` does not name): the
+ *     product's own "AI features are not configured" refusal, a 503 and a
+ *     `not_configured` row. The most common AI failure this product has, and
+ *     until 0150 it left no trace anywhere.
+ *   · a model (`model-stub.mjs`): the stub is told, through
+ *     `POST /__control/next`, to fail the call often enough to outlast the
+ *     client's retries, so the provider's failure reaches the product — a 5xx
+ *     and a `provider_error` row.
+ *
+ * Either way the refusal is scenery. This suite is about the row a failure
+ * leaves and the filters that find it, so the checks are the same checks on
+ * both kinds of lane and the row's `errorCode` must be the one the
+ * configuration predicts. It used to force the 503 alone, which made it a
+ * suite that stood on the refusal: green only where no model answered, and on
+ * a lane with one the 503 check failed and the failed-row checks after it had
+ * nothing to count (`lane-env.sh`). The status is checked explicitly (the
+ * fixture's `apiClient` NEVER THROWS, so a `.catch` on it would be inert and a
+ * failed call would read as success), then the run proves exactly one new
+ * failed row appeared and that the two status filters put it on opposite
+ * sides.
  *
  * ITS OWN FIXTURES: the failed row is identified by DELTA against a set of ids
  * read moments before, and the succeeded row carries a feature name unique to
@@ -63,12 +78,20 @@ const MINE_FEATURE = `e2e-af-${STAMP}`
 /** Tags the rows inserted directly, so exactly those can be removed. */
 const TAG = `e2e-af-model-${STAMP}`
 
+const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
+/*
+ * THE LANE'S MODEL STUB, asked for anything only where `/ai/status` says a
+ * model is configured. Lane k runs its API on 302k and `model-stub.mjs` on
+ * 92k (`lane-env.sh`); `--model` or `E2E_MODEL_PORT` overrides the formula.
+ */
+const MODEL = `http://127.0.0.1:${argOf('--model', process.env.E2E_MODEL_PORT ?? String(9200 + (API_PORT - 3020)))}`
+
 let stack = null
 let B = (process.env.BASE ?? '').replace(/\/$/, '')
 if (!B) {
   stack = await startLocalStack({
     dist: path.resolve(REPO, argOf('--dist', 'apps/web/dist')),
-    apiPort: Number(argOf('--api', process.env.E2E_API_PORT ?? 3011)),
+    apiPort: API_PORT,
   })
   B = stack.base
 }
@@ -122,22 +145,73 @@ try {
   const failedBefore = idsOf(before)
 
   /*
-   * A genuine failure, where no model is configured: the product's real "AI
-   * features are not configured" path — the one that used to 503 and record
-   * nothing at all. The status is checked EXPLICITLY:
-   * `apiClient` returns `{status, data, error}` and never throws, so a `.catch`
-   * here would be inert and a 200 would sail through as if it had failed.
+   * WHICH FAILURE IS REAL HERE, READ BEFORE ONE IS CAUSED. Availability belongs
+   * to the API process — one key per API, fixed when it starts (`lane-env.sh`)
+   * — so a suite cannot choose it, only ask. `/ai/status` answers, and the run
+   * causes the failure that answer makes real. An answer that is neither true
+   * nor false predicts nothing, so no failure is caused and the check below
+   * says why.
    */
-  const forced = await api('/ai/task/generate', {
-    method: 'POST',
-    body: { prompt: `activity filter fixture ${STAMP}`, workspaceId: WS },
-  })
+  const aiStatus = await api('/ai/status')
+  const statusKnown = aiStatus.status === 200 && typeof aiStatus.data?.available === 'boolean'
+  const modelConfigured = statusKnown && aiStatus.data.available === true
+  /** The `errorCode` the new row must carry, as the configuration predicts it. */
+  const predicted = modelConfigured ? 'provider_error' : 'not_configured'
+  const configuration = statusKnown
+    ? `/ai/status says a model is ${modelConfigured ? `configured (stub ${MODEL})` : 'not configured'}`
+    : `/ai/status answered ${aiStatus.status} ${JSON.stringify(aiStatus.data)?.slice(0, 80)}`
+  console.log(`  · ${configuration}, so the failure caused is ${modelConfigured ? "the provider's" : "the product's own refusal"}`)
+
+  /*
+   * THE PROVIDER'S FAILURE, ARRANGED where a model answers. The stub fails the
+   * call it is staged for `count` times over, because the product builds its
+   * client with the SDK's default retries: a failure the first attempt uses up
+   * lets the retry succeed, and the arranged failure reaches nobody
+   * (`model-stub.mjs` found that the moment its status became truthful).
+   * Reset BEFORE, because the stub outlives every run and whatever an earlier
+   * one staged and never used is still staged; reset AFTER, so what is left of
+   * the count does not fail whatever asks the model next on this lane.
+   *
+   * Where no model is configured nothing is arranged: the product's own "AI
+   * features are not configured" path is the failure, the one that used to 503
+   * and record nothing at all.
+   *
+   * The status is checked EXPLICITLY either way: `apiClient` returns
+   * `{status, data, error}` and never throws, so a `.catch` here would be inert
+   * and a 200 would sail through as if it had failed.
+   */
+  const stub = (route, body) =>
+    fetch(`${MODEL}/__control/${route}`, {
+      method: 'POST',
+      ...(body ? { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) } : {}),
+    })
+      .then((r) => r.ok)
+      .catch(() => false)
+  let arranged = false
+  if (modelConfigured) {
+    arranged =
+      (await stub('reset')) &&
+      (await stub('next', { status: 500, message: `arranged by ai-activity-filters ${STAMP}`, count: 8 }))
+  }
+  const forced =
+    statusKnown && (!modelConfigured || arranged)
+      ? await api('/ai/task/generate', {
+          method: 'POST',
+          body: { prompt: `activity filter fixture ${STAMP}`, workspaceId: WS },
+        })
+      : { status: 0, data: null }
+  if (modelConfigured) await stub('reset')
   chk(
-    forced.status === 503,
-    'asking for a task while AI is unconfigured is refused with a 503',
-    `it returned ${forced.status} — this environment CAN reach a model, so the ` +
-      'forced-failure fixture is not forcing anything and the status checks below ' +
-      'would prove nothing',
+    modelConfigured ? arranged && forced.status >= 500 : statusKnown && forced.status === 503,
+    modelConfigured
+      ? 'asking for a task while the provider fails is refused, not answered'
+      : 'asking for a task while AI is unconfigured is refused with a 503',
+    !statusKnown
+      ? `${configuration} — without the configuration there is no knowing which failure is real here, so none was caused`
+      : modelConfigured && !arranged
+        ? `the model stub at ${MODEL} would not stage a failure, so this run could not cause one and nothing below measures anything`
+        : `it returned ${forced.status} while ${configuration}` +
+          (modelConfigured ? ' and the stub was told to fail the call' : ''),
   )
 
   const afterFail = await activity('&status=failed')
@@ -156,9 +230,10 @@ try {
     `the new row was ${JSON.stringify(row)}`,
   )
   chk(
-    row?.errorCode === 'not_configured' && typeof row?.errorMessage === 'string' && row.errorMessage.length > 0,
+    row?.errorCode === predicted && typeof row?.errorMessage === 'string' && row.errorMessage.length > 0,
     'and carries WHY, in a sentence somebody can act on',
-    `errorCode=${JSON.stringify(row?.errorCode)} errorMessage=${JSON.stringify(row?.errorMessage)}`,
+    `errorCode=${JSON.stringify(row?.errorCode)}, where the configuration predicts ${JSON.stringify(predicted)}; ` +
+      `errorMessage=${JSON.stringify(row?.errorMessage)}`,
   )
   chk(
     row?.userId === ME,
@@ -168,10 +243,22 @@ try {
 
   console.log('\n▶ the two status filters put it on opposite sides')
   const succeeded = await activity('&status=succeeded')
+  /*
+   * AN ABSENCE IS A CLAIM ONLY WHERE THE ROW COULD HAVE BEEN. With no failed
+   * row made above — a model lane, or a regression of the failure write —
+   * `forcedFailureId` is null, no row has a null id, and this passed about a
+   * row that does not exist; a read that failed passed it the same way. So
+   * the row must exist and the read must have answered.
+   */
   chk(
-    !idsOf(succeeded).has(forcedFailureId),
+    forcedFailureId != null && succeeded.status === 200 && Array.isArray(succeeded.data) &&
+      !idsOf(succeeded).has(forcedFailureId),
     'the failed row is absent from "Succeeded"',
-    'a failed run is being listed as a success — the filter is decorative',
+    forcedFailureId == null
+      ? 'no failed row was made above, so its absence from "Succeeded" says nothing'
+      : succeeded.status !== 200 || !Array.isArray(succeeded.data)
+        ? `the Succeeded read answered ${succeeded.status}, so it could not have listed anything`
+        : 'a failed run is being listed as a success — the filter is decorative',
   )
   sql = await openDb()
   chk(
@@ -470,12 +557,16 @@ try {
   await page.getByTestId('ai-activity-status').selectOption('succeeded')
   await waitUntil(() => calls.slice(beforeSucceeded).some((u) => u.includes('status=succeeded')), { timeoutMs: 10_000 })
   await answerDrawn()
+  // As above: "drops it" is only a claim about a row that was made.
   chk(
-    (await page.locator(`[data-run-id="${forcedFailureId}"]`).count()) === 0 &&
+    forcedFailureId != null &&
+      (await page.locator(`[data-run-id="${forcedFailureId}"]`).count()) === 0 &&
       (await page.getByTestId('ai-activity-row').count()) > 0,
     'switching to Succeeded drops it, and does not empty the list',
-    `the failed row appeared ${await page.locator(`[data-run-id="${forcedFailureId}"]`).count()} times ` +
-      `among ${await page.getByTestId('ai-activity-row').count()} succeeded rows`,
+    forcedFailureId == null
+      ? 'no failed row was made above, so there was nothing for Succeeded to drop'
+      : `the failed row appeared ${await page.locator(`[data-run-id="${forcedFailureId}"]`).count()} times ` +
+          `among ${await page.getByTestId('ai-activity-row').count()} succeeded rows`,
   )
 
   console.log('\n▶ an empty list says the filters are why, and clears ALL of them')

@@ -185,11 +185,23 @@ try {
    * searching for a mountain gets a gradient and no way to know why. This fails
    * if either dead tab comes back.
    */
-  const tabsText = await page.locator('[role="tablist"]').first().innerText().catch(() => '')
+  /*
+   * AN ABSENCE IS A CLAIM ONLY WHERE THE THING COULD HAVE BEEN (`lib/fixture.mjs`
+   * states it). This read `[role="tablist"]` first and caught a failed read to
+   * '', so a missing tab strip passed both absence checks below — and "first"
+   * could as well have been some other tab strip on the page. The strip read
+   * is the picker's own, the one holding its Link tab, and it has to have been
+   * found and read before what is missing from it counts.
+   */
+  const coverTabs = page.locator('[role="tablist"]').filter({ has: page.getByTestId('cover-tab-link') })
+  const tabStrips = await coverTabs.count()
+  const tabsText = tabStrips === 1 ? await coverTabs.innerText().catch(() => '') : ''
+  const sawTabs = tabStrips === 1 && tabsText.trim().length > 0
+  const unseen = `no tab strip holding the picker's Link tab was read (${tabStrips} found), so what it lacks says nothing`
   chk(
-    !/photos/i.test(tabsText) && !/\bAI\b/.test(tabsText),
+    sawTabs && !/photos/i.test(tabsText) && !/\bAI\b/.test(tabsText),
     'and nothing that only pretends to work',
-    `the picker still offers: ${JSON.stringify(tabsText.replace(/\s+/g, ' '))}`,
+    sawTabs ? `the picker still offers: ${JSON.stringify(tabsText.replace(/\s+/g, ' '))}` : unseen,
   )
 
   /*
@@ -208,11 +220,13 @@ try {
    * deleted once already. Either way the suite should be the thing that asks.
    */
   chk(
-    !/search/i.test(tabsText),
+    sawTabs && !/search/i.test(tabsText),
     'the Search tab stays absent, and the comment that says why has been re-checked',
-    `the picker now offers a Search tab (${JSON.stringify(tabsText.replace(/\s+/g, ' '))}) — ` +
-      'if it searches a real provider, update the decision in cover-image-picker.tsx; ' +
-      'if it does not, it is a search box over nothing',
+    sawTabs
+      ? `the picker now offers a Search tab (${JSON.stringify(tabsText.replace(/\s+/g, ' '))}) — ` +
+          'if it searches a real provider, update the decision in cover-image-picker.tsx; ' +
+          'if it does not, it is a search box over nothing'
+      : unseen,
   )
 
   // Setting a colour from the Gallery has to actually reach the task.

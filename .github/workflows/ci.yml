@@ -207,20 +207,26 @@ jobs:
       # running a patch. A heuristic and a ratchet, both said out loud in the
       # script: it finds the shape, not whether the condition is ever false.
       #
+      # It COUNTS each side of an `if` — chk, check, ok/bad/skip where they
+      # report, a chain's .step, a .rest filling to the chain's length — and
+      # fails on two sides that differ, on a loop that re-types a count, and on
+      # a check inside a .catch. It used to ask only whether an `else` existed,
+      # and read 0 over 23 findings in 11 suites (29 September).
+      #
       # It also gates the assumption every number in this audit rests on: that
       # each suite declares EXPECTED_CHECKS and compares it with `!==`. That
       # line is what turns a run which stopped early into a reported failure
       # instead of a `0 failed` nobody questions, and nothing was checking it.
-      # All 113 have it; a suite arriving without it, or reaching for `<`
+      # All 242 have it; a suite arriving without it, or reaching for `<`
       # because it expects a skip, fails the build that brings it.
-      - name: No new suite gets a conditional check with no else
+      - name: No suite's branches report different numbers of checks
         run: node scripts/check-suite-check-branches.mjs
 
       # And that THAT rule can fail at all. It gates, its steady-state answer is
       # zero, and until check-branches-cases.mjs it had nothing able to tell a
       # working rule from a broken one — the position section-enders was in, and
       # the one three mutation harnesses turned out to be in even after they had
-      # one. 13 cases over fixture suites, 6 of 6 mutations redden one.
+      # one. 39 cases over fixture suites, 23 of 23 mutations redden one.
       - name: The conditional-check rule can fail, and each case bites
         run: node scripts/check-branches-cases.mjs --mutate
 

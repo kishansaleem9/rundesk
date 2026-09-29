@@ -40,6 +40,7 @@
  *   node test/e2e/space-default-permission.mjs --api 3011
  */
 import { signInApi, signUpApi } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -70,6 +71,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A section whose fixture is missing fails its checks with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 /*
  * NEVER THROWS — it returns `{status, data, error}`. So every call site below
@@ -284,6 +287,20 @@ try {
     'the member has a list of their own in each space, made while the space allowed it',
     `create returned ${viewList.status} / ${commentList.status} / ${editList.status}`,
   )
+  /*
+   * THE THREE IDS, READ ONCE AND OPTIONALLY. The check above is allowed to
+   * fail, and every section below used `viewList.data.id` (or its two
+   * siblings) bare — so one refused create threw a TypeError at the first of
+   * them, and with this suite's single `try` the twenty-six checks from there
+   * on went with it. Each section that needs a list now asks for it, and fails
+   * its checks naming the list that was never made.
+   */
+  const viewListId = viewList.data?.id
+  const commentListId = commentList.data?.id
+  const editListId = editList.data?.id
+  const neverMade = (where, res) =>
+    `skipped: the member's own list in the ${where} space was never made (POST /lists answered ${res.status}), ` +
+    'so there was nothing of theirs to act on'
 
   // ── `06:52` — and ADDING to the space is a change to the space ────────────
   console.log('\n▶ `06:52` — "View only" refuses creation, not only editing')
@@ -328,81 +345,101 @@ try {
   // ── the refusals ──────────────────────────────────────────────────────────
   console.log('\n▶ `06:52` — "View only" means the server says no')
 
-  const renamedView = await M(`/lists/${viewList.data.id}`, {
-    method: 'PUT',
-    body: { name: `${TAG} renamed by member` },
-  })
-  chk(
-    renamedView.status === 403,
+  const viewRefusals = chain(
     'renaming their OWN list in a view-only space is refused with 403',
-    `PUT /lists/:id returned ${renamedView.status} ${messageOf(renamedView.error)} — ` +
-      'the space says View only and the creator short-circuit let it through anyway',
-  )
-  chk(
-    /default permission/i.test(messageOf(renamedView.error)),
     'and the refusal says WHY — the space\'s default permission, not a generic denial',
-    `the 403 read "${messageOf(renamedView.error)}"`,
-  )
-
-  /*
-   * The row itself, re-read as the admin. A 403 with the write applied anyway
-   * is a check passing on a bug — the status code and the state are different
-   * facts and only the second one is the feature.
-   */
-  const afterView = await A(`/lists/${viewList.data.id}`)
-  /*
-   * COMPARED AGAINST THE NAME THAT WAS CREATED, not against a re-derived
-   * literal. This read `=== \`${TAG} list\``, and giving each fixture list its
-   * own sequence number — which the break test above demanded — broke it
-   * immediately: the row was correctly untouched and the check reported it
-   * changed, because the literal it compared to no longer described anything.
-   * A check that re-derives a value the fixture owns will drift every time the
-   * fixture does; reading it back from the creation response cannot.
-   */
-  const viewListName = viewList.data?.name
-  chk(
-    afterView.status === 200 && !!viewListName && afterView.data?.name === viewListName,
     'and the list really is unchanged — the refusal was not cosmetic',
-    `the list was created as ${JSON.stringify(viewListName)} and is now named ` +
-      `${JSON.stringify(afterView.data?.name)} (status ${afterView.status})`,
-  )
-
-  const deletedView = await M(`/lists/${viewList.data.id}`, { method: 'DELETE' })
-  chk(
-    deletedView.status === 403,
     'deleting it is refused too, not only renaming it',
-    `DELETE /lists/:id returned ${deletedView.status} ${messageOf(deletedView.error)}`,
   )
+  if (!viewListId) {
+    viewRefusals.rest(neverMade('view-only', viewList))
+  } else {
+    const renamedView = await M(`/lists/${viewListId}`, {
+      method: 'PUT',
+      body: { name: `${TAG} renamed by member` },
+    })
+    viewRefusals.step(
+      renamedView.status === 403,
+      `PUT /lists/:id returned ${renamedView.status} ${messageOf(renamedView.error)} — ` +
+        'the space says View only and the creator short-circuit let it through anyway',
+    )
+    viewRefusals.step(
+      /default permission/i.test(messageOf(renamedView.error)),
+      `the 403 read "${messageOf(renamedView.error)}"`,
+    )
 
-  const renamedComment = await M(`/lists/${commentList.data.id}`, {
-    method: 'PUT',
-    body: { name: `${TAG} renamed in comment space` },
-  })
-  chk(
-    renamedComment.status === 403,
+    /*
+     * The row itself, re-read as the admin. A 403 with the write applied anyway
+     * is a check passing on a bug — the status code and the state are different
+     * facts and only the second one is the feature.
+     */
+    const afterView = await A(`/lists/${viewListId}`)
+    /*
+     * COMPARED AGAINST THE NAME THAT WAS CREATED, not against a re-derived
+     * literal. This read `=== \`${TAG} list\``, and giving each fixture list its
+     * own sequence number — which the break test above demanded — broke it
+     * immediately: the row was correctly untouched and the check reported it
+     * changed, because the literal it compared to no longer described anything.
+     * A check that re-derives a value the fixture owns will drift every time the
+     * fixture does; reading it back from the creation response cannot.
+     */
+    const viewListName = viewList.data?.name
+    viewRefusals.step(
+      afterView.status === 200 && !!viewListName && afterView.data?.name === viewListName,
+      `the list was created as ${JSON.stringify(viewListName)} and is now named ` +
+        `${JSON.stringify(afterView.data?.name)} (status ${afterView.status})`,
+    )
+
+    const deletedView = await M(`/lists/${viewListId}`, { method: 'DELETE' })
+    viewRefusals.step(
+      deletedView.status === 403,
+      `DELETE /lists/:id returned ${deletedView.status} ${messageOf(deletedView.error)}`,
+    )
+  }
+
+  const commentRung = chain(
     '`comment` — the rung between — is refused as well, so the gate is a ladder and not an `=== "view"`',
-    `PUT in the comment-default space returned ${renamedComment.status} ${messageOf(renamedComment.error)}`,
   )
+  if (!commentListId) {
+    commentRung.rest(neverMade('comment', commentList))
+  } else {
+    const renamedComment = await M(`/lists/${commentListId}`, {
+      method: 'PUT',
+      body: { name: `${TAG} renamed in comment space` },
+    })
+    commentRung.step(
+      renamedComment.status === 403,
+      `PUT in the comment-default space returned ${renamedComment.status} ${messageOf(renamedComment.error)}`,
+    )
+  }
 
   console.log('\n▶ and it narrows rather than blocking everything')
 
-  const renamedEdit = await M(`/lists/${editList.data.id}`, {
-    method: 'PUT',
-    body: { name: `${TAG} renamed in edit space` },
-  })
-  chk(
-    renamedEdit.status < 400 && renamedEdit.data?.name === `${TAG} renamed in edit space`,
-    'the SAME member renaming the SAME kind of list succeeds where the default is `edit`',
-    `PUT in the edit-default space returned ${renamedEdit.status} ${messageOf(renamedEdit.error)} — ` +
-      'a gate that refuses everybody is not this feature',
-  )
+  const editRung = chain('the SAME member renaming the SAME kind of list succeeds where the default is `edit`')
+  if (!editListId) {
+    editRung.rest(neverMade('edit', editList))
+  } else {
+    const renamedEdit = await M(`/lists/${editListId}`, {
+      method: 'PUT',
+      body: { name: `${TAG} renamed in edit space` },
+    })
+    editRung.step(
+      renamedEdit.status < 400 && renamedEdit.data?.name === `${TAG} renamed in edit space`,
+      `PUT in the edit-default space returned ${renamedEdit.status} ${messageOf(renamedEdit.error)} — ` +
+        'a gate that refuses everybody is not this feature',
+    )
+  }
 
-  const readView = await M(`/lists/${viewList.data.id}`)
-  chk(
-    readView.status === 200 && readView.data?.id === viewList.data.id,
-    'and "View only" still means VIEW — the member can read the list they may not change',
-    `GET /lists/:id as the member returned ${readView.status}`,
-  )
+  const viewRead = chain('and "View only" still means VIEW — the member can read the list they may not change')
+  if (!viewListId) {
+    viewRead.rest(neverMade('view-only', viewList))
+  } else {
+    const readView = await M(`/lists/${viewListId}`)
+    viewRead.step(
+      readView.status === 200 && readView.data?.id === viewListId,
+      `GET /lists/:id as the member returned ${readView.status}`,
+    )
+  }
 
   /*
    * The admin created these spaces, so `createSpace` seeded them as a
@@ -420,16 +457,20 @@ try {
         `${messageOf(unseated.error)}) — the admin check below would be about that grant, not the role`,
     )
   }
-  const adminRename = await A(`/lists/${viewList.data.id}`, {
-    method: 'PUT',
-    body: { name: `${TAG} renamed by admin` },
-  })
-  chk(
-    adminRename.status < 400 && adminRename.data?.name === `${TAG} renamed by admin`,
-    'a workspace admin is not narrowed by a space setting, with no explicit grant to lean on',
-    `the admin's PUT returned ${adminRename.status} ${messageOf(adminRename.error)} — ` +
-      'a space setting that can lock an admin out of their own workspace is a foot-gun',
-  )
+  const adminOnList = chain('a workspace admin is not narrowed by a space setting, with no explicit grant to lean on')
+  if (!viewListId) {
+    adminOnList.rest(neverMade('view-only', viewList))
+  } else {
+    const adminRename = await A(`/lists/${viewListId}`, {
+      method: 'PUT',
+      body: { name: `${TAG} renamed by admin` },
+    })
+    adminOnList.step(
+      adminRename.status < 400 && adminRename.data?.name === `${TAG} renamed by admin`,
+      `the admin's PUT returned ${adminRename.status} ${messageOf(adminRename.error)} — ` +
+        'a space setting that can lock an admin out of their own workspace is a foot-gun',
+    )
+  }
   /*
    * AND PUT BACK. The grant was taken away for that one check; left gone, every
    * later section that briefly raises this space (`withEditable`) leans on the
@@ -456,15 +497,19 @@ try {
     'the member is given an explicit `edit` role on the view-only space',
     `POST /spaces/:id/members returned ${granted.status} ${messageOf(granted.error)}`,
   )
-  const renamedAfterGrant = await M(`/lists/${viewList.data.id}`, {
-    method: 'PUT',
-    body: { name: `${TAG} renamed after grant` },
-  })
-  chk(
-    renamedAfterGrant.status < 400 && renamedAfterGrant.data?.name === `${TAG} renamed after grant`,
-    'and now the same PUT succeeds — the default is a FALLBACK, not a ceiling',
-    `PUT after the grant returned ${renamedAfterGrant.status} ${messageOf(renamedAfterGrant.error)}`,
-  )
+  const afterGrant = chain('and now the same PUT succeeds — the default is a FALLBACK, not a ceiling')
+  if (!viewListId) {
+    afterGrant.rest(neverMade('view-only', viewList))
+  } else {
+    const renamedAfterGrant = await M(`/lists/${viewListId}`, {
+      method: 'PUT',
+      body: { name: `${TAG} renamed after grant` },
+    })
+    afterGrant.step(
+      renamedAfterGrant.status < 400 && renamedAfterGrant.data?.name === `${TAG} renamed after grant`,
+      `PUT after the grant returned ${renamedAfterGrant.status} ${messageOf(renamedAfterGrant.error)}`,
+    )
+  }
 
   console.log('\n▶ the Move picker does not offer a destination the server will refuse')
 

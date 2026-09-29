@@ -355,22 +355,23 @@ try {
   const idA = docA.data?.id
   const idB = docB.data?.id
 
+  const docAddress = chain(
+    'landing on /docs names the doc it opened',
+    'clicking a page puts it in the address',
+    'and reopening that address returns the same doc',
+  )
   if (!idA || !idB) {
-    check(false, 'could not seed two docs to switch between')
-    check(false, 'so the doc address was never exercised')
-    check(false, 'and neither was the bucket rail')
+    docAddress.rest(
+      `skipped: two docs could not be seeded to switch between (POST answered ${docA.status} / ${docB.status})`,
+    )
   } else {
     await page.goto(`${origin}/app/${workspaceId}/docs`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3500)
-    check(
-      /[?&]doc=/.test(page.url()),
-      'landing on /docs names the doc it opened',
-      page.url(),
-    )
+    docAddress.step(/[?&]doc=/.test(page.url()), page.url())
 
     await page.getByTestId(`docs-tree-item-${idB}`).first().click()
     await page.waitForTimeout(1800)
-    check(page.url().includes(`doc=${idB}`), 'clicking a page puts it in the address', page.url())
+    docAddress.step(page.url().includes(`doc=${idB}`), page.url())
 
     /*
      * The point of an address: reopening it returns the SAME doc rather than
@@ -385,10 +386,10 @@ try {
     await page.goto(opened, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3500)
     const activeTitle = await page.getByTestId('docs-active-title').innerText().catch(() => '')
-    check(
+    docAddress.step(
       activeTitle.includes(DOC_B),
-      `and reopening that address returns the same doc (${activeTitle.trim()})`,
       `the editor opened "${activeTitle.trim()}" instead`,
+      `and reopening that address returns the same doc (${activeTitle.trim()})`,
     )
 
     tidy(await A(`/docs/${idA}`, { method: 'DELETE' }), `DELETE /docs/${idA}`)
@@ -413,28 +414,27 @@ try {
     body: { workspaceId, name: PRESET, layout: [] },
   })
   const presetId = preset.data?.id
+  const presetAddress = chain(
+    'the dashboard starts with no preset in the address',
+    'choosing a preset puts it in the address',
+  )
   if (!presetId) {
-    check(false, 'could not create a preset to link to')
-    check(false, 'so the preset address was never exercised')
+    presetAddress.rest(`skipped: no preset could be created to link to (POST answered ${preset.status})`)
   } else {
     await page.goto(`${origin}/app/${workspaceId}/dashboard`, { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3000)
-    check(!/[?&]preset=/.test(page.url()), 'the dashboard starts with no preset in the address', page.url())
+    presetAddress.step(!/[?&]preset=/.test(page.url()), page.url())
 
     // Custom is where presets are listed.
     await page.getByText('Custom', { exact: false }).first().click().catch(() => {})
     await page.waitForTimeout(2000)
     const row = page.getByTestId(`dashboard-preset-${presetId}`)
     if ((await row.count()) === 0) {
-      check(false, `the preset "${PRESET}" was not listed to click`)
+      presetAddress.rest(`skipped: the preset "${PRESET}" was not listed to click`)
     } else {
       await row.first().click()
       await page.waitForTimeout(1800)
-      check(
-        page.url().includes(`preset=${presetId}`),
-        'choosing a preset puts it in the address',
-        page.url(),
-      )
+      presetAddress.step(page.url().includes(`preset=${presetId}`), page.url())
     }
     tidy(await A(`/dashboards/${presetId}`, { method: 'DELETE' }), `DELETE /dashboards/${presetId}`)
   }
@@ -512,35 +512,33 @@ try {
    * both true and both meaningless. Said as failures with the reason attached
    * rather than skipped, because the behaviour really is broken.
    */
+  const chord = chain(
+    'and pressing it again brings it back',
+    'with the caret in a text field',
+    'typing a backslash does NOT collapse the sidebar out from under you',
+  )
   if (!collapsedByKey) {
-    check(false, 'and pressing it again brings it back', 'never collapsed, so expanding could not be tested')
-    check(false, 'with the caret in a text field', 'the chord does nothing, so the typing guard is untestable')
-    check(false, 'typing a backslash does NOT collapse the sidebar out from under you', 'the chord does nothing at all')
+    chord.rest('skipped: the chord never collapsed the sidebar, so there was nothing to bring back and no guard to test')
   } else {
     await page.keyboard.press('Control+\\')
-    check(await settlesTo('false'), 'and pressing it again brings it back', 'the chord collapsed but could not expand')
+    chord.step(await settlesTo('false'), 'the chord collapsed but could not expand')
 
     // Now the guard: the same chord, with the caret in a text field. Asserted
     // against the expanded state re-established above, so "it did not move"
     // means the guard held rather than that nothing was listening.
     const composer = page.locator('textarea, [contenteditable="true"], input[type="text"]').first()
     if ((await composer.count()) === 0) {
-      check(false, 'with the caret in a text field', 'no text field on this page to test the guard against')
-      check(false, 'typing a backslash does NOT collapse the sidebar out from under you', 'nowhere to type')
+      chord.rest('skipped: no text field on this page to test the guard against')
     } else {
       await composer.click({ timeout: 5000 }).catch(() => {})
       const focused = await page.evaluate(() => {
         const el = document.activeElement
         return !!el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
       })
-      check(focused, 'with the caret in a text field', 'could not focus a text field, so the guard was never exercised')
+      chord.step(focused, 'could not focus a text field, so the guard was never exercised')
       await page.keyboard.press('Control+\\')
       await page.waitForTimeout(1200)
-      check(
-        (await sidebarState()) === 'false',
-        'typing a backslash does NOT collapse the sidebar out from under you',
-        'the sidebar collapsed while somebody was typing',
-      )
+      chord.step((await sidebarState()) === 'false', 'the sidebar collapsed while somebody was typing')
     }
   }
 
@@ -642,13 +640,14 @@ try {
   const repliesLink = page.locator(`[data-testid="workspace-sidebar"] a[href$="/replies"]`).first()
   const hasReplies = (await repliesLink.count()) > 0
   check(hasReplies, 'the sidebar carries a Replies entry', 'Replies is still palette-only')
+  // Reported, not skipped — see the note on the four-check chain above.
+  const repliesPage = chain('and it goes to the Replies page')
   if (hasReplies) {
     await repliesLink.click()
     await page.waitForTimeout(2500)
-    check(/\/replies$/.test(new URL(page.url()).pathname), 'and it goes to the Replies page', page.url())
+    repliesPage.step(/\/replies$/.test(new URL(page.url()).pathname), page.url())
   } else {
-    // Reported, not skipped — see the note on the four-check chain above.
-    check(false, 'and it goes to the Replies page', 'skipped: there was no Replies entry to click')
+    repliesPage.rest('skipped: there was no Replies entry to click')
   }
 
   // ---------------------------------------------------------------------
@@ -687,18 +686,19 @@ try {
    * above. No menu button used to mean one check where the full path reports
    * four, so losing phone navigation entirely showed up as a SHORT RUN rather
    * than as three failures naming it.
+   *
+   * `lib/chain.mjs`, not a copy of it. This was a label array with its own
+   * `drawerAt` counter, bumped by hand before each check and emptied by a
+   * `while` — the helper, rewritten in place, and one missed `drawerAt++` from
+   * reporting a sentence against the wrong check.
    */
-  const drawerChain = [
+  const drawerChain = chain(
     'which opens the navigation',
     'carrying the destinations',
     'and closes once you go somewhere',
-  ]
-  let drawerAt = 0
-  const drawerRest = (why) => {
-    while (drawerAt < drawerChain.length) check(false, drawerChain[drawerAt++], why)
-  }
+  )
   if (!hasBurger) {
-    drawerRest('skipped: there was no menu button to open')
+    drawerChain.rest('skipped: there was no menu button to open')
   } else {
     await burger.click()
     const drawer = await small
@@ -706,21 +706,17 @@ try {
       .waitFor({ timeout: 6000 })
       .then(() => true)
       .catch(() => false)
-    drawerAt++
-    check(drawer, drawerChain[0], 'the menu button opened nothing')
+    drawerChain.step(drawer, 'the menu button opened nothing')
     if (!drawer) {
-      drawerRest('skipped: the drawer never opened')
+      drawerChain.rest('skipped: the drawer never opened')
     } else {
       const links = await small.locator('[data-testid="workspace-sidebar-drawer"] a').count()
-      drawerAt++
-      check(links >= 3, `carrying the destinations (${links} links)`, `only ${links} link(s) in the drawer`)
+      drawerChain.step(links >= 3, `only ${links} link(s) in the drawer`, `carrying the destinations (${links} links)`)
       // A nav that stays open over the page it navigated to is its own dead end.
       await small.locator('[data-testid="workspace-sidebar-drawer"] a').first().click().catch(() => {})
       await small.waitForTimeout(1200)
-      drawerAt++
-      check(
+      drawerChain.step(
         !(await small.getByTestId('workspace-sidebar-drawer').isVisible().catch(() => false)),
-        drawerChain[2],
         'the drawer stayed open over the page it opened',
       )
     }
@@ -748,16 +744,15 @@ try {
     })
   const moved = await dockLeft()
   check(moved !== null && moved > 400, `the dock can be moved away (left=${moved})`, `dock left=${moved}`)
+  // Two checks on this path too — see the note on the unread chain above. A
+  // dock that cannot be moved leaves nothing to reset, and saying so for both
+  // keeps the run the same length as one that could.
+  const dockReset = chain(
+    'and Reset dock position brings it home',
+    'and forgets the old spot, so a reload does not undo it',
+  )
   if (moved === null || moved <= 400) {
-    // Two checks on this path too — see the note on the unread chain above. A
-    // dock that cannot be moved leaves nothing to reset, and saying so twice
-    // keeps the run the same length as one that could.
-    check(false, 'and Reset dock position brings it home', 'skipped: the dock never moved away')
-    check(
-      false,
-      'and forgets the old spot, so a reload does not undo it',
-      'skipped: the dock never moved away',
-    )
+    dockReset.rest('skipped: the dock never moved away')
   } else {
     await page.evaluate(() => window.dispatchEvent(new CustomEvent('rundesk:reset-dock')))
     const back = await page
@@ -770,10 +765,9 @@ try {
       )
       .then(() => true)
       .catch(() => false)
-    check(back, 'and Reset dock position brings it home', 'the reset event did nothing')
-    check(
+    dockReset.step(back, 'the reset event did nothing')
+    dockReset.step(
       await page.evaluate(() => localStorage.getItem('rundesk.floatingDockPos') === null),
-      'and forgets the old spot, so a reload does not undo it',
       'the stored position survived the reset',
     )
   }
@@ -824,37 +818,46 @@ try {
   )
 
   const docsToggle = page.getByTestId('dock-tool-toggle-docs')
+  /*
+   * FIVE CHECKS BOTH WAYS, UNDER THE PASS PATH'S OWN SENTENCES. The no-toggle
+   * path reported four, under a first sentence ("a tool can be turned off")
+   * that had drifted from the one a passing run prints, and without the fifth.
+   */
+  const dockTools = chain(
+    'Docs is in the dock to begin with',
+    'and the choice is stored on the person, not the browser',
+    'and the dock stops carrying it',
+    'and turning it back on brings it back',
+    'and emptying it entirely is respected, not treated as "never chose"',
+  )
   if (!(await docsToggle.count())) {
-    check(false, 'a tool can be turned off', 'no docs toggle in the picker')
-    check(false, 'and the choice is stored on the person, not the browser', 'skipped')
-    check(false, 'and the dock stops carrying it', 'skipped')
-    check(false, 'and turning it back on brings it back', 'skipped')
+    dockTools.rest('skipped: there was no Docs toggle in the picker')
   } else {
     const wasOn = await docsToggle.isChecked({ timeout: 5000 }).catch(() => false)
-    check(wasOn, 'Docs is in the dock to begin with', 'docs was not in the default set')
+    dockTools.step(wasOn, 'docs was not in the default set')
     await docsToggle.click()
-    await page.waitForTimeout(1800)
+    // Stored, then drawn: each waited for (bounded), not a fixed time, which a
+    // loaded machine outlasts.
+    let stored = await A(`/dashboards/dock/${workspaceId}`)
+    await waitUntil(async () => {
+      stored = await A(`/dashboards/dock/${workspaceId}`)
+      return Array.isArray(stored.data?.pinnedLinks) && !stored.data.pinnedLinks.includes('docs')
+    }, { timeoutMs: 10_000 })
+    await waitUntil(async () => (await page.getByTestId('dock-tool-docs').count()) === 0, { timeoutMs: 8_000 })
 
     // Read back from the API: this is the half a screenshot cannot show.
-    const stored = await A(`/dashboards/dock/${workspaceId}`)
-    check(
+    dockTools.step(
       Array.isArray(stored.data?.pinnedLinks) && !stored.data.pinnedLinks.includes('docs'),
-      'and the choice is stored on the person, not the browser',
       `pinnedLinks=${JSON.stringify(stored.data?.pinnedLinks)}`,
     )
-    check(
+    dockTools.step(
       (await page.getByTestId('dock-tool-docs').count()) === 0,
-      'and the dock stops carrying it',
       'the dock still shows a tool that was switched off',
     )
 
     await docsToggle.click()
-    await page.waitForTimeout(1800)
-    check(
-      (await page.getByTestId('dock-tool-docs').count()) > 0,
-      'and turning it back on brings it back',
-      'the tool did not return',
-    )
+    await waitUntil(async () => (await page.getByTestId('dock-tool-docs').count()) > 0, { timeoutMs: 8_000 })
+    dockTools.step((await page.getByTestId('dock-tool-docs').count()) > 0, 'the tool did not return')
 
     /*
      * "I want none" is an answer, and it is not the same as "never chose".
@@ -868,9 +871,8 @@ try {
     await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: [] } })
     await page.reload({ waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3000)
-    check(
+    dockTools.step(
       (await page.locator('[data-testid^="dock-tool-"]').count()) === 0,
-      'and emptying it entirely is respected, not treated as "never chose"',
       `${await page.locator('[data-testid^="dock-tool-"]').count()} tool(s) came back`,
     )
     await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { pinnedLinks: DEFAULT_DOCK } })
@@ -916,18 +918,26 @@ try {
     'a page you have never opened can still be favourited',
     'no star on a Browse row — favouriting still needs a visit first',
   )
+  /*
+   * FIVE CHECKS BOTH WAYS: the no-star path reported three of them, so a
+   * missing star read as the run stopping early rather than as five failures.
+   */
+  const favourites = chain(
+    'and the choice is stored on the account',
+    'so a different browser sees it too',
+    'and an emptied list is not silently refilled',
+    'and clearing it restores "never arranged", not an empty list',
+    'so the defaults come back on screen',
+  )
   if ((await star.count()) === 0) {
-    check(false, 'and the choice is stored on the account', 'skipped')
-    check(false, 'so a different browser sees it too', 'skipped')
-    check(false, 'and an emptied list is not silently refilled', 'skipped')
+    favourites.rest('skipped: there was no star on the Templates row to press')
   } else {
     await star.click({ force: true, timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(2000)
 
     const saved = await A(`/dashboards/dock/${workspaceId}`)
-    check(
+    favourites.step(
       (saved.data?.navFavorites ?? []).some((f) => String(f.path).endsWith('/templates')),
-      'and the choice is stored on the account',
       `navFavorites=${JSON.stringify(saved.data?.navFavorites)}`,
     )
 
@@ -951,9 +961,8 @@ try {
       .getByTestId('nav-favorites-list')
       .innerText()
       .catch(() => '')).replace(/\s+/g, ' ')
-    check(
+    favourites.step(
       /Templates/i.test(freshFavorites),
-      'so a different browser sees it too',
       `fresh favourites: ${freshFavorites.slice(0, 120) || '(none rendered)'}`,
     )
     await fresh.close()
@@ -973,14 +982,22 @@ try {
      * a list they deleted — which is exactly what a break using that
      * expression did.
      */
-    const emptied = (await page
-      .getByTestId('nav-favorites-list')
-      .innerText()
-      .catch(() => '')).replace(/\s+/g, ' ')
-    check(
-      !/Dashboards/i.test(emptied) && !/Templates/i.test(emptied),
-      'and an emptied list is not silently refilled',
-      `favourites still showing: ${emptied.slice(0, 120)}`,
+    /*
+     * AND THE LIST HAS TO BE THERE TO BE EMPTY. The read is caught to '', and
+     * '' holds neither word — so a sidebar that drew no favourites list at all
+     * passed this. The list is drawn whenever the section is open, with its own
+     * "no favourites" line when it is empty, so the read must have found the
+     * one list and read something out of it before its absences count.
+     */
+    const favList = page.getByTestId('nav-favorites-list')
+    const favListCount = await favList.count()
+    const emptied = (await favList.innerText().catch(() => '')).replace(/\s+/g, ' ').trim()
+    favourites.step(
+      favListCount === 1 && emptied.length > 0 && !/Dashboards/i.test(emptied) && !/Templates/i.test(emptied),
+      favListCount === 1 && emptied.length > 0
+        ? `favourites still showing: ${emptied.slice(0, 120)}`
+        : `the favourites list was not there to read (${favListCount} on the page, read ${JSON.stringify(emptied)}), ` +
+            'so the absence of the defaults in it says nothing',
     )
 
     /*
@@ -996,9 +1013,8 @@ try {
      */
     await A(`/dashboards/dock/${workspaceId}`, { method: 'POST', body: { navFavorites: null } })
     const cleared = await A(`/dashboards/dock/${workspaceId}`)
-    check(
+    favourites.step(
       cleared.data?.navFavorites === null,
-      'and clearing it restores "never arranged", not an empty list',
       `navFavorites=${JSON.stringify(cleared.data?.navFavorites)}`,
     )
     await page.reload({ waitUntil: 'domcontentloaded' })
@@ -1007,9 +1023,8 @@ try {
       .getByTestId('nav-favorites-list')
       .innerText()
       .catch(() => '')).replace(/\s+/g, ' ')
-    check(
+    favourites.step(
       /Docs/i.test(restored) && /Dashboards/i.test(restored),
-      'so the defaults come back on screen',
       `favourites: ${restored.slice(0, 120)}`,
     )
   }
@@ -1059,6 +1074,19 @@ try {
       for (const id of madeSpaces) tidy(await A(`/spaces/${id}`, { method: 'DELETE' }), `DELETE /spaces/${id}`)
     }
 
+    /*
+     * The sentences once, here. The seeding-failed path used to re-type all six
+     * as a literal array beside the checks that print them, so the two lists
+     * could drift apart and nothing would say so.
+     */
+    const treeSearch = chain(
+      'the tree has a search box',
+      'all the spaces are listed to begin with',
+      'searching a list name narrows to the one space holding it',
+      'and the list itself is on screen without expanding anything',
+      'a search that matches nothing says so',
+      'clearing brings every space back',
+    )
     try {
       if (madeSpaces.length === 3 && listMade) {
         await page.reload({ waitUntil: 'domcontentloaded' })
@@ -1074,23 +1102,22 @@ try {
          */
         await box.waitFor({ state: 'visible', timeout: 20_000 }).catch(() => {})
         await waitUntil(async () => (await rows()) >= 3, { timeoutMs: 20_000 })
-        check(await box.isVisible().catch(() => false), 'the tree has a search box')
+        treeSearch.step(await box.isVisible().catch(() => false), 'no search box over the space tree')
 
         const before = await rows()
-        check(before >= 3, `all the spaces are listed to begin with (${before})`)
+        treeSearch.step(before >= 3, `${before} space row(s)`, `all the spaces are listed to begin with (${before})`)
 
         // Typing a LIST name: its space survives, the other two do not.
         await box.fill(LIST_NEEDLE, { timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(900)
         const narrowed = await rows()
-        check(
+        treeSearch.step(
           narrowed === 1,
-          `searching a list name narrows to the one space holding it (${narrowed} of ${before})`,
           `${narrowed} spaces still shown — the filter is not matching descendants`,
+          `searching a list name narrows to the one space holding it (${narrowed} of ${before})`,
         )
-        check(
+        treeSearch.step(
           await page.locator(`text=${JSON.stringify(LIST_NEEDLE)}`).first().isVisible().catch(() => false),
-          'and the list itself is on screen without expanding anything',
           'the match is in the tree but still hidden inside a collapsed space',
         )
 
@@ -1108,27 +1135,20 @@ try {
         const emptyText = (
           await page.getByTestId('tree-filter-empty').innerText().catch(() => '')
         ).trim()
-        check(
+        treeSearch.step(
           emptyText.length > 0,
-          `a search that matches nothing says so ("${emptyText}")`,
           'an empty tree renders blank, or an empty box with nothing in it',
+          `a search that matches nothing says so ("${emptyText}")`,
         )
 
-        await page.getByTestId('tree-filter-clear').click()
+        // Bounded: a Clear that is not there fails the check below with the
+        // count it left, rather than throwing thirty seconds from now.
+        await page.getByTestId('tree-filter-clear').click({ timeout: 10_000 }).catch(() => {})
         await page.waitForTimeout(900)
         const after = await rows()
-        check(after === before, `clearing brings every space back (${after})`, `${after} vs ${before}`)
+        treeSearch.step(after === before, `${after} vs ${before}`, `clearing brings every space back (${after})`)
       } else {
-        for (const label of [
-          'the tree has a search box',
-          'all the spaces are listed to begin with',
-          'searching a list name narrows to the one space holding it',
-          'and the list itself is on screen without expanding anything',
-          'a search that matches nothing says so',
-          'clearing brings every space back',
-        ]) {
-          check(false, label, 'seeding failed')
-        }
+        treeSearch.rest(`skipped: seeding failed (spaces=${madeSpaces.length} list=${listMade}), so there was no tree to search`)
       }
     } finally {
       await cleanupTree()

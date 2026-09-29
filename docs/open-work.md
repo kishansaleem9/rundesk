@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 68 open, 10 partly fixed, 246 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 324 items, 51 open, 10 partly fixed, 263 closed, counted from this file's headings on 29 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -2879,7 +2879,7 @@ The break runs for `c55a088` found one wait that had cost a check its bite: `rol
 
 `list-empty-states` was not measured: its baseline was red under the four runners' load (22 of 23 at `394d3f9`). The empty state read "No tasks yet" without its Create task, which the page draws once the list's access (`list-caps`) has answered, and under load that answer comes after the rows. Alone on lane 7 it passed 23/23 three times. It now waits (10 s at most) for the invitation before reading it, so a patch that takes the invitation away still fails the check; its set runs after the commit.
 
-*29 September, at a load average near 20 (three agents' suites, two break runners and a regression at once on four cores):* three more reads that waited a fixed time, each found by a break set's red baseline. `list-empty-states` read its second empty state before the list's access had answered (the same race as its first read, fixed earlier today); `task-depth` read the tag's create offer, the save and the badge after 0.5, 2.5 and 0.8 fixed seconds; `video-regression` [A2.6b] reloaded 1.6 s after a toggle, before the choice was stored, and read the old grouping. Each now waits for what it reads, bounded: the invitation, the offer, the task's labels, the badge, the stored preference and then the rows. Alone on lane 7 afterwards: 23/23, 91/91, 94/94. `video-regression` [A2.6] (Clear all after mark-all-read) missed its 20 s bound once at the same load and passed on the re-run; it already waits for the control.
+*29 September, at a load average near 20 (three agents' suites, two break runners and a regression at once on four cores):* three more reads that waited a fixed time, each found by a break set's red baseline. `list-empty-states` read its second empty state before the list's access had answered (the same race as its first read, fixed earlier today); `task-depth` read the tag's create offer, the save and the badge after 0.5, 2.5 and 0.8 fixed seconds; `video-regression` [A2.6b] reloaded 1.6 s after a toggle, before the choice was stored, and read the old grouping. Each now waits for what it reads, bounded: the invitation, the offer, the task's labels, the badge, the stored preference and then the rows. Alone on lane 7 afterwards: 23/23, 91/91, 94/94. `video-regression` [A2.6] (Clear all after mark-all-read) missed its 20 s bound once at the same load and passed on the re-run; it already waits for the control. Two more, in the four-lane sweep of the suite-hygiene merge the same day: `panel-collapse` read the dock 1.8 s after switching a tool off, and `ui-sweep` §14 pressed Saturday 2 s after the page opened and read it 1.6 s later (and pressed it back the same way, which could have left the shared week at six days). Each now waits for the stored choice and the drawn state; alone afterwards, 57/57 and 107/107.
 
 ### `found-24-sep/create-menu-offers-guests-what-they-cannot-make` — **closed** (visible bug; found closing `custom-role-permissions-unread-by-web`)
 
@@ -3261,13 +3261,30 @@ The new suite `project-page-controls`, 4 checks: the admin (every control), a me
 
 *Closed:* the test reads the reach from the task query's own subqueries. The fake database keeps each query's predicates on the query (a subquery reaches the outer query as a parameter), so the assertion asks what THAT query was built with. The clean tree passes, 47/47. With `sst-2` applied, "no reach on the task hits"; with `sst-3` (the reach without the list's rule), "the reach has no list rule". `check-unit-claims`: 27 of 27 redden.
 
-### `suite-hygiene/branch-checker-confident-zero` — open, medium
+### `suite-hygiene/branch-checker-confident-zero` — **closed** (test tooling, medium)
 
 **check-suite-check-branches reports 0 because it cannot see bad(), uncounted SKIPs, or unequal branches**
 
 *Evidence:* The checker printed '0 conditional check block(s) with no else, in 0 of 115 suite(s) read.' It has three blind spots. First, CHECK_CALL = /\b(chk|check)\s*\(/ at line 79 never matches bad(…)/ok(…) (a39-dm-tabs:178, ui-sweep:421/461, video-regression:325/328/693/713, list-view-controls:239, list-empty-states:357) or a console.log SKIP (video-regression:465). Second, line 160 only asks whether an `else` exists, never whether both sides report the same count, so every imbalance in finding unbalanced-else-branches passes. Third, its header (187-191: 'ZERO NOW, ACROSS ALL 113 SUITES') and the ledger (docs/video2-reaudit.md:4008-4011: 'Every one of the 113 suites now reports the same number of checks whichever way it goes') are false, and the suite count is now 115.
 
 *To close:* Count reporting calls per branch: chk, check, ok, bad, skip, .step (1 each), with .rest/.skipRest treated as 'fills to declared length'. Flag if/else pairs whose counts differ, and flag loops with literal bounds. Add fixture cases to check-branches-cases.mjs for a bad()-only else and a 9-vs-8 else. Then correct ledger lines 4008-4011.
+
+*Closed, 29 September.* `check-suite-check-branches.mjs` counts each side of an `if` instead of asking whether an
+`else` exists. It reads code with comments, strings, regexes and template text blanked (a file whose brackets then
+do not balance is refused by name); counts `chk`, `check`, and `ok`/`bad`/`skip` where the suite defines them to
+report, a chain's `.step` one each, `.rest`/`.skipRest` filling to the chain's declared length from where the flow
+got to, loops by a literal bound, and a suite's own reporting functions by their bodies; and reports four findings
+under one ratchet: an `if` with no `else` that reports, an `if`/`else` whose sides differ (a chain that a later
+`.rest()` fills is left out — `syncup-live`'s `bgChain`), a loop re-typing a count, and a check inside a `.catch`.
+Before, on `d5ef040`: the old rule read "0 … in 0 of 242 suite(s)"; the new one read **23 findings in 11 of 242**
+over the same tree (19 unequal pairs of 126, 3 literal loops, 1 `.catch`). After: **0, over 124 pairs.** 238 of 242
+suites walk to exactly their `EXPECTED_CHECKS`. `check-branches-cases.mjs`: 39 cases, the ledger's `bad()`-only
+else and 9-vs-8 else among them; 23 of 23 mutations redden one; 25 of the 39 fail against the old rule.
+`BRANCHES_TRACE=<suite>.mjs` prints every pair it compared. The header's "ZERO NOW, ACROSS ALL 113 SUITES" and the
+re-audit's "Every one of the 113 suites now reports the same number of checks whichever way it goes" are corrected
+where they stand. *Not done:* a `switch`, a check on either side of `?:` or behind `&&` is not read — no suite
+reports that way today — and conditions are not tracked, so a `.rest()` able to run after an `if` is assumed to
+complete its chain on every path.
 
 ### `commit-log/log-68c0345-1` — open, medium
 
@@ -4317,7 +4334,7 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *Re-run on lane 2:* `pv-2` reddened, and `lwb-1` reddened its claim. `prail-3` reddened nothing again. With the server's rule gone, the page's own copy still left the closed task out. Each copy of the rule covered for the other, so neither could be tested. The page's copy is gone now (with `product-siblings/workload-csv-dates-shifted-east-of-utc`'s batch), and the server's is the only one. `prail-2`, which read the page's copy, is re-aimed at the list it now reads. `planner-rail` passes 10/10 without the page's copy, in the 24-suite sweep above. Re-run on lane 2: `prail-2` and `prail-3` each reddened. `prail-3` now proves the server's rule. `sidebar-reorder-2`, re-aimed at the tree drawing the server's order, reddened as well.
 
-### `suite-hygiene/hand-rolled-chains` — open, large
+### `suite-hygiene/hand-rolled-chains` — **closed** (test tooling, large)
 
 **103 literal check(false, …) calls in 15 suites, plus 5 other hand-rolled chains, instead of lib/chain.mjs**
 
@@ -4326,6 +4343,18 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *Evidence:* Literal `(chk|check)(false,` count per suite: chat-message-actions 31, panel-collapse 23, person-panel 8, addressability-live 8, task-depth 7, settings-depth 5, planner-priorities 5, list-statuses-seeded 4, video-regression 3, a61-meeting-record 3, loading-states 2, and 1 each in video1-fast-items, video1-acceptance, planner-settings, emoji-picker. Six of these suites already import makeChain (chat-message-actions, panel-collapse, person-panel, task-depth, video-regression, video1-fast-items). Other hand-rolled chains: video-regression.mjs:927-1000 (G13 with its own `emitted`/`stopped` counters and `while (emitted < G13.length)`), video-regression.mjs:575-613 (A2.6b else re-types three labels), emoji-picker.mjs:406-413 (a literal label array duplicating 439/442/456), and the fixed-count loops list-empty-states.mjs:357 and list-view-controls.mjs:239. Fail branches that report fixture sentences instead of the product claim, which the ledger ruled out at docs/video2-reaudit.md:4030-4034: chat-message-actions.mjs:566-571 ('so "Assign to" was never checked'… against the product sentences at 515-561), :493-494; task-depth.mjs:1025-1028, 964, 994-995; person-panel.mjs:597-602; settings-depth.mjs:424-426, 500-501; addressability-live.mjs:221, 343, 365; panel-collapse.mjs:343-345, 401-402, 413. The first label at panel-collapse.mjs:811 ('a tool can be turned off') has already drifted from its pass twin at 817 ('Docs is in the dock to begin with').
 
 *To close:* Move every one onto makeChain: declare the pass-path sentences once with chain(...), use step() on the pass path, and put the reason in rest(why) on the fail path. Replace the G13 emitted/stopped machinery with makeChain(chk). Consider a checker rule that flags `(chk|check)(false,` and bare `bad('` in suites once converted.
+
+*Closed, 29 September.* No suite reports a check with a literal `false`. The 103
+sites in 15 suites, and the five hand-rolled chains beside them, are on
+`lib/chain.mjs`: each chain's sentences are declared once, and its failure branch
+fails the rest under the pass path's own sentences with its reason. The seven
+branches that reported fewer checks than the path beside them report the same
+number now, so a product failure there reads as failures and not as a short run.
+Every changed suite ran at its `EXPECTED_CHECKS` on lane 6 with 0 failed. Forced
+down its failure path in a copy outside the repository, every converted chain
+kept its suite's count and failed its later checks with the reason; with the same
+forcing, the original chat-message-actions and panel-collapse ran 66 of 73 and 54
+of 57 and passed two checks about things that never happened.
 
 ### `suite-hygiene/apiAs-duplicated-62` — open, medium
 
@@ -4382,7 +4411,7 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *Closed, 29 September,* with `suite-hygiene/inert-catches` (the measurement, the 158 status checks, the gate, and `ensureShared` reading every write and closing by the list's own status). The 292 in `docs/video2-resume.md` and `docs/e2e-shared-state-audit.md` is corrected to the measured split. The SQL swallowers this item counted as a separate class (`sql`...`.catch(() => {})` in cleanups) are out of the gate's scope; they do reject, and each discards a real error, so they remain a class of their own.
 
-### `suite-hygiene/unbalanced-else-branches` — open, medium
+### `suite-hygiene/unbalanced-else-branches` — **closed** (test tooling, medium)
 
 **14 if/else branches report a different number of checks on the failure path; one is a drifted magic count**
 
@@ -4390,7 +4419,23 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Convert each block to makeChain(check) using the pass branch's own sentences, and call .rest(why) in the else. Delete the literal counts and re-typed labels. For command-palette, report the click failure in the detail of the next check rather than as an extra check. After converting, force each else path (for example, remove the testid) and confirm the count still matches EXPECTED_CHECKS.
 
-### `suite-hygiene/unguarded-derefs` — open, medium
+*Closed, 29 September.* All fourteen sites, found by the counter where they now stand, and six more blocks it found
+beside them, converted to `makeChain` with the pass side's own sentences and `.rest(why)` where the other side re-typed
+labels, counted in a literal loop, or printed a `SKIP`: `list-view-controls` (9·8), `chat-message-actions` (the
+forward modal's 4·11 as one chain of eleven, dropping two stale sentences; the narrow thread's 5·3 and 2·1 as two
+chains, since the dialog's two can stop while the drawer's last check runs), `person-panel` (1·3), `task-depth`
+(2·1), `a39-dm-tabs` (2·1), `ui-sweep` (4·1, 2·1, and the ⋯ section's literal loop of four, now its own chain),
+`video-regression` (12·1, 7·1, 4·1, and Clear all's 3·0, which now decides first — no client skips all three,
+counted; a client with nothing arranged fails them with that reason), and `command-palette` (the `bad()` in a
+`.catch` is the reason on the check below it). Beside them: `panel-collapse`'s hand-rolled drawer chain, its
+dock-toggle block (4·5) and favourites block (3·5); `list-empty-states`' re-typed loop of three; `syncup-live`'s dead
+peer branch (0·1), now the check failed with its reason. No pass sentence and no `EXPECTED_CHECKS` changed; claims 0
+failing. Before and after on lane 2, each at its constant (chat-message-actions' one baseline failure is in a section
+this does not touch and did not recur). Every converted else path, forced in a copy of its suite, reported its
+suite's full count, the forced checks failing with their reasons (and video-regression's invocation path three
+counted skips).
+
+### `suite-hygiene/unguarded-derefs` — **closed** (test tooling, medium)
 
 **Raw .data.X dereferences after a check that is allowed to fail, and in fixture helpers**
 
@@ -4398,7 +4443,14 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* At each site, optional-chain the id into a const, and gate what follows on it with a chain whose .rest() names the missing fixture (as folder-dialog now does). In ensureShared, throw a sentence when the POST fails. Consider adding a rule to the section-enders checker: `X.data.` used after a chk whose condition mentions `X.data?.`.
 
-### `suite-hygiene/ai-activity-filters-model-refusal` — open, small
+*Closed, 29 September.* No cited `.data.X` is read after a check that may have
+found it missing. Each id is optional-chained into a const, and the checks that
+need it fail naming the fixture that was never made, instead of ending the run
+with a `TypeError`; a setup read every check depends on throws a sentence naming
+the read. `ensureShared` was already fixed in the snapshot (`must()`) and is
+unchanged.
+
+### `suite-hygiene/ai-activity-filters-model-refusal` — **closed** (test tooling, small)
 
 **A fifth suite pins the model refusal; the harness says four**
 
@@ -4406,7 +4458,23 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Convert this one: the refusal is scenery. Arrange a real provider failure on a model lane via model-stub `POST /__control/next` (model-stub.mjs:103), and on a modelless lane keep the not_configured path. Assert the row's errorCode equals what the configuration predicts (read /ai/status first), so the same checks hold either way. Update the count in lane-env.sh.
 
-### `suite-hygiene/conversion-reintroduced-fingerprint` — open, small
+*Closed, 29 September.* ai-activity-filters no longer stands on the refusal. It
+reads `/ai/status` before causing its failed run: with no model, the product's
+own "not configured" 503; with one, a provider failure arranged through the
+model stub's `POST /__control/next` (a 500, staged to outlast the client's
+retries, the stub reset before and after), which the product records as
+`provider_error` and answers with a 500. The row's `errorCode` must be the one
+the configuration predicts, and the two absence checks require the row to
+exist. Measured on lane 4, which has no model: 34/34; the flipped prediction
+fails "and carries WHY"; the model path where no stub answers fails in words
+and causes nothing; with the row deleted, the two absence checks that passed
+before now fail. The staging was checked against a scratch stub with the
+product's client: three attempts, a 500 carrying the staged message, nothing
+left staged. The model path end to end still needs a model lane.
+`lane-env.sh:142-146, 176-181, 186-189` still count this suite among those that
+need a lane without a model.
+
+### `suite-hygiene/conversion-reintroduced-fingerprint` — **closed** (test tooling, small)
 
 **Tonight's AI-configuration conversions put the fingerprint back on the model-configured branch**
 
@@ -4414,13 +4482,28 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* On the configured branch, assert the resting placeholder string positively (the i18n resting text) and non-null. For the endpoints, assert a 2xx (or the specific success status and shape) when available. Run both on a model lane with a break that removes the composer or the route.
 
-### `suite-hygiene/fingerprint-negations` — open, small
+*Closed, 29 September, the configured branch shown in a copy rather than on a
+model lane.* Where a model is configured, the composer must rest on its
+invitation, `/ai/command` must answer with a plan and `/ai/chat` must open a
+stream; the absence of a 503, or of the unavailable sentence, passes for none of
+them. Told a model was configured, with the composer and both routes removed, the
+original assertions passed all three and the new ones fail all three, naming
+what they expected.
+
+### `suite-hygiene/fingerprint-negations` — **closed** (test tooling, small)
 
 **Facts asserted by the absence of a word from another string**
 
 *Evidence:* ai-answer-rendering.mjs:617 `!/^working$/i.test(stepWords)` means 'its own words' only by lacking the fallback word; if the fallback becomes 'Thinking', a missing translation passes. chat-message-actions.mjs:514 `!/^thread$/i` claims 'named after whoever started the thread' by not being 'Thread', though the suite knows the starter (it posted BODY as A). team-view.mjs:289 `!/Admin|Omar/.test(last)` claims 'unowned work is last' by the absence of two seed names; any third member in the shared lane DB passes. tab-title-countdown.mjs:204 `!/left|\d+m \d+s/i` claims no countdown only by the absence of today's countdown format. list-empty-states.mjs:231 `!/create task/i` claims no create CTA by the absence of today's button copy. no-dead-ends.mjs:167 `!/Something went wrong/i` claims 'does not crash' by the absence of the error-boundary copy, with no positive anchor; the sidebar wait at 163 is caught. ui-sweep.mjs:429 `!/Due date.*checklist item/i`. addressability-live.mjs:150 and command-palette.mjs:298 `!/No matches/i` fingerprint the palette's empty copy; both have positive twins above, so they are weaker.
 
 *To close:* Assert the positive fact. Match the create_list step's expected label exactly; compare the thread title to A's display name; assert the last row is the unassigned row by testid or data attribute; compare the tab title with the base title read before any block; count the CTA testid in the filtered state; assert workspace-sidebar and the notifications panel are visible; check that the checklist item's first control is the assignee picker; check that the cmdk-empty element count is 0.
+
+*Closed, 29 September.* None of the nine checks asserts a fact by the absence of
+a word. Each asserts the fact: a step's own label, the starter's name, the row
+holding the unowned task, the title the page shipped, the controls a state
+offers, the panel that drew, the picker that comes first, the palette's own empty
+element. Where the product gives the fact no testid, the check's comment says so
+and it reads the structure instead.
 
 ### `commit-log/log-1e7f092-1` — partly-fixed, small
 
@@ -4441,7 +4524,7 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *Closed, 29 September, by the item's ratchet rather than a conversion.* Counted with the suites lexed (comments, strings, regex literals and template text left out): 215 `process.exit()` calls in 113 suites, where 129 suites already set `process.exitCode`. A call is harmless where a suite writes to a file, as the lanes and the break runner do, and loses the end of the output where it writes to a pipe, as CI's steps do (`scripts/lib/bail.mjs` measured the loss). Converting is not free: a suite that ends in `process.exit()` may depend on it to stop a handle nothing closed, and would then hang until CI's timeout, so each conversion wants its own run.
 - `scripts/check-suite-process-exit.mjs --mutate` (preflight, and CI's verify job): more than 215 fails, naming the suites; fewer fails too, until the number in it comes down, so a conversion stays converted. The mutation checks that a call in a comment or a string is not counted and that a planted one over the baseline fails.
 
-### `commit-log/log-641be6c-1` — open, small
+### `commit-log/log-641be6c-1` — **closed** (test tooling, small)
 
 **The stale-chunk 'no reload loop' check allows up to three reloads and cannot catch a missing cooldown**
 
@@ -4449,7 +4532,13 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Widen the observation window or assert the cooldown directly (for example exactly one recovery reload, then the error boundary), so that scr-5 reddens both checks.
 
-### `commit-log/log-6d8e26f-1` — open, small
+*Closed, 29 September.* The stale-chunk suite asserts the cooldown: one recovery
+reload, and no second while it lasts, where it allowed three. `scr-5`, which
+takes the cooldown out of the automatic recovery, reddens both of section 4's
+checks — 25 and 2 against 27 of 27 unpatched, on the suite's own releases built
+outside the repository — and its header claims both.
+
+### `commit-log/log-6d8e26f-1` — **closed** (test tooling, small)
 
 **syncup-live skips its storage checks on any error, which a real bug can now trigger; two suites still claim storage is unconfigured**
 
@@ -4457,7 +4546,19 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Skip only when the deployment reports storage as unconfigured, never on any error status. Arrange the failure case through s3-stub's fail-next-put. Rewrite the three comments.
 
-### `suite-hygiene/more-hand-rolled-chains` — open, small
+*Closed, 29 September.* syncup-live's storage chain skips only where both the
+machine and the deployment say there is no storage: nothing answers on the
+run's store port (`lib/store.mjs`; the section resets the stub, which is also
+its own start-of-section rule) and upload-url answers the API's own 400 "Storage
+is not configured". Any other refusal fails the five with its status and
+message, and so does "not configured" on a machine that gave the API a store.
+The failure case is arranged through `s3-stub`'s `fail-next-put`: armed before
+the page's PUT, the PUT and the playback fail and the run is 59 of 59; a
+never-recorded call's 400, five SKIPs and exit 0 before, is five FAILs after.
+The two syncup-live comments and settings-depth's had been corrected in
+`d5ef040`; 5b's now states the new rule. syncup-live 59/59 on lane 4.
+
+### `suite-hygiene/more-hand-rolled-chains` — **closed** (test tooling, small)
 
 **Further hand-rolled chains and literal-count loops the finder did not list**
 
@@ -4465,7 +4566,13 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Use makeChain for drawerChain. Declare the tree-search sentences once and use rest(). In ui-sweep, split the ⋯ steps into their own chain so a rest() can fill exactly that section, or replace the literal 4 with a count derived from the labels.
 
-### `suite-hygiene/skips-reachable-by-product` — open, small
+*Closed, 29 September.* panel-collapse's phone drawer and tree search, and
+ui-sweep's ⋯ section, are chains of `lib/chain.mjs`, with no hand-kept counter,
+no second copy of the sentences and no literal count. The ⋯ has a chain of its
+own, so without it exactly its four checks fail, with the reason, and the checks
+after it keep their own sentences.
+
+### `suite-hygiene/skips-reachable-by-product` — **closed** (test tooling, small)
 
 **Counted skips gated on product state rather than on the machine**
 
@@ -4473,7 +4580,21 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* syncup-live: read the entitlement from the API and skip only when it is off; if it is on and there is no Record button, fail. For storage, skip only when a configuration read says storage is unconfigured (or an explicit env flag); otherwise step(false) with the status and message. ui-sweep: replace the skip with a chain step that fails.
 
-### `suite-hygiene/syncup-live-dead-peer-branch` — open, small
+*Closed, 29 September.* Both of syncup-live's recording gates now ask the
+configuration and never the product. The entitlement is read from
+`/feature-flags/resolved` (`ai.meeting_notes`) and only an explicit `false`
+skips; with it on, a call that offers no Record control fails all three
+recording checks in a sentence. Storage is item 2. ui-sweep's board section is
+one chain: a board that does not draw the task this run added fails "clicking a
+card opens the task", and a missing Board tab fails both checks instead of one.
+Measured on lane 4 against scratch copies (no product change): a hidden Record
+control read `51 passed, 0 failed, 8 skipped`, exit 0, before, and
+`51 passed, 8 failed`, 59 of 59, after; the board's missing card read SKIP
+before and FAIL after, 107 of 107. The tenant and deployment gates still skip,
+counted: `51 passed, 0 failed, 8 skipped`. syncup-live 59/59 and ui-sweep
+107/107 on lane 4.
+
+### `suite-hygiene/syncup-live-dead-peer-branch` — **closed** (test tooling, small)
 
 **syncup-live's 'peer state is not exposed' branch is unreachable and states a stale reason; if reached it would shorten the run**
 
@@ -4481,7 +4602,15 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Delete the dead branch, or turn it into a failing check that says the instrumentation did not install. Do not print an uncounted SKIP.
 
-### `suite-hygiene/task-depth-inline-list-unbalanced` — open, small
+*Closed, 29 September.* The branch for a missing peer wrapper is gone. The
+wrapper is the suite's own init script, so its absence now fails "the two
+browsers reach a connected peer connection" with that reason instead of
+printing an uncounted SKIP about a product hook that was never built, and the
+share chain's first sender step says the same. Measured on lane 4 with the
+wrapper removed in a scratch copy: "58 of 59 checks ran" before, 59 of 59 with
+the failure named after. syncup-live 59/59.
+
+### `suite-hygiene/task-depth-inline-list-unbalanced` — **closed** (test tooling, small)
 
 **task-depth's 'project with no list' branch reports 1 check one way and 0 (plus an uncounted log line) the other, and its check never runs on seeded data**
 
@@ -4489,7 +4618,14 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Arrange the precondition instead of reading it from ambient data: create a project with no list in the fixture and drive the inline creator there, so the check always runs. If it must stay conditional, make both sides report the same labelled check via makeChain(check).rest(why).
 
-### `suite-hygiene/vacuous-absence-on-empty-read` — open, small
+*Closed, 29 September.* The precondition is arranged rather than read from ambient data: `task-depth` makes a project
+with no list, selects its space and it by value in the create form, and asserts every run that a project with no
+list offers to make one right here, then makes the list inline and creates the task in it; the project is archived
+after. `EXPECTED_CHECKS` 91 → 92. Before (lane 2, `d5ef040`): 91/91, with "this project already has a list, so the
+inline creator was not needed" — the check had never run on the seeded data and the creator had never been driven.
+After: 92/92, the check among the passes.
+
+### `suite-hygiene/vacuous-absence-on-empty-read` — **closed** (test tooling, small)
 
 **Absence checks that pass when the read came back empty or the fixture id is null**
 
@@ -4497,7 +4633,12 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 
 *To close:* Carry the precondition into the condition: require controls/tabsText/emptied/row to be non-empty (or the container count to be 1), and require forcedFailureId to be non-null, in the same chk.
 
-### `suite-hygiene/vr-invocation-skip-unreachable` — open, small
+*Closed, 29 September.* An absence in these five suites is asserted only where
+the read found the thing that could have held it — a row, strip or list that is
+on the page and was read, or a row that exists. A missing container, or a row
+never made, fails the check with that reason instead of passing it.
+
+### `suite-hygiene/vr-invocation-skip-unreachable` — **closed** (test tooling, small)
 
 **video-regression's counted skip for a WS-given invocation can never run; that path reports 3 checks short**
 
@@ -4506,6 +4647,17 @@ Held to that twice. `check-locks.sh` has three new cases for the pair (both free
 *To close:* Hoist the skip decision: if !API (invocation), skip all 3 via skip(); else if !NOTIFIED, fail all 3 with the reason (arranging a notification failed); otherwise run them. Use makeChain(chk, skip) for the block.
 
 ## Unbuilt features (buildable: research ClickUp where the frames stop) — 31
+
+*Closed, 29 September.* The Clear-all decision is taken before anything is
+read, in one `makeChain(…, skip)` of its three sentences: a run given `WS` has
+no client and skips the three, counted; a discovering run whose notification
+could not be arranged fails the three, each naming itself, because arranging
+state through the product is the product. Measured on lane 4: given `WS`, the
+block went from an uncounted SKIP line and no checks (88 of 94) to three
+counted skips (91 of 94 — the remainder is A3.9's unbalanced `else`, which is
+`unbalanced-else-branches`' `video-regression.mjs:700/712-714`, not this); with
+the notification not arranged, from "91 of 94 checks ran" to 94 of 94 with three
+FAILs. video-regression 94/94.
 
 ### `found-23-sep/connected-search-per-person` — open, medium (unbuilt; found closing federated search)
 
@@ -4921,13 +5073,15 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Research which photo provider ClickUp's Search tab uses (believed to be Unsplash; the research lens should confirm) and add a server-side proxy with a key. Add a harness stub like s3-stub.mjs/model-stub.mjs so it can be measured. Needs the owner's decision to take a key.
 
-### `commit-log/log-3100ba1-1` — open, small
+### `commit-log/log-3100ba1-1` — **closed** (already fixed, small)
 
 **The create-modal placeholder and its ⚡AI button are built and tested, but the ledger counts the row as missing**
 
 *Evidence:* Commit 3100ba1 (21 Sep 19:10) wrote 'Left M with the reason on the row'. Ledger row 791 still reads 'M ... Left M rather than built'. The feature went in three hours earlier in 666f15f (16:15). catalogs.ts:2211 has 'Add description, or write with ⚡AI'. quick-create-modal.tsx:703-734 and 1330-1351 wire a live button to /ai/task/generate. create-menu-ai.mjs:449-484 checks both. The frame citations also conflict: the code and the suite cite frame 10:04, while ledger §7 (line 2981) says 09:54-10:08 are all Board view.
 
 *To close:* Re-extract frame 10:04. Then move row 791 to B, or strike it as answering no frame (as the tab-title countdown was), and let check-video2-counts recompute 148/11/14.
+
+*Closed, 29 September, as already fixed:* `ledger-rows/row-791` did what this asks. Frames 10:02 to 10:06, re-extracted from the video, show the create-task modal with its placeholder, so row 791 is `B` (closed by `create-menu-ai`), §7's "all Board view" is corrected, and `check-video2-counts.mjs` holds the recomputed totals, 151 · 9 · 13 of 173.
 
 ### `commit-log/log-6f62af6-1` — partly-fixed, small
 
@@ -4945,13 +5099,15 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 *To close:* Add the member count to the People tab and a check for it. Record it as a B* or its own row so it is counted.
 
-### `ledger-rows/row-780-remainder` — open, small
+### `ledger-rows/row-780-remainder` — **closed** (already fixed, small)
 
 **Sidebar 'new folder here' dialog still posts only {name} — a second create path that the frame's dialog fields never reached**
 
 *Evidence:* reaudit.md:780 (B) says 'The sidebar's own inline "new folder here" dialog still posts { name } alone — recorded rather than built, because it answers no frame'. workspace-sidebar.tsx:745-751 submitCreateFolder does `api(`/spaces/${...}/folders`, { method: 'POST', body: { name } })`. The quick-create Folder tab carries description, private and location.
 
 *To close:* Point the sidebar entry at the shared Create Folder dialog (quick-create-modal FolderForm with initialSpaceId) instead of a second form.
+
+*Closed, 29 September, as already fixed:* `commit-log/log-a0b4108-1` did it. The sidebar's "New folder" opens the Create menu's Folder form on its space (`spaceCreate`, `initialSpaceId` in `workspace-sidebar.tsx`), the way its "+" menu opens the other types, and the sidebar's own `{name}`-only dialog is gone. `folder-create` drives the sidebar path. There is one folder form, with the frame's fields.
 
 ### `ledger-rows/row-835-reorder` — open, small
 

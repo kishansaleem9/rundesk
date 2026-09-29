@@ -22,6 +22,7 @@ import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -67,6 +68,9 @@ const check = (ok, label, detail = '') => {
     console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`)
   }
 }
+// A branch that could not run fails its checks with the reason, under the
+// sentences the branch that did run prints — see `lib/chain.mjs`.
+const chain = makeChain(check)
 
 let DIST = argOf('--dist')
 if (!DIST) {
@@ -402,22 +406,18 @@ console.log('\n7. the screen she actually named — arriving in a workspace')
     // with no `else` — so it could not tell. A heuristic that cannot see a
     // fix is a heuristic that keeps reporting one, and the cheapest honest
     // answer is to write the shape it can read.
+    const panelShapes = chain(
+      `the ${panel} panel is drawn as shapes`,
+      `and ${panel} does not announce it is empty before it knows`,
+    )
     if ((await tab.count()) === 0) {
-      check(false, `the ${panel} panel is drawn as shapes`, 'skipped: the panel was not reachable')
-      check(
-        false,
-        `and ${panel} does not announce it is empty before it knows`,
-        'skipped: the panel was not reachable',
-      )
+      panelShapes.rest('skipped: the panel was not reachable')
     } else {
       await tab.click()
       await page.waitForTimeout(500)
       const n = await shapesNow()
-      check(n >= 3, `the ${panel} panel is drawn as shapes (${n})`)
-      check(
-        !(await claimsEmptyNow()),
-        `and ${panel} does not announce it is empty before it knows`,
-      )
+      panelShapes.step(n >= 3, `${n} shape(s)`, `the ${panel} panel is drawn as shapes (${n})`)
+      panelShapes.step(!(await claimsEmptyNow()), 'the panel said it was empty before its request had answered')
     }
   }
   await ctx.close()

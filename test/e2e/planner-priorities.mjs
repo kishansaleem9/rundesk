@@ -43,6 +43,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -71,6 +72,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -178,12 +181,24 @@ try {
    * Both halves are here now and they are different claims. This one is the
    * server's.
    */
-  const personList = await A(`/workspaces/${workspaceId}/people/${(await A('/users/me')).data.id}/priorities`)
-  chk(
-    (personList.data ?? []).some((p) => p.title === TITLE),
-    'the per-person read returns it too — one resource, one list',
-    'the person-scoped endpoint does not have the priority the rail just made',
-  )
+  /*
+   * THE ID IS READ OPTIONALLY. This was `(await A('/users/me')).data.id` inline
+   * in the route: a /users/me that answered with no body threw a TypeError here
+   * and ended the run with six checks unreported. Now that check fails, naming
+   * the read, and the run goes on.
+   */
+  const me = await A('/users/me')
+  const meId = me.data?.id
+  const perPerson = chain('the per-person read returns it too — one resource, one list')
+  if (!meId) {
+    perPerson.rest(`skipped: GET /users/me answered ${me.status} with no id, so there was no person to read`)
+  } else {
+    const personList = await A(`/workspaces/${workspaceId}/people/${meId}/priorities`)
+    perPerson.step(
+      (personList.data ?? []).some((p) => p.title === TITLE),
+      'the person-scoped endpoint does not have the priority the rail just made',
+    )
+  }
 
   /*
    * And this one is the panel's: opened in the same page, with no reload,
@@ -241,68 +256,65 @@ try {
    * the same reason it is not `skipRest`: a rail that cannot write is a product
    * regression, not a gate on the machine.
    */
-  const NOTHING_WRITTEN = row?.id
-    ? null
-    : 'the rail never wrote a priority to the server, so there was nothing to tick off or remove'
-  if (NOTHING_WRITTEN) {
-    chk(false, 'ticking it marks it done on the server', NOTHING_WRITTEN)
-    chk(false, 'and it leaves the open list', NOTHING_WRITTEN)
-    chk(false, 'a second priority is added', NOTHING_WRITTEN)
-    chk(false, 'and removing it really removes it', NOTHING_WRITTEN)
-  } else {
-  await page.getByTestId(`planner-priority-done-${row.id}`).click()
-  chk(
-    await waitUntil(async () => {
-      const after = (await mine()).data ?? []
-      return after.find((p) => p.id === row.id)?.doneAt != null
-    }, { timeoutMs: 15_000 }),
+  const lifecycle = chain(
     'ticking it marks it done on the server',
-    'the tick changed nothing — the box is a picture of a checkbox',
-  )
-  /*
-   * The rail lists what is still open, so a finished priority should leave it.
-   * A rail that kept showing done items would make the tick look broken.
-   */
-  chk(
-    await waitUntil(
-      async () => !(await readText(page.getByTestId('planner-priorities'))).includes(TITLE),
-      { timeoutMs: 10_000 },
-    ),
     'and it leaves the open list',
-    'a priority that is done is still sitting in the rail as if it were not',
+    'a second priority is added',
+    'and removing it really removes it',
   )
-
-  // Add a second one to remove, since the first is now done and out of view.
-  const SECOND = `Drop me ${TAG}`
-  // Both bounded: the Add control is asserted to exist by a check in this
-  // suite, and bounding the press alone would move the thirty seconds onto —
-  // or leave it on — the fill above it. `second` below is read from the
-  // SERVER, so an add that never happened fails that check rather than this
-  // line, which is the guard the comment further down already describes.
-  await page.getByTestId('planner-priority-input').fill(SECOND, { timeout: 8000 }).catch(() => {})
-  await page.getByTestId('planner-priority-add').click({ timeout: 8000 }).catch(() => {})
-  let second = null
-  await waitUntil(async () => {
-    second = ((await mine()).data ?? []).find((p) => p.title === SECOND)
-    return !!second
-  }, { timeoutMs: 15_000 })
-  chk(!!second, 'a second priority is added', 'the second add never reached the server')
-
-  // And the same guard one step down: the check above is allowed to find that
-  // the add never landed, and `second.id` would then throw where it stands.
-  if (!second?.id) {
-    chk(false, 'and removing it really removes it', 'the second add never reached the server, so there was nothing to remove')
+  if (!row?.id) {
+    lifecycle.rest('the rail never wrote a priority to the server, so there was nothing to tick off or remove')
   } else {
-    await page.getByTestId(`planner-priority-remove-${second.id}`).click()
-    chk(
+    await page.getByTestId(`planner-priority-done-${row.id}`).click()
+    lifecycle.step(
       await waitUntil(async () => {
         const after = (await mine()).data ?? []
-        return !after.some((p) => p.id === second.id)
+        return after.find((p) => p.id === row.id)?.doneAt != null
       }, { timeoutMs: 15_000 }),
-      'and removing it really removes it',
-      'the ✕ removed the row from the screen and left it on the server',
+      'the tick changed nothing — the box is a picture of a checkbox',
     )
-  }
+    /*
+     * The rail lists what is still open, so a finished priority should leave it.
+     * A rail that kept showing done items would make the tick look broken.
+     */
+    lifecycle.step(
+      await waitUntil(
+        async () => !(await readText(page.getByTestId('planner-priorities'))).includes(TITLE),
+        { timeoutMs: 10_000 },
+      ),
+      'a priority that is done is still sitting in the rail as if it were not',
+    )
+
+    // Add a second one to remove, since the first is now done and out of view.
+    const SECOND = `Drop me ${TAG}`
+    // Both bounded: the Add control is asserted to exist by a check in this
+    // suite, and bounding the press alone would move the thirty seconds onto —
+    // or leave it on — the fill above it. `second` below is read from the
+    // SERVER, so an add that never happened fails that check rather than this
+    // line, which is the guard the comment further down already describes.
+    await page.getByTestId('planner-priority-input').fill(SECOND, { timeout: 8000 }).catch(() => {})
+    await page.getByTestId('planner-priority-add').click({ timeout: 8000 }).catch(() => {})
+    let second = null
+    await waitUntil(async () => {
+      second = ((await mine()).data ?? []).find((p) => p.title === SECOND)
+      return !!second
+    }, { timeoutMs: 15_000 })
+    lifecycle.step(!!second, 'the second add never reached the server')
+
+    // And the same guard one step down: the check above is allowed to find that
+    // the add never landed, and `second.id` would then throw where it stands.
+    if (!second?.id) {
+      lifecycle.rest('the second add never reached the server, so there was nothing to remove')
+    } else {
+      await page.getByTestId(`planner-priority-remove-${second.id}`).click()
+      lifecycle.step(
+        await waitUntil(async () => {
+          const after = (await mine()).data ?? []
+          return !after.some((p) => p.id === second.id)
+        }, { timeoutMs: 15_000 }),
+        'the ✕ removed the row from the screen and left it on the server',
+      )
+    }
   }
 } catch (err) {
   failed += 1

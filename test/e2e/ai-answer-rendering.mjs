@@ -560,12 +560,23 @@ try {
   const aiStatus = await api('/ai/status')
   const modelConfigured = aiStatus.status === 200 && aiStatus.data?.available === true
   const UNAVAILABLE = 'AI is not configured on this server'
+  /*
+   * BOTH BRANCHES ASK FOR A STRING. The configured one asked `!== UNAVAILABLE`,
+   * and `attrOf` answers null for a composer that is not there — so on a lane
+   * with a model a missing composer, an empty placeholder or one still reading
+   * "Working on it…" all passed: the absence of one string standing in for the
+   * presence of another, which is the shape this check was rewritten to lose.
+   * Where a model answers, the composer rests on its invitation, and that
+   * sentence (`aiPanel.inputPlaceholder`) is what is asked for.
+   */
+  const RESTING = 'Ask Rundesk AI anything…'
   const beforePlaceholder = await attrOf(composer, 'placeholder')
   chk(
-    modelConfigured ? beforePlaceholder !== UNAVAILABLE : beforePlaceholder === UNAVAILABLE,
+    beforePlaceholder === (modelConfigured ? RESTING : UNAVAILABLE),
     'the composer says which state it is in, and it is the state /ai/status reports',
     `the placeholder read ${JSON.stringify(beforePlaceholder)} while /ai/status said ` +
-      `available=${JSON.stringify(aiStatus.data?.available)}`,
+      `available=${JSON.stringify(aiStatus.data?.available)}, so it should read ` +
+      JSON.stringify(modelConfigured ? RESTING : UNAVAILABLE),
   )
 
   /*
@@ -612,7 +623,8 @@ try {
   chk(
     busyPlaceholder === 'Working on it…' && busyPlaceholder !== beforePlaceholder,
     'and the composer says it is WORKING, which is a different sentence from either of the others',
-    `it read ${JSON.stringify(busyPlaceholder)} against a disabled ${JSON.stringify(beforePlaceholder)}`,
+    // "Before", not "disabled": on a lane with a model the composer was not disabled.
+    `it read ${JSON.stringify(busyPlaceholder)} against ${JSON.stringify(beforePlaceholder)} before the request went out`,
   )
 
   release()
@@ -636,12 +648,20 @@ try {
   const stepWords = settled
     ? (await page.getByTestId('ai-trace-step-create_list').innerText().catch(() => '')).trim()
     : null
+  /*
+   * ITS OWN WORDS, BY NAME. This asked that the step not read "Working", the
+   * unknown-step fallback — so the day the fallback became "Thinking", a
+   * missing translation would have passed. The step's own label is known
+   * (`aiPanel.stepCreatingList`), and it is what is asked for.
+   */
+  const CREATING_LIST = 'Creating the new list'
   chk(
-    stepWords !== null && stepWords.length > 0 && !/^working$/i.test(stepWords),
+    stepWords === CREATING_LIST,
     'with its own words, so a missing translation cannot pass as a present one',
     settled
-      ? `the step read ${JSON.stringify(stepWords)} — the unknown-step fallback is "Working", and a ` +
-        'check for "a step is present" would pass on it'
+      ? `the step read ${JSON.stringify(stepWords)} where create_list's own label is ` +
+        `${JSON.stringify(CREATING_LIST)} — the unknown-step fallback is "Working", and a check for ` +
+        '"a step is present" would pass on it'
       : 'there was no create_list step on the page to read, so what it says could not be checked — ' +
         'reported as failed because UNKNOWN is not the same as fine',
   )

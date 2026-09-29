@@ -20,6 +20,7 @@
  *   node test/e2e/planner-blocks.mjs --api 3011
  */
 import { signInApi } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -46,6 +47,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A check whose fixture is missing fails with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -215,12 +218,22 @@ try {
     'another member of the same workspace sees none of my blocks',
     `they saw ${theirs.length} — a planner is a person's day, not their work`,
   )
-  const theirDelete = await B(`/planner/${workspaceId}/blocks/${made.data.id}`, { method: 'DELETE' })
-  chk(theirDelete.status === 404, 'and cannot delete one — 404, not 403',
-    `deleting somebody else's block returned ${theirDelete.status}`)
+  /*
+   * THE ID IS READ OPTIONALLY. "A block is created from a task" is a check that
+   * may fail, and `made.data.id` then threw here, ending the run two checks
+   * short. The two deletes need the block, so they fail naming it instead.
+   */
+  const madeId = made.data?.id
+  const deletes = chain('and cannot delete one — 404, not 403', 'while I can delete my own')
+  if (!madeId) {
+    deletes.rest(`skipped: the block was never made (POST answered ${made.status}), so there was none to delete`)
+  } else {
+    const theirDelete = await B(`/planner/${workspaceId}/blocks/${madeId}`, { method: 'DELETE' })
+    deletes.step(theirDelete.status === 404, `deleting somebody else's block returned ${theirDelete.status}`)
 
-  const mineGone = await A(`/planner/${workspaceId}/blocks/${made.data.id}`, { method: 'DELETE' })
-  chk(mineGone.status < 400, 'while I can delete my own', `deleting my own returned ${mineGone.status}`)
+    const mineGone = await A(`/planner/${workspaceId}/blocks/${madeId}`, { method: 'DELETE' })
+    deletes.step(mineGone.status < 400, `deleting my own returned ${mineGone.status}`)
+  }
 } catch (e) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${e.message.split('\n')[0]}`)

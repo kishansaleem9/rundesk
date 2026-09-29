@@ -164,6 +164,20 @@ try {
   }
 
   /*
+   * THE BASE TITLE, READ BEFORE ANY BLOCK EXISTS: the one `index.html` ships,
+   * which is what the hook restores (`BASE_TITLE`, taken at module load). The
+   * all-day check below compares the tab with THIS, rather than asserting that
+   * today's countdown format is absent from it — a countdown worded any other
+   * way ("ends in 23:41", "Focus · 23h") passed that.
+   */
+  const shippedHtml = await fetch(`${stack.base}/`).then((r) => r.text()).catch(() => '')
+  const entities = { amp: '&', lt: '<', gt: '>', quot: '"', '#39': "'" }
+  const shippedTitle = (/<title>([^<]*)<\/title>/i.exec(shippedHtml)?.[1] ?? '')
+    .replace(/&(amp|lt|gt|quot|#39);/g, (_, e) => entities[e])
+    .replace(/\s+/g, ' ')
+    .trim()
+
+  /*
    * An ALL-DAY block covering right now. It is the trap: it contains the
    * present instant, so anything that counts down "a block happening now"
    * without excluding all-day blocks will hijack the tab with a number that is
@@ -201,10 +215,12 @@ try {
   await waitUntil(async () => blockCalls.length > 0, { timeoutMs: 20_000 })
   const baseTitle = await page.title()
   chk(
-    baseTitle.length > 0 && !/left|\d+m \d+s/i.test(baseTitle),
+    shippedTitle.length > 0 && baseTitle === shippedTitle,
     `an all-day block puts no countdown in the tab (it reads ${JSON.stringify(baseTitle)})`,
-    `the tab reads ${JSON.stringify(baseTitle)} — an all-day block is not a countdown, ` +
-      'and a whole-day "23h 41m left" holds the title hostage all day',
+    shippedTitle
+      ? `the tab reads ${JSON.stringify(baseTitle)} where index.html ships ${JSON.stringify(shippedTitle)} — ` +
+          'an all-day block is not a countdown, and a whole-day "23h 41m left" holds the title hostage all day'
+      : 'the served index.html carried no <title> to compare the tab with',
   )
 
   const windowed = blockCalls.some((url) => {

@@ -17,6 +17,7 @@ import path from 'node:path'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -46,6 +47,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A check whose fixture is missing fails with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -161,23 +164,36 @@ try {
    * table exists to avoid — a router handed an absolute URL goes nowhere — so
    * the element kind is checked, not just that something rendered.
    */
-  const externalEl = page.getByTestId(`bookmark-${external.data.id}`)
-  const tag = await externalEl.evaluate((el) => el.tagName.toLowerCase()).catch(() => '')
-  const target = await externalEl.getAttribute('target').catch(() => null)
-  chk(
-    tag === 'a' && target === '_blank',
-    'an external bookmark is a real link that opens a new tab',
-    `rendered as <${tag}> target=${target}`,
-  )
-  const internalTag = await page
-    .getByTestId(`bookmark-${internal.data.id}`)
-    .evaluate((el) => el.tagName.toLowerCase())
-    .catch(() => '')
-  chk(
-    internalTag === 'button',
-    'and an in-app one navigates instead of leaving the app',
-    `rendered as <${internalTag}>`,
-  )
+  /*
+   * THE IDS ARE READ OPTIONALLY, AND EACH ELEMENT CHECK IS GATED ON ITS OWN.
+   * Both saves above are checks that may fail — a refused save answers with no
+   * `data` — and `external.data.id` then threw here, ending the run before the
+   * element checks and Add Bookmark. Each check now fails naming the bookmark
+   * that was never saved.
+   */
+  const externalId = external.data?.id
+  const internalId = internal.data?.id
+  const neverSaved = (res) => `skipped: it was never saved (POST answered ${res.status}), so there is no element to read`
+
+  const externalKind = chain('an external bookmark is a real link that opens a new tab')
+  if (!externalId) {
+    externalKind.rest(neverSaved(external))
+  } else {
+    const externalEl = page.getByTestId(`bookmark-${externalId}`)
+    const tag = await externalEl.evaluate((el) => el.tagName.toLowerCase()).catch(() => '')
+    const target = await externalEl.getAttribute('target').catch(() => null)
+    externalKind.step(tag === 'a' && target === '_blank', `rendered as <${tag}> target=${target}`)
+  }
+  const internalKind = chain('and an in-app one navigates instead of leaving the app')
+  if (!internalId) {
+    internalKind.rest(neverSaved(internal))
+  } else {
+    const internalTag = await page
+      .getByTestId(`bookmark-${internalId}`)
+      .evaluate((el) => el.tagName.toLowerCase())
+      .catch(() => '')
+    internalKind.step(internalTag === 'button', `rendered as <${internalTag}>`)
+  }
 
   // ── Adding one from the card ──────────────────────────────────────────────
   await page.getByTestId('bookmark-add-open').click()

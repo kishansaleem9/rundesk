@@ -33,6 +33,7 @@ import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixtu
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const chromium = await resolveChromium()
 const argOf = (name, fallback) => {
@@ -74,6 +75,8 @@ const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) 
 // named no check `check-break-reddened.mjs` could find when the reason was
 // built from the run (`found-29-sep/failing-checks-print-only-their-reason`).
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ? `${good} \u2014 ${badMsg}` : good))
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const auth = await login(`${B}/api/v1`, EMAIL, PASSWORD)
 const api = apiClient(`${B}/api/v1`, auth.accessToken)
@@ -169,12 +172,34 @@ try {
   const colBox = await chipBox('list-columns')
   chk(!!groupBox && !!subBox && !!colBox, 'Group, Subtasks and Columns are all on the toolbar',
     `missing a chip: group=${!!groupBox} subtasks=${!!subBox} columns=${!!colBox}`)
+  /*
+   * A floor per KIND of control, from what this build actually measures — one
+   * floor for all three would be set by the narrowest and would not notice
+   * the widest collapsing.
+   */
+  const FLOORS = { group: 120, subtasks: 86, columns: 84 }
+  /*
+   * NINE CHECKS, AND BOTH PATHS REPORT NINE. The missing-chip path used to be a
+   * `for (let i = 0; i < 8; i++) bad(…)` — one short since the cluster-box check
+   * made the geometry nine, so a missing chip read as the run stopping early,
+   * and under no sentence of any check.
+   */
+  const geometry = chain(
+    'all three are in one cluster, as the frame groups them',
+    'the three sit on one row',
+    'and in the frame\'s left-to-right order',
+    'with nothing wedged between them',
+    'and the cluster is a box of its own that holds all three',
+    `the Group chip is at least ${FLOORS.group}px wide`,
+    `the Subtasks chip is at least ${FLOORS.subtasks}px wide`,
+    `the Columns chip is at least ${FLOORS.columns}px wide`,
+    'and all three are one pill tall',
+  )
   if (groupBox && subBox && colBox) {
-    chk(
+    geometry.step(
       await page.locator('[data-testid="list-view-controls"] [data-testid="list-group-chip"]').count() === 1 &&
         await page.locator('[data-testid="list-view-controls"] [data-testid="list-subtasks"]').count() === 1 &&
         await page.locator('[data-testid="list-view-controls"] [data-testid="list-columns"]').count() === 1,
-      'all three are in one cluster, as the frame groups them',
       'the three chips are loose in the toolbar rather than grouped',
     )
     /*
@@ -183,17 +208,17 @@ try {
      * correct — nothing reads as broken, and it is not what the frame shows.
      */
     const ys = [groupBox.y, subBox.y, colBox.y]
-    chk(Math.max(...ys) - Math.min(...ys) <= 4, 'the three sit on one row',
+    geometry.step(Math.max(...ys) - Math.min(...ys) <= 4,
       `tops were ${ys.map((y) => Math.round(y)).join(', ')} — the toolbar wrapped through the cluster`)
     /*
      * Order, and NOTHING BETWEEN THEM. x-order alone can be satisfied by a
      * wrapped layout, so the gap is measured too: the container's own `gap-2`
      * is 8px, and anything much wider means another control got in.
      */
-    chk(groupBox.x < subBox.x && subBox.x < colBox.x, 'and in the frame\'s left-to-right order',
+    geometry.step(groupBox.x < subBox.x && subBox.x < colBox.x,
       `order was group@${Math.round(groupBox.x)} subtasks@${Math.round(subBox.x)} columns@${Math.round(colBox.x)}`)
     const gaps = [subBox.x - (groupBox.x + groupBox.width), colBox.x - (subBox.x + subBox.width)]
-    chk(gaps.every((g) => g >= 0 && g <= 14), 'with nothing wedged between them',
+    geometry.step(gaps.every((g) => g >= 0 && g <= 14),
       `the gaps measured ${gaps.map((g) => Math.round(g)).join('px, ')}px`)
     /*
      * AND THE CLUSTER IS A BOX, WHICH IS WHAT MAKES IT A CLUSTER.
@@ -212,36 +237,28 @@ try {
      * would show it.
      */
     const clusterBox = await chipBox('list-view-controls')
-    chk(
+    geometry.step(
       !!clusterBox &&
         clusterBox.width > 0 &&
         clusterBox.x <= groupBox.x + 1 &&
         clusterBox.x + clusterBox.width >= colBox.x + colBox.width - 1,
-      'and the cluster is a box of its own that holds all three',
       clusterBox
         ? `the cluster box ${JSON.stringify(clusterBox)} does not contain chips ending at ` +
           `x=${Math.round(colBox.x + colBox.width)}`
         : 'the cluster has no box at all — `display: contents` leaves the three laid out by the ' +
           'toolbar, so they wrap through the group at narrower widths',
     )
-    /*
-     * A floor per KIND of control, from what this build actually measures — one
-     * floor for all three would be set by the narrowest and would not notice
-     * the widest collapsing.
-     */
-    const FLOORS = { group: 120, subtasks: 86, columns: 84 }
-    chk(groupBox.width >= FLOORS.group, `the Group chip is at least ${FLOORS.group}px wide`,
+    geometry.step(groupBox.width >= FLOORS.group,
       `the Group chip measured ${Math.round(groupBox.width)}px — "Group: Status" cannot be in there`)
-    chk(subBox.width >= FLOORS.subtasks, `the Subtasks chip is at least ${FLOORS.subtasks}px wide`,
+    geometry.step(subBox.width >= FLOORS.subtasks,
       `the Subtasks chip measured ${Math.round(subBox.width)}px`)
-    chk(colBox.width >= FLOORS.columns, `the Columns chip is at least ${FLOORS.columns}px wide`,
+    geometry.step(colBox.width >= FLOORS.columns,
       `the Columns chip measured ${Math.round(colBox.width)}px`)
-    chk([groupBox, subBox, colBox].every((b) => b.height >= 24 && b.height <= 44),
-      'and all three are one pill tall',
+    geometry.step([groupBox, subBox, colBox].every((b) => b.height >= 24 && b.height <= 44),
       `heights were ${[groupBox, subBox, colBox].map((b) => Math.round(b.height)).join(', ')}`)
   } else {
     // Same count either way, so a missing chip cannot shrink the run.
-    for (let i = 0; i < 8; i++) bad('no chip geometry to measure')
+    geometry.rest(`skipped: no chip geometry to measure (group=${!!groupBox} subtasks=${!!subBox} columns=${!!colBox})`)
   }
 
   console.log('\n▶ the Group chip names its current value `12:10`')

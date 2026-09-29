@@ -710,16 +710,13 @@ console.log('\n§1.3b  the tree opens, closes, and opens again — and the dock 
 
   // Opening a space must never fold it away. Navigating to something and having
   // it disappear underneath you is how the tree became unusable.
+  const nameOpens = chain('clicking the name opens the space, never closes it')
   if ((await link.count()) === 0) {
-    check(
-      false,
-      'clicking the name opens the space, never closes it',
-      'skipped: the name was not a separate target to click',
-    )
+    nameOpens.rest('skipped: the name was not a separate target to click')
   } else {
     await link.click({ timeout: 10_000 }).catch(() => {})
     await page.waitForTimeout(1200)
-    check((await child.count()) > 0, 'clicking the name opens the space, never closes it')
+    nameOpens.step((await child.count()) > 0, 'the space was not open after its name was clicked')
   }
 
   /*

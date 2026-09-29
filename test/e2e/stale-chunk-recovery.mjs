@@ -519,7 +519,28 @@ console.log('\n4. a deploy that is actually broken')
   const after = await text(page)
   const reloads = documentRequests - documentsBefore
   check(crashed(after), 'the error boundary is shown once reloading has not helped', after.slice(0, 120))
-  check(reloads <= 3, `no reload loop (${reloads} document loads)`)
+  /*
+   * THE COOLDOWN, ASSERTED AS ITSELF. This was `reloads <= 3`, and it could not
+   * see a missing cooldown: the chunk is only asked for on a click, the window
+   * above holds two clicks, and with the cooldown gone each click reloads once
+   * — two document loads, under the ceiling, so `scr-5-reload-has-no-cooldown`
+   * left it green beside the boundary check it broke. The bound is real and
+   * was never what was checked.
+   *
+   * Two failures of the same chunk land inside one cooldown here: the first
+   * click's, which reloads, and the second click's, four seconds after the
+   * page came back. The cooldown is what makes the second one stand down and
+   * show the boundary instead, so the count is EXACT: one recovery reload and
+   * no second. Nought would mean recovery never tried; two, that the second
+   * failure reloaded straight through the cooldown.
+   */
+  check(
+    reloads === 1,
+    `no reload loop: one recovery reload, and no second inside the cooldown (${reloads} document loads)`,
+    reloads === 0
+      ? 'the first failure never reloaded, so there was no recovery for a cooldown to bound'
+      : 'the second failure, inside the cooldown, reloaded again instead of standing down',
+  )
   breakPalette = false
   await ctx.close()
 }

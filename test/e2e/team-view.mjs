@@ -284,11 +284,20 @@ try {
     'the busiest person is first',
     `the first row was ${JSON.stringify(first.replace(/\s+/g, ' ').slice(0, 60))}`,
   )
-  const last = await readText(rows().last())
+  /*
+   * THE LAST ROW IS THE UNOWNED ROW, READ BY WHAT IT HOLDS. This asserted the
+   * last row did not name "Admin" or "Omar" — the absence of two seed names,
+   * which any third member of the shared lane's workspace satisfies. The row
+   * for work nobody owns is the one holding this list's one unassigned task,
+   * and only it: so the last row's tasks are read, and must be exactly that.
+   */
+  const unowned = `Nobody wants this ${TAG}`
+  const lastTasks = (await rows().last().locator('[data-testid="team-view-task"]').allInnerTexts())
+    .map((t) => t.trim())
   chk(
-    !/Admin|Omar/.test(last),
+    lastTasks.length === 1 && lastTasks[0] === unowned,
     'and the unowned work is last, whatever its size — it is a gap, not a colleague',
-    `the last row was ${JSON.stringify(last.replace(/\s+/g, ' ').slice(0, 60))}`,
+    `the last row held ${JSON.stringify(lastTasks)} — the unowned row holds exactly ${JSON.stringify(unowned)}`,
   )
 
   /*

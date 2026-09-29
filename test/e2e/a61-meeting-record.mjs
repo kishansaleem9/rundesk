@@ -5,6 +5,7 @@ import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm } from '.
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -61,6 +62,8 @@ const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 const TITLE = `A61 retro ${Date.now().toString(36)}`
 const NOTES = 'Ali will write the migration by Thursday. Sara reviews the export path on Friday.'
 
@@ -188,21 +191,20 @@ try {
     chk(await chip.isVisible().catch(() => false), 'with a chip for a tag in use',
       `no chip for ${tag}`)
 
+    const tagFilter = chain('choosing it narrows the list', 'and choosing it again clears the filter')
     if (await chip.isVisible().catch(() => false)) {
       const rows = () => p.locator('[data-testid^="meeting-row-"], article, li').filter({ hasText: tag }).count()
       const before = await rows()
       await chip.click()
       await p.waitForTimeout(900)
       const after = await rows()
-      chk(after > 0 && after < before, `choosing it narrows the list (${before} → ${after})`,
-        `the chip changed nothing: ${before} → ${after}`)
+      tagFilter.step(after > 0 && after < before, `the chip changed nothing: ${before} → ${after}`,
+        `choosing it narrows the list (${before} → ${after})`)
       await chip.click()
       await p.waitForTimeout(700)
-      chk((await rows()) === before, 'and choosing it again clears the filter',
-        'the chip could not be turned off')
+      tagFilter.step((await rows()) === before, 'the chip could not be turned off')
     } else {
-      chk(false, 'choosing it narrows the list', 'no chip')
-      chk(false, 'and choosing it again clears the filter', 'no chip')
+      tagFilter.rest(`skipped: there was no chip for ${tag} to choose`)
     }
 
     // The server filters too, so a tag on the 201st meeting is still reachable.
@@ -258,17 +260,17 @@ try {
     'and the result points at that meeting, not just the meetings page',
     `url was ${hit?.url}`,
   )
+  const marksIt = chain('and following it marks the one you came for')
   if (hit?.url) {
     await p.goto(`${B}${hit.url}`, { waitUntil: 'domcontentloaded' })
     await p.waitForTimeout(3500)
     const row = p.getByTestId(`meeting-${findable.id}`)
-    chk(
+    marksIt.step(
       (await row.getAttribute('data-highlighted').catch(() => null)) === 'true',
-      'and following it marks the one you came for',
       'the linked meeting is not distinguished from the rest of the list',
     )
   } else {
-    chk(false, 'and following it marks the one you came for', 'no url to follow')
+    marksIt.rest('skipped: search returned no url to follow')
   }
 
   /*

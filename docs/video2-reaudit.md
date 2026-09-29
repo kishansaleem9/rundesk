@@ -4114,8 +4114,20 @@ numbers, all at zero, two of them new and both break-tested.
 
 ### Conditional check blocks: 55 → 0
 
-Every one of the 113 suites now reports the same number of checks whichever way
-it goes. `video1-fast-items` had fifteen, `syncup-live` ten, `video-regression`
+~~Every one of the 113 suites now reports the same number of checks whichever way
+it goes.~~ **NOT TRUE — CORRECTED 29 SEPTEMBER.** What reached 0 was the rule's
+own shape, an `if` that calls `chk(` or `check(` and has no `else`, and the rule
+could see nothing else: it never counted `bad()`, `ok()`, `skip()` or a chain's
+`.step()`/`.rest()`, and it asked whether an `else` EXISTED, never whether it
+reported the same number. Counted per branch for the first time, the tree held
+**23 findings in 11 of 242 suites** — 19 if/else pairs reporting different
+numbers (9 against a loop of 8 in `list-view-controls`, 12 against one `bad()`
+in `video-regression`, 3 against an uncounted `console.log('SKIP …')`), three
+loops re-typing a count, and one `bad()` inside a `.catch` in `command-palette`.
+All were balanced the same day, and `check-suite-check-branches.mjs` now counts
+each branch and reads 0 over 124 pairs
+(`suite-hygiene/branch-checker-confident-zero`). The 55 below were balanced as
+described. `video1-fast-items` had fifteen, `syncup-live` ten, `video-regression`
 nine, `ui-sweep` seven, `panel-collapse` six, `task-depth` four,
 `addressability-live` four, `person-panel` two, and one each in `emoji-picker`,
 `loading-states` and `stale-chunk-recovery`.
@@ -5701,7 +5713,8 @@ either way. All five paths to a vacuous pass now redden on the floor:
 | the ledger documents stop being read | both readable |
 
 **`check-suite-check-branches.mjs` printed a zero with no denominator.** Its
-header says "ZERO NOW, ACROSS ALL 113 SUITES" and nothing made that true: point
+header says "ZERO NOW, ACROSS ALL 113 SUITES" and nothing made that true (nor
+was it: see the 29 September correction under "Conditional check blocks"): point
 `SUITES` at the wrong directory and both of its verdicts — the conditional-check
 count and the missing-`catch` list — are empty, and it exits 0. It now asserts
 the suite count and prints it, so the line reads **"0 conditional check block(s)
@@ -5842,6 +5855,14 @@ So the property is real and it is enforced dynamically, by `EXPECTED_CHECKS`
 being compared with `!==` on every run. A static version would add nothing and
 would report nine working suites as defects — the same trade that kept the broad
 read scan from becoming a rule. Written down so the scan is not built twice.
+
+*29 September:* "with conditional checks at zero" was the confident zero corrected
+under "Conditional check blocks" above. And the alternatives are countable after
+all, by counting ONE side of each branch rather than every call site:
+`check-suite-check-branches.mjs` now does, and walking whole suites that way, 238
+of 242 total exactly their `EXPECTED_CHECKS` (the other four hold a loop over a
+named constant, an IIFE with a `while` that fills what it left, or a chain filled
+from a place the flow lost). It is a measurement of the counter, not a rule.
 
 ### The line every number here rests on, ungated until now
 

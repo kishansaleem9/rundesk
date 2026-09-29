@@ -34,6 +34,7 @@ import { apiClient, login, pickWorkspace, ensureSweepFixture } from './lib/fixtu
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const chromium = await resolveChromium()
 const argOf = (name, fallback) => {
@@ -71,6 +72,8 @@ const bad = (m) => { results.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) 
 // named no check `check-break-reddened.mjs` could find when the reason was
 // built from the run (`found-29-sep/failing-checks-print-only-their-reason`).
 const chk = (c, good, badMsg) => (c ? ok(good) : bad(badMsg && badMsg !== good ? `${good} \u2014 ${badMsg}` : good))
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 /*
  * THIS SUITE'S OWN CALLS GO STRAIGHT TO THE API; the browser keeps the proxy.
@@ -248,10 +251,20 @@ try {
     'the filtered state says something DIFFERENT from the empty-list state',
     `both empty states read ${JSON.stringify(filteredText)} — a filtered list is still claiming to be an empty one`,
   )
+  /*
+   * BY ITS CONTROLS, NOT BY TODAY'S BUTTON COPY. `!/create task/i` passed on a
+   * create button worded any other way. The empty-list state's invitation is a
+   * button, and the filtered state's one control is Clear filters — so the
+   * claim is that the filtered state, on screen, offers no button but that one.
+   */
+  const filteredButtons = await page
+    .locator('[data-testid="list-empty-filtered"] button')
+    .evaluateAll((els) => els.map((el) => el.getAttribute('data-testid') || el.innerText.trim()))
+  const invitations = filteredButtons.filter((b) => b !== 'list-empty-clear-filters')
   chk(
-    !/create task/i.test(filteredText),
+    (await countOf('list-empty-filtered')) === 1 && invitations.length === 0,
     'and it does not invite you to create a task that the filter would immediately hide',
-    `the filtered state offers Create task: ${JSON.stringify(filteredText)}`,
+    `the filtered state offers ${JSON.stringify(invitations)} beside Clear filters: ${JSON.stringify(filteredText)}`,
   )
 
   console.log('\n▶ it names the filter that emptied it, and counts what is hidden')
@@ -330,6 +343,14 @@ try {
    * finished, and the screen said the list had never had anything in it.
    */
   console.log('\n▶ hiding closed tasks is a narrowing too, and is named as one')
+  // Three checks either way, under the sentences this path prints. The other
+  // path used to report `bad()` three times from a fixed-count loop, under no
+  // sentence of any check, and a fourth check here would have left it at three.
+  const closedAxis = chain(
+    'switching closed tasks off gives the filtered state, not the empty-list one',
+    'and names the Closed toggle as the reason',
+    'and Clear switches it back on, with all three rows in the filtered set again',
+  )
   if (closedStatus?.key) {
     for (const id of created) {
       const patched = await api(`/tasks/${id}`, { method: 'PATCH', body: { status: closedStatus.key } })
@@ -357,25 +378,23 @@ try {
     if (!seeded) throw new Error(`the closed group holds ${await closedGroupCount()} of 3 before the toggle was touched`)
     await page.getByTestId('list-toggle-closed').click()
     const closedEmpty = await waitUntil(() => visible('list-empty-filtered'), { timeoutMs: 10_000 })
-    chk(closedEmpty, 'switching closed tasks off gives the filtered state, not the empty-list one',
+    closedAxis.step(closedEmpty,
       'a list of finished work reported itself as a list that had never had anything in it')
     const closedAxes = (await attrOf('[data-testid="list-empty-filtered"]', 'data-filters')) ?? ''
-    chk(closedAxes.split(',').filter(Boolean).join(',') === 'closed',
-      'and names the Closed toggle as the reason',
+    closedAxis.step(closedAxes.split(',').filter(Boolean).join(',') === 'closed',
       `it reported ${JSON.stringify(closedAxes)}`)
     await clickClear()
     const restored = await waitUntil(
       async () => !(await visible('list-empty-filtered')) && (await closedGroupCount()) === '3',
       { timeoutMs: 10_000 },
     )
-    chk(restored,
-      'and Clear switches it back on, with all three rows in the filtered set again',
+    closedAxis.step(restored,
       `the CLOSED clear left: ${await narrowState()}, ` +
         `and the ${closedStatus.key} group holds ${JSON.stringify(await closedGroupCount())} of 3`)
   } else {
     // Same count either way, so a list without a closed status cannot shorten
     // the run into a pass.
-    for (let i = 0; i < 3; i++) bad('this list has no closed status, so the Closed axis could not be exercised')
+    closedAxis.rest('this list has no closed status, so the Closed axis could not be exercised')
   }
 
   // ── 5. Back to genuinely empty ────────────────────────────────────────────

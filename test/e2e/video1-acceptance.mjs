@@ -21,6 +21,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const argOf = (name, fallback) => {
@@ -57,6 +58,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -245,15 +248,15 @@ try {
   const hit = hits.find((h) => h.entityType === 'meeting')
   chk(!!hit, '§G14-15 a meeting is findable by what its notes say',
     `search returned ${JSON.stringify(hits.map((h) => h.entityType))}`)
+  const landsOnIt = chain('and the result lands on that meeting, not just the page')
   if (hit?.url) {
     await page.goto(`${stack.base}${hit.url}`, { waitUntil: 'domcontentloaded' })
-    chk(
+    landsOnIt.step(
       (await page.getByTestId(`meeting-${meeting.id}`).getAttribute('data-highlighted').catch(() => null)) === 'true',
-      'and the result lands on that meeting, not just the page',
       'the linked meeting is not distinguished',
     )
   } else {
-    chk(false, 'and the result lands on that meeting, not just the page', 'no hit to follow')
+    landsOnIt.rest('skipped: search returned no hit to follow')
   }
 
   // ── The inbox ─────────────────────────────────────────────────────────────

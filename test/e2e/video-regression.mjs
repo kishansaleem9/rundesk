@@ -153,15 +153,17 @@ const chk = (c, g, b) => (c ? ok(g) : bad(b))
  * A COUNTED SKIP, for a gate on the INVOCATION rather than on the product.
  *
  * `API` is only set when this suite discovered the workspace itself; given
- * `WS` in the environment it has no client, and the two "Clear all survives
- * having read everything" checks cannot be arranged. That made the run's
- * LENGTH depend on how it was invoked — and `EXPECTED_CHECKS` is compared with
- * `!==`, so one of the two invocations had to be wrong about the count.
+ * `WS` in the environment it has no client, so neither the notification the
+ * three "Clear all" checks need nor the inbox's put-back can be arranged. That
+ * made the run's LENGTH depend on how it was invoked — and `EXPECTED_CHECKS` is
+ * compared with `!==`, so one of the two invocations had to be wrong about the
+ * count.
  *
  * Pushed into `results` so the total is the same either way, and marked
  * `'skip'` rather than `true` so it cannot be read as a pass. Only the
  * machine, the deployment or the invocation may skip; a skip reachable by a
- * product regression is a check that cannot fail.
+ * product regression is a check that cannot fail. It is the chain's skip
+ * too, so `skipRest` reports the Clear-all chain this way.
  */
 const skip = (m, why) => {
   results.push([REF, 'skip', m])
@@ -176,7 +178,7 @@ const skip = (m, why) => {
  * G13-10 block below is where that was found — see its own comment — and this
  * file had eight more of the shape. See `test/e2e/lib/chain.mjs`.
  */
-const chain = makeChain(chk)
+const chain = makeChain(chk, skip)
 const ref = (r, what) => { REF = r; console.log(`\n\x1b[1;36m▶ ${r}\x1b[0m  ${what}`) }
 const area = (n) => console.log(`\n\x1b[1;35m${'═'.repeat(66)}\n  ${n}\n${'═'.repeat(66)}\x1b[0m`)
 
@@ -275,18 +277,35 @@ try {
       listHref = await hrefOfDepthOnceDrawn(3)
     }
   }
+  /*
+   * TWELVE CHECKS WHICHEVER WAY THIS GOES. Everything from here to A1.3 needs a
+   * list to stand on, and with none reachable the else used to report ONE
+   * `bad()` against the twelve below — so a space page that stopped linking
+   * onward read as a run that stopped early. Declared up here so the else can
+   * fill each chain with the reason.
+   */
+  const viewsOffered = chain(
+    'the List view is offered',
+    'the Board view is offered',
+    'the Table view is offered',
+    'the Calendar view is offered',
+    'the Gantt view is offered',
+  )
+  const savedView = chain(
+    'there is a control to save the current view',
+    'and a saved view then sits in the tab strip',
+    'under the name it was given',
+  )
+  const filterBuilder = chain('there is a Filter control', 'the builder offers')
+  const inViewSearch = chain('the list has its own task search')
+  const addGroup = chain('the board offers + Add group')
   if (listHref) {
     await go(listHref, 4500)
     const listPage = await seen()
     for (const v of ['List', 'Board', 'Table', 'Calendar', 'Gantt']) {
-      chk(new RegExp(`\\b${v}\\b`).test(listPage), `the ${v} view is offered`, `no ${v} view`)
+      viewsOffered.step(new RegExp(`\\b${v}\\b`).test(listPage), `no ${v} view`)
     }
     const addView = page.locator('button').filter({ hasText: /^View$/ }).last()
-    const savedView = chain(
-      'there is a control to save the current view',
-      'and a saved view then sits in the tab strip',
-      'under the name it was given',
-    )
     const haveAddView = (await addView.count()) > 0
     savedView.step(haveAddView, 'no add-a-view control beside the tabs')
     if (!haveAddView) {
@@ -306,7 +325,6 @@ try {
 
     ref('A1.4', 'A filter builder, not three fixed fields')
     const filterBtn = page.getByRole('button', { name: /^Filter/i }).first()
-    const filterBuilder = chain('there is a Filter control', 'the builder offers')
     const haveFilter = (await filterBtn.count()) > 0
     filterBuilder.step(haveFilter, 'no Filter control on a list view')
     if (!haveFilter) {
@@ -323,8 +341,7 @@ try {
     }
 
     ref('A1.4b', 'Search inside the view you are already in')
-    chk(await page.getByPlaceholder(/Search tasks/i).count() > 0,
-      'the list has its own task search', 'no in-view task search')
+    inViewSearch.step(await page.getByPlaceholder(/Search tasks/i).count() > 0, 'no in-view task search')
 
     ref('A1.3', 'Board polish — label pills, inline rename, + Add group')
     const boardTab = page.getByRole('button', { name: /^Board$/ }).first()
@@ -332,12 +349,17 @@ try {
       await boardTab.click()
       await page.waitForTimeout(3000)
       const board = await seen()
-      chk(/Add group|New group/i.test(board), 'the board offers + Add group', 'no add-group control on the board')
+      addGroup.step(/Add group|New group/i.test(board), 'no add-group control on the board')
     } else {
-      bad('could not switch to the Board view')
+      addGroup.rest('could not switch to the Board view')
     }
   } else {
-    bad('no list reachable from the space page to test views against')
+    const why = 'no list reachable from the space page to test views against'
+    viewsOffered.rest(why)
+    savedView.rest(why)
+    filterBuilder.rest(why)
+    inViewSearch.rest(why)
+    addGroup.rest(why)
   }
 
   // ═══════════════════════════════════════════════ A2 search & inbox ════
@@ -412,27 +434,67 @@ try {
    * list mein"), so its absence is the assertion now. This suite listed it
    * among the buckets that must be reachable, and went on failing for the
    * shipped behaviour the whole time it was out of CI.
+   *
+   * AN ABSENCE COUNTS ONLY WHERE THE THING COULD HAVE BEEN. `controls` is read
+   * through `.catch(() => '')`, and '' holds no "Other" — so a page with no
+   * controls row passed this. Other sat beside Primary in the filter group, so
+   * the read has to have seen Primary there before Other's absence says anything.
    */
+  const sawFilters = /\bPrimary\b/i.test(controls)
   chk(
-    !/\bOther\b/i.test(controls),
+    sawFilters && !/\bOther\b/i.test(controls),
     'and Other is gone (§2.2)',
-    `Other is back among the inbox controls: ${controls.replace(/\s+/g, ' ').slice(0, 120)}`,
+    sawFilters
+      ? `Other is back among the inbox controls: ${controls.replace(/\s+/g, ' ').slice(0, 120)}`
+      : `the read did not see the filter group Other sat in (it read ${JSON.stringify(controls.replace(/\s+/g, ' ').slice(0, 120))}), ` +
+          'so Other being absent from it says nothing',
   )
 
   /*
    * §2.5 — the one-move action is "Clear all", not "Mark all read": clearing
    * is what she asked for, and the row carries a retention clock afterwards.
    * The old copy never existed after that change landed.
+   *
+   * THREE CHECKS ON EVERY PATH, AND THE SKIP DECIDED BEFORE ANYTHING IS READ.
+   * The decision used to sit inside `if (NOTIFIED)`, and NOTIFIED is only ever
+   * set by the discovery block — the same block that sets `API`. So the counted
+   * skips for a run given `WS` sat behind a condition that run could never meet:
+   * it fell into an `else` that printed an uncounted SKIP and reported none of
+   * the three, and so did a discovering run whose notification could not be
+   * arranged — three checks short either way, under the headline that says the
+   * RUN stopped early ("91 of 94 checks ran", measured on the second).
+   *
+   *   · given WS (no `API`): the INVOCATION — nothing can be arranged or put
+   *     back — so all three are counted as skipped;
+   *   · discovered, but `ensureNotification` came back null: arranging state
+   *     through the product failed (the peer could not sign in, or its task or
+   *     its assignment was refused), and a Clear all that renders only when
+   *     there is something to clear cannot be asked about — all three FAIL,
+   *     with that reason, because a skip reachable by the product is a check
+   *     that cannot fail;
+   *   · otherwise they run.
    */
-  if (NOTIFIED) {
+  // `chk` prints only its reason on a failure, and `rest` gives all three the
+  // same one — so each FAIL here names its own check first, or the three lines
+  // would be indistinguishable.
+  const clearAll = makeChain((c, g, b) => chk(c, g, `${g} — ${b}`), skip)(
+    'the inbox can be cleared in one move',
+    'and Clear all survives having read everything',
+    'and the check left the inbox exactly as it found it',
+  )
+  if (!API) {
+    // The invocation, not the product — see `skip` above.
+    clearAll.skipRest('this run was given WS, so it has no API client to arrange a notification with or to put the inbox back')
+  } else if (!NOTIFIED) {
+    clearAll.rest(
+      'no notification could be arranged (ensureNotification came back null: the peer could not sign in, ' +
+        'or its task or its assignment was refused), so there was nothing for Clear all to clear',
+    )
+  } else {
     // By testid rather than by scanning the page for the words "Clear all" —
     // same reason as the controls row above, and it survives the copy being
     // translated.
-    chk(
-      (await page.getByTestId('inbox-clear-all').count()) > 0,
-      'the inbox can be cleared in one move',
-      'no Clear all',
-    )
+    clearAll.step((await page.getByTestId('inbox-clear-all').count()) > 0, 'no Clear all')
     /*
      * §G10-12 — and it is STILL there once nothing is unread.
      *
@@ -442,50 +504,34 @@ try {
      * button gone precisely because you went through them. Reading and clearing
      * are different questions and the control must not be gated on the wrong
      * one.
+     *
+     * The rows that were unread are recorded and PUT BACK afterwards.
+     *
+     * An earlier fixture in this suite emptied the top bar for every later
+     * suite and cost two CI runs to find; the lesson stuck. Marking every
+     * notification read is a global change to this account, and leaving it
+     * that way makes the very check above — which needs something unread —
+     * fail on the next run for a reason that has nothing to do with the code.
      */
-    if (!API) {
-      // The invocation, not the product — see `skip` above.
-      skip('and Clear all survives having read everything', 'this run was given WS, so it has no API client')
-      skip('and the check left the inbox exactly as it found it', 'nothing was changed to put back')
-    } else {
-      /*
-       * The rows that were unread are recorded and PUT BACK afterwards.
-       *
-       * An earlier fixture in this suite emptied the top bar for every later
-       * suite and cost two CI runs to find; the lesson stuck. Marking every
-       * notification read is a global change to this account, and leaving it
-       * that way makes the very check above — which needs something unread —
-       * fail on the next run for a reason that has nothing to do with the code.
-       */
-      const before = (await API('/notifications?unreadOnly=true')).data ?? []
-      await API('/notifications/mark-all-read', { method: 'POST' })
-      await page.reload({ waitUntil: 'domcontentloaded' })
-      // The control is drawn with the inbox's rows, so it is waited for (bounded)
-      // rather than counted 2.5 fixed seconds after the reload — the same shape
-      // as [A1.2], and it missed the same way on a loaded machine.
-      await page.getByTestId('inbox-clear-all').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
-      chk(
-        (await page.getByTestId('inbox-clear-all').count()) > 0,
-        'and Clear all survives having read everything',
-        'Clear all vanished once nothing was unread',
-      )
-      // Judged by the count below; a refused one is named in its reason.
-      const refused = []
-      for (const n of before) {
-        const res = await API(`/notifications/${n.id}/unread`, { method: 'POST' })
-        if (res.status >= 300) refused.push(`${n.id}: ${res.status}`)
-      }
-      const after = (await API('/notifications?unreadOnly=true')).data ?? []
-      chk(
-        after.length === before.length,
-        'and the check left the inbox exactly as it found it',
-        `unread was ${before.length}, is now ${after.length}${refused.length ? `; marking unread was refused for ${refused.join(', ')}` : ''}`,
-      )
+    const before = (await API('/notifications?unreadOnly=true')).data ?? []
+    await API('/notifications/mark-all-read', { method: 'POST' })
+    await page.reload({ waitUntil: 'domcontentloaded' })
+    // The control is drawn with the inbox's rows, so it is waited for (bounded)
+    // rather than counted 2.5 fixed seconds after the reload — the same shape
+    // as [A1.2], and it missed the same way on a loaded machine.
+    await page.getByTestId('inbox-clear-all').first().waitFor({ state: 'attached', timeout: 20_000 }).catch(() => {})
+    clearAll.step((await page.getByTestId('inbox-clear-all').count()) > 0, 'Clear all vanished once nothing was unread')
+    // Judged by the count below; a refused one is named in its reason.
+    const refused = []
+    for (const n of before) {
+      const res = await API(`/notifications/${n.id}/unread`, { method: 'POST' })
+      if (res.status >= 300) refused.push(`${n.id}: ${res.status}`)
     }
-  } else {
-    // Said out loud, not skipped silently: the control is correctly absent on
-    // an empty inbox, so with nothing to clear this check cannot be answered.
-    console.log('  \x1b[2mSKIP  no notification could be arranged — "Clear all" not checked\x1b[0m')
+    const after = (await API('/notifications?unreadOnly=true')).data ?? []
+    clearAll.step(
+      after.length === before.length,
+      `unread was ${before.length}, is now ${after.length}${refused.length ? `; marking unread was refused for ${refused.join(', ')}` : ''}`,
+    )
   }
 
   /*
@@ -599,6 +645,13 @@ try {
     `the default order is not newest-first: ${newestFirst.map((t) => new Date(t).toISOString()).join(' / ')}`,
   )
 
+  // The three sentences once. The short path used to type all three again,
+  // beside the checks that print them, with nothing to keep the copies alike.
+  const inboxOrder = chain(
+    'turning off "newest first" puts the oldest at the top',
+    'and the server remembers the choice',
+    'turning off "group by date" removes the date headers',
+  )
   if (newestFirst.length >= 2) {
     // Turning the sort off has to change which row is on top. A checkbox that
     // only changes its own tick is the whole defect class this audit is about.
@@ -610,9 +663,8 @@ try {
     await go(readOn, 3200)
     await waitUntil(async () => runsUp(await rowTimes()), { timeoutMs: 8_000 })
     const oldestFirst = await rowTimes()
-    chk(
+    inboxOrder.step(
       runsUp(oldestFirst) && oldestFirst.length >= 2,
-      'turning off "newest first" puts the oldest at the top',
       `the timestamps do not run oldest-first: ${oldestFirst.map((t) => new Date(t).toISOString()).join(' / ')}`,
     )
     // ...and survived a reload, which is what "stored" means.
@@ -621,9 +673,8 @@ try {
     // indistinguishable from "the server did not store it" — the check failed
     // while the feature worked.
     const stored = (await rootApi('/notifications/preferences').catch(() => null))?.data
-    chk(
+    inboxOrder.step(
       stored?.inboxView?.sortNewestFirst === false,
-      'and the server remembers the choice',
       `server says ${JSON.stringify(stored?.inboxView ?? null)}`,
     )
 
@@ -632,15 +683,12 @@ try {
     await waitUntil(async () => (await rootApi('/notifications/preferences').catch(() => null))?.data?.inboxView?.groupByDate === false, { timeoutMs: 10_000 })
     await go(readOn, 3200)
     await waitUntil(async () => (await ungrouped()) === 1, { timeoutMs: 8_000 })
-    chk(
+    inboxOrder.step(
       (await dateBuckets()) === 0 && (await ungrouped()) === 1,
-      'turning off "group by date" removes the date headers',
       `buckets=${await dateBuckets()} ungrouped=${await ungrouped()}`,
     )
   } else {
-    chk(false, 'turning off "newest first" puts the oldest at the top', 'not enough rows')
-    chk(false, 'and the server remembers the choice', 'not enough rows')
-    chk(false, 'turning off "group by date" removes the date headers', 'not enough rows')
+    inboxOrder.rest(`skipped: ${newestFirst.length} row(s) on screen — ordering needs two`)
   }
 
   // Put it back, so the rest of this suite and every other one see the inbox
@@ -677,16 +725,26 @@ try {
 
   ref('A3.5', 'Ask AI opens a prompt rather than rewriting the draft')
   const ta = page.locator('textarea:visible').first()
+  /*
+   * SEVEN CHECKS WHICHEVER WAY THIS GOES: with no composer the else used to
+   * report one `bad()` against the Ask AI chain and the link picker's.
+   */
+  const composerAi = chain(
+    'the composer has an Ask AI control',
+    'it offers modes to choose from',
+    'the draft is untouched until a mode is picked',
+  )
+  const linkPicker = chain(
+    'there is a link control in the toolbar',
+    'the Tasks tab is offered',
+    'the Docs tab is offered',
+    'the Channels tab is offered',
+  )
   if (await ta.count()) {
     await ta.fill('we need to shipp this featur by friday pls')
     const before = await ta.inputValue({ timeout: 5000 }).catch(() => '')
     const composer = page.locator('div').filter({ has: page.locator('textarea') }).last()
     const askAi = composer.getByRole('button', { name: /Ask AI/i }).first()
-    const composerAi = chain(
-      'the composer has an Ask AI control',
-      'it offers modes to choose from',
-      'the draft is untouched until a mode is picked',
-    )
     const haveAskAi = (await askAi.count()) > 0
     composerAi.step(haveAskAi, 'no Ask AI in the composer')
     if (!haveAskAi) {
@@ -704,12 +762,6 @@ try {
 
     ref('A3.6', 'The link picker has Tasks / Docs / Channels')
     const link = page.getByRole('button', { name: /Link a task, doc or channel/i }).first()
-    const linkPicker = chain(
-      'there is a link control in the toolbar',
-      'the Tasks tab is offered',
-      'the Docs tab is offered',
-      'the Channels tab is offered',
-    )
     const haveLink = (await link.count()) > 0
     linkPicker.step(haveLink, 'no link control')
     if (!haveLink) {
@@ -725,27 +777,35 @@ try {
       await page.waitForTimeout(800)
     }
   } else {
-    bad('no composer on the chat page')
+    composerAi.rest('no composer on the chat page')
+    linkPicker.rest('no composer on the chat page')
   }
 
   ref('A3.9', 'A DM gets Chat / Calendar / Tasks; a channel does not')
   const strip = () => page.locator('button[aria-pressed]').filter({ hasText: /^(Chat|Calendar|Tasks)$/ })
   chk(await strip().count() === 0, 'a channel has no tab strip', 'a channel showed DM tabs')
   const dmRow = page.getByText(DM_NAME, { exact: true }).first()
+  // FOUR CHECKS WHICHEVER WAY THIS GOES: with no DM the else used to report
+  // one `bad()` against the four the DM's tab strip reports.
+  const dmTabs = chain(
+    'a DM shows all three tabs',
+    'Calendar names whose meetings these are',
+    'the composer steps out of the way',
+    'Tasks names whose tasks these are',
+  )
   if (await dmRow.count()) {
     await dmRow.click()
     await page.waitForTimeout(2500)
-    chk(await strip().count() === 3, 'a DM shows all three tabs', `saw ${await strip().count()} tabs`)
+    dmTabs.step(await strip().count() === 3, `saw ${await strip().count()} tabs`)
     await page.getByRole('button', { name: 'Calendar', exact: true }).click()
     await page.waitForTimeout(2000)
-    chk(/Meetings with/i.test(await seen()), 'Calendar names whose meetings these are', 'no Calendar heading')
-    chk(await page.locator('textarea:visible').count() === 0,
-      'the composer steps out of the way', 'the composer is still showing under Calendar')
+    dmTabs.step(/Meetings with/i.test(await seen()), 'no Calendar heading')
+    dmTabs.step(await page.locator('textarea:visible').count() === 0, 'the composer is still showing under Calendar')
     await page.getByRole('button', { name: 'Tasks', exact: true }).click()
     await page.waitForTimeout(2000)
-    chk(/Open tasks with/i.test(await seen()), 'Tasks names whose tasks these are', 'no Tasks heading')
+    dmTabs.step(/Open tasks with/i.test(await seen()), 'no Tasks heading')
   } else {
-    bad('no DM in the sidebar to test the tab strip against')
+    dmTabs.rest('no DM in the sidebar to test the tab strip against')
   }
 
   // ═════════════════════════════════════════════════════════ A4 admin ════
@@ -958,28 +1018,28 @@ try {
      * reached, and whatever is left over is reported as failed with the reason
      * the chain stopped. Eight by construction — a branch that forgets a check
      * cannot shorten the run, it fails that check with its own sentence.
+     *
+     * THAT LIST IS `lib/chain.mjs` NOW. This block kept its own copy of the
+     * helper — an `emitted` counter, a `stopped` reason and a `while` to fill
+     * the remainder — which is the module's job, and which the module does
+     * with one thing this copy lacked: a step past the last sentence throws
+     * instead of reporting `undefined`.
      */
-    const G13 = [
-      ['the AI dock can be opened', 'no ai-dock-toggle on the top bar'],
-      ['the AI composer is usable once the model is available', 'the composer stayed disabled'],
-      ['the answer arrives', 'the answer never rendered'],
-      ['and the trace of what it read stays with it', 'no trace survived the answer'],
-      ['naming the workspace read the server reported', 'the workspace step never rendered'],
-      ['and the answer offers next steps drawn from it', 'no follow-up chips under the answer'],
-      ['phrased as something you could say back', 'the chip did not read as something to say'],
-      ['and clicking one actually asks it', 'the chip did not send its suggestion'],
-    ]
-    let emitted = 0
-    const g13 = (cond, why) => {
-      const [good, bad] = G13[emitted++]
-      chk(cond, good, why ?? bad)
-    }
-    let stopped = ''
+    const g13 = chain(
+      'the AI dock can be opened',
+      'the AI composer is usable once the model is available',
+      'the answer arrives',
+      'and the trace of what it read stays with it',
+      'naming the workspace read the server reported',
+      'and the answer offers next steps drawn from it',
+      'phrased as something you could say back',
+      'and clicking one actually asks it',
+    )
     await (async () => {
       const aiToggle = aiPage.getByTestId('ai-dock-toggle')
       const haveToggle = (await aiToggle.count()) > 0
-      g13(haveToggle)
-      if (!haveToggle) return (stopped = 'skipped: there was no dock handle to open')
+      g13.step(haveToggle, 'no ai-dock-toggle on the top bar')
+      if (!haveToggle) return g13.rest('skipped: there was no dock handle to open')
 
       await aiToggle.click()
       await aiPage.waitForTimeout(1500)
@@ -988,8 +1048,8 @@ try {
       // and `fill` would then time out 30s into a failure whose message says
       // nothing about why.
       const enabled = !(await composer.isDisabled().catch(() => true))
-      g13(enabled)
-      if (!enabled) return (stopped = 'skipped: the composer never became usable')
+      g13.step(enabled, 'the composer stayed disabled')
+      if (!enabled) return g13.rest('skipped: the composer never became usable')
 
       await composer.fill('what am I working on?')
       await composer.press('Enter')
@@ -999,7 +1059,7 @@ try {
         .waitFor({ timeout: 15000 })
         .then(() => true)
         .catch(() => false)
-      g13(answered)
+      g13.step(answered, 'the answer never rendered')
       /*
        * Read AFTER the answer, on purpose. A first version looked while the
        * turn was still streaming and found nothing, because the trace was
@@ -1007,8 +1067,8 @@ try {
        * when you would want to check whether it read your data. The trace
        * now belongs to the message and stays with it.
        */
-      g13((await aiPage.getByTestId('ai-trace').count()) > 0)
-      g13((await aiPage.getByTestId('ai-trace-step-workspace').count()) > 0)
+      g13.step((await aiPage.getByTestId('ai-trace').count()) > 0, 'no trace survived the answer')
+      g13.step((await aiPage.getByTestId('ai-trace-step-workspace').count()) > 0, 'the workspace step never rendered')
 
       /*
        * G13-9 [18:42] — "Follow ups", under the answer they came from.
@@ -1019,20 +1079,22 @@ try {
        */
       const chip = aiPage.locator('[data-testid^="ai-followup-"]').first()
       const haveChip = (await chip.count()) > 0
-      g13(haveChip)
-      if (!haveChip) return (stopped = 'skipped: there was no chip to read or click')
+      g13.step(haveChip, 'no follow-up chips under the answer')
+      if (!haveChip) return g13.rest('skipped: there was no chip to read or click')
 
       // The MESSAGE read the chip through a catch and the CONDITION did not, so
       // an absent chip threw out of the assertion describing it — and the press
       // below was bare as well.
       const chipText = await chip.innerText({ timeout: 6000 }).catch(() => null)
-      g13(chipText?.trim() === 'Show me the overdue one', chipText ?? '(unreadable)')
+      g13.step(chipText?.trim() === 'Show me the overdue one', chipText ?? '(unreadable)')
       // A chip that does not ask the question is a label.
       await chip.click({ timeout: 8000 }).catch(() => {})
       await aiPage.waitForTimeout(2000)
-      g13((await aiPage.locator('text=Show me the overdue one').count()) >= 2)
+      g13.step(
+        (await aiPage.locator('text=Show me the overdue one').count()) >= 2,
+        'the chip did not send its suggestion',
+      )
     })()
-    while (emitted < G13.length) g13(false, stopped || 'skipped: the chain stopped earlier')
     await aiCtx.close()
   }
 

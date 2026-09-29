@@ -21,6 +21,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { makeChain } from './lib/chain.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -65,6 +66,9 @@ const check = (ok, label, detail = '') => {
     console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`)
   }
 }
+// A branch that could not run fails its checks with the reason, under the
+// sentences the branch that did run prints — see `lib/chain.mjs`.
+const chain = makeChain(check)
 
 let DIST = argOf('--dist')
 if (!DIST) {
@@ -402,15 +406,18 @@ console.log('\n7. the chunk does not arrive — and Try again actually tries')
    * the reason, so the run reaches its own summary and the count still comes to
    * `EXPECTED_CHECKS` — which is the same rule the rest of this directory
    * follows: every branch reports the same number of checks.
+   *
+   * The three sentences are declared once, here, for both paths. The failure
+   * path used to carry its own literal array of them beside the checks that
+   * print them, two copies of one list with nothing keeping them alike.
    */
+  const retry = chain(
+    'Try again reloads rather than re-importing a module the browser has already given up on',
+    'and does not pretend to re-fetch in the dead document',
+    'and the list is there after it',
+  )
   if (!reported) {
-    for (const [label, why] of [
-      ['Try again reloads rather than re-importing a module the browser has already given up on', 'skipped: there was no failure state to retry'],
-      ['and does not pretend to re-fetch in the dead document', 'skipped: there was no failure state to retry'],
-      ['and the list is there after it', 'skipped: there was no failure state to retry'],
-    ]) {
-      check(false, label, why)
-    }
+    retry.rest('skipped: there was no failure state to retry')
     await fresh.close()
   } else {
 
@@ -436,12 +443,8 @@ console.log('\n7. the chunk does not arrive — and Try again actually tries')
     .then(() => true)
     .catch(() => false)
   await fresh.locator('[data-testid="emoji-retry"]').click()
-  check(await reloaded, 'Try again reloads rather than re-importing a module the browser has already given up on')
-  check(
-    asked.length === beforeRetry,
-    'and does not pretend to re-fetch in the dead document',
-    `${asked.length - beforeRetry} request(s) were made before the reload`,
-  )
+  retry.step(await reloaded, 'pressing Try again did not reload the document')
+  retry.step(asked.length === beforeRetry, `${asked.length - beforeRetry} request(s) were made before the reload`)
 
   // And the reloaded app, with the chunk reachable again, works.
   const againTrigger = fresh.locator('button[title="Emoji"]').first()
@@ -453,7 +456,7 @@ console.log('\n7. the chunk does not arrive — and Try again actually tries')
     .waitFor({ timeout: 15000 })
     .catch(() => {})
   const recovered = await fresh.locator('[data-testid="emoji-section-people"] button').count()
-  check(recovered > 300, `and the list is there after it (${recovered})`, `only ${recovered} rendered after the reload`)
+  retry.step(recovered > 300, `only ${recovered} rendered after the reload`, `and the list is there after it (${recovered})`)
   await fresh.close()
   }
 }

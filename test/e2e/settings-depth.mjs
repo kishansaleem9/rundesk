@@ -17,6 +17,7 @@ import { createRequire } from 'node:module'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const require_ = createRequire(path.join(REPO, 'noop.cjs'))
@@ -107,6 +108,9 @@ const check = (ok, label, detail = '') => {
     console.log(`  FAIL  ${label}${detail ? ` — ${detail}` : ''}`)
   }
 }
+// A branch that could not run fails its checks with the reason, under the
+// sentences the branch that did run prints — see `lib/chain.mjs`.
+const chain = makeChain(check)
 
 /** Raise this when checks are added — a suite that quietly shrinks reads as green. */
 const EXPECTED_CHECKS = 62
@@ -404,35 +408,31 @@ try {
 
   const mine = (await A('/workspaces')).data ?? []
   check(mine.length > 0, 'this account is in at least one workspace to list', `${mine.length}`)
+  // Three checks either way, under the sentences the listed path prints; the
+  // empty list is the reason, not three claims of its own.
+  const workspaceRow = chain(
+    'the workspace the API returns is the one on the page',
+    'and it says what you are in it, not just that you are in it',
+    'and opening one takes you into it',
+  )
   if (mine.length > 0) {
     const row = page.getByTestId(`profile-workspace-${mine[0].workspace.id}`)
-    check(
-      await row.isVisible().catch(() => false),
-      'the workspace the API returns is the one on the page',
-      `looked for ${mine[0].workspace.id}`,
-    )
+    workspaceRow.step(await row.isVisible().catch(() => false), `looked for ${mine[0].workspace.id}`)
     /*
      * The role is the half you cannot read off the sidebar, and the reason to
      * open this page rather than just looking at the app.
      */
     const rowText = (await row.innerText().catch(() => '')).toLowerCase()
-    check(
+    workspaceRow.step(
       rowText.includes(String(mine[0].role).replace(/_/g, ' ').toLowerCase()),
-      'and it says what you are in it, not just that you are in it',
       `row read "${rowText.replace(/\s+/g, ' ').slice(0, 80)}" expected role ${mine[0].role}`,
     )
     // A list you cannot act on is a screenshot.
     await page.getByTestId(`profile-workspace-open-${mine[0].workspace.id}`).click().catch(() => {})
     await page.waitForTimeout(2500)
-    check(
-      page.url().includes(`/app/${mine[0].workspace.id}`),
-      'and opening one takes you into it',
-      page.url(),
-    )
+    workspaceRow.step(page.url().includes(`/app/${mine[0].workspace.id}`), page.url())
   } else {
-    check(false, 'no workspace row to read')
-    check(false, 'so the role caption was never checked')
-    check(false, 'so opening one was never driven')
+    workspaceRow.rest('skipped: the API listed no workspace for this account, so there was no row to read')
   }
 
   // ---------------------------------------------------------------------
@@ -505,25 +505,20 @@ try {
   check(/[?&]tab=members/.test(page.url()), 'arriving at a named tab keeps it', page.url())
 
   const trashTab = page.getByTestId('settings-tab-trash')
+  const tabAddress = chain(
+    'moving to another tab replaces it in the address',
+    'and reopening that address returns the same tab',
+  )
   if ((await trashTab.count()) === 0) {
-    check(false, 'no Trash tab to move to')
-    check(false, 'so the tab address was never exercised')
+    tabAddress.rest('skipped: there was no Trash tab to move to')
   } else {
     await trashTab.first().click()
     await page.waitForTimeout(2000)
-    check(
-      /[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()),
-      'moving to another tab replaces it in the address',
-      page.url(),
-    )
+    tabAddress.step(/[?&]tab=trash/.test(page.url()) && !/tab=members/.test(page.url()), page.url())
     // The point of the address: reopening it returns the same tab.
     await page.goto(page.url(), { waitUntil: 'domcontentloaded' })
     await page.waitForTimeout(3000)
-    check(
-      /[?&]tab=trash/.test(page.url()),
-      'and reopening that address returns the same tab',
-      page.url(),
-    )
+    tabAddress.step(/[?&]tab=trash/.test(page.url()), page.url())
   }
 
   // ---------------------------------------------------------------------

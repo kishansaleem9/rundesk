@@ -385,14 +385,28 @@ try {
   )
 
   await press('space-wizard-preset-marketing')
+  /*
+   * NO GANTT, READ OFF A ROW THAT SHOWS THE CARD'S OWN VIEWS. `readText` answers
+   * '' for a row it cannot read, and '' holds no "Gantt" — so a wizard that
+   * drew no views row passed this. The row read has to name every view the
+   * marketing card carries before Gantt's absence from it counts: that is the
+   * card's configuration replacing the copy, rather than nothing replacing it.
+   */
+  const marketingViews = PRESETS.presets.find((p) => p.key === 'marketing').views
+  const showsCard = (row) => marketingViews.every((v) => new RegExp(`\\b${v}\\b`, 'i').test(row))
   chk(
     await waitUntil(async () => {
       const row = (await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')
-      return !/Gantt/.test(row) && (await page.locator('[data-testid="space-wizard-copy-note"]').count()) === 0
+      return showsCard(row) && !/Gantt/.test(row) &&
+        (await page.locator('[data-testid="space-wizard-copy-note"]').count()) === 0
     }, { timeoutMs: 10_000 }),
     'and choosing a workflow card drops the copy — it was a customisation OF the old card',
-    'the copied views survived a preset change, so the space would be built from a mixture ' +
-      'nobody chose and the note would still name a Space that no longer decides anything',
+    showsCard((await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' '))
+      ? 'the copied views survived a preset change, so the space would be built from a mixture ' +
+          'nobody chose and the note would still name a Space that no longer decides anything'
+      : `the Default views row did not show the marketing card's ${JSON.stringify(marketingViews)} — it read ` +
+          `"${(await readText(page.locator('[data-testid="space-wizard-row-views"]'))).replace(/\s+/g, ' ')}", ` +
+          'so what it lacks says nothing',
   )
 
   // The Required-views panel: List cannot be turned off.

@@ -294,10 +294,15 @@ try {
   )
 
   // "No matches" over results the browser is holding was the visible symptom.
+  // Asked of the element cmdk draws for it — `[cmdk-empty]`, which exists only
+  // while its list holds nothing — inside a list that is on screen, rather
+  // than of today's wording, which any rewording of the empty state passed.
+  const paletteLists = await page.locator('[cmdk-list]').count()
+  const paletteEmpty = await page.locator('[cmdk-list] [cmdk-empty]').count()
   chk(
-    !/No matches/i.test(seen),
+    paletteLists > 0 && paletteEmpty === 0,
     'the palette does not claim "no matches" while holding results',
-    'the palette says "no matches" over results it has',
+    paletteLists ? 'the palette says "no matches" over results it has' : 'no palette list was on screen to read',
   )
 
   /*
@@ -509,15 +514,24 @@ try {
 
   const clear = page.getByTestId('palette-clear-filters')
   chk(await clear.isVisible().catch(() => false), 'Clear filters is on screen', 'the Clear filters button is not visible')
-  await clear.click({ timeout: 5000 }).catch(async () => {
-    // Reported rather than swallowed: a button that cannot be clicked is its
-    // own defect, and the checks below would otherwise blame the handler.
-    bad('the Clear filters button could not be clicked')
-  })
+  /*
+   * Reported rather than swallowed: a button that cannot be clicked is its own
+   * defect, and the check below would otherwise blame the handler. Reported IN
+   * that check, though, not beside it — a `bad()` in the `.catch` was a 44th
+   * check that existed only when the click failed, so the path that found the
+   * defect printed "44 of 43 checks ran" over it.
+   */
+  const unclicked = await clear.click({ timeout: 5000 }).then(() => null, (e) => e)
   await page.waitForTimeout(600)
 
   const after = await countNow()
-  chk(after === 0, 'Clear filters puts the count back to zero', `the badge still reads ${after} after clearing`)
+  chk(
+    !unclicked && after === 0,
+    'Clear filters puts the count back to zero',
+    unclicked
+      ? `the Clear filters button could not be clicked (${String(unclicked.message).split('\n')[0]}), and the badge reads ${after}`
+      : `the badge still reads ${after} after clearing`,
+  )
   chk(
     (await page.getByTestId('palette-created-after').inputValue().catch(() => 'x')) === '',
     'and the date field is actually empty again',

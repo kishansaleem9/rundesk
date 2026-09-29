@@ -30,6 +30,7 @@ import { startLocalStack } from './lib/local-stack.mjs'
 import { signInApi, LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
 import { openDb } from './lib/db.mjs'
 import { waitUntil, readText } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -58,6 +59,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A check whose fixture is missing fails with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -103,13 +106,22 @@ try {
   const far = new Date(now.getFullYear(), now.getMonth(), Math.abs(now.getDate() - 28) > 8 ? 28 : 1)
   far.setHours(10, 0, 0, 0)
   const farEnd = new Date(far.getTime() + 60 * 60 * 1000)
-  const meId = (await A('/users/me')).data.id
-  await sql`
-    insert into task_time_blocks (workspace_id, user_id, task_id, title, starts_at, ends_at, is_all_day)
-    values (
-      ${workspaceId}, ${meId}, ${task.id}, ${`Late month ${TAG}`},
-      ${far.toISOString()}, ${farEnd.toISOString()}, false
-    )`
+  /*
+   * THE ID IS READ OPTIONALLY. This was `(await A('/users/me')).data.id`, which
+   * threw before the browser opened and took all eleven checks with it. Only
+   * the Month check below needs the far-away block, so without an id the block
+   * is not made and that one check fails, naming the read.
+   */
+  const me = await A('/users/me')
+  const meId = me.data?.id
+  if (meId) {
+    await sql`
+      insert into task_time_blocks (workspace_id, user_id, task_id, title, starts_at, ends_at, is_all_day)
+      values (
+        ${workspaceId}, ${meId}, ${task.id}, ${`Late month ${TAG}`},
+        ${far.toISOString()}, ${farEnd.toISOString()}, false
+      )`
+  }
 
   const ctx = await browser.newContext({ viewport: { width: 1500, height: 1000 } })
   const page = await ctx.newPage()
@@ -191,14 +203,18 @@ try {
    * and drew thirty: the other twenty-three looked empty, and nothing anywhere
    * said otherwise.
    */
-  chk(
-    await waitUntil(
-      async () => (await readText(page.getByTestId('planner-month-grid'))).includes(`Late month ${TAG}`),
-      { timeoutMs: 15_000 },
-    ),
-    'a block late in the month is actually fetched and drawn',
-    'the month drew empty cells for days it never asked the server about',
-  )
+  const lateBlock = chain('a block late in the month is actually fetched and drawn')
+  if (!meId) {
+    lateBlock.rest(`skipped: GET /users/me answered ${me.status} with no id, so no block could be put late in the month`)
+  } else {
+    lateBlock.step(
+      await waitUntil(
+        async () => (await readText(page.getByTestId('planner-month-grid'))).includes(`Late month ${TAG}`),
+        { timeoutMs: 15_000 },
+      ),
+      'the month drew empty cells for days it never asked the server about',
+    )
+  }
 
   // -------------------------------------------------------------------------
   console.log('\n▶ the arrows move ONE SPAN, not always a week')

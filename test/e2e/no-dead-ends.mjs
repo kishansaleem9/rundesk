@@ -25,6 +25,7 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createRequire } from 'node:module'
+import { waitUntil } from './lib/wait.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -163,10 +164,23 @@ try {
     await page.waitForSelector('[data-testid="workspace-sidebar"]', { timeout: 15000 }).catch(() => {})
     await page.waitForTimeout(1200)
 
+    /*
+     * "DOES NOT CRASH" AS WHAT IS ON SCREEN, NOT AS A PHRASE THAT IS NOT. This
+     * asserted the error boundary's copy was absent — which a reworded boundary,
+     * or a blank page, satisfies just as well — and the sidebar wait above it is
+     * caught. A page that survived the payload draws the sidebar and the
+     * notifications panel it was sent to, whose channel switches are its own
+     * (nothing in the sidebar is a switch).
+     */
+    // Waited for, bounded: the panel draws a skeleton until its preferences answer.
+    await waitUntil(async () => (await page.getByRole('switch').count()) >= 2, { timeoutMs: 10_000 })
+    const sidebarShown = await page.getByTestId('workspace-sidebar').isVisible().catch(() => false)
+    const panelSwitches = await page.getByRole('switch').count()
     chk(
-      !/Something went wrong/i.test(await page.locator('body').innerText()),
+      sidebarShown && panelSwitches >= 2,
       'a malformed notification-preferences payload does not crash the page',
-      'the notifications tab still dies on an unexpected payload shape',
+      `the notifications tab still dies on an unexpected payload shape: sidebar ${sidebarShown ? 'shown' : 'gone'}, ` +
+        `${panelSwitches} channel switch(es) drawn`,
     )
 
     const escape = page.locator('[data-testid="sidebar-no-workspace"]')

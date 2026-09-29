@@ -373,9 +373,18 @@ try {
     `/ai/status returned ${status.status} ${JSON.stringify(status.data)} — the two checks below ` +
       'are about agreeing with it, so an answer that is neither true nor false makes them meaningless',
   )
+  /*
+   * "NOT REFUSING" IS AN ANSWER, NOT THE ABSENCE OF ONE STATUS. Where a model is
+   * configured these asked `!== 503`, which a 404 (the route gone) or a 500
+   * passes. Not refusing means answering: `/ai/command` with a plan — a 2xx
+   * carrying its summary and its actions — and `/ai/chat` with a 2xx that
+   * opens an event stream.
+   */
   const planned = await api('/ai/command', { method: 'POST', body: { workspaceId: WS, message: 'create a list' } })
+  const plannedAnswer = planned.status >= 200 && planned.status < 300 &&
+    typeof planned.data?.summary === 'string' && Array.isArray(planned.data?.actions)
   chk(
-    modelConfigured ? planned.status !== 503 : planned.status === 503,
+    modelConfigured ? plannedAnswer : planned.status === 503,
     '/ai/command agrees with it — refusing outright when there is no model, and not refusing when there is',
     `it returned ${planned.status} ${JSON.stringify(planned.data).slice(0, 160)} while /ai/status said ` +
       `available=${JSON.stringify(status.data?.available)}`,
@@ -392,10 +401,14 @@ try {
    * the refusal — when there is one — is about the key and arrives as a status
    * code before a stream is opened, rather than as an error inside one.
    */
+  const streamType = streamed.headers.get('content-type') ?? ''
   chk(
-    modelConfigured ? streamed.status !== 503 : streamed.status === 503,
+    modelConfigured
+      ? streamed.status >= 200 && streamed.status < 300 && /text\/event-stream/.test(streamType)
+      : streamed.status === 503,
     'and /ai/chat agrees too, before opening a stream, so a refusal is a status code rather than a message inside one',
-    `it returned ${streamed.status} while /ai/status said available=${JSON.stringify(status.data?.available)}`,
+    `it returned ${streamed.status} (${streamType || 'no content-type'}) while /ai/status said ` +
+      `available=${JSON.stringify(status.data?.available)}`,
   )
 
   // ── What a chip in an answer resolves to ───────────────────────────────────

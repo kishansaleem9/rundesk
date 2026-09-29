@@ -4,6 +4,7 @@ import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { apiClient, login, pickWorkspace, ensureSweepFixture, ensureDm, ensureShared } from './lib/fixture.mjs'
 import { startLocalStack } from './lib/local-stack.mjs'
 import { LOGIN_NAV_TIMEOUT_MS } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 /*
  * "0 failed" is not "it ran". Compared with `!==` and never `<`: with `<`, a
@@ -80,6 +81,7 @@ const r = []
 const ok = (m) => { r.push(1); console.log(`  \x1b[32mPASS\x1b[0m ${m}`) }
 const bad = (m) => { r.push(0); console.log(`  \x1b[31mFAIL\x1b[0m ${m}`) }
 const chk = (c, g, b) => (c ? ok(g) : bad(b))
+const chain = makeChain(chk)
 
 const br = await chromium.launch(launchOptions())
 const p = await (await br.newContext({ viewport: { width: 1600, height: 1000 } })).newPage()
@@ -165,17 +167,23 @@ try {
   await p.getByRole('button', { name: 'Tasks', exact: true }).click()
   await p.waitForTimeout(1200)
   const other = p.getByText('general', { exact: true }).first()
+  // TWO CHECKS WHICHEVER WAY THIS GOES. With no channel to switch to, the
+  // else used to report one `bad()` where the path it stands in for reports
+  // two, so a missing channel read as a run that stopped early.
+  const switched = chain(
+    'switching to a channel drops the strip entirely',
+    'coming back to the DM lands on Chat, not on stale Tasks',
+  )
   if (await other.count()) {
     await other.click()
     await p.waitForTimeout(1800)
-    chk(await strip().count() === 0, 'switching to a channel drops the strip entirely',
-      'the strip survived a switch to a channel')
+    switched.step(await strip().count() === 0, 'the strip survived a switch to a channel')
     await dm.click()
     await p.waitForTimeout(1800)
-    chk(await p.getByRole('button', { name: 'Chat', exact: true }).getAttribute('aria-pressed') === 'true',
-      'coming back to the DM lands on Chat, not on stale Tasks', 'the DM reopened on the old tab')
+    switched.step(await p.getByRole('button', { name: 'Chat', exact: true }).getAttribute('aria-pressed') === 'true',
+      'the DM reopened on the old tab')
   } else {
-    bad('could not find a channel to switch to')
+    switched.rest('could not find a channel to switch to')
   }
 } catch (e) {
   bad(`threw: ${e.message}`)

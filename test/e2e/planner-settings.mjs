@@ -51,6 +51,7 @@ import { fileURLToPath } from 'node:url'
 import { execFileSync } from 'node:child_process'
 import { resolveChromium, launchOptions } from './lib/playwright.mjs'
 import { waitUntil } from './lib/wait.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -73,6 +74,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const chromium = await resolveChromium()
 const LAUNCH = launchOptions()
@@ -415,16 +418,15 @@ try {
     'there is no timezone control — the API has validated `timezone` since this page shipped, ' +
       'and the file even carried a comment claiming the page edits it',
   )
+  // One sentence for both paths: the no-control path used to print a shortened
+  // copy of it ("…sends it to the account"), which no passing run prints.
+  const zoneSaves = chain('and choosing one sends it to the account, not just to this dialog')
   if (zonePresent) {
     await page.locator('[data-testid="planner-timezone"]').selectOption('Asia/Karachi')
     const zoneSaved = await waitUntil(() => settings.timezone === 'Asia/Karachi', { timeoutMs: 8000 })
-    chk(
-      zoneSaved,
-      'and choosing one sends it to the account, not just to this dialog',
-      `the settings the page saved were ${JSON.stringify(settings)}`,
-    )
+    zoneSaves.step(zoneSaved, `the settings the page saved were ${JSON.stringify(settings)}`)
   } else {
-    chk(false, 'and choosing one sends it to the account', 'skipped — no control to choose from')
+    zoneSaves.rest('skipped — no control to choose from')
   }
 
   /* ─────────────────────────────────────────────────────────────────────────

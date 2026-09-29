@@ -34,6 +34,7 @@
  *   node test/e2e/list-statuses-seeded.mjs --api 3011
  */
 import { signInApi } from './lib/signin.mjs'
+import { makeChain } from './lib/chain.mjs'
 
 const argOf = (name, fallback) => {
   const i = process.argv.indexOf(name)
@@ -60,6 +61,8 @@ const chk = (cond, good, bad) => {
   // on. Seventy suites shared the line.
   else { failed += 1; console.log(`  \x1b[31mFAIL\x1b[0m ${good}${bad && bad !== good ? ` \u2014 ${bad}` : ''}`) }
 }
+// A path that cannot go on fails what is left with the reason — `lib/chain.mjs`.
+const chain = makeChain(chk)
 
 const apiAs = (token) => async (route, init = {}) => {
   const headers = token ? { authorization: `Bearer ${token}` } : {}
@@ -186,20 +189,24 @@ try {
       'so its absence after closing would prove nothing',
   )
 
+  // The four checks below cannot be asked without a closed key. Reported as
+  // failed with the reason rather than skipped, so the count is the same on
+  // both paths and the run reaches its own totals — under the sentences the
+  // path with a closed key prints, declared once here.
+  const closing = chain(
+    'setting it to the closed status is accepted',
+    'and the stored status is the key that was asked for',
+    'and the stored CATEGORY says closed — the half that used to disagree',
+    'and a reader that reasons on the category no longer counts it as current work',
+  )
   if (NO_CLOSED) {
-    // The four checks below cannot be asked without a closed key. Reported as
-    // failed with the reason rather than skipped, so the count is the same on
-    // both paths and the run reaches its own totals.
-    chk(false, 'setting it to the closed status is accepted', NO_CLOSED)
-    chk(false, 'and the stored status is the key that was asked for', NO_CLOSED)
-    chk(false, 'and the stored CATEGORY says closed — the half that used to disagree', NO_CLOSED)
-    chk(false, 'and a reader that reasons on the category no longer counts it as current work', NO_CLOSED)
+    closing.rest(NO_CLOSED)
   } else {
     const patched = await A(`/tasks/${taskId}`, { method: 'PATCH', body: { status: closed.key } })
-    chk(
+    closing.step(
       patched.status === 200,
-      `setting it to ${closed.key} is accepted`,
       `the PATCH answered ${patched.status} — the checks below would be about the wrong thing`,
+      `setting it to ${closed.key} is accepted`,
     )
 
     /*
@@ -207,14 +214,12 @@ try {
      * was STORED, and a response echoing the request would have hidden it.
      */
     const after = (await A(`/tasks/${taskId}`)).data
-    chk(
+    closing.step(
       after?.status === closed.key,
-      'and the stored status is the key that was asked for',
       `stored status is "${after?.status}", asked for "${closed.key}"`,
     )
-    chk(
+    closing.step(
       after?.statusCategory === 'closed',
-      'and the stored CATEGORY says closed — the half that used to disagree',
       `status is "${after?.status}" but statusCategory is "${after?.statusCategory}" — the two disagree, which is the defect`,
     )
 
@@ -224,9 +229,8 @@ try {
      * stored as done-but-open shows up there forever.
      */
     const afterClose = await titlesIn()
-    chk(
+    closing.step(
       afterClose.status === 200 && !afterClose.titles.includes(`done-check ${TAG}`),
-      'and a reader that reasons on the category no longer counts it as current work',
       `the work preview (${afterClose.status}) still lists it: ${JSON.stringify(afterClose.titles)}`,
     )
   }
