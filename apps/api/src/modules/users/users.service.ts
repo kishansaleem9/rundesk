@@ -1,9 +1,10 @@
-import { Injectable, Inject, UnauthorizedException, BadRequestException } from '@nestjs/common'
+import { Injectable, Inject, ForbiddenException, BadRequestException } from '@nestjs/common'
 import { ACCENT_PALETTE } from '@rundesk/feature-flags'
 import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { passwords } from '../../common/security/password-hash'
 import { hashRefreshToken } from '../../common/security/refresh-token'
+import { accountLocked, countWrongPassword, lockedUntilNow } from '../../common/security/lockout'
 import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import {
@@ -351,19 +352,45 @@ export class UsersService {
    * browser sends as its refresh cookie and a client with no cookie in the body
    * (`currentRefreshToken`, as "sign out other sessions" takes it). A session
    * stored before refresh tokens were hashed matches it raw. A caller that
-   * names none keeps none, as after a reset; its access token lives out its
-   * minutes. Answers how many sessions it revoked.
+   * names none keeps none, as after a reset, and since a revoked session's
+   * access token is refused at once (`found-30-sep/revoked-sessions-keep-their-access-tokens`)
+   * it is signed out by its own change. Answers how many sessions it revoked.
+   *
+   * A WRONG CURRENT PASSWORD COUNTS TOWARD THE ACCOUNT'S LOCKOUT
+   * (`found-30-sep/password-change-guesses-600-an-hour`), by the statement
+   * that counts sign-in's (`countWrongPassword`), so the two share one count:
+   * ten a minute per person let a session somebody else holds guess 600
+   * current passwords an hour, where OWASP's ASVS 2.2.1 allows "no more than
+   * 100 failed attempts per hour … on a single account" and sign-in's lockout
+   * allows ten. A locked account's change is refused 423 before its current
+   * password is compared, saying for how long: the caller is signed in as the
+   * account, so the lock tells them nothing sign-in would hide. A wrong one is
+   * refused 403, not 401: the request's session is good, and a client that
+   * reads 401 as an expired token refreshes and sends the change again (the
+   * web did, so one mistyped password counted twice). A right one clears the
+   * count, as a right password at sign-in does.
    */
   async changePassword(userId: string, currentPassword: string, newPassword: string, keepRefreshToken?: string | null) {
     if (typeof newPassword !== 'string' || newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters')
     const user = await this.findById(userId)
     if (!user) throw new BadRequestException('User not found')
     if (!user.passwordHash) throw new BadRequestException('Account uses SSO; set a password via reset flow')
+    const { settings } = await this.securitySettings.getEffectiveForUser(userId)
+    const now = new Date()
+    const locked = lockedUntilNow(user, settings, now)
+    if (locked) throw accountLocked(locked, now, 'This account is locked after too many wrong passwords.')
     // On a worker, and at the cost every other hash has (`found-30-sep/password-hash-holds-the-event-loop`):
     // this one hashed at 10, on the event loop.
     const ok = typeof currentPassword === 'string' && (await passwords.compare(currentPassword, user.passwordHash))
-    if (!ok) throw new UnauthorizedException('Current password is incorrect')
-    const { settings } = await this.securitySettings.getEffectiveForUser(userId)
+    if (!ok) {
+      if (settings.lockoutEnabled) {
+        const counted = await countWrongPassword(this.db, userId, settings, now)
+        // Counted nothing: another attempt locked the account while this one compared.
+        const lockedNow = counted ? lockedUntilNow(counted, settings, now) : lockedUntilNow((await this.findById(userId)) ?? user, settings, now)
+        if (lockedNow) throw accountLocked(lockedNow, now, 'Current password is incorrect, and too many wrong passwords have locked this account.')
+      }
+      throw new ForbiddenException('Current password is incorrect')
+    }
     await this.securitySettings.enforcePasswordPolicy(newPassword, {
       requireStrong: settings.requireStrongPasswords,
       blockBreached: settings.blockBreachedPasswords,
@@ -373,7 +400,7 @@ export class UsersService {
     const revoked = await this.db.transaction(async (tx) => {
       await tx
         .update(users)
-        .set({ passwordHash, updatedAt: new Date() })
+        .set({ passwordHash, updatedAt: new Date(), failedLoginAttempts: 0, lockedUntil: null })
         .where(eq(users.id, userId))
       return tx
         .update(sessions)

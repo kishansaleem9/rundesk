@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { after, before, describe, it, mock } from 'node:test'
-import { BadRequestException, UnauthorizedException } from '@nestjs/common'
+import { BadRequestException, ForbiddenException, HttpException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { hashSync } from 'bcryptjs'
 import {
@@ -266,10 +266,13 @@ describe('UsersService.changePassword — held to the workspace’s policy, and 
     return settings
   }
 
-  it('a wrong current password is refused 401, and nothing is written', async () => {
+  it('a wrong current password is refused 403, not 401 (the caller’s session is good), and nothing is written', async () => {
     const { db, writes } = changeDb()
     const svc = new UsersService(db, {} as any, workspacePolicy(true))
-    await assert.rejects(() => svc.changePassword('u1', 'Guess@12345!', 'Another@12345!', 'RAW-REFRESH'), (err: unknown) => err instanceof UnauthorizedException)
+    await assert.rejects(
+      () => svc.changePassword('u1', 'Guess@12345!', 'Another@12345!', 'RAW-REFRESH'),
+      (err: unknown) => err instanceof ForbiddenException && err.getStatus() === 403 && err.message === 'Current password is incorrect',
+    )
     assert.deepEqual(writes, [])
   })
 
@@ -319,5 +322,124 @@ describe('UsersService.changePassword — held to the workspace’s policy, and 
     const where = rendered(writes[1].where)
     assert.equal(where.sql, '("sessions"."user_id" = $1 and "sessions"."is_revoked" = $2)')
     assert.deepEqual(where.params, ['u1', false])
+  })
+})
+
+/*
+ * A WRONG CURRENT PASSWORD COUNTS TOWARD THE ACCOUNT'S LOCKOUT
+ * (`found-30-sep/password-change-guesses-600-an-hour`). The change's ten a
+ * minute per person let a session somebody else holds compare 600 current
+ * passwords an hour, uncounted, where sign-in's lockout allows ten. It is
+ * counted now by the statement that counts sign-in's (`common/security/lockout.ts`),
+ * rendered here as Postgres is sent it; a locked account's change is refused
+ * 423 before its password is compared; a right one clears the count.
+ * `sign-in-and-password.mjs` sends six in a row on a lane.
+ */
+describe('UsersService.changePassword — a wrong current password counts toward the account’s lockout', () => {
+  const CURRENT = 'Current@12345!'
+  const stored = hashSync(CURRENT, 4)
+  let restoreHash = () => undefined as void
+  before(() => {
+    const hashed = mock.method(passwords, 'hash', async () => 'NEW-HASH')
+    restoreHash = () => hashed.mock.restore()
+  })
+  after(() => restoreHash())
+
+  /** The account (with the lockout's columns); the counting UPDATE's statements and what it answers; the transaction's writes. */
+  function lockoutDb(account: Record<string, unknown> = {}, counted: any[] = [{ failedLoginAttempts: 1, lockedUntil: null }]) {
+    const statements: Array<{ table: unknown; set: any; where: unknown }> = []
+    const writes: Array<{ table: unknown; set: any; where: unknown }> = []
+    const row = { ...SAMPLE_USER, passwordHash: stored, failedLoginAttempts: 0, lockedUntil: null, ...account }
+    const recorder = (into: typeof writes, answer: any[]) => (table: unknown) => ({
+      set: (set: any) => ({
+        where: (where: unknown) => {
+          into.push({ table, set, where })
+          const done: any = Promise.resolve(undefined)
+          done.returning = async () => answer
+          return done
+        },
+      }),
+    })
+    const db = {
+      select: () => ({ from: () => ({ where: async () => [row] }) }),
+      update: recorder(statements, counted),
+      transaction: async (fn: (t: unknown) => unknown) => fn({ update: recorder(writes, []) }),
+    }
+    return { db: db as any, statements, writes }
+  }
+  function lockoutPolicy(lockoutEnabled = true) {
+    const settings = new WorkspaceSecuritySettingsService({} as any, {} as any)
+    settings.getEffectiveForUser = async () => ({
+      settings: { requireStrongPasswords: true, blockBreachedPasswords: false, lockoutEnabled, lockoutThreshold: 5, lockoutDurationMinutes: 30 } as any,
+      isWorkspaceAdmin: false,
+    })
+    return settings
+  }
+  const lockedRefusal = (err: unknown) => err instanceof HttpException && err.getStatus() === 423 && (err.getResponse() as any)?.error === 'account_locked'
+
+  it('a wrong current password is counted by the statement sign-in counts with, the row’s failed_login_attempts + 1, and refused 403', async () => {
+    const { db, statements, writes } = lockoutDb()
+    const svc = new UsersService(db, {} as any, lockoutPolicy())
+    await assert.rejects(
+      () => svc.changePassword('u1', 'Guess@12345!', 'Another@12345!', null),
+      (err: unknown) => err instanceof ForbiddenException && err.message === 'Current password is incorrect',
+    )
+    assert.equal(statements.length, 1, 'one statement counts it')
+    assert.equal(statements[0].table, users)
+    const count = rendered(statements[0].set.failedLoginAttempts)
+    assert.equal(count.sql, 'case when "users"."failed_login_attempts" + 1 >= $1 then 0 else "users"."failed_login_attempts" + 1 end')
+    assert.deepEqual(count.params, [5], 'the only number sent is the policy’s threshold')
+    assert.match(rendered(statements[0].where).sql, /^\("users"\."id" = \$1 and \("users"\."locked_until" is null or "users"\."locked_until" <= \$2\)\)$/)
+    // Counted, not compared deeply: a failing deepEqual prints drizzle's table graph and runs the process out of memory.
+    assert.equal(writes.length, 0, 'nothing else is written')
+  })
+
+  it('the wrong current password that reaches the policy’s threshold is refused 423, saying the account is locked and for how long', async () => {
+    const until = new Date(Date.now() + 30 * 60_000)
+    const { db } = lockoutDb({}, [{ failedLoginAttempts: 0, lockedUntil: until }])
+    const svc = new UsersService(db, {} as any, lockoutPolicy())
+    await assert.rejects(() => svc.changePassword('u1', 'Guess@12345!', 'Another@12345!', null), (err: unknown) => {
+      assert.ok(lockedRefusal(err), `not a 423 lock: ${String(err)}`)
+      const body = (err as HttpException).getResponse() as any
+      assert.equal(body.message, 'Current password is incorrect, and too many wrong passwords have locked this account. Try again in 30 minutes, or reset your password.')
+      assert.equal(body.lockedUntil, until.toISOString())
+      assert.ok(body.retryAfter > 29 * 60 && body.retryAfter <= 30 * 60, `retryAfter ${body.retryAfter}`)
+      return true
+    })
+  })
+
+  it('a locked account’s change is refused 423 before its current password is compared, and nothing is counted or written', async () => {
+    const compared = mock.method(passwords, 'compare', async () => true)
+    try {
+      const { db, statements, writes } = lockoutDb({ lockedUntil: new Date(Date.now() + 10 * 60_000) })
+      const svc = new UsersService(db, {} as any, lockoutPolicy())
+      await assert.rejects(
+        () => svc.changePassword('u1', CURRENT, 'Another@12345!', null),
+        (err: unknown) => lockedRefusal(err) && /^This account is locked after too many wrong passwords\. Try again in 10 minutes, or reset your password\.$/.test((err as HttpException).message),
+      )
+      assert.equal(compared.mock.callCount(), 0, 'the current password was compared')
+      assert.equal(statements.length, 0, 'a wrong password was counted')
+      assert.equal(writes.length, 0, 'something was written')
+    } finally {
+      compared.mock.restore()
+    }
+  })
+
+  it('with the lockout off, a wrong current password is refused 403 and counts nothing, and a lock left on the row refuses nothing', async () => {
+    const { db, statements } = lockoutDb({ lockedUntil: new Date(Date.now() + 10 * 60_000) })
+    const svc = new UsersService(db, {} as any, lockoutPolicy(false))
+    await assert.rejects(() => svc.changePassword('u1', 'Guess@12345!', 'Another@12345!', null), (err: unknown) => err instanceof ForbiddenException)
+    assert.equal(statements.length, 0, 'a wrong password was counted with the lockout off')
+  })
+
+  it('a right current password clears the count and the lock, in the transaction that writes the password', async () => {
+    const { db, statements, writes } = lockoutDb({ failedLoginAttempts: 3 })
+    const svc = new UsersService(db, {} as any, lockoutPolicy())
+    await svc.changePassword('u1', CURRENT, 'Another@12345!', null)
+    assert.equal(statements.length, 0, 'nothing counted')
+    const written = writes.find((w) => w.table === users)
+    assert.equal(written?.set.passwordHash, 'NEW-HASH')
+    assert.equal(written?.set.failedLoginAttempts, 0)
+    assert.equal(written?.set.lockedUntil, null)
   })
 })

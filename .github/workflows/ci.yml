@@ -637,11 +637,11 @@ jobs:
     # more but a guaranteed failure a few suites from the end, after paying for
     # all of it. It was raised to 75 for those fifty.
     #
-    # The job now runs TWO HUNDRED AND FIFTY-TWO — every suite in the repo but the
+    # The job now runs TWO HUNDRED AND FIFTY-THREE — every suite in the repo but the
     # six in `browser-suites`, which `check-suites-registered.mjs` now enforces
     # rather than this comment asserting it. At the measured 1.1 minutes each
-    # that is about 277 minutes plus setup. The count has gone
-    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252.
+    # that is about 278 minutes plus setup. The count has gone
+    # 50 → 85 → 88 → 93 → 96 → 98 → 101 → 104 → 107 → 110 → 111 → 112 → 113 → 114 → 115 → 116 → 117 → 119 → 120 → 121 → 122 → 123 → 124 → 126 → 127 → 128 → 129 → 130 → 131 → 132 → 133 → 134 → 135 → 136 → 137 → 138 → 139 → 141 → 142 → 144 → 146 → 147 → 148 → 149 → 150 → 153 → 155 → 156 → 158 → 159 → 160 → 161 → 162 → 163 → 164 → 165 → 166 → 167 → 168 → 169 → 170 → 171 → 172 → 173 → 174 → 175 → 176 → 177 → 178 → 179 → 180 → 181 → 182 → 183 → 184 → 185 → 186 → 187 → 188 → 189 → 190 → 191 → 192 → 193 → 194 → 195 → 196 → 197 → 198 → 199 → 200 → 201 → 202 → 203 → 204 → 205 → 206 → 207 → 208 → 216 → 217 → 218 → 219 → 220 → 221 → 222 → 223 → 224 → 225 → 227 → 229 → 231 → 232 → 233 → 234 → 236 → 237 → 241 → 242 → 243 → 244 → 245 → 246 → 247 → 248 → 249 → 250 → 251 → 252 → 253.
     #
     # The limit is 300, raised from 270 when the job reached 227 suites: about
     # 250 minutes plus setup against 270 left a margin smaller than one slow
@@ -1961,22 +1961,41 @@ jobs:
         run: node test/e2e/password-hash-time.mjs --api 3011
 
       # `found-30-sep/lockout-counts-overlapping-attempts-once`,
-      # `found-30-sep/sign-in-reads-the-email-as-typed` and
-      # `found-30-sep/password-change-unthrottled`. Four, five and eight wrong
-      # passwords sent at once are each counted toward the lockout (read from
-      # the database), which locks at the fifth and counts none past it. An
-      # email is the same in any case: sign-in, forgot-password, adding a
+      # `found-30-sep/sign-in-reads-the-email-as-typed`,
+      # `found-30-sep/password-change-unthrottled`,
+      # `found-30-sep/password-change-guesses-600-an-hour`,
+      # `found-30-sep/revoked-sessions-keep-their-access-tokens` and
+      # `found-30-sep/an-accepted-invitation-sets-no-cookies`. Four, five and
+      # eight wrong passwords sent at once are each counted toward the lockout
+      # (read from the database), which locks at the fifth and counts none past
+      # it. An email is the same in any case: sign-in, forgot-password, adding a
       # member, sign-up's check that it is free and an invitation, including
       # an account stored with capitals as the retired register route wrote
       # one. Changing one's password has ten a minute per person, from any
       # address; a weak new password is refused under the workspace's policy;
-      # and a change, made as a browser or by a client naming its session,
-      # signs out every other session and keeps its own. Every sign-in leaves
-      # from a loopback address of its own (127.0.21.x) and the accounts are
-      # made from 127.0.0.11–13: about twenty seconds.
-      - name: Every wrong password counts, an email is the same in any case, and a password change is limited and signs out the rest
+      # a change, made as a browser or by a client naming its session, signs
+      # out every other session and keeps its own; and a wrong current password
+      # counts toward the lockout, sign-in's count and the change's one, so the
+      # sixth in a row is refused 423. A session ended by a password change, a
+      # reset, "sign out other sessions", revoking it, signing out or the
+      # session cap is refused at once on a read, a refresh, a socket and a
+      # claim, while the caller's reads on, and a refresh keeps its session. The
+      # claim sets the session cookies, and a person signed in by cookies alone
+      # accepts one. Every sign-in leaves from a loopback address of its own
+      # (127.0.21.x) and the accounts are made from 127.0.0.11–13: under a minute.
+      - name: Every wrong password counts, an email is the same in any case, a password change is limited and signs out the rest, and an ended session is refused at once
         if: '!cancelled()'
         run: node test/e2e/sign-in-and-password.mjs --api 3011
+
+      # The same three as a person sees them in a browser: a newcomer who
+      # accepts an invitation is still signed in after a reload; a browser
+      # whose session a password change made elsewhere has ended is signed out
+      # at its next reload; and one mistyped current password in the profile
+      # sends one change (no refresh, no second change) and counts one wrong
+      # password. About forty seconds.
+      - name: A session in the browser is kept after accepting an invitation and ended at once elsewhere, and a mistyped password counts once
+        if: '!cancelled()'
+        run: node test/e2e/session-in-the-browser.mjs --api 3011 --dist apps/web/dist
 
       # What a read shows depends on who is reading. The Teams preview listed
       # every member's open tasks with no viewer, so private spaces, projects,

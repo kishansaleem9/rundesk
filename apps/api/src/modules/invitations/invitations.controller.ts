@@ -1,7 +1,12 @@
 import { roleRank } from '../../common/permissions/workspace-roles'
-import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
+import { Controller, Post, Get, Body, Param, UseGuards, Delete, Query, Req, Res, Inject, NotFoundException, ForbiddenException, HttpCode, HttpStatus } from '@nestjs/common'
 import { ApiTags, ApiOperation, ApiBearerAuth } from '@nestjs/swagger'
+import { ConfigService } from '@nestjs/config'
+import type { FastifyReply } from 'fastify'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { cookieOrBearerExtractor } from '../auth/strategies/jwt.strategy'
+import { setAuthCookies } from '../auth/auth-cookies'
+import { sessionIsLive } from '../../common/security/live-session'
 import { OrganizationAdminGuard } from '../auth/guards/organization-admin.guard'
 import { InvitationsService } from './invitations.service'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
@@ -25,8 +30,9 @@ export class InvitationsController {
     private readonly invitationsService: InvitationsService,
     private readonly authService: AuthService,
     private readonly jwtService: JwtService,
-    @Inject(DB_TOKEN) private readonly db: any, 
+    @Inject(DB_TOKEN) private readonly db: any,
     private readonly roles: CustomRolesService,
+    private readonly config: ConfigService,
   ) {}
 
   /*
@@ -108,26 +114,59 @@ export class InvitationsController {
     })
   }
 
+  /*
+   * ACCEPTING AN INVITATION SIGNS THE PERSON IN AS SIGN-UP DOES
+   * (`found-30-sep/an-accepted-invitation-sets-no-cookies`): the session is
+   * set as the `access_token`, `refresh_token` and `csrf_token` cookies on
+   * the answer, as `AuthController.issueCookies` sets sign-up's and sign-in's,
+   * and is in the body too. It was in the body alone, and the web keeps no
+   * token across a reload (the cookies are the session), so a page reloaded
+   * after accepting an invitation was signed out: measured in a browser on
+   * lane 3, `GET /users/me` 401, the refresh 401, and `/app` sent to the
+   * sign-in page.
+   */
   @Post('claim')
   @RateLimit(AUTH_ROUTE_LIMITS.signUp)
   @ApiOperation({ summary: 'Claim an invitation and create an account if needed' })
-  async claim(@Body() dto: { token: string; password?: string; fullName?: string }, @Req() req: any) {
-    let currentUserId = req.user?.id as string | undefined
-    const authHeader = (req.headers?.authorization as string | undefined) ?? ''
-    const bearerToken = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : undefined
-    if (!currentUserId && bearerToken) {
-      try {
-        const payload = this.jwtService.verify(bearerToken)
-        currentUserId = payload?.sub as string | undefined
-      } catch {
-        throw new ForbiddenException('Invalid access token')
-      }
-    }
+  async claim(
+    @Body() dto: { token: string; password?: string; fullName?: string },
+    @Req() req: any,
+    @Res({ passthrough: true }) res: FastifyReply,
+  ) {
+    const currentUserId = await this.claimant(req)
     const { userId } = await this.invitationsService.claim(dto, currentUserId)
-    return this.authService.issueSessionForUserId(userId, {
+    const bundle = await this.authService.issueSessionForUserId(userId, {
       userAgent: req.headers['user-agent'] as string | undefined,
       ip: req.ip,
     })
+    setAuthCookies(res, bundle, { secure: (this.config.get<string>('NODE_ENV') ?? 'development') === 'production' })
+    return bundle
+  }
+
+  /*
+   * WHO IS CLAIMING, read as every route behind `JwtAuthGuard` reads it: the
+   * access cookie, then the Bearer header (`cookieOrBearerExtractor`),
+   * verified, and its session live (`sessionIsLive`,
+   * `found-30-sep/revoked-sessions-keep-their-access-tokens`). The Bearer
+   * header alone was read, and the web sends one only while a page load holds
+   * the token in memory, so a person signed in by their cookies (any page
+   * reloaded, or the invitation opened from its email in a new tab) was told
+   * "Account already exists. Please log in first." A token whose session has
+   * ended is nobody, as `OptionalJwtAuthGuard` reads it: it claims nothing for
+   * its account, and a newcomer whose browser holds one still makes theirs. A
+   * token that does not verify is refused, as it was.
+   */
+  private async claimant(req: unknown): Promise<string | undefined> {
+    const token = cookieOrBearerExtractor(req as never)
+    if (!token) return undefined
+    let payload: { sub?: unknown; sid?: unknown }
+    try {
+      payload = this.jwtService.verify(token)
+    } catch {
+      throw new ForbiddenException('Invalid access token')
+    }
+    if (!(await sessionIsLive(this.db, payload))) return undefined
+    return typeof payload.sub === 'string' ? payload.sub : undefined
   }
   @Get('workspace/:workspaceId')
   @UseGuards(JwtAuthGuard)

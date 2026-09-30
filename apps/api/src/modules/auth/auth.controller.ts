@@ -177,12 +177,22 @@ export class AuthController {
     return this.authService.listSessions(user.id, currentRefreshToken)
   }
 
+  /*
+   * THE CALLER'S SESSION IS THE ONE ITS REFRESH TOKEN NAMES: in the body, or a
+   * browser's refresh cookie, as the password change reads it. The body alone
+   * was read, and the web keeps its refresh token in memory only, so after a
+   * reload "Sign out other sessions" revoked the browser's own session too;
+   * now that a revoked session's access token is refused at once
+   * (`found-30-sep/revoked-sessions-keep-their-access-tokens`), that signed
+   * the person out where it had let them read for fifteen minutes more.
+   */
   @Post('sessions/revoke-others')
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Revoke all sessions except current one' })
-  revokeOthers(@CurrentUser() user: any, @Body() body: { currentRefreshToken?: string }) {
-    return this.authService.revokeOtherSessions(user.id, body.currentRefreshToken)
+  revokeOthers(@CurrentUser() user: any, @Body() body: { currentRefreshToken?: string }, @Req() req: RequestWithCookies) {
+    const named = typeof body?.currentRefreshToken === 'string' && body.currentRefreshToken ? body.currentRefreshToken : null
+    return this.authService.revokeOtherSessions(user.id, named ?? req.cookies?.[REFRESH_TOKEN_COOKIE] ?? null)
   }
 
   @Delete('sessions/:sessionId')

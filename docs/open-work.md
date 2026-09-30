@@ -2562,7 +2562,7 @@ Checks:
 Found while building it: `found-30-sep/password-change-guesses-600-an-hour`, `found-30-sep/revoked-sessions-keep-their-access-tokens` and `found-30-sep/an-accepted-invitation-sets-no-cookies`.
 - Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
 
-### `found-30-sep/password-change-guesses-600-an-hour` — open (security, small; found closing `found-30-sep/password-change-unthrottled`)
+### `found-30-sep/password-change-guesses-600-an-hour` — **closed** (security, small; found closing `found-30-sep/password-change-unthrottled`)
 
 **A session somebody else holds can still guess 600 current passwords an hour**
 
@@ -2573,7 +2573,36 @@ Found while building it: `found-30-sep/password-change-guesses-600-an-hour`, `fo
 
 *To close:* count a wrong current password toward the account's lockout, in `countWrongPassword`'s one statement, and refuse a change on a locked account, saying so (the caller is signed in as the account, so the lock tells them nothing new); or give the route an hourly budget beside its ten a minute. Check that the sixth wrong current password in a row is refused.
 
-### `found-30-sep/revoked-sessions-keep-their-access-tokens` — open (security, medium; found closing `found-30-sep/password-change-unthrottled`)
+
+*Closed, 30 September.* ClickUp documents no count for wrong passwords, at sign-in or at a password change. OWASP: the counter of failed logins "should be associated with the account itself" (authentication cheat sheet), and ASVS 2.2.1 allows "no more than 100 failed attempts per hour … on a single account".
+
+Measured first on lane 3, three runs alike: six wrong current passwords in a row were each answered 401 and counted nothing toward the lockout (`failed_login_attempts` 0, no lock), and the right password then signed in; three wrong sign-ins and two wrong current passwords left a count of 3; ten a minute were compared, minute after minute, 20 in two minutes: 600 an hour. And in a browser, one mistyped current password in Profile › Security sent the change, a refresh and the change again: the route's 401 read to the web's client as an expired token.
+
+Now a wrong current password counts toward the account's lockout, by the statement that counts sign-in's (`countWrongPassword`, moved to `common/security/lockout.ts` so the users service shares it), so the two share one count:
+- A locked account's change is refused **423**, before its current password is compared, saying for how long ("This account is locked after too many wrong passwords. Try again in 30 minutes, or reset your password.", with `lockedUntil` and `retryAfter`); the wrong one that locks it says so too. The caller is signed in as the account, so the lock tells them nothing sign-in hides; sign-in still answers a locked account with "Invalid credentials".
+- A wrong current password is refused **403**, not 401: the request's session is good, and the web no longer refreshes and sends it again.
+- A right current password clears the count, as a right password at sign-in does.
+- It follows the workspace's policy: with the lockout off, nothing is counted, and the ten a minute are the bound, as sign-in's are.
+
+At the default policy that is five wrong passwords per thirty minutes, sign-in's and the change's together: ten an hour one after another, and twenty sent at once (the minute's ten are all compared before the fifth locks the account). An hourly budget beside the ten a minute was the other way offered; it would have been a second count for the same secret.
+
+Checks:
+- `sign-in-and-password` (16 → 29 checks; this item's section, 4):
+  - five wrong current passwords in a row: the first four refused 403 and counted 1 to 4, the fifth locks the account and is refused 423 saying so;
+  - the sixth, even the right one, is refused 423 saying for how long, the password is not changed, and sign-in is refused while the lock lasts;
+  - three wrong sign-ins and two wrong current passwords lock the account at the policy's five;
+  - a right current password after two wrong ones is taken (201) and the count reads 0.
+
+  The burst check now runs where the workspace's lockout is off (with it on, the fifth wrong one locks the account first), and both of its sentences say 403. Before (lane 3, `9b5ced3`'s API): 401 and nothing counted, the right password changed through the "lock", the count 3 and no lock, the count 0 before the right one; after: all four hold, in every run.
+- `session-in-the-browser` (new): one mistyped current password sends one change, no refresh, and counts one. Before: change, refresh, change; 0 counted.
+- Unit tests: `users.service.test.ts` renders the count's statement (the same as sign-in's), the 423 that says when, the 423 before any compare on a locked account, nothing counted with the lockout off, the count cleared in the change's transaction; the 401 test is now 403.
+- Break patches: `sip-25` (not counted) reddens the section's four checks; `sip-27` (a locked account's change compared) the sixth's; `sip-29` (the lock not said) the fifth's and the shared count's; `sip-31` (the count left standing) the clearing check; `sip-35` (401 again) the two burst checks and the fifth's and shared count's, and `sib-2` (the same edit) the browser's one-change check ("change → refresh → change; failed_login_attempts 2"); `sip-26`, `sip-28`, `sip-30`, `sip-32`, `sip-34` and `sip-36` redden their unit tests. `sip-12` and `sip-14` were re-aimed at the reworded burst sentences, and `sip-3`, `sip-4`, `sip-5`, `sip-16` and `sip-17` re-anchored (the statement moved; the policy's read moved before the compare); `sip-5` (the lock one late) now also reddens the change's three lockout checks. A patch counting with the lockout off (`sip-33`) reddened nothing, since with it off nothing reads the count, and was dropped; its unit twin `sip-34` holds it.
+- Regression on lane 3, one suite at a time, with the other two items' (below): 45 suites (the limit and timing suites, the invitation suites, `settings-depth`, the suites that sign one person in more than once or sign out, the socket suites, and ten that sign in through the form), 44 green, 743 of 744 checks; the one failure, `loading-states`, is the base's (a web string; this work changes no web file). `password-hash-time` 4/4 and `auth-route-limits` 22/22.
+
+Found while building it: `found-30-sep/a-burst-is-compared-before-the-lock`.
+- Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
+
+### `found-30-sep/revoked-sessions-keep-their-access-tokens` — **closed** (security, medium; found closing `found-30-sep/password-change-unthrottled`)
 
 **A revoked session goes on working until its access token runs out**
 
@@ -2586,6 +2615,33 @@ OWASP's ASVS 3.3.3 asks that terminating the other sessions after a password cha
 
 *To close:* carry the session in the access token (a `sid` claim) and refuse a token whose session is revoked, or keep a per-account "tokens issued before this are void" time that a password change, a reset and "sign out other sessions" set. Check that a session revoked by a password change is refused at once, on a read as well as a refresh.
 
+
+*Closed, 30 September.* ClickUp signs people out at once: changing the session duration "will immediately sign everyone with access to your Workspace out of their ClickUp account" (help centre, search excerpt). OWASP's ASVS 5.0, 7.4.1: when a session is terminated "the application disallows any further use of the session … Applications using self-contained tokens will need a solution such as maintaining a list of terminated tokens, disallowing tokens produced before a per-user date and time or rotating a per-user signing key."
+
+Measured first on lane 3, three runs alike: after a password change, a reset, "Sign out other sessions", revoking one session, signing out and the session cap, every revoked session's access token still read `GET /users/me` (200), opened a realtime socket, and claimed an invitation for its account (201, and it joined). The token's claims were `sub, email, role, workspaceId, flags`: no session. In a browser, a session a password change made elsewhere had ended still read after a reload.
+
+Now the access token names its session (`sid`, the session row's id), and `JwtStrategy` refuses a token whose session is revoked, past its window, another person's or gone, or that names none (`common/security/live-session.ts`): one read by primary key per request (0.04 ms in Postgres), and no cache, since a cached answer is a revoked session reading until it expires. A per-account "tokens before this time are void" would cost the same read and could not end one session of several. The socket's handshake and the invitation claim, which read tokens themselves, ask the same; a subscribe sent the moment a socket connects waits for the handshake's answer (the first regression run found four socket suites with every room denied before it did). So that a refresh does not void the tokens made before it, a refresh keeps its session: the row's refresh token is replaced in place, matched on the presented one and on being live (of two refreshes with one token, one is refused, as before), and a refresh the IP allowlist refuses still ends the session. The session cap orders by the window a refresh extends, which is what ordering by the row's creation meant while a refresh made a new row. "Sign out other sessions" reads the browser's refresh cookie as the password change does: after a reload it revoked the browser's own session too (measured, `revoked: 3`), which now would have signed the person out.
+
+Checks:
+- `sign-in-and-password` (this item's section, 7):
+  - a session a password change signs out is refused 401 at once on a read and a refresh, as is the sign-up session, while the changer reads and refreshes on;
+  - so is one ended by id, by signing out, by "Sign out other sessions", by a reset and by the session cap;
+  - the cap ends the session used least recently: one refreshed after another's sign-in outlives it (it held before too; it guards the cap's order);
+  - a refresh keeps its session: the token from before it still reads, and the replaced refresh token is refused (it held before too; it guards the rotation);
+  - an ended session opens no socket ("Session ended"), a live one's stays up;
+  - an ended session claims no invitation for its account (403 "Account already exists"), joining nothing;
+  - "Sign out other sessions" made as a browser keeps the browser's session and ends the other.
+
+  Before: every read 200, the socket up, the claim 201, the browser's own session revoked; after: all hold, in every run.
+- `session-in-the-browser`: a browser whose session a password change elsewhere ended is signed out at its next reload. Before: signed in.
+- Unit tests: `jwt.strategy.test.ts` (refused when revoked, past its window, another person's, gone, naming none or a malformed id; one read by id for a live one), `auth.service.test.ts` (`sid` is the row written; a refresh rotates the row it found, matched on the old hash and live, inserting and revoking nothing; a rotation that matches nothing is refused; the allowlist's refusal ends the session; the cap orders by `expires_at`), `realtime.gateway.test.ts`, `invitations.controller.test.ts`, `auth.controller.test.ts` (new).
+- Break patches: `sip-37` (the strategy asks no session) reddens the password change's, the other ways' and the browser-style sign-out checks, and `sib-3` the browser's; `sip-39` (a refresh makes a new session) the refresh check; `sip-56` (the cap by creation) the cap check; `sip-45` (the socket) the socket check; `sip-47` (the claim) the claim check; `sip-49` (no cookie) the browser-style sign-out check; `sip-38`, `sip-40`, `sip-41`, `sip-42`, `sip-43`, `sip-44`, `sip-46`, `sip-48`, `sip-50`, `sip-55`, `sip-57` and `sip-58` (a subscribe that does not wait) redden their unit tests. The previous round's `sip-19` (nothing revoked) now also reddens the password change's, the socket's and the claim's checks, and `sip-21` (the caller's session revoked too) the password change's. Each patch reddened exactly what it claims (30 aimed at the two suites, 22 unit claims).
+- Cost: the read by primary key is 0.04 ms in Postgres and 0.8 ms p50 through the API's own client; `GET /users/me`, the lightest authenticated route, went from p50 2.7 ms (before, load 3.3) to 4.1 ms (after, load 1.4), and back to back under load (12–13) the two builds could not be told apart.
+- Regression on lane 3 (above): the first run found this work's socket race (a subscribe sent as the socket connects was judged before the handshake's session read; `chat-realtime-access`, `call-realtime-access`, `guest-chat-scope` and `guest-canvas-scope` failed), fixed, and the whole batch ran again: 44 of 45 green, 743 of 744 checks, `loading-states` the base's.
+
+Found while building it: `found-30-sep/an-open-socket-outlives-its-session`, `found-30-sep/the-callers-session-is-named-by-its-refresh-token` and `found-30-sep/loading-states-reads-the-clip-page-loading`.
+- Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
+
 ### `found-30-sep/email-lookups-read-the-whole-table` — open (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`)
 
 **Every lookup by email reads the whole `users` table**
@@ -2594,7 +2650,7 @@ OWASP's ASVS 3.3.3 asks that terminating the other sessions after a password cha
 
 *To close:* an index on `lower(email)`, declared in the schema with its migration (`check-schema-declares-migrations`); a unique one once the accounts that differ only in case are folded. `rundesk_v3` holds twelve such pairs, every one made by a probe, a BEFORE run or a break patch (below); production's count is unknown and is the first thing to read.
 
-### `found-30-sep/an-accepted-invitation-sets-no-cookies` — open (visible bug, small; found closing `found-30-sep/password-change-unthrottled`)
+### `found-30-sep/an-accepted-invitation-sets-no-cookies` — **closed** (visible bug, small; found closing `found-30-sep/password-change-unthrottled`)
 
 **Accepting an invitation signs the person in only until the page reloads**
 
@@ -2604,6 +2660,66 @@ OWASP's ASVS 3.3.3 asks that terminating the other sessions after a password cha
 - Found building the password change: such a session names itself only in the body (`currentRefreshToken`, which the web now sends), since it has no cookie.
 
 *To close:* set the cookies on the claim's answer as sign-up does, and check that a page reloaded after accepting an invitation is still signed in.
+
+
+*Closed, 30 September.* ClickUp: an invitee without an account is asked "to create an account and sign in", and one with an account joins "when they log in" (help centre, search summary); nothing has a reload sign them out. OWASP: "A web application should make use of cookies for session ID exchange management" (session management cheat sheet), as this one does for every other way in.
+
+Measured first, three runs alike: `POST /invitations/claim` answered 201 with a session in its body and set no cookie, where sign-up and sign-in set `access_token`, `refresh_token` and `csrf_token`. In a browser on lane 3, a newcomer who accepted an invitation held no cookie, and a reload signed them out: `GET /users/me` 401, the refresh 401, the store cleared, and `/app` sent them to the sign-in page. And a person signed in by their cookies alone (any page reloaded, or the invitation opened from its email in a new tab) could not accept an invitation to their account: the claim read the Bearer header alone, so it answered 403 "Account already exists. Please log in first."
+
+Now the claim's answer sets the three cookies as `AuthController.issueCookies` sets sign-up's (`setAuthCookies`, secure in production), and still carries the session in its body; and it reads who is claiming as every route does, the access cookie and then the Bearer header, verified, its session live.
+
+Checks:
+- `session-in-the-browser` (new, 3 checks, registered in CI): a newcomer who accepts an invitation holds the session cookies, and a reload keeps them signed in. Before: no cookie, and signed out by the reload.
+- `sign-in-and-password` (this item's section, 2): the claim sets the three cookies, and they alone read `/users/me` as the newcomer and refresh; a person signed in by cookies alone accepts an invitation to their account (201, a member). Before: no cookies; 403.
+- Unit tests: `invitations.controller.test.ts` (new, 2): the cookies on the answer; the claimant read from the cookie or the Bearer header, only while its session is live, a token that does not verify refused.
+- Break patches: `sip-51` (no cookies) reddens the cookies check and `sib-1` (the same edit) the browser's reload check; `sip-53` (the Bearer header alone) the cookie-only claim; `sip-52` and `sip-54` redden their unit tests.
+- Regression on lane 3, with the other two items': the invitation suites among the 45 (`assignee-picker`, `credential-reads`, which claims a legacy invitation, `guest-invitations`, `list-empty-states`, `no-dead-ends`, `settings-tabs-by-key`, `video-regression`) all green; 44 of 45 in all, 743 of 744 checks.
+- Merged here onto `6f8e02c` and run again on lane 3: `sign-in-and-password` 29, `session-in-the-browser` 3, `auth-route-limits` 22, `password-hash-time` 4, the socket handshake's `chat-realtime-access` 6, `call-realtime-access` 2, `workspace-read-access` 30 and `guest-chat-scope` 7, `credential-reads` 11, `guest-invitations` 2, `settings-depth` 62 and `menu-reopen` 26, all green, 204 checks; `loading-states` 25/26, its known failure (`found-30-sep/loading-states-reads-the-clip-page-loading`).
+
+### `found-30-sep/a-burst-is-compared-before-the-lock` — open (security, small; found closing `found-30-sep/password-change-guesses-600-an-hour`)
+
+**Wrong passwords sent at once are all compared before the lockout locks the account, and a right one among them signs in**
+
+*Evidence, 30 September, lane 3 (`probe-burst.mjs`, three runs alike, on this work's build; sign-in is unchanged by it):*
+- A fresh account; twenty wrong passwords and then its right one, sent at once to `POST /auth/login`, each from a loopback address of its own: the twenty answered 401, the fifth locked the account (read after: `failed_login_attempts` 0, locked), and the right one answered **200, a session**. The right password alone, a moment later, was refused 401.
+- `validateUser` reads the account (and its lock) before it compares; each attempt in flight had read an unlocked account, so each was compared, and the lock stopped only those that came after. Since `found-30-sep/lockout-counts-overlapping-attempts-once` each wrong password is counted, but the count bounds what is counted, not what is compared: an attacker with as many addresses as they send at once gets that many guesses per lock, where sign-in's ten a minute per address bounds nothing per account.
+- The password change has ten a minute per person, so there at most ten are compared per lock (twenty an hour).
+
+OWASP's ASVS 2.2.1: "no more than 100 failed attempts per hour is possible on a single account"; the authentication cheat sheet: the counter "should be associated with the account itself, rather than the source IP address".
+
+*To close:* take the attempt before the compare, in one statement: count it (or refuse it when the account is locked or the count has reached the threshold) as it begins, and give it back when the password is right, so attempts that overlap past the threshold are refused without a compare; keep sign-in's refusal in one hash's time (`password-hash-time`). Check that of twenty wrong passwords and the right one sent at once, the right one is refused once five have been counted.
+
+### `found-30-sep/an-open-socket-outlives-its-session` — open (security, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+
+**A realtime socket opened before its session ended stays connected, and hears its rooms**
+
+*Evidence, 30 September, lane 3 (`probe.mjs`, before and after this work's build):*
+- A session B opened a socket (connected), and another session of the account signed B out ("Sign out other sessions", 201). Two seconds later B's socket was still connected, before this work and after it.
+- The gateway checks a token once, at the handshake (`RealtimeGateway.handleConnection`); now it also asks whether the token's session is live (a socket can no longer be opened with an ended session's token), but nothing looks at a socket again. A socket outlives its access token's fifteen minutes the same way: the web reconnects with a fresh token after a refresh, and a client that does not is never asked.
+- What such a socket hears is what its person may read (the rooms are checked at `subscribe`): task, list, doc, chat and notification events, for as long as it stays open.
+
+OWASP's ASVS 5.0, 7.4.1: when a session is terminated, "the application disallows any further use of the session".
+
+*To close:* end a session's sockets when it ends: each socket joins a room named for its session (`sid`) at the handshake, and each way a session ends (a password change, a reset, "sign out other sessions", revoking one, signing out, the session cap) disconnects that room; or re-check each socket's session at an interval and on its presence ping. Check that a socket open on a session a password change ends is disconnected within seconds, and that the changer's own socket stays.
+
+### `found-30-sep/loading-states-reads-the-clip-page-loading` — open (suite, small; found in the regression for `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+
+**`loading-states` fails at `7751d5a`: the clip page shows "Loading the clip…"**
+
+*Evidence, 30 September, lane 3:* in this work's regression `loading-states` answered 25/26: "no visible "Loading…" copy is wired to a surface (3 such strings exist, none referenced) — clipLink.loading="Loading the clip…"". The check reads the catalogs and the web source, and this work changes no web file (`git diff 7751d5a -- apps/web` is empty): `apps/web/src/pages/clip-link-page.tsx:96` renders `t('clipLink.loading')` since `de7ac24` (a clip's link). Either the page shows a skeleton, as the check's rule asks of every surface, or the check names the page as one that may say so.
+
+*To close:* decide which, and check `loading-states` green.
+
+### `found-30-sep/the-callers-session-is-named-by-its-refresh-token` — open (visible bug, small; found closing `found-30-sep/revoked-sessions-keep-their-access-tokens`)
+
+**The sessions list marks no device as this one after a reload, and a client that names no session is signed out by its own password change**
+
+*Evidence, 30 September, read and measured (lane 3, `probe.mjs` section 4, on this work's build):*
+- `GET /auth/sessions` marks `isCurrent` by a refresh token passed as `currentRefreshToken`; the profile page passes the one its store holds, in memory only. Asked by a browser's cookies with no refresh token in the query, as a reloaded page asks it: 200, two sessions, **none marked current**. So after a reload no row is "This device", and the page's per-row Revoke on its own row does not clear the store (it clears only when `isCurrent`).
+- The password change keeps the session its refresh token names (body or cookie), and "Sign out other sessions" now reads the cookie too; a client that names neither keeps none. Measured: a Bearer client changing its password without naming its session got 201 `{"ok":true,"revoked":3}`, and then its own read and refresh were refused 401 (before this work its read went on for up to fifteen minutes).
+- Every access token now names its session (`sid`, `found-30-sep/revoked-sessions-keep-their-access-tokens`), so the server knows the caller's session without being told.
+
+*To close:* name the caller's session by the access token's `sid` in the sessions list (`isCurrent`), "Sign out other sessions" and the password change, the refresh token in the body or cookie as well where one is given; check that a reloaded profile page marks its own session and keeps it through "Sign out other sessions", and that a Bearer client's change keeps its own session.
 
 ### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
 
@@ -2722,7 +2838,7 @@ Checks:
 *Closed, 30 September.* ClickUp's attached files carry a date, drawn as day and month, or a relative time ("Oct 12"). A feedback request marked planned asks it for the year: "it is impossible to determine at a glance whether a comment, approval, or attached document belongs to 2022, 2024, or 2026" (feedback board, through search excerpts). So the card draws the day its file was attached in the reader's own date format, which carries the year, and the full date and time on hover.
 - The card's line reads size · uploader · date. The date is a `<time>` whose `datetime` is the server's `createdAt` for that file (`attachment-date`).
 - `task-attachments`, 25 → 26: "each card says when its file was attached — the server's date, with its year". It compares each card's `datetime` with the list's `createdAt` for that file, and asks the drawn text for the year. Before, 25/26: no card drew a date. After, 26/26 in three runs in a row on lane 5.
-- `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check. The break runner measured them at `de24716` (lane 1): each 25/26 against 26/26.
+- `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check. The break runner measured them at `de24716` (lane 1): each 25/26 against 26/26. And at `7751d5a` (lane 1), with the suite at 32 checks: each 31/32 against 32/32. So were the 20 other patches aimed at the suite (`atd`, `ato`, `aup`, `cfo`, ten `tat`), 26 to 31 of 32, each failing what it names.
 - Regression on lanes 5 and 7: the suites that draw attachment cards, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42 and `comment-recording` 33, all green.
 
 ### `found-30-sep/attachments-have-no-download-all` — **closed** (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)
@@ -2763,7 +2879,7 @@ and a member refused the task gets 404 where they had the zip while it was open 
 - `zip-stream.test.ts` (6), `zip-names.test.ts` (2), `tasks-attachments-zip.test.ts` (5) read every archive
   back with Info-ZIP; `content-disposition.test.ts` (1). A seventh in `zip-stream.test.ts` checks the CRC
   below.
-- `dla-1..8` redden their checks, each 31/32 on lane 7; `dla-9..22` redden their unit tests (`dla-10` four more,
+- `dla-1..8` redden their checks, each 31/32 on lane 7; `dla-9..22` redden their unit tests (`dla-10` four more, The break runner measured `dla-1..8` at `7751d5a` (lane 1): each 31/32 against 32/32, failing exactly the check it names.
   since unzip cannot read its archive).
 - Regression on lane 7: `task-attachments` 32, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42,
   `comment-recording` 33, `object-key-boundaries` 23, all green.

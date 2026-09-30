@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { describe, it, mock } from 'node:test'
-import { UnauthorizedException } from '@nestjs/common'
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common'
 import { PgDialect } from 'drizzle-orm/pg-core'
 import { compareSync, getRounds, hashSync } from 'bcryptjs'
 import { AuthService, hashRefreshToken } from './auth.service'
@@ -576,7 +576,7 @@ describe('AuthService.login — refresh token stored hashed', () => {
 })
 
 describe('AuthService.refresh — locate session by hash', () => {
-  it('looks the session up by the token hash, then rotates (revoke + re-issue)', async () => {
+  it('looks the session up by the token hash, then keeps it: login rotates that row, and no row is revoked', async () => {
     const raw = 'RAW-REFRESH'
     const stored = {
       id: 's1',
@@ -600,9 +600,145 @@ describe('AuthService.refresh — locate session by hash', () => {
     assert.equal(selectWheres[0].column, 'refresh_token')
     assert.equal(selectWheres[0].value, hashRefreshToken(raw))
     assert.notEqual(selectWheres[0].value, raw)
-    // The located session is revoked by id (rotation) and a new one issued via login().
-    assert.ok(updates.some((u) => u.set.isRevoked === true && u.where.value === 's1'))
+    // The located session is kept: login() rotates that row, named with the hash presented for it.
     assert.equal(login.mock.callCount(), 1)
+    assert.deepEqual((login.mock.calls[0].arguments as unknown[])[2], { sessionId: 's1', refreshTokenHash: hashRefreshToken(raw) })
+    assert.ok(!updates.some((u) => u.set.isRevoked === true), 'a refresh revokes no session')
+  })
+})
+
+/*
+ * THE ACCESS TOKEN NAMES ITS SESSION, AND A REFRESH KEEPS IT
+ * (`found-30-sep/revoked-sessions-keep-their-access-tokens`). `sid` is the
+ * session row's id, which `JwtStrategy` reads to refuse a token whose session
+ * has ended. A refresh replaces the row's refresh token in place, so the
+ * session and its access tokens outlive it; a new row per refresh would void
+ * every access token made before it. `sign-in-and-password.mjs` measures both
+ * on a lane.
+ */
+describe('AuthService.login — the access token names its session, and a refresh keeps it', () => {
+  const dialect = new PgDialect()
+  const rendered = (fragment: unknown) => dialect.sqlToQuery(fragment as never)
+  /** A drizzle stand-in: queued selects; every insert and update recorded; an update's `returning` answers `rotated`. */
+  function sessionsDb(selects: any[][], rotated: any[] = [{ id: 's1' }]) {
+    const queue = [...selects]
+    const inserts: any[] = []
+    const updates: Array<{ set: any; where: unknown }> = []
+    const node = (rows: any[]) => {
+      const n: any = Promise.resolve(rows)
+      for (const m of ['from', 'innerJoin', 'where', 'orderBy', 'limit']) n[m] = () => n
+      return n
+    }
+    const db: any = {
+      select: () => node(queue.shift() ?? []),
+      insert: () => ({ values: async (values: any) => { inserts.push(values) } }),
+      update: () => ({
+        set: (set: any) => ({
+          where: (where: unknown) => {
+            updates.push({ set, where })
+            const done: any = Promise.resolve(undefined)
+            done.returning = async () => rotated
+            return done
+          },
+        }),
+      }),
+    }
+    return { db, inserts, updates }
+  }
+  const signed: any[] = []
+  function loginService(db: any, settings: Record<string, unknown> = {}) {
+    signed.length = 0
+    return makeAuthService({
+      db,
+      workspacesService: { findByMember: async () => [] },
+      securitySettings: {
+        getEffectiveForUser: async () => ({
+          settings: { workspaceId: null, sessionTimeoutMinutes: 60, maxConcurrentSessions: 0, ipAllowlistEnabled: false, ipAllowlist: [], ipAllowlistIncludeAdmins: false, ...settings },
+          isWorkspaceAdmin: false,
+        }),
+      },
+      featureFlagsService: { resolveForUser: async () => ({ flags: {} }) },
+      jwtService: {
+        sign: (payload: any) => { signed.push(payload); return payload?.type === 'refresh' ? `REFRESH-${signed.length}` : `ACCESS-${signed.length}` },
+        verify: () => ({ sub: 'u1', type: 'refresh' }),
+      },
+      config: { getOrThrow: () => 'secret' },
+      security: { logAuditEvent: async () => undefined },
+      usersService: { findById: async () => ({ id: 'u1', email: 'a@b.com', role: 'member' }) },
+    })
+  }
+  const user = { id: 'u1', email: 'a@b.com', role: 'member', passwordHash: 'x' }
+  const live = { id: 's1', userId: 'u1', refreshToken: hashRefreshToken('OLD-REFRESH'), isRevoked: false, expiresAt: new Date(Date.now() + 60_000) }
+
+  it('login names its session in the access token: sid is the id of the session row it writes', async () => {
+    const { db, inserts } = sessionsDb([[]])
+    await loginService(db).login(user)
+    const access = signed.find((p) => p.type !== 'refresh')
+    assert.equal(inserts.length, 1, 'one session row')
+    assert.match(String(access?.sid), /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/, `the access token names no session: ${JSON.stringify(access)}`)
+    assert.equal(inserts[0].id, access.sid, 'the row written is the session the token names')
+  })
+
+  it('a refresh keeps its session: the row the refresh token names gets the new refresh token and window, matched on the old one and on being live, and nothing is inserted or revoked', async () => {
+    const { db, inserts, updates } = sessionsDb([[live], []])
+    const bundle = await loginService(db).refresh('OLD-REFRESH')
+    const access = signed.find((p) => p.type !== 'refresh')
+    assert.equal(access?.sid, 's1', 'the new access token names the same session')
+    assert.equal(inserts.length, 0, 'no new session')
+    assert.ok(!updates.some((u) => u.set.isRevoked === true), 'no session revoked')
+    const rotation = updates.find((u) => u.set.refreshToken)
+    assert.ok(rotation, 'the session’s refresh token is replaced')
+    assert.equal(rotation!.set.refreshToken, hashRefreshToken(bundle.refreshToken))
+    assert.ok(rotation!.set.expiresAt instanceof Date && rotation!.set.expiresAt.getTime() > Date.now() + 59 * 60_000, 'its window extended by the policy’s minutes')
+    const where = rendered(rotation!.where)
+    assert.equal(where.sql, '("sessions"."id" = $1 and "sessions"."refresh_token" = $2 and "sessions"."is_revoked" = $3)')
+    assert.deepEqual(where.params, ['s1', hashRefreshToken('OLD-REFRESH'), false])
+  })
+
+  it('a refresh whose session another refresh has just rotated, or something revoked, is refused and makes no session', async () => {
+    const { db, inserts } = sessionsDb([[live], []], [])
+    await assert.rejects(() => loginService(db).refresh('OLD-REFRESH'), (err: any) => err instanceof UnauthorizedException && err.message === 'Session expired')
+    assert.equal(inserts.length, 0)
+  })
+
+  it('a refresh the workspace’s IP allowlist refuses ends the session, as it did when a refresh revoked it first', async () => {
+    const { db, updates } = sessionsDb([[live], []])
+    const svc = loginService(db, { ipAllowlistEnabled: true, ipAllowlist: ['10.9.9.0/24'] })
+    await assert.rejects(() => svc.refresh('OLD-REFRESH', { ip: '203.0.113.7' }), (err: any) => err instanceof ForbiddenException)
+    const ended = updates.find((u) => u.set.isRevoked === true)
+    assert.ok(ended, 'the session is revoked')
+    assert.deepEqual(rendered(ended!.where).params, ['s1'])
+    assert.ok(!updates.some((u) => u.set.refreshToken), 'and not rotated')
+  })
+
+  it('the session cap ends the sessions used least recently: the live ones ordered by the window each refresh extends, not by when they signed in', async () => {
+    const orderedBy: unknown[] = []
+    const revoked: unknown[] = []
+    const queue: any[][] = [[], [{ id: 'newest' }, { id: 'recent' }, { id: 'stale' }]] // the organisations, then the live sessions
+    const node = (rows: any[]) => {
+      const n: any = Promise.resolve(rows)
+      for (const m of ['from', 'innerJoin', 'where', 'limit']) n[m] = () => n
+      n.orderBy = (...by: unknown[]) => { orderedBy.push(...by); return n }
+      return n
+    }
+    const db: any = {
+      select: () => node(queue.shift() ?? []),
+      insert: () => ({ values: async () => undefined }),
+      update: () => ({
+        set: (set: any) => ({
+          where: (where: unknown) => {
+            if (set.isRevoked) revoked.push(rendered(where).params[0])
+            const done: any = Promise.resolve(undefined)
+            done.returning = async () => []
+            return done
+          },
+        }),
+      }),
+    }
+    await loginService(db, { maxConcurrentSessions: 2 }).login(user)
+    assert.equal(orderedBy.length, 1, 'the cap orders the live sessions once')
+    assert.equal(rendered(orderedBy[0]).sql, '"sessions"."expires_at" desc')
+    assert.deepEqual(revoked, ['stale'], 'the session past the cap, used least recently, is ended')
   })
 })
 

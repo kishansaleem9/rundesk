@@ -2,13 +2,14 @@ import { Injectable, UnauthorizedException, ConflictException, ForbiddenExceptio
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
 import { randomUUID, randomBytes } from 'node:crypto'
-import { and, eq, isNull, desc, sql, or, lte } from 'drizzle-orm'
+import { and, eq, isNull, desc, sql } from 'drizzle-orm'
 import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, featureFlags, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { signupFeatureRows } from './signup-features'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { NO_ACCOUNT_HASH, passwords } from '../../common/security/password-hash'
 import { hashRefreshToken } from '../../common/security/refresh-token'
+import { countWrongPassword, type LockoutPolicy } from '../../common/security/lockout'
 import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
@@ -19,6 +20,8 @@ import { isIpAllowed } from '../security/ip-allowlist.util'
 import type { SignupDto } from './dto/signup.dto'
 
 type SessionMeta = { userAgent?: string; ip?: string }
+/** The session a refresh keeps: its row, and the hash of the refresh token presented for it. */
+type RotateSession = { sessionId: string; refreshTokenHash: string }
 
 function slugify(input: string): string {
   return input
@@ -124,42 +127,14 @@ export class AuthService {
 
   /**
    * ONE WRONG PASSWORD, COUNTED IN ONE STATEMENT
-   * (`found-30-sep/lockout-counts-overlapping-attempts-once`).
-   *
-   * The count was read with the account and written back plus one, so wrong
-   * passwords that overlapped each wrote the same next number. Measured on
-   * lane 3: four sent at once left `failed_login_attempts` at 1, and five or
-   * eight at once at 1 too; one after another, the account locked only at its
-   * eighth wrong password, where the policy says five. So the number of
-   * guesses the lockout allowed grew with how many an attacker sends at once,
-   * from as many addresses as sign-in's ten a minute per address needs.
-   *
-   * Postgres adds the one now, to the number the row holds when this UPDATE
-   * takes its lock: attempts that overlap wait for each other and each is
-   * counted. The one that reaches the threshold locks the account in the same
-   * statement and starts the count again, as the policy always did. An attempt
-   * that finds the account already locked is not counted, as a locked
-   * account's sign-in never was (it is refused above, before its compare is
-   * read): eight at once lock it at the fifth and leave nothing counted past it.
-   * Answers the count and the lock as the statement left them, or null when it
-   * counted nothing.
+   * (`found-30-sep/lockout-counts-overlapping-attempts-once`): the statement is
+   * `common/security/lockout.ts`'s, which a password change's wrong current
+   * password is counted by too (`found-30-sep/password-change-guesses-600-an-hour`),
+   * so the two share one count per account. Answers the count and the lock as
+   * the statement left them, or null when it counted nothing.
    */
-  private async countWrongPassword(
-    userId: string,
-    policy: { lockoutThreshold: number; lockoutDurationMinutes: number },
-    now: Date,
-  ) {
-    const lockedUntil = new Date(now.getTime() + policy.lockoutDurationMinutes * 60_000)
-    const reachesThreshold = sql`${users.failedLoginAttempts} + 1 >= ${policy.lockoutThreshold}`
-    const [counted] = await this.db
-      .update(users)
-      .set({
-        failedLoginAttempts: sql`case when ${reachesThreshold} then 0 else ${users.failedLoginAttempts} + 1 end`,
-        lockedUntil: sql`case when ${reachesThreshold} then ${lockedUntil.toISOString()}::timestamptz else ${users.lockedUntil} end`,
-      })
-      .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))
-      .returning({ failedLoginAttempts: users.failedLoginAttempts, lockedUntil: users.lockedUntil })
-    return counted ?? null
+  private async countWrongPassword(userId: string, policy: LockoutPolicy, now: Date) {
+    return countWrongPassword(this.db, userId, policy, now)
   }
 
   /**
@@ -196,7 +171,12 @@ export class AuthService {
     }
   }
 
-  async login(user: typeof users.$inferSelect, meta: SessionMeta = {}) {
+  /**
+   * A session's tokens: a new session (sign-in, sign-up, a claim, SSO, Google),
+   * or, with `rotate`, the session a refresh token names, kept and given a new
+   * refresh token (`refresh`).
+   */
+  async login(user: typeof users.$inferSelect, meta: SessionMeta = {}, rotate?: RotateSession) {
     const memberships = await this.workspacesService.findByMember(user.id)
 
     /*
@@ -260,12 +240,24 @@ export class AuthService {
       role: user.role,
     })
 
+    /*
+     * THE ACCESS TOKEN NAMES ITS SESSION (`sid`,
+     * `found-30-sep/revoked-sessions-keep-their-access-tokens`), and
+     * `JwtStrategy` refuses one whose session is revoked, expired or gone. It
+     * named none, so a session revoked by a password change, a reset, "sign out
+     * other sessions", revoking it, signing out or the session cap went on
+     * reading for the fifteen minutes its access token had left. The id is the
+     * session row's, made here so the token can carry it before the row is
+     * written; a refresh keeps it.
+     */
+    const sessionId = rotate?.sessionId ?? randomUUID()
     const accessToken = this.jwtService.sign({
       sub: user.id,
       email: user.email,
       role: user.role,
       workspaceId: primaryWorkspaceId,
       flags: resolvedFlags.flags,
+      sid: sessionId,
     })
 
     // Session lifetime is driven by the workspace policy (idle/inactivity
@@ -282,19 +274,40 @@ export class AuthService {
 
     const expiresAt = new Date(Date.now() + ttlMinutes * 60_000)
 
-    // Store only the hash of the refresh token at rest (the raw JWT is still
-    // returned to the client below). See hashRefreshToken().
-    await this.db.insert(sessions).values({
-      userId: user.id,
-      refreshToken: hashRefreshToken(refreshToken),
-      userAgent: meta.userAgent,
-      ipAddress: meta.ip,
-      expiresAt,
-    })
+    if (rotate) {
+      /*
+       * A REFRESH KEEPS ITS SESSION: the same row, its refresh token replaced
+       * and its window extended, where it used to revoke the row and make
+       * another. The session is what an access token names now, so a new row
+       * per refresh would void every access token made before it, and a
+       * browser's requests in flight across a refresh would be refused and
+       * refresh again, each voiding the last. Only the refresh token the
+       * caller presented is replaced, on a row still live: of two refreshes
+       * with one token, one rotates it and the other is refused, as a used
+       * refresh token was.
+       */
+      const [kept] = await this.db
+        .update(sessions)
+        .set({ refreshToken: hashRefreshToken(refreshToken), expiresAt, userAgent: meta.userAgent, ipAddress: meta.ip })
+        .where(and(eq(sessions.id, rotate.sessionId), eq(sessions.refreshToken, rotate.refreshTokenHash), eq(sessions.isRevoked, false)))
+        .returning({ id: sessions.id })
+      if (!kept) throw new UnauthorizedException('Session expired')
+    } else {
+      // Store only the hash of the refresh token at rest (the raw JWT is still
+      // returned to the client below). See hashRefreshToken().
+      await this.db.insert(sessions).values({
+        id: sessionId,
+        userId: user.id,
+        refreshToken: hashRefreshToken(refreshToken),
+        userAgent: meta.userAgent,
+        ipAddress: meta.ip,
+        expiresAt,
+      })
 
-    // Concurrent-session cap: revoke the oldest sessions beyond the limit.
-    if (settings.maxConcurrentSessions > 0) {
-      await this.enforceSessionCap(user.id, settings.maxConcurrentSessions)
+      // Concurrent-session cap: revoke the oldest sessions beyond the limit.
+      if (settings.maxConcurrentSessions > 0) {
+        await this.enforceSessionCap(user.id, settings.maxConcurrentSessions)
+      }
     }
 
     await this.security.logAuditEvent({
@@ -326,13 +339,20 @@ export class AuthService {
     return this.login(user, meta)
   }
 
-  /** Revoke the oldest active sessions beyond `max` (newest are kept). */
+  /**
+   * Revoke the active sessions beyond `max`, those used least recently first:
+   * ordered by `expiresAt`, which a sign-in sets and each refresh extends. It
+   * was `createdAt`, which meant the same while a refresh made a new row; a
+   * refresh keeps its row now (`login`, rotate), so `createdAt` is when the
+   * session signed in, and the cap would end a session in daily use before
+   * one left idle since the day after.
+   */
   private async enforceSessionCap(userId: string, max: number) {
     const active = await this.db
       .select({ id: sessions.id })
       .from(sessions)
       .where(and(eq(sessions.userId, userId), eq(sessions.isRevoked, false)))
-      .orderBy(desc(sessions.createdAt))
+      .orderBy(desc(sessions.expiresAt))
     for (const stale of active.slice(max)) {
       await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, stale.id))
     }
@@ -594,8 +614,18 @@ export class AuthService {
     const user = await this.usersService.findById(payload.sub)
     if (!user) throw new UnauthorizedException()
 
-    await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, session.id))
-    return this.login(user, meta)
+    // The session is kept, and the refresh token presented for it replaced
+    // (`login`, rotate): its access tokens name it, and stay good.
+    try {
+      return await this.login(user, meta, { sessionId: session.id, refreshTokenHash: session.refreshToken })
+    } catch (err) {
+      // A refresh the workspace's IP allowlist refuses ends the session, as it
+      // did when the old session was revoked before a new one was made.
+      if (err instanceof ForbiddenException) {
+        await this.db.update(sessions).set({ isRevoked: true }).where(eq(sessions.id, session.id))
+      }
+      throw err
+    }
   }
 
   async logout(refreshToken: string) {

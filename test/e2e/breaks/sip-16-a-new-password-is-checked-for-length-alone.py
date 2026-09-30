@@ -5,12 +5,16 @@
 # invitation's claim ask ten, both cases, a number and a symbol, and reset asks
 # the workspace's policy, which asks the same unless the workspace says not.
 #
+# Re-anchored 30 September: the workspace's settings are read before the
+# current password is compared now, for its lockout
+# (`found-30-sep/password-change-guesses-600-an-hour`), so the anchor is the
+# policy's call alone; the edit still drops it.
+#
 # Reddens: sign-in-and-password:
 #   "a weak new password is refused 400 under the workspace’s default policy, saying what it lacks, and the old password still signs in"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/users/users.service.ts'
 a = (
-    "    const { settings } = await this.securitySettings.getEffectiveForUser(userId)\n"
     "    await this.securitySettings.enforcePasswordPolicy(newPassword, {\n"
     "      requireStrong: settings.requireStrongPasswords,\n"
     "      blockBreached: settings.blockBreachedPasswords,\n"

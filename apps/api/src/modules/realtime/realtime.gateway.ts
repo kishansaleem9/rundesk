@@ -21,6 +21,7 @@ import { canReadDoc } from '../../common/permissions/doc-access'
 import { PresenceService } from '../presence/presence.service'
 import { ACCESS_TOKEN_COOKIE } from '../auth/auth-cookies'
 import { guestMayRead, guestReachesList } from '../../common/permissions/guest-reach'
+import { sessionIsLive } from '../../common/security/live-session'
 
 /**
  * Extract the access_token from a raw Cookie header. Browser sessions no longer
@@ -165,6 +166,8 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
   /** A socket may only join a room it is authorized for (own user channel, or a
    *  workspace it belongs to — resolved transitively for list/task/doc/canvas). */
   private async canJoinRoom(client: Socket, room: string): Promise<boolean> {
+    // A subscribe can arrive before the handshake has found the session live (`handleConnection`).
+    await (client.data as { handshake?: Promise<void> })?.handshake
     const userId = (client.data as { userId?: string })?.userId
     if (!userId) return false
     const idx = room.indexOf(':')
@@ -275,10 +278,31 @@ export class RealtimeGateway implements OnGatewayConnection, OnGatewayDisconnect
       return
     }
 
+    /*
+     * THE HANDSHAKE ASKS FOR THE SESSION, WHICH IS A READ, so a message can
+     * arrive before it is answered: the web subscribes the moment it connects.
+     * Who the socket is was set at once, before; now it is set when the session
+     * is found live. So the handshake's work is kept on the socket, and a
+     * subscribe waits for it before it reads who the socket is (`canJoinRoom`).
+     */
+    const handshake = this.admit(client, token)
+    ;(client.data as { handshake?: Promise<void> }).handshake = handshake
+    await handshake
+  }
+
+  /** Who the socket is, when its token verifies and its session is live; otherwise it is told why and closed. */
+  private async admit(client: Socket, token: string): Promise<void> {
     try {
       const payload = this.jwtService.verify(token, {
         secret: this.config.getOrThrow('JWT_ACCESS_SECRET'),
       })
+      // A token whose session has ended opens no socket, as it reads no route
+      // (`sessionIsLive`, `found-30-sep/revoked-sessions-keep-their-access-tokens`).
+      if (!(await sessionIsLive(this.db, payload))) {
+        client.emit('error', { message: 'Session ended' })
+        client.disconnect(true)
+        return
+      }
       ;(client.data as { userId: string; email: string; role: string }).userId = payload.sub
       ;(client.data as { userId: string; email: string; role: string }).email = payload.email
       ;(client.data as { userId: string; email: string; role: string }).role  = payload.role

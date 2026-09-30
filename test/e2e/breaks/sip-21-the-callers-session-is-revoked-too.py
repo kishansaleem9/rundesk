@@ -2,11 +2,13 @@
 #
 # The session the caller's refresh token names is matched by a digest that is
 # no digest of it, so nothing is kept: the person who changed their password
-# is signed out of the tab they did it in when its access token runs out.
+# is signed out of the tab they did it in, at once now that an ended session's
+# access token is refused (`found-30-sep/revoked-sessions-keep-their-access-tokens`).
 #
 # Reddens: sign-in-and-password:
 #   "a change made as a browser makes it (its cookies and the CSRF header) signs out the account’s other sessions and keeps the browser’s: the other session’s refresh is refused 401, the browser’s answered 200"
 #   "a change by a client naming its session in the body (currentRefreshToken) keeps it and signs out the other two: its refresh is answered 200, the other sign-in’s and the sign-up’s are refused 401, and the change says it revoked 2"
+#   "a session a password change signs out is refused at once: its access token’s read (GET /users/me) is refused 401, as is the sign-up session’s, and its refresh is refused 401, while the session that made the change reads and refreshes on"
 import io
 p = '/home/user/rundesk/apps/api/src/modules/users/users.service.ts'
 a = "    const kept = keepRefreshToken ? [hashRefreshToken(keepRefreshToken), keepRefreshToken] : []\n"

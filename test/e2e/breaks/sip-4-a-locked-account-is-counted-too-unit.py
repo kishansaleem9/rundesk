@@ -3,11 +3,15 @@
 # `sip-3`'s edit, claimed by the unit test: the UPDATE touches the account's
 # row whether or not its lock has passed.
 #
+# Re-anchored 30 September: the statement moved to `common/security/lockout.ts`
+# (`found-30-sep/password-change-guesses-600-an-hour`); the line and the edit
+# are the same, and the auth service still counts with it.
+#
 # Reddens: unit: auth.service.test.ts "a wrong password is not counted on an account another attempt has just locked: the statement touches only a row whose lock has passed"
 import io
-p = '/home/user/rundesk/apps/api/src/modules/auth/auth.service.ts'
-a = "      .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))\n"
-b = "      .where(eq(users.id, userId))\n"
+p = '/home/user/rundesk/apps/api/src/common/security/lockout.ts'
+a = "    .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))\n"
+b = "    .where(eq(users.id, userId))\n"
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
 io.open(p, 'w', encoding='utf-8').write(s.replace(a, b))
