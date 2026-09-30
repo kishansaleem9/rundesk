@@ -1,6 +1,6 @@
 # Open work — verified inventory, 23 September 2026
 
-> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 37 open, 7 partly fixed, 310 closed, counted from this file's headings on 29 September.
+> **Current state and where to start: `docs/resume-2026-09-28.md`** — 354 items, 36 open, 8 partly fixed, 310 closed, counted from this file's headings on 30 September.
 
 Produced by a read-only sweep: eight lanes (handoff defects, every open ledger row, ClickUp research ×2, suite hygiene, harness, product siblings of tonight's fixes, three days of commit messages), each non-research finding re-read by an adversarial verifier. Only findings the verifier confirmed as still open or partly fixed are listed. The same item can appear under more than one lane; ids are prefixed by lane.
 
@@ -5610,13 +5610,18 @@ ClickUp (help centre, search snippets): the Planner "syncs with your connected G
 
 ## Ledger rows still open — 18
 
-### `harness/ai-rows-blocked-on-empty-key` — open, large
+### `harness/ai-rows-blocked-on-empty-key` — partly-fixed, large
 
 **Ledger rows still give 'ANTHROPIC_API_KEY is empty here and in CI' as the reason the AI field types and AI surfaces are unbuilt or refusal-only**
 
 *Evidence:* docs/video2-reaudit.md:642 ('eight of the ten need a language model and ANTHROPIC_API_KEY is empty here and in CI') and :719 (row P, the 10 absent field types: Summary, Custom Text, Custom Dropdown, Progress Updates, Translation, Sentiment, Categorize, Action Items, plus Relationship and Button). Also :727 (row B: the task AI bar ends in 'not configured'). The same ledger at :2843 says 'The ANTHROPIC_API_KEY half of that reason is now known to be wrong', and scripts/e2e-lanes/model-stub.mjs plus lane_model_env (lane-env.sh:170-177) now supply a model to a lane. Under the owner's policy these rows are UNBUILT, not blocked.
 
 *To close:* Relabel these rows as unbuilt. Build the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour. Measure them on a model lane through model-stub (this depends on model-lane-routing-unbuilt).
+
+*Partly fixed, 30 September:*
+- The rows are relabelled. `docs/video2-reaudit.md` keeps its words about the empty key, and says beside each (§4's paragraph, the field-types row, the task AI bar's row) that a lane runs a model stub, so the eight AI types are unbuilt, not blocked.
+- The dependency is closed: model-lane routing is built (`harness/model-lane-routing-unbuilt`).
+- What stays open is the build: the eight AI field types, and Relationship and Button, to ClickUp's documented behaviour, measured on the model lane.
 
 ### `resume-defects/resume-5` — partly-fixed, large
 
