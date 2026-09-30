@@ -1804,7 +1804,7 @@ Checks:
 
 Checks: `task-attachments`, 17 → 23 checks, with the two items below. The panel's list is held until the tab's header is shown, and a mutation observer reads the first card the moment it is drawn: "the first card is drawn where it stays — its box when it first appears is its box once the list has answered" and "and its first draw already has its Download link — the cards are drawn from the list, not from the task's own rows".
 - Before, both failed in three runs of three. After, 23/23 in nine runs, three in a row each at `f499cf6` (twice) and at `cb21d14`.
-- `atd-1` (the task's rows drawn while the list is on its way) reddens the Download check (22/23); `atd-2` (and the form drawn only once the list answers) reddens the box check and the Download check (21/23). The twelve `tat-*` patches still redden theirs; `tat-1` is re-aimed at the header's new count. The break runner measured `atd-1` and `atd-2` again at 8c1b727 (lane 1): 22/23 and 21/23 against 23/23.
+- `atd-1` (the task's rows drawn while the list is on its way) reddens the Download check (22/23); `atd-2` (and the form drawn only once the list answers) reddens the box check and the Download check (21/23). The twelve `tat-*` patches still redden theirs; `tat-1` is re-aimed at the header's new count. The break runner measured `atd-1` and `atd-2` again at 8c1b727 (lane 1): 22/23 and 21/23 against 23/23. At `de24716` (lane 1), with the suite at 26 checks, `atd-1`, `atd-2` and ten of the `tat-*` (`tat-1`, `3`–`7`, `9`–`12`) each fail what they name again (`atd-1` 25 and `atd-2` 24 of 26), against 26/26.
 - Regression on lane 4, AFTER: the eleven suites that open the tab or read attachments, 288 checks, all green.
 - Merged here with 0170 applied to every lane database and `rundesk_pristine`, and run again on lane 5: `task-attachments` 23/23, attach-on-create 14, clip-created-card 26, task-cover 42, all green.
 
@@ -1827,7 +1827,7 @@ Checks: `task-attachments`, 17 → 23 checks, with the two items below. The pane
 Checks: `task-attachments` attaches file-1, file-2 and file-0 in that order, then rewrites their rows into the heap as file-2, file-0, file-1 and reads their `ctid` back. "the list hands the files back in the order they were attached, oldest first — not in the order the heap holds them", "and the task itself carries its files in the same order" and "the panel draws the files in the order they were attached".
 - Before, all three failed in three runs of three: [file-2, file-0, file-1], the heap's order. After, all pass.
 - `tasks-attachments-read.test.ts` is new, 5 tests: 0/5 against the old service, 5/5 after.
-- `ato-1` (the list unsorted) reddens the list's and the panel's order (21/23), on a lane that has the index; `ato-2` (the task's rows unsorted) the task's (22/23); `ato-3` (newest first) all three (20/23). `ato-4` and `ato-5` redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 21, 22 and 20 of 23.
+- `ato-1` (the list unsorted) reddens the list's and the panel's order (21/23), on a lane that has the index; `ato-2` (the task's rows unsorted) the task's (22/23); `ato-3` (newest first) all three (20/23). `ato-4` and `ato-5` redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 21, 22 and 20 of 23. And at `de24716` (lane 1, 26 checks): 24, 25 and 21 of 26, each failing what it names.
 - After the merge every lane database needs 0170 before `fleet-restart.sh` will start its API.
 
 ### `found-30-sep/attachment-card-names-uploader-by-id` — **closed** (visible bug, small; found closing `found-30-sep/task-attachments-flaky`)
@@ -1843,7 +1843,7 @@ Checks: `task-attachments` attaches file-1, file-2 and file-0 in that order, the
 Checks: "each card names who attached it — the uploader's name, not their id" reads every card's shown text against the name the server gives the one who attached them.
 - Before, it failed in three runs of three. After, it passes.
 - Unit tests: the LEFT join, `uploaderName: null` for a gone uploader, and `addAttachment`'s row naming its uploader.
-- `aup-1` (the card draws the id) and `aup-2` (the list names nobody) redden it (22/23 each); `aup-3` (an inner join) and `aup-4` (the new row names nobody) redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 22/23 each.
+- `aup-1` (the card draws the id) and `aup-2` (the list names nobody) redden it (22/23 each); `aup-3` (an inner join) and `aup-4` (the new row names nobody) redden their unit tests. Measured again by the break runner at 8c1b727 (lane 1): 22/23 each. And at `de24716` (lane 1, 26 checks): 25/26 each.
 
 Found while building them: `found-30-sep/comment-files-unordered`, `found-30-sep/comment-file-index-only-in-a-migration`, `found-30-sep/attachment-card-draws-no-date`, `found-30-sep/attachments-have-no-download-all`, `found-30-sep/schema-reference-reads-the-main-tree` and `found-30-sep/agent-worktrees-build-main-packages` (measured again).
 
@@ -2007,9 +2007,9 @@ Checks:
   - Before: 26/32 three times at `f335b89` (the six merge checks red), and 26/33 three times at `2f7670e` (the seven new checks red).
   - After: 33/33 three times in a row at each, and again at `de24716`.
   - One check reads the request as well as the task. A field left alone is the template's on the old build too, so what is checked is that only what was set is sent, and the template's estimate and start date stand for the rest.
-- `create-modal-templates-21..27` are new. Each reddens only the check it claims on lane 2 (32/33).
+- `create-modal-templates-21..27` are new. Each reddens only the check it claims on lane 2 (32/33). The break runner measured them at `cdc2105` (lane 2): each fails exactly the check it names, 32/33 against 33/33.
 - `tsf-1..4` are unit claims. Each reddens only its test in `task-templates.service.test.ts` (4 tests new; before, 29/33 with the four red).
-- `create-modal-templates-5`, `td-create-1`, `time-estimate-4` and `v1f-3` were anchored on the create body, which moved into `setInForm`. They are re-anchored, and each still reddens its claim on lane 2.
+- `create-modal-templates-5`, `td-create-1`, `time-estimate-4` and `v1f-3` were anchored on the create body, which moved into `setInForm`. They are re-anchored, and each still reddens its claim on lane 2. The break runner measured `create-modal-templates-5` at `cdc2105` (lane 2): 26/33 against 33/33, failing the check it names and the six that make a task from a template.
 - Regression on lane 2 (by the agent): the 23 suites that open the create modal or its templates, all green, 609 checks. Among them: template-center 81, project-template-key 5, task-depth 92, video1-fast-items 92, custom-field-progress 60, space-create-menu 32, custom-field-types 32, folder-dialog 29, create-menu-ai 24, space-wizard 23 and time-estimate 13.
 - Merged here and run again on lanes 2 and 5: `create-modal-templates` 33/33, `template-center` 81, `project-template-key` 5, `custom-field-progress` 60, `task-depth` 92, `space-create-menu` 32, `folder-dialog` 29, `time-estimate` 13 and `create-menu-ai` 24, all green, 369 checks. The API and the web typecheck.
 
@@ -2064,7 +2064,7 @@ Read, not measured: the create modal makes each typed tag (`POST /workspaces/:ws
 
 *Closed, 30 September* (with `found-30-sep/template-submit-ignores-the-form`, built by an agent on lane 2). The backdrop scrolls (`overflow-y-auto`), with room under the card. Measured after on lane 2: Create task can be pressed at 1000, 900, 768 and 700, with a template chosen or without.
 - `create-modal-templates` presses it in a window 700 high, with a template chosen and the form filled in, and first checks that it lies below the window's edge.
-- `create-modal-templates-27` takes the scroll away and reddens that check alone.
+- `create-modal-templates-27` takes the scroll away and reddens that check alone. The break runner measured it at `cdc2105` (lane 2): 32/33 against 33/33.
 
 ### `found-30-sep/menus-drop-a-press-while-closing` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 
@@ -2387,7 +2387,7 @@ Checks:
 
   Before (lane 3, `2f7670e`'s API): 1, 2 unlocked, 1, 1, and the right password signed in each time. After: all four hold, in every run.
 - `auth.service.test.ts`: the two tests pinned to the read-then-write are replaced by four that render what Postgres is sent: the count is the row's plus one, the only number sent the threshold; the lock is in the same statement, for the policy's minutes; the statement touches only a row whose lock has passed; with the lockout off nothing is written.
-- Break patches: `sip-1` (read, then written back plus one, as before) reddens all four checks, `sip-3` (a locked row counted too) the eight-at-once check (3 counted past the lock), `sip-5` (the lock one attempt late) the fifth's and the five-at-once checks; `sip-2` and `sip-4` redden their unit tests.
+- Break patches: `sip-1` (read, then written back plus one, as before) reddens all four checks, `sip-3` (a locked row counted too) the eight-at-once check (3 counted past the lock), `sip-5` (the lock one attempt late) the fifth's and the five-at-once checks; `sip-2` and `sip-4` redden their unit tests. The break runner measured `sip-1`, `sip-3` and `sip-5` at `9b5ced3` (lane 4): each fails exactly the checks it names, 12, 15 and 14 of 16 against 16/16.
 - Regression on lane 3, with the other two items' (below): 28 suites, 390 of 390 checks; `password-hash-time`'s three kinds of refusal within 4 ms of each other, and `auth-route-limits` 22/22.
 - Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
 
@@ -2426,7 +2426,7 @@ Checks:
 
   Before: the forgot-password check alone held; the others answered 401, 400 "No user with email", 0 resets, and 201 twice with a second account. After: all six hold.
 - `same-email.test.ts` (new, 2) renders both helpers; `users.service.test.ts` renders `findByEmail`'s query.
-- Break patches: `sip-6` (`findByEmail` as stored) reddens the capital sign-in, the stored-with-capitals and the sign-up checks; `sip-8` (adding a member) its check; `sip-9` (the claim) and `sip-10` (the link) the invitation check; `sip-7` and `sip-11` redden their unit tests.
+- Break patches: `sip-6` (`findByEmail` as stored) reddens the capital sign-in, the stored-with-capitals and the sign-up checks; `sip-8` (adding a member) its check; `sip-9` (the claim) and `sip-10` (the link) the invitation check; `sip-7` and `sip-11` redden their unit tests. The break runner measured `sip-6`, `sip-8`, `sip-9` and `sip-10` at `9b5ced3` (lane 4): each fails exactly the checks it names, 13, 15, 15 and 15 of 16 against 16/16.
 - Regression on lane 3 (below): the eleven suites that sign their people up and add them by email, the invitation suites, inbound mail's and a form's lookups, and `password-hash-time`, whose refusals stayed within 4 ms of each other though every lookup now reads the table: 28 suites, 390 of 390 checks.
 - Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
 
@@ -2468,7 +2468,7 @@ Checks:
 
   Before: only the relaxed-policy check held (any eight characters were accepted). After: all six hold.
 - Unit tests: `auth-route-limits.test.ts` (the route's budget, behind `JwtAuthGuard`; the eleventh refused from another address, another person served), `rate-limit.guard.test.ts` (a per-user policy's buckets; the address with nobody signed in), `users.service.test.ts` (the policy, with the real policy code; the revocation's WHERE, by hash or raw; none kept when none is named), `users.controller.test.ts` (new: the cookie names the session when the body does not).
-- Break patches: `sip-12` (no `@RateLimit`) reddens the burst and per-person checks, `sip-14` (counted per address) the per-person check, `sip-16` (no policy) the weak-password check, `sip-18` (the strong rule whatever the workspace says) the relaxed-policy check, `sip-19` (nothing revoked) and `sip-21` (the caller's session revoked too) both session checks, `sip-22` (the cookie not read) the browser's; `sip-13`, `sip-15`, `sip-17`, `sip-20`, `sip-23` and `sip-24` redden their unit tests.
+- Break patches: `sip-12` (no `@RateLimit`) reddens the burst and per-person checks, `sip-14` (counted per address) the per-person check, `sip-16` (no policy) the weak-password check, `sip-18` (the strong rule whatever the workspace says) the relaxed-policy check, `sip-19` (nothing revoked) and `sip-21` (the caller's session revoked too) both session checks, `sip-22` (the cookie not read) the browser's; `sip-13`, `sip-15`, `sip-17`, `sip-20`, `sip-23` and `sip-24` redden their unit tests. The break runner measured the seven at `9b5ced3` (lane 4): each fails exactly the checks it names, 14 (`sip-12`), 15 (`sip-14`, `-16`, `-18`, `-22`) and 14 (`sip-19`, `-21`) of 16 against 16/16.
 - In a browser, on this worktree's bundle: the change from Profile › Security marked the other two sessions "Revoked" without a reload; the other session's refresh was refused, the browser's own answered, and a reload stayed signed in.
 - Regression on lane 3, one suite at a time, for the three items together: the limit suites, the suites that invite people, add them by email, read the security policy, or receive mail and form answers by email, and the eleven that sign their people up: 28 suites, 390 of 390 checks. `password-hash-time`'s refusals stayed within 4 ms of each other (336 / 340 / 338 ms).
 
@@ -2545,7 +2545,7 @@ Measured first on lane 4: a comment's three files, attached as note-1, note-2 an
 Checks: `task-attachments`, 23 → 25. A task of the suite's own carries one comment with three files, written out of heap order as the task's own are: "a comment hands its files back in the order they were attached, oldest first — not in the order the heap holds them" and "and the comment draws them in that order".
 - Before, both failed in three runs of three. After, 25/25 in six runs, three in a row each at `32bfebb` and `8c1b727`.
 - `tasks-attachments-read.test.ts` has a sixth test, which the old service fails.
-- `cfo-1` (no order) and `cfo-2` (newest first) redden both checks (23/25), `cfo-1` again on a lane with `task_attachments_comment_id_idx`, which reads one comment's files in heap order too. `cfo-3` (the comment sorts its files by name) reddens the drawn check alone (24/25). `cfo-4` reddens the unit test. The break runner measured `cfo-1..3` again at `f335b89` (lane 1): 23, 23 and 24 of 25 against 25/25.
+- `cfo-1` (no order) and `cfo-2` (newest first) redden both checks (23/25), `cfo-1` again on a lane with `task_attachments_comment_id_idx`, which reads one comment's files in heap order too. `cfo-3` (the comment sorts its files by name) reddens the drawn check alone (24/25). `cfo-4` reddens the unit test. The break runner measured `cfo-1..3` again at `f335b89` (lane 1): 23, 23 and 24 of 25 against 25/25. And at `de24716` (lane 1, 26 checks): 24, 24 and 25 of 26.
 - Regression on lane 4: the suites that post or read a comment's files, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28 and `comment-thread` 13, all green.
 - Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
 
@@ -2751,6 +2751,14 @@ table-driven `crc32`, buffered, beside `common/export/zip-stream.ts`, which stre
 Two writers of one format drift apart the way the duplicated lists in this ledger did.
 
 *To close:* write the workbook with `zipStream`, and check `list-export`'s xlsx checks still pass.
+
+### `found-30-sep/a-hung-page-outlasts-every-wait` — open (test tooling, small; found running `task-attachments`' break set at `7751d5a`)
+
+**A wait whose question never answers waits for ever, whatever its timeout says**
+
+*Evidence, 30 September, lane 1:* the break runner's baseline of `task-attachments` at `7751d5a` printed "▶ the panel, frame `01:55`" at 12:18:41, then nothing for fourteen minutes, until it was stopped. The lane's API saw the signed-in page open its socket and close it at 12:18:54, as the page left for the task's address, and then no request at all. Every wait in that section has a timeout of 30 s or less. `waitUntil` (`test/e2e/lib/wait.mjs`) awaits its predicate before it looks at the deadline, so a predicate that never settles holds it for ever. The likeliest such predicate is a Playwright call to a page whose renderer stopped answering: an agent had measured 5.4 GB free with no swap half an hour before, with three browsers and a preflight running. Read, not proven: the run left no trace of which call it was in. The suite ends only at its runner's 900 s kill, reported as one failed check. 151 suites call `waitUntil`, 1,072 times. The same suite passed 32/32 on lane 5, at the same code, half an hour earlier.
+
+*To close:* race each predicate against the time left, and count one still pending at the deadline as a no. `waitForCount` goes through `waitUntil`; `textOf`, whose `page.evaluate` has no timeout, needs the same. Check it with a predicate that never settles: the wait returns false at its deadline.
 
 ### `found-30-sep/schema-reference-reads-the-main-tree` — **closed** (test tooling, small; found closing `found-30-sep/attachments-unordered`)
 
