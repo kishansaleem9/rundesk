@@ -251,6 +251,17 @@ ok(drift(first, ['apps/web/src/a.tsx']).length === 1, 'a product file edited sin
 ok(drift(first, ['test/e2e/s.mjs']).length === 0, 'a file nothing touched is not')
 ok(drift(git('rev-parse', 'HEAD').trim(), ['apps/web/src/a.tsx']).length === 0, 'and HEAD has drifted from nothing')
 
+// AN EDIT NOT YET COMMITTED IS A CHANGE TOO (`found-30-sep/drift-reads-only-committed-changes`):
+// a batch grows a suite before it commits it, and its logs must read as drifted
+// then, as they will once it is committed, not as about this tree and short.
+const head = git('rev-parse', 'HEAD').trim()
+writeFileSync(join(repo, 'test/e2e/s.mjs'), 'suite, grown\n')
+ok(drift(head, ['test/e2e/s.mjs']).length === 1, 'an edit not yet committed is named, as it will be once it is')
+git('checkout', '--', 'test/e2e/s.mjs')
+writeFileSync(join(repo, 'test/e2e/new-helper.mjs'), 'helper\n')
+ok(drift(head, ['test/e2e/new-helper.mjs']).length === 1, 'and so is a file that did not exist when the run was made')
+rmSync(join(repo, 'test/e2e/new-helper.mjs'))
+
 // AN UNKNOWN SHA MUST NOT READ AS "NOTHING CHANGED". This is the one that
 // matters: `git diff` on a commit this checkout does not have exits non-zero,
 // and the obvious `catch { return [] }` turns every unplaceable log into a
@@ -415,6 +426,8 @@ if (process.argv.includes('--mutate')) {
       ['a route with `$` in its name stops being a dependency', '[A-Za-z0-9_.$/-]+', '[A-Za-z0-9_./-]+'],
       ['a patch stops depending on the product files it edits', '/\\/home\\/user\\/rundesk\\/((?:apps|packages)\\/[A-Za-z0-9_.$/-]+)/g', '/__never_matches__()/g'],
       ['an unreadable commit reads as no drift', "out = ['<unknown commit>']", 'out = []'],
+      ['an edit not yet committed reads as no drift', "['diff', '--name-only', sha, '--', ...paths]", "['diff', '--name-only', sha, 'HEAD', '--', ...paths]"],
+      ['a file new since the run reads as no drift', '      out = [...out, ...untracked.filter((p) => !out.includes(p))]\n', ''],
       ['a Re-run: line with nothing after it counts', '/^#[ \\t]*Re-run:[ \\t]*\\S/im', '/^#[ \\t]*Re-run:/im'],
       ['a patch that never ran reads as measured', 'CONTROL.test(line) || NOT_RUN.test(line)', 'CONTROL.test(line)'],
       ['a pending Re-run is invisible to the measurement check', 'if (patch && declaresRerun(patch.text) &&', 'if (false && declaresRerun(patch?.text ?? "") &&'],

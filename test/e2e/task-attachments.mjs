@@ -75,7 +75,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 25
+const EXPECTED_CHECKS = 26
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -572,6 +572,28 @@ try {
     'each card names who attached it — the uploader\'s name, not their id',
     `the ${cardTexts.length} cards read ${JSON.stringify(cardTexts.map((text) => text.replace(/\s+/g, ' ')))} and name ` +
       `${JSON.stringify(uploaderNames)} as their uploader; the server calls them ${JSON.stringify(ME_NAME)} (${ME_ID})`,
+  )
+
+  /*
+   * WHEN IT WAS ATTACHED (`found-30-sep/attachment-card-draws-no-date`). ClickUp's
+   * attached files carry a date, and a feedback request asks it for the year,
+   * which it leaves out ("Oct 12"). Each card draws the day its file was
+   * attached, in a <time> whose datetime is the server's own createdAt, in the
+   * reader's date format, which carries the year.
+   */
+  const serverRows = (await A(`/tasks/${task.id}/attachments`)).data ?? []
+  const createdOf = new Map(serverRows.map((r) => [r.id, r.createdAt]))
+  const dated = await page.getByTestId('attachment-date').filter({ visible: true }).evaluateAll((els) => els.map((el) => ({
+    id: el.closest('[data-attachment-id]')?.getAttribute('data-attachment-id') ?? null,
+    at: el.getAttribute('datetime'),
+    text: (el.textContent ?? '').trim(),
+  }))).catch(() => [])
+  chk(
+    dated.length === SEEDED && dated.every((d) => !!d.id && !!createdOf.get(d.id) && !!d.at
+      && new Date(d.at).getTime() === new Date(createdOf.get(d.id)).getTime()
+      && d.text.includes(String(new Date(d.at).getFullYear()))),
+    'each card says when its file was attached — the server\'s date, with its year',
+    `the cards' dates read ${JSON.stringify(dated)}; the server's are ${JSON.stringify([...createdOf])}`,
   )
 
   // -------------------------------------------------------------------------

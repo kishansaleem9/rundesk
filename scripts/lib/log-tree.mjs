@@ -290,10 +290,17 @@ const patchFileMoved = ({ root, sha, name, text }) => {
   return was === null || was !== text
 }
 
-// `(sha, paths) => the paths that changed between sha and HEAD`, memoised
-// because 650 patches across 80 suites ask the same question a few hundred
-// times. An unknown sha answers `['<unknown commit>']`: a log whose tree cannot
-// be found is not evidence that the tree is unchanged.
+// `(sha, paths) => the paths that changed between sha and the working copy`,
+// memoised because 650 patches across 80 suites ask the same question a few
+// hundred times. An unknown sha answers `['<unknown commit>']`: a log whose tree
+// cannot be found is not evidence that the tree is unchanged.
+//
+// THE WORKING COPY, NOT HEAD (`found-30-sep/drift-reads-only-committed-changes`).
+// It asked `git diff sha HEAD`, committed changes only, so a batch that grew a
+// suite read that suite's logs as about this tree until it was committed, and
+// too short: `unreadable`, which only a person can clear, where a moment later,
+// committed, the same logs read as drifted and were planned. A file that did
+// not exist when the run was made (untracked now) has changed since too.
 export function makeDriftCheck({ root }) {
   const cache = new Map()
   return (sha, paths) => {
@@ -302,7 +309,7 @@ export function makeDriftCheck({ root }) {
     if (cache.has(key)) return cache.get(key)
     let out
     try {
-      out = execFileSync('git', ['diff', '--name-only', sha, 'HEAD', '--', ...paths], {
+      out = execFileSync('git', ['diff', '--name-only', sha, '--', ...paths], {
         cwd: root,
         encoding: 'utf8',
         stdio: ['ignore', 'pipe', 'ignore'],
@@ -310,6 +317,15 @@ export function makeDriftCheck({ root }) {
         .trim()
         .split('\n')
         .filter(Boolean)
+      const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard', '--', ...paths], {
+        cwd: root,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      })
+        .trim()
+        .split('\n')
+        .filter(Boolean)
+      out = [...out, ...untracked.filter((p) => !out.includes(p))]
     } catch {
       out = ['<unknown commit>']
     }

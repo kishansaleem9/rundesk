@@ -5903,6 +5903,7 @@ function AttachmentsPanel({
   const { t } = useTranslation()
   const caps = useTaskCaps()
   const qc = useQueryClient()
+  const { formatDate, formatDateTime } = useDateFormat()
   const [linkUrl, setLinkUrl] = useState('')
   const [fileName, setFileName] = useState('')
   const [selectedFile, setSelectedFile] = useState<File | null>(null)
@@ -6212,6 +6213,25 @@ function AttachmentsPanel({
                       <>
                         {' · '}
                         <span data-testid="attachment-uploader">{a.uploaderName}</span>
+                      </>
+                    ) : null}
+                    {/*
+                      WHEN IT WAS ATTACHED (`found-30-sep/attachment-card-draws-no-date`).
+                      ClickUp's attached files carry a date. It shows the day and
+                      month alone ("Oct 12"), and a feedback request asks it for
+                      the year, so this is the reader's own date format, which
+                      carries one; the time is on hover.
+                    */}
+                    {a.createdAt ? (
+                      <>
+                        {' · '}
+                        <time
+                          data-testid="attachment-date"
+                          dateTime={a.createdAt}
+                          title={formatDateTime(a.createdAt)}
+                        >
+                          {formatDate(a.createdAt)}
+                        </time>
                       </>
                     ) : null}
                   </div>

@@ -2332,7 +2332,7 @@ Measured first on lane 4: a comment's three files, attached as note-1, note-2 an
 Checks: `task-attachments`, 23 → 25. A task of the suite's own carries one comment with three files, written out of heap order as the task's own are: "a comment hands its files back in the order they were attached, oldest first — not in the order the heap holds them" and "and the comment draws them in that order".
 - Before, both failed in three runs of three. After, 25/25 in six runs, three in a row each at `32bfebb` and `8c1b727`.
 - `tasks-attachments-read.test.ts` has a sixth test, which the old service fails.
-- `cfo-1` (no order) and `cfo-2` (newest first) redden both checks (23/25), `cfo-1` again on a lane with `task_attachments_comment_id_idx`, which reads one comment's files in heap order too. `cfo-3` (the comment sorts its files by name) reddens the drawn check alone (24/25). `cfo-4` reddens the unit test.
+- `cfo-1` (no order) and `cfo-2` (newest first) redden both checks (23/25), `cfo-1` again on a lane with `task_attachments_comment_id_idx`, which reads one comment's files in heap order too. `cfo-3` (the comment sorts its files by name) reddens the drawn check alone (24/25). `cfo-4` reddens the unit test. The break runner measured `cfo-1..3` again at `f335b89` (lane 1): 23, 23 and 24 of 25 against 25/25.
 - Regression on lane 4: the suites that post or read a comment's files, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28 and `comment-thread` 13, all green.
 - Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
 
@@ -2368,7 +2368,7 @@ Checks:
 - A column that a migration writes `UNIQUE` counts as declared by `.unique()` on that column. 0048's webhook token is one: Postgres calls it `inbound_webhooks_token_key`, and a push calls it `inbound_webhooks_token_unique`.
 - Before, the gate found 33 differences; after, none. `check-schema-declares-migrations-cases.mjs`: 24 cases hold, and 21 of 21 mutations bite. Both run in preflight and in CI's verify job.
 - `list-under-space` has a 14th check: six lists made at once share one container, and all six are listed. It fails 13/14 without the index and passes 14/14 with it (lane 5). The suite then deletes the space it raced in, by SQL, so a lane without the index keeps no extra containers.
-- `lus-4` removes the index from the schema; the break runner measures it next.
+- `lus-4` removes the index from the schema. The break runner measured it at `f335b89` (lane 1): 13/14 against 14/14, reddening the new check.
 - Regression on lanes 5 and 7: the 20 suites that read or write these tables, all green, 461 checks (`list-under-space` 14, `view-visibility` 23, `share-levels` 6, `calendar-accounts` 37, `meeting-tags` 4, `public-doc-page` 12, `folder-dialog` 29, `status-write-access` 4, `doc-trash-level` 5, `user-group-access` 8, `ai-value` 23, `ai-activity-filters` 34, `settings-depth` 62, `person-panel` 60, `container-delete-keys` 10, `archived-tasks-access` 7, `chat-message-actions` 73, `goal-access` 13, `teams-destination` 14, `task-attachments` 23).
 
 Found while closing it: `found-30-sep/task-labels-left-in-production`.
@@ -2391,13 +2391,17 @@ Checks:
 - The five that must read as moved: a clean file with a patch left on it; a file the batch changed, changed again, whose status reads the same; a staged file with a patch left in the working tree; an untracked file of the batch rewritten; a file a patch made and left.
 - Before, preflight's step failed on this batch and on batches 145 to 148 with every claim reddening. After, it passes on this batch, with its apps and packages uncommitted, in the preflight below. The cases run in preflight and in CI's verify job.
 
-### `found-30-sep/drift-reads-only-committed-changes` — open (test tooling, small; found closing `found-30-sep/unit-claims-refuse-an-uncommitted-batch`)
+### `found-30-sep/drift-reads-only-committed-changes` — **closed** (test tooling, small; found closing `found-30-sep/unit-claims-refuse-an-uncommitted-batch`)
 
 **A batch that grows a suite reads that suite's break patches as unreadable until it is committed, not as drifted**
 
 *Evidence, 30 September:* `makeDriftCheck` (`lib/log-tree.mjs`) asks `git diff --name-only <sha> HEAD`: committed changes only. This batch grew `task-attachments` (23 → 25 checks) and `create-modal-templates` (20 → 26) before committing them. So the logs of their 12 proven patches (`atd-1`, `atd-2`, `ato-1..3`, `aup-1`, `aup-2`, `create-modal-templates-16..20`) read as about this tree, and too short. That is "unreadable", which only a person can clear, and preflight's "the plan asks for what is unmeasured" failed on its ceiling of 0. Once committed, the same logs read as drifted and the planner lists them.
 
 *To close:* compare the working copy with the recorded commit, as the patch's own code already is, so that a batch reads the same before and after it is committed. Add a case in `check-log-tree` and a mutation.
+
+*Closed, 30 September.* `makeDriftCheck` asks `git diff --name-only <sha> -- <paths>`: the recorded commit against the working copy, staged or not. A file among the paths that did not exist then, untracked now, is named as changed too. So a batch that grows a suite reads that suite's logs as drifted before it is committed, as they read after, and the planner and the reddened checker agree on it either way.
+- `check-log-tree.mjs` has two new cases: an edit not yet committed is named, as it will be once it is; and so is a file that did not exist when the run was made. 17 of 17 mutations bite, two new: the diff taken against HEAD again, and untracked files left out.
+- Before, the preflight of the templates batch (`f335b89`) failed "the plan asks for what is unmeasured" on the 12 logs of `task-attachments`' and `create-modal-templates`' proven patches, read as too short because their suites had grown and were not yet committed. Committed, the same step passed.
 
 ### `found-30-sep/task-labels-left-in-production` — open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
 
@@ -2407,13 +2411,19 @@ Checks:
 
 *To close:* find out whether production's `task_labels` holds rows. If it is empty, drop it in a migration and take it off the gate's list. If it holds rows, decide first whether they move to `task_label_assignments`.
 
-### `found-30-sep/attachment-card-draws-no-date` — open (parity, small; found closing `found-30-sep/attachment-card-names-uploader-by-id`)
+### `found-30-sep/attachment-card-draws-no-date` — **closed** (parity, small; found closing `found-30-sep/attachment-card-names-uploader-by-id`)
 
 **An attachment card does not say when the file was attached**
 
 *Evidence, 30 September:* ClickUp's attached files carry a date. A feedback request says it "hides the year in timestamps for comments and attached files (showing only day/month or relative times like 'Oct 12')". The card draws the size and the uploader. The list already hands back `createdAt`.
 
 *To close:* find where ClickUp draws the date, draw it on the card, and check it.
+
+*Closed, 30 September.* ClickUp's attached files carry a date, drawn as day and month, or a relative time ("Oct 12"). A feedback request marked planned asks it for the year: "it is impossible to determine at a glance whether a comment, approval, or attached document belongs to 2022, 2024, or 2026" (feedback board, through search excerpts). So the card draws the day its file was attached in the reader's own date format, which carries the year, and the full date and time on hover.
+- The card's line reads size · uploader · date. The date is a `<time>` whose `datetime` is the server's `createdAt` for that file (`attachment-date`).
+- `task-attachments`, 25 → 26: "each card says when its file was attached — the server's date, with its year". It compares each card's `datetime` with the list's `createdAt` for that file, and asks the drawn text for the year. Before, 25/26: no card drew a date. After, 26/26 in three runs in a row on lane 5.
+- `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check; the break runner measures them next.
+- Regression on lanes 5 and 7: the suites that draw attachment cards, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42 and `comment-recording` 33, all green.
 
 ### `found-30-sep/attachments-have-no-download-all` — open (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)
 
@@ -2477,7 +2487,7 @@ Measured first on lane 4: a template holding the words "about a week", the optio
 Checks: `create-modal-templates`, 20 → 23. A second project with the four fields, the route asked each value on a task there, and the task made from the template read by SQL: "a template’s words, applied where the field of that name is a Number, leave that field unset — as the field’s own route refuses them (400), read by SQL", "and its option, where that field is a Dropdown without it, leaves the Dropdown unset — as its route refuses it (400)" and "and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written".
 - Before, the three failed in three runs of three. After, 23/23 in six runs, three in a row each at `32bfebb` and `8c1b727`.
 - `task-templates.service.test.ts` has a new test, which the old service fails; the instantiate test for lists reads the route's own check of its People list as well.
-- `tvu-1` (the rules not asked) and `tvu-2` (one refusal refuses the template: 400, after the task was made, with none of its values) redden the three (20/23). `tvu-4` (the shared rule forgets a Dropdown's options) reddens the Dropdown check alone (22/23): the route took "critical" and so did the template. `tvu-3` reddens the unit test.
+- `tvu-1` (the rules not asked) and `tvu-2` (one refusal refuses the template: 400, after the task was made, with none of its values) redden the three (20/23). `tvu-4` (the shared rule forgets a Dropdown's options) reddens the Dropdown check alone (22/23): the route took "critical" and so did the template. `tvu-3` reddens the unit test. The break runner measured `tvu-1`, `tvu-2` and `tvu-4` again at `f335b89` (lane 1): 23, 23 and 25 of 26 against 26/26.
 - Regression on lane 4: the suites that write field values through the route, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30 and `task-field-create` 18, and `template-center` 81 and `project-template-key` 5, all green. The API's unit tests: 1816/1816.
 - Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
 
@@ -2501,7 +2511,7 @@ Measured first on lane 4: a task holding the caller's vote and a Files value nam
 Checks: `custom-field-progress`, 58 → 60, beside its Files and Voting rules. The task is duplicated through the route the sheet's Duplicate calls and the copy read by SQL: "a duplicate of the task carries none of its votes — a vote is cast by its voter on the task they voted on (read by SQL)" and "and its Files field names none of the original’s attachments, which the copy does not have — while its other values are copied" (its size, labels and person, as the original holds them).
 - Before, both failed in three runs of three. After, 60/60 in six runs, three in a row each at `32bfebb` and `8c1b727`.
 - `task-templates.service.test.ts` has a duplicate test, which the old service fails.
-- `dcv-1` (the unchecked writer back) reddens both (58/60), `dcv-2` (votes written onto the copy) the votes check alone and `dcv-3` (files written) the files check alone (59/60 each). `dcv-4` reddens the unit test.
+- `dcv-1` (the unchecked writer back) reddens both (58/60), `dcv-2` (votes written onto the copy) the votes check alone and `dcv-3` (files written) the files check alone (59/60 each). `dcv-4` reddens the unit test. The break runner measured `dcv-1..3` again at `f335b89` (lane 1): 58, 59 and 59 of 60 against 60/60.
 
 Found while building them: `found-30-sep/duplicate-reads-what-its-caller-cannot` (measured: a member refused a private task duplicated it and read its words from the copy; closed here), `found-30-sep/duplicate-copies-no-attachments`, `found-30-sep/template-leaves-values-out-silently`, `found-30-sep/template-values-find-fields-by-name-alone` and `found-30-sep/field-route-takes-another-projects-field`.
 - Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
@@ -2521,7 +2531,7 @@ Found while building them: `found-30-sep/duplicate-reads-what-its-caller-cannot`
 Checks:
 - `create-modal-templates`, 23 → 26: "a member refused a private task cannot duplicate it: 404, no copy is made, and none of its words come back"; "and granted Manage templates, cannot save it as a template: 404, and no template holds it"; and, so the refusals are about the task, "while a task they may open, the same member duplicates and saves as a template". Before: 24/26, the first two failing as above. After: 26/26.
 - `task-templates.service.test.ts` has two new tests, one a route: each refuses a task the read rule does not find for its caller and makes nothing. The two tests that duplicate and save a task are scripted with the read rule's two reads. 29/29.
-- `ddr-1` (Duplicate asks no read rule), `ddr-2` (Save as template asks none) and `ddr-3` (the rule refuses everyone) are aimed at the three checks; the break runner measures them next. `ddr-4` and `ddr-5` are their unit claims.
+- `ddr-1` (Duplicate asks no read rule), `ddr-2` (Save as template asks none) and `ddr-3` (the rule refuses everyone) are aimed at the three checks. The break runner measured them at `f335b89` (lane 1): each reddens its own, 25/26 against 26/26. `ddr-4` and `ddr-5` are their unit claims.
 
 ### `found-30-sep/duplicate-copies-no-attachments` — open (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`)
 
