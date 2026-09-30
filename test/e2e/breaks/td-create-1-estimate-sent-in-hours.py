@@ -24,13 +24,9 @@
 # Reddens: task-depth: "the estimate is stored in seconds"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
-a = """              ...(parseEstimate(estimateHours)
-                ? { timeEstimate: parseEstimate(estimateHours)!.seconds }
-                : {}),
+a = """      ...(estimate ? { timeEstimate: estimate.seconds } : {}),
 """
-b = """              ...(parseEstimate(estimateHours)
-                ? { timeEstimate: parseEstimate(estimateHours)!.hours }
-                : {}),
+b = """      ...(estimate ? { timeEstimate: estimate.hours } : {}),
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'

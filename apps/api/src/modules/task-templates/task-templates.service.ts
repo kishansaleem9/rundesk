@@ -111,6 +111,73 @@ export function fitTemplateValue(
   return kept.length ? kept : undefined
 }
 
+/**
+ * What the person set in the create modal beside the template they chose
+ * (`InstantiateTemplateDto`, checked as `POST /tasks` checks the same fields).
+ * A field they left alone is absent.
+ */
+export interface TemplateFormValues {
+  priority?: TaskPriority
+  taskTypeId?: string
+  description?: string
+  /** ISO strings, as `POST /tasks` takes them. */
+  startDate?: string
+  dueDate?: string
+  /** Seconds. */
+  timeEstimate?: number
+  assigneeIds?: string[]
+  labelIds?: string[]
+}
+
+/**
+ * `found-30-sep/template-submit-ignores-the-form` — THE TASK A TEMPLATE MAKES,
+ * WITH WHAT THE PERSON SET BESIDE IT. The create modal sent the route the list
+ * and the title alone, and the priority, description, dates, estimate, tags,
+ * task type and assignees typed into the same form were dropped without a word.
+ *
+ * ClickUp's help centre (read through search excerpts, the site being blocked
+ * here) says templates "are merged when applied to an existing task", and its
+ * own merge of one task into another keeps the target's "tags, priorities,
+ * dates … and estimated time", adds the other's description "to the bottom" of
+ * the target's, and adds its assignees ("Merge tasks"). Its feedback board
+ * records the description rule for a template in so many words: "When you
+ * append a template that adds to the description, it gets added to the end of
+ * the description". The form is the task here, and the template is what is
+ * merged into it:
+ *
+ *   · ONE VALUE — priority, task type, start and due dates, estimate: what the
+ *     person set wins. What they left alone is the template's, as before.
+ *   · A DESCRIPTION typed comes first, and the template's follows it after a
+ *     blank line; either alone is the description.
+ *   · TAGS AND ASSIGNEES are the template's and the form's together, each once.
+ *     A template holds no assignees, so those are the form's.
+ *
+ * Checklists, subtasks and custom-field values have no place in the form and
+ * come from the template, as they did (`instantiate`).
+ */
+export function templateWithForm(
+  payload: Pick<TaskTemplatePayload, 'description' | 'priority' | 'timeEstimate' | 'startDateOffsetDays' | 'dueDateOffsetDays'>,
+  form: TemplateFormValues,
+  templateLabelIds: string[],
+  now: Date,
+) {
+  const typed = (form.description ?? '').trim()
+  const own = (payload.description ?? '').trim()
+  const description = !typed ? payload.description ?? undefined : own ? `${typed}\n\n${own}` : typed
+  const labelIds = [...new Set([...templateLabelIds, ...(form.labelIds ?? [])])]
+  const assigneeIds = [...new Set(form.assigneeIds ?? [])]
+  return {
+    description,
+    priority: form.priority ?? payload.priority,
+    taskTypeId: form.taskTypeId || undefined,
+    timeEstimate: form.timeEstimate ?? payload.timeEstimate ?? undefined,
+    startDate: form.startDate ? new Date(form.startDate) : offsetToDate(now, payload.startDateOffsetDays) ?? undefined,
+    dueDate: form.dueDate ? new Date(form.dueDate) : offsetToDate(now, payload.dueDateOffsetDays) ?? undefined,
+    labelIds: labelIds.length ? labelIds : undefined,
+    assigneeIds: assigneeIds.length ? assigneeIds : undefined,
+  }
+}
+
 export interface TaskTemplateView {
   id: string
   workspaceId: string
@@ -319,12 +386,16 @@ export class TaskTemplatesService {
    *
    * Date offsets are interpreted as days from `now` so a template
    * with `dueDateOffsetDays: 7` always produces a task due in a week.
+   *
+   * What the person set in the create modal beside the template (`form`) wins
+   * over the template's one values, or adds to its description, tags and
+   * assignees (`templateWithForm`). Create instantly sends none of it.
    */
   async instantiate(
     workspaceId: string,
     templateId: string,
     actor: { id: string; email?: string },
-    dto: { listId: string; titleOverride?: string; assigneeIds?: string[] },
+    dto: { listId: string; titleOverride?: string } & TemplateFormValues,
   ) {
     const template = await this.requireTemplate(workspaceId, templateId)
     const listCtx = await this.resolveListContext(dto.listId)
@@ -335,21 +406,15 @@ export class TaskTemplatesService {
 
     const payload = template.payload
     const now = new Date()
-    const labelIds = await this.resolveLabelIds(workspaceId, payload.labels, actor.id)
+    const templateLabelIds = await this.resolveLabelIds(workspaceId, payload.labels, actor.id)
 
-    const startDate = offsetToDate(now, payload.startDateOffsetDays)
-    const dueDate = offsetToDate(now, payload.dueDateOffsetDays)
-
+    // The form's task type, people and labels are asked by `createTask` as
+    // `POST /tasks` asks them — a type of the list's, people who can see it,
+    // labels of this workspace — before anything is written.
     const task = await this.tasksService.createTask({
       listId: dto.listId,
       title: dto.titleOverride?.trim() || payload.title || template.name,
-      description: payload.description ?? undefined,
-      priority: payload.priority,
-      timeEstimate: payload.timeEstimate ?? undefined,
-      startDate: startDate ?? undefined,
-      dueDate: dueDate ?? undefined,
-      labelIds: labelIds.length ? labelIds : undefined,
-      assigneeIds: dto.assigneeIds?.length ? dto.assigneeIds : undefined,
+      ...templateWithForm(payload, dto, templateLabelIds, now),
       createdById: actor.id,
     })
     if (!task) throw new Error('Task creation returned no row')

@@ -62,6 +62,30 @@
  * where a field of the same name is of another kind, so the route's rule is
  * the one kept: nothing is written that the field itself would refuse.
  *
+ * AND WHAT IS SET IN THE FORM BESIDE A TEMPLATE IS KEPT,
+ * `found-30-sep/template-submit-ignores-the-form`. With a template chosen,
+ * Create task sent the template's route the list and the title alone: the
+ * priority, description, dates, estimate, tags, task type and assignees typed
+ * into the same form were dropped without a word. ClickUp's help centre says
+ * templates "are merged when applied to an existing task" ("Intro to
+ * templates"), and its merge keeps the target's "tags, priorities, dates … and
+ * estimated time", adds the other's description "to the bottom" and adds its
+ * assignees ("Merge tasks"), all read from search excerpts. So the form is the
+ * task and the template is merged into it:
+ *
+ *   · before Create, the modal says what the template brings and that what is
+ *     set here wins over it, naming what was set;
+ *   · the priority and due date set win over the template's, and its checklist
+ *     and subtask come with the task; the tag and assignee set are added to its
+ *     own tag; a typed description comes first, the template's after it;
+ *   · what was left alone is not sent, and the template's estimate and start
+ *     date stand for it;
+ *   · what the route takes beside a template is checked as `POST /tasks`
+ *     checks the same fields, and refused with the same answer;
+ *   · and in a window 700 high the modal scrolls to Create task
+ *     (`found-30-sep/create-modal-cuts-off-create`): the form could not scroll,
+ *     and the note put Create out of reach at 1000.
+ *
  *   node test/e2e/create-modal-templates.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -78,7 +102,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 26
+const EXPECTED_CHECKS = 33
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -726,6 +750,201 @@ try {
     leftUnset(CONTACT),
     'and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written',
     `the route answered ${routeSaid[CONTACT]} for ${JSON.stringify(HELD[CONTACT])} and ${routeSaid[NOTE]} for the Note; ${appliedSaid}`,
+  )
+
+  // ══ USE TEMPLATE, WITH THE FORM FILLED IN ════════════════════════════════
+  console.log('\n▶ Use Template, with the form filled in beside it')
+  /*
+   * `found-30-sep/template-submit-ignores-the-form`. Measured first on lane 2,
+   * three runs of a probe of this scenario on the old build (the admin as the
+   * assignee): the page sent instantiate `{ listId, titleOverride }` and
+   * nothing else, and the task came out Low,
+   * with the template's description alone, no due date, no assignee and the
+   * template's tag alone — every value set in the form dropped, with nothing on
+   * screen to say so.
+   *
+   * A template with priority Low, a description, an estimate, a start and a due
+   * date, a tag, a checklist and a subtask. In the modal it is chosen under Use
+   * Template, and then set beside it: priority High, the member as assignee, a
+   * tag, a due date and a description. The estimate and the start date are left
+   * alone.
+   */
+  const T4_NAME = `Merged ${TAG}`
+  const T4 = {
+    title: `Merged title ${TAG}`,
+    description: `Template body ${TAG}`,
+    priority: 'low',
+    timeEstimate: 3600,
+    startDateOffsetDays: 1,
+    dueDateOffsetDays: 10,
+    labels: [`template-tag-${TAG}`],
+    checklists: [{ title: 'Merged steps', items: [{ content: 'First' }, { content: 'Second' }] }],
+    subtasks: [{ title: `Merged sub ${TAG}`, description: null, priority: 'normal', timeEstimate: null, dueDateOffsetDays: null }],
+  }
+  const T4_MADE = { checklists: [{ title: 'Merged steps', items: ['First', 'Second'] }], subtasks: [`Merged sub ${TAG}`] }
+  const T4_ID = must('make the template the form is merged with', await A(`/workspaces/${WS}/task-templates`, { method: 'POST', body: { name: T4_NAME, payload: T4 } }))?.id
+  if (!T4_ID) throw new Error('the template the form is merged with came back without an id')
+  const MERGED = `Typed over ${TAG}`
+  const TYPED_BODY = `Typed body ${TAG}`
+  const TYPED_TAG = `typed-tag-${TAG}`
+  const TYPED_DUE = dayAt(3, 17)
+  /*
+   * In a window tall enough for the whole form: these checks are about what the
+   * task is made of. Whether Create task can be reached in a short window is
+   * a check of its own, at the end of this section.
+   */
+  await page.setViewportSize({ width: 1500, height: 1300 }).catch(() => {})
+  await openModal(page)
+  await chooseList(page)
+  await openMenu(page)
+  await openSub(page, 'use')
+  await page.getByTestId(`quick-create-tpl-use-${T4_ID}`).click({ timeout: 5000 }).catch(() => {})
+  await waitUntil(async () => (await readText(trigger, { timeoutMs: 1000 })).includes(T4_NAME), { timeoutMs: 5000 })
+  const mergeNote = page.getByTestId('quick-create-tpl-merge').filter({ visible: true })
+  // What it says with nothing set yet, then with the form filled in.
+  let noteBare = ''
+  await waitUntil(async () => (noteBare = await readText(mergeNote, { timeoutMs: 1000 })).includes(T4_NAME), { timeoutMs: 5000 })
+  await titleBox(page).fill(MERGED, { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-priority').selectOption('high', { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-assign').selectOption(memberId, { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-tag-input').fill(TYPED_TAG, { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-tag-input').press('Enter', { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-due').fill(TYPED_DUE, { timeout: 5000 }).catch(() => {})
+  await page.getByTestId('quick-create-description').fill(TYPED_BODY, { timeout: 5000 }).catch(() => {})
+  let noteSet = ''
+  await waitUntil(async () => /Priority · Due\b/.test(noteSet = await readText(mergeNote, { timeoutMs: 1000 })), { timeoutMs: 5000 })
+  chk(
+    noteBare.includes(`Made from ${T4_NAME}: its checklists, subtasks and custom-field values come with the task.`)
+      && noteBare.includes('Everything else comes from the template. What you set here wins over it.')
+      && noteSet.includes("What you set here wins over the template's: Priority · Due. The rest comes from the template.")
+      && noteSet.includes("Your description comes first, and the template's follows it.")
+      && noteSet.includes("Your tags and assignees are added to the template's."),
+    'with a template chosen, the modal says before Create that its checklists, subtasks and custom-field values come with the task and that what is set here wins over it — naming Priority and Due once they are set — with a typed description first and tags and assignees added to its own',
+    `with nothing set it read ${JSON.stringify(noteBare)}; with the form filled in, ${JSON.stringify(noteSet)}`,
+  )
+
+  await waitUntil(() => page.getByTestId('quick-create-submit').isEnabled().catch(() => false), { timeoutMs: 8000 })
+  const mergedAnswer = answered(page, `/task-templates/${T4_ID}/instantiate`)
+  const mergedRequest = page.waitForRequest(
+    (r) => r.method() === 'POST' && new URL(r.url()).pathname.endsWith(`/task-templates/${T4_ID}/instantiate`),
+    { timeout: 15_000 },
+  ).catch(() => null)
+  await page.getByTestId('quick-create-submit').click({ timeout: 8000 }).catch(() => {})
+  const mergedStatus = (await mergedAnswer)?.status() ?? null
+  const mergedSent = await mergedRequest.then((r) => r?.postDataJSON() ?? null).catch(() => null)
+  let mergedRows = []
+  await waitUntil(async () => (mergedRows = await sql`
+    select id, priority::text as priority, description, start_date, due_date, time_estimate
+    from tasks where title = ${MERGED} and parent_task_id is null`).length > 0, { timeoutMs: 15_000 })
+  const merged = mergedRows[0] ?? null
+  const mergedContent = merged ? await contentOf(merged.id) : null
+  const mergedAssignees = merged ? (await sql`select user_id from task_assignees where task_id = ${merged.id}`).map((r) => r.user_id) : []
+  const mergedTags = merged
+    ? (await sql`select l.name from task_label_assignments a join labels l on l.id = a.label_id where a.task_id = ${merged.id}`).map((r) => r.name).sort()
+    : []
+  const mergedSaid = `the template's route answered ${mergedStatus ?? 'nothing'}; ${mergedRows.length} task(s) so titled`
+  const daysAhead = (d) => (d ? Math.round((new Date(d).getTime() - Date.now()) / 86_400_000) : null)
+  chk(
+    mergedStatus !== null && mergedStatus < 300 && mergedRows.length === 1 && merged.priority === 'high'
+      && !!merged.due_date && new Date(merged.due_date).getTime() === new Date(TYPED_DUE).getTime()
+      && JSON.stringify(mergedContent) === JSON.stringify(T4_MADE),
+    'Create task with the template chosen makes the task with the priority High and the due date set in the form, over the template’s Low and its own due date, and with the template’s checklist and subtask (read by SQL)',
+    `${mergedSaid}; the first ${JSON.stringify(merged && { priority: merged.priority, due: merged.due_date })} against High and ${new Date(TYPED_DUE).toISOString()}, carrying ${JSON.stringify(mergedContent)}`,
+  )
+  const BOTH_TAGS = [TYPED_TAG, `template-tag-${TAG}`].sort()
+  chk(
+    !!merged && JSON.stringify(mergedAssignees) === JSON.stringify([memberId]) && JSON.stringify(mergedTags) === JSON.stringify(BOTH_TAGS),
+    'and the member assigned and the tag added in the form are on it, beside the template’s own tag (read by SQL)',
+    `${mergedSaid}; assigned ${JSON.stringify(mergedAssignees)} (the member is ${memberId}); tagged ${JSON.stringify(mergedTags)} against ${JSON.stringify(BOTH_TAGS)}`,
+  )
+  chk(
+    merged?.description === `${TYPED_BODY}\n\n${T4.description}`,
+    'and its description is the one typed, then the template’s after it',
+    `${mergedSaid}; its description is ${JSON.stringify(merged?.description ?? null)}`,
+  )
+  /*
+   * WHAT WAS LEFT ALONE IS NOT SENT, and the template's value stands for it. A
+   * form that sent every box would put an empty or default value over the
+   * template's; the request is read off the wire, and the task by SQL.
+   */
+  const SENT = ['assigneeIds', 'description', 'dueDate', 'labelIds', 'listId', 'priority', 'titleOverride']
+  const sentKeys = mergedSent ? Object.keys(mergedSent).sort() : null
+  chk(
+    JSON.stringify(sentKeys) === JSON.stringify(SENT) && !!merged && merged.time_estimate === T4.timeEstimate
+      && daysAhead(merged.start_date) === T4.startDateOffsetDays,
+    'Create sends the template’s route what was set in the form and nothing left alone — no estimate, start date or task type — and the task holds the template’s estimate and start date for them',
+    `the page sent ${JSON.stringify(mergedSent)}; the task's estimate is ${merged?.time_estimate ?? null} against the template's ${T4.timeEstimate}, ` +
+      `and it starts ${daysAhead(merged?.start_date)} day(s) ahead against the template's ${T4.startDateOffsetDays}`,
+  )
+  /*
+   * AND CHECKED AS `POST /tasks` CHECKS THE SAME FIELDS. Each value, sent to
+   * both routes: a priority not of the four, a date that is not ISO, an estimate
+   * in parts of a second, and a task type, a label and a person that are not
+   * this workspace's. The template's route took anything beside its list and
+   * title, unread.
+   */
+  const REFUSED = `Refused ${TAG}`
+  const NOBODY = '00000000-0000-4000-8000-00000000abcd'
+  const PROBES = [
+    ['priority', 'super-urgent'],
+    ['dueDate', 'Oct 3 2026'],
+    ['timeEstimate', 1.5],
+    ['taskTypeId', NOBODY],
+    ['labelIds', [NOBODY]],
+    ['assigneeIds', [NOBODY]],
+  ]
+  const answers = []
+  for (const [field, value] of PROBES) {
+    const plain = await A('/tasks', { method: 'POST', body: { listId: LIST, title: REFUSED, [field]: value } })
+    const fromTemplate = await A(`/workspaces/${WS}/task-templates/${T4_ID}/instantiate`, { method: 'POST', body: { listId: LIST, titleOverride: REFUSED, [field]: value } })
+    answers.push({ field, tasks: plain.status, instantiate: fromTemplate.status })
+  }
+  const refusedMade = (await madeTasks(REFUSED)).length
+  chk(
+    answers.every((a) => a.tasks >= 400 && a.tasks < 500 && a.instantiate === a.tasks) && refusedMade === 0,
+    'and the template’s route refuses each value POST /tasks refuses — a priority not of the four, a date that is not ISO, an estimate in parts of a second, a task type, a label and a person that are not this workspace’s — with the same answer, and makes no task',
+    `answered ${JSON.stringify(answers)}; ${refusedMade} task(s) so titled were made`,
+  )
+  /*
+   * `found-30-sep/create-modal-cuts-off-create`. The backdrop is fixed to the
+   * window and the card had nothing to scroll in: with a list chosen, Create
+   * task sat 859–891px down on the build before, out of reach in a window 768
+   * high, and the note a chosen template adds put it out of reach at 1000. In a
+   * window 700 high, with the template chosen and the form filled in, Create
+   * task lies below the window's edge (where it is in the modal, the scroll
+   * added back), and pressing it makes the task.
+   */
+  const shortCtx = await browser.newContext({ viewport: { width: 1366, height: 700 }, serviceWorkers: 'block' })
+  const short = await shortCtx.newPage()
+  await signIn(short, ADMIN.email, ADMIN.password)
+  await openModal(short)
+  await chooseList(short)
+  await openMenu(short)
+  await openSub(short, 'use')
+  await short.getByTestId(`quick-create-tpl-use-${T4_ID}`).click({ timeout: 5000 }).catch(() => {})
+  const SHORT = `Short window ${TAG}`
+  await titleBox(short).fill(SHORT, { timeout: 5000 }).catch(() => {})
+  await short.getByTestId('quick-create-description').fill(TYPED_BODY, { timeout: 5000 }).catch(() => {})
+  await waitUntil(() => short.getByTestId('quick-create-submit').isEnabled().catch(() => false), { timeoutMs: 8000 })
+  // Where the button lies in the modal, whatever has been scrolled to reach the menu.
+  const shortLayout = await short.evaluate(() => {
+    const button = document.querySelector('[data-testid="quick-create-submit"]')
+    if (!button) return null
+    let scrolled = 0
+    for (let el = button.parentElement; el; el = el.parentElement) scrolled += el.scrollTop
+    return { bottom: Math.round(button.getBoundingClientRect().bottom + scrolled), window: window.innerHeight }
+  }).catch(() => null)
+  const shortAnswer = answered(short, `/task-templates/${T4_ID}/instantiate`)
+  await short.getByTestId('quick-create-submit').click({ timeout: 8000 }).catch(() => {})
+  const shortStatus = (await shortAnswer)?.status() ?? null
+  let shortRows = []
+  await waitUntil(async () => (shortRows = await madeTasks(SHORT)).length > 0, { timeoutMs: shortStatus ? 15_000 : 3000 })
+  await shortCtx.close().catch(() => {})
+  chk(
+    !!shortLayout && shortLayout.bottom > shortLayout.window && shortStatus !== null && shortStatus < 300 && shortRows.length === 1,
+    'in a window 700 high, with the template chosen and the form filled in, Create task lies below the window’s edge and the modal scrolls to it: pressing it makes the task',
+    `Create task's foot is ${shortLayout ? `${shortLayout.bottom}px down the modal in a window ${shortLayout.window} high` : 'nowhere (the modal had gone)'}; ` +
+      `the template's route answered ${shortStatus ?? 'nothing'}; ${shortRows.length} task(s) so titled`,
   )
 
   // ══ 23. A MEMBER, WITHOUT template.manage ════════════════════════════════

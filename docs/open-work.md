@@ -1968,13 +1968,103 @@ Checks:
 Found while building it: `found-30-sep/template-values-written-unchecked`, `found-30-sep/duplicate-copies-votes-and-files`, `found-30-sep/save-as-template-words-promise-every-field` and `found-30-sep/suite-runs-leave-accounts-behind`.
 - Merged here and run again: on lane 5 `create-modal-templates` 20/20, and on lane 7 `template-center` 81/81, `project-template-key` 5/5, space-wizard 23, like-literal 5, role-permissions-web 5 and space-default-permission 36, all green.
 
-### `found-30-sep/template-submit-ignores-the-form` — open (visible bug, small; found closing `ledger-rows/row-1060`)
+### `found-30-sep/template-submit-ignores-the-form` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 
 **With a template chosen, Create task ignores everything else typed in the form, and nothing says so**
 
 *Evidence, 30 September:* the submit sends `{ listId, titleOverride }` to instantiate. Priority, description, dates, estimate, tags, task type and assignees typed into the same form are not applied, although the route already accepts `assigneeIds`. `docs/clickup-research.md` §9 records this as a defect and proposes letting the fields the person touched win over the template. It was kept as it is by row-1060's brief.
 
 *To close:* research how ClickUp applies a template to a form that already holds values, then apply what was typed (or say, before Create, which fields the template will replace), and check it with a suite.
+
+
+*Closed, 30 September* (built by an agent on lane 2). ClickUp's help centre, read through search excerpts (the site and its feedback board are blocked here):
+- the task creation modal can "load a task template" ("Create a task");
+- templates "are merged when applied to an existing task" ("Intro to templates");
+- in a merge, the target "will keep its tags, priorities, dates, recurrence, time tracked, Custom Fields, and estimated time", the other's "description is added to the bottom" of the target's, and its "assignees are added" ("Merge tasks");
+- the feedback board's "Choose where in description to append a task template": "When you append a template that adds to the description, it gets added to the end of the description".
+
+So the form is the task, and the template is merged into it.
+
+Measured first on lane 2 at `f335b89`, three runs. A template with a checklist, a subtask and priority Low. In the modal: priority High, an assignee, a tag, a due date and a description; Create. The page sent instantiate `{ listId, titleOverride }`. The task came out Low, with the template's description alone, no due date, nobody assigned and the template's tag alone: all five dropped.
+
+- What the person set wins over the template's one values: priority, task type, start and due dates, estimate.
+- A typed description comes first, and the template's follows it after a blank line.
+- Tags and assignees are the template's and the form's, each once.
+- What was left alone is the template's, and its checklists, subtasks and custom-field values come as before (`templateWithForm`).
+- The form sends only what was set (`setInForm`, which the plain create sends too). Every field starts empty but the priority, which starts on Normal, so whether it was chosen is kept apart.
+- The route's body is a DTO (`InstantiateTemplateDto`), with `POST /tasks`'s rules field for field, and no estimate below nothing. The type, the people and the labels are asked by `createTask`, as for `POST /tasks`. The body was an untyped shape, and nothing in it was checked.
+- Before Create, beside the chosen template, the modal says:
+  - that the template brings its checklists, subtasks and custom-field values;
+  - that what is set here wins over the template, naming what was set ("Priority · Due");
+  - that a typed description comes first;
+  - that tags and assignees are added to the template's.
+
+  It is said, not loaded into the form. The template's tags and description are added to what the form holds, so in its boxes they would read as the person's own. Four locales.
+- Create instantly is unchanged: the list and the title only.
+
+Checks:
+- `create-modal-templates` had 26 checks and has 33.
+  - Before: 26/32 three times at `f335b89` (the six merge checks red), and 26/33 three times at `2f7670e` (the seven new checks red).
+  - After: 33/33 three times in a row at each, and again at `de24716`.
+  - One check reads the request as well as the task. A field left alone is the template's on the old build too, so what is checked is that only what was set is sent, and the template's estimate and start date stand for the rest.
+- `create-modal-templates-21..27` are new. Each reddens only the check it claims on lane 2 (32/33).
+- `tsf-1..4` are unit claims. Each reddens only its test in `task-templates.service.test.ts` (4 tests new; before, 29/33 with the four red).
+- `create-modal-templates-5`, `td-create-1`, `time-estimate-4` and `v1f-3` were anchored on the create body, which moved into `setInForm`. They are re-anchored, and each still reddens its claim on lane 2.
+- Regression on lane 2 (by the agent): the 23 suites that open the create modal or its templates, all green, 609 checks. Among them: template-center 81, project-template-key 5, task-depth 92, video1-fast-items 92, custom-field-progress 60, space-create-menu 32, custom-field-types 32, folder-dialog 29, create-menu-ai 24, space-wizard 23 and time-estimate 13.
+- Merged here and run again on lanes 2 and 5: `create-modal-templates` 33/33, `template-center` 81, `project-template-key` 5, `custom-field-progress` 60, `task-depth` 92, `space-create-menu` 32, `folder-dialog` 29, `time-estimate` 13 and `create-menu-ai` 24, all green, 369 checks. The API and the web typecheck.
+
+Found while building it: `found-30-sep/create-modal-cuts-off-create` (closed with it), `found-30-sep/a-task-starts-after-it-is-due`, `found-30-sep/task-estimate-below-zero`, `found-30-sep/refused-create-leaves-tags` and `found-30-sep/load-template-takes-every-attribute`.
+
+### `found-30-sep/a-task-starts-after-it-is-due` — open (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+**A task can start after it is due, and nothing says so**
+
+*Evidence, 30 September, measured on lane 2 by the agent:* nothing refuses a start date after the due date.
+- `POST /tasks` starting 10 October and due 3 October answered 201.
+- `PATCH /tasks/:id` with the same dates answered 200.
+- A template's start date lands beside a typed due date too. A template starting in 9 days, made with a due date typed 3 days out, answered 201, and the task starts six days after it is due.
+
+*To close:* research what ClickUp does with a start after the due date (refuse it, move one of the two, or warn). Then do the same on every write that sets both, the template's merge among them, and check it with a suite.
+
+### `found-30-sep/task-estimate-below-zero` — open (small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+**`POST /tasks` and `PATCH /tasks/:id` take an estimate below zero**
+
+*Evidence, 30 September, measured on lane 2 by the agent:*
+- `POST /tasks` with `timeEstimate: -3600` answered 201 and stored -3600.
+- `PATCH /tasks/:id` with -60 answered 200.
+- `CreateTaskDto` has `@IsInt()` alone, and the PATCH handler asks only that it is a number.
+- A template clamps its estimate to zero (`normalisePayload`), and the template route's body now refuses one below zero (400).
+
+*To close:* refuse an estimate below zero on both routes, as the template route does, and check each with a suite.
+
+### `found-30-sep/refused-create-leaves-tags` — open (small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+**A refused create leaves the tags it made behind**
+
+*Evidence, 30 September, measured on lane 2 by the agent:* making a task from a template makes the template's missing labels (`resolveLabelIds`) before `createTask` asks about the list, the type, the people and the labels. A create refused for its task type (400) made no task, and left the template's label in the workspace.
+
+Read, not measured: the create modal makes each typed tag (`POST /workspaces/:ws/labels`) before the task. So a refused create, plain or from a template, leaves those tags too. Before this fix, every tag typed beside a template was left so, attached to nothing.
+
+*To close:* make the labels only once the task is made, or in the same transaction, and check that a refused create adds no label.
+
+### `found-30-sep/load-template-takes-every-attribute` — open (parity, medium; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+**Use Template brings everything the template holds, where ClickUp lets you choose**
+
+*Evidence, 30 September:* a search summary of ClickUp's "Use task templates" reads "When you load a Template, you can choose which attributes you'd like to inherit". Here, a template chosen in the create modal brings everything: its checklists, subtasks and custom-field values, and its one values wherever the form left them alone. Only the form can win over it.
+
+*To close:* research ClickUp's attribute choice (which attributes, and where it is offered), then offer the same under Use Template, and check it with a suite.
+
+### `found-30-sep/create-modal-cuts-off-create` — **closed** (visible bug, small; found closing `found-30-sep/template-submit-ignores-the-form`)
+
+**The create modal cannot scroll: in a window under about 900 high, Create task is below the edge and cannot be pressed**
+
+*Evidence, 30 September, measured on lane 2 by the agent:* the backdrop is fixed to the window, and the card has no height of its own to scroll in. On the build before, the Task tab with a list chosen draws Create task 859–891px from the top. It can be pressed in a window 1366×1000 or 1366×900; at 1366×768 and 1366×700 Playwright finds it "outside of the viewport", and nothing scrolls to it. The note a chosen template now adds (`found-30-sep/template-submit-ignores-the-form`) put it out of reach at 1000 too (1014px down).
+
+*Closed, 30 September* (with `found-30-sep/template-submit-ignores-the-form`, built by an agent on lane 2). The backdrop scrolls (`overflow-y-auto`), with room under the card. Measured after on lane 2: Create task can be pressed at 1000, 900, 768 and 700, with a template chosen or without.
+- `create-modal-templates` presses it in a window 700 high, with a template chosen and the form filled in, and first checks that it lies below the window's edge.
+- `create-modal-templates-27` takes the scroll away and reddens that check alone.
 
 ### `found-30-sep/menus-drop-a-press-while-closing` — **closed** (visible bug, small; found closing `ledger-rows/row-1060`)
 

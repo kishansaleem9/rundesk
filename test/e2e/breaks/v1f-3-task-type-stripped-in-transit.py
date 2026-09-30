@@ -26,7 +26,7 @@
 # Reddens: video1-fast-items: "and the chosen type is in the request body"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
-a = """              ...(taskTypeId ? { taskTypeId } : {}),
+a = """      ...(taskTypeId ? { taskTypeId } : {}),
 """
 b = ""
 s = io.open(p, encoding='utf-8').read()

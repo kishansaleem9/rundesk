@@ -239,12 +239,22 @@ function Backdrop({ children, onClose }: { children: React.ReactNode; onClose: (
 
   if (!mounted) return null
 
+  /*
+   * A FORM TALLER THAN THE WINDOW SCROLLS (`found-30-sep/create-modal-cuts-off-create`).
+   * The backdrop is fixed to the window and the card had no height of its own
+   * to scroll in, so whatever of the form fell below the window's edge could
+   * not be reached. Measured on the build before this, the Task tab with a
+   * list chosen: Create task at 859–891px from the top, out of reach in a
+   * window 768 high (a laptop's) and pressable only from about 900 up; the
+   * note a chosen template adds (`TemplateMergeNote`) put it out of reach at
+   * 1000. The backdrop scrolls now, with room under the card.
+   */
   return createPortal(
     <div
-      className="fixed inset-0 z-[9999] bg-black/55 backdrop-blur-[1px] flex items-start justify-center pt-24 px-4"
+      className="fixed inset-0 z-[9999] overflow-y-auto bg-black/55 backdrop-blur-[1px] flex items-start justify-center pt-24 px-4"
       onClick={onClose}
     >
-      <div className="relative z-[10000]" onClick={(e) => e.stopPropagation()}>{children}</div>
+      <div className="relative z-[10000] mb-10" onClick={(e) => e.stopPropagation()}>{children}</div>
     </div>,
     document.body,
   )
@@ -685,6 +695,63 @@ function TemplatesMenu({
 }
 
 /**
+ * `found-30-sep/template-submit-ignores-the-form` — WHAT CREATE WILL DO WITH THE
+ * TEMPLATE CHOSEN, said beside it before Create is pressed. With a template
+ * chosen, Create task made the task from the template alone, and everything
+ * else typed into the form was dropped without a word.
+ *
+ * ClickUp's task creation modal offers to "load a task template" (help centre,
+ * "Create a task"), and templates "are merged when applied to an existing task"
+ * ("Intro to templates"): its merge keeps the target's "tags, priorities,
+ * dates … and estimated time", adds the other's description "to the bottom",
+ * and adds its assignees ("Merge tasks"). So the form here is the task, and the
+ * template is merged into it when it is made: what the person set wins over the
+ * template's one values, a typed description comes first with the template's
+ * after it, tags and assignees are added to its own, and the rest — checklists,
+ * subtasks and custom-field values, which have no place in this form — comes
+ * from the template.
+ *
+ * SAID HERE, NOT COPIED INTO THE FORM. A template's tags and description are
+ * added to what the form holds, so copied into its boxes they would read as the
+ * person's own: a template tag removed there would come back from the template
+ * at Create, and an edited copy of its description would be followed by the
+ * template's own. Its dates are days from the day the task is made, and its
+ * checklists and subtasks have no box to go in. So the form keeps what the
+ * person set, and this says what the template adds to it and what gives way.
+ */
+function TemplateMergeNote({
+  name,
+  wins,
+  description,
+  adds,
+}: {
+  name: string
+  /** The one-value fields set here, by their labels, that the template's give way to. */
+  wins: string[]
+  /** A description was typed. */
+  description: boolean
+  /** Tags or assignees were set. */
+  adds: boolean
+}) {
+  const { t } = useTranslation()
+  return (
+    <div
+      data-testid="quick-create-tpl-merge"
+      className="space-y-0.5 rounded-md border border-dashed border-border/70 px-2 py-1.5 text-[11px] text-muted-foreground"
+    >
+      <p data-testid="quick-create-tpl-merge-brings">{t('quickCreate.templateMergeBrings', { name })}</p>
+      <p data-testid="quick-create-tpl-merge-wins">
+        {wins.length
+          ? t('quickCreate.templateMergeWins', { fields: wins.join(' · ') })
+          : t('quickCreate.templateMergeNothingSet')}
+      </p>
+      {description && <p data-testid="quick-create-tpl-merge-description">{t('quickCreate.templateMergeDescription')}</p>}
+      {adds && <p data-testid="quick-create-tpl-merge-adds">{t('quickCreate.templateMergeAdds')}</p>}
+    </div>
+  )
+}
+
+/**
  * §V2-S01 frame `00:05` — the footer's **Create Task ▾**, a primary `Create
  * Task` with a chevron segment beside it.
  *
@@ -855,6 +922,13 @@ function TaskForm({
   const [startDate, setStartDate] = useState('')
   const [dueDate, setDueDate] = useState('')
   const [priority, setPriority] = useState<'urgent' | 'high' | 'normal' | 'low'>('normal')
+  /*
+   * `found-30-sep/template-submit-ignores-the-form` — whether the priority was
+   * CHOSEN. Every other field starts empty, so its value says whether it was
+   * set; this one starts on Normal, which is also a priority one may choose, so
+   * its value cannot. A priority nobody chose must not replace a template's.
+   */
+  const [priorityTouched, setPriorityTouched] = useState(false)
   const [estimateHours, setEstimateHours] = useState('')
   const [tagNames, setTagNames] = useState<string[]>([])
   const [tagDraft, setTagDraft] = useState('')
@@ -1101,17 +1175,54 @@ function TaskForm({
   })
 
   /*
-   * A task made from a template, in the chosen list, the typed title winning
-   * when there is one. The route answers `{ taskId, task }`: the submit read
-   * `.id` off that answer, so a task made from a template came back as
-   * `undefined` — measured on the old select, its watcher was posted to
-   * `/tasks/undefined/watchers` (and its files would have been), and the page
-   * went to the list with no task open, the router dropping `task: undefined`.
+   * WHAT THE PERSON SET IN THIS FORM, AND ONLY THAT
+   * (`found-30-sep/template-submit-ignores-the-form`): a field left as it
+   * started is not here. The plain create sends it with the list, the title and
+   * the priority; the template's route takes it as what wins over the template
+   * (or adds to its description, tags and assignees), and a field that is not
+   * here is the template's. `labelIds` are the typed tags, made by then.
    */
-  const instantiate = async (id: string, titleOverride: string): Promise<CreatedTask> => {
+  const setInForm = (labelIds: string[]) => {
+    const estimate = parseEstimate(estimateHours)
+    return {
+      ...(priorityTouched ? { priority } : {}),
+      ...(taskTypeId ? { taskTypeId } : {}),
+      ...(description.trim() ? { description: description.trim() } : {}),
+      ...(assigneeIds.length ? { assigneeIds } : {}),
+      // datetime-local has no zone; the browser's own offset is the one she
+      // picked it in, so let Date apply it rather than pinning a Z and shifting
+      // everybody's 7pm.
+      ...(startDate ? { startDate: new Date(startDate).toISOString() } : {}),
+      ...(dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
+      /*
+       * §V2-S02 — through the SAME parser the task-detail field uses. This used
+       * to be its own `Number(hours) * 3600`, so the two boxes would have
+       * disagreed the moment one of them learned what `90m` means. The column
+       * is seconds; what somebody may type is `12`, `90m` or `1h 30m`.
+       */
+      ...(estimate ? { timeEstimate: estimate.seconds } : {}),
+      ...(labelIds.length ? { labelIds } : {}),
+    }
+  }
+
+  /*
+   * A task made from a template, in the chosen list, the typed title winning
+   * when there is one, and with what else was set in the form (`fields`,
+   * `setInForm`); Create instantly sends none of that. The route answers
+   * `{ taskId, task }`: the submit read `.id` off that answer, so a task made
+   * from a template came back as `undefined` — measured on the old select, its
+   * watcher was posted to `/tasks/undefined/watchers` (and its files would have
+   * been), and the page went to the list with no task open, the router dropping
+   * `task: undefined`.
+   */
+  const instantiate = async (
+    id: string,
+    titleOverride: string,
+    fields: ReturnType<typeof setInForm> | Record<string, never> = {},
+  ): Promise<CreatedTask> => {
     const made = await api<InstantiatedTask>(`/workspaces/${workspaceId}/task-templates/${id}/instantiate`, {
       method: 'POST',
-      body: { listId, ...(titleOverride.trim() ? { titleOverride: titleOverride.trim() } : {}) },
+      body: { listId, ...(titleOverride.trim() ? { titleOverride: titleOverride.trim() } : {}), ...fields },
     })
     return { id: made.taskId, title: made.task?.title }
   }
@@ -1149,39 +1260,22 @@ function TaskForm({
       /*
        * A template is not a set of defaults to copy into this form — it
        * carries checklists, subtasks and custom-field values this modal has
-       * nowhere to put. So the server builds the task from it and the typed
-       * title wins, rather than this form trying to reproduce it.
+       * nowhere to put. So the server builds the task from it, with what was
+       * set here (`found-30-sep/template-submit-ignores-the-form`): the typed
+       * title, and every other field the person set, win over the template's,
+       * a typed description comes before its own, and tags and assignees are
+       * added to its. This sent the title alone, and dropped the rest without
+       * a word. What will happen is said beside the template before Create
+       * (`TemplateMergeNote`).
        */
+      const fields = setInForm(labelIds)
       const task = templateId
-        ? await instantiate(templateId, title)
+        ? await instantiate(templateId, title, fields)
         : await api<{ id: string }>(`/tasks`, {
             method: 'POST',
             // Omit status → backend seeds the list's first/default status.
             // Omit taskTypeId → same, for the list's default type.
-            body: {
-              listId,
-              title,
-              priority,
-              ...(taskTypeId ? { taskTypeId } : {}),
-              ...(description.trim() ? { description: description.trim() } : {}),
-              ...(assigneeIds.length ? { assigneeIds } : {}),
-              // datetime-local has no zone; the browser's own offset is the
-              // one she picked it in, so let Date apply it rather than
-              // pinning a Z and shifting everybody's 7pm.
-              ...(startDate ? { startDate: new Date(startDate).toISOString() } : {}),
-              ...(dueDate ? { dueDate: new Date(dueDate).toISOString() } : {}),
-              /*
-               * §V2-S02 — through the SAME parser the task-detail field uses.
-               * This used to be its own `Number(hours) * 3600`, so the two
-               * boxes would have disagreed the moment one of them learned what
-               * `90m` means. The column is seconds; what somebody may type is
-               * `12`, `90m` or `1h 30m`.
-               */
-              ...(parseEstimate(estimateHours)
-                ? { timeEstimate: parseEstimate(estimateHours)!.seconds }
-                : {}),
-              ...(labelIds.length ? { labelIds } : {}),
-            },
+            body: { listId, title, priority, ...fields },
           })
 
       // Both of these need a task to hang off, so they happen after it exists.
@@ -1250,8 +1344,9 @@ function TaskForm({
    * `ledger-rows/row-1060` — **Create instantly from template**: the task is
    * made from the template the moment it is chosen, in the list this form has
    * chosen, with the typed title if there is one. Nothing else in the form is
-   * read and nothing is submitted. It ends as a normal create does: the modal
-   * closes, and the toast names the task and its list with a way to open it.
+   * read (no `setInForm`) and nothing is submitted. It ends as a normal create
+   * does: the modal closes, and the toast names the task and its list with a
+   * way to open it.
    */
   const instant = useMutation({
     mutationFn: (template: TaskTemplate) => instantiate(template.id, title),
@@ -1356,6 +1451,7 @@ function TaskForm({
     setStartDate('')
     setDueDate('')
     setPriority('normal')
+    setPriorityTouched(false)
     setEstimateHours('')
     setTagNames([])
     setTagDraft('')
@@ -1395,6 +1491,20 @@ function TaskForm({
   // Both halves of Create Task ▾ ask this: a title, a list, nothing in flight
   // (a Create instantly from template is a create too).
   const canCreate = Boolean(title.trim() && listId) && !create.isPending && !instant.isPending
+
+  /*
+   * The template chosen under Use Template, and the one-value fields set here
+   * that its own give way to, by their labels (`TemplateMergeNote`) — the same
+   * state `setInForm` sends.
+   */
+  const chosenTemplate = templates.find((tpl) => tpl.id === templateId) ?? null
+  const setOverTemplate = [
+    priorityTouched && t('quickCreate.priority'),
+    taskTypeId && t('quickCreate.selectTaskType'),
+    startDate && t('quickCreate.startDate'),
+    dueDate && t('quickCreate.dueDate'),
+    parseEstimate(estimateHours) && t('quickCreate.timeEstimate'),
+  ].filter((label): label is string => typeof label === 'string' && label.length > 0)
 
   return (
     <form
@@ -1824,7 +1934,10 @@ function TaskForm({
           {t('quickCreate.priority')}
           <select
             value={priority}
-            onChange={(e) => setPriority(e.target.value as typeof priority)}
+            onChange={(e) => {
+              setPriority(e.target.value as typeof priority)
+              setPriorityTouched(true)
+            }}
             data-testid="quick-create-priority"
             className="h-8 rounded-md border border-border bg-card px-1.5 text-[12px] text-foreground"
           >
@@ -1990,6 +2103,15 @@ function TaskForm({
           </label>
         )}
       </div>
+
+      {chosenTemplate && (
+        <TemplateMergeNote
+          name={chosenTemplate.name}
+          wins={setOverTemplate}
+          description={description.trim().length > 0}
+          adds={tagNames.length > 0 || assigneeIds.length > 0}
+        />
+      )}
 
       {/*
         `ledger-rows/row-1060` — the name, asked for here. ClickUp's own "Save

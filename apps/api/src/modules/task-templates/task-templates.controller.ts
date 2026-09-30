@@ -15,6 +15,7 @@ import { WorkspaceMemberGuard } from '../auth/guards/workspace-member.guard'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
 import { PermissionsGuard, RequirePermissions } from '../custom-roles/permissions.guard'
 import { TaskTemplatesService } from './task-templates.service'
+import { InstantiateTemplateDto } from './dto/instantiate-template.dto'
 import type { TaskTemplatePayload } from '@rundesk/db'
 
 /**
@@ -120,13 +121,19 @@ export class TaskTemplatesController {
     return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email, role: user.role })
   }
 
+  /*
+   * `found-30-sep/template-submit-ignores-the-form` — with what the person set
+   * beside the template in the create modal, each checked as `POST /tasks`
+   * checks it (`InstantiateTemplateDto`). What they set wins over the template,
+   * or adds to it (`templateWithForm`).
+   */
   @Post(':id/instantiate')
   @UseGuards(WorkspaceMemberGuard)
   @ApiOperation({ summary: 'Create a real task from a template under a target list' })
   instantiate(
     @Param('workspaceId', new ParseUUIDPipe()) workspaceId: string,
     @Param('id', new ParseUUIDPipe()) templateId: string,
-    @Body() body: { listId: string; titleOverride?: string; assigneeIds?: string[] },
+    @Body() body: InstantiateTemplateDto,
     @CurrentUser() user: any,
   ) {
     return this.templates.instantiate(

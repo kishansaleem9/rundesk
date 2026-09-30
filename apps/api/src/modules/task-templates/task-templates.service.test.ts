@@ -1,7 +1,12 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common'
 import assert from 'node:assert/strict'
 import { describe, it, mock } from 'node:test'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { plainToInstance } from 'class-transformer'
+import { validate } from 'class-validator'
 import { TaskTemplatesService, fitTemplateValue } from './task-templates.service'
+import { CreateTaskDto } from '../tasks/dto/task.dto'
 
 /**
  * The service has two clearly testable surfaces:
@@ -524,6 +529,128 @@ describe('TaskTemplatesService.duplicateTask — the copy carries no votes and n
       { taskId: 'copy-1', fieldId: 'f-tags', value: { v: ['red'] } },
       { taskId: 'copy-1', fieldId: 'f-budget', value: { v: 5 } },
     ])
+  })
+})
+
+/*
+ * `found-30-sep/template-submit-ignores-the-form` — with a template chosen in the
+ * create modal, Create task sent the route the list and the title alone, and
+ * the priority, description, dates, estimate, tags, task type and assignees
+ * typed into the same form were dropped without a word. What the person set
+ * wins over the template's one values, a typed description comes before the
+ * template's, and tags and assignees are the two together; what they left
+ * alone is the template's (`templateWithForm`).
+ */
+describe('TaskTemplatesService.instantiate — what the person set beside the template (found-30-sep/template-submit-ignores-the-form)', () => {
+  const TYPE = '44444444-4444-4444-8444-444444444444'
+  const templateOf = (payload: Record<string, unknown>) => ({
+    id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', description: null, icon: null, usageCount: 0,
+    createdById: ACTOR.id, createdAt: new Date(), updatedAt: new Date(),
+    payload: {
+      ...EMPTY, title: 'From the template', description: 'The template body', priority: 'low', timeEstimate: 3600,
+      startDateOffsetDays: 2, dueDateOffsetDays: 10, labels: ['tpl-tag'],
+      checklists: [{ title: 'Steps', items: [{ content: 'Step one' }] }],
+      subtasks: [{ title: 'Sub', description: null, priority: 'normal', timeEstimate: null, dueDateOffsetDays: null }],
+      ...payload,
+    },
+  })
+  /** The task `createTask` was asked for, the subtasks after it, and what was inserted. */
+  const made = async (form: Record<string, unknown>, payload: Record<string, unknown> = {}) => {
+    // The template, the list's place, then the template's tag as the workspace holds it.
+    const { db, inserted } = recordingDb([
+      [templateOf(payload)],
+      [{ workspaceId: WORKSPACE_ID, projectId: 'p' }],
+      [{ id: 'label-tpl', name: 'tpl-tag' }],
+    ])
+    const createTask = mock.fn(async (_arg: any) => ({ id: 'task-9' }))
+    await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+      listId: 'l',
+      ...form,
+    })
+    const calls = createTask.mock.calls.map((c) => c.arguments[0])
+    return { task: calls[0], subtasks: calls.slice(1), inserted }
+  }
+  const daysFromNow = (d: Date | undefined) => (d ? Math.round((d.getTime() - Date.now()) / 86_400_000) : null)
+
+  it('lets the priority, task type, start and due dates and estimate set in the form win over the template’s, leaves each one not set to the template, and still makes its checklist and subtask', async () => {
+    const all = await made({
+      priority: 'high',
+      taskTypeId: TYPE,
+      startDate: '2026-10-02T09:00:00.000Z',
+      dueDate: '2026-10-03T17:00:00.000Z',
+      timeEstimate: 5400,
+    })
+    assert.equal(all.task.priority, 'high')
+    assert.equal(all.task.taskTypeId, TYPE)
+    assert.equal(all.task.startDate?.toISOString(), '2026-10-02T09:00:00.000Z')
+    assert.equal(all.task.dueDate?.toISOString(), '2026-10-03T17:00:00.000Z')
+    assert.equal(all.task.timeEstimate, 5400)
+    assert.deepEqual(all.inserted[0], { taskId: 'task-9', title: 'Steps', position: 0 })
+    assert.deepEqual(all.subtasks.map((s) => [s.title, s.parentTaskId]), [['Sub', 'task-9']])
+    // The priority alone set: the rest is the template's, the dates as days from now, the type the list's own.
+    const one = await made({ priority: 'urgent' })
+    assert.equal(one.task.priority, 'urgent')
+    assert.equal(one.task.timeEstimate, 3600)
+    assert.equal(one.task.taskTypeId, undefined)
+    assert.equal(daysFromNow(one.task.startDate), 2)
+    assert.equal(daysFromNow(one.task.dueDate), 10)
+  })
+
+  it('puts a typed description first and the template’s after it, and either alone as it is', async () => {
+    assert.equal((await made({ description: '  Typed body  ' })).task.description, 'Typed body\n\nThe template body')
+    assert.equal((await made({ description: 'Typed body' }, { description: null })).task.description, 'Typed body')
+    assert.equal((await made({ description: '   ' })).task.description, 'The template body')
+  })
+
+  it('makes the tags the template’s and the form’s together, each once, and assigns each person set once', async () => {
+    const { task } = await made({ labelIds: ['label-typed', 'label-tpl'], assigneeIds: [U1, U2, U1] })
+    assert.deepEqual(task.labelIds, ['label-tpl', 'label-typed'])
+    assert.deepEqual(task.assigneeIds, [U1, U2])
+  })
+})
+
+/*
+ * THE ROUTE'S BODY, CHECKED AS `POST /tasks` CHECKS THE SAME FIELDS. The body was
+ * an untyped shape, which the global ValidationPipe does not validate (a plain
+ * `Object`), so nothing in it was checked. Which class the route declares is
+ * read from the controller, as `create-task-wiring.test.ts` reads `POST /tasks`:
+ * the metadata Nest reads it from is emitted by tsc, not by the loader these
+ * tests run under.
+ */
+describe('POST …/task-templates/:id/instantiate — the body is checked as POST /tasks checks the same fields (found-30-sep/template-submit-ignores-the-form)', () => {
+  const controller = readFileSync(join(__dirname, 'task-templates.controller.ts'), 'utf8')
+  const route = controller.slice(controller.indexOf("@Post(':id/instantiate')"))
+  const bodyType = /@Body\(\) body: (\w+),/.exec(route.slice(0, route.indexOf(') {')))?.[1] ?? null
+  /** What the pipe refuses of a body: its class's rules, or nothing for an untyped one. */
+  const refused = async (cls: (new () => object) | undefined, body: object) =>
+    cls ? (await validate(plainToInstance(cls, body), { whitelist: true })).map((e) => e.property) : []
+  const GOOD = {
+    listId: 'l', title: 'x', titleOverride: 'x', priority: 'high', taskTypeId: '44444444-4444-4444-8444-444444444444',
+    description: 'Typed', startDate: '2026-10-02T09:00:00.000Z', dueDate: '2026-10-03T17:00:00.000Z',
+    timeEstimate: 5400, assigneeIds: [U1], labelIds: ['label-1'],
+  }
+  const BAD: Array<[string, unknown]> = [
+    ['priority', 'super-urgent'],
+    ['startDate', 'next week'],
+    ['dueDate', '31/12/2026'],
+    ['timeEstimate', 1.5],
+    ['taskTypeId', 'not-an-id'],
+    ['assigneeIds', U1],
+    ['labelIds', [7]],
+  ]
+
+  it('takes a body holding every field the form can set, and refuses each value POST /tasks refuses, by the same field', async () => {
+    const dtos: Record<string, new () => object> = await import('./dto/instantiate-template.dto').catch(() => ({}))
+    const body = bodyType ? dtos[bodyType] : undefined
+    assert.deepEqual(await refused(body, GOOD), [])
+    assert.deepEqual(await refused(body, { listId: 'l' }), [])
+    for (const [field, value] of BAD) {
+      const sent = { ...GOOD, [field]: value }
+      assert.deepEqual(await refused(body, sent), [field], `instantiate (body ${bodyType}) refuses ${field} ${JSON.stringify(value)}`)
+      assert.deepEqual(await refused(CreateTaskDto, sent), [field], `POST /tasks refuses ${field} ${JSON.stringify(value)} too`)
+    }
+    // Below nothing, an estimate is no estimate here (POST /tasks takes one).
+    assert.deepEqual(await refused(body, { ...GOOD, timeEstimate: -60 }), ['timeEstimate'])
   })
 })
 

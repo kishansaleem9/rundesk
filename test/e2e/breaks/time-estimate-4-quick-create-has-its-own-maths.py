@@ -25,13 +25,9 @@
 # Reddens: time-estimate: "the OTHER estimate box reads `90m` the same way — 5400s"
 import io
 p = '/home/user/rundesk/apps/web/src/components/quick-create-modal.tsx'
-a = """              ...(parseEstimate(estimateHours)
-                ? { timeEstimate: parseEstimate(estimateHours)!.seconds }
-                : {}),
+a = """      ...(estimate ? { timeEstimate: estimate.seconds } : {}),
 """
-b = """              ...(Number(estimateHours) > 0
-                ? { timeEstimate: Math.round(Number(estimateHours) * 3600) }
-                : {}),
+b = """      ...(Number(estimateHours) > 0 ? { timeEstimate: Math.round(Number(estimateHours) * 3600) } : {}),
 """
 s = io.open(p, encoding='utf-8').read()
 assert s.count(a) == 1, f'anchor appears {s.count(a)} times in {p}, expected exactly 1'
