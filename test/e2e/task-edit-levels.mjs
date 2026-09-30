@@ -106,9 +106,9 @@ try {
   const binned = await M(`/tasks/${e3}/trash`, { method: 'POST' })
   const [r1, r2, r3] = [await row(e1), await row(e2), await row(e3)]
   chk(
-    retitled.status < 300 && r1?.title === `${TAG} renamed by the member` && r1?.status === 'in_progress' &&
-      selfAssigned.status < 300 && (await assigned(e1)) === 1 &&
-      archived.status < 300 && r2?.is_archived === true && binned.status < 300 && r3?.deleted_at !== null,
+    retitled.ok && r1?.title === `${TAG} renamed by the member` && r1?.status === 'in_progress' &&
+      selfAssigned.ok && (await assigned(e1)) === 1 &&
+      archived.ok && r2?.is_archived === true && binned.ok && r3?.deleted_at !== null,
     'a member with "edit" on the space changes a colleague\'s task there — its title and status, its assignees — and archives and deletes one',
     `retitle ${retitled.status} (${JSON.stringify(r1 && { title: r1.title, status: r1.status })}); assign ${selfAssigned.status}; ` +
       `archive ${archived.status} (${r2?.is_archived}); delete ${binned.status} (${r3?.deleted_at})`,
@@ -125,7 +125,7 @@ try {
   const [rc1, rc2] = [await row(c1), await row(c2)]
   chk(
     cTitle.status === 403 && rc1?.title === `${TAG} not theirs` && cOtherStatus.status === 403 && rc1?.status !== 'in_progress' &&
-      cStatus.status < 300 && rc2?.status === 'in_progress' &&
+      cStatus.ok && rc2?.status === 'in_progress' &&
       cTheirsTitle.status === 403 && rc2?.title === `${TAG} assigned to them`,
     'a comment-only space lets a member change nothing of a colleague\'s task, and on a task assigned to them its status alone',
     `a colleague's title ${cTitle.status} ("${rc1?.title}"), status ${cOtherStatus.status} (${rc1?.status}); their task's status ${cStatus.status} (${rc2?.status}), its title ${cTheirsTitle.status} ("${rc2?.title}")`,
@@ -152,7 +152,7 @@ try {
   const rh1 = await row(h1)
   chk(
     [403, 404].includes(hTitle.status) && [403, 404].includes(hArchive.status) &&
-      adminTitle.status < 300 && rh1?.title === `${TAG} renamed by the admin` && rh1?.is_archived === false,
+      adminTitle.ok && rh1?.title === `${TAG} renamed by the admin` && rh1?.is_archived === false,
     'a task the member cannot open is not theirs to change, whatever the space lets them do — the admin changes it',
     `the member's title ${hTitle.status}, archive ${hArchive.status}; the admin's ${adminTitle.status}; the row ${JSON.stringify(rh1 && { title: rh1.title, archived: rh1.is_archived })}`,
   )

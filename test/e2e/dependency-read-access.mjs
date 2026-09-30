@@ -108,7 +108,7 @@ try {
     values (${MINE}, ${HIDDEN}, 'blocked_by'), (${MINE}, ${PRIVATE}, 'blocked_by'), (${MINE}, ${OPEN}, 'blocked_by'),
            (${HIDDEN}, ${FAR}, 'blocked_by')`
   const gate = await M(`/tasks/${HIDDEN}`)
-  if (gate.status < 400) throw new Error(`the member could open the hidden blocker (${said(gate)}), so nothing here would mean anything`)
+  if (gate.ok) throw new Error(`the member could open the hidden blocker (${said(gate)}), so nothing here would mean anything`)
   const namesHidden = (text) => [HIDDEN, PRIVATE, `${TAG} hidden blocker`, `${TAG} private blocker`].filter((s) => text.includes(s))
 
   // ══ 1. THE GRAPH ═════════════════════════════════════════════════════════

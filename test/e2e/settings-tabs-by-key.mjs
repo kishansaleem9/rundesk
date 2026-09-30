@@ -109,7 +109,7 @@ try {
   const plainInvites = await plain.as('/invitations', { method: 'POST', body: { email: byPlain, workspaceId: WS, role: 'member' } })
   const managerInvitesAdmin = await manager.as('/invitations', { method: 'POST', body: { email: `${TAG}-admin-by-manager@rundesk.invalid`, workspaceId: WS, role: 'workspace_admin' } })
   chk(
-    inviterInvites.status < 300 && (await invited(byInviter)) === 1 && inviterInvitesAdmin.status === 403
+    inviterInvites.ok && (await invited(byInviter)) === 1 && inviterInvitesAdmin.status === 403
       && plainInvites.status === 403 && (await invited(byPlain)) === 0 && managerInvitesAdmin.status === 403,
     'a member granted members.invite invites a member, and no one above themself (403 for a manager) — a plain member invites no one, and a manager invites no admin',
     `inviter ${said(inviterInvites)}, above their role ${said(inviterInvitesAdmin)}; plain ${said(plainInvites)}; manager an admin ${said(managerInvitesAdmin)}`,
@@ -128,7 +128,7 @@ try {
   const inviterCancels = await inviter.as(`/invitations/${inviteId}`, { method: 'DELETE' })
   chk(
     plainLink.status === 403 && plainCancels.status === 403 && stillAfterPlain === 1
-      && inviterLink.status === 200 && inviterCancels.status < 300 && (await invited(byAdmin)) === 0,
+      && inviterLink.status === 200 && inviterCancels.ok && (await invited(byAdmin)) === 0,
     'a plain member neither reads an invitation’s link nor cancels it (403 each, still pending) — the member granted members.invite reads it and cancels it',
     `plain link ${said(plainLink)}, cancel ${said(plainCancels)} (${stillAfterPlain} pending); inviter link ${said(inviterLink)}, cancel ${said(inviterCancels)}, ${await invited(byAdmin)} still pending`,
   )

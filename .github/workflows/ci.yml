@@ -147,6 +147,13 @@ jobs:
       - name: And the schema gate can fail
         run: node scripts/check-schema-declares-migrations-cases.mjs --mutate
 
+      # The unit claims apply break patches and must leave the tree as they found
+      # it: compared by content, since a file a batch already changed reads the
+      # same status with a patch left on it
+      # (`found-30-sep/unit-claims-refuse-an-uncommitted-batch`).
+      - name: The unit claims leave the tree they found
+        run: node scripts/check-tree-state-cases.mjs --mutate
+
       # Step 6 of the re-audit applies deliberately-broken edits to the tree to
       # prove a check can fail. On a shared tree, a `git add -A` eventually
       # catches one — and one reached `43f7b57`, hiding the Add-fields button
@@ -331,6 +338,13 @@ jobs:
       # (suite-hygiene/apiAs-duplicated-62). A new one is refused by name or shape.
       - name: No suite hand-rolls an API client, and that gate bites
         run: node scripts/check-suite-api-clients.mjs --mutate
+
+      # That client answers status 0 when nothing answers, unless a suite binds
+      # it with noAnswer: 'throw', and 0 < 300: a check on `status < 300` alone
+      # passed with the API gone (found-30-sep/status-zero-passes-status-only-checks).
+      # A status that can be 0 is never compared with an upper bound alone.
+      - name: A status of 0 never reads as success, and that gate bites
+        run: node scripts/check-suite-status-floor.mjs --mutate
 
       # process.exit() loses the end of a suite's output on a pipe; the count
       # may only fall (log-30183c3-1).

@@ -101,7 +101,7 @@ try {
   const adminRenames = await A(`/workspaces/${WS}`, { method: 'PATCH', body: { name: `${TAG} by the admin` } })
   chk(
     managerRenames.status === 403 && managerArchives.status === 403 && afterManager.name === TAG && afterManager.is_archived === false
-      && delegateRenames.status < 300 && afterDelegate.name === `${TAG} by the delegate` && adminRenames.status < 300 && (await ws()).name === `${TAG} by the admin`,
+      && delegateRenames.ok && afterDelegate.name === `${TAG} by the delegate` && adminRenames.ok && (await ws()).name === `${TAG} by the admin`,
     'a manager neither renames nor archives the workspace (403 each, unchanged) — a member granted workspace.manage renames it, and the admin does',
     `manager: rename ${said(managerRenames)}, archive ${said(managerArchives)}, now ${JSON.stringify(afterManager)}; delegate ${said(delegateRenames)} (${afterDelegate.name}); admin ${said(adminRenames)}`,
   )
@@ -131,7 +131,7 @@ try {
   const adminKey = await A(`/workspaces/${WS}/api-keys`, { method: 'POST', body: { name: `${TAG} admin key` } })
   chk(
     managerPolicy.status === 403 && afterManagerPolicy === before && managerKey.status === 403 && (await keys(`${TAG} manager key`)) === 0
-      && delegatePolicy.status < 300 && afterDelegatePolicy === 888 && adminKey.status < 300 && (await keys(`${TAG} admin key`)) === 1,
+      && delegatePolicy.ok && afterDelegatePolicy === 888 && adminKey.ok && (await keys(`${TAG} admin key`)) === 1,
     'a manager neither changes the security policy nor makes an API key (403 each, nothing written) — a member granted security.policy.manage changes the policy, and the admin makes a key',
     `manager: policy ${said(managerPolicy)} (${before} → ${afterManagerPolicy}), key ${said(managerKey)}; delegate ${said(delegatePolicy)} (→ ${afterDelegatePolicy}); admin key ${said(adminKey)}`,
   )
@@ -145,7 +145,7 @@ try {
   const adminMakes = await A(`/workspaces/${WS}/automations`, { method: 'POST', body: rule(`${TAG} admin rule`) })
   chk(
     managerMakes.status === 403 && (await automations(`${TAG} manager rule`)) === 0
-      && delegateMakes.status < 300 && (await automations(`${TAG} delegate rule`)) === 1 && adminMakes.status < 300 && (await automations(`${TAG} admin rule`)) === 1,
+      && delegateMakes.ok && (await automations(`${TAG} delegate rule`)) === 1 && adminMakes.ok && (await automations(`${TAG} admin rule`)) === 1,
     'a manager makes no automation (403, none made) — a member granted automation.manage makes one, and the admin does',
     `manager ${said(managerMakes)}; delegate ${said(delegateMakes)}; admin ${said(adminMakes)}`,
   )

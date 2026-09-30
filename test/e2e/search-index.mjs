@@ -210,7 +210,7 @@ try {
   const binnedStill = meili ? await stubDocument(SEARCH, `task-${binned}`) : null
   const binnedFound = finds(await search(`${TAG} binned`), `task-${binned}`)
   chk(
-    binnedBefore && toTrash.status < 300 && binnedGone,
+    binnedBefore && toTrash.ok && binnedGone,
     'a task put in the Trash is let go of — taken out of the index (removeTask) where Meilisearch answers, and no longer found by the search endpoint either way',
     `found before: ${binnedBefore}; the Trash answered ${said(toTrash)}; ` +
       (meili ? `the index ${binnedStill ? 'still holds' : 'let go of'} it; ` : '') +
@@ -220,7 +220,7 @@ try {
   const archivedStill = meili ? await stubDocument(SEARCH, `task-${archived}`) : null
   const archivedFound = finds(await search(`${TAG} archived`), `task-${archived}`)
   chk(
-    archivedBefore && toArchive.status < 300 && archivedGone,
+    archivedBefore && toArchive.ok && archivedGone,
     'and so is a task archived — out of the index where Meilisearch answers, and out of the search endpoint’s answer either way',
     `found before: ${archivedBefore}; the archive answered ${said(toArchive)}; ` +
       (meili ? `the index ${archivedStill ? 'still holds' : 'let go of'} it; ` : '') +
@@ -247,9 +247,9 @@ try {
   const dead = [`task-${binned}`, `task-${archived}`, `task-${stale}`]
   chk(
     meili
-      ? rebuilt.status < 300 && rebuilt.data?.indexed === ids.size && live.every((id) => ids.has(id)) &&
+      ? rebuilt.ok && rebuilt.data?.indexed === ids.size && live.every((id) => ids.has(id)) &&
           dead.every((id) => !ids.has(id)) && othersAfter === othersBefore
-      : rebuilt.status < 300 && rebuilt.data?.indexed === undefined,
+      : rebuilt.ok && rebuilt.data?.indexed === undefined,
     'the workspace’s rebuild makes its index match it — every live task, file and doc, nothing archived or in the Trash (one archived behind the API’s back included), the count it answers, and no other workspace touched, where Meilisearch answers; where none does, it answers without claiming to have indexed anything',
     meili
       ? `it answered ${said(rebuilt)} ${JSON.stringify(rebuilt.data ?? null)}; the index holds ${ids.size} of this workspace's: ` +
@@ -309,7 +309,7 @@ try {
   const docAfter = await search(GONE_DOC)
   const docThrough = meili ? await throughIndex(docFrom, GONE_DOC) : true
   chk(
-    docBefore && docDeleted.status < 300 && docAfter.status === 200 && !finds(docAfter, `doc-${goneDoc}`) && docThrough,
+    docBefore && docDeleted.ok && docAfter.status === 200 && !finds(docAfter, `doc-${goneDoc}`) && docThrough,
     'a doc deleted is no longer found — found before its delete and not after it, through the index where Meilisearch answers',
     `found before: ${docBefore}; the delete answered ${said(docDeleted)}; the search after it answered ${said(docAfter)} and ` +
       `${finds(docAfter, `doc-${goneDoc}`) ? 'STILL FOUND it' : 'did not find it'}${docThrough ? '' : ', never reaching the index'}`,
@@ -329,7 +329,7 @@ try {
   const shelvedAfter = await search(SHELVED_FILE)
   const trashedAfter = await search(TRASHED_FILE)
   chk(
-    shelvedBefore && trashedBefore && shelvedGone.status < 300 && trashedGone.status < 300 &&
+    shelvedBefore && trashedBefore && shelvedGone.ok && trashedGone.ok &&
       shelvedAfter.status === 200 && trashedAfter.status === 200 &&
       !finds(shelvedAfter, `file-${shelvedFile}`) && !finds(trashedAfter, `file-${trashedFile}`),
     'a file goes where its task goes — found before, and not found once its task is archived or in the Trash, whichever engine answers',

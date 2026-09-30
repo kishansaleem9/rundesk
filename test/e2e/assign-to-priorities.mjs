@@ -681,7 +681,7 @@ try {
     where user_id = ${mateId} and workspace_id = ${workspaceId}`
   const rowsAfterPutBack = await rowsFor(mateId, routed.id)
   chk(
-    ticked.status < 300 && putBack.status < 300 && !!back && back.done_at === null && back.position === last &&
+    ticked.ok && putBack.ok && !!back && back.done_at === null && back.position === last &&
       back.added_by_id === mateId && rowsAfterPutBack === 1,
     'a task they ticked off, added again, is back on their open list, at the end, as added by whoever put it back',
     `ticking it off answered ${ticked.status}, adding it again ${putBack.status}; the row is ` +

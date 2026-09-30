@@ -1617,13 +1617,52 @@ The seeded platform rows are all on (the default-enabled flags), so applying the
 - `STUB_GATE_MUTANT_TIMEOUT_MS` sets the limit for a slower machine.
 - After: the two gates together, 22 of 22 and 11 of 11, at load ~10.
 
-### `found-30-sep/status-zero-passes-status-only-checks` — open (test tooling, medium; found closing `suite-hygiene/apiAs-duplicated-62`)
+### `found-30-sep/status-zero-passes-status-only-checks` — **closed** (test tooling, medium; found closing `suite-hygiene/apiAs-duplicated-62`)
 
 **When nothing answers, the one client answers status 0, and 137 conditions in 57 suites compare the status with no lower bound**
 
 *Evidence, 30 September (the agent's count):* the 105 suites whose copies answered 0 when nothing answered keep that answer, now the one client's default. Their checks compare a status below 300 or 400 with no lower bound 137 times. Most are ANDed with a read-back that a dead API would also fail. But a check that rests on the status alone passes with nothing answering: `dependency-read-access:111` and `related-task-access:95` would say "the member could open the hidden blocker" about a dead API. The 80 suites bound with `noAnswer: 'throw'` hold 165 more such comparisons, which the option keeps harmless.
 
 *To close:* read `ok` (or `must`) in those 137 conditions, or bind those suites with `noAnswer: 'throw'`. Add a gate that refuses a status compared with `<` and no lower bound, with a planted case and a mutation.
+
+*Closed, 30 September.* Measured first, at `8c1b727`: the suites' code held 389 status comparisons with an upper bound. In the 112 suites that bind the client the default way, 168 had no lower bound, in 61 suites: 162 in a check's condition, 4 in guards that throw (the two above among them), 1 in a helper a check calls and 1 in an `if`. The ledger's 137 were these lines on the older tree; the rest are in three suites added or moved since, and in a status held under a name of its own. The throw binding did not cover all of its own either: 26 more, in 12 suites bound to throw, read a hand-made `{ status: 0 }` (a step never taken, standing in for its answer, or a rejection caught into one) or a helper's own 0. `ai-value` caught the put-back's rejection into `{ status: 0 }` and passed "the workspace's own benchmark is put back" on it.
+
+Measured with nothing answering. A port nothing listens on stops every suite at sign-in, so lane 2's API sat behind a proxy that closes its port at a chosen request:
+- `search-read-access`, the API gone at the admin's rebuild: 4 of 4 passed, and it exited 0.
+- `lookup-read-access`, gone at the member's first open favourite: "…while they favourite the open ones" passed on five 0s.
+- `dependency-read-access`, gone at its guard: it threw "the member could open the hidden blocker (0 … no answer)".
+
+All 194 now read `ok`, which is what `status < 300` meant:
+- 187 as `x.ok`;
+- the four guards as `if (gate.ok) throw`;
+- `flag-resolution`'s restore as `healed?.ok === true`, and `task-ai-bar`'s `< 400` as `ok`;
+- `project-page-controls`' two bare numbers keep a floor.
+
+Three answers a suite builds itself (`publishAs`, `makes`, `download`) carry an `ok` of their own. No suite was bound with `noAnswer: 'throw'` instead: none had more than seven, `ok` changes only the condition, and the binding would reject in each suite's `finally` too while leaving a placeholder's 0. No check sentence and no `EXPECTED_CHECKS` changed. `lib/fixture.mjs` is unchanged, so only the 73 edited suites' break logs drift.
+
+Checks:
+- `scripts/check-suite-status-floor.mjs --mutate`, in preflight and CI's verify job beside the api-clients gate, refuses a status compared with an upper bound alone where it can be 0: in a suite binding the client without `noAnswer: 'throw'`, or read from a name bound to a hand-made `status: 0` or to a helper that hands one back. It reads every comparison in code, not only a check's condition (the two examples above are guards), and never a check's message. A lower bound is another conjunct of the same `&&`: `>= 200`, `> 0`, `!== 0`, the status itself, or the answer's `ok`. A line is exempted only by `// status-floor: not-a-client | zero-fails`, and none is. At `8c1b727` (and `eff8b9c`) it finds the 194 sites in 73 suites; now none. 32/32 cases pass, and 32 of 32 mutations bite.
+- The same three runs with nothing answering, after: `search-read-access` fails "the admin may" on the admin's 0; `lookup-read-access` fails its first check on the five 0s; `dependency-read-access` claims nothing about the member, and fails its checks with the 0 in each.
+- The 73 changed suites on lane 2, one at a time from the worktree: 73 at their `EXPECTED_CHECKS` with 0 failed, 662 of 662 checks.
+- Merged here on top of the templates batch, and run again on lanes 4, 5 and 7: 15 of the 73 suites, among them the two it shares with other work (`task-attachments`, `auth-route-limits`) and the three of the demonstration, all green, 206 checks. The gate passes on the merged tree, 32 of 32 mutations biting.
+
+Found while closing it: `found-30-sep/status-zero-slips-setup-guards` and `found-30-sep/status-floor-blind-to-other-names`.
+
+### `found-30-sep/status-zero-slips-setup-guards` — open (test tooling, medium; found closing `found-30-sep/status-zero-passes-status-only-checks`)
+
+**A setup guard that reads failure as `status >= 300` lets a status of 0 through**
+
+*Evidence, 30 September (a line scan, `status0-work/mirror.mjs`):* the mirror of the closed item. 563 one-line guards in the suites throw on `x.status >= 300` (or `>= 400`); 420 of them read a status that can be 0 (the default binding, or a `{ status: 0 }` placeholder), and 172 of those have no read-back beside them (`|| !x.data?.id`) that a 0 also fails. With nothing answering the setup goes on, and the run reports the product. The sharpest are nine grant guards on a placeholder — `admin-only-keys:91`, `billing-key:85`, `calendar-pull-access:96`, `member-role-grants:132`, `project-template-key:93`, `report-export-key:89`, `settings-role-grants:93`, `settings-tabs-by-key:91`, `time-approval-rule:113`: `granted = role.data?.id ? await A(…) : { status: 0 }`, so when the role was not made the grant is never attempted, `0 >= 300` is false, and the delegate's checks fail as the product's rather than "could not grant". (Refusal CHECKS written `>= 400` are sound: a 0 fails them.)
+
+*To close:* read `!x.ok` (or `must`) in those guards, and give `check-suite-status-floor.mjs` a rule for a failure read as a lower bound alone where the status can be 0.
+
+### `found-30-sep/status-floor-blind-to-other-names` — open (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
+
+**A status held under a name the gate does not know as one is compared with an upper bound alone**
+
+*Evidence, 30 September:* `check-suite-status-floor.mjs` knows a status by its name (`status`, or ending in `Status`). `time-tracking-readers:132/134` compare `g.stop < 300` and `v.stop < 300`, where `track()` copies `stop.status` and `stop` is `{ status: 0 }` when nothing was started; each is ANDed with checks a 0 fails (`g.start === 201`, `g.running === 0`), so nothing passes on it today. `stable-images`' `put`/`saved` were the same, and are floored here.
+
+*To close:* floor or `ok` them, and teach the gate a value copied from a `.status` into a field.
 
 ### `found-30-sep/client-address-behind-nginx` — **closed** (security, small; found closing `found-30-sep/public-routes-unthrottled`)
 
@@ -2089,13 +2128,25 @@ A callback exchanges a code with the provider, as SSO's does.
 
 So it wants a page's budget or none, not thirty.
 
-### `found-30-sep/comment-files-unordered` — open (visible bug, small; found closing `found-30-sep/attachments-unordered`)
+### `found-30-sep/comment-files-unordered` — **closed** (visible bug, small; found closing `found-30-sep/attachments-unordered`)
 
 **A comment's files come back in whatever order Postgres finds them**
 
 *Evidence, 30 September, read:* `listComments` reads each comment's files from `task_attachments` with no ORDER BY (`tasks.service.ts`, "Hydrate per-comment attachments"). It is the third read of a task's files, and the one the item did not name. A comment with several files draws them in heap order, as the Attachments tab did.
 
 *To close:* sort them by `ATTACHMENT_ORDER`, and check with a comment's files written out of heap order.
+
+*Closed, 30 September* (built by an agent on lane 4). ClickUp's help centre does not say in what order a comment's files are drawn. It says "Attachments in comments are also displayed in the attachments section on the left side of a task" ("Add attachments to tasks", read through search excerpts), and that section lists a task's files in the order they were attached (`found-30-sep/attachments-unordered`). So a comment's files are read the same way, oldest first, which is also the order the composer uploads them in before it posts the comment.
+
+Measured first on lane 4: a comment's three files, attached as note-1, note-2 and note-0 and rewritten into the heap as note-2, note-0, note-1, came back from `GET /tasks/:id/comments` as `[note-2, note-0, note-1]`, the heap's order, and the comment drew them so (three runs of three).
+- `listComments` reads each comment's files by `ATTACHMENT_ORDER`, the same `created_at, id` as the Attachments tab's list and the task's own rows.
+
+Checks: `task-attachments`, 23 → 25. A task of the suite's own carries one comment with three files, written out of heap order as the task's own are: "a comment hands its files back in the order they were attached, oldest first — not in the order the heap holds them" and "and the comment draws them in that order".
+- Before, both failed in three runs of three. After, 25/25 in six runs, three in a row each at `32bfebb` and `8c1b727`.
+- `tasks-attachments-read.test.ts` has a sixth test, which the old service fails.
+- `cfo-1` (no order) and `cfo-2` (newest first) redden both checks (23/25), `cfo-1` again on a lane with `task_attachments_comment_id_idx`, which reads one comment's files in heap order too. `cfo-3` (the comment sorts its files by name) reddens the drawn check alone (24/25). `cfo-4` reddens the unit test.
+- Regression on lane 4: the suites that post or read a comment's files, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28 and `comment-thread` 13, all green.
+- Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
 
 ### `found-30-sep/comment-file-index-only-in-a-migration` — **closed** (schema, small; found closing `found-30-sep/attachments-unordered`)
 
@@ -2136,13 +2187,29 @@ Found while closing it: `found-30-sep/task-labels-left-in-production`.
 
 Not measured here: production itself. Every index and check above is one that production already has from its migrations. 0171 is the only change it will see.
 
-### `found-30-sep/unit-claims-refuse-an-uncommitted-batch` — open (test tooling, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
+### `found-30-sep/unit-claims-refuse-an-uncommitted-batch` — **closed** (test tooling, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
 
 **Preflight's unit-claims step fails every batch that changes `apps/` or `packages/` before it is committed**
 
 *Evidence, 30 September:* `check-unit-claims.mjs` ends by asking `git status --porcelain -- apps packages`, and fails on any line, so that a break patch left applied is caught. A batch under test has lines there by definition. The step failed on this batch (the 20 schema files and 0171) and on batches 145–148, each time with every claim reddening (110 of 110 here), and each commit message has had to explain it. A patch left applied on top of an uncommitted batch reads the same as the batch alone, so the step cannot tell them apart.
 
 *To close:* compare the tree with its own state before the first patch, as a run from elsewhere already does for the main checkout, rather than with HEAD. Add a case and a mutation.
+
+*Closed, 30 September.* `lib/tree-state.mjs` takes a state of apps and packages: the status lines, a digest of the diff against HEAD, and a digest of every untracked file's name and bytes. `check-unit-claims.mjs` takes one before the first patch and one after the last, and fails only when they differ, naming what moved. By content, not by status: a file the batch had already changed reads ` M` before and after, whether or not a patch was left on it, so a comparison of status lines alone would have let exactly that through.
+
+Checks:
+- `check-tree-state-cases.mjs` plants git repositories: 9 cases hold, and 6 of 6 mutations bite.
+- The four cases that must read as not moved: a clean tree, an uncommitted batch left as it was (the case the old check failed every time), a staged change written again with the same bytes, and a change outside apps and packages.
+- The five that must read as moved: a clean file with a patch left on it; a file the batch changed, changed again, whose status reads the same; a staged file with a patch left in the working tree; an untracked file of the batch rewritten; a file a patch made and left.
+- Before, preflight's step failed on this batch and on batches 145 to 148 with every claim reddening. After, it passes on this batch, with its apps and packages uncommitted, in the preflight below. The cases run in preflight and in CI's verify job.
+
+### `found-30-sep/drift-reads-only-committed-changes` — open (test tooling, small; found closing `found-30-sep/unit-claims-refuse-an-uncommitted-batch`)
+
+**A batch that grows a suite reads that suite's break patches as unreadable until it is committed, not as drifted**
+
+*Evidence, 30 September:* `makeDriftCheck` (`lib/log-tree.mjs`) asks `git diff --name-only <sha> HEAD`: committed changes only. This batch grew `task-attachments` (23 → 25 checks) and `create-modal-templates` (20 → 26) before committing them. So the logs of their 12 proven patches (`atd-1`, `atd-2`, `ato-1..3`, `aup-1`, `aup-2`, `create-modal-templates-16..20`) read as about this tree, and too short. That is "unreadable", which only a person can clear, and preflight's "the plan asks for what is unmeasured" failed on its ceiling of 0. Once committed, the same logs read as drifted and the planner lists them.
+
+*To close:* compare the working copy with the recorded commit, as the patch's own code already is, so that a batch reads the same before and after it is committed. Add a case in `check-log-tree` and a mutation.
 
 ### `found-30-sep/task-labels-left-in-production` — open (schema, small; found closing `found-30-sep/comment-file-index-only-in-a-migration`)
 
@@ -2168,13 +2235,18 @@ Not measured here: production itself. Every index and check above is one that pr
 
 *To close:* a zip of the task's files under its read rule, links left out or listed, and the icon; check the zip's entries against the list.
 
-### `found-30-sep/schema-reference-reads-the-main-tree` — open (test tooling, small; found closing `found-30-sep/attachments-unordered`)
+### `found-30-sep/schema-reference-reads-the-main-tree` — **closed** (test tooling, small; found closing `found-30-sep/attachments-unordered`)
 
 **A worktree with a migration is refused by its own `fleet-restart.sh`, and working round it can rebuild the shared reference**
 
 *Evidence, 30 September:* `schema_ref_ensure` (`lane-env.sh`) keys and builds its reference from `/home/user/rundesk`, whichever checkout calls it. A lane served from a worktree whose migration adds an index reads as drift ("extra: index task_attachments …") and is refused. The way round, used here and by `ledger-rows/row-850` before it, is a reference of the worktree's own in `SCHEMA_REF_DIR`, keyed to the main tree's hash. If the main tree's schema changes while such a reference is in use, the key stops matching, and `schema_ref_ensure` rebuilds into that directory, from the main tree, into the shared database name `rundesk_schema_ref`, under a lock held in that directory only, so two shells can rebuild the shared database at once.
 
 *To close:* build and key the reference from the calling checkout, name its database after its directory, and check both with a worktree that adds an index.
+
+*Closed, 30 September.* Measured first: a planted checkout (the lane scripts beside a copy of `packages/db` whose schema declares one index more, as a worktree with a migration would) asked `lane_schema_drift` about lane 5, which lacks that index. It read no drift (rc 0). The reference it used was the main checkout's, built and keyed from `/home/user/rundesk`, and held no such index.
+- The reference is now the calling checkout's. `schema_ref_root` is the checkout `lane-env.sh` lives in. The main checkout keeps `/tmp/claude-0` and `rundesk_schema_ref`, so nothing changes for it: its key and its reference database are the ones the lanes were already checked against. Any other checkout, and any `SCHEMA_REF_DIR`, gets a directory and a database named after it (`schema_ref_dir`, `schema_ref_db`). So two references never share a database, and never build it under two locks.
+- `schema-drift-selfcheck.sh` plants such a checkout. 10 of 10 hold, four new: it builds its own reference under its own name, with its index in it; it reads a database without that index as drift, naming the index; this checkout's reference keeps its key and still reads the same database as no drift; and a reference kept in another directory gets a database of its own. The planted database and directories are removed at the end.
+- The script is renamed over the old one, so a shell sourcing it mid-edit reads one whole version.
 
 ### `found-30-sep/suite-runs-leave-accounts-behind` — open (test tooling, medium; found closing `found-30-sep/templates-null-array-field-values`)
 
@@ -2195,7 +2267,7 @@ It is the wider form of `found-30-sep/killed-suites-leave-members-behind`: most 
 
 *To close:* have each suite delete what it made, as `create-modal-templates` does: accounts, their organizations, and workspaces and spaces removed rather than archived. Sweep tagged leftovers at the start of a run, and check that a run leaves no row it made.
 
-### `found-30-sep/template-values-written-unchecked` — open (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
+### `found-30-sep/template-values-written-unchecked` — **closed** (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
 
 **A template's one-value custom field is written onto the new task unchecked, whatever the same-named field there is**
 
@@ -2207,7 +2279,21 @@ It is the wider form of `found-30-sep/killed-suites-leave-members-behind`: most 
 
 *To close:* check a template's one-value values as the route does, with the route's validation shared rather than copied. Check it with a template applied in a project whose same-named field has another type or other options.
 
-### `found-30-sep/duplicate-copies-votes-and-files` — open (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
+*Closed, 30 September* (built by an agent on lane 4). ClickUp's help centre says nothing of a template applied where a field of the same name takes another kind of value; of a template's fields it says only "If you choose to include Custom Fields, Formula Fields will not be included" ("Use List templates"). Its own API refuses a value that is not one of a field's options: "Values must each be a valid option id" (quoted in a Zapier community thread). So a value is written only where the field's own route would take it, and the rest are still written.
+
+Measured first on lane 4: a template holding the words "about a week", the option "critical", the words "the front desk" and a note, applied in a project whose fields of those names are a Number, a Dropdown of Low and High, an Email and a Text field, wrote all four, where the route refused the first three (400 each), in three runs of three.
+- The route's validation moved, unchanged, from `CustomFieldsService.setValue` into `checkValue`, which `setValue` calls and whose answer it stores. The text is the same, so the patches anchored in it still apply, and the six whose anchors lie inside it still redden their checks.
+- Every value a template writes onto a task is asked of `checkValue`, after `fitTemplateValue` has fitted a list to its field. A value it refuses is not written; the rest are.
+- Nothing yet tells the person which were left out (`found-30-sep/template-leaves-values-out-silently`).
+
+Checks: `create-modal-templates`, 20 → 23. A second project with the four fields, the route asked each value on a task there, and the task made from the template read by SQL: "a template’s words, applied where the field of that name is a Number, leave that field unset — as the field’s own route refuses them (400), read by SQL", "and its option, where that field is a Dropdown without it, leaves the Dropdown unset — as its route refuses it (400)" and "and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written".
+- Before, the three failed in three runs of three. After, 23/23 in six runs, three in a row each at `32bfebb` and `8c1b727`.
+- `task-templates.service.test.ts` has a new test, which the old service fails; the instantiate test for lists reads the route's own check of its People list as well.
+- `tvu-1` (the rules not asked) and `tvu-2` (one refusal refuses the template: 400, after the task was made, with none of its values) redden the three (20/23). `tvu-4` (the shared rule forgets a Dropdown's options) reddens the Dropdown check alone (22/23): the route took "critical" and so did the template. `tvu-3` reddens the unit test.
+- Regression on lane 4: the suites that write field values through the route, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30 and `task-field-create` 18, and `template-center` 81 and `project-template-key` 5, all green. The API's unit tests: 1816/1816.
+- Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
+
+### `found-30-sep/duplicate-copies-votes-and-files` — **closed** (visible bug, small; found closing `found-30-sep/templates-null-array-field-values`)
 
 **Duplicate copies a Voting field's votes and a Files field's attachment ids onto the copy**
 
@@ -2218,6 +2304,68 @@ It is the wider form of `found-30-sep/killed-suites-leave-members-behind`: most 
 - Templates no longer take either (`NOT_FROM_TEMPLATES`); duplicate was left as it was, being outside these items.
 
 *To close:* research what ClickUp's duplicate does with Voting and Files fields, do the same, and check both on a duplicated task.
+
+*Closed, 30 September* (built by an agent on lane 4). ClickUp's help centre ("Duplicate a task", read through search excerpts): you "choose what you want to include in the new task", and "making changes to the duplicate task will not change the original task in any way". It says nothing of a Voting or a Files field. A vote is a person's ("Hide users who have voted"; "everyone can see the field's total vote count", "Use Voting Custom Fields"), and a Files field holds files of its own, apart from the task's attachments (feedback board). So the rules those fields' own route keeps decide: a vote is the caller's own, and a Files value names files attached to the task itself, which a Rundesk copy does not have (`found-30-sep/duplicate-copies-no-attachments`).
+
+Measured first on lane 4: a task holding the caller's vote and a Files value naming its own attachment was duplicated, and the copy held both, in three runs of three.
+- `duplicateTask` writes the copy's values as a template's are: never a Voting or Files value (`NOT_FROM_TEMPLATES`), lists fitted to their field, and every value asked of the route's rules (`checkValue`). The unchecked writer is gone.
+
+Checks: `custom-field-progress`, 58 → 60, beside its Files and Voting rules. The task is duplicated through the route the sheet's Duplicate calls and the copy read by SQL: "a duplicate of the task carries none of its votes — a vote is cast by its voter on the task they voted on (read by SQL)" and "and its Files field names none of the original’s attachments, which the copy does not have — while its other values are copied" (its size, labels and person, as the original holds them).
+- Before, both failed in three runs of three. After, 60/60 in six runs, three in a row each at `32bfebb` and `8c1b727`.
+- `task-templates.service.test.ts` has a duplicate test, which the old service fails.
+- `dcv-1` (the unchecked writer back) reddens both (58/60), `dcv-2` (votes written onto the copy) the votes check alone and `dcv-3` (files written) the files check alone (59/60 each). `dcv-4` reddens the unit test.
+
+Found while building them: `found-30-sep/duplicate-reads-what-its-caller-cannot` (measured: a member refused a private task duplicated it and read its words from the copy; closed here), `found-30-sep/duplicate-copies-no-attachments`, `found-30-sep/template-leaves-values-out-silently`, `found-30-sep/template-values-find-fields-by-name-alone` and `found-30-sep/field-route-takes-another-projects-field`.
+- Merged here and run again on lanes 4, 5 and 7: the 16 suites that read comment files, write field values or use templates, all green, 422 checks (`task-attachments` 25, `custom-field-progress` 60, `create-modal-templates` 26, `comment-recording` 33, `object-key-boundaries` 23, `clip-created-card` 26, `task-merge` 28, `comment-thread` 13, `custom-field-types` 32, `custom-field-access` 4, `field-writes-by-level` 5, `collapse-empty-fields` 13, `list-export` 30, `task-field-create` 18, `template-center` 81, `project-template-key` 5). The API's unit tests for templates: 29/29.
+
+### `found-30-sep/duplicate-reads-what-its-caller-cannot` — **closed** (security, small; found closing `found-30-sep/duplicate-copies-votes-and-files`)
+
+**Duplicate copies a task its caller may not open, and hands them its words**
+
+*Evidence, 30 September, measured on lane 4 by the agent and on lane 5 here:* `POST /workspaces/:ws/task-templates/duplicate/:taskId` asked workspace membership (`WorkspaceMemberGuard`) and, through `createTask`, the right to make a task in the list. It never asked the task's read rule. `POST …/task-templates/from-task/:taskId` snapshotted a task the same way, behind `template.manage` alone.
+
+*To close:* ask the task's read rule before snapshotting, in both routes. Check that a member refused a task can neither duplicate it nor save it as a template (404, nothing made), while one who may open it can.
+
+*Closed, 30 September.* ClickUp copies what its user can see: a task you may not open is not in front of you to duplicate or save, and a read of a task one may not open answers as a task that is not there, as every such read here does.
+- Measured first on lane 5, with the trio's build: an admin's task, made private by SQL, was refused to a plain member (403 on `GET /tasks/:id`). The member duplicated it (201), and the copy held its description, "Hidden words …". Granted Manage templates by a custom role, the same member saved it as a template (201), and the template held the same words.
+- Both methods now ask `readableTask` for the caller (`assertTaskOpenTo`) before they read the task, and answer 404 when it does not find the task for them. The controller passes the caller's account role with the id, as the other read rules take it.
+
+Checks:
+- `create-modal-templates`, 23 → 26: "a member refused a private task cannot duplicate it: 404, no copy is made, and none of its words come back"; "and granted Manage templates, cannot save it as a template: 404, and no template holds it"; and, so the refusals are about the task, "while a task they may open, the same member duplicates and saves as a template". Before: 24/26, the first two failing as above. After: 26/26.
+- `task-templates.service.test.ts` has two new tests, one a route: each refuses a task the read rule does not find for its caller and makes nothing. The two tests that duplicate and save a task are scripted with the read rule's two reads. 29/29.
+- `ddr-1` (Duplicate asks no read rule), `ddr-2` (Save as template asks none) and `ddr-3` (the rule refuses everyone) are aimed at the three checks; the break runner measures them next. `ddr-4` and `ddr-5` are their unit claims.
+
+### `found-30-sep/duplicate-copies-no-attachments` — open (parity, small; found closing `found-30-sep/duplicate-copies-votes-and-files`)
+
+**Duplicate copies none of a task's attachments, and offers no choice of what to copy**
+
+*Evidence, 30 September:* ClickUp's duplicate asks you to "choose what you want to include in the new task" ("Duplicate a task", through search excerpts), a checklist "with pre-selected boxes of what to keep" (feedback board). Rundesk's Duplicate is one button that copies fields, checklists, subtasks, assignees and labels, and no attachments, so a Files value is not carried to the copy either.
+
+*To close:* find which items ClickUp's dialog offers, offer them, and copy attachments as objects of the copy's own (as `attachClip` copies a clip), carrying a Files value over to the copies; check it.
+
+### `found-30-sep/template-leaves-values-out-silently` — open (decision, small; found closing `found-30-sep/template-values-written-unchecked`)
+
+**A template applied where a field refuses its value leaves that field unset, and nothing says so**
+
+*Evidence, 30 September:* `instantiate` now writes only what each field's route would take and leaves out the rest (words into a Number field, an option a Dropdown lacks). Its answer does not say which were left out, and the create modal's toast says only that the task was made. ClickUp's help centre has nothing on a template's value that its target field refuses.
+
+*To close:* the owner decides whether the person is told. If so, the answer names the fields left out and the modal says so, in four locales; check it with a template applied where a field refuses its value.
+
+### `found-30-sep/template-values-find-fields-by-name-alone` — open (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
+
+**A template's or a duplicate's value goes to whichever field of that name the project's query returns last**
+
+*Evidence, 30 September, read and not yet measured:* `materialiseTemplateValues` maps names over every field of the project, including fields scoped to another list, and two fields may share a name (nothing forbids it; `checkedFormulaConfig` refuses a formula over two for that reason). So a value can be written into a field the new task does not have, or into the other of two same-named fields. A duplicate, which stays in its own list, still copies by name rather than by field.
+
+*To close:* map only the fields the new task has (project-wide or its own list's), decide between same-named fields deliberately, and copy a duplicate's values by field; check with a same-named field scoped to another list.
+
+### `found-30-sep/field-route-takes-another-projects-field` — open (visible bug, small; found closing `found-30-sep/template-values-written-unchecked`)
+
+**The field-value route takes a field the task does not have**
+
+*Evidence, 30 September, read and not yet measured:* `setValue` checks that the task and the field are both in the workspace (`assertTaskOpenTo`, `getDefOwnedBy`), not that the field is one the task has — its project's, and for a list-scoped field its list's. A value written so is shown by no reader: `getValuesForTask` reads the task's own project's fields.
+
+*To close:* refuse a field the task does not have; check with a field of another project and one scoped to another list.
 
 ### `found-30-sep/template-tags-keep-their-case` — open (decision, small; found closing `found-30-sep/template-tags-spelled-by-collation`)
 

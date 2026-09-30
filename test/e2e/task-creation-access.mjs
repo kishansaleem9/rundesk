@@ -172,7 +172,7 @@ try {
   const mList = mSlash.data?.task?.listId
   const aList = aSlash.data?.task?.listId
   chk(
-    mSlash.status < 300 && mList && mList !== first.id && mList !== PRIVATE && aSlash.status < 300 && aList === first.id,
+    mSlash.ok && mList && mList !== first.id && mList !== PRIVATE && aSlash.ok && aList === first.id,
     'the member’s /task goes to the oldest list they may make a task in, not the older one they are refused — the admin’s goes to the oldest',
     `the member's ${said(mSlash)} went to ${mList === first.id ? 'the REFUSED oldest list' : mList === PRIVATE ? 'the PRIVATE list' : mList === OPEN ? 'the open list' : JSON.stringify(mList)}; the admin's ${said(aSlash)} to ${aList === first.id ? 'the oldest' : JSON.stringify(aList)}`,
   )

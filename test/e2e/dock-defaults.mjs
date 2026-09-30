@@ -132,7 +132,7 @@ try {
   const clearedRow = await row()
   const clearedTools = await dockAt('')
   chk(
-    emptied.status < 300 && emptyTools.length === 0 && cleared.status < 300 && clearedRow?.pinned_links === null && clearedTools.includes('home'),
+    emptied.ok && emptyTools.length === 0 && cleared.ok && clearedRow?.pinned_links === null && clearedTools.includes('home'),
     'a dock arranged to hold nothing holds nothing — and cleared, it has its default tools again',
     `emptied ${emptied.status}, carrying ${JSON.stringify(emptyTools)}; cleared ${cleared.status}, stored ${JSON.stringify(clearedRow?.pinned_links)}, carrying ${JSON.stringify(clearedTools)}`,
   )

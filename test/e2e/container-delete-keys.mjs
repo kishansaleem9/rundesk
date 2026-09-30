@@ -161,7 +161,7 @@ try {
   l.lister = await lister.as(`/lists/${makersList}`, { method: 'DELETE' })
   const lAfter = { gone: await gone('lists', makersList), trash: await inTrashOf(lister, 'list', makersList) }
   chk(
-    l.plain.status === 403 && l.projector.status === 403 && lStayed && who.lister && l.lister.status < 300 && lAfter.gone && lAfter.trash,
+    l.plain.status === 403 && l.projector.status === 403 && lStayed && who.lister && l.lister.ok && lAfter.gone && lAfter.trash,
     'a member granted list.delete deletes a list another member made where they hold Full edit, and it is in their Trash — a plain member, and one granted only project.delete, are refused it (403) and it stays until then',
     `plain ${said(l.plain)}; project deleter ${said(l.projector)}; stayed ${lStayed}; list deleter ${who.lister ? said(l.lister) : 'NOT GRANTED'}, ${JSON.stringify(lAfter)}`,
   )
@@ -177,7 +177,7 @@ try {
   p.projector = await projector.as(`/projects/${adminsProject}`, { method: 'DELETE' })
   const pAfter = { gone: await gone('projects', adminsProject), trash: await inTrashOf(projector, 'project', adminsProject) }
   chk(
-    p.plain.status === 403 && p.lister.status === 403 && pStayed && who.projector && p.projector.status < 300 && pAfter.gone && pAfter.trash,
+    p.plain.status === 403 && p.lister.status === 403 && pStayed && who.projector && p.projector.ok && pAfter.gone && pAfter.trash,
     'a member granted project.delete deletes a project somebody else made where they hold Full edit, and it is in their Trash — a plain member, and one granted only list.delete, are refused it (403) and it stays until then',
     `plain ${said(p.plain)}; list deleter ${said(p.lister)}; stayed ${pStayed}; project deleter ${who.projector ? said(p.projector) : 'NOT GRANTED'}, ${JSON.stringify(pAfter)}`,
   )
@@ -196,7 +196,7 @@ try {
   s.spacer = await spacer.as(`/spaces/${doomed.space}`, { method: 'DELETE' })
   const sAfter = { gone: await gone('spaces', doomed.space), trash: await inTrashOf(spacer, 'space', doomed.space) }
   chk(
-    s.plain.status === 403 && s.manager.status === 403 && sStayed && who.spacer && s.spacer.status < 300 && sAfter.gone && sAfter.trash,
+    s.plain.status === 403 && s.manager.status === 403 && sStayed && who.spacer && s.spacer.ok && sAfter.gone && sAfter.trash,
     'a member granted space.delete deletes a space somebody else made where they hold Full edit, and it is in their Trash — a plain member, and a manager who belongs to it but holds no space.delete, are refused it (403) and it stays until then',
     `plain ${said(s.plain)}; manager ${said(s.manager)}; stayed ${sStayed}; space deleter ${who.spacer ? said(s.spacer) : 'NOT GRANTED'}, ${JSON.stringify(sAfter)}`,
   )
@@ -214,7 +214,7 @@ try {
   const g = await guest.as(`/spaces/${guestsSpace.space}`, { method: 'DELETE' })
   const gStayed = !(await gone('spaces', guestsSpace.space))
   chk(
-    guest.granted && guestList.status < 300 && refusedFor(g, 'A guest cannot delete a space') && gStayed,
+    guest.granted && guestList.ok && refusedFor(g, 'A guest cannot delete a space') && gStayed,
     'a guest granted space.delete is refused deleting a space shared with them at Full edit (403), and it stays — they make a list there, so the level is real',
     `granted ${guest.granted}; list ${said(guestList)}; delete ${said(g)}; stayed ${gStayed}`,
   )
@@ -240,7 +240,7 @@ try {
     otherProject: await gone('projects', notTheirs.project),
   }
   chk(
-    m.theirList.status < 300 && m.theirProject.status < 300 && mAfter.theirList && mAfter.theirProject
+    m.theirList.ok && m.theirProject.ok && mAfter.theirList && mAfter.theirProject
       && m.otherList.status === 403 && m.otherProject.status === 403 && !mAfter.otherList && !mAfter.otherProject,
     'a manager, who holds project.delete and list.delete by default, deletes a list and a project in a space they belong to — and in one they do not is refused both (403), which stay',
     `${Object.entries(m).map(([k, r]) => `${k} ${said(r)}`).join('; ')}; deleted ${JSON.stringify(mAfter)}`,
@@ -314,7 +314,7 @@ try {
   const assigned = await A(`/workspaces/${WS}/members/${maker.memberId}/roles/${older.data.id}`, { method: 'POST', body: {} })
   const holds = (await maker.as(`/workspaces/${WS}/roles/me/permissions`)).data?.permissions ?? []
   chk(
-    assigned.status < 300 && holds.includes('list.delete') && RETIRED.every((key) => !holds.includes(key)),
+    assigned.ok && holds.includes('list.delete') && RETIRED.every((key) => !holds.includes(key)),
     'a role saved while the retired keys were offered is assigned as before, and grants list.delete and nothing for task.delete.any, doc.delete.any or doc.publish',
     `assign ${said(assigned)}; the holder resolves ${JSON.stringify(holds.filter((key) => key === 'list.delete' || RETIRED.includes(key)))}`,
   )

@@ -209,8 +209,9 @@ try {
   }
   const [projectRow] = await sql`select name from projects where id = ${PROJECT}`
   chk(
-    answers.memberRenamesProject === 403 && answers.memberRenamesAdminsList === 403 && answers.memberRenamesOwnList < 300
-      && answers.memberAddsStatus < 300 && answers.memberAddsMember === 403 && answers.guestAddsStatus === 403 && answers.guestSuggests === 403
+    answers.memberRenamesProject === 403 && answers.memberRenamesAdminsList === 403
+      && answers.memberRenamesOwnList >= 200 && answers.memberRenamesOwnList < 300
+      && answers.memberAddsStatus >= 200 && answers.memberAddsStatus < 300 && answers.memberAddsMember === 403 && answers.guestAddsStatus === 403 && answers.guestSuggests === 403
       && projectRow?.name === PROJECT_NAME,
     'each route answers as the page offers: the member renames their own list and adds a status, and is refused the project, the admin’s list and its members; the guest is refused statuses and suggestions',
     `${JSON.stringify(answers)}; the project is named ${JSON.stringify(projectRow?.name)}`,

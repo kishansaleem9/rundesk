@@ -161,12 +161,15 @@ type DependencyType = 'blocks' | 'blocked_by' | 'related_to'
 export const MAX_ATTACHMENT_BYTES = 100 * 1024 * 1024 // 100 MB
 
 /**
- * THE ORDER A TASK'S FILES ARE READ IN, by both reads of them: the list the
+ * THE ORDER A TASK'S FILES ARE READ IN, by every read of them: the list the
  * Attachments tab draws (`listAttachments`) and the rows `getTask` carries
- * (`found-30-sep/attachments-unordered`). Neither had an ORDER BY, so both came
- * back in heap order. Measured on lane 4: once autovacuum had freed space, each
- * pooled connection inserted into a page of its own, and 9 seedings of three
- * links in 15 came back in another order than they were linked.
+ * (`found-30-sep/attachments-unordered`), and the files each comment carries
+ * (`listComments`, `found-30-sep/comment-files-unordered`). None had an ORDER
+ * BY, so all three came back in heap order. Measured on lane 4: once autovacuum
+ * had freed space, each pooled connection inserted into a page of its own, and
+ * 9 seedings of three links in 15 came back in another order than they were
+ * linked; a comment's three files, written into the heap in another order,
+ * came back and were drawn in that order.
  *
  * The order they were attached, oldest first. ClickUp's help centre does not
  * say what order its Attachments section lists files in; its feedback board
@@ -4941,13 +4944,16 @@ export class TasksService {
       with: { author: PUBLIC_USER_WITH, reactions: true, assignee: PUBLIC_USER_WITH, resolver: PUBLIC_USER_WITH },
     })
     // Hydrate per-comment attachments (Plan §4). Kept as a separate query to
-    // avoid a schema import cycle between comments and attachments.
+    // avoid a schema import cycle between comments and attachments. In the order
+    // they were attached, as the task's own files are: with no ORDER BY a
+    // comment drew its files in heap order (`found-30-sep/comment-files-unordered`).
     const commentIds = rows.map((r: { id: string }) => r.id)
     if (commentIds.length === 0) return rows
     const files = await this.db
       .select()
       .from(taskAttachments)
       .where(and(eq(taskAttachments.taskId, taskId), inArray(taskAttachments.commentId, commentIds)))
+      .orderBy(...ATTACHMENT_ORDER)
     const byComment = new Map<string, Array<Record<string, unknown>>>()
     for (const f of files) {
       const list = byComment.get(f.commentId as string) ?? []

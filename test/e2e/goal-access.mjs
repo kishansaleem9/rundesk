@@ -103,7 +103,7 @@ try {
   const PS = await space(`${WORD} private space`, 'private')
   const OS = await space(`${TAG} open space`)
   const gate = await M(`/spaces/${PS}`)
-  if (gate.status < 400) throw new Error(`the member was not refused the private space (${said(gate)}), so nothing here would mean anything`)
+  if (gate.ok) throw new Error(`the member was not refused the private space (${said(gate)}), so nothing here would mean anything`)
 
   // The goals and key results under test are planted by SQL, not made through
   // the routes this suite is about.

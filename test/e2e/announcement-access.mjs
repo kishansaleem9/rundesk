@@ -120,7 +120,7 @@ try {
   const publishAs = async (who, key) => {
     const title = `${TAG} by the ${key}`
     const r = await who(`/workspaces/${WS}/announcements`, { method: 'POST', body: { title, body: 'hello', tone: 'celebrate' } })
-    return { status: r.status, saved: await titled(title) }
+    return { status: r.status, ok: r.ok, saved: await titled(title) }
   }
   const managerPublishes = await publishAs(manager.as, 'manager')
   const memberPublishes = await publishAs(member.as, 'member')
@@ -129,8 +129,8 @@ try {
   chk(
     managerPublishes.status === 403 && managerPublishes.saved === 0
       && memberPublishes.status === 403 && memberPublishes.saved === 0
-      && announcer.granted && announcerPublishes.status < 300 && announcerPublishes.saved === 1
-      && adminPublishes.status < 300 && adminPublishes.saved === 1,
+      && announcer.granted && announcerPublishes.ok && announcerPublishes.saved === 1
+      && adminPublishes.ok && adminPublishes.saved === 1,
     'publishing a workspace announcement is refused to a manager and to a plain member (403 each, nothing saved) — the member granted announcement.manage publishes one, and so does a workspace admin',
     `manager ${JSON.stringify(managerPublishes)}; member ${JSON.stringify(memberPublishes)}; announcer ${announcer.granted ? JSON.stringify(announcerPublishes) : 'NOT GRANTED'}; admin ${JSON.stringify(adminPublishes)}`,
   )

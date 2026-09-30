@@ -168,7 +168,7 @@ try {
   const sendMine = mineId ? await reportOf(M, `custom/${mineId}/send-now`, { method: 'POST', body: {} }) : { status: 0 }
   const adminEdits = mineId ? await reportOf(A, `custom/${mineId}`, { method: 'PATCH', body: { name: `${TAG} the member's report, as the admin left it` } }) : { status: 0 }
   chk(
-    mine.status < 300 && renameMine.status === 200 && sendMine.status < 300 && adminEdits.status === 200,
+    mine.ok && renameMine.status === 200 && sendMine.ok && adminEdits.status === 200,
     'while a member edits and sends their own saved report, and an admin may edit anybody’s',
     `saving ${said(mine)}, renaming ${said(renameMine)}, sending ${said(sendMine)}; the admin's edit ${said(adminEdits)}`,
   )

@@ -163,7 +163,7 @@ try {
     task: (await sql`select count(*)::int as n from tasks where title = ${`${TAG} taskinview`}`)[0].n,
   }
   chk(
-    inView.status === 403 && rows.view === 0 && inEdit.status < 300 && rows.open === 1 && taskInView.status === 403 && rows.task === 0,
+    inView.status === 403 && rows.view === 0 && inEdit.ok && rows.open === 1 && taskInView.status === 403 && rows.task === 0,
     'the API refuses the member what the menus withhold — a list or a task in the view-only space (403, none made) — and makes the list in the open one',
     `a list in the view-only space ${inView.status} (${rows.view}); in the open one ${inEdit.status} (${rows.open}); a task in the view-only space ${taskInView.status} (${rows.task})`,
   )

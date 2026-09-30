@@ -56,6 +56,7 @@ step "break patches name a real check"  node scripts/check-break-claims.mjs
 step "and reddened the one they name"   node scripts/check-break-reddened.mjs
 step "the plan asks for what is unmeasured" node scripts/check-plan-population.mjs
 step "and the unit claims redden too"   node scripts/check-unit-claims.mjs
+step "and leave the tree they found"     node scripts/check-tree-state-cases.mjs --mutate
 step "and they read this tree, not a nested one" node scripts/check-find-in-tree.mjs --mutate
 step "every suite has a break patch"    node scripts/check-break-coverage.mjs
 step "every suite has a CI step"        node scripts/check-suites-registered.mjs
@@ -68,6 +69,7 @@ step "and every ender rule bites"        node scripts/check-suite-enders.mjs --m
 step "a check of shown text reads what is drawn" node scripts/check-suite-text-reads.mjs --mutate
 step "no silent catch on an API client" node scripts/check-suite-api-catches.mjs --mutate
 step "and no suite hand-rolls one"      node scripts/check-suite-api-clients.mjs --mutate
+step "and a status of 0 never reads as success" node scripts/check-suite-status-floor.mjs --mutate
 step "no new process.exit in a suite"   node scripts/check-suite-process-exit.mjs --mutate
 step "a refusal-standing suite declares it" node scripts/check-suite-lane-need.mjs --mutate
 step "the S3 stub is faithful to the SDK" node scripts/check-s3-stub.mjs --mutate

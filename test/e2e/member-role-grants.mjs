@@ -105,7 +105,7 @@ try {
   const adminChanges = await A(`/workspaces/${WS}/members/${other.id}`, { method: 'PATCH', body: { role: 'manager' } })
   chk(
     selfToAdmin.status === 403 && targetToManager.status === 403 && afterManager.manager === 'manager' && afterManager.target === 'member'
-      && adminChanges.status < 300 && (await roleOf(other.id)) === 'manager',
+      && adminChanges.ok && (await roleOf(other.id)) === 'manager',
     'a manager changes nobody’s role — not their own to admin, not a member’s (403 each, both unchanged) — and the admin does',
     `own to admin ${said(selfToAdmin)}, a member's to manager ${said(targetToManager)}; now ${JSON.stringify(afterManager)}; the admin's change ${said(adminChanges)}`,
   )
@@ -138,9 +138,9 @@ try {
   const promotes = await delegate.as(`/workspaces/${WS}/members/${target.id}`, { method: 'PATCH', body: { role: 'workspace_admin' } })
   const demotes = await delegate.as(`/workspaces/${WS}/members/${target.id}`, { method: 'PATCH', body: { role: 'guest' } })
   chk(
-    makesBeyond.status === 403 && (await rolesNamed(beyond)) === 0 && makesWithin.status < 300 && (await rolesNamed(within)) === 1
+    makesBeyond.status === 403 && (await rolesNamed(beyond)) === 0 && makesWithin.ok && (await rolesNamed(within)) === 1
       && takesHooks.status === 403 && !(await assigned(delegate.id)).includes(`${TAG} hooks`)
-      && promotes.status === 403 && demotes.status < 300 && (await roleOf(target.id)) === 'guest',
+      && promotes.status === 403 && demotes.ok && (await roleOf(target.id)) === 'guest',
     'a member granted roles.manage makes a role only of permissions they hold, assigns none holding more, and with members.role.change makes nobody an admin — while changing a member within their own rank',
     `a role beyond ${said(makesBeyond)}, within ${said(makesWithin)}; takes the hooks role ${said(takesHooks)}; promotes to admin ${said(promotes)}, demotes to guest ${said(demotes)} (now ${await roleOf(target.id)})`,
   )
@@ -151,7 +151,7 @@ try {
   const stillThere = (await roleOf(other.id)) !== null
   const adminRemoves = await A(`/workspaces/${WS}/members/${other.id}`, { method: 'DELETE' })
   chk(
-    managerRemoves.status === 403 && stillThere && adminRemoves.status < 300 && (await roleOf(other.id)) === null,
+    managerRemoves.status === 403 && stillThere && adminRemoves.ok && (await roleOf(other.id)) === null,
     'a manager removes nobody from the workspace (403, still a member) — and the admin does',
     `manager ${said(managerRemoves)} (still there: ${stillThere}); admin ${said(adminRemoves)}`,
   )
@@ -165,7 +165,7 @@ try {
   const managerAddsMember = await manager.as(`/workspaces/${WS}/members`, { method: 'POST', body: { email: outsider.email, role: 'member' } })
   chk(
     asPlatform.status === 400 && platformRow === null && managerAddsAdmin.status === 403 && managerRow === null
-      && managerAddsMember.status < 300 && (await roleOf(outsider.id)) === 'member',
+      && managerAddsMember.ok && (await roleOf(outsider.id)) === 'member',
     'nobody is added under a role a workspace does not give (400, no row), and a manager adds nobody as an admin (403, no row) — though they add a member',
     `as super_admin ${said(asPlatform)} (row ${platformRow}); a manager adding an admin ${said(managerAddsAdmin)} (row ${managerRow}); a member ${said(managerAddsMember)} (row ${await roleOf(outsider.id)})`,
   )

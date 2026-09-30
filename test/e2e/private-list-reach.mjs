@@ -231,7 +231,7 @@ try {
     A(`/workspaces/${WS}/people/${adminId}/standup`, { method: 'POST', body: { days: 7 } }),
   ])
   chk(
-    mStandup.status < 300 && !names(mStandup) && names(aStandup),
+    mStandup.ok && !names(mStandup) && names(aStandup),
     'the admin’s standup, asked for by the member, names none of the private list’s tasks — nor what holds them up — and the admin’s own does',
     `the member's ${said(mStandup)} names it: ${names(mStandup)}; the admin's own: ${names(aStandup)}`,
   )

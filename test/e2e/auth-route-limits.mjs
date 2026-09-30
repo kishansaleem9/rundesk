@@ -301,7 +301,7 @@ try {
   )
   const adminMail = await A('/email/test', { method: 'POST', body: { to: mail('admin-probe'), subject: `Super admin ${TAG}` } })
   chk(
-    adminMail.status < 300 && adminMail.data?.ok === true,
+    adminMail.ok && adminMail.data?.ok === true,
     'a super admin may still send a test email outside production, to an address that goes nowhere',
     `it answered ${said(adminMail)}`,
   )

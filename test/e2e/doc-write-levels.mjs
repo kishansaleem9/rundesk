@@ -115,7 +115,7 @@ try {
   const cComment = await M(`/docs/${commented}/comments`, { method: 'POST', body: { body: `${TAG} said through a comment share` } })
   const cRename = await rename(M, commented, `${TAG} renamed through a comment share`)
   chk(
-    cComment.status < 300 && (await commentsOn(commented)) === 1 && cRename.status === 403 && (await titleOf(commented)).title === `${TAG} shared to comment`,
+    cComment.ok && (await commentsOn(commented)) === 1 && cRename.status === 403 && (await titleOf(commented)).title === `${TAG} shared to comment`,
     'a COMMENT share comments and does not rename (403, unchanged)',
     `comment ${said(cComment)}, rename ${said(cRename)}`,
   )

@@ -770,7 +770,7 @@ try {
   const keptRow = (await T()).data
   const keptBytes = await bytesOf(keptRow?.coverUrl)
   chk(
-    pinned.status < 300 && otherGone.status < 300 && keptRow?.coverStorageKey === pinnedImage.key &&
+    pinned.ok && otherGone.ok && keptRow?.coverStorageKey === pinnedImage.key &&
       keptBytes !== null && keptBytes.equals(TINY_PNG),
     'deleting another attachment leaves the cover where it was, still drawn',
     `the pinned image: ${pinnedImage.said}; the other: ${otherImage.said}; setting the cover answered ${pinned.status}, ` +
@@ -784,7 +784,7 @@ try {
   const coverless = (await T()).data
   const card = await onBoard()
   chk(
-    pinnedGone.status < 300 && coverless?.coverStorageKey == null && coverless?.coverUrl == null &&
+    pinnedGone.ok && coverless?.coverStorageKey == null && coverless?.coverUrl == null &&
       card !== null && card.coverUrl == null,
     'deleting the attachment the cover was picked from takes the cover off — the banner and the board card draw none',
     `deleting it answered ${pinnedGone.status}; the task still holds coverStorageKey=${JSON.stringify(coverless?.coverStorageKey ?? null)}, ` +
@@ -841,7 +841,7 @@ try {
   )
   const cardCleared = removedInSheet && (await waitUntil(async () => (await cardImage.count()) === 0, { timeoutMs: 10_000 }))
   chk(
-    shownPinned.status < 300 && drawnBefore && removedInSheet && cardCleared,
+    shownPinned.ok && drawnBefore && removedInSheet && cardCleared,
     'removing that attachment in the sheet takes the cover off the board card behind it, with no reload',
     !drawnBefore
       ? `the board card never drew the cover (${shown.said}, cover set ${shownPinned.status}), so there was nothing to take off`

@@ -274,7 +274,7 @@ try {
   const revokedTitles = await titleEl.count()
   const revokedApi = await publicStatus(SLUG)
   chk(
-    revoked.status < 300 && revokedSays && revokedTitles === 0 && revokedApi === 404,
+    revoked.ok && revokedSays && revokedTitles === 0 && revokedApi === 404,
     'a link turned off says “Doc not found” and draws nothing of the doc',
     `turning it off answered ${said(revoked)}; “Doc not found” ${revokedSays ? 'is' : 'is not'} shown; ${revokedTitles} title(s) drawn; the API answers ${revokedApi}`,
   )
@@ -286,7 +286,7 @@ try {
   const oldApi = await publicStatus(SLUG)
   const newApi = NEW_SLUG ? await publicStatus(NEW_SLUG) : 0
   chk(
-    reshared.status < 300 && NEW_SLUG !== null && NEW_SLUG !== SLUG && oldStillClosed && oldApi === 404 && newApi === 200,
+    reshared.ok && NEW_SLUG !== null && NEW_SLUG !== SLUG && oldStillClosed && oldApi === 404 && newApi === 200,
     'sharing it again makes a new link, and the one turned off stays closed',
     `sharing again answered ${said(reshared)}, the link ${NEW_SLUG === SLUG ? 'is the old one' : 'is new'}; the old link’s page ${oldStillClosed ? 'says' : 'does not say'} “Doc not found” and the API answers it ${oldApi}; the new one ${newApi}`,
   )
@@ -296,7 +296,7 @@ try {
   const archivedSays = await waitUntil(async () => (await notFound.count()) > 0, { timeoutMs: 15000 })
   const archivedApi = NEW_SLUG ? await publicStatus(NEW_SLUG) : 0
   chk(
-    archived.status < 300 && archivedSays && archivedApi === 404,
+    archived.ok && archivedSays && archivedApi === 404,
     'archiving the doc closes its link: the page says “Doc not found”',
     `archiving answered ${said(archived)}; “Doc not found” ${archivedSays ? 'is' : 'is not'} shown; the API answers ${archivedApi}`,
   )

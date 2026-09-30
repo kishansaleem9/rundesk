@@ -121,7 +121,7 @@ try {
   const mSug = await suggest(M, { projectName: 'Website launch' })
   const aSug = await suggest(A, { projectName: 'Website launch' })
   chk(
-    mSug.status < 300 && Array.isArray(mSug.data?.suggestions) && !mSug.text.includes(WORD) &&
+    mSug.ok && Array.isArray(mSug.data?.suggestions) && !mSug.text.includes(WORD) &&
       aSug.text.includes(`${WORD} secret step`) && aSug.text.includes(`${WORD} private-list task`),
     'a member’s suggestions carry no title or name from a space or a list they are refused — the admin’s carry both',
     `the member's ${said(mSug)} ${mSug.text.includes(WORD) ? 'CARRIES them' : 'is clean'} (basis: ${JSON.stringify(mSug.data?.basis)}); the admin's carries the steps: ${aSug.text.includes(`${WORD} secret step`)}, the list's: ${aSug.text.includes(`${WORD} private-list task`)}`,
@@ -133,7 +133,7 @@ try {
   const byOpenId = await suggest(M, { projectId: OP })
   const same = (x, y) => JSON.stringify(x.data) === JSON.stringify(y.data)
   chk(
-    byPrivateId.status < 300 && same(byPrivateId, byNothing) && byOpenId.status < 300 && !same(byOpenId, byNothing),
+    byPrivateId.ok && same(byPrivateId, byNothing) && byOpenId.ok && !same(byOpenId, byNothing),
     'a project the member may not open, named by id, is planned as no project at all — the open one, named by id, is planned by its name',
     `naming the private project answered as naming none: ${same(byPrivateId, byNothing)} (${JSON.stringify(byPrivateId.data?.basis)} vs ${JSON.stringify(byNothing.data?.basis)}); naming the open one differed: ${!same(byOpenId, byNothing)}`,
   )
@@ -145,7 +145,7 @@ try {
   const aBal = await A('/ai/workload-balance', { method: 'POST', body: { workspaceId: WS } })
   const leakedIds = privateIds.filter((id) => mBal.text.includes(id))
   chk(
-    mBal.status < 300 && load(mBal, adminId) === 0 && load(mBal, memberId) === 1 && leakedIds.length === 0 &&
+    mBal.ok && load(mBal, adminId) === 0 && load(mBal, memberId) === 1 && leakedIds.length === 0 &&
       load(aBal, adminId) === 9 && load(aBal, memberId) === 1,
     'workload balance counts, for a member, only tasks they may open, and hands out no id of another — the admin’s counts all nine',
     `the member's ${said(mBal)} counts the admin at ${load(mBal, adminId)} and holds ${leakedIds.length} private id(s); the admin's counts the admin at ${load(aBal, adminId)}`,
@@ -159,7 +159,7 @@ try {
   const mAdmin = candidate(mPick, adminId)
   const aAdmin = candidate(aPick, adminId)
   chk(
-    mPick.status < 300 && mAdmin && mAdmin.openTasks === 0 && mAdmin.overdue === 0 &&
+    mPick.ok && mAdmin && mAdmin.openTasks === 0 && mAdmin.overdue === 0 &&
       aAdmin && aAdmin.openTasks === 9 && aAdmin.overdue === 6,
     'Assign with AI, asked by a member, counts a colleague’s open and overdue work as the member may see it — asked by the admin, it counts all of it',
     `the member sees the admin at ${JSON.stringify(mAdmin ? { open: mAdmin.openTasks, overdue: mAdmin.overdue } : mPick.data ?? said(mPick))}; the admin at ${JSON.stringify(aAdmin ? { open: aAdmin.openTasks, overdue: aAdmin.overdue } : aPick.data ?? said(aPick))}`,

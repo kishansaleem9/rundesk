@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common'
+import { BadRequestException, Inject, Injectable, NotFoundException, Optional } from '@nestjs/common'
 import { and, asc, desc, eq, inArray, sql } from 'drizzle-orm'
 import {
   taskTemplates,
@@ -21,6 +21,8 @@ import { DB_TOKEN } from '../../common/database/database.module'
 import { isUuid } from '../../common/validation/uuid'
 import { TasksService } from '../tasks/tasks.service'
 import { SecurityService } from '../security/security.service'
+import { CustomFieldsService } from '../custom-fields/custom-fields.service'
+import { readableTask } from '../../common/permissions/read-access'
 
 const NAME_MAX = 120
 const DESCRIPTION_MAX = 1000
@@ -52,14 +54,17 @@ export function templateFieldValue(value: unknown): TemplateFieldValue {
 }
 
 /**
- * THE FIELDS A TEMPLATE NEVER WRITES ONTO A TASK, and so never takes from one.
+ * THE FIELDS A TEMPLATE NEVER WRITES ONTO A TASK, and so never takes from one —
+ * nor a duplicate onto its copy (`found-30-sep/duplicate-copies-votes-and-files`).
  *
  *   · `voting` — a vote is its voter's own: the field's route toggles the
  *     caller's vote and nobody else's (`CustomFieldsService.setValue`). Copied
  *     from a template, it would be cast on every task made from it, by people
- *     who never saw that task.
+ *     who never saw that task; copied by a duplicate, on a task its voters
+ *     never saw either.
  *   · `files` — the ids are attachments of the task the template was saved
- *     from, and a task made from it has none of them.
+ *     from, or the task duplicated, and the new task has none of them: the
+ *     route takes only files attached to the task itself.
  *   · `progress_auto` and `formula` — worked out on read; no value is stored.
  */
 const NOT_FROM_TEMPLATES: ReadonlySet<string> = new Set(['voting', 'files', 'progress_auto', 'formula'])
@@ -79,7 +84,13 @@ const LIST_FIELDS: ReadonlySet<string> = new Set(['people', 'labels', 'tasks'])
  * written. A template is saved from one project and used in any, where a field
  * of the same name has its own options; and somebody named in it may have left
  * since. A list is never written into a one-value field, nor one value into a
- * list field. One value into a one-value field is written as it always was.
+ * list field.
+ *
+ * What this answers is then asked of the field's own rules, list or one value,
+ * before it is written (`materialiseTemplateValues`, which asks
+ * `CustomFieldsService.checkValue`): one value into a one-value field was
+ * written as it came, text into a Number field and an option a Dropdown does
+ * not define among it (`found-30-sep/template-values-written-unchecked`).
  */
 export function fitTemplateValue(
   field: { type: string; options?: Array<{ value: string }> | null },
@@ -133,11 +144,23 @@ const EMPTY_PAYLOAD: TaskTemplatePayload = {
 
 @Injectable()
 export class TaskTemplatesService {
+  /**
+   * THE FIELD ROUTE'S OWN RULES for a value (`CustomFieldsService.checkValue`),
+   * which every value this service writes onto a task passes
+   * (`found-30-sep/template-values-written-unchecked`).
+   */
+  private readonly customFields: CustomFieldsService
+
   constructor(
     @Inject(DB_TOKEN) private readonly db: Db,
     private readonly tasksService: TasksService,
     private readonly security: SecurityService,
-  ) {}
+    // Optional so a service built by hand in a unit test needs no fourth
+    // argument: it then asks the same rules of the same database.
+    @Optional() customFields?: CustomFieldsService,
+  ) {
+    this.customFields = customFields ?? new CustomFieldsService(db)
+  }
 
   // -------------------------------------------------------------- CRUD
 
@@ -266,12 +289,13 @@ export class TaskTemplatesService {
   async saveFromTask(
     workspaceId: string,
     taskId: string,
-    actor: { id: string; email?: string },
+    actor: { id: string; email?: string; role?: string | null },
     dto: { name: string; description?: string | null; icon?: string | null },
   ): Promise<TaskTemplateView> {
     const ctx = await this.resolveTaskContext(taskId)
     if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+    await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
     const payload = await this.snapshotTask(taskId, { forTemplate: true })
     return this.create(workspaceId, actor, {
@@ -290,7 +314,8 @@ export class TaskTemplatesService {
    * workspace — missing ones are auto-created with a neutral color),
    * and custom-field values (resolved by definition name within the
    * target project, each as far as that field can hold it —
-   * `fitTemplateValue`) are all reconstructed.
+   * `fitTemplateValue`, then the field route's own rules) are all
+   * reconstructed.
    *
    * Date offsets are interpreted as days from `now` so a template
    * with `dueDateOffsetDays: 7` always produces a task due in a week.
@@ -358,11 +383,22 @@ export class TaskTemplatesService {
    * checklists, custom-field values and one level of subtasks into the SAME
    * list, with "(copy)" appended to the title. Dates are copied verbatim from
    * the source (not shifted like template offsets). The copy starts open.
+   *
+   * ITS CUSTOM-FIELD VALUES ARE WRITTEN AS A TEMPLATE'S ARE
+   * (`materialiseTemplateValues`), and were written unchecked, every one the
+   * task held (`found-30-sep/duplicate-copies-votes-and-files`): the copy carried
+   * the original's votes, cast by people who never saw it, and its Files value,
+   * naming attachments of the original that the copy does not have. ClickUp's
+   * help centre says a duplicate carries what you choose to include of the task,
+   * and says nothing of a Voting or a Files field; the rules those fields' own
+   * route keeps decide it. The copy carries no votes and no files, and each
+   * other value as far as the field's route would take it now.
    */
-  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string }) {
+  async duplicateTask(workspaceId: string, taskId: string, actor: { id: string; email?: string; role?: string | null }) {
     const ctx = await this.resolveTaskContext(taskId)
     if (!ctx) throw new NotFoundException('Task not found')
     if (ctx.workspaceId !== workspaceId) throw new NotFoundException('Task not found in this workspace')
+    await this.assertTaskOpenTo(workspaceId, taskId, actor)
 
     const [src] = await this.db
       .select({ startDate: tasks.startDate, dueDate: tasks.dueDate })
@@ -394,7 +430,7 @@ export class TaskTemplatesService {
     if (!task) throw new Error('Task creation returned no row')
 
     await this.materialiseChecklists(task.id, payload.checklists)
-    await this.materialiseCustomFieldValues(task.id, ctx.projectId, payload.customFieldValues)
+    await this.materialiseTemplateValues(task.id, ctx.projectId, workspaceId, payload.customFieldValues)
     await this.materialiseSubtasks(ctx.listId, task.id, payload.subtasks, actor.id, now)
 
     await this.security.logAuditEvent({
@@ -413,6 +449,21 @@ export class TaskTemplatesService {
 
   // ----------------------------------------------------------- helpers
 
+  /*
+   * THE TASK IS COPIED ONLY FOR SOMEBODY WHO MAY OPEN IT
+   * (`found-30-sep/duplicate-reads-what-its-caller-cannot`). Duplicate asked
+   * membership and the right to add to the list, and Save as template asked
+   * the template key; neither asked the task's read rule. A member refused a
+   * private task duplicated it and read its words from the copy, and a member
+   * holding the key saved it as a template. Refused as a task that is not
+   * there, as every read of a task its reader may not open is.
+   */
+  private async assertTaskOpenTo(workspaceId: string, taskId: string, actor: { id: string; role?: string | null }) {
+    if (!(await readableTask(this.db, workspaceId, taskId, { id: actor.id, role: actor.role ?? null }))) {
+      throw new NotFoundException('Task not found in this workspace')
+    }
+  }
+
   private async requireTemplate(workspaceId: string, id: string) {
     const [row] = await this.db
       .select()
@@ -425,7 +476,9 @@ export class TaskTemplatesService {
 
   /**
    * The task as a payload. `forTemplate` leaves out the fields a template never
-   * writes (`NOT_FROM_TEMPLATES`); a duplicate takes the task as it is.
+   * writes (`NOT_FROM_TEMPLATES`); a duplicate takes the task as it is, and what
+   * of it is written onto the copy is decided as a template's values are
+   * (`materialiseTemplateValues`).
    */
   private async snapshotTask(
     taskId: string,
@@ -563,36 +616,24 @@ export class TaskTemplatesService {
     }
   }
 
-  private async materialiseCustomFieldValues(
-    taskId: string,
-    projectId: string,
-    values: TaskTemplatePayload['customFieldValues'],
-  ) {
-    if (!values?.length) return
-    const defs = await this.db
-      .select({ id: customFieldDefinitions.id, name: customFieldDefinitions.name })
-      .from(customFieldDefinitions)
-      .where(eq(customFieldDefinitions.projectId, projectId))
-    const byName = new Map(defs.map((d) => [d.name, d.id]))
-
-    const rows = values
-      .map((v) => {
-        const fieldId = byName.get(v.fieldName)
-        if (!fieldId) return null
-        return { taskId, fieldId, value: { v: v.value ?? null } as any }
-      })
-      .filter((r): r is { taskId: string; fieldId: string; value: any } => !!r)
-
-    if (rows.length === 0) return
-    await this.db.insert(customFieldValues).values(rows)
-  }
-
   /**
-   * A TEMPLATE's custom-field values, onto the task made from it: each to the
-   * field of that name in the task's project, as far as `fitTemplateValue`
-   * says that field can hold it. The people and tasks a list names are asked
-   * of the database once each, and only ids shaped like ids are asked: an id
-   * that is not one would have Postgres refuse the whole query (`isUuid`).
+   * A TEMPLATE's custom-field values, onto the task made from it — or a
+   * DUPLICATED task's, onto its copy: each to the field of that name in the
+   * task's project, as far as `fitTemplateValue` says that field can hold it.
+   * The people and tasks a list names are asked of the database once each, and
+   * only ids shaped like ids are asked: an id that is not one would have
+   * Postgres refuse the whole query (`isUuid`).
+   *
+   * AND EACH AS THE FIELD'S OWN ROUTE WOULD TAKE IT, by that route's rules
+   * (`CustomFieldsService.checkValue`), not a copy of them: a value the route
+   * refuses (400) is not written, and the rest are. One value went into a
+   * one-value field unchecked, so a template saved in one project wrote text
+   * into another's Number field, an option its Dropdown does not define, or
+   * words into an Email field (`found-30-sep/template-values-written-unchecked`),
+   * and a duplicate wrote every value its original held, votes and files among
+   * them (`found-30-sep/duplicate-copies-votes-and-files`). ClickUp's help centre
+   * says nothing of a template applied where a field of its name takes another
+   * kind of value; nothing is written that the field itself would refuse.
    */
   private async materialiseTemplateValues(
     taskId: string,
@@ -645,7 +686,15 @@ export class TaskTemplatesService {
       if (!def) continue
       const value = fitTemplateValue(def, v.value, known)
       if (value === undefined) continue
-      rows.push({ taskId, fieldId: def.id, value: { v: value } })
+      const taken = await this.customFields.checkValue(workspaceId, taskId, def, value).then(
+        (checked) => ({ checked }),
+        (err: unknown) => {
+          if (err instanceof BadRequestException) return null
+          throw err
+        },
+      )
+      if (!taken) continue
+      rows.push({ taskId, fieldId: def.id, value: { v: taken.checked } })
     }
     if (rows.length === 0) return
     await this.db.insert(customFieldValues).values(rows)

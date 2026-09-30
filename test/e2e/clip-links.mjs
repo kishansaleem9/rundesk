@@ -604,7 +604,7 @@ try {
   const afterDeleteApi = await apiAs(null)(`/public/clips/${token ?? madeUp}`)
   const rowsLeft = token ? await sql`select id from clip_links where token = ${token}`.catch(() => [{}]) : [{}]
   chk(
-    removed.status < 300 && afterDelete.unavailable && !afterDelete.src && notFound(afterDeleteApi) && rowsLeft.length === 0,
+    removed.ok && afterDelete.unavailable && !afterDelete.src && notFound(afterDeleteApi) && rowsLeft.length === 0,
     'deleting the clip ends its link: the page says it is not available, the server answers 404, and the link is gone with it',
     `delete answered ${removed.status}; the page showed ${JSON.stringify(afterDelete)}; the API answered ${said(afterDeleteApi)}; ${rowsLeft.length} row(s) left`,
   )

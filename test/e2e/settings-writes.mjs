@@ -105,7 +105,7 @@ try {
   const inside = own ? await W(`/workspaces/${WS}`, { method: 'PATCH', body: { logoUrl: own } }) : { status: 0 }
   const logoAfterOwn = (await row()).logo_url
   chk(
-    outside.status === 400 && logoAfterOutside !== FOREIGN && presigned.status < 300 && inside.status === 200 && logoAfterOwn === own,
+    outside.status === 400 && logoAfterOutside !== FOREIGN && presigned.ok && inside.status === 200 && logoAfterOwn === own,
     'a logo at another host is refused and not saved — the workspace’s own upload is',
     `another host ${said(outside)}, saved: ${logoAfterOutside === FOREIGN}; presign ${said(presigned)}; the upload's address ${inside.status}, saved: ${logoAfterOwn === own}`,
   )

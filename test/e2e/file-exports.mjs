@@ -69,13 +69,13 @@ const download = async (method, route, body) => {
     headers: { authorization: `Bearer ${token}`, ...(body ? { 'content-type': 'application/json' } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   }).catch(() => null)
-  if (!res) return { status: 0, type: '', bytes: Buffer.alloc(0) }
-  return { status: res.status, type: res.headers.get('content-type') ?? '', bytes: Buffer.from(await res.arrayBuffer()) }
+  if (!res) return { status: 0, ok: false, type: '', bytes: Buffer.alloc(0) }
+  return { status: res.status, ok: res.ok, type: res.headers.get('content-type') ?? '', bytes: Buffer.from(await res.arrayBuffer()) }
 }
 const head = (bytes) => JSON.stringify(bytes.subarray(0, 60).toString())
 const said = (d) => `${d.status} ${d.type} ${d.bytes.length} bytes, starting ${head(d.bytes)}`
 const isPdfBytes = (bytes) => bytes.subarray(0, 5).toString() === '%PDF-'
-const isPdf = (d) => d.status < 300 && /application\/pdf/.test(d.type) && isPdfBytes(d.bytes)
+const isPdf = (d) => d.ok && /application\/pdf/.test(d.type) && isPdfBytes(d.bytes)
 /** A CSV's first row, its cells unquoted: the audit log quotes every cell, which is CSV all the same. */
 const headerOf = (bytes) => bytes.toString().split('\n')[0].split(',').map((c) => c.trim().replace(/^"(.*)"$/, '$1')).join(',')
 
@@ -103,7 +103,7 @@ try {
   const csv = await download('POST', `/workspaces/${WS}/reports/custom/export`, definition)
   const firstLine = csv.bytes.toString().split('\n')[0]
   chk(
-    csv.status < 300 && /text\/csv/.test(csv.type) && firstLine.startsWith('group,') && firstLine.includes('tasks-count'),
+    csv.ok && /text\/csv/.test(csv.type) && firstLine.startsWith('group,') && firstLine.includes('tasks-count'),
     'a custom report downloads as CSV: text/csv, its header row first',
     said(csv),
   )
@@ -122,7 +122,7 @@ try {
   chk(isPdf(contribution), 'the contribution report downloads as a PDF that begins %PDF-', said(contribution))
   const audit = await download('GET', `/workspaces/${WS}/audit-logs/export`)
   chk(
-    audit.status < 300 && /text\/csv/.test(audit.type) && headerOf(audit.bytes).startsWith('Timestamp,Actor,Action'),
+    audit.ok && /text\/csv/.test(audit.type) && headerOf(audit.bytes).startsWith('Timestamp,Actor,Action'),
     'the audit log downloads as CSV, its header row first',
     said(audit),
   )

@@ -688,6 +688,61 @@ export class CustomFieldsService {
       return inserted
     }
 
+    /*
+     * THE VALUE'S OWN RULES, asked by `checkValue` — which is also what a
+     * template or a duplicate asks before it writes a value onto a task
+     * (`found-30-sep/template-values-written-unchecked`), so the rules are
+     * stated once. Whatever it answers is what is stored.
+     */
+    value = await this.checkValue(workspaceId, taskId, def, value)
+
+    // Upsert (taskId, fieldId) is unique
+    const existing = await this.db
+      .select()
+      .from(customFieldValues)
+      .where(and(eq(customFieldValues.taskId, taskId), eq(customFieldValues.fieldId, fieldId)))
+      .limit(1)
+
+    if (existing[0]) {
+      const [row] = await this.db
+        .update(customFieldValues)
+        .set({ value: { v: value }, updatedAt: new Date() })
+        .where(eq(customFieldValues.id, existing[0].id))
+        .returning()
+      return row
+    }
+    const [row] = await this.db
+      .insert(customFieldValues)
+      .values({ taskId, fieldId, value: { v: value } })
+      .returning()
+    return row
+  }
+
+  /**
+   * WHAT A FIELD WILL HOLD, as its own route (`setValue`) asks it: the value's
+   * shape for the field's type, the options it defines, and — asked of the
+   * database — that people are members of this workspace, files are attached
+   * to this task, and tasks are in this workspace and are not the task itself.
+   * Throws the route's 400 for a value the field refuses; answers the value to
+   * store.
+   *
+   * One statement of the rules, for every writer of a value. A template and a
+   * duplicate write values onto a new task round the route, and wrote them
+   * unchecked: text into a Number field, an option a Dropdown does not define,
+   * an address an Email field refuses (`found-30-sep/template-values-written-unchecked`).
+   * `TaskTemplatesService` asks this, and writes only what it takes.
+   *
+   * Not the three the route answers first: a Progress (Auto) or a Formula
+   * value is refused before it gets here, and a vote is the caller's toggle,
+   * never a value that is handed in. A template and a duplicate never write
+   * any of the three, nor a Files value (`NOT_FROM_TEMPLATES`).
+   */
+  async checkValue(
+    workspaceId: string,
+    taskId: string,
+    def: { type: string; options: unknown },
+    value: FieldValue,
+  ): Promise<FieldValue> {
     // Type validation
     if (value !== null) {
       switch (def.type) {
@@ -878,26 +933,6 @@ export class CustomFieldsService {
         }
       }
     }
-
-    // Upsert (taskId, fieldId) is unique
-    const existing = await this.db
-      .select()
-      .from(customFieldValues)
-      .where(and(eq(customFieldValues.taskId, taskId), eq(customFieldValues.fieldId, fieldId)))
-      .limit(1)
-
-    if (existing[0]) {
-      const [row] = await this.db
-        .update(customFieldValues)
-        .set({ value: { v: value }, updatedAt: new Date() })
-        .where(eq(customFieldValues.id, existing[0].id))
-        .returning()
-      return row
-    }
-    const [row] = await this.db
-      .insert(customFieldValues)
-      .values({ taskId, fieldId, value: { v: value } })
-      .returning()
-    return row
+    return value
   }
 }

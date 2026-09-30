@@ -204,7 +204,7 @@ try {
   const gTabs2 = await createTabs(grantedPage)
   const gMenu2 = await spaceMenu(grantedPage)
   chk(
-    granted.status < 300 && gTabs2.includes('project') && gMenu2.includes('space-create-project'),
+    granted.ok && gTabs2.includes('project') && gMenu2.includes('space-create-project'),
     'once a custom role grants project.create, the member is offered Project in both menus',
     `the grant answered ${granted.status}; the Create menu offered ${JSON.stringify(gTabs2)}; the space's menu ${JSON.stringify(gMenu2)}`,
   )
@@ -217,7 +217,7 @@ try {
   const tplPage = await signIn(member)
   const after = await saveAsTemplate(tplPage)
   chk(
-    before === 0 && tplGranted.status < 300 && after === 1,
+    before === 0 && tplGranted.ok && after === 1,
     '"Save as template" is offered to a member only once a role grants template.manage',
     `before the grant: ${before}; the grant answered ${tplGranted.status}; after it: ${after}`,
   )

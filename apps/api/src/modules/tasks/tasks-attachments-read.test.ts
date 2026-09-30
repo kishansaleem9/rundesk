@@ -14,6 +14,8 @@ import { TasksService } from './tasks.service'
  *      `uploadedBy`, an id. The list and the row `addAttachment` returns carry
  *      `uploaderName`, read from `users` through a LEFT join, so a file whose
  *      uploader is gone is still listed.
+ *   3. `found-30-sep/comment-files-unordered` — the files each comment carries
+ *      (`listComments`), the third read of them, ask for the same order.
  *
  * `task-attachments` measures both on a lane with files written out of heap
  * order; these read the query each read asks for.
@@ -139,6 +141,30 @@ describe('TasksService.getTask — the task’s own rows, in the same order', ()
       '"task_attachments"."created_at" asc, "task_attachments"."id" asc',
       'the task’s own rows ask for no order, or another one than the list’s',
     )
+  })
+})
+
+/*
+ * `found-30-sep/comment-files-unordered` — the third read of a task's files,
+ * the files each comment carries, had no ORDER BY either.
+ */
+describe('TasksService.listComments — each comment’s files, in the same order', () => {
+  it('reads each comment’s files by created_at, then id, as the list does, and hands them on in that order', async () => {
+    const { db, calls } = makeDb({
+      task_attachments: [
+        { ...ROW, id: 'a2', commentId: 'c1' },
+        { ...ROW, id: 'a1', commentId: 'c1' },
+      ],
+    })
+    db.query.taskComments = { findMany: mock.fn(async () => [{ id: 'c1', body: 'two files' }]) }
+    const [comment] = (await makeService(db).listComments('t1')) as unknown as Array<{ attachments: Array<{ id: string }> }>
+    assert.equal(
+      orderOf(calls),
+      '"task_attachments"."created_at" asc, "task_attachments"."id" asc',
+      'a comment’s files ask for no order, or another one than the list’s: they come back in whatever order Postgres finds them',
+    )
+    // As the read gave them, not sorted again on the way out.
+    assert.deepEqual(comment.attachments.map((f) => f.id), ['a2', 'a1'])
   })
 })
 

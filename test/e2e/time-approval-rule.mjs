@@ -248,8 +248,8 @@ try {
   const afterDelegate = await sheet(bystander.id)
   chk(
     bystanderApproves.status === 403 && afterBystander?.status === 'submitted'
-      && managerApproves.status < 300 && afterManager?.status === 'approved' && afterManager?.approved_by_id === manager.id
-      && delegateApproves.status < 300 && afterDelegate?.status === 'approved' && afterDelegate?.approved_by_id === delegate.id,
+      && managerApproves.ok && afterManager?.status === 'approved' && afterManager?.approved_by_id === manager.id
+      && delegateApproves.ok && afterDelegate?.status === 'approved' && afterDelegate?.approved_by_id === delegate.id,
     'a member without time.approval.manage approves nothing (403, still submitted) — the manager approves, and so does the member granted it (each recorded as the approver)',
     `bystander ${said(bystanderApproves)} (${afterBystander?.status}); manager ${said(managerApproves)} (${afterManager?.status} by ${afterManager?.approved_by_id === manager.id ? 'them' : afterManager?.approved_by_id}); delegate ${said(delegateApproves)} (${afterDelegate?.status} by ${afterDelegate?.approved_by_id === delegate.id ? 'them' : afterDelegate?.approved_by_id})`,
   )
@@ -263,7 +263,7 @@ try {
   const afterDelegateRejects = await sheet(submitter.id)
   chk(
     bystanderRejects.status === 403 && afterBystanderRejects?.status === 'approved'
-      && delegateRejects.status < 300 && afterDelegateRejects?.status === 'rejected' && afterDelegateRejects?.rejection_reason === REASON && afterDelegateRejects?.approved_by_id === delegate.id,
+      && delegateRejects.ok && afterDelegateRejects?.status === 'rejected' && afterDelegateRejects?.rejection_reason === REASON && afterDelegateRejects?.approved_by_id === delegate.id,
     'a member without the key sends nothing back (403, unchanged) — the member granted it does, and the reason is kept',
     `bystander ${said(bystanderRejects)} (${afterBystanderRejects?.status}); delegate ${said(delegateRejects)} (${JSON.stringify(afterDelegateRejects)})`,
   )

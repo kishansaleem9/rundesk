@@ -139,7 +139,7 @@ try {
     : { status: 0 }
   const ownBytes = await bytesAt(ownAttach.data?.url)
   chk(
-    ownAttach.status < 300 && ownBytes !== null && ownBytes.equals(PNG),
+    ownAttach.ok && ownBytes !== null && ownBytes.equals(PNG),
     'while this channel’s own upload is recorded, and its URL serves the bytes that were put',
     `presign ${chatPresign.status}, PUT ${chatPut}, record ${said(ownAttach)}; the URL served ` +
       `${ownBytes === null ? 'nothing' : `${ownBytes.length} other byte(s)`}`,
@@ -196,7 +196,7 @@ try {
     : { status: 0 }
   const emojiBytes = await bytesAt(ownEmoji.data?.imageUrl)
   chk(
-    ownEmoji.status < 300 && emojiBytes !== null && emojiBytes.equals(PNG),
+    ownEmoji.ok && emojiBytes !== null && emojiBytes.equals(PNG),
     'while the workspace’s own upload becomes an emoji whose image serves its bytes',
     `presign ${emojiPresign.status}, PUT ${emojiPut}, add ${said(ownEmoji)}`,
   )
@@ -258,7 +258,7 @@ try {
     ? await A(`/workspaces/${WA}/meetings/${round.data.id}`, { method: 'PATCH', body: { notes: 'edited', recordingUrl: handedOut } })
     : { status: 0 }
   chk(
-    typeof handedOut === 'string' && /^https?:\/\//.test(handedOut) && edited.status < 300 &&
+    typeof handedOut === 'string' && /^https?:\/\//.test(handedOut) && edited.ok &&
       (await meetingRow(ROUND))?.recording_url === CALL_KEY,
     'the signed URL a meeting hands out, sent back with an edit, leaves the durable key in place',
     `the GET handed out ${JSON.stringify(handedOut ?? null).slice(0, 80)}; the edit answered ${said(edited)} and the ` +
@@ -329,7 +329,7 @@ try {
     ? await A(`/workspaces/${WA}/calls/${CALL}/recording/attach`, { method: 'POST', body: { storageKey: REC_KEY } })
     : { status: 0 }
   chk(
-    attached.status < 300 && REC_KEY !== null && (await recordingRows(REC_KEY)) === 1,
+    attached.ok && REC_KEY !== null && (await recordingRows(REC_KEY)) === 1,
     'while the key the call’s own presign minted is attached',
     `upload-url answered ${said(upload)}; attaching answered ${said(attached)}`,
   )
@@ -402,7 +402,7 @@ try {
     : { status: 0 }
   const ownShared = await servedBy(ownShare)
   chk(
-    ownShare.status < 300 && ownShared !== null && ownShared.equals(CLIP),
+    ownShare.ok && ownShared !== null && ownShared.equals(CLIP),
     'while the workspace’s own clip is shared, and its link serves the clip',
     `presign ${said(clipPresign)}, PUT ${clipPut}, share ${said(ownShare)}; the link served ` +
       `${ownShared === null ? 'nothing' : `${ownShared.length} other byte(s)`}`,
@@ -439,7 +439,7 @@ try {
   const attachedBytes = await bytesAt(ownClipAttach.data?.url)
   const afterOwn = await aTaskFiles()
   chk(
-    ownClipAttach.status < 300 && attachedBytes !== null && attachedBytes.equals(CLIP) && afterOwn.length === 1 &&
+    ownClipAttach.ok && attachedBytes !== null && attachedBytes.equals(CLIP) && afterOwn.length === 1 &&
       afterOwn[0].storage_key.startsWith(`workspaces/${WA}/tasks/${aTask}/attachments/`),
     'while one of the workspace’s own clips is attached as the task’s own copy, which serves the clip',
     `attach answered ${said(ownClipAttach)}; the task holds ${JSON.stringify(afterOwn.map((r) => r.storage_key)).slice(0, 160)}; ` +
@@ -461,7 +461,7 @@ try {
     : { status: 0 }
   const listedAfter = OWN_CLIP ? await libraryHas(OWN_CLIP) : true
   chk(
-    listedBefore && ownRemove.status < 300 && !listedAfter,
+    listedBefore && ownRemove.ok && !listedAfter,
     'while the workspace’s own clip is deleted, and leaves the library',
     `the library ${listedBefore ? 'listed' : 'did not list'} it; delete answered ${said(ownRemove)}; ` +
       `afterwards it is ${listedAfter ? 'still listed' : 'gone'}`,
@@ -497,7 +497,7 @@ try {
       })
     : { status: 0 }
   chk(
-    misnamed.length === 0 && unnamedRecord.status < 300 && unnamedRecord.data?.fileName === 'file',
+    misnamed.length === 0 && unnamedRecord.ok && unnamedRecord.data?.fileName === 'file',
     'an upload with no file name is given a safe one on every route that names an object — not a 500',
     `${misnamed.map(([what, r]) => `${what} answered ${said(r)}`).join('; ') || 'every presign named its key'}; ` +
       `the chat record (PUT ${recPut}) answered ${said(unnamedRecord)}`,

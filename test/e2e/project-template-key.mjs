@@ -124,9 +124,9 @@ try {
   const plainSaves = await save(plain, `${TAG} by the plain member`, open.projectId)
   const managerSaves = await save(manager, `${TAG} by the manager`, open.projectId)
   chk(
-    designerSaves.status < 300 && (await templatesNamed(`${TAG} by the designer`)).length === 1
+    designerSaves.ok && (await templatesNamed(`${TAG} by the designer`)).length === 1
       && plainSaves.status === 403 && (await templatesNamed(`${TAG} by the plain member`)).length === 0
-      && managerSaves.status < 300,
+      && managerSaves.ok,
     'a member granted template.manage saves a project as a template, and so does a manager — a plain member saves none (403)',
     `designer ${said(designerSaves)}; plain ${said(plainSaves)}; manager ${said(managerSaves)}`,
   )
@@ -154,7 +154,7 @@ try {
   const designerDeletes = madeId ? await designer.as(`/workspaces/${WS}/project-templates/${madeId}`, { method: 'DELETE' }) : { status: 0 }
   const left = madeId ? (await sql`select count(*)::int as n from project_templates where id = ${madeId}`)[0].n : -1
   chk(
-    plainMakes.status === 403 && designerMakes.status < 300 && plainDeletes.status === 403 && designerDeletes.status < 300 && left === 0,
+    plainMakes.status === 403 && designerMakes.ok && plainDeletes.status === 403 && designerDeletes.ok && left === 0,
     'a plain member neither makes nor deletes a template (403 each) — the member granted template.manage makes one and deletes it',
     `plain makes ${said(plainMakes)}, deletes ${said(plainDeletes)}; designer makes ${said(designerMakes)}, deletes ${said(designerDeletes)}; ${left} left`,
   )

@@ -77,7 +77,7 @@ try {
   const found = await A(`/search/${WS}?q=${q(`${TAG} cut 50%`)}&types=task`)
   const titles = (found.data ?? []).map((h) => h.title ?? h.name).filter(Boolean)
   chk(
-    found.status < 300 && titles.includes(PCT) && !titles.includes(NUM),
+    found.ok && titles.includes(PCT) && !titles.includes(NUM),
     'the workspace search for “50%” finds the task with 50% in its title and not the one with 500',
     `${said(found)}; found ${JSON.stringify(titles)}`,
   )
@@ -107,7 +107,7 @@ try {
   const browsed = await A(`/workspaces/${WS}/project-templates/browse?q=${q(`${TAG} path a\\`)}`)
   const names = (browsed.data?.items ?? browsed.data?.templates ?? browsed.data ?? []).map?.((t) => t.name) ?? []
   chk(
-    tmpl.status < 300 && browsed.status < 300 && names.includes(SLASH),
+    tmpl.ok && browsed.ok && names.includes(SLASH),
     'a template search ending in a backslash finds the template whose name ends in it',
     `made ${said(tmpl)}; ${said(browsed)}; found ${JSON.stringify(names)}`,
   )
@@ -118,7 +118,7 @@ try {
   const rows = act.data?.items ?? act.data ?? []
   const actTitles = [...new Set(rows.map((r) => r.taskTitle ?? r.task?.title ?? r.title).filter(Boolean))]
   chk(
-    act.status < 300 && actTitles.includes(PCT) && !actTitles.includes(NUM),
+    act.ok && actTitles.includes(PCT) && !actTitles.includes(NUM),
     'a person’s activity searched for “50%” lists the task with 50% and not the one with 500',
     `${said(act)}; found ${JSON.stringify(actTitles)}`,
   )
@@ -134,7 +134,7 @@ try {
   const dir = await A(`/organizations/users?q=${q(`${TAG} fifty 50%`)}`)
   const dirNames = (dir.data?.items ?? dir.data?.users ?? dir.data ?? []).map?.((u) => u.displayName ?? u.name) ?? []
   chk(
-    dir.status < 300 && dirNames.includes(people[0]) && !dirNames.includes(people[1]),
+    dir.ok && dirNames.includes(people[0]) && !dirNames.includes(people[1]),
     'the platform user directory searched for “50%” finds the person with 50% in their name and not the one with 500',
     `${said(dir)}; found ${JSON.stringify(dirNames)}`,
   )

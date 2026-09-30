@@ -134,7 +134,7 @@ try {
   const cAssign = await M(`/tasks/${comment.mine}/assignees`, { method: 'POST', body: { userId: colleague.id } })
   const vAssign = await M(`/tasks/${view.mine}/assignees`, { method: 'POST', body: { userId: colleague.id } })
   chk(
-    cAssign.status < 300 && (await assignees(comment.mine)).includes(colleague.id) &&
+    cAssign.ok && (await assignees(comment.mine)).includes(colleague.id) &&
       vAssign.status === 403 && !(await assignees(view.mine)).includes(colleague.id),
     'an assignee in a “comment” space may add a colleague to their task — in a “view only” space not (403, not added)',
     `comment ${said(cAssign)}; view only ${said(vAssign)}`,

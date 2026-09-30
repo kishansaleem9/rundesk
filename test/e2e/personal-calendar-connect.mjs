@@ -108,7 +108,7 @@ try {
   const mine = await member.call(PERSONAL(WS), { method: 'POST' })
   const mineState = stateOf(mine.data?.authUrl)
   chk(
-    mine.status < 300 && /accounts\.google\.com/.test(mine.data?.authUrl ?? '') &&
+    mine.ok && /accounts\.google\.com/.test(mine.data?.authUrl ?? '') &&
       mineState?.userId === member.id && mineState?.workspaceId === WS && mineState?.personal === true,
     'a member is answered with Google’s consent address, for their own calendar — its signed state names them, this workspace, and a personal grant',
     `${mine.status}; the state ${JSON.stringify(mineState && { ...mineState, raw: undefined })}`,
@@ -119,7 +119,7 @@ try {
   const theirs = await guest.call(PERSONAL(WS), { method: 'POST' })
   const theirState = stateOf(theirs.data?.authUrl)
   chk(
-    theirs.status < 300 && theirState?.userId === guest.id && theirState?.personal === true,
+    theirs.ok && theirState?.userId === guest.id && theirState?.personal === true,
     'a guest may connect their own calendar too — ClickUp gives guests and limited members the calendar integrations',
     `${theirs.status}; the state ${JSON.stringify(theirState && { ...theirState, raw: undefined })}`,
   )
@@ -130,7 +130,7 @@ try {
   const adminWs = await A(WORKSPACE(WS), { method: 'POST' })
   const adminWsState = stateOf(adminWs.data?.authUrl)
   chk(
-    memberWs.status === 403 && adminWs.status < 300 && adminWsState?.personal === undefined,
+    memberWs.status === 403 && adminWs.ok && adminWsState?.personal === undefined,
     'the workspace’s own calendar connection is still the admin’s: the member is refused it, and the admin’s grant is not a personal one',
     `the member ${memberWs.status}; the admin ${adminWs.status}, personal ${adminWsState?.personal}`,
   )
@@ -141,7 +141,7 @@ try {
   // Refused as the member guard refuses anybody else: 403, or 404 where the
   // workspace is not theirs to know of. Either way, no grant is handed out.
   chk(
-    (outside.status === 403 || outside.status === 404) && !outside.data?.authUrl && mine.status < 300,
+    (outside.status === 403 || outside.status === 404) && !outside.data?.authUrl && mine.ok,
     'somebody outside the workspace cannot start a grant in it — its member can',
     `outside ${outside.status}${outside.data?.authUrl ? ', handed a consent address' : ''}; the member ${mine.status}`,
   )

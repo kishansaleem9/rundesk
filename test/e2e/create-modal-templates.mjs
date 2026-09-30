@@ -52,6 +52,16 @@
  * template saved with "Import everything" includes "all task properties,
  * fields, and settings", and "Custom Fields" leaves out only Formula Fields.
  *
+ * AND ONE VALUE IS WRITTEN ONLY WHERE ITS FIELD'S ROUTE WOULD TAKE IT,
+ * `found-30-sep/template-values-written-unchecked`. A template names its fields
+ * by name, and applied in another project whose field of that name is a Number,
+ * a Dropdown without the option or an Email field, it wrote the words, the
+ * option and the non-address in anyway. Each is refused by that field's own
+ * route (400); applied, each is now left unset, while a value the field can
+ * hold is written. ClickUp's help centre says nothing of a template applied
+ * where a field of the same name is of another kind, so the route's rule is
+ * the one kept: nothing is written that the field itself would refuse.
+ *
  *   node test/e2e/create-modal-templates.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -68,7 +78,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". EXACT, so a section that stopped early is a failure. */
-const EXPECTED_CHECKS = 20
+const EXPECTED_CHECKS = 26
 
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
 const REPO = path.resolve(import.meta.dirname, '../..')
@@ -644,7 +654,81 @@ try {
     `making it answered ${said(restored)}; ${restoredId ? `its fields hold ${JSON.stringify(restoredFields)}` : 'no task so titled'}; the source's were ${JSON.stringify(LISTS)}`,
   )
 
-  // ══ 20. A MEMBER, WITHOUT template.manage ════════════════════════════════
+  // ══ 20–22. ONE VALUE, WHERE THE FIELD OF THAT NAME TAKES ANOTHER ═════════
+  console.log('\n▶ a template’s one-value fields, applied where the field of that name takes something else')
+  /*
+   * `found-30-sep/template-values-written-unchecked`. A template names its
+   * fields by NAME and is applied in any project, where a field of that name
+   * may be of another type or define other options. A list was checked against
+   * the field it lands in; one value was written into it whatever it was. The
+   * field's own route (`PUT …/custom-fields/:fieldId`) refuses each of these
+   * with 400, and asked here of a task in the same project, it says so.
+   *
+   * A second project, with four fields named as the template's: an Estimate
+   * that is a Number where the template holds words, a Severity Dropdown
+   * without the template's option, a Contact that is an Email field where the
+   * template holds no address, and a Note that is Text, as the template's is.
+   * The Note is written onto the task, and every check asks for it: a field
+   * left unset then says what it was refused for, not that nothing was written.
+   */
+  const OTHER_PROJECT = must('make the second project', await A('/projects', { method: 'POST', body: { spaceId: SPACE, name: `${TAG} other project` } }))?.id
+  const OTHER_LIST = must('make its list', await A('/lists', { method: 'POST', body: { projectId: OTHER_PROJECT, name: `${TAG} other list` } }))?.id
+  if (!OTHER_PROJECT || !OTHER_LIST) throw new Error('the second project or its list came back without an id')
+  const ESTIMATE = `Estimate ${TAG}`
+  const SEVERITY = `Severity ${TAG}`
+  const CONTACT = `Contact ${TAG}`
+  const NOTE = `Note ${TAG}`
+  const OTHER_FIELDS = [
+    [ESTIMATE, { type: 'number' }],
+    [SEVERITY, { type: 'dropdown', options: [{ label: 'Low', value: 'low' }, { label: 'High', value: 'high' }] }],
+    [CONTACT, { type: 'email' }],
+    [NOTE, { type: 'text' }],
+  ]
+  const otherField = {}
+  for (const [name, def] of OTHER_FIELDS) {
+    otherField[name] = must(`make the field ${name}`, await A(`/workspaces/${WS}/projects/${OTHER_PROJECT}/custom-fields`, { method: 'POST', body: { name, ...def } }))?.id
+  }
+  const HELD = { [ESTIMATE]: 'about a week', [SEVERITY]: 'critical', [CONTACT]: 'the front desk', [NOTE]: `Kept ${TAG}` }
+  const T3_ID = must('make the template applied elsewhere', await A(`/workspaces/${WS}/task-templates`, {
+    method: 'POST',
+    body: { name: `Elsewhere ${TAG}`, payload: { title: `Elsewhere ${TAG}`, customFieldValues: Object.entries(HELD).map(([fieldName, value]) => ({ fieldName, value })) } },
+  }))?.id
+  // What the field's own route answers each value, asked on a task of that project.
+  const PROBE = must('make the task the route is asked on', await A('/tasks', { method: 'POST', body: { listId: OTHER_LIST, title: `Probe ${TAG}` } }))?.id
+  if (!T3_ID || !PROBE) throw new Error('the template or the probe task came back without an id')
+  const routeSaid = {}
+  for (const [name] of OTHER_FIELDS) {
+    routeSaid[name] = (await A(`/workspaces/${WS}/tasks/${PROBE}/custom-fields/${otherField[name]}`, { method: 'PUT', body: { value: HELD[name] } })).status
+  }
+  const APPLIED = `Applied elsewhere ${TAG}`
+  const applied = await A(`/workspaces/${WS}/task-templates/${T3_ID}/instantiate`, { method: 'POST', body: { listId: OTHER_LIST, titleOverride: APPLIED } })
+  const appliedId = (await madeTasks(APPLIED))[0]?.id ?? null
+  /** The values the made task holds, by field name, read from the rows. */
+  const appliedFields = appliedId
+    ? Object.fromEntries((await sql`select d.name, v.value from custom_field_values v join custom_field_definitions d on d.id = v.field_id where v.task_id = ${appliedId}`)
+      .map((r) => [r.name, (typeof r.value === 'string' ? JSON.parse(r.value) : r.value)?.v ?? null]))
+    : {}
+  const noteWritten = appliedFields[NOTE] === HELD[NOTE]
+  const appliedSaid = `applying it answered ${said(applied)}; ${appliedId ? `the task holds ${JSON.stringify(appliedFields)}` : 'no task so titled'}`
+  const leftUnset = (name) =>
+    applied.status >= 200 && applied.status < 300 && !!appliedId && noteWritten && !(name in appliedFields) && routeSaid[name] === 400
+  chk(
+    leftUnset(ESTIMATE),
+    'a template’s words, applied where the field of that name is a Number, leave that field unset — as the field’s own route refuses them (400), read by SQL',
+    `the route answered ${routeSaid[ESTIMATE]} for ${JSON.stringify(HELD[ESTIMATE])}; ${appliedSaid}`,
+  )
+  chk(
+    leftUnset(SEVERITY),
+    'and its option, where that field is a Dropdown without it, leaves the Dropdown unset — as its route refuses it (400)',
+    `the route answered ${routeSaid[SEVERITY]} for ${JSON.stringify(HELD[SEVERITY])}; ${appliedSaid}`,
+  )
+  chk(
+    leftUnset(CONTACT),
+    'and words that are no address, where that field is an Email field, leave it unset — as its route refuses them (400) — while the Note, a Text field there too, is written',
+    `the route answered ${routeSaid[CONTACT]} for ${JSON.stringify(HELD[CONTACT])} and ${routeSaid[NOTE]} for the Note; ${appliedSaid}`,
+  )
+
+  // ══ 23. A MEMBER, WITHOUT template.manage ════════════════════════════════
   console.log('\n▶ a member without template.manage')
   const memberCtx = await browser.newContext({ viewport: { width: 1500, height: 1000 }, serviceWorkers: 'block' })
   const mpage = await memberCtx.newPage()
@@ -669,6 +753,57 @@ try {
       `their save answered ${said(refused)}`,
   )
   await memberCtx.close().catch(() => {})
+
+  // ══ A TASK THE CALLER MAY NOT OPEN ═══════════════════════════════════════
+  console.log('\n▶ a task its caller may not open is neither duplicated nor saved as a template')
+  /*
+   * `found-30-sep/duplicate-reads-what-its-caller-cannot`. Duplicate asked
+   * membership and the right to add to the list, and Save as template asked
+   * the template key; neither asked whether the caller may open the task. A
+   * member refused a private task duplicated it (201) and read its words from
+   * the copy. ClickUp copies what you can see: a task you cannot open is not
+   * in front of you to duplicate. Refused as a task that is not there (404),
+   * as every read of a task one may not open is.
+   */
+  const SECRET = `Secret ${TAG}`
+  const SECRET_WORDS = `Hidden words ${TAG}`
+  const secretId = must('make the task to hide', await A('/tasks', { method: 'POST', body: { listId: LIST, title: SECRET, description: SECRET_WORDS } }))?.id
+  if (!secretId) throw new Error('the private task came back without an id')
+  await sql`update tasks set visibility = 'private' where id = ${secretId}`
+  const unseen = await M(`/tasks/${secretId}`)
+  const dup = await M(`/workspaces/${WS}/task-templates/duplicate/${secretId}`, { method: 'POST', body: {} })
+  const copies = await sql`select id, description from tasks where list_id = ${LIST} and title = ${`${SECRET} (copy)`}`
+  chk(
+    unseen.status >= 400 && dup.status === 404 && copies.length === 0 && !JSON.stringify(dup.data ?? {}).includes(SECRET_WORDS),
+    'a member refused a private task cannot duplicate it: 404, no copy is made, and none of its words come back',
+    `reading it answered ${unseen.status}; duplicating it answered ${said(dup)}; ${copies.length} cop${copies.length === 1 ? 'y' : 'ies'} made` +
+      `${copies[0] ? `, holding “${copies[0].description}”` : ''}`,
+  )
+  /* The same member, granted Manage templates, as `project-template-key` grants it. */
+  const [memberRow] = await sql`select id from workspace_members where workspace_id = ${WS} and user_id = ${memberId}`
+  const keyRole = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} templates`, permissions: ['template.manage'] } })
+  const granted = keyRole.data?.id && memberRow
+    ? await A(`/workspaces/${WS}/members/${memberRow.id}/roles/${keyRole.data.id}`, { method: 'POST', body: {} })
+    : { status: 0, error: { message: 'no role or no membership to grant it on' } }
+  if (granted.status >= 300) throw new Error(`could not grant the member Manage templates: ${said(keyRole)} ${said(granted)}`)
+  const STOLEN = `Saved from a hidden task ${TAG}`
+  const save = await M(`/workspaces/${WS}/task-templates/from-task/${secretId}`, { method: 'POST', body: { name: STOLEN } })
+  const savedHidden = await sql`select id, payload from task_templates where workspace_id = ${WS} and name = ${STOLEN}`
+  chk(
+    save.status === 404 && savedHidden.length === 0 && !JSON.stringify(save.data ?? {}).includes(SECRET_WORDS),
+    'and granted Manage templates, cannot save it as a template: 404, and no template holds it',
+    `saving it answered ${said(save)}; ${savedHidden.length} template(s) so named${savedHidden[0] ? `, holding “${savedHidden[0].payload?.description ?? ''}”` : ''}`,
+  )
+  /* And a task they may open, they duplicate and save, so the refusals above are about the task. */
+  const OPEN = `Open ${TAG}`
+  const openId = must('make a task anybody here may open', await A('/tasks', { method: 'POST', body: { listId: LIST, title: OPEN } }))?.id
+  const dupOpen = await M(`/workspaces/${WS}/task-templates/duplicate/${openId}`, { method: 'POST', body: {} })
+  const saveOpen = await M(`/workspaces/${WS}/task-templates/from-task/${openId}`, { method: 'POST', body: { name: `Saved from an open task ${TAG}` } })
+  chk(
+    dupOpen.status >= 200 && dupOpen.status < 300 && saveOpen.status >= 200 && saveOpen.status < 300,
+    'while a task they may open, the same member duplicates and saves as a template',
+    `duplicating it answered ${said(dupOpen)}; saving it answered ${said(saveOpen)}`,
+  )
 } catch (err) {
   failed += 1
   console.log(`  \x1b[31mFAIL\x1b[0m threw: ${String(err?.message ?? err).split('\n')[0]}`)

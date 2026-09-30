@@ -326,7 +326,7 @@ try {
   const cSlack = await connector.as(`/workspaces/${WS}/integrations/slack`, { method: 'POST', body: { webhookUrl: SLACK_URL, channelName: '#granted' } })
   const afterGranted = await slackRows()
   chk(
-    pSlack.status === 403 && afterPlain === 0 && cSlack.status < 300 && afterGranted === 1,
+    pSlack.status === 403 && afterPlain === 0 && cSlack.ok && afterGranted === 1,
     'Slack is connected by the holder of integrations.manage, as the catalog files it — a plain member is refused (403, none made)',
     `the plain member ${pSlack.status} (${afterPlain} made); the holder ${cSlack.status} (${afterGranted} made)`,
   )

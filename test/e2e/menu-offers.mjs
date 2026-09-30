@@ -143,7 +143,7 @@ try {
   const own = await caps(member.as, paths.ownList)
   const ownRename = await member.as(`/lists/${ownList}`, { method: 'PUT', body: { name: `${TAG} the member’s list, renamed` } })
   chk(
-    own?.manage === true && own?.delete === true && ownRename.status < 300,
+    own?.manage === true && own?.delete === true && ownRename.ok,
     'on the list they made the capabilities offer the member renaming and deleting it, and the rename route agrees (200)',
     `capabilities ${JSON.stringify(own)}; rename ${said(ownRename)}`,
   )

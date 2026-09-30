@@ -123,7 +123,7 @@ try {
   const openValue = await valueOf(open.task, open.field)
   chk(
     refused(hiddenPut) && JSON.stringify(hiddenValue).includes(`${TAG} hidden value`) &&
-      openPut.status < 300 && JSON.stringify(openValue).includes('edited'),
+      openPut.ok && JSON.stringify(openValue).includes('edited'),
     'a member cannot set a field on a task of a space they are refused (404, the value unchanged) — while they set one on an open task',
     `the refused task answered ${said(hiddenPut)} and now holds ${JSON.stringify(hiddenValue)}; the open one ${said(openPut)}, ${JSON.stringify(openValue)}`,
   )
@@ -136,7 +136,7 @@ try {
     select count(*)::int as n from custom_field_definitions where project_id = ${hidden.project} and name like ${`${TAG} member-made%`}`
   const defineOpen = await M(`/workspaces/${WS}/projects/${open.project}/custom-fields`, { method: 'POST', body: { name: `${TAG} member-made, open`, type: 'text' } })
   chk(
-    refused(defineOnProject) && refused(defineFromTask) && strayDefs === 0 && defineOpen.status < 300,
+    refused(defineOnProject) && refused(defineFromTask) && strayDefs === 0 && defineOpen.ok,
     'a member cannot define a field in a project they are refused, from the project or from its task (404 each, none made) — while they define one in an open project',
     `from the project ${said(defineOnProject)}, from the task ${said(defineFromTask)}, fields made ${strayDefs}; in the open project ${said(defineOpen)}`,
   )
@@ -149,7 +149,7 @@ try {
   const renameOpen = await M(`/workspaces/${WS}/custom-fields/${open.field}`, { method: 'PATCH', body: { name: `${TAG} open field, renamed` } })
   chk(
     refused(renameHidden) && refused(deleteHidden) && hiddenName === `${TAG} hidden field` &&
-      renameOpen.status < 300 && (await fieldNamed(open.field)) === `${TAG} open field, renamed`,
+      renameOpen.ok && (await fieldNamed(open.field)) === `${TAG} open field, renamed`,
     'a member cannot rename or delete a field of a project they are refused (404 each, the field untouched) — while they rename an open one',
     `rename ${said(renameHidden)}, delete ${said(deleteHidden)}; the field is now ${JSON.stringify(hiddenName)}; renaming the open one ${said(renameOpen)}`,
   )

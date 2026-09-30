@@ -115,7 +115,7 @@ try {
   const [{ n: strayFavourites }] = await sql`
     select count(*)::int as n from favorites where user_id = ${memberId} and entity_id in ${sql(HIDDEN.map(([, id]) => id))}`
   chk(
-    hiddenToggles.every((r) => r.status === 404) && strayFavourites === 0 && openToggles.every((r) => r.status < 300),
+    hiddenToggles.every((r) => r.status === 404) && strayFavourites === 0 && openToggles.every((r) => r.ok),
     'a member cannot favourite anything of a space they are refused, nor a channel closed to them (404 each, no row) — while they favourite the open ones',
     `the refused ones answered ${HIDDEN.map((item, i) => `${label(item)} ${hiddenToggles[i].status}`).join(', ')}, rows made ${strayFavourites}; ` +
       `the open ones ${OPEN.map((item, i) => `${label(item)} ${openToggles[i].status}`).join(', ')}`,
@@ -142,7 +142,7 @@ try {
   for (const item of HIDDEN) adminToggles.push(await toggle(A, item))
   const adminList = await A(`/workspaces/${WS}/favorites`)
   chk(
-    adminToggles.every((r) => r.status < 300) && namesHidden(adminList).length === HIDDEN.length,
+    adminToggles.every((r) => r.ok) && namesHidden(adminList).length === HIDDEN.length,
     'while the admin favourites every one of them and reads each by name',
     `the admin's toggles answered ${adminToggles.map((r) => r.status).join(', ')}; the list names ${namesHidden(adminList).length} of ${HIDDEN.length}`,
   )
@@ -165,7 +165,7 @@ try {
   const otherList = await make('/lists', { projectId: otherProject, name: `${TAG} other list` }, 'the other list')
   const FOREIGN = await make('/tasks', { listId: otherList, title: `${TAG} foreign task` }, 'the other workspace’s task')
   const outsider = await M(`/workspaces/${WS2}`)
-  if (outsider.status < 400) throw new Error(`the member could read the other workspace (${said(outsider)}), so nothing here would mean anything`)
+  if (outsider.ok) throw new Error(`the member could read the other workspace (${said(outsider)}), so nothing here would mean anything`)
 
   const startsAt = new Date(Date.now() + 60 * 60 * 1000).toISOString()
   const block = (taskId) => M(`/planner/${WS}/blocks`, { method: 'POST', body: { taskId, startsAt } })
@@ -175,7 +175,7 @@ try {
   const [{ n: strayBlocks }] = await sql`
     select count(*)::int as n from task_time_blocks where user_id = ${memberId} and task_id in (${FOREIGN}, ${hidden.task})`
   chk(
-    onForeign.status === 404 && onHidden.status === 404 && strayBlocks === 0 && onOpen.status < 300,
+    onForeign.status === 404 && onHidden.status === 404 && strayBlocks === 0 && onOpen.ok,
     'a planner block cannot point at a task of another workspace, nor of a space the member is refused (404 each, no block) — while it points at an open task',
     `on the other workspace's task ${said(onForeign)}, on the refused one ${said(onHidden)}, blocks made ${strayBlocks}; on the open task ${said(onOpen)}`,
   )
@@ -220,7 +220,7 @@ try {
   const [{ n: straySprintRows }] = await sql`
     select count(*)::int as n from sprint_tasks where sprint_id = ${SPRINT} and task_id in (${FOREIGN}, ${hidden.task})`
   chk(
-    sprintForeign.status === 404 && sprintHidden.status === 404 && straySprintRows === 0 && sprintOpen.status < 300,
+    sprintForeign.status === 404 && sprintHidden.status === 404 && straySprintRows === 0 && sprintOpen.ok,
     'a sprint cannot take a task of another workspace, nor of a space the member is refused (404 each, not added) — while it takes an open task',
     `adding the other workspace's task answered ${said(sprintForeign)}, the refused one ${said(sprintHidden)}, rows made ${straySprintRows}; the open one ${said(sprintOpen)}`,
   )

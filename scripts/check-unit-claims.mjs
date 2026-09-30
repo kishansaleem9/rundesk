@@ -32,6 +32,7 @@ import { execFileSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
 import { findInTree } from './lib/find-in-tree.mjs'
 import { aimedAt, PATCHES_ROOT } from './lib/patch-root.mjs'
+import { treeState, treeMoved } from './lib/tree-state.mjs'
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const BREAKS = join(ROOT, 'test/e2e/breaks')
@@ -106,6 +107,16 @@ const elsewhere = resolve(ROOT) !== PATCHES_ROOT && existsSync(join(PATCHES_ROOT
 const mainStatus = () =>
   execFileSync('git', ['status', '--porcelain', '--', 'apps', 'packages'], { cwd: PATCHES_ROOT, encoding: 'utf8' })
 const mainBefore = elsewhere ? mainStatus() : null
+
+/*
+ * THE TREE AS THIS RUN FOUND IT, to compare with the tree it leaves
+ * (`found-30-sep/unit-claims-refuse-an-uncommitted-batch`). It asked for a
+ * clean apps and packages at the end, so every batch not yet committed failed
+ * here whatever the claims did, and a patch left applied on top of such a
+ * batch read the same as the batch alone. Now it asks whether anything moved.
+ */
+let treeBefore = null
+try { treeBefore = treeState(ROOT) } catch { /* not a git checkout; the copies are still written back */ }
 
 for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
   const patch = join(BREAKS, f)
@@ -201,12 +212,11 @@ for (const f of readdirSync(BREAKS).filter((x) => x.endsWith('.py')).sort()) {
 }
 
 // THE TREE GOES BACK EXACTLY AS IT WAS, and this says so rather than assuming.
-let dirty = ''
+let moved = ''
+let treeAfter = null
 try {
-  dirty = execFileSync('git', ['status', '--porcelain', '--', 'apps', 'packages'], {
-    cwd: ROOT,
-    encoding: 'utf8',
-  }).trim()
+  treeAfter = treeState(ROOT)
+  moved = treeBefore ? treeMoved(treeBefore, treeAfter) : ''
 } catch {
   /* not a git checkout; the copies were still written back */
 }
@@ -230,9 +240,9 @@ if (elsewhere) {
     bad = 1
   }
 }
-if (dirty) {
+if (moved) {
   console.error(
-    `\n[unit-claims] the working tree is NOT back as it was:\n${dirty}\n` +
+    `\n[unit-claims] the working tree is NOT back as it was: ${moved}:\n${treeAfter?.status || '(now clean)'}\n` +
       'Restore these before committing — a break patch left applied is what ' +
       '`check-no-break-patches.mjs` exists to catch.',
   )

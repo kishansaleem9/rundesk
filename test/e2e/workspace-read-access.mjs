@@ -461,7 +461,7 @@ try {
   const everyBucket = (res) => ['done', 'active', 'overdue', 'blocked'].flatMap((name) => bucket(res, name))
   const memberHeard = everyBucket(memberStandup)
   chk(
-    memberStandup.status < 300 && !memberHeard.includes(HIDDEN) && !memberHeard.includes(PRIVATE) &&
+    memberStandup.ok && !memberHeard.includes(HIDDEN) && !memberHeard.includes(PRIVATE) &&
       !text(memberStandup).includes(`${TAG} in the private space`) && !text(memberStandup).includes(`${TAG} a private task`) &&
       bucket(memberStandup, 'active').includes(OPEN) && bucket(memberStandup, 'blocked').includes(OPEN) &&
       bucket(adminStandup, 'active').includes(HIDDEN) && bucket(adminStandup, 'blocked').includes(HIDDEN) &&
@@ -496,7 +496,7 @@ try {
   const [{ n: refusedRows }] = await sql`
     select count(*)::int as n from user_priorities where user_id = ${M.id} and task_id in (${HIDDEN}, ${PRIVATE})`
   chk(
-    pinHidden.status === 404 && pinPrivate.status === 404 && refusedRows === 0 && pinOpen.status < 300 && pinOpen.data?.taskId === OPEN,
+    pinHidden.status === 404 && pinPrivate.status === 404 && refusedRows === 0 && pinOpen.ok && pinOpen.data?.taskId === OPEN,
     'and a member cannot pin a task they may not open to read its title back (404 and no row, for a refused space and a private task) — while they pin an open one',
     `pinning the private space's task answered ${said(pinHidden)}, the private task ${said(pinPrivate)}, rows made ${refusedRows}; the open one ${said(pinOpen)}`,
   )
@@ -536,7 +536,7 @@ try {
   const removedLeaver = await A(`/workspaces/${WS}/members/${leaver.id}`, { method: 'DELETE' })
   const afterLeaving = await leaverFeed()
   chk(
-    whileIn.status === 200 && whileIn.text.includes(`${TAG} in the open space`) && removedLeaver.status < 300 && afterLeaving.status === 404,
+    whileIn.status === 200 && whileIn.text.includes(`${TAG} in the open space`) && removedLeaver.ok && afterLeaving.status === 404,
     'and once somebody is removed from the workspace, their calendar feed answers nothing',
     `while a member the feed answered ${whileIn.status}; removing them answered ${said(removedLeaver)}; afterwards the feed answered ${afterLeaving.status}`,
   )
@@ -617,7 +617,7 @@ try {
   const pageUnderOpen = await M(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: `${TAG} the member's open page`, parentDocId: OPEN_DOC } })
   const [{ n: underPriv }] = await sql`select count(*)::int as n from docs where parent_doc_id = ${PRIV_DOC}`
   chk(
-    pageUnder.status === 404 && movedUnder.status === 404 && underPriv === 1 && own.status < 300 && pageUnderOpen.status < 300,
+    pageUnder.status === 404 && movedUnder.status === 404 && underPriv === 1 && own.ok && pageUnderOpen.ok,
     'and a member cannot hang a page under a doc they may not open, nor move one there (404) — while they add one under an open doc',
     `a new page there answered ${pageUnder.status}, a move there ${movedUnder.status}; the private doc now has ${underPriv} page(s); under the open doc ${said(pageUnderOpen)}`,
   )
@@ -690,7 +690,7 @@ try {
   const adminAsks = await askAs(A)
   const cited = (res) => (res.data?.sources ?? []).filter((s) => s.type === 'doc').map((s) => s.id)
   chk(
-    reindexed.status < 300 && memberAsks.status < 300 && REFUSED_DOCS.every((id) => !cited(memberAsks).includes(id)) &&
+    reindexed.ok && memberAsks.ok && REFUSED_DOCS.every((id) => !cited(memberAsks).includes(id)) &&
       cited(memberAsks).includes(SHARED_SUB) && cited(adminAsks).includes(SUB_DOC),
     'the knowledge answer cites no doc the member may not open, nor the page under one — while it cites the page shared with them, and the admin’s cites the private page',
     `reindex ${said(reindexed)}; the member's (${memberAsks.status}) cites ${JSON.stringify(cited(memberAsks).map(docName))}; the admin's ${JSON.stringify(cited(adminAsks).map(docName))}`,

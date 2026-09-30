@@ -153,7 +153,7 @@ try {
   const ownRow = own.data?.id ? (await sql`select form_id from form_fields where id = ${own.data.id}`)[0] ?? null : null
   chk(
     Boolean(MINE) && refused(relabel.status) && refused(crossField.status) && fieldRow?.label === `${TAG} name`
-      && moved.status < 300 && ownRow?.form_id === MINE,
+      && moved.ok && ownRow?.form_id === MINE,
     'a field is changed only under its own form, in its own workspace — relabelled from another organisation, or deleted under another form, it is not found and stays; and a body naming another form does not move one onto it',
     `the member's form ${mine.status}; relabelled from outside ${relabel.status}; deleted under the member's form ${crossField.status}; the field is ${JSON.stringify(fieldRow?.label ?? null)}; the member's own field patched with the admin's form ${moved.status}, on ${ownRow?.form_id === MINE ? 'their form' : ownRow?.form_id === FORM ? 'THE ADMIN’S FORM' : JSON.stringify(ownRow)}`,
   )
@@ -165,7 +165,7 @@ try {
   const hiddenForms = (await sql`select count(*)::int as n from forms where workspace_id = ${WS} and target_list_id = ${HIDDEN}`)[0].n
   const intoOpen = await M(`/workspaces/${WS}/forms`, { method: 'POST', body: { title: `${TAG} into open`, targetListId: OPEN, isPublic: true } })
   chk(
-    refused(intoHidden.status) && refused(retarget.status) && hiddenForms === 0 && intoOpen.status < 300,
+    refused(intoHidden.status) && refused(retarget.status) && hiddenForms === 0 && intoOpen.ok,
     'a member routes no form, new or changed, to a list they are refused (none made or moved) — one to an open list they may add to is made',
     `made into the private list ${intoHidden.status}; changed to it ${retarget.status}; forms routed there ${hiddenForms}; made into the open list ${intoOpen.status}`,
   )
@@ -182,7 +182,7 @@ try {
   const onside = await anon(`/forms/${router.data?.slug}/submit`, { method: 'POST', body: { data: { [routeField.data?.id]: `list:${OPEN}` } } })
   const afterRoute = { open: await tasksIn(OPEN), hidden: await tasksIn(HIDDEN) }
   chk(
-    offside.status >= 400 && afterRoute.hidden === before.hidden && onside.status < 300 && afterRoute.open === before.open + 1,
+    offside.status >= 400 && afterRoute.hidden === before.hidden && onside.ok && afterRoute.open === before.open + 1,
     'a submission is filed only where the routing field offers — naming a list it does not offer, the private one, it is refused and files nothing; naming the one it offers, it files a task there',
     `the field ${routeField.status}; routed off its options ${offside.status}, private list ${before.hidden} → ${afterRoute.hidden}; routed as offered ${onside.status}, open list ${before.open} → ${afterRoute.open}`,
   )
@@ -232,7 +232,7 @@ try {
   const pointedHere = (await sql`select count(*)::int as n from forms where workspace_id = ${THEIRS} and target_list_id = ${OPEN}`)[0].n
   const homeRow = (await sql`select target_list_id from forms where title = ${`${TAG} aimed home`}`)[0] ?? null
   chk(
-    refused(aimedHere.status) && refused(turned.status) && pointedHere === 0 && aimedHome.status < 300 && homeRow?.target_list_id === ownList.id,
+    refused(aimedHere.status) && refused(turned.status) && pointedHere === 0 && aimedHome.ok && homeRow?.target_list_id === ownList.id,
     'a form made in another organisation’s workspace files nothing here: aimed at this workspace’s list, made or changed to it, it is not found and none points at it — aimed at their own list, it is made',
     `made aimed here ${aimedHere.status}; changed to aim here ${turned.status}; their forms aimed here ${pointedHere}; made aimed at their own list ${aimedHome.status}, aimed at ${homeRow?.target_list_id === ownList.id ? 'their list' : JSON.stringify(homeRow?.target_list_id ?? null)}`,
   )

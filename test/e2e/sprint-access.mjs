@@ -189,7 +189,7 @@ try {
   const removeFromOpen = await M(`/sprints/${sOpen}/tasks/${task}`, { method: 'DELETE' })
   const [{ n: openLeft }] = await sql`select count(*)::int as n from sprint_tasks where sprint_id = ${sOpen} and task_id = ${task}`
   chk(
-    removeFromPriv.status === 404 && addToPriv.status === 404 && stillIn === 1 && removeFromOpen.status < 300 && openLeft === 0,
+    removeFromPriv.status === 404 && addToPriv.status === 404 && stillIn === 1 && removeFromOpen.ok && openLeft === 0,
     'a member moves no task in or out of a private space’s sprint — and takes one out of the open one',
     `the private sprint: remove ${said(removeFromPriv)}, add ${said(addToPriv)}, the task still in: ${stillIn}; the open sprint: remove ${said(removeFromOpen)}, left ${openLeft}`,
   )

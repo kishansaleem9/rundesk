@@ -96,7 +96,7 @@ try {
   const avatar = await upload('/users/me/avatar/presign', (address) => api('/users/me', { method: 'PATCH', body: { avatarUrl: address } }))
   const me = await api('/users/me')
   chk(
-    avatar.pre.status < 300 && avatar.put < 300 && avatar.saved < 300 && noSignature(avatar.address) && me.data?.avatarUrl === avatar.address,
+    avatar.pre.ok && avatar.put >= 200 && avatar.put < 300 && avatar.saved >= 200 && avatar.saved < 300 && noSignature(avatar.address) && me.data?.avatarUrl === avatar.address,
     'the address saved for an uploaded avatar carries no signature and no expiry',
     `presign ${avatar.pre.status}, PUT ${avatar.put}, save ${avatar.saved}; saved ${JSON.stringify(me.data?.avatarUrl)}`,
   )
@@ -115,7 +115,7 @@ try {
   const ws = await api(`/workspaces/${WS}`)
   const logoServed = await follow(logo.address)
   chk(
-    logo.pre.status < 300 && logo.put < 300 && logo.saved < 300 && noSignature(logo.address) && ws.data?.logoUrl === logo.address &&
+    logo.pre.ok && logo.put >= 200 && logo.put < 300 && logo.saved >= 200 && logo.saved < 300 && noSignature(logo.address) && ws.data?.logoUrl === logo.address &&
       logoServed.status === 302 && logoServed.imageStatus === 200 && logoServed.same,
     'a workspace logo is saved the same way, and answers with its bytes',
     `presign ${logo.pre.status}, PUT ${logo.put}, save ${logo.saved}; saved ${JSON.stringify(ws.data?.logoUrl)}; served ${logoServed.status}/${logoServed.imageStatus}, same ${logoServed.same}`,

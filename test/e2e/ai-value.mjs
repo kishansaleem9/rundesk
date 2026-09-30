@@ -325,7 +325,7 @@ try {
     }
   }
   chk(
-    !putBack || putBack.status < 300,
+    !putBack || putBack.ok,
     'and the workspace’s own benchmark is put back',
     `PATCH answered ${putBack?.status} ${JSON.stringify(putBack?.error ?? null)} — the workspace keeps this run's benchmark`,
   )

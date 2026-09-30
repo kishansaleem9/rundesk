@@ -129,7 +129,7 @@ try {
   const md = await M(`/spaces/${OPEN}/folders/${mine}`, { method: 'DELETE' })
   const mineAfter = await row(mine)
   chk(
-    mr.status < 300 && md.status < 300 && mineAfter?.name === `${TAG} mine, renamed` && mineAfter?.is_archived === true,
+    mr.ok && md.ok && mineAfter?.name === `${TAG} mine, renamed` && mineAfter?.is_archived === true,
     'in a space at Full edit a member renames and deletes the folder they made',
     `rename ${said(mr)}, delete ${said(md)}; after ${JSON.stringify(mineAfter)}`,
   )
@@ -139,7 +139,7 @@ try {
   const ad = await A(`/spaces/${VIEW}/folders/${theirs}`, { method: 'DELETE' })
   const theirsAfter = await row(theirs)
   chk(
-    ar.status < 300 && ad.status < 300 && theirsAfter?.name === `${TAG} renamed by the admin` && theirsAfter?.is_archived === true,
+    ar.ok && ad.ok && theirsAfter?.name === `${TAG} renamed by the admin` && theirsAfter?.is_archived === true,
     'an admin renames, makes private and deletes a folder in the view-only space, which binds members, not admins',
     `rename ${said(ar)}, delete ${said(ad)}; after ${JSON.stringify(theirsAfter)}`,
   )

@@ -113,7 +113,7 @@ try {
     `listed: theirs ${mSees.has(MINE) && mSees.has(MINE2)}, the admin’s ${mSees.has(ADMINS)}, the manager’s ${mSees.has(HERS)}`,
   )
   chk(
-    mRestore.status < 300 && (await state(MINE)) === 'live'
+    mRestore.ok && (await state(MINE)) === 'live'
       && mPurgeOwn.status === 403 && (await state(MINE2)) === 'trash'
       && mPurgeAdmins.status === 403 && (await state(ADMINS)) === 'trash',
     'a member restores what they deleted, and deletes nothing for good — not even their own (403, it stays in the Trash)',
@@ -139,8 +139,8 @@ try {
   const aEmpty = await A(`/workspaces/${WS}/trash`, { method: 'DELETE' })
   chk(
     aSees.has(MINE2) && aSees.has(HERS) && aSees.has(ADMINS)
-      && aPurge.status < 300 && (await state(MINE2)) === 'gone'
-      && aEmpty.status < 300 && (await state(ADMINS)) === 'gone' && (await state(HERS)) === 'gone',
+      && aPurge.ok && (await state(MINE2)) === 'gone'
+      && aEmpty.ok && (await state(ADMINS)) === 'gone' && (await state(HERS)) === 'gone',
     'an admin sees every deletion, deletes one for good, and empties the Trash',
     `listed all ${aSees.has(MINE2) && aSees.has(HERS) && aSees.has(ADMINS)}; purge ${said(aPurge)} → ${await state(MINE2)}; empty ${said(aEmpty)} → ${await state(ADMINS)}, ${await state(HERS)}`,
   )

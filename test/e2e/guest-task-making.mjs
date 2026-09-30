@@ -96,7 +96,7 @@ try {
   const makes = async (list, title) => {
     const r = await G('/tasks', { method: 'POST', body: { listId: list.id, title: `${TAG} ${title}` } })
     const [row] = await sql`select count(*)::int as n from tasks where title = ${`${TAG} ${title}`}`
-    return { status: r.status, made: row.n }
+    return { status: r.status, ok: r.ok, made: row.n }
   }
 
   // ══ 1. SHARED LISTS ══════════════════════════════════════════════════════
@@ -105,7 +105,7 @@ try {
   const edit = await makes(OPEN.lists.edit, 'at edit')
   const none = await makes(OPEN.lists.nothing, 'not shared')
   chk(
-    full.status < 300 && full.made === 1 && edit.status === 403 && edit.made === 0 && none.status >= 400 && none.made === 0,
+    full.ok && full.made === 1 && edit.status === 403 && edit.made === 0 && none.status >= 400 && none.made === 0,
     'a guest adds a task to a list shared with them at Full edit — and not at Edit (403), nor to a list not shared with them, none made',
     `Full edit ${JSON.stringify(full)}; Edit ${JSON.stringify(edit)}; not shared ${JSON.stringify(none)}`,
   )
@@ -114,7 +114,7 @@ try {
   console.log('\n▶ the guest, given a whole space at Full edit, adds a task in it')
   const inSpace = await makes(SHARED.lists.inside, 'in the space')
   chk(
-    inSpace.status < 300 && inSpace.made === 1,
+    inSpace.ok && inSpace.made === 1,
     'given a whole space at Full edit, a guest adds a task in it',
     JSON.stringify(inSpace),
   )

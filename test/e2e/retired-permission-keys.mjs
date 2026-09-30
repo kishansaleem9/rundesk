@@ -109,7 +109,7 @@ try {
   const assigned = await A(`/workspaces/${WS}/members/${memberRow.id}/roles/${older.data.id}`, { method: 'POST', body: {} })
   const mine = (await holder(`/workspaces/${WS}/roles/me/permissions`)).data?.permissions ?? []
   chk(
-    assigned.status < 300 && mine.includes('webhook.manage') && !mine.includes(RETIRED),
+    assigned.ok && mine.includes('webhook.manage') && !mine.includes(RETIRED),
     'the admin assigns the older role as before, and it grants webhook.manage and nothing for the retired key',
     `assign ${said(assigned)}; the holder resolves ${JSON.stringify(mine.filter((k) => k === RETIRED || k === 'webhook.manage'))}`,
   )

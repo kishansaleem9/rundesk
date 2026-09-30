@@ -99,7 +99,7 @@ try {
   const dRow = await row(deleted)
   const dTrash = await inTrashOf(member, deleted)
   chk(
-    d.status < 300 && dRow?.is_archived === true && dTrash,
+    d.ok && dRow?.is_archived === true && dTrash,
     'a member with an Edit share deletes a doc (200), and it is in their own Trash as deleted by them — ClickUp: Edit deletes a Doc',
     `${said(d)}; archived ${dRow?.is_archived}; in their Trash ${dTrash}`,
   )
@@ -112,7 +112,7 @@ try {
   const aRow = await row(archived)
   const aTrash = await inTrashOf(member, archived)
   chk(
-    a.status < 300 && aRow?.is_archived === true && aRow?.archived_by_id === member.id && !!aRow?.archived_at && aTrash,
+    a.ok && aRow?.is_archived === true && aRow?.archived_by_id === member.id && !!aRow?.archived_at && aTrash,
     'archiving a doc through the doc itself records who archived it and when, as deleting does, so it is in their own Trash',
     `${said(a)}; ${JSON.stringify({ archived: aRow?.is_archived, by: aRow?.archived_by_id === member.id, at: !!aRow?.archived_at })}; in their Trash ${aTrash}`,
   )
@@ -123,7 +123,7 @@ try {
   const uRow = await row(archived)
   const uTrash = await inTrashOf(member, archived)
   chk(
-    u.status < 300 && uRow?.is_archived === false && uRow?.archived_by_id === null && uRow?.archived_at === null && !uTrash,
+    u.ok && uRow?.is_archived === false && uRow?.archived_by_id === null && uRow?.archived_at === null && !uTrash,
     'unarchiving it at Edit brings it back and clears who archived it and when, and it leaves their Trash',
     `${said(u)}; ${JSON.stringify({ archived: uRow?.is_archived, by: uRow?.archived_by_id, at: uRow?.archived_at })}; in their Trash ${uTrash}`,
   )
@@ -149,7 +149,7 @@ try {
   const gRow = await row(guests)
   const gTrash = await inTrashOf(guest, guests)
   chk(
-    g.status < 300 && gRow?.is_archived === true && gTrash,
+    g.ok && gRow?.is_archived === true && gTrash,
     'a guest with an Edit share deletes the doc (200), and it is in their own Trash — ClickUp: guests with edit permissions delete Docs',
     `${said(g)}; archived ${gRow?.is_archived}; in their Trash ${gTrash}`,
   )

@@ -241,7 +241,7 @@ try {
   }
   chk(
     Object.values(p).every(refused) && afterP.templates === 0 && afterP.checklists === 1 && afterP.type === 'kept' && afterP.reminders === 0 && !afterP.titleTold
-      && Object.values(c).every((r) => r.status < 300) && (await typeOf(OPEN.task)) === TY,
+      && Object.values(c).every((r) => r.ok) && (await typeOf(OPEN.task)) === TY,
     'a member refused a private space reaches none of its tasks through their other routes — no template from a checklist there, no checklist from a template, no type changed, no reminder and no title told, no calendar push — while on an open task each goes through',
     `the private task: ${Object.entries(p).map(([k, r]) => `${k} ${r.status}`).join(', ')}; after ${JSON.stringify(afterP)}; the open one: ${Object.entries(c).map(([k, r]) => `${k} ${r.status}`).join(', ')}`,
   )

@@ -83,7 +83,7 @@ try {
   const gFound = await G(`/workspaces/${WS}/labels`, { method: 'POST', body: { name: existing, color: '#ff0000' } })
   const mNew = await M(`/workspaces/${WS}/labels`, { method: 'POST', body: { name: `${TAG} the member's`, color: '#ff0000' } })
   chk(
-    gNew.status === 403 && (await byName(`${TAG} the guest's`)) === 0 && gFound.status < 300 && gFound.data?.name === existing &&
+    gNew.status === 403 && (await byName(`${TAG} the guest's`)) === 0 && gFound.ok && gFound.data?.name === existing &&
       mNew.status === 201 && (await byName(`${TAG} the member's`)) === 1,
     'a guest makes no new tag (403, none made), though typing an existing one finds it — a member makes one',
     `the guest's new tag ${said(gNew)}; typing the existing one ${said(gFound)}; the member's ${said(mNew)}`,

@@ -97,7 +97,7 @@ try {
   const waits = await M(`/tasks/${alsoMine}/dependencies`, { method: 'POST', body: { relatedTaskId: readOnly, type: 'blocked_by' } })
   const afterWaits = await deps(alsoMine, readOnly)
   chk(
-    blocks.status === 403 && afterBlocks.length === 0 && close.status < 300 && waits.status < 300 && afterWaits.includes('blocked_by'),
+    blocks.status === 403 && afterBlocks.length === 0 && close.ok && waits.ok && afterWaits.includes('blocked_by'),
     'a member blocks no task they may only read — refused (403), none made, and its owner closes it — while their own task may wait on it',
     `blocks ${said(blocks)} (${JSON.stringify(afterBlocks)}); the admin closes theirs ${said(close)}; waits on it ${said(waits)} (${JSON.stringify(afterWaits)})`,
   )
@@ -117,7 +117,7 @@ try {
   chk(
     newUnderRead.status === 403 && madeUnderRead.n === 0 && moveUnderRead.status === 403 && mineNow?.parent_task_id === null
       && newUnderEdit.status === 403 && madeUnderEdit.n === 0
-      && newUnderFull.status < 300 && moveUnderFull.status < 300 && madeUnderFull.n === 2,
+      && newUnderFull.ok && moveUnderFull.ok && madeUnderFull.n === 2,
     'a member hangs no subtask under a task they may only read — neither a new one nor their own task moved there (403 each, nothing under it) — nor under one they may only Edit, and under one at Full edit they do both',
     `under the read-only task: new ${said(newUnderRead)}, moved ${said(moveUnderRead)}, ${madeUnderRead.n} under it; under Edit: new ${said(newUnderEdit)}, ${madeUnderEdit.n} under it; under Full edit: new ${said(newUnderFull)}, moved ${said(moveUnderFull)}, ${madeUnderFull.n} under it`,
   )

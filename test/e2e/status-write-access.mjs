@@ -105,7 +105,7 @@ try {
   const [still] = await sql`select name from project_statuses where id = ${adminStatus?.id ?? '00000000-0000-0000-0000-000000000000'}`
   const byGuest = await named('project_statuses', 'project_id', OPEN.project, `${TAG} byguest`)
   chk(
-    refused(gMade.status) && byGuest === 0 && aMade.status < 300 && Boolean(adminStatus)
+    refused(gMade.status) && byGuest === 0 && aMade.ok && Boolean(adminStatus)
       && refused(gRename.status) && refused(gDelete.status) && refused(gReorder.status) && still?.name === `${TAG} byadmin`,
     'a guest who passes through a project makes, renames, deletes and reorders none of its statuses (refused, all unchanged) — the admin makes one',
     `the guest: made ${gMade.status} (${byGuest}), renamed ${gRename.status}, deleted ${gDelete.status}, reordered ${gReorder.status}; the admin made ${aMade.status}; the status is now ${JSON.stringify(still?.name ?? null)}`,
@@ -125,7 +125,7 @@ try {
   }
   chk(
     mSpace.status === 403 && mProject.status === 403 && mList.status === 403 && rows.space + rows.project + rows.list === 0
-      && mOpen.status < 300 && rows.open === 1,
+      && mOpen.ok && rows.open === 1,
     'a member of a view-only space makes no status on it, its project or its list (403, none made) — in an open space the same member makes one',
     `in the view-only space: ${mSpace.status}, ${mProject.status}, ${mList.status}, made ${rows.space + rows.project + rows.list}; in the open one ${mOpen.status}, made ${rows.open}`,
   )
@@ -144,7 +144,7 @@ try {
     await named('list_statuses', 'list_id', OPEN.other, `${TAG} memberlist`),
   ]
   chk(
-    gList.status === 403 && gRows === 0 && gSpace.status === 403 && gSpaceRows === 0 && mList2.status < 300 && mRows === 1,
+    gList.status === 403 && gRows === 0 && gSpace.status === 403 && gSpaceRows === 0 && mList2.ok && mRows === 1,
     'a guest given a list, or a whole space, to edit still shapes none of their statuses (403, none made) — a member makes one there',
     `the guest: on the list ${gList.status} (${gRows}), on the space ${gSpace.status} (${gSpaceRows}); the member ${mList2.status} (${mRows})`,
   )
@@ -161,7 +161,7 @@ try {
   const aScope = await A(`/lists/${VIEW.list}/status-scope`, { method: 'PATCH', body: { scope: 'project' } })
   const afterAdmin = await scopeOf(VIEW.list)
   chk(
-    mScope.status === 403 && afterMember === before && aScope.status < 300 && afterAdmin === 'project',
+    mScope.status === 403 && afterMember === before && aScope.ok && afterAdmin === 'project',
     'a list in a view-only space keeps its statuses when a member switches them (403, unchanged) — the admin switches them',
     `was ${JSON.stringify(before)}; the member ${mScope.status}, now ${JSON.stringify(afterMember)}; the admin ${aScope.status}, now ${JSON.stringify(afterAdmin)}`,
   )

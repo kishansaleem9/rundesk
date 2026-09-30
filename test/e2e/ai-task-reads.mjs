@@ -114,7 +114,7 @@ try {
     return { res, text: JSON.stringify(calls), stubRead: !modelOn || before !== null }
   }
   // Allowed: 2xx where a model answers, 503 "not configured" where none does.
-  const served = (res) => (modelOn ? res.status < 300 : res.status === 503)
+  const served = (res) => (modelOn ? res.ok : res.status === 503)
   const why = `a model is ${modelOn ? `configured (stub ${MODEL})` : 'not configured here'}`
 
   // ══ 1. A SUMMARY ═════════════════════════════════════════════════════════

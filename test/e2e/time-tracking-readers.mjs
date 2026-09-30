@@ -142,7 +142,7 @@ try {
   const markedRows = await entries(marked.id, forMarked)
   const markedAsks = await marked.as('/ai/knowledge', { method: 'POST', body: { workspaceId: WS, question: `${TAG} what is in this workspace?` } })
   chk(
-    markedStart.status === 201 && markedRows.length === 1 && markedAsks.status < 300,
+    markedStart.status === 201 && markedRows.length === 1 && markedAsks.ok,
     'an account marked guest on its own, and a member of the workspace, is what the workspace makes it: it tracks time and asks the knowledge base',
     `timer ${said(markedStart)} (${markedRows.length} made); knowledge ${said(markedAsks)}`,
   )
@@ -158,7 +158,7 @@ try {
   const adminLeft = await indexed()
   chk(
     guestAsks.status === 403 && guestIndexes.status === 403 && memberIndexes.status === 403 && refusedLeft === 0
-      && adminIndexes.status < 300 && adminLeft > 0,
+      && adminIndexes.ok && adminLeft > 0,
     'a guest of the workspace neither asks its knowledge base nor reindexes it, a member does not reindex it (403 each, nothing indexed) — and its admin does',
     `guest asks ${said(guestAsks)}, reindexes ${said(guestIndexes)}; member reindexes ${said(memberIndexes)}; ${refusedLeft} indexed; admin ${said(adminIndexes)}, ${adminLeft} indexed`,
   )

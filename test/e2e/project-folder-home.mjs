@@ -115,7 +115,7 @@ try {
   const afterOwn = await folderOf(P)
   const outAgain = await A(`/projects/${P}`, { method: 'PUT', body: { folderId: null } })
   chk(
-    toOwn.status < 300 && afterOwn === OWN && outAgain.status < 300 && (await folderOf(P)) === null,
+    toOwn.ok && afterOwn === OWN && outAgain.ok && (await folderOf(P)) === null,
     'a folder of its own space is set, and null takes the project out of it again',
     `set ${said(toOwn)} → ${afterOwn}; out ${said(outAgain)} → ${await folderOf(P)}`,
   )

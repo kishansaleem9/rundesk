@@ -99,7 +99,7 @@ try {
   // ══ 1. A PRIVATE LIST ════════════════════════════════════════════════════
   console.log('\n▶ a private list in an open space')
   chk(
-    mine.status < 300 && !cites(mine, `${WORD} quokka plan`) && openCited(mine) && cites(theirs, `${WORD} quokka plan`),
+    mine.ok && !cites(mine, `${WORD} quokka plan`) && openCited(mine) && cites(theirs, `${WORD} quokka plan`),
     'a member’s knowledge answer cites no task of a private list they are refused, and cites the open one — the admin’s cites it',
     `the member's ${said(mine)} ${cites(mine, `${WORD} quokka plan`) ? 'CITES the private list’s task' : 'is clean'}, the open task ${openCited(mine) ? 'cited' : 'NOT cited'}; the admin's cites it: ${cites(theirs, `${WORD} quokka plan`)}`,
   )

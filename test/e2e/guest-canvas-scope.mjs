@@ -127,7 +127,7 @@ try {
   const mMade = await M(`/workspaces/${WS}/canvases`, { method: 'POST', body: { type: 'whiteboard', title: `${TAG} bymember` } })
   const [gN, mN] = [await titled('byguest'), await titled('bymember')]
   chk(
-    gMade.status === 403 && gN === 0 && mMade.status < 300 && mN === 1,
+    gMade.status === 403 && gN === 0 && mMade.ok && mN === 1,
     'a guest makes no whiteboard (403, none made) — a member does',
     `the guest ${gMade.status}, made ${gN}; the member ${mMade.status}, made ${mN}`,
   )

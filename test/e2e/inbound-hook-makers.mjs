@@ -110,7 +110,7 @@ try {
   const delivered = hook.data?.token ? await Anyone(`/inbound/webhook/${hook.data.token}`, { method: 'POST', body: { title } }) : { status: 0 }
   const [task] = await sql`select list_id, created_by_id from tasks where title = ${title}`
   chk(
-    hook.status < 300 && (await hooksOf(FULL)) === 1 && delivered.status < 300 && task?.list_id === FULL.list && task?.created_by_id === me.id,
+    hook.ok && (await hooksOf(FULL)) === 1 && delivered.ok && task?.list_id === FULL.list && task?.created_by_id === me.id,
     'where they may add — Full edit — a member makes a hook, and a delivery to its address adds a task to the list, as them',
     `made ${said(hook)}; delivered ${said(delivered)}; the task ${JSON.stringify(task ?? null)}`,
   )

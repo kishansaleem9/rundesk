@@ -605,7 +605,7 @@ try {
   const gone = firstUpload.length === 1
     ? await A(`/workspaces/${workspaceId}/clips`, { method: 'DELETE', body: { storageKey: firstUpload[0].key } })
     : { status: 0 }
-  const removedFirst = firstUpload.length === 1 && gone.status < 300
+  const removedFirst = firstUpload.length === 1 && gone.ok
   const tasksBeforeFailure = new Set(await tasksInList())
   await page.getByTestId('clip-created-task').click()
   const saidSo = await waitUntil(

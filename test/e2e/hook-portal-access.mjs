@@ -158,7 +158,7 @@ try {
   const adminDeletes = spare?.id ? await api(`${HOOKS}/${spare.id}`, { method: 'DELETE' }) : { status: 0 }
   const rowsNow = await hookRows()
   chk(
-    memberDeletes.status === 403 && rowsNow.includes(A.id) && adminDeletes.status < 300 && !rowsNow.includes(spare?.id),
+    memberDeletes.status === 403 && rowsNow.includes(A.id) && adminDeletes.ok && !rowsNow.includes(spare?.id),
     'a member may not delete the admin’s hook — it stays — while the admin may delete a member’s',
     `member delete ${memberDeletes.status} (admin's hook still there: ${rowsNow.includes(A.id)}); admin delete ${adminDeletes.status} (gone: ${!rowsNow.includes(spare?.id)})`,
   )

@@ -113,7 +113,7 @@ try {
   const own = await setTitle(plain.as, plain.id, 'Copywriter')
   const ownAfter = await titleOf(plain.id)
   chk(
-    own.status < 300 && ownAfter === 'Copywriter',
+    own.ok && ownAfter === 'Copywriter',
     'a plain member sets their own job title (200) and it is saved',
     `${said(own)}; saved ${JSON.stringify(ownAfter)}`,
   )
@@ -135,7 +135,7 @@ try {
   const granted = await setTitle(profiler.as, colleague.id, 'Senior analyst')
   const grantedAfter = await titleOf(colleague.id)
   chk(
-    profiler.granted && granted.status < 300 && grantedAfter === 'Senior analyst',
+    profiler.granted && granted.ok && grantedAfter === 'Senior analyst',
     'a member granted members.profile.manage sets a colleague’s job title (200) and it is saved',
     `granted ${profiler.granted}; ${said(granted)}; saved ${JSON.stringify(grantedAfter)}`,
   )
@@ -148,7 +148,7 @@ try {
   const ma = await setTitle(manager.as, adminId, 'Retitled by a manager')
   const after4 = { member: await titleOf(colleague.id), peer: await titleOf(peer.id), admin: await titleOf(adminId) }
   chk(
-    mm.status < 300 && mp.status < 300 && after4.member === 'Lead analyst' && after4.peer === 'Delivery manager'
+    mm.ok && mp.ok && after4.member === 'Lead analyst' && after4.peer === 'Delivery manager'
       && ma.status === 403 && after4.admin === 'Head of operations',
     'a manager sets a member’s and a fellow manager’s job title, and is refused an admin’s (403), which stays — nobody sets the profile of somebody above their own role',
     `member ${said(mm)}; manager ${said(mp)}; admin ${said(ma)}; saved ${JSON.stringify(after4)}`,
@@ -159,7 +159,7 @@ try {
   const am = await setTitle(A, manager.id, 'Studio manager')
   const amAfter = await titleOf(manager.id)
   chk(
-    am.status < 300 && amAfter === 'Studio manager',
+    am.ok && amAfter === 'Studio manager',
     'an admin sets a manager’s job title (200) — ClickUp: owners and admins edit everyone’s titles',
     `${said(am)}; saved ${JSON.stringify(amAfter)}`,
   )
@@ -275,7 +275,7 @@ try {
   const somebody = await A(`/workspaces/${WS}/groups/${crew}/members/${plain.id}`, { method: 'DELETE' })
   const afterSomebody = await audited()
   chk(
-    nobody.status < 300 && afterNobody === 0 && somebody.status < 300 && afterSomebody === 1,
+    nobody.ok && afterNobody === 0 && somebody.ok && afterSomebody === 1,
     'removing somebody who is not in a team writes nothing to the audit log, and removing a member writes one line',
     `not in it ${said(nobody)}, ${afterNobody} line(s); a member ${said(somebody)}, ${afterSomebody} line(s)`,
   )

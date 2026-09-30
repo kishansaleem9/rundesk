@@ -143,7 +143,7 @@ try {
   // this run's failure. With no client nothing was switched.
   const healed = await platformOn()
   chk(
-    !A || healed?.status < 300,
+    !A || healed?.ok === true,
     'and the platform’s Forms switch is back on for every workspace after this run',
     `PUT /feature-flags/forms ${healed ? said(healed) : 'was never sent'}`,
   )

@@ -92,7 +92,7 @@ try {
   const NEAR = await make('/tasks', { listId: openList, title: `${TAG} an open task` }, 'the open related task')
   const MINE = await make('/tasks', { listId: openList, title: `${TAG} the member's task`, assigneeIds: [memberId] }, "the member's task")
   const gate = await M(`/tasks/${HIDDEN}`)
-  if (gate.status < 400) throw new Error(`the member was not refused the private task (${said(gate)}), so nothing here would mean anything`)
+  if (gate.ok) throw new Error(`the member was not refused the private task (${said(gate)}), so nothing here would mean anything`)
   // Two ties to the hidden task and one to the open one, planted by SQL.
   for (const [related, type] of [[HIDDEN, 'blocks'], [HIDDEN, 'related_to'], [NEAR, 'related_to']]) {
     await sql`insert into task_dependencies (task_id, related_task_id, type) values (${MINE}, ${related}, ${type})`

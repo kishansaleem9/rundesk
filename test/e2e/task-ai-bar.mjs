@@ -282,7 +282,7 @@ try {
     : { status: 0 }
   const typeBefore = (await A(`/tasks/${task.id}`)).data?.taskTypeId ?? null
   chk(
-    types.length > 1 && moved.status < 400 && typeBefore === types[1].id,
+    types.length > 1 && moved.ok && typeBefore === types[1].id,
     `the task stands on ${types[1]?.name ?? '(a second type)'} first, so a fallback to the first type would show`,
     `the workspace has ${types.length} type(s) and the task holds ` +
       `${JSON.stringify(typeBefore)} against ${JSON.stringify(types[1]?.id ?? null)} — with the task ` +

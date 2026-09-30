@@ -114,7 +114,7 @@ try {
     const now = await current()
     if (now.length === 1 && now[0] === admin.preset) return
     const r = await setAs(admin, admin.preset)
-    if (r.status < 300) return
+    if (r.ok) return
     // The route under test may be what is broken (a patch that refuses the
     // admin, as dda-1 does): put it back by SQL, so that refusal reddens its
     // own check and does not end the run before the others are measured.
@@ -131,7 +131,7 @@ try {
   const afterAgain = await current()
   chk(
     adminSets.status === 200 && afterSet.length === 1 && afterSet[0] === admin.preset
-      && adminClears.status < 300 && afterClear.length === 0
+      && adminClears.ok && afterClear.length === 0
       && adminSetsAgain.status === 200 && afterAgain[0] === admin.preset,
     'a workspace admin who is not a super-admin sets their dashboard as the workspace default, clears it, and sets it again',
     `set ${said(adminSets)} → ${JSON.stringify(afterSet)}; clear ${said(adminClears)} → ${JSON.stringify(afterClear)}; again ${said(adminSetsAgain)} → ${JSON.stringify(afterAgain)}`,
@@ -172,7 +172,7 @@ try {
   const afterSetterClears = await current()
   chk(
     setter.granted && setterSets.status === 200 && afterSetterSets.length === 1 && afterSetterSets[0] === setter.preset
-      && setterClears.status < 300 && afterSetterClears.length === 0,
+      && setterClears.ok && afterSetterClears.length === 0,
     `a member granted ${KEY} makes their own dashboard the workspace default, replacing the admin’s, and clears it`,
     `${setter.granted ? '' : 'NOT GRANTED; '}set ${said(setterSets)} → ${JSON.stringify(afterSetterSets)}; clear ${said(setterClears)} → ${JSON.stringify(afterSetterClears)}`,
   )

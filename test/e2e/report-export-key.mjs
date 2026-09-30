@@ -102,7 +102,7 @@ try {
   const exporterCsv = await csvAs(exporter)
   const memberCsv = await csvAs(member)
   chk(
-    viewerCsv.status === 403 && exporterCsv.status < 300 && /text\/csv/.test(exporterCsv.type) && memberCsv.status < 300,
+    viewerCsv.status === 403 && exporterCsv.ok && /text\/csv/.test(exporterCsv.type) && memberCsv.ok,
     'a guest granted report.view.basic alone downloads no CSV (403) — a guest granted report.export too does, and so does a member',
     `viewer ${said(viewerCsv)}; exporter ${exporterCsv.status} ${exporterCsv.type}; member ${memberCsv.status}`,
   )
@@ -113,7 +113,7 @@ try {
   const viewerPdf = await pdfAs(viewer)
   const exporterPdf = await pdfAs(exporter)
   chk(
-    viewerPdf.status === 403 && exporterPdf.status < 300 && /application\/pdf/.test(exporterPdf.type),
+    viewerPdf.status === 403 && exporterPdf.ok && /application\/pdf/.test(exporterPdf.type),
     'a guest granted report.view.basic alone downloads no PDF (403) — a guest granted report.export too does',
     `viewer ${said(viewerPdf)}; exporter ${exporterPdf.status} ${exporterPdf.type}`,
   )
@@ -123,7 +123,7 @@ try {
   const viewerRuns = await viewer.as(`/workspaces/${WS}/reports/custom/run`, { method: 'POST', body: DEFINITION })
   const viewerOverview = await viewer.as(`/workspaces/${WS}/reports/overview`)
   chk(
-    viewerRuns.status < 300 && Array.isArray(viewerRuns.data?.rows) && viewerOverview.status === 200,
+    viewerRuns.ok && Array.isArray(viewerRuns.data?.rows) && viewerOverview.status === 200,
     'the guest who may only view still runs the report and reads the overview — viewing asks report.view.basic alone',
     `run ${said(viewerRuns)}; overview ${said(viewerOverview)}`,
   )

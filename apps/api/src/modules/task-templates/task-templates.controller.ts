@@ -104,7 +104,7 @@ export class TaskTemplatesController {
     return this.templates.saveFromTask(
       workspaceId,
       taskId,
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, role: user.role },
       body,
     )
   }
@@ -117,7 +117,7 @@ export class TaskTemplatesController {
     @Param('taskId', new ParseUUIDPipe()) taskId: string,
     @CurrentUser() user: any,
   ) {
-    return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email })
+    return this.templates.duplicateTask(workspaceId, taskId, { id: user.id, email: user.email, role: user.role })
   }
 
   @Post(':id/instantiate')

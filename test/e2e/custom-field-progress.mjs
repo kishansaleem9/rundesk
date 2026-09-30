@@ -17,6 +17,11 @@
  * field created on the seeded project would appear on every task in it and
  * every other suite's task rows would change shape underneath them.
  *
+ * AND WHAT A DUPLICATE OF THE TASK CARRIES of its Voting and Files fields
+ * (`found-30-sep/duplicate-copies-votes-and-files`), checked beside the two
+ * rules those fields' route keeps: a vote is the caller's own, and a file is
+ * one attached to this task.
+ *
  *   node test/e2e/custom-field-progress.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -34,7 +39,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 58
+const EXPECTED_CHECKS = 60
 
 const chromium = await resolveChromium()
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -551,6 +556,51 @@ try {
     Array.isArray(after2) && after2.length === 0,
     'and voting again is a toggle, not a second vote — the submitted id is ignored',
     `it stored ${JSON.stringify(after2)} — a body-supplied id must never reach the tally`,
+  )
+
+  // ── found-30-sep/duplicate-copies-votes-and-files ─────────────────────────
+  /*
+   * DUPLICATE COPIED EVERY VALUE THE TASK HELD, these two among them. The
+   * sheet's Duplicate (`POST …/task-templates/duplicate/:taskId`) wrote the
+   * copy the original's votes, which its voters never cast on it, and its
+   * Files value, which names attachments of the ORIGINAL — the copy has none of
+   * them, so the rule above ("a file attached to a different task is refused")
+   * was broken by the copy itself. ClickUp's help centre says a duplicate is
+   * made of what you choose to include, and says nothing of a Voting or a
+   * Files field; the two rules checked just above decide it. The copy is read
+   * from the rows, and its other values must still be there: its size, its
+   * labels and its person.
+   */
+  console.log('\n▶ a duplicate carries no votes, and no file it does not have')
+  await setOn(votingField, [])
+  const votedBefore = await readBack(votingField)
+  // The original's size, labels and person as it holds them, which the copy must carry.
+  const OTHERS = {}
+  for (const id of [tshirt, labels, people]) OTHERS[id] = await readBack(id)
+  const dup = await A(`/workspaces/${workspaceId}/task-templates/duplicate/${task.id}`, { method: 'POST' })
+  const copyId = dup.status < 300 ? (dup.data?.taskId ?? null) : null
+  /** The copy's values by field id, as its rows hold them. */
+  const copied = copyId
+    ? Object.fromEntries((await sql`select field_id, value from custom_field_values where task_id = ${copyId}`)
+      .map((r) => [r.field_id, (typeof r.value === 'string' ? JSON.parse(r.value) : r.value)?.v ?? null]))
+    : {}
+  const othersCopied = Object.values(OTHERS).every((v) => v != null && !(Array.isArray(v) && v.length === 0)) &&
+    Object.entries(OTHERS).every(([id, v]) => JSON.stringify(copied[id]) === JSON.stringify(v))
+  // By the fields' names, so a failure reads as what it is.
+  const NAMES = { [votingField]: 'Voting', [filesField]: 'Files', [tshirt]: 'Size', [labels]: 'Tags', [people]: 'Who', [longText]: 'Notes', [location]: 'Where', [manual]: 'Done pct' }
+  const byName = (values) => JSON.stringify(Object.fromEntries(Object.entries(values).map(([id, v]) => [NAMES[id] ?? id, v])))
+  const copySaid = `the duplicate answered ${dup.status}${copyId ? `; the copy holds ${byName(copied)}` : ' and made no copy'}; ` +
+    `the original's size, labels and person are ${byName(OTHERS)}`
+  chk(
+    JSON.stringify(votedBefore) === JSON.stringify([me.id]) && !!copyId && othersCopied && !(votingField in copied),
+    'a duplicate of the task carries none of its votes — a vote is cast by its voter on the task they voted on (read by SQL)',
+    `the original held the votes ${JSON.stringify(votedBefore)}; ${copySaid}`,
+  )
+  const filesBefore = await readBack(filesField)
+  chk(
+    JSON.stringify(filesBefore) === JSON.stringify([att.id]) && !!copyId && othersCopied && !(filesField in copied),
+    'and its Files field names none of the original’s attachments, which the copy does not have — while its other values are copied',
+    `the original's Files field held ${JSON.stringify(filesBefore)}; ${copySaid}`,
   )
 
   // ── §V2-01a — the field is created WHILE the task is being made ──────────

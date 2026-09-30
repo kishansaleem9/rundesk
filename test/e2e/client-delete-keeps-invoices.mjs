@@ -86,7 +86,7 @@ try {
   console.log('\n▶ a client with none, and one that is not there')
   const p = await G(`/workspaces/${WS}/clients/${PLAIN}`, { method: 'DELETE' })
   chk(
-    p.status < 300 && !(await clientThere(PLAIN)),
+    p.ok && !(await clientThere(PLAIN)),
     'a client with no invoice is deleted as before',
     `${said(p)}; the client ${(await clientThere(PLAIN)) ? 'stays' : 'is gone'}`,
   )

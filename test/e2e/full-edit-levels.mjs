@@ -161,7 +161,7 @@ try {
   chk(
     e.change.status === 200 && eAfter.changed && e.archive.status === 200 && eAfter.archived
       && e.add.status === 403 && eAfter.added === 0 && e.list.status === 403 && eAfter.lists === 0 && e.del.status === 403 && !eAfter.binned
-      && f.add.status === 201 && fAfter.added === 1 && f.list.status === 201 && fAfter.lists === 1 && f.del.status < 300 && fAfter.binned,
+      && f.add.status === 201 && fAfter.added === 1 && f.list.status === 201 && fAfter.lists === 1 && f.del.ok && fAfter.binned,
     'where a space’s default is Edit a member changes the admin’s task and archives one, and adds no task or list and deletes no task (403 each, none made, none in the Trash) — in a Full edit space they add and delete',
     `edit: ${Object.entries(e).map(([k, r]) => `${k} ${r.status}`).join(', ')}, after ${JSON.stringify(eAfter)}; full: ${Object.entries(f).map(([k, r]) => `${k} ${r.status}`).join(', ')}, after ${JSON.stringify(fAfter)}`,
   )
@@ -186,7 +186,7 @@ try {
   const fullBinned = await binned(vFull.id)
   chk(
     Object.values(g).every((x) => x.change.status === 200 && x.after.changed && x.del.status === 403 && !x.after.binned)
-      && full.status < 300 && fullBinned,
+      && full.ok && fullBinned,
     'a grant at Edit — a task shared at Edit, a space role of Edit, a project role of Edit — changes a task and deletes none (403, not in the Trash); a task shared at Full edit is deleted',
     `${Object.entries(g).map(([k, x]) => `${k}: change ${x.change.status}, delete ${said(x.del)}, ${JSON.stringify(x.after)}`).join('; ')}; full edit: ${said(full)}, in the Trash ${fullBinned}`,
   )
@@ -259,7 +259,7 @@ try {
   const listGone = async (id) => (await sql`select is_archived from lists where id = ${id}`)[0]?.is_archived === true
   const [goneEdit, goneFull] = [await listGone(ownEdit.id), await listGone(ownFull.id)]
   chk(
-    lEdit.status === 403 && !goneEdit && says(lEdit, 'does not allow deleting this list') && lFull.status < 300 && goneFull,
+    lEdit.status === 403 && !goneEdit && says(lEdit, 'does not allow deleting this list') && lFull.ok && goneFull,
     'a member deletes a list of their own only with Full edit: in the space whose default is Edit it stays (403, and the refusal says deleting), in the Full edit space it goes',
     `edit ${said(lEdit)}, deleted ${goneEdit}; full edit ${said(lFull)}, deleted ${goneFull}`,
   )
@@ -281,8 +281,8 @@ try {
   const docRow = async (id) => (await sql`select title, is_archived from docs where id = ${id}`)[0] ?? null
   const [rEdit, rFull] = [await docRow(dEdit), await docRow(dFull)]
   chk(
-    dRename.status === 200 && rEdit?.title === `${TAG} doc renamed at edit` && dDelEdit.status < 300 && rEdit?.is_archived === true
-      && dDelFull.status < 300 && rFull?.is_archived === true,
+    dRename.status === 200 && rEdit?.title === `${TAG} doc renamed at edit` && dDelEdit.ok && rEdit?.is_archived === true
+      && dDelFull.ok && rFull?.is_archived === true,
     'a doc shared at Edit is renamed and deleted, as ClickUp’s Edit deletes a Doc, and one shared at Full edit is deleted too — in a space that is view-only for the member',
     `edit: rename ${said(dRename)}, delete ${said(dDelEdit)}, now ${JSON.stringify(rEdit)}; full edit: delete ${said(dDelFull)}, now ${JSON.stringify(rFull)}`,
   )

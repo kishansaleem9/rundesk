@@ -663,7 +663,7 @@ try {
   const deleteOwn = OWN_DEP ? await M(`/tasks/${T}/dependencies/${OWN_DEP}`, { method: 'DELETE' }) : { status: 0 }
   const ownDepGone = OWN_DEP ? (await sql`select 1 from task_dependencies where id = ${OWN_DEP}`).length === 0 : false
   chk(
-    deleteOwn.status < 300 && ownDepGone,
+    deleteOwn.ok && ownDepGone,
     'while the task’s own dependency is removed through it',
     `it answered ${said(deleteOwn)} and the dependency is ${ownDepGone ? 'gone' : 'still there'}`,
   )

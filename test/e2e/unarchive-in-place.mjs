@@ -129,7 +129,7 @@ try {
   const members = await canRestore(member.as)
   chk(
     admins.open === true && admins.view === true && outside.open === false && outside.view === false
-      && joined.status < 300 && inside.open === true && inside.view === false && members.open === true && members.view === false,
+      && joined.ok && inside.open === true && inside.view === false && members.open === true && members.view === false,
     'Settings → Archived offers Restore as the rule does: the admin every row, a manager the rows of their own spaces, a member where they may edit',
     `admin ${JSON.stringify(admins)}; manager outside ${JSON.stringify(outside)}; joined ${said(joined)}; inside ${JSON.stringify(inside)}; member ${JSON.stringify(members)}`,
   )

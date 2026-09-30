@@ -52,6 +52,12 @@
  *   · A CARD NAMED ITS UPLOADER BY ID (`found-30-sep/attachment-card-names-uploader-by-id`):
  *     "1.0 KB · 978243e1-…". A card names who attached it.
  *
+ * AND A COMMENT'S FILES CAME BACK IN HEAP ORDER TOO (`found-30-sep/comment-files-unordered`):
+ * the third read of a task's files, the one the comments list makes, had no
+ * ORDER BY either. The last section posts three files on one comment, attached
+ * in the same order and rewritten into the heap in the same other one, and
+ * reads them from the list and from the comment as drawn.
+ *
  *   node test/e2e/task-attachments.mjs --api 3011 --dist apps/web/dist
  */
 import path from 'node:path'
@@ -69,7 +75,7 @@ const argOf = (name, fallback) => {
 }
 
 /** "0 failed" is not "it ran". */
-const EXPECTED_CHECKS = 23
+const EXPECTED_CHECKS = 25
 
 const REPO = path.resolve(import.meta.dirname, '../..')
 const API_PORT = Number(argOf('--api', process.env.E2E_API_PORT ?? 3011))
@@ -176,21 +182,31 @@ try {
    * statement, and their place is read back (`ctid`): a check below that finds
    * them in the heap in the order they were attached proves nothing, and says so.
    */
-  const heapOrder = async () =>
+  const heapOrderOf = async (taskId) =>
     sql
-      ? ((await sql`select id from task_attachments where task_id = ${task.id} order by ctid`.catch(() => null)) ?? [])
+      ? ((await sql`select id from task_attachments where task_id = ${taskId} order by ctid`.catch(() => null)) ?? [])
           .map((r) => r.id)
       : []
-  let inHeap = await heapOrder()
-  let rewriteRefused = sql ? null : 'there is no database to rewrite them with'
-  for (let attempt = 0; !rewriteRefused && attempt < 5 && inHeap.join() !== heapIds.join(); attempt += 1) {
-    rewriteRefused = await sql`
-      with gone as (delete from task_attachments where task_id = ${task.id} returning *)
-      insert into task_attachments select * from gone
-      order by case id when ${heapIds[0]}::uuid then 0 when ${heapIds[1]}::uuid then 1 else 2 end`
-      .then(() => null, (err) => `rewriting them failed: ${err?.message ?? err}`)
-    inHeap = await heapOrder()
+  /*
+   * A task's three file rows, rewritten unchanged into the heap in `ids`'s
+   * order, up to five times until they sit so: where they sit then, and why a
+   * rewrite was refused. The same for the task's own files here and for a
+   * comment's below (`found-30-sep/comment-files-unordered`).
+   */
+  const writeIntoHeap = async (taskId, ids) => {
+    let held = await heapOrderOf(taskId)
+    let refused = sql ? null : 'there is no database to rewrite them with'
+    for (let attempt = 0; !refused && attempt < 5 && held.join() !== ids.join(); attempt += 1) {
+      refused = await sql`
+        with gone as (delete from task_attachments where task_id = ${taskId} returning *)
+        insert into task_attachments select * from gone
+        order by case id when ${ids[0]}::uuid then 0 when ${ids[1]}::uuid then 1 else 2 end`
+        .then(() => null, (err) => `rewriting them failed: ${err?.message ?? err}`)
+      held = await heapOrderOf(taskId)
+    }
+    return { held, refused }
   }
+  const { held: inHeap, refused: rewriteRefused } = await writeIntoHeap(task.id, heapIds)
   const outOfHeap = inHeap.length === SEEDED && inHeap.join() !== attachedIds.join()
   const unproven = outOfHeap
     ? ''
@@ -688,7 +704,7 @@ try {
       })
     : { status: 0, data: null }
   chk(
-    recorded.status < 300 && recorded.data?.kind === 'file' && typeof recorded.data?.url === 'string' &&
+    recorded.ok && recorded.data?.kind === 'file' && typeof recorded.data?.url === 'string' &&
       recorded.data.url !== FILE_KEY,
     'an uploaded file is recorded as a file, and its url is signed rather than the bare key',
     `presign answered ${pre.status}, the PUT ${put}, recording it ${recorded.status} with kind=` +
@@ -703,10 +719,89 @@ try {
     (r) => r.n > (beforeFileDelete?.seq ?? Infinity) && r.method === 'DELETE' && r.key === FILE_KEY,
   )
   chk(
-    removed.status < 300 && fileDeletes.length === 1,
+    removed.ok && fileDeletes.length === 1,
     'and removing it deletes exactly its object from the bucket',
     `the removal answered ${removed.status} and the bucket saw ${fileDeletes.length} DELETE(s) for ` +
       `${JSON.stringify(FILE_KEY)}${afterFileDelete === null ? ' — the store gave no request log at all' : ''}`,
+  )
+
+  // -------------------------------------------------------------------------
+  console.log('\n▶ a comment\'s files, in the order they were attached')
+
+  /*
+   * THE THIRD READ OF A TASK'S FILES (`found-30-sep/comment-files-unordered`):
+   * the files each comment carries, which `GET /tasks/:id/comments` hands back
+   * and the comment draws in the order it is handed them. It read them with no
+   * ORDER BY, as the other two did. So the same fixture as the task's own: three
+   * files attached in ATTACHED's order, one awaited request each, posted on one
+   * comment, then their rows rewritten into the heap in IN_HEAP's order. On a
+   * task of its own, so the tab above counts only its own three.
+   */
+  const noted = (await A('/tasks', { method: 'POST', body: { listId: list.id, title: `Comment files ${TAG}` } })).data
+  if (!noted?.id) throw new Error('could not make the task the comment is on')
+  const noteIdOf = {}
+  for (const i of ATTACHED) {
+    const r = await A(`/tasks/${noted.id}/attachments`, {
+      method: 'POST',
+      body: {
+        fileName: `note-${i}-${TAG}.txt`,
+        url: `https://example.invalid/${TAG}/note-${i}.txt`,
+        contentType: 'text/plain',
+        sizeBytes: 1024 * (i + 1),
+      },
+    })
+    if (r.status >= 400 || !r.data?.id) throw new Error(`seeding the comment's file ${i} answered ${r.status}`)
+    noteIdOf[i] = r.data.id
+  }
+  const noteAttached = ATTACHED.map((i) => noteIdOf[i])
+  const noteNameOf = (id) => {
+    const i = Object.keys(noteIdOf).find((k) => noteIdOf[k] === id)
+    return i === undefined ? String(id) : `note-${i}`
+  }
+  const noteNamesOf = (ids) => `[${ids.map(noteNameOf).join(', ')}]`
+  const commented = await A(`/tasks/${noted.id}/comments`, {
+    method: 'POST',
+    body: { body: `Three files ${TAG}`, attachmentIds: noteAttached },
+  })
+  const commentId = commented.status < 300 ? (commented.data?.id ?? null) : null
+  const { held: noteInHeap, refused: noteRewriteRefused } = await writeIntoHeap(noted.id, IN_HEAP.map((i) => noteIdOf[i]))
+  const noteOutOfHeap = noteInHeap.length === SEEDED && noteInHeap.join() !== noteAttached.join()
+  const noteUnproven = noteOutOfHeap
+    ? ''
+    : `; but the heap holds them ${noteNamesOf(noteInHeap)}${noteRewriteRefused ? ` (${noteRewriteRefused})` : ''}, so no order is proved`
+  const noteMade = commentId ? '' : `; the comment was never made (${commented.status} ${JSON.stringify(commented.error?.message ?? null)})`
+
+  const onComments = await A(`/tasks/${noted.id}/comments`)
+  const carriedIds = ((onComments.data ?? []).find((c) => c.id === commentId)?.attachments ?? []).map((f) => f.id)
+  chk(
+    onComments.status === 200 && !!commentId && noteOutOfHeap && carriedIds.join() === noteAttached.join(),
+    'a comment hands its files back in the order they were attached, oldest first — not in the order the heap holds them',
+    `GET /tasks/:id/comments answered ${onComments.status}, the comment carrying ${noteNamesOf(carriedIds)}; they were ` +
+      `attached ${noteNamesOf(noteAttached)} and sit in the heap as ${noteNamesOf(noteInHeap)}${noteUnproven}${noteMade}`,
+  )
+
+  /*
+   * AND DRAWN SO. The comment's file links, as shown, in the document's order:
+   * a text file is drawn as a link naming it. Waited for until all three are
+   * shown, then read once.
+   */
+  await page.goto(
+    `${stack.base}/app/${workspaceId}/${space.id}/${project.id}/${list.id}?task=${noted.id}`,
+    { waitUntil: 'domcontentloaded' },
+  )
+  await settleCookies()
+  await page.getByTestId('task-tab-comments').click({ timeout: 20_000 }).catch(() => {})
+  const noteLinks = page.locator(`[data-comment-id="${commentId}"] a[href]`).filter({ visible: true })
+  await waitForCount(noteLinks, SEEDED, { timeoutMs: 20_000 })
+  const drawnNotes = (await noteLinks.allInnerTexts().catch(() => [])).map((text) => text.trim())
+  const drawnNoteIds = drawnNotes.map((text) => {
+    const i = /^note-(\d)-/.exec(text)?.[1]
+    return i === undefined ? text : noteIdOf[i]
+  })
+  chk(
+    !!commentId && noteOutOfHeap && drawnNoteIds.join() === noteAttached.join(),
+    'and the comment draws them in that order',
+    `the comment drew ${JSON.stringify(drawnNotes)}; they were attached ${noteNamesOf(noteAttached)}${noteUnproven}${noteMade}`,
   )
 } catch (err) {
   failed += 1

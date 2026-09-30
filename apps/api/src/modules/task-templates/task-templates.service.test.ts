@@ -322,9 +322,11 @@ describe('TaskTemplatesService — a list-valued custom field is kept (found-30-
       { name: 'Files', type: 'files', value: { v: ['attachment-1'] } },
       { name: 'Budget', type: 'number', value: { v: 5 } },
     ]
-    // The task's place, the task, its labels, checklists, subtasks and values, in the order they are read.
+    // The task's place, the read rule's two reads (the task where it lives, the caller's role), then the task,
+    // its labels, checklists, subtasks and values, in the order they are read.
     const { db, inserted } = recordingDb([
       [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
       [task], [], [], [], values,
     ])
     await new TaskTemplatesService(db, tasksServiceStub, securityStub).saveFromTask(WORKSPACE_ID, T1, ACTOR, { name: 'From a task' })
@@ -391,8 +393,9 @@ describe('TaskTemplatesService.instantiate — the template\'s lists reach the t
       { id: 'f-tags', name: 'Tags', type: 'labels', options: [{ value: 'red' }, { value: 'blue' }] },
       { id: 'f-votes', name: 'Votes', type: 'voting', options: null },
     ]
-    // The template, the list's place, the fields, then who of those named is still a member (U2 has left).
-    const { db, inserted } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs, [{ id: U1 }]])
+    // The template, the list's place, the fields, then who of those named is still a member (U2 has left),
+    // and then the field route's own check of the People list about to be written (`checkValue`).
+    const { db, inserted } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs, [{ id: U1 }], [{ userId: U1 }]])
     const createTask = mock.fn(async () => ({ id: 'task-9' }))
     await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
       listId: 'l',
@@ -400,6 +403,126 @@ describe('TaskTemplatesService.instantiate — the template\'s lists reach the t
     assert.deepEqual(inserted[0], [
       { taskId: 'task-9', fieldId: 'f-people', value: { v: [U1] } },
       { taskId: 'task-9', fieldId: 'f-tags', value: { v: ['red', 'blue'] } },
+    ])
+  })
+})
+
+/*
+ * `found-30-sep/template-values-written-unchecked` — a template's ONE value was
+ * written into the field of its name whatever that field takes. Every value is
+ * now asked of the field route's own rules (`CustomFieldsService.checkValue`),
+ * and one the route would refuse is not written.
+ */
+describe('TaskTemplatesService.instantiate — one value, only where the field of its name would take it (found-30-sep/template-values-written-unchecked)', () => {
+  it('writes no words into a Number field, no option a Dropdown does not define and no words into an Email field, and writes the values its fields can hold', async () => {
+    const template = {
+      id: 'tpl-1', workspaceId: WORKSPACE_ID, name: 'T', description: null, icon: null, usageCount: 0,
+      createdById: ACTOR.id, createdAt: new Date(), updatedAt: new Date(),
+      payload: {
+        ...EMPTY,
+        customFieldValues: [
+          { fieldName: 'Estimate', value: 'about a week' },
+          { fieldName: 'Severity', value: 'critical' },
+          { fieldName: 'Contact', value: 'the front desk' },
+          { fieldName: 'Note', value: 'kept' },
+          { fieldName: 'Budget', value: 5 },
+          { fieldName: 'Priority', value: 'high' },
+        ],
+      },
+    }
+    const defs = [
+      { id: 'f-estimate', name: 'Estimate', type: 'number', options: null },
+      { id: 'f-severity', name: 'Severity', type: 'dropdown', options: [{ value: 'low' }, { value: 'high' }] },
+      { id: 'f-contact', name: 'Contact', type: 'email', options: null },
+      { id: 'f-note', name: 'Note', type: 'text', options: null },
+      { id: 'f-budget', name: 'Budget', type: 'number', options: null },
+      { id: 'f-priority', name: 'Priority', type: 'dropdown', options: [{ value: 'low' }, { value: 'high' }] },
+    ]
+    // The template, the list's place, the fields; no list names anybody, so nothing more is asked.
+    const { db, inserted } = recordingDb([[template], [{ workspaceId: WORKSPACE_ID, projectId: 'p' }], defs])
+    const createTask = mock.fn(async () => ({ id: 'task-9' }))
+    await new TaskTemplatesService(db, { createTask } as any, securityStub).instantiate(WORKSPACE_ID, 'tpl-1', ACTOR, {
+      listId: 'l',
+    })
+    assert.deepEqual(inserted[0], [
+      { taskId: 'task-9', fieldId: 'f-note', value: { v: 'kept' } },
+      { taskId: 'task-9', fieldId: 'f-budget', value: { v: 5 } },
+      { taskId: 'task-9', fieldId: 'f-priority', value: { v: 'high' } },
+    ])
+  })
+})
+
+/*
+ * `found-30-sep/duplicate-copies-votes-and-files` — a duplicate wrote every value
+ * the task held onto its copy, unchecked: votes its voters never cast on the
+ * copy, and a Files value naming the original's attachments. The copy's values
+ * are now written as a template's are.
+ */
+/*
+ * What the task's read rule reads before a task is copied
+ * (`found-30-sep/duplicate-reads-what-its-caller-cannot`): the task where it
+ * lives, then the caller's role in the workspace. An admin opens it.
+ */
+const READABLE = [
+  [{ taskId: T1, listId: 'l', taskVisibility: 'public', taskCreatedById: ACTOR.id, listVisibility: 'public', listCreatedById: ACTOR.id, projectId: 'p', projectVisibility: 'public', spaceId: 's', spaceVisibility: 'public' }],
+  [{ role: 'workspace_admin' }],
+]
+
+describe('TaskTemplatesService — a task its caller may not open is not copied (found-30-sep/duplicate-reads-what-its-caller-cannot)', () => {
+  it('refuses to duplicate a task the read rule does not find for its caller, and makes nothing', async () => {
+    // The task's place, then the read rule's first read, which finds no task this caller may open.
+    const { db, inserted } = recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []])
+    const createTask = mock.fn(async () => ({ id: 'copy-1' }))
+    await assert.rejects(
+      new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR),
+      /Task not found in this workspace/,
+    )
+    assert.equal(createTask.mock.callCount(), 0)
+    assert.equal(inserted.length, 0)
+  })
+
+  it('refuses to save such a task as a template, and saves nothing', async () => {
+    const { db, inserted } = recordingDb([[{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }], []])
+    await assert.rejects(
+      new TaskTemplatesService(db, tasksServiceStub, securityStub).saveFromTask(WORKSPACE_ID, T1, ACTOR, { name: 'From a hidden task' }),
+      /Task not found in this workspace/,
+    )
+    assert.equal(inserted.length, 0)
+  })
+})
+
+describe('TaskTemplatesService.duplicateTask — the copy carries no votes and no files (found-30-sep/duplicate-copies-votes-and-files)', () => {
+  it('writes the copy the values its fields can hold, and none of the original’s votes or files', async () => {
+    const task = { title: 'Launch', description: null, priority: 'high', timeEstimate: null, startDate: null, dueDate: null }
+    const values = [
+      { name: 'People', type: 'people', value: { v: [U1] } },
+      { name: 'Tags', type: 'labels', value: { v: ['red'] } },
+      { name: 'Votes', type: 'voting', value: { v: [U1] } },
+      { name: 'Files', type: 'files', value: { v: ['attachment-1'] } },
+      { name: 'Budget', type: 'number', value: { v: 5 } },
+    ]
+    const defs = [
+      { id: 'f-people', name: 'People', type: 'people', options: null },
+      { id: 'f-tags', name: 'Tags', type: 'labels', options: [{ value: 'red' }] },
+      { id: 'f-votes', name: 'Votes', type: 'voting', options: null },
+      { id: 'f-files', name: 'Files', type: 'files', options: null },
+      { id: 'f-budget', name: 'Budget', type: 'number', options: null },
+    ]
+    // The task's place, its dates and assignees; the task, its labels, checklists, subtasks and values; then its
+    // project's fields, who of those named is a member, and the field route's own check of the People list.
+    const { db, inserted } = recordingDb([
+      [{ workspaceId: WORKSPACE_ID, spaceId: 's', projectId: 'p', listId: 'l' }],
+      ...READABLE,
+      [{ startDate: null, dueDate: null }], [],
+      [task], [], [], [], values,
+      defs, [{ id: U1 }], [{ userId: U1 }],
+    ])
+    const createTask = mock.fn(async () => ({ id: 'copy-1' }))
+    await new TaskTemplatesService(db, { createTask } as any, securityStub).duplicateTask(WORKSPACE_ID, T1, ACTOR)
+    assert.deepEqual(inserted[0], [
+      { taskId: 'copy-1', fieldId: 'f-people', value: { v: [U1] } },
+      { taskId: 'copy-1', fieldId: 'f-tags', value: { v: ['red'] } },
+      { taskId: 'copy-1', fieldId: 'f-budget', value: { v: 5 } },
     ])
   })
 })

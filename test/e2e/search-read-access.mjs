@@ -167,7 +167,7 @@ try {
   const memberReindex = await M(`/search/${WS}/reindex`, { method: 'POST', body: {} })
   const adminReindex = await A(`/search/${WS}/reindex`, { method: 'POST', body: {} })
   chk(
-    memberReindex.status === 403 && adminReindex.status < 300,
+    memberReindex.status === 403 && adminReindex.ok,
     'and only a manager may rebuild the workspace’s search index (403 for a member) — the admin may',
     `the member's rebuild answered ${said(memberReindex)}; the admin's ${said(adminReindex)}`,
   )

@@ -119,7 +119,7 @@ try {
   const toEdit = await M.api(`/shares/list/${SHARED.list}`, { method: 'POST', body: { email: O.email, level: 'edit' } })
   const afterEdit = await levelOf(SHARED, O.id)
   chk(
-    toFull.status === 403 && afterFull === null && toEdit.status < 300 && afterEdit === 'edit',
+    toFull.status === 403 && afterFull === null && toEdit.ok && afterEdit === 'edit',
     'nor gives more than they hold: Full edit for another member is refused and nothing is shared, Edit is given',
     `Full edit ${said(toFull)} (share ${afterFull}); Edit ${said(toEdit)} (share ${afterEdit})`,
   )
@@ -132,7 +132,7 @@ try {
   const remove = await M.api(`/shares/list/${SHARED.list}/${await shareRowOf(SHARED, O.id)}`, { method: 'DELETE' })
   const held = await levelOf(SHARED, O.id)
   chk(
-    raised.status < 300 && lower.status === 403 && reshare.status === 403 && remove.status === 403 && held === 'admin',
+    raised.ok && lower.status === 403 && reshare.status === 403 && remove.status === 403 && held === 'admin',
     'nor changes or removes a share above their own — by changing it, sharing over it, or removing it: the admin’s Full edit share for another member stays as it was',
     `admin raised ${raised.status}; member lowers ${said(lower)}, shares over it ${said(reshare)}, removes ${said(remove)}; the share ${held}`,
   )
@@ -151,7 +151,7 @@ try {
   const [invited] = await sql`select count(*)::int as n from object_shares where object_id = ${FULL.list} and invited_email = ${outsider}`
   const levels = { full: await levelOf(FULL, O.id), edit: await levelOf(EDIT, O.id), view: await levelOf(VIEW, O.id) }
   chk(
-    full.status < 300 && levels.full === 'admin' && editAtEdit.status < 300 && levels.edit === 'edit' && fullAtEdit.status === 403
+    full.ok && levels.full === 'admin' && editAtEdit.ok && levels.edit === 'edit' && fullAtEdit.status === 403
       && view.status === 403 && levels.view === null && guest.status === 403 && invited.n === 0,
     'a member shares by the level the space gives them, as ClickUp’s edit permissions do: at Full edit the admin’s list up to Full edit, at Edit up to Edit, at View not at all — and a guest shares nothing, even with Edit',
     `Full edit ${said(full)}; Edit at Edit ${said(editAtEdit)}, Full edit at Edit ${said(fullAtEdit)}; View ${said(view)}; guest ${said(guest)} (${invited.n} invited); shares ${JSON.stringify(levels)}`,
@@ -164,7 +164,7 @@ try {
   const giveEdit = await M.api(`/lists/${EDIT.list}/inbound-email`, { method: 'POST' })
   const [addr] = await sql`select count(*)::int as n from list_email_aliases where list_id = ${EDIT.list}`
   chk(
-    giveFull.status < 300 && Boolean(giveFull.data?.address) && rotateFull.status < 300 && giveEdit.status === 403 && addr.n === 0,
+    giveFull.ok && Boolean(giveFull.data?.address) && rotateFull.ok && giveEdit.status === 403 && addr.n === 0,
     'a list’s address is given and rotated by whoever may add tasks to it — a member at Full edit, on the admin’s list — and not by a member at Edit (403, none made)',
     `Full edit: give ${said(giveFull)}, rotate ${said(rotateFull)}; Edit: give ${said(giveEdit)}, ${addr.n} made`,
   )

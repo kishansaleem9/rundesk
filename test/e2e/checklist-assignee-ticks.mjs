@@ -105,7 +105,7 @@ try {
   const mine = await itemRow(COMMENT.items.mine.id)
   const theirs = await itemRow(COMMENT.items.theirs.id)
   chk(
-    tickMine.status < 300 && mine?.is_done === true && tickTheirs.status === 403 && theirs?.is_done === false
+    tickMine.ok && mine?.is_done === true && tickTheirs.status === 403 && theirs?.is_done === false
       && rename.status === 403 && mine?.content === COMMENT.items.mine.content,
     'at Comment a member ticks the checklist item assigned to them — and nothing else: not the admin’s item, and not their own item’s words (403 each, unchanged)',
     `tick theirs-own ${said(tickMine)} (done ${mine?.is_done}); tick the admin's ${said(tickTheirs)} (done ${theirs?.is_done}); rename ${said(rename)} (${mine?.content})`,

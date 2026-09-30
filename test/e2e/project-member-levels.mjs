@@ -128,8 +128,8 @@ try {
       vMake.status === 403 && (await tasksNamed(`${TAG} made through view`)) === 0 &&
       vRename.status === 403 && (await listName(PV.list)) === `${TAG} view list` &&
       vOwnRename.status === 403 && (await listName(vOwn)) === `${TAG} view theirs` &&
-      nTitle.status < 300 && (await title(PN.task)) === `${TAG} changed with no grant` &&
-      nOwnRename.status < 300 && (await listName(nOwn)) === `${TAG} theirs renamed with no grant`,
+      nTitle.ok && (await title(PN.task)) === `${TAG} changed with no grant` &&
+      nOwnRename.ok && (await listName(nOwn)) === `${TAG} theirs renamed with no grant`,
     'a member given View on a project changes nothing in it — not the admin\'s task, not a new task, not a list, even one they made — where the space alone would let them, as it does in the project beside it',
     `view: the task ${vTitle.status} ("${await title(PV.task)}"), a new task ${vMake.status}, the list ${vRename.status}, their own list ${vOwnRename.status} ("${await listName(vOwn)}"); ` +
       `no grant: the task ${nTitle.status} ("${await title(PN.task)}"), their own list ${nOwnRename.status}`,
@@ -140,7 +140,7 @@ try {
   const cSaid = await M(`/tasks/${PC.task}/comments`, { method: 'POST', body: { body: `${TAG} a comment` } })
   const cTitle = await M(`/tasks/${PC.task}`, { method: 'PATCH', body: { title: `${TAG} changed through comment` } })
   chk(
-    cSaid.status < 300 && (await comments(PC.task)) === 1 && cTitle.status === 403 && (await title(PC.task)) === `${TAG} comment task`,
+    cSaid.ok && (await comments(PC.task)) === 1 && cTitle.status === 403 && (await title(PC.task)) === `${TAG} comment task`,
     'a member given Comment on a project comments on its tasks and changes nothing of them',
     `the comment ${cSaid.status} (${await comments(PC.task)}); the title ${cTitle.status} ("${await title(PC.task)}")`,
   )
@@ -152,9 +152,9 @@ try {
   const fMake = await M('/tasks', { method: 'POST', body: { listId: PF.list, title: `${TAG} made through full edit` } })
   const xTitle = await M(`/tasks/${PX.task}`, { method: 'PATCH', body: { title: `${TAG} changed in view-only` } })
   chk(
-    eTitle.status < 300 && (await title(PE.task)) === `${TAG} changed through edit` &&
+    eTitle.ok && (await title(PE.task)) === `${TAG} changed through edit` &&
       eMake.status === 403 && (await tasksNamed(`${TAG} made through edit`)) === 0 &&
-      fMake.status < 300 && (await tasksNamed(`${TAG} made through full edit`)) === 1 &&
+      fMake.ok && (await tasksNamed(`${TAG} made through full edit`)) === 1 &&
       xTitle.status === 403 && (await title(PX.task)) === `${TAG} nothing task`,
     'a member given Edit on a project in a view-only space changes the admin\'s task there and makes none, and given Full edit on the one beside it makes one — and in a project with no grant the space\'s View still decides',
     `edit: the task ${eTitle.status} ("${await title(PE.task)}"), a new task ${eMake.status}; full edit: a new task ${fMake.status}; no grant: ${xTitle.status} ("${await title(PX.task)}")`,
@@ -172,7 +172,7 @@ try {
   await sql`update project_members set added_by_id = ${admin.id} where project_id = ${PM.project} and user_id = ${me.id}`
   const given = await M(`/tasks/${PM.task}`, { method: 'PATCH', body: { title: `${TAG} changed by the grant` } })
   chk(
-    seeded.status === 403 && afterSeed === `${TAG} theirs task` && given.status < 300 && (await title(PM.task)) === `${TAG} changed by the grant`,
+    seeded.status === 403 && afterSeed === `${TAG} theirs task` && given.ok && (await title(PM.task)) === `${TAG} changed by the grant`,
     'the admin row a project\'s maker is seeded with is no grant — the space\'s View decides — and the same row given by the admin is one',
     `the seed ${seeded.status} ("${afterSeed}"); given by the admin ${given.status} ("${await title(PM.task)}")`,
   )

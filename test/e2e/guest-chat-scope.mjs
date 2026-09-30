@@ -229,7 +229,7 @@ try {
   const mMade = await M(`/workspaces/${WS}/chat/channels`, { method: 'POST', body: { name: `${TAG}-bymember` } })
   const [gN, mN] = [await named(`${TAG}-byguest`), await named(`${TAG}-bymember`)]
   chk(
-    gMade.status === 403 && gN === 0 && mMade.status < 300 && mN === 1,
+    gMade.status === 403 && gN === 0 && mMade.ok && mN === 1,
     'a guest makes no channel (403, none made) — a member does',
     `the guest ${gMade.status}, made ${gN}; the member ${mMade.status}, made ${mN}`,
   )
