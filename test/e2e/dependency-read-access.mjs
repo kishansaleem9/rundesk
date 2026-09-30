@@ -67,7 +67,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const email = `${TAG}-member@rundesk.invalid`
@@ -76,13 +76,13 @@ try {
     organizationName: `Dependency member ${stamp}`, organizationSlug: `dependency-member-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const memberId = signed.user?.id
 
   const make = async (C, route, body, what) => {
     const res = await C(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const listIn = async (side, visibility) => {
@@ -144,7 +144,7 @@ try {
   const GIVEN = await make(A, '/tasks', { listId: OPEN_LIST, title: `${TAG} given to the member`, assigneeIds: [memberId] }, 'the given task')
   const linkHidden = await A(`/tasks/${GIVEN}/dependencies`, { method: 'POST', body: { relatedTaskId: HIDDEN, type: 'blocked_by' } })
   const linkOpen = await A(`/tasks/${GIVEN}/dependencies`, { method: 'POST', body: { relatedTaskId: OPEN, type: 'blocked_by' } })
-  if (linkHidden.status >= 300 || linkOpen.status >= 300) throw new Error(`the admin could not link the given task: ${said(linkHidden)} / ${said(linkOpen)}`)
+  if (!linkHidden.ok || !linkOpen.ok) throw new Error(`the admin could not link the given task: ${said(linkHidden)} / ${said(linkOpen)}`)
   const blockedNotices = async () =>
     sql`select title, body from notifications where user_id = ${memberId} and type = 'task_blocked' and workspace_id = ${WS}`
   await waitFor(async () => (await blockedNotices()).length >= 2, 8000)

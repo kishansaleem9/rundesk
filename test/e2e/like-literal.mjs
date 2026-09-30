@@ -59,7 +59,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const space = (await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })).data?.id
   const project = (await A('/projects', { method: 'POST', body: { spaceId: space, name: `${TAG} project` } })).data?.id
@@ -69,7 +69,7 @@ try {
   const NUM = `${TAG} cut 500 now`
   for (const title of [PCT, NUM]) {
     const t = await A('/tasks', { method: 'POST', body: { listId: list, title } })
-    if (t.status >= 300) throw new Error(`could not make "${title}": ${said(t)}`)
+    if (!t.ok) throw new Error(`could not make "${title}": ${said(t)}`)
   }
 
   // ══ 1. THE WORKSPACE SEARCH ══════════════════════════════════════════════

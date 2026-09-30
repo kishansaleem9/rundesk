@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /*
  * A STATUS THAT CAN BE 0 IS NEVER READ AS SUCCESS BY AN UPPER BOUND ALONE
- * (`found-30-sep/status-zero-passes-status-only-checks`).
+ * (`found-30-sep/status-zero-passes-status-only-checks`), NOR AS NO FAILURE BY
+ * A LOWER BOUND ALONE IN A GUARD (`found-30-sep/status-zero-slips-setup-guards`).
  *
  * `lib/fixture.mjs`'s one client answers `{ status: 0, ok: false, … }` when
  * nothing answers — the API is down, restarted under the run, the connection
@@ -59,6 +60,28 @@
  * cannot do without it; a floor (`>= 200 &&`) on a bare number; or the binding
  * `noAnswer: 'throw'`. A refusal is `>= 400` or its status, which a 0 fails.
  *
+ * RULE 2, THE MIRROR: A GUARD. A setup guard that stops the run on
+ * `x.status >= 300` (`>= 400`, `> 299`, `300 <= x.status`) lets a status of 0
+ * through — 0 is below the bound — so with nothing answering the setup goes on
+ * and the run reports the product. Nine grant guards stood on
+ * `granted = role.data?.id ? await A(…) : { status: 0 }`: when the role was not
+ * made the grant was never tried, and the delegate's checks failed as the
+ * product's rather than "could not grant". MEASURED FIRST, 30 September, at
+ * f532edc: 616 such guards in the suites' code; 424 of them, in 116 suites,
+ * read a status that can be 0 by the same three reasons (404 ZERO-CLIENT, 20
+ * PLACEHOLDER — the nine and a tenth among them), 5 already caught the 0
+ * beside the bound (`|| x.status === 0`), and 187 read a client that rejects.
+ * Each of the 424 now reads `!x.ok`, its message kept: a 0 and a hand-made
+ * `{ status: 0 }` both make it true. A guard is an `if` whose branch stops on
+ * the failure (throws, exits or bails with a code but 0, returns with nothing,
+ * `false` or the answer) or notes it; a refusal CHECK written `>= 400` is none,
+ * and is sound, and so is a branch that ends the run as a pass (a skip,
+ * `process.exit(0)`) or says yes on a refusal (`if (r.status >= 400) return
+ * true` in a refusal helper): a 0 goes past either and fails. One note of a
+ * grant never tried, `data-transfer-keys:217`, said nothing on its
+ * `{ status: 0 }`; it is recorded for its check now. What counts as a guard,
+ * and as the 0 caught beside one, is written where rule 2 is read, below.
+ *
  * EXEMPT, by `// status-floor: <reason>` at the end of the comparison's own
  * line, the reason one of `not-a-client` (the status is a page response's or
  * another that cannot be 0, which the gate cannot tell) or `zero-fails` (a 0
@@ -66,7 +89,9 @@
  * answers that must all be refusals). Never inside a check's arguments — the
  * other gates split those on text and a comment moves the split — so a
  * comparison that needs one is hoisted into a variable first. An unknown
- * reason, or a marker that exempts nothing on its line, is a failure.
+ * reason, or a marker that exempts nothing on its line, is a failure. A guard
+ * takes only `not-a-client`: a 0 that fails a guard's condition is the guard's
+ * defect, so `zero-fails` never exempts one.
  *
  * READ AS JAVASCRIPT, NOT AS LINES: comments, strings, regex literals and
  * template text are blanked before anything is matched (`lex`, copied from
@@ -78,10 +103,13 @@
  * fewer than 100 suites read is a failure (1 under `SUITE_DIR`).
  *
  * `--mutate` plants suites in a temp directory — the dependency-read-access
- * guard and `flag-resolution`'s restore among them — requires every shape above
- * to be caught and `ok`, a floor, a `noAnswer: 'throw'` binding and a page
- * response to pass, then breaks this file one rule at a time and requires a
- * planted case to notice (`lib/mutate.mjs`).
+ * guard, `flag-resolution`'s restore, a grant guard on `{ status: 0 }` and a
+ * grant only noted among them — requires every shape above to be caught and
+ * `ok`, `!ok`, a floor, a 0 caught beside a guard's bound, a refusal helper, a
+ * skip, a `noAnswer: 'throw'` binding and a page response to pass, then breaks
+ * this file one rule at a time and requires a
+ * planted case to notice (`lib/mutate.mjs`). The cases are `CASES` in this
+ * file, which is also the case file the mutants are run against.
  *
  *   node scripts/check-suite-status-floor.mjs [--mutate]
  *   SUITE_DIR=<dir> node scripts/check-suite-status-floor.mjs
@@ -97,6 +125,8 @@ const SELF = fileURLToPath(import.meta.url)
 const SUITES = process.env.SUITE_DIR ?? join(dirname(SELF), '..', 'test', 'e2e')
 const MIN_SUITES = process.env.SUITE_DIR ? 1 : 100
 const REASONS = ['not-a-client', 'zero-fails']
+/** The reasons that exempt each shape of site: a 0 that fails a guard's condition is the guard's defect, never its excuse. */
+const FITS = { upper: REASONS, guard: ['not-a-client'] }
 const MARKER = /\/\/\s*status-floor:\s*([\w-]*)/g
 const CHECKS = /(?<![.\w$])(?:chk|check)\s*\(|\.\s*step\s*\(/g
 const KEYWORDS = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'await', 'yield'])
@@ -526,6 +556,17 @@ export function floorlessIn(src) {
     const vals = bindings.get(name) ?? []
     return vals.length > 0 && vals.every((v) => /\.\s*status\s*\(/.test(code.slice(v.a, v.b)))
   }
+  /** Whether an operand, spaces out, is a status: `….status`, a bare `status`, a name ending in `Status` (not a page response's), or a field a status was copied into. */
+  const statusNamed = (operand) => {
+    const last = /([A-Za-z_$][\w$]*)$/.exec(operand)?.[1]
+    if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields.has(last)))) return false
+    return !(last !== 'status' && !statusFields.has(last) && pageStatus(last))
+  }
+  /** Why the status an operand reads can be 0 — its root's binding first, then the suite's client — or null. */
+  const canBeZero = (operand) => {
+    const root = /^([A-Za-z_$][\w$]*)/.exec(operand)?.[1] ?? null
+    return (root && zeroRoot(root)) ?? (zeroClient ? 'ZERO-CLIENT' : null)
+  }
 
   const checks = []
   for (const m of code.matchAll(CHECKS)) {
@@ -590,7 +631,7 @@ export function floorlessIn(src) {
     }
   }
   const sites = []
-  const considered = { compared: 0, floored: 0, cannotBeZero: 0 }
+  const considered = { compared: 0, floored: 0, cannotBeZero: 0, guards: 0, notes: 0, caught: 0, guardCannotBeZero: 0, notGuards: 0 }
   for (const m of code.matchAll(/(?<![<>=!])(<=?|>=?)(?![<>=])/g)) {
     const op = m[1]
     const at = m.index
@@ -611,9 +652,7 @@ export function floorlessIn(src) {
     if (opStart < 0 || opEnd <= opStart) continue
     // The operand as written (strings included, so `A('/x')` is not `A('/y')`), spaces out.
     const operand = norm(src.slice(opStart, opEnd))
-    const last = /([A-Za-z_$][\w$]*)$/.exec(operand)?.[1]
-    if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields.has(last)))) continue
-    if (last !== 'status' && !statusFields.has(last) && pageStatus(last)) continue
+    if (!statusNamed(operand)) continue
     const where = inCheck(at)
     if (where !== null && where >= 1) continue // a check's message decides nothing
     considered.compared += 1
@@ -639,8 +678,7 @@ export function floorlessIn(src) {
       considered.floored += 1
       continue
     }
-    const root = /^([A-Za-z_$][\w$]*)/.exec(operand)?.[1] ?? null
-    const why = (root && zeroRoot(root)) ?? (zeroClient ? 'ZERO-CLIENT' : null)
+    const why = canBeZero(operand)
     if (!why) {
       considered.cannotBeZero += 1
       continue
@@ -650,8 +688,241 @@ export function floorlessIn(src) {
     sites.push({
       line: lineOf(at),
       rule: why,
+      shape: 'upper',
       text: op[0] === '<' ? `${said} ${op} ${num}` : `${num} ${op} ${said}`,
       inCheck: where === 0,
+    })
+  }
+
+  /*
+   * RULE 2 — A FAILURE READ AS A LOWER BOUND ALONE, IN A GUARD
+   * (`found-30-sep/status-zero-slips-setup-guards`). The mirror of the loop
+   * above. A setup guard stops the run when a step failed, and one that reads
+   * the failure as `x.status >= 300` (`>= 400`, `> 299`, `300 <= x.status`: a
+   * lower bound of 300 or more) lets a status of 0 through, since 0 is below
+   * it: with nothing answering, the setup goes on and the run reports the
+   * product. Nine grant guards read
+   *
+   *     const granted = role.data?.id ? await A(…) : { status: 0 }
+   *     if (granted.status >= 300) throw new Error(`could not grant the delegate: …`)
+   *
+   * so when the role was not made the grant was never tried, and the delegate's
+   * checks failed as the product's rather than "could not grant".
+   *
+   * A GUARD is an `if` whose branch stops on the failure, or notes it
+   * (`branchKind`, below): a branch that ends the run as a pass or says yes on
+   * a refusal is none. The comparison is a term of its condition — reached
+   * through `||`, `&&`, grouping parentheses and the callback of a `.some(…)`,
+   * and not under a `!` or deciding a ternary. A refusal CHECK written `>= 400`
+   * is not a guard, and is sound: a 0 fails it.
+   *
+   * A CATCHER is another disjunct of an `||` chain on the way up that a status
+   * of 0 makes true: the same answer's `!ok`, or the same status false, `=== 0`
+   * or `!== N` (N ≠ 0), either way round. A read-back (`|| !x.data?.id`) is not
+   * one, as the loop above counts none for a floor: it stands for the status
+   * only by coincidence. Nor is an upper bound (`x.status < 200 ||`), which the
+   * loop above refuses where it stands: `!x.ok` says it once, for both.
+   */
+  /** Whether `k` starts an `||` or an `&&`. */
+  const joins = (k) => (code[k] === '|' && code[k + 1] === '|') || (code[k] === '&' && code[k + 1] === '&')
+  /** The disjuncts of the `||` chain filling [x, y): a group that is the whole of one is opened in its turn. */
+  const disjuncts = (x, y) => {
+    const parts = []
+    let d = 0
+    let s = x
+    for (let k = x; k < y; k++) {
+      if ('([{'.includes(code[k])) d += 1
+      else if (')]}'.includes(code[k])) d -= 1
+      else if (d === 0 && code[k] === '|' && code[k + 1] === '|') {
+        parts.push([s, k])
+        s = k + 2
+        k += 1
+      }
+    }
+    parts.push([s, y])
+    const out = []
+    for (const [p, q] of parts) {
+      const [ta, tb] = trimmed(code, p, q)
+      if (code[ta] === '(' && matchForward(code, ta) === tb - 1 && isGroup(code, ta)) out.push(...disjuncts(ta + 1, tb - 1))
+      else out.push([ta, tb])
+    }
+    return out
+  }
+  /*
+   * THE `if (` WHOSE CONDITION HOLDS THE TERM [a, b), walking out one bracket at
+   * a time, with the range of each `||` chain passed on the way; or null when
+   * the term is not a term of an `if`'s condition.
+   */
+  const guardAround = (a, b) => {
+    const levels = []
+    for (;;) {
+      const open = enclosingOpen(code, a)
+      if (open < 0 || code[open] !== '(') return null
+      const close = matchForward(code, open)
+      // In `xs.some((r) => r.status >= 300 || …)` the chain is the body of the arrow the call is handed.
+      let arrow = -1
+      for (let k = open + 1, d = 0; k < a; k++) {
+        if ('([{'.includes(code[k])) d += 1
+        else if (')]}'.includes(code[k])) d -= 1
+        else if (d === 0 && code[k] === '=' && code[k + 1] === '>') arrow = k
+      }
+      const from = arrow < 0 ? open + 1 : skipFwd(code, arrow + 2)
+      // The term is one of the `||`/`&&` terms filling [from, close): not under a `!`, not a ternary's.
+      const before = skipBack(code, a - 1)
+      const after = skipFwd(code, b)
+      if (!(before < from || joins(before - 1))) return null
+      if (!(after >= close || joins(after))) return null
+      levels.push([from, close])
+      const kw = skipBack(code, open - 1)
+      if (arrow >= 0) {
+        const fn = wordBefore(code, kw)
+        if (fn.word !== 'some' || code[skipBack(code, fn.at - 1)] !== '.') return null
+        a = chainBack(close)
+        b = close + 1
+        continue
+      }
+      if (isWord(code[kw]) && wordBefore(code, kw).word === 'if') return { close, levels }
+      // Otherwise a group, stepped through: a call's parenthesis fails the check above one level out.
+      a = open
+      b = close + 1
+    }
+  }
+  /*
+   * WHAT THE BRANCH IS FOR. A 0 skips the branch and goes on past it, so
+   * whether that is a defect is decided by what the branch does:
+   *
+   *   'fail'     it stops on the failure: throws; exits or bails with any code
+   *              but a literal 0 (`bail()` is 1, and `process.exit()` or a
+   *              computed code is whatever the run has come to, read as a
+   *              failure); or returns with nothing, `null`, `false`, the answer
+   *              or anything else a caller goes on from. A guard.
+   *   'note'     it says the failure (`console.log(…)` and the like). A 0 that
+   *              skips it is not said: `data-transfer-keys` noted a grant never
+   *              tried on `given.status >= 300`, said nothing on its
+   *              `{ status: 0 }`, and went on to fail the importer's check as
+   *              the product's. Read as a guard.
+   *   'skip'     it ends the run as a pass: `process.exit(0)`, `bail(0)`. A 0
+   *              that skips it goes on to the checks, and they fail.
+   *   'verdict'  it says yes on a REFUSAL — `return true` or a string, on a
+   *              bound of 400 or more, which is what a refusal is: a refusal
+   *              helper, a `.map` verdict, a `waitUntil` predicate. A 0 falls
+   *              through to the other answer, which a refusal check fails.
+   *
+   * A skip and a verdict are no guards: `!x.ok` there would turn a dead API
+   * into the skip, or into the refusal a check passes on. A yes said on a bound
+   * below 400 (`>= 300`) is said of any failure — a failure handed to whoever
+   * reads it, a guard in two steps — and is read as 'fail'; so is a refusal
+   * said as no (`return false`), since the gate cannot tell it from a failure
+   * handed back, and it is said as the yes instead. In a block, a stop on
+   * failure anywhere makes the branch one; else a skip or a verdict; else a note.
+   */
+  const ENDS = /^(?:(?:await\s+)?bail|process\s*\.\s*exit)\s*\(/
+  const NOTES = /^console\s*\.\s*(?:log|error|warn|info)\s*\(/
+  const RANK = { fail: 3, skip: 2, verdict: 2, note: 1 }
+  /** What the statement starting at `k` does, on a failure whose least status is `least`: a RANK, or null for none of them. */
+  const statementKind = (k, least) => {
+    const text = code.slice(k, k + 40)
+    if (/^throw(?![\w$])/.test(text)) return 'fail'
+    let m
+    if ((m = ENDS.exec(text))) {
+      const open = k + m[0].length - 1
+      const close = matchForward(code, open)
+      return close > 0 && code.slice(open + 1, close).trim() === '0' ? 'skip' : 'fail'
+    }
+    if (/^return(?![\w$])/.test(text)) {
+      let from = k + 'return'.length
+      while (code[from] === ' ' || code[from] === '\t') from++
+      // `return` alone, before a line break, a `;` or a `}`, hands back nothing.
+      if (from >= code.length || ';}\n'.includes(code[from])) return 'fail'
+      const value = src.slice(from, exprEnd(code, from, regexEnds)).trim()
+      return least >= 400 && /^(?:true|(['"`])[^]+\1)$/.test(value) ? 'verdict' : 'fail'
+    }
+    if (NOTES.test(text)) return 'note'
+    return null
+  }
+  /** What the branch after the `if (…)` that closes at `close` does: itself, or the strongest statement of its block outside any bracket. */
+  const branchKind = (close, least) => {
+    const j = skipFwd(code, close + 1)
+    if (code[j] !== '{') return statementKind(j, least)
+    const end = matchForward(code, j)
+    let d = 0
+    let kind = null
+    for (let k = j + 1; k < end; k++) {
+      if ('(['.includes(code[k])) d += 1
+      else if (')]'.includes(code[k])) d -= 1
+      else if (d === 0 && isWord(code[k]) && !isWord(code[k - 1]) && code[k - 1] !== '.') {
+        const here = statementKind(k, least)
+        if (here && (!kind || RANK[here] > RANK[kind])) kind = here
+      }
+    }
+    return kind
+  }
+  /** Whether `l op r` holds, for the numbers a catcher compares (`===`, `==`, `!==`, `!=`). */
+  const holds = (l, op, r) => (op[0] === '=' ? l === r : l !== r)
+  for (const m of code.matchAll(/(?<![<>=!])(>=?|<=?)(?![<>=])/g)) {
+    const cmp = m[1]
+    const pos = m.index
+    let lo
+    let hi
+    let term
+    let bound
+    if (cmp[0] === '>') {
+      // `x.status >= 300`: the status on the left, the bound on the right
+      const right = /^\s*(\d[\d_.]*)/.exec(code.slice(pos + cmp.length, pos + cmp.length + 12))
+      if (!right) continue
+      bound = right[1]
+      hi = skipBack(code, pos - 1) + 1
+      lo = chainBack(hi - 1)
+      term = [lo, pos + cmp.length + right[0].length]
+    } else {
+      // `300 <= x.status`: the bound on the left, the status on the right
+      const left = wordBefore(code, skipBack(code, pos - 1))
+      if (!/^\d[\d_.]*$/.test(left.word)) continue
+      bound = left.word
+      lo = skipFwd(code, pos + cmp.length)
+      hi = chainFwd(lo)
+      term = [left.at, hi]
+    }
+    if (lo < 0 || hi <= lo) continue
+    // The least status the comparison holds for: at 300 or more it reads a failure; below, it is a floor.
+    const least = cmp.length === 2 ? Number(bound) : Number(bound) + 1
+    if (!(least >= 300)) continue
+    const operand = norm(src.slice(lo, hi))
+    if (!statusNamed(operand)) continue
+    const guard = guardAround(...term)
+    const kind = guard && branchKind(guard.close, least)
+    if (!kind) continue
+    if (kind === 'skip' || kind === 'verdict') {
+      considered.notGuards += 1
+      continue
+    }
+    considered[kind === 'note' ? 'notes' : 'guards'] += 1
+    const base = operand.endsWith('.status') ? operand.slice(0, -'.status'.length) : null
+    const catches = (t) => {
+      let f
+      if (base && (f = /^!(.+)\.ok$/.exec(t)) && f[1] === base) return true
+      if ((f = /^!(.+)$/.exec(t)) && f[1] === operand) return true
+      if ((f = /^(.+?)(===?|!==?)(-?[\d_.]+)$/.exec(t)) && f[1] === operand) return holds(0, f[2], Number(f[3]))
+      if ((f = /^(-?[\d_.]+)(===?|!==?)(.+)$/.exec(t)) && f[3] === operand) return holds(Number(f[1]), f[2], 0)
+      return false
+    }
+    if (guard.levels.some(([x, y]) => disjuncts(x, y).some(([p, q]) => catches(norm(src.slice(p, q)))))) {
+      considered.caught += 1
+      continue
+    }
+    const zero = canBeZero(operand)
+    if (!zero) {
+      considered.guardCannotBeZero += 1
+      continue
+    }
+    const said = src.slice(lo, hi).replace(/\s+/g, ' ')
+    sites.push({
+      line: lineOf(pos),
+      rule: zero,
+      shape: 'guard',
+      notes: kind === 'note',
+      text: cmp[0] === '>' ? `${said} ${cmp} ${bound}` : `${bound} ${cmp} ${said}`,
+      inCheck: false,
     })
   }
 
@@ -664,6 +935,7 @@ export function floorlessIn(src) {
     if (commentStart !== slash) continue
     markers.push({ line: lineOf(slash), reason: m[1], inCheck: inCheck(slash) !== null })
   }
+  sites.sort((x, y) => x.line - y.line)
   return { sites, markers, clean, zeroClient, considered }
 }
 
@@ -671,7 +943,7 @@ export function floorlessIn(src) {
 export function scan(dir) {
   const problems = []
   const sites = []
-  const tally = { suites: 0, zeroClient: 0, compared: 0, floored: 0, cannotBeZero: 0, exempt: {} }
+  const tally = { suites: 0, zeroClient: 0, compared: 0, floored: 0, cannotBeZero: 0, guards: 0, notes: 0, caught: 0, guardCannotBeZero: 0, notGuards: 0, exempt: {} }
   let files = []
   try {
     files = readdirSync(dir).filter((f) => f.endsWith('.mjs')).sort()
@@ -695,10 +967,15 @@ export function scan(dir) {
     tally.compared += found.considered.compared
     tally.floored += found.considered.floored
     tally.cannotBeZero += found.considered.cannotBeZero
+    tally.guards += found.considered.guards
+    tally.notes += found.considered.notes
+    tally.caught += found.considered.caught
+    tally.guardCannotBeZero += found.considered.guardCannotBeZero
+    tally.notGuards += found.considered.notGuards
     const byLine = new Map(found.markers.map((mk) => [mk.line, mk]))
     for (const s of found.sites) {
       const mk = byLine.get(s.line)
-      if (mk && REASONS.includes(mk.reason) && !mk.inCheck) {
+      if (mk && FITS[s.shape].includes(mk.reason) && !mk.inCheck) {
         tally.exempt[mk.reason] = (tally.exempt[mk.reason] ?? 0) + 1
         mk.used = true
         continue
@@ -714,7 +991,11 @@ export function scan(dir) {
       } else if (!REASONS.includes(mk.reason)) {
         problems.push(`${file}:${mk.line}  // status-floor: ${mk.reason} — not a reason this gate knows (${REASONS.join(', ')})`)
       } else if (!mk.used) {
-        problems.push(`${file}:${mk.line}  // status-floor: ${mk.reason} — exempts nothing: no comparison on this line needs it`)
+        const guarded = found.sites.some((s) => s.line === mk.line && s.shape === 'guard')
+        problems.push(
+          `${file}:${mk.line}  // status-floor: ${mk.reason} — exempts nothing: no comparison on this line needs it` +
+            (guarded ? ` (a guard takes only ${FITS.guard.join(', ')}: a 0 its condition lets through is the defect itself)` : ''),
+        )
       }
     }
   }
@@ -729,19 +1010,35 @@ const WHY = {
 
 function report({ problems, sites, tally }) {
   for (const p of problems) console.log(`✗ ${p}`)
-  for (const s of sites) console.log(`✗ ${s.file}:${s.line}  ${s.rule}  ${s.text} — ${WHY[s.rule]}`)
+  for (const s of sites) {
+    if (s.shape === 'guard' && s.notes) console.log(`✗ ${s.file}:${s.line}  ${s.rule}  ${s.text} — a note of a failure read as a lower bound alone, which 0 is below, so a 0 is not said; ${WHY[s.rule]}`)
+    else if (s.shape === 'guard') console.log(`✗ ${s.file}:${s.line}  ${s.rule}  ${s.text} — a guard reading failure as a lower bound alone, which 0 is below; ${WHY[s.rule]}`)
+    else console.log(`✗ ${s.file}:${s.line}  ${s.rule}  ${s.text} — ${WHY[s.rule]}`)
+  }
   if (problems.length || sites.length) {
-    const of = (rule) => sites.filter((s) => s.rule === rule).length
+    const upper = sites.filter((s) => s.shape !== 'guard')
+    const guards = sites.filter((s) => s.shape === 'guard')
+    const of = (list, rule) => list.filter((s) => s.rule === rule).length
+    const split = (list) =>
+      `in ${new Set(list.map((s) => s.file)).size} suite(s): ${of(list, 'ZERO-CLIENT')} on a client that answers 0, ` +
+      `${of(list, 'PLACEHOLDER')} on a hand-made status of 0, ${of(list, 'ZERO-HELPER')} on a helper's`
     console.error(
-      `\n[status-floor] ${sites.length} status comparison(s) with an upper bound and no lower bound, where the status can be 0, ` +
-        `in ${new Set(sites.map((s) => s.file)).size} suite(s): ${of('ZERO-CLIENT')} on a client that answers 0, ` +
-        `${of('PLACEHOLDER')} on a hand-made status of 0, ${of('ZERO-HELPER')} on a helper's` +
-        `${problems.length ? `; and ${problems.length} other problem(s)` : ''}.\n` +
+      `\n[status-floor] ${upper.length} status comparison(s) with an upper bound and no lower bound, where the status can be 0, ` +
+        `${split(upper)}; and ${guards.length} guard(s) or note(s) reading a failure as a lower bound alone, where the status can be 0, ` +
+        `${split(guards)}${problems.length ? `; and ${problems.length} other problem(s)` : ''}.\n` +
         '0 < 300: nothing answering reads as success. Where the condition means "it worked", read `ok` (2xx), which\n' +
         'the client\'s answer and a fetch Response both have and a hand-made `{ status: 0 }` does not; where what\n' +
         "follows cannot do without it, `must(res, what)`; on a bare number, a floor (`s >= 200 && s < 300`); or bind\n" +
         "the suite's client with `noAnswer: 'throw'`. A refusal is `>= 400` or its status. A comparison a 0 cannot\n" +
-        `pass ends its own line with \`// status-floor: <reason>\`, one of ${REASONS.join(', ')} — outside any check's arguments.`,
+        `pass ends its own line with \`// status-floor: <reason>\`, one of ${REASONS.join(', ')} — outside any check's arguments.\n` +
+        'And 0 >= 300 is false: a guard that stops the setup on `x.status >= 300` lets nothing-answering through, and the\n' +
+        'run goes on to report the product; a note of the failure says nothing. Read `!x.ok` there, which a 0 and a\n' +
+        "hand-made `{ status: 0 }` both make true, keeping the guard's own message — or, where the run goes on without the\n" +
+        "step (a grant noted, not stopped), stop, or record it for the check that needs it to read. A guard whose status\n" +
+        `cannot be 0 is marked ${FITS.guard.join(', ')}. Only a branch that stops on the failure or notes it is read so: one\n` +
+        "that ends the run as a pass (`process.exit(0)`, a skip) or says yes on a refusal (`if (x.status >= 400) return true`,\n" +
+        "`return 'refused'`) is no guard — a 0 goes on and fails — and `!x.ok` there would turn a dead API into the skip or\n" +
+        'the refusal. A refusal said as no (`return false`) is read as a failure handed back: say it as the yes.',
     )
     process.exitCode = 1
     return false
@@ -750,7 +1047,9 @@ function report({ problems, sites, tally }) {
   console.log(
     `[status-floor] ok — ${tally.suites} suite(s) read, ${tally.zeroClient} of them binding a client that answers 0; ` +
       `${tally.compared} status comparison(s) with an upper bound: ${tally.floored} with a lower bound beside it, ` +
-      `${tally.cannotBeZero} on a status that cannot be 0, ` +
+      `${tally.cannotBeZero} on a status that cannot be 0; ` +
+      `${tally.guards} guard(s) and ${tally.notes} note(s) reading a failure as a lower bound: ${tally.caught} with a 0 caught beside it, ` +
+      `${tally.guardCannotBeZero} on a status that cannot be 0; ${tally.notGuards} branch(es) that skip or say yes on a refusal, no guards; ` +
       `${exempt.reduce((n, [, v]) => n + v, 0)} exempt${exempt.length ? ` (${exempt.map(([k, v]) => `${k} ${v}`).join(', ')})` : ''}`,
   )
   return true
@@ -900,6 +1199,156 @@ const CASES = [
     "const r = await A('/x')",
     "chk(r.ok, 'x', `it answered ${r.status < 300 ? 'yes' : 'no'}`)",
   )],
+
+  /* RULE 2: a guard that reads failure as a lower bound alone (`found-30-sep/status-zero-slips-setup-guards`). */
+  ['caught', "the nine grant guards: a failure read as status >= 300 on a grant never tried, standing in as { status: 0 }", suite(THROWS,
+    "const role = await A('/roles', { method: 'POST', body: { permissions: [key] } })",
+    "const granted = role.data?.id ? await A(`/members/${ROW}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }",
+    "if (granted.status >= 300) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)",
+  ), /✗ c\.mjs:6 {2}PLACEHOLDER {2}granted\.status >= 300/],
+  ['caught', 'a setup guard on the default binding', suite(HEAD,
+    "const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })",
+    "if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)",
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}added\.status >= 300/],
+  ['caught', 'a guard with a read-back beside it, which stands for the status only by coincidence', suite(HEAD,
+    "const made = await A('/workspaces', { method: 'POST', body: { name } })",
+    "if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)",
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}made\.status >= 300/],
+  ['caught', 'a failure read as >= 400 and as > 299, and the bound written first either way', suite(HEAD,
+    "const r = await A('/x')",
+    "if (r.status >= 400) throw new Error('a')",
+    "if (r.status > 299) throw new Error('b')",
+    "if (300 <= r.status) throw new Error('c')",
+    "if (299 < r.status) throw new Error('d')",
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}r\.status >= 400[\s\S]*✗ c\.mjs:6 {2}ZERO-CLIENT {2}r\.status > 299[\s\S]*✗ c\.mjs:7 {2}ZERO-CLIENT {2}300 <= r\.status[\s\S]*✗ c\.mjs:8 {2}ZERO-CLIENT {2}299 < r\.status/],
+  ['caught', "a guard whose block throws, a helper's that returns, and guards that exit or bail", suite(HEAD,
+    "const r = await A('/x')",
+    'if (r.status >= 300) {',
+    '  console.log(`answered ${r.status}`)',
+    "  throw new Error('could not stage x')",
+    '}',
+    'const presigned = async () => {',
+    "  const p = await A('/presign', { method: 'POST' })",
+    '  if (p.status >= 300) return null',
+    '  return p.data',
+    '}',
+    "const q = await A('/y')",
+    "if (q.status >= 300) { console.error('could not stage y'); process.exit(1) }",
+    "const s = await A('/z')",
+    'if (s.status >= 300) await bail(1)',
+  ), /✗ c\.mjs:5 [\s\S]*✗ c\.mjs:11 [\s\S]*✗ c\.mjs:15 [\s\S]*✗ c\.mjs:17 /],
+  ['caught', 'a guard over a list of answers, through .some()', suite(HEAD,
+    "const gone = [await A('/a', { method: 'DELETE' }), await A('/b', { method: 'DELETE' })]",
+    "if (gone.some((r) => r.status >= 300)) throw new Error(`could not delete: ${gone.map(said).join(', ')}`)",
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}r\.status >= 300/],
+  ['caught', "no catcher: another answer's !ok, an !ok ANDed with something else, a comparison a 0 does not make true", suite(HEAD,
+    "const r = await A('/x')",
+    "const q = await A('/y')",
+    "if (r.status >= 300 || !q.ok) throw new Error('a')",
+    "if (r.status >= 300 || (!r.ok && fresh)) throw new Error('b')",
+    "if (r.status >= 300 || r.status === 204 || 204 === r.status) throw new Error('c')",
+  ), /✗ c\.mjs:6 {2}ZERO-CLIENT {2}r\.status >= 300[\s\S]*✗ c\.mjs:7 {2}ZERO-CLIENT {2}r\.status >= 300[\s\S]*✗ c\.mjs:8 {2}ZERO-CLIENT {2}r\.status >= 300/],
+  ['caught', 'a zero-fails marker on a guard, where the 0 it lets through is the defect itself', suite(HEAD,
+    "const r = await A('/x')",
+    "if (r.status >= 300) throw new Error('x') // status-floor: zero-fails",
+  ), /^(?=[\s\S]*c\.mjs:5 {2}\/\/ status-floor: zero-fails — exempts nothing)(?=[\s\S]*✗ c\.mjs:5 {2}ZERO-CLIENT {2}r\.status >= 300)/],
+  ['caught', 'a status copied into a field of another name, and guarded there', suite(HEAD,
+    "const stage = async () => { const s = await A('/x', { method: 'POST' }); return { made: s.status, id: s.data?.id } }",
+    'const g = await stage()',
+    "if (g.made >= 300) throw new Error('could not stage')",
+  ), /✗ c\.mjs:6 {2}ZERO-CLIENT {2}g\.made >= 300/],
+  ['passes', 'the same guards reading !ok, the grant on its placeholder among them', suite(HEAD,
+    "const role = await A('/roles', { method: 'POST' })",
+    "const granted = role.data?.id ? await A('/grant', { method: 'POST' }) : { status: 0 }",
+    'if (!granted.ok) throw new Error(`could not grant the delegate: ${said(granted)}`)',
+    "const made = await A('/workspaces', { method: 'POST' })",
+    "if (!made.ok || !made.data?.id) throw new Error('could not make the workspace')",
+    "const gone = [await A('/a', { method: 'DELETE' })]",
+    "if (gone.some((r) => !r.ok)) throw new Error('could not delete')",
+  )],
+  ['passes', 'a 0 caught beside the lower bound, in every spelling', suite(HEAD,
+    "const r = await A('/x')",
+    "if (r.status >= 300 || !r.ok) throw new Error('a')",
+    "if (r.status === 0 || r.status >= 300) throw new Error('b')",
+    "if (!r.status || r.status >= 400) throw new Error('c')",
+    "if (r.status >= 300 || 0 === r.status) throw new Error('d')",
+    "if ((r.status >= 300 || r.status == 0) && strict) throw new Error('e')",
+    "if (r.status >= 300 || r.status !== 201) throw new Error('f')",
+    "if ((r.status >= 300) || (!r?.ok)) throw new Error('g')",
+    "if (gone.some((x) => x.status >= 300 || !x.ok)) throw new Error('h')",
+  )],
+  ['caught', "the data-transfer-keys grant: a grant never tried, standing in as { status: 0 }, noted on >= 300 and so not noted at all", suite(THROWS,
+    "const r = await A('/roles', { method: 'POST', body: { permissions: ['workspace.import'] } })",
+    "const given = r.data?.id ? await A(`/members/${ROW}/roles/${r.data.id}`, { method: 'POST', body: {} }) : { status: 0 }",
+    'if (given.status >= 300) console.log(`    (not granted in the empty workspace: ${said(r)})`)',
+  ), /✗ c\.mjs:6 {2}PLACEHOLDER {2}given\.status >= 300 — a note of a failure/],
+  ['caught', 'a cleanup note on the default binding, itself or in a block', suite(HEAD,
+    "const gone = await A('/x', { method: 'DELETE' })",
+    'if (gone.status >= 300) console.log(`  note: cleanup answered ${gone.status}`)',
+    'if (gone.status >= 400) {',
+    '  console.error(`  cleanup left behind: ${gone.status}`)',
+    '}',
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}gone\.status >= 300 — a note[\s\S]*✗ c\.mjs:6 {2}ZERO-CLIENT {2}gone\.status >= 400 — a note/],
+  ['caught', 'a yes said on a failure (>= 300), not a refusal, is a failure handed on: a guard in two steps', suite(HEAD,
+    "const failed = async (route) => { const r = await A(route); if (r.status >= 300) return true; return false }",
+    "if (await failed('/x')) throw new Error('could not stage x')",
+  ), /✗ c\.mjs:4 {2}ZERO-CLIENT {2}r\.status >= 300 — a guard/],
+  ['caught', "on a refusal's bound, a branch that hands back false, nothing, an empty string or the answer stops on failure", suite(HEAD,
+    "const staged = async () => { const p = await A('/p', { method: 'POST' }); if (p.status >= 400) return false; await A('/q'); return true }",
+    "const made = async () => { const p = await A('/p', { method: 'POST' }); if (p.status >= 400) return; return p.data }",
+    "const mkList = async () => { const proj = await A('/projects', { method: 'POST' }); if (proj.status >= 400) return { proj, list: null }; return { proj, list: await A('/lists') } }",
+    "const named = async () => { const p = await A('/p'); if (p.status >= 400) return ''; return 'named' }",
+  ), /✗ c\.mjs:4 {2}ZERO-CLIENT {2}p\.status >= 400 — a guard[\s\S]*✗ c\.mjs:5 [\s\S]*✗ c\.mjs:6 {2}ZERO-CLIENT {2}proj\.status >= 400[\s\S]*✗ c\.mjs:7 /],
+  ['caught', 'an exit whose code is computed, and a bare bail, stop on failure', suite(HEAD,
+    "const s = await A('/z')",
+    'if (s.status >= 400) process.exit(failed ? 1 : 0)',
+    'if (s.status >= 400) await bail()',
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}s\.status >= 400 — a guard[\s\S]*✗ c\.mjs:6 {2}ZERO-CLIENT {2}s\.status >= 400 — a guard/],
+  ['caught', 'a stop on failure anywhere in a block makes it a guard, a skip beside it notwithstanding', suite(HEAD,
+    "const probe = await A('/model')",
+    'if (probe.status >= 400) {',
+    "  if (strict) throw new Error('this lane was to have a model')",
+    "  console.log('SKIP — this lane has no model')",
+    '  process.exit(0)',
+    '}',
+  ), /✗ c\.mjs:5 {2}ZERO-CLIENT {2}probe\.status >= 400 — a guard/],
+  ['passes', "not guards (the review's planted suites): a refusal helper, a .map verdict and a waitUntil predicate that say yes on a refusal, and skips that exit 0", suite(HEAD,
+    'const refused = async (route) => { const r = await M(route); if (r.status >= 400) return true; return false }',
+    "chk(await refused(`/tasks/${HIDDEN}`), 'the member is refused the hidden task')",
+    "const verdicts = await Promise.all(routes.map(async (route) => { const r = await M(route); if (r.status >= 400) return 'refused'; return `let in (${r.status})` }))",
+    "chk(verdicts.every((v) => v === 'refused'), 'the member is refused every route')",
+    "const shut = await waitUntil(async () => { const r = await M('/x'); if (r.status > 399) return true; return false })",
+    "chk(shut, 'the member is refused once the share is withdrawn')",
+    "const probe = await A('/model')",
+    "if (probe.status >= 400) { console.log('SKIP — this lane has no model'); process.exit(0) }",
+    'if (400 <= probe.status) await bail(0)',
+  )],
+  ['passes', 'a note that says a 0 too, and a grant recorded for its check rather than noted (data-transfer-keys, after)', suite(HEAD,
+    "const gone = await A('/x', { method: 'DELETE' })",
+    'if (gone.status >= 300 || gone.status === 0) console.log(`  note: cleanup answered ${gone.status}`)',
+    "const r = await A('/roles', { method: 'POST' })",
+    "const given = r.data?.id ? await A('/grant', { method: 'POST' }) : { status: 0 }",
+    'const granted = given.ok === true',
+    'if (!granted) console.log(`    (not granted in the empty workspace: ${said(r)} ${said(given)})`)',
+    "chk(granted && shown === 1, 'the member granted it is offered it', `importer ${granted ? shown : 'NOT GRANTED'}`)",
+  )],
+  ['passes', 'not guards: a refusal check, a refusal collected, a floor, a bound under a ! or deciding a ternary', suite(HEAD,
+    "const r = await A('/x')",
+    "chk(r.status >= 400, 'the member is refused')",
+    'if (r.status >= 400) refused.push(r.status)',
+    'const read = async () => { if (r.status >= 200 && r.status < 300) return r.data; return null }',
+    "if (!(r.status >= 300)) throw new Error('it went through, which it should not have')",
+    "if (r.status >= 300 ? strict : false) throw new Error('refused, and this run is strict')",
+  )],
+  ['passes', "a guard on a noAnswer: 'throw' binding, whose client rejects instead of answering 0", suite(THROWS,
+    "const added = await A('/members', { method: 'POST' })",
+    'if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)',
+  )],
+  ['passes', "a guard's shape in a comment, a string and a template", suite(HEAD,
+    '// if (added.status >= 300) throw new Error()',
+    "const said = 'if (added.status >= 300) throw'",
+    'const tpl = `if (added.status >= 300) throw ${WS}`',
+  )],
 ]
 
 function runCases(gate) {
@@ -942,9 +1391,17 @@ if (process.env.STATUS_FLOOR_UNDER_TEST) {
     const { fail, seen } = runCases(SELF)
     const planted = seen[CASES[0][1]]
     const fixed = seen[CASES.find(([want]) => want === 'passes')[1]]
+    const grant = seen[CASES.find(([, name]) => name.startsWith('the nine grant guards'))[1]]
+    const granted = seen[CASES.find(([, name]) => name.startsWith('the same guards reading !ok'))[1]]
+    const noted = seen[CASES.find(([, name]) => name.startsWith('the data-transfer-keys grant'))[1]]
+    const verdicts = seen[CASES.find(([, name]) => name.startsWith("not guards (the review's planted suites)"))[1]]
     console.log(
       `[status-floor] mutate: the planted dependency-read-access guard was ${planted.ok ? 'caught' : 'NOT caught'} — ${planted.first}\n` +
-        `[status-floor] mutate: the same conditions reading ok ${fixed.ok ? 'pass' : 'do NOT pass'} — ${fixed.first}`,
+        `[status-floor] mutate: the same conditions reading ok ${fixed.ok ? 'pass' : 'do NOT pass'} — ${fixed.first}\n` +
+        `[status-floor] mutate: the planted grant guard on { status: 0 } was ${grant.ok ? 'caught' : 'NOT caught'} — ${grant.first}\n` +
+        `[status-floor] mutate: the same guards reading !ok ${granted.ok ? 'pass' : 'do NOT pass'} — ${granted.first}\n` +
+        `[status-floor] mutate: the planted grant noted on { status: 0 } was ${noted.ok ? 'caught' : 'NOT caught'} — ${noted.first}\n` +
+        `[status-floor] mutate: the planted refusal helper, verdicts and skips ${verdicts.ok ? 'pass' : 'do NOT pass'} — ${verdicts.first}`,
     )
     const alive = (mutant) => {
       const r = spawnSync(process.execPath, [mutant], { encoding: 'utf8', timeout: 120_000 })
@@ -968,9 +1425,9 @@ if (process.env.STATUS_FLOOR_UNDER_TEST) {
         ['lte-unread', at('for (const m of code.matchAll(/(?<![<>=!])(<=?|>=?)', '(?![<>=])/g)) {'), 'for (const m of code.matchAll(/(?<![<>=!])(<|>=?)(?![<>=])/g)) {'],
         ['reversed-unread', at("if (!/^\\d[\\d_.]*$/.test(wordBefore(code, n).word)) ", 'continue'), 'continue'],
         ['keywords-in-chains', at('if (isWord(code[k]) && KEYWORDS.has(wordBefore(code, k).word)) ', 'return o'), ''],
-        ['named-statuses-unread', at("if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields", ".has(last)))) continue"), "if (!last || !(last === 'status' || (operand.includes('.') && statusFields.has(last)))) continue"],
-        ['copied-statuses-unread', at("/Status$/.test(last) || (operand.includes('.') && ", 'statusFields.has(last)))) continue'), "/Status$/.test(last) || false)) continue"],
-        ['page-statuses-counted', at("if (last !== 'status' && !statusFields.has(last) && ", 'pageStatus(last)) continue'), 'if (false) continue'],
+        ['named-statuses-unread', at("if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields", ".has(last)))) return false"), "if (!last || !(last === 'status' || (operand.includes('.') && statusFields.has(last)))) return false"],
+        ['copied-statuses-unread', at("/Status$/.test(last) || (operand.includes('.') && ", 'statusFields.has(last)))) return false'), "/Status$/.test(last) || false)) return false"],
+        ['page-statuses-counted', at("return !(last !== 'status' && !statusFields.has(last) && ", 'pageStatus(last))'), 'return true'],
         ['zero-client-off', at('if (!options || !/noAn', "swer\\s*:\\s*['\"]throw['\"]/.test(src.slice(...options))) zeroClient = true"), 'if (false) zeroClient = true'],
         ['any-options-throw', at('if (!options || ', '!/noAnswer'), 'if (!options || false && !/noAnswer'],
         ['own-name-unread', at("if (s) local.add(s[1] ?? ", "'apiAs')"), 'if (s && s[1]) local.add(s[1])'],
@@ -997,6 +1454,46 @@ if (process.env.STATUS_FLOOR_UNDER_TEST) {
         ['unlexed-read-anyway', at('    if (!found.clean) ', '{'), '    if (false) {'],
         ['no-floor', at('const MIN_SUITES = ', 'process.env.SUITE_DIR ? 1 : 100'), 'const MIN_SUITES = 0'],
         ['violations-exit-zero', at('    process.exitCode = 1\n', '    return false'), '    process.exitCode = 0\n    return false'],
+        // Rule 2: a guard that reads failure as a lower bound alone.
+        ['guards-unread', at('if (!(least >= ', '300)) continue'), 'continue'],
+        ['floors-read-as-failures', at('if (!(least >= ', '300)) continue'), 'if (!(least >= 0)) continue'],
+        ['guard-bounds-off-by-one', at('const least = cmp.length === 2 ? Number(bound) : ', 'Number(bound) + 1'), 'const least = Number(bound)'],
+        ['guard-bounds-first-unread', at('if (!/^\\d[\\d_.]*$/.test(left', '.word)) continue'), 'continue'],
+        ['guards-need-no-if', at("if (isWord(code[kw]) && wordBefore(code, kw).word === ", "'if') return { close, levels }"), "if (isWord(code[kw]) && wordBefore(code, kw).word === 'while') return { close, levels }"],
+        ['any-if-a-guard', at('const kind = guard && ', 'branchKind(guard.close, least)'), "const kind = guard && (branchKind(guard.close, least) ?? 'fail')"],
+        ['consequents-unread', at("if (code[j] !== '{') ", 'return statementKind(j, least)'), "if (code[j] !== '{') return null"],
+        ['blocks-unread', at("if (code[j] !== '{') ", 'return statementKind(j, least)'), 'return statementKind(j, least)'],
+        ['throws-go-on', at('if (/^throw(?![\\w$])/.test(text)) ', "return 'fail'"), "if (false) return 'fail'"],
+        ['returns-go-on', at('if (/^return(?![\\w$])/', '.test(text)) {'), 'if (false) {'],
+        ['exits-go-on', at('const ENDS = /^(?:(?:await\\s+)?bail|', 'process\\s*\\.\\s*exit)\\s*\\(/'), 'const ENDS = /^(?:(?:await\\s+)?bail)\\s*\\(/'],
+        ['bails-go-on', at('const ENDS = /^(?:', '(?:await\\s+)?bail|process'), 'const ENDS = /^(?:process'],
+        // What the branch is for: a skip or a yes on a refusal is no guard; everything else that stops, and a note, is.
+        ['skips-are-failures', at(".trim() === '0' ? ", "'skip' : 'fail'"), ".trim() === '0' ? 'fail' : 'fail'"],
+        ['every-exit-a-skip', at('return close > 0 && code.slice(open + 1, close).trim() ', "=== '0' ? 'skip' : 'fail'"), "return 'skip'"],
+        ['verdicts-are-failures', at(".test(value) ? 'verdict'", " : 'fail'"), ".test(value) ? 'fail' : 'fail'"],
+        ['verdicts-on-any-bound', at('return least >= ', '400 && /^(?:true'), 'return /^(?:true'],
+        ['any-value-a-verdict', at('/^(?:true|', "(['\"`])[^]+\\1)$/"), '/^(?:[^]+)$/'],
+        ['empty-strings-verdicts', at("(['\"`])[^]", '+\\1)$/'), "(['\"`])[^]*\\1)$/"],
+        ['bare-returns-verdicts', at("if (from >= code.length || ';}\\n'.includes(code[from])) ", "return 'fail'"), "if (from >= code.length || ';}\\n'.includes(code[from])) return 'verdict'"],
+        ['notes-unread', at('if (NOTES.test(text)) ', "return 'note'"), "if (false) return 'note'"],
+        ['notes-outrank-skips', at('const RANK = { fail: 3, ', 'skip: 2, verdict: 2, note: 1 }'), at('const RANK = { fail: 3, ', 'skip: 2, verdict: 2, note: 2.5 }')],
+        ['failures-outranked', at('const RANK = { ', 'fail: 3, skip: 2'), 'const RANK = { fail: 1.5, skip: 2'],
+        ['first-statement-decides', at('if (here && (!kind || ', 'RANK[here] > RANK[kind])) kind = here'), 'if (here && !kind) kind = here'],
+        ['skips-counted-as-guards', at("if (kind === 'skip' || ", "kind === 'verdict') {"), "if (kind === 'verdict') {"],
+        ['verdicts-counted-as-guards', at("if (kind === 'skip' || ", "kind === 'verdict') {"), "if (kind === 'skip') {"],
+        ['negations-read', at('if (!(before < from || ', 'joins(before - 1))) return null'), 'if (false) return null'],
+        ['ternaries-read', at('if (!(after >= close || ', 'joins(after))) return null'), 'if (false) return null'],
+        ['callbacks-unread', at("else if (d === 0 && code[k] === '=' && ", "code[k + 1] === '>') arrow = k"), 'else if (false) arrow = k'],
+        ['some-unread', at("if (fn.word !== 'some' || code[skipBack(code, fn.at - 1)] !== '.') ", 'return null'), 'return null'],
+        ['catchers-unread', at('if (guard.levels.some(([x, y]) => ', 'disjuncts(x, y).some(([p, q]) => catches(norm(src.slice(p, q)))))) {'), 'if (false) {'],
+        ['other-answers-catch', at("if (base && (f = /^!(.+)\\.ok$/.exec(t)) ", '&& f[1] === base) return true'), 'if (base && (f = /^!(.+)\\.ok$/.exec(t))) return true'],
+        ['read-backs-catch', at('if ((f = /^!(.+)$/.exec(t)) ', '&& f[1] === operand) return true'), 'if ((f = /^!(.+)$/.exec(t))) return true'],
+        ['nonzero-catchers', at('return holds(0, f[2], ', 'Number(f[3]))'), 'return true'],
+        ['nonzero-catchers-reversed', at('return holds(Number(f[1]), ', 'f[2], 0)'), 'return true'],
+        ['catchers-across-and', at("else if (d === 0 && code[k] === '|' ", "&& code[k + 1] === '|') {"), "else if (d === 0 && '|&'.includes(code[k]) && code[k + 1] === code[k]) {"],
+        ['catcher-groups-unopened', at("if (code[ta] === '(' && matchForward(code, ta) === tb - 1 && isGroup(code, ta)) ", 'out.push(...disjuncts(ta + 1, tb - 1))'), 'if (false) out.push(...disjuncts(ta + 1, tb - 1))'],
+        ['guards-ignore-the-client', at('if (!zero) ', '{'), 'if (false) {'],
+        ['guard-takes-any-reason', at('const FITS = { upper: REASONS, guard: ', "['not-a-client'] }"), 'const FITS = { upper: REASONS, guard: REASONS }'],
       ],
     })
     if (!realOk || fail || blind) process.exitCode = 1

@@ -77,7 +77,7 @@ try {
   // ── fixtures ─────────────────────────────────────────────────────────────
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const workspace = async (label) => {
@@ -119,7 +119,7 @@ try {
 
   const docIn = async (ws, as, title, extra = {}) => {
     const res = await as(`/workspaces/${ws}/docs`, { method: 'POST', body: { title, ...extra } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the doc "${title}": ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make the doc "${title}": ${said(res)}`)
     return res.data.id
   }
   const D = await docIn(WA, M, `${TAG} mine`)

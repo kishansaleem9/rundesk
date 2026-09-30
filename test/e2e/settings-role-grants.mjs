@@ -71,7 +71,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
 
   const person = async (who, role = 'member') => {
@@ -82,15 +82,15 @@ try {
       organizationName: `Granted ${who} ${stamp}`, organizationSlug: `granted-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${added.status}`)
     return { id: signed.user?.id, email, password, as: apiAs(signed.accessToken) }
   }
   const grant = async (who, key) => {
     const role = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} ${key}`, permissions: [key] } })
-    if (role.status >= 300 || !role.data?.id) throw new Error(`could not make the ${key} role: ${role.status}`)
+    if (!role.ok || !role.data?.id) throw new Error(`could not make the ${key} role: ${role.status}`)
     const row = ((await A(`/workspaces/${WS}/members`)).data ?? []).find((m) => (m.userId ?? m.user?.id) === who.id)
     const granted = row ? await A(`/workspaces/${WS}/members/${row.workspaceMemberId}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-    if (granted.status >= 300) throw new Error(`could not grant ${key}: ${granted.status}`)
+    if (!granted.ok) throw new Error(`could not grant ${key}: ${granted.status}`)
   }
   const plain = await person('plain')
   const hooker = await person('hooker')
@@ -106,7 +106,7 @@ try {
   // is the gate's alone: the plain member's choice must be filtered out.
   for (const who of [plain, hooker, guest]) {
     const dock = await who.as(`/dashboards/dock/${WS}`, { method: 'POST', body: { pinnedLinks: ['home', 'settings'] } })
-    if (dock.status >= 300) throw new Error(`could not arrange the dock: ${dock.status}`)
+    if (!dock.ok) throw new Error(`could not arrange the dock: ${dock.status}`)
   }
 
   const chromium = await resolveChromium()

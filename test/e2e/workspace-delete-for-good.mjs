@@ -69,21 +69,21 @@ try {
   const admin = await person('admin')
   O = owner.api
   const made = await O('/workspaces', { method: 'POST', body: { name: `${TAG} doomed` } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`the owner could not make a workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`the owner could not make a workspace: ${said(made)}`)
   const WS = made.data.id
   const NAME = made.data.name
   const live = await O('/workspaces', { method: 'POST', body: { name: `${TAG} live` } })
-  if (live.status >= 300 || !live.data?.id) throw new Error(`the owner could not make the live workspace: ${said(live)}`)
+  if (!live.ok || !live.data?.id) throw new Error(`the owner could not make the live workspace: ${said(live)}`)
   LIVE = live.data.id
   // A workspace admin of it who owns another organization, not this one.
   const added = await O(`/workspaces/${WS}/members`, { method: 'POST', body: { email: admin.email, role: 'workspace_admin' } })
-  if (added.status >= 300) throw new Error(`could not add the admin: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the admin: ${said(added)}`)
   // Something in it to be gone afterwards: a space, a project, a list, a task.
   const space = (await O('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })).data?.id
   const project = (await O('/projects', { method: 'POST', body: { spaceId: space, name: `${TAG} project` } })).data?.id
   const list = (await O('/lists', { method: 'POST', body: { projectId: project, name: `${TAG} list` } })).data?.id
   const task = await O('/tasks', { method: 'POST', body: { listId: list, title: `${TAG} task` } })
-  if (task.status >= 300 || !task.data?.id) throw new Error(`could not stage the workspace's contents: ${said(task)}`)
+  if (!task.ok || !task.data?.id) throw new Error(`could not stage the workspace's contents: ${said(task)}`)
   // And files in the store: an attachment, which a row names, and a clip,
   // which only its prefix does (clips have no table).
   const body = Buffer.from(`${TAG} bytes`)
@@ -94,13 +94,13 @@ try {
     : { status: 0 }
   const clipPre = await O(`/workspaces/${WS}/clips/presign`, { method: 'POST', body: { fileName: `${TAG}.webm`, contentType: 'video/webm', title: `${TAG} clip` } })
   const putClip = clipPre.data?.uploadUrl ? await fetch(clipPre.data.uploadUrl, { method: 'PUT', headers: { 'content-type': 'video/webm' }, body }).then((r) => r.status, () => 0) : 0
-  if (putFile >= 300 || !putFile || recordedFile.status >= 300 || !putClip || putClip >= 300) {
+  if (putFile >= 300 || !putFile || !recordedFile.ok || !putClip || putClip >= 300) {
     throw new Error(`could not store the workspace's files: attachment presign ${pre.status}, PUT ${putFile}, record ${recordedFile.status}; clip presign ${clipPre.status}, PUT ${putClip} — a lane needs its store for this suite`)
   }
   const FILE_KEY = pre.data.storageKey
   const CLIP_KEY = clipPre.data.storageKey
   const archived = await O(`/workspaces/${WS}`, { method: 'DELETE' })
-  if (archived.status >= 300) throw new Error(`could not archive the workspace: ${said(archived)}`)
+  if (!archived.ok) throw new Error(`could not archive the workspace: ${said(archived)}`)
 
   browser = await (await resolveChromium()).launch(launchOptions())
   const archivedTabAs = async (who) => {
@@ -121,7 +121,7 @@ try {
   console.log('\n▶ Settings › Archived, as the owner and as an admin of another organization')
   // The admin reads the archived list from the live workspace too: add them there.
   const addedLive = await O(`/workspaces/${LIVE}/members`, { method: 'POST', body: { email: admin.email, role: 'workspace_admin' } })
-  if (addedLive.status >= 300) throw new Error(`could not add the admin to the live workspace: ${said(addedLive)}`)
+  if (!addedLive.ok) throw new Error(`could not add the admin to the live workspace: ${said(addedLive)}`)
   const op = await archivedTabAs(owner)
   const ownerOffered = await op.getByTestId(`archived-workspace-delete-${WS}`).count()
   const ap = await archivedTabAs(admin)

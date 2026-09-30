@@ -64,13 +64,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   // A webhook to a name that never resolves (RFC 6761's `.invalid`: a private
   // address is refused when the hook is made), and one test delivery to it, which fails.
   const hook = await A(`/workspaces/${WS}/webhooks`, { method: 'POST', body: { name: `${TAG} hook`, url: 'https://rundesk-hook.invalid/hook', events: ['task.created'] } })
-  if (hook.status >= 300 || !hook.data?.id) throw new Error(`could not make the webhook: ${said(hook)}`)
+  if (!hook.ok || !hook.data?.id) throw new Error(`could not make the webhook: ${said(hook)}`)
   const HOOK = hook.data.id
   const tested = await A(`/workspaces/${WS}/webhooks/${HOOK}/test`, { method: 'POST' })
   const recorded = await waitUntil(async () => ((await A(`/workspaces/${WS}/webhooks/${HOOK}/deliveries`)).data ?? []).length > 0, { timeoutMs: 20_000 })
@@ -78,18 +78,18 @@ try {
 
   // A goal whose value moves twice.
   const goal = await A(`/workspaces/${WS}/goals`, { method: 'POST', body: { title: `${TAG} goal`, targetValue: 10, currentValue: 0 } })
-  if (goal.status >= 300 || !goal.data?.id) throw new Error(`could not make the goal: ${said(goal)}`)
+  if (!goal.ok || !goal.data?.id) throw new Error(`could not make the goal: ${said(goal)}`)
   const GOAL = goal.data.id
   for (const v of [3, 7]) {
     const r = await A(`/goals/${GOAL}`, { method: 'PATCH', body: { currentValue: v } })
-    if (r.status >= 300) throw new Error(`could not move the goal to ${v}: ${said(r)}`)
+    if (!r.ok) throw new Error(`could not move the goal to ${v}: ${said(r)}`)
   }
 
   // The digest's own answer, which the preview must repeat.
   const prefs = await A('/notifications/preferences')
   digestWas = prefs.data?.digest ?? null
   const answer = await A('/notifications/digest/preview?frequency=weekly')
-  if (answer.status >= 300) throw new Error(`the digest preview route answered ${said(answer)}`)
+  if (!answer.ok) throw new Error(`the digest preview route answered ${said(answer)}`)
   const TOTAL = answer.data?.total ?? -1
 
   browser = await (await resolveChromium()).launch(launchOptions())
@@ -135,7 +135,7 @@ try {
   // ══ 3. THE DIGEST'S PREVIEW ══════════════════════════════════════════════
   console.log('\n▶ Profile › Notifications: Preview the digest')
   const on = await A('/notifications/preferences', { method: 'POST', body: { digest: { enabled: true, frequency: 'weekly', hour: 8 } } })
-  if (on.status >= 300) throw new Error(`could not turn the digest on: ${said(on)}`)
+  if (!on.ok) throw new Error(`could not turn the digest on: ${said(on)}`)
   await page.goto(`${B}/app/profile?tab=notifications`, { waitUntil: 'domcontentloaded' })
   await page.getByTestId('digest-preview-open').click({ timeout: 20_000 }).catch(() => {})
   const said_ = await waitUntil(async () => (await page.getByTestId('digest-preview-total').count()) + (await page.getByTestId('digest-preview-empty').count()) > 0, { timeoutMs: 15_000 })

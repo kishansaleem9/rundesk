@@ -65,7 +65,7 @@ try {
   A = apiAs(auth.accessToken)
   const newWorkspace = async (name) => {
     const made = await A('/workspaces', { method: 'POST', body: { name } })
-    if (made.status >= 300 || !made.data?.id) throw new Error(`could not make a workspace: ${said(made)}`)
+    if (!made.ok || !made.data?.id) throw new Error(`could not make a workspace: ${said(made)}`)
     workspaces.push(made.data.id)
     return made.data.id
   }
@@ -78,14 +78,14 @@ try {
       organizationName: `Sprint ${who} ${stamp}`, organizationSlug: `sprint-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return apiAs(signed.accessToken)
   }
   const M = await person('member', 'member')
   const G = await person('guest', 'guest')
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const OPEN = await make('/spaces', { workspaceId: WS, name: `${TAG} open` }, 'the open space')

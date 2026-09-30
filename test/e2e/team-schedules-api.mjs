@@ -56,11 +56,11 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const person = async (who, member) => {
@@ -71,7 +71,7 @@ try {
     })
     if (member) {
       const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-      if (added.status >= 300) throw new Error(`could not add ${who}: ${said(added)}`)
+      if (!added.ok) throw new Error(`could not add ${who}: ${said(added)}`)
     }
     if (!signed.user?.id) throw new Error(`${who} signed up without an id`)
     return signed.user.id

@@ -80,7 +80,7 @@ try {
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
   const other = await A('/workspaces', { method: 'POST', body: { name: `${TAG} other` } })
-  if (made.status >= 300 || other.status >= 300) throw new Error(`could not make the workspaces: ${said(made)} ${said(other)}`)
+  if (!made.ok || !other.ok) throw new Error(`could not make the workspaces: ${said(made)} ${said(other)}`)
   WS = made.data.id
   WSB = other.data.id
 
@@ -92,7 +92,7 @@ try {
   }
   const join = async (who, ws, role) => {
     const added = await A(`/workspaces/${ws}/members`, { method: 'POST', body: { email: who.email, role } })
-    if (added.status >= 300) throw new Error(`could not add ${who.email}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add ${who.email}: ${said(added)}`)
   }
   const manager = await signUp('manager')
   const near = await signUp('near')
@@ -106,7 +106,7 @@ try {
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} task` } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make ${name}: ${said(space)} ${said(task)}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make ${name}: ${said(space)} ${said(task)}`)
     return { spaceId: space.data.id, taskId: task.data.id }
   }
   const teamSpace = await taskIn(WS, 'team')
@@ -116,7 +116,7 @@ try {
   await sql`insert into space_members (space_id, user_id, role) values (${teamSpace.spaceId}, ${manager.id}, 'edit') on conflict do nothing`
   const log = async (who, taskId, from, to) => {
     const r = await who.as(`/tasks/${taskId}/time-entries/manual`, { method: 'POST', body: { startedAt: at(from), endedAt: at(to), description: TAG } })
-    if (r.status >= 300) throw new Error(`could not log time: ${said(r)}`)
+    if (!r.ok) throw new Error(`could not log time: ${said(r)}`)
   }
   await log(near, teamSpace.taskId, '01', '03') // 2h in the manager's team
   await log(far, farSpace.taskId, '01', '04') // 3h outside it

@@ -84,7 +84,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (label, role) => {
@@ -94,7 +94,7 @@ try {
       organizationName: `Reads ${label} ${stamp}`, organizationSlug: `reads-${label}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${label}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${label}: ${said(added)}`)
     const client = apiAs(data.accessToken)
     client.id = data.user?.id
     client.token = data.accessToken
@@ -105,7 +105,7 @@ try {
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const spaceOf = {}
@@ -286,11 +286,11 @@ try {
    */
   const post = async (channelId, body) => {
     const res = await A(`/chat/channels/${channelId}/messages`, { method: 'POST', body: { body } })
-    if (res.status >= 300) throw new Error(`could not post in the channel: ${said(res)}`)
+    if (!res.ok) throw new Error(`could not post in the channel: ${said(res)}`)
   }
   const channel = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const DM = await channel(`/workspaces/${WS}/chat/dms`, { peerUserId: M.id }, 'the DM')

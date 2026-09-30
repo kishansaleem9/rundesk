@@ -53,20 +53,20 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Invites ${who}`, email, password: 'Invites@12345!', organizationName: `Invites ${who} ${stamp}`, organizationSlug: `invites-${who}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return apiAs(signed.accessToken)
   }
   const G = await person('guest', 'guest')
   const M = await person('member', 'member')
   const INVITEE = `${TAG}-invitee@rundesk.invalid`
   const inv = await A('/invitations', { method: 'POST', body: { email: INVITEE, workspaceId: WS, role: 'workspace_admin' } })
-  if (inv.status >= 300 || !inv.data?.id) throw new Error(`could not invite: ${said(inv)}`)
+  if (!inv.ok || !inv.data?.id) throw new Error(`could not invite: ${said(inv)}`)
 
   // ══ 1. WHO READS THE PENDING LIST ════════════════════════════════════════
   console.log('\n▶ the pending invitations, read by a guest and by a member')

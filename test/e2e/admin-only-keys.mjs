@@ -71,14 +71,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Keys ${key}`, email, password: 'AdminKeys@12345!', organizationName: `Keys ${key} ${stamp}`, organizationSlug: `keys-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select id from users where email = ${email}`
     return { id: row.id, email, password: 'AdminKeys@12345!', as: apiAs(signed.accessToken) }
   }
@@ -88,7 +88,7 @@ try {
   const role = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} keys`, permissions: ['workspace.manage', 'workspace.audit.view', 'security.policy.manage', 'automation.manage'] } })
   const [memberRow] = await sql`select id from workspace_members where workspace_id = ${WS} and user_id = ${delegate.id}`
   const granted = role.data?.id ? await A(`/workspaces/${WS}/members/${memberRow.id}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-  if (granted.status >= 300) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
   const ws = async () => (await sql`select name, is_archived from workspaces where id = ${WS}`)[0]
 
   // ══ 1. THE WORKSPACE'S SETTINGS ══════════════════════════════════════════

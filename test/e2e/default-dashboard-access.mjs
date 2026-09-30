@@ -77,14 +77,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role, keys = []) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Dash ${key}`, email, password: PASSWORD, organizationName: `Dash ${key} ${stamp}`, organizationSlug: `dash-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     let granted = keys.length === 0
     if (keys.length > 0) {
       // A key the catalog does not know is refused (400): recorded, so the checks say so.
@@ -97,7 +97,7 @@ try {
     const as = apiAs(signed.accessToken)
     // Each person's own dashboard in this workspace: private to them, and not their own default.
     const preset = await as('/dashboards', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${key}'s dashboard`, layout: [] } })
-    if (preset.status >= 300 || !preset.data?.id) throw new Error(`could not make the ${key}'s dashboard: ${said(preset)}`)
+    if (!preset.ok || !preset.data?.id) throw new Error(`could not make the ${key}'s dashboard: ${said(preset)}`)
     return { key, email, password: PASSWORD, granted, as, preset: preset.data.id }
   }
   // A workspace admin who is NOT a super-admin, so the admin's side is the role's, not the platform's bypass.

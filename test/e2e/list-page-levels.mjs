@@ -75,13 +75,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'ListLevels@12345!'
   const signed = await signUpApi(API, { fullName: 'List reader', email, password, organizationName: `List ${stamp}`, organizationSlug: `list-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const [me] = await sql`select id from users where email = ${email}`
 
@@ -90,22 +90,22 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
     const task = async (title, assignees = []) => {
       const t = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name} ${title}`, ...(assignees.length ? { assigneeIds: assignees } : {}) } })
-      if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
+      if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
       return { id: t.data.id, title: `${TAG} ${name} ${title}` }
     }
     const first = await task('first', assignFirst ? [me.id] : [])
     const second = await task('second')
     // A subtask of the first, and a text field on the project, so the rows and the table have one each.
     const sub = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name} subtask`, parentTaskId: first.id } })
-    if (sub.status >= 300) throw new Error(`could not make the ${name} subtask: ${said(sub)}`)
+    if (!sub.ok) throw new Error(`could not make the ${name} subtask: ${said(sub)}`)
     const field = await A(`/workspaces/${WS}/projects/${project.data.id}/custom-fields`, { method: 'POST', body: { name: `${TAG} note`, type: 'text' } })
-    if (field.status >= 300) throw new Error(`could not make the ${name} field: ${said(field)}`)
+    if (!field.ok) throw new Error(`could not make the ${name} field: ${said(field)}`)
     // And an empty list beside it, for what an empty list invites.
     const empty = await A('/lists', { method: 'POST', body: { projectId: project.data.id, name: `${TAG} ${name} empty` } })
-    if (empty.status >= 300) throw new Error(`could not make the ${name} empty list: ${said(empty)}`)
+    if (!empty.ok) throw new Error(`could not make the ${name} empty list: ${said(empty)}`)
     const base = `/app/${WS}/${space.data.id}/${project.data.id}`
     return { list: list.data.id, url: `${base}/${list.data.id}`, emptyUrl: `${base}/${empty.data.id}`, first, second, subTitle: `${TAG} ${name} subtask` }
   }
@@ -313,7 +313,7 @@ try {
   const day = (offset) => new Date(Date.now() + offset * 86_400_000).toISOString().slice(0, 10)
   for (const p of [VIEW, FULL]) {
     const dated = await A(`/tasks/${p.second.id}`, { method: 'PATCH', body: { startDate: day(-2), dueDate: day(0) } })
-    if (dated.status >= 300) throw new Error(`could not date "${p.second.title}": ${said(dated)}`)
+    if (!dated.ok) throw new Error(`could not date "${p.second.title}": ${said(dated)}`)
   }
   const calendar = async (p) => {
     await openIn(p, 'calendar', p.second)

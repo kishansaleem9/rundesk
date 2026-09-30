@@ -84,7 +84,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-planner@rundesk.invalid`
   const signed = await signUpApi(API, {
@@ -92,7 +92,7 @@ try {
     organizationName: `Rail order ${stamp}`, organizationSlug: `rail-order-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the newcomer: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the newcomer: ${said(added)}`)
   const newcomer = apiAs(signed.accessToken)
   const userId = signed.user?.id
   if (!userId) throw new Error('the sign-up answered with no user id')

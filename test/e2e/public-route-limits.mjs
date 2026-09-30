@@ -212,29 +212,29 @@ try {
 
   /* A WORKSPACE OF ITS OWN, holding one of everything the public routes serve. */
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Public route limits ${TAG}` } })
-  if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
+  if (!madeWs.ok || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   WS = madeWs.data.id
 
   // A shared doc.
   const madeDoc = await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: DOC_TITLE } })
-  if (madeDoc.status >= 300 || !madeDoc.data?.id) throw new Error(`could not make the doc: ${said(madeDoc)}`)
+  if (!madeDoc.ok || !madeDoc.data?.id) throw new Error(`could not make the doc: ${said(madeDoc)}`)
   made.docId = madeDoc.data.id
   const shared = await A(`/docs/${made.docId}/share`, { method: 'POST' })
   const SLUG = shared.data?.publicShareId
-  if (shared.status >= 300 || !SLUG) throw new Error(`could not share the doc: ${said(shared)}`)
+  if (!shared.ok || !SLUG) throw new Error(`could not share the doc: ${said(shared)}`)
 
   // A clip, uploaded as the app uploads one, and its link.
   const presign = await A(`/workspaces/${WS}/clips/presign`, {
     method: 'POST', body: { fileName: `${TAG}.webm`, contentType: 'video/webm', title: `Clip ${TAG}` },
   })
-  if (presign.status >= 300 || !presign.data?.uploadUrl) throw new Error(`could not presign the clip: ${said(presign)}`)
+  if (!presign.ok || !presign.data?.uploadUrl) throw new Error(`could not presign the clip: ${said(presign)}`)
   const put = await fetch(presign.data.uploadUrl, { method: 'PUT', body: Buffer.from(`${TAG}: a clip`), headers: { 'content-type': 'video/webm' } })
     .then((r) => r.status, () => 0)
   if (put !== 200) throw new Error(`the store refused the clip's upload: ${put}`)
   made.clipKey = presign.data.storageKey
   const link = await A(`/workspaces/${WS}/clips/link`, { method: 'POST', body: { storageKey: made.clipKey } })
   const CLIP_TOKEN = link.data?.token
-  if (link.status >= 300 || !CLIP_TOKEN) throw new Error(`could not get the clip a link: ${said(link)}`)
+  if (!link.ok || !CLIP_TOKEN) throw new Error(`could not get the clip a link: ${said(link)}`)
 
   // A client portal, on a project of its own.
   const [space] = await sql`insert into spaces (workspace_id, name) values (${WS}, ${`Space ${TAG}`}) returning id`
@@ -242,12 +242,12 @@ try {
   const [project] = await sql`insert into projects (space_id, name) values (${space.id}, ${PROJECT_NAME}) returning id`
   const portal = await A(`/projects/${project.id}/portal`, { method: 'POST', body: { name: `Portal ${TAG}` } })
   const PORTAL_TOKEN = portal.data?.token
-  if (portal.status >= 300 || !PORTAL_TOKEN) throw new Error(`could not make the portal: ${said(portal)}`)
+  if (!portal.ok || !PORTAL_TOKEN) throw new Error(`could not make the portal: ${said(portal)}`)
   made.portalId = portal.data.id
 
   // A logo, uploaded the product's own way: its saved address is a public image.
   const logo = await A(`/workspaces/${WS}/logo/presign`, { method: 'POST', body: { contentType: 'image/png', sizeBytes: TINY_PNG.length } })
-  if (logo.status >= 300 || !logo.data?.uploadUrl || !logo.data?.publicUrl) throw new Error(`could not presign the logo: ${said(logo)}`)
+  if (!logo.ok || !logo.data?.uploadUrl || !logo.data?.publicUrl) throw new Error(`could not presign the logo: ${said(logo)}`)
   const logoPut = await fetch(logo.data.uploadUrl, { method: 'PUT', body: TINY_PNG, headers: { 'content-type': 'image/png' } })
     .then((r) => r.status, () => 0)
   if (logoPut !== 200) throw new Error(`the store refused the logo's upload: ${logoPut}`)

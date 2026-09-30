@@ -61,13 +61,13 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — what the Trash holds is read back by SQL')
   A = apiAs((await signInApi(API, ADMIN.email, ADMIN.password)).accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Trash ${key}`, email, password: PASSWORD, organizationName: `Trash ${key} ${stamp}`, organizationSlug: `trash-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const as = apiAs(signed.accessToken)
     as.id = signed.user?.id
     return as
@@ -77,15 +77,15 @@ try {
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })
   // The manager belongs to the space: a manager deletes only in their own spaces.
   const joined = await A(`/spaces/${space.data?.id}/members`, { method: 'POST', body: { userId: G.id, role: 'edit' } })
-  if (joined.status >= 300) throw new Error(`could not add the manager to the space: ${said(joined)}`)
+  if (!joined.ok) throw new Error(`could not add the manager to the space: ${said(joined)}`)
   const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} project` } })
   const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} list` } })
-  if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the list: ${said(space)} ${said(project)} ${said(list)}`)
+  if (!list.ok || !list.data?.id) throw new Error(`could not make the list: ${said(space)} ${said(project)} ${said(list)}`)
   const trashed = async (who, name) => {
     const t = await who('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name}` } })
-    if (t.status >= 300 || !t.data?.id) throw new Error(`could not make the ${name} task: ${said(t)}`)
+    if (!t.ok || !t.data?.id) throw new Error(`could not make the ${name} task: ${said(t)}`)
     const d = await who(`/tasks/${t.data.id}/trash`, { method: 'POST' })
-    if (d.status >= 300) throw new Error(`could not delete the ${name} task: ${said(d)}`)
+    if (!d.ok) throw new Error(`could not delete the ${name} task: ${said(d)}`)
     return t.data.id
   }
   const MINE = await trashed(M, 'the member deleted')

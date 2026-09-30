@@ -88,7 +88,7 @@ try {
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const WA = await make('/workspaces', { name: `${TAG} A` }, 'workspace A')
@@ -344,7 +344,7 @@ try {
    */
   const inB = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what} in B: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what} in B: ${said(res)}`)
     return res.data.id
   }
   const bSpace = await inB('/spaces', { workspaceId: WB, name: `${TAG} space` }, 'a space')
@@ -363,7 +363,7 @@ try {
         body: { fileName: 'secret.pdf', storageKey: bPresign.data.storageKey, contentType: 'application/pdf', sizeBytes: SECRET.length },
       })
     : { status: 0 }
-  if (bPut !== 200 || bRecord.status >= 300) throw new Error(`could not plant B's file: PUT ${bPut}, record ${said(bRecord)}`)
+  if (bPut !== 200 || !bRecord.ok) throw new Error(`could not plant B's file: PUT ${bPut}, record ${said(bRecord)}`)
   const B_OBJECT = bPresign.data.storageKey
   /** B's file, read the way B reads it; null once it is gone. */
   const bFileNow = async () => {
@@ -416,7 +416,7 @@ try {
    */
   const inA = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what} in A: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what} in A: ${said(res)}`)
     return res.data.id
   }
   const aSpace = await inA('/spaces', { workspaceId: WA, name: `${TAG} space` }, 'a space')

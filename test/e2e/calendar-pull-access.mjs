@@ -71,7 +71,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const [admin] = await sql`select id from users where email = ${ADMIN.email}`
 
@@ -80,7 +80,7 @@ try {
     const password = 'CalendarPull@12345!'
     const signed = await signUpApi(API, { fullName: `Calendar ${key}`, email, password, organizationName: `Calendar ${key} ${stamp}`, organizationSlug: `calendar-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select id from users where email = ${email}`
     return { id: row.id, email, password, as: apiAs(signed.accessToken) }
   }
@@ -93,13 +93,13 @@ try {
   const granted = keeperRow && role.data?.id
     ? await A(`/workspaces/${WS}/members/${keeperRow.workspaceMemberId}/roles/${role.data.id}`, { method: 'POST', body: {} })
     : { status: 0 }
-  if (granted.status >= 300) throw new Error(`could not grant integrations.manage: ${said(role)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant integrations.manage: ${said(role)} ${said(granted)}`)
 
   // The workspace's own Google Calendar connection, an inbox list for it, and a token that has not expired.
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} calendar` } })
   const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} calendar` } })
   const inbox = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} inbox` } })
-  if (inbox.status >= 300 || !inbox.data?.id) throw new Error(`could not make the inbox: ${said(space)} ${said(inbox)}`)
+  if (!inbox.ok || !inbox.data?.id) throw new Error(`could not make the inbox: ${said(space)} ${said(inbox)}`)
   await sql`insert into workspace_integration_connections
     (workspace_id, provider, status, scopes, external_account_email, access_token, refresh_token, token_expires_at, metadata, connected_by_id)
     values (${WS}, 'gcal', 'connected', ${sql.array([])}, ${`${TAG}@calendar.invalid`}, 'staged-token', 'staged-refresh',

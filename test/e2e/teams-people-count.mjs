@@ -70,7 +70,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (key) => {
     const email = `${TAG}-${key}@rundesk.invalid`
@@ -79,7 +79,7 @@ try {
       organizationName: `People ${key} ${stamp}`, organizationSlug: `people-${key}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-    if (added.status >= 300) throw new Error(`could not add ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add ${key}: ${said(added)}`)
     return email
   }
   const viewer = await person('one')

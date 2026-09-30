@@ -78,7 +78,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = auth.user?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   /** A person in the workspace at `role`, granted `keys` by a custom role of their own. */
@@ -86,7 +86,7 @@ try {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Titled ${key}`, email, password: PASSWORD, organizationName: `Titled ${key} ${stamp}`, organizationSlug: `titled-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
     let granted = keys.length === 0
     if (keys.length > 0) {
@@ -248,7 +248,7 @@ try {
   console.log('\n▶ searching teams for a name with % or _ in it')
   const team = async (name) => {
     const r = await A(`/workspaces/${WS}/groups`, { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the team "${name}": ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the team "${name}": ${said(r)}`)
     return r.data.id
   }
   await team('cut 50% now')
@@ -268,7 +268,7 @@ try {
   console.log('\n▶ removing somebody from a team, and somebody who is not in it')
   const crew = await team('crew')
   const joined = await A(`/workspaces/${WS}/groups/${crew}/members`, { method: 'POST', body: { userIds: [plain.id] } })
-  if (joined.status >= 300) throw new Error(`could not add to the team: ${said(joined)}`)
+  if (!joined.ok) throw new Error(`could not add to the team: ${said(joined)}`)
   const audited = async () => (await sql`select count(*)::int as n from audit_logs where workspace_id = ${WS} and action = 'group.member_removed' and resource_id = ${crew}`)[0].n
   const nobody = await A(`/workspaces/${WS}/groups/${crew}/members/${colleague.id}`, { method: 'DELETE' })
   const afterNobody = await audited()

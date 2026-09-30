@@ -60,7 +60,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const email = `${TAG}-member@rundesk.invalid`
@@ -69,12 +69,12 @@ try {
     organizationName: `Field member ${stamp}`, organizationSlug: `field-member-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
 
   const make = async (C, route, body, what) => {
     const res = await C(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   /** A space, its project and list, a task, and one text field with a value on it. */
@@ -85,7 +85,7 @@ try {
     const task = await make(A, '/tasks', { listId: list, title: `${TAG} ${side} task` }, `the ${side} task`)
     const field = await make(A, `/workspaces/${WS}/projects/${project}/custom-fields`, { name: `${TAG} ${side} field`, type: 'text' }, `the ${side} field`)
     const set = await A(`/workspaces/${WS}/tasks/${task}/custom-fields/${field}`, { method: 'PUT', body: { value: `${TAG} ${side} value` } })
-    if (set.status >= 300) throw new Error(`could not set the ${side} value: ${said(set)}`)
+    if (!set.ok) throw new Error(`could not set the ${side} value: ${said(set)}`)
     return { project, list, task, field }
   }
   const hidden = await plant('hidden', 'private')

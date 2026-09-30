@@ -280,7 +280,7 @@ try {
 
   /* A WORKSPACE OF ITS OWN, for the invitations and as a workspace with no SSO. */
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Auth route limits ${TAG}` } })
-  if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
+  if (!madeWs.ok || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   WS = madeWs.data.id
   workspacesMade.push({ id: WS, as: A })
 
@@ -291,11 +291,11 @@ try {
   /* Three invitations into it, each read by its link as its invitee would: one opened, one accepted, one declined. */
   const invite = async (who) => {
     const made = await A('/invitations', { method: 'POST', body: { email: mail(who), workspaceId: WS, role: 'member' } })
-    if (made.status >= 300 || !made.data?.id) throw new Error(`could not invite ${who}: ${said(made)}`)
+    if (!made.ok || !made.data?.id) throw new Error(`could not invite ${who}: ${said(made)}`)
     pendingInvitations.set(who, made.data.id)
     const link = await A(`/invitations/${made.data.id}/link`)
     const token = link.data?.claimUrl ? new URL(link.data.claimUrl).searchParams.get('token') : null
-    if (link.status >= 300 || !token) throw new Error(`could not read ${who}’s invitation link: ${said(link)}`)
+    if (!link.ok || !token) throw new Error(`could not read ${who}’s invitation link: ${said(link)}`)
     return token
   }
   const OPENED = await invite('opener')

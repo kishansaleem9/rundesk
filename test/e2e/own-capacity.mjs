@@ -68,7 +68,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   // The Workload page is a view a workspace switches on.
   await A('/feature-flags/views.workload', { method: 'PUT', body: { enabled: true, scope: 'workspace', scopeId: WS, workspaceId: WS } })
@@ -76,7 +76,7 @@ try {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Capacity ${key}`, email, password: PASSWORD, organizationName: `Capacity ${key} ${stamp}`, organizationSlug: `capacity-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return { email, id: signed.user?.id, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')

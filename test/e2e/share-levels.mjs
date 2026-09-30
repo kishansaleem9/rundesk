@@ -68,14 +68,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const password = 'ShareLevels@12345!'
     const signed = await signUpApi(API, { fullName: `Share ${who}`, email, password, organizationName: `Share ${who} ${stamp}`, organizationSlug: `share-${who}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     const [row] = await sql`select id from users where email = ${email}`
     return { email, password, id: row.id, api: apiAs(signed.accessToken) }
   }
@@ -88,7 +88,7 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
     return { name, list: list.data.id, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}` }
   }
   const SHARED = await place('view, shared at edit', 'view')
@@ -98,7 +98,7 @@ try {
   const levelOf = async (p, userId) => (await sql`select level from object_shares where object_type = 'list' and object_id = ${p.list} and user_id = ${userId}`)[0]?.level ?? null
   const shareRowOf = async (p, userId) => (await sql`select id from object_shares where object_type = 'list' and object_id = ${p.list} and user_id = ${userId}`)[0]?.id ?? null
   const granted = await A(`/shares/list/${SHARED.list}`, { method: 'POST', body: { email: M.email, level: 'edit' } })
-  if (granted.status >= 300) throw new Error(`could not share the list with the member: ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not share the list with the member: ${said(granted)}`)
 
   // ══ 1. NOT THEMSELVES ════════════════════════════════════════════════════
   console.log('\n▶ a member shared a list at Edit, raising themselves')

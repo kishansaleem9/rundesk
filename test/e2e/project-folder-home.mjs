@@ -58,18 +58,18 @@ try {
   A = apiAs((await signInApi(API, ADMIN.email, ADMIN.password)).accessToken)
   const workspace = async (name) => {
     const r = await A('/workspaces', { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make workspace ${name}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make workspace ${name}: ${said(r)}`)
     MADE.push(r.data.id)
     return r.data.id
   }
   const space = async (ws, name) => {
     const r = await A('/spaces', { method: 'POST', body: { workspaceId: ws, name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make space ${name}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make space ${name}: ${said(r)}`)
     return r.data.id
   }
   const folder = async (sp, name) => {
     const r = await A(`/spaces/${sp}/folders`, { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make folder ${name}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make folder ${name}: ${said(r)}`)
     return r.data.id
   }
   const HOME = await workspace('home')
@@ -78,7 +78,7 @@ try {
   const SIBLING = await space(HOME, 'sibling')
   const FOREIGN = await space(AWAY, 'foreign')
   const project = await A('/projects', { method: 'POST', body: { spaceId: SPACE, name: `${TAG} project` } })
-  if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
+  if (!project.ok || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
   const P = project.data.id
   const OWN = await folder(SPACE, 'own folder')
   const SIB = await folder(SIBLING, 'sibling folder')

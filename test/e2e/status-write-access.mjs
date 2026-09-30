@@ -62,7 +62,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -71,7 +71,7 @@ try {
       organizationName: `Shaper ${who} ${stamp}`, organizationSlug: `shaper-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${added.status}`)
     return { id: signed.user?.id, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -80,7 +80,7 @@ try {
   const G = guest.as
   const place = async (name, defaultPermission) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(defaultPermission ? { defaultPermission } : {}) } })
-    if (space.status >= 300 || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
+    if (!space.ok || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data.id, name: `${TAG} ${name}` } })
     const [list] = await sql`insert into lists (project_id, name) values (${project.data?.id}, ${`${TAG} ${name} list`}) returning id`
     const [other] = await sql`insert into lists (project_id, name) values (${project.data?.id}, ${`${TAG} ${name} other list`}) returning id`
@@ -154,7 +154,7 @@ try {
   const scopeOf = async (id) => (await sql`select status_scope from lists where id = ${id}`)[0]?.status_scope ?? null
   // The project has statuses of its own to switch to (a scope with none is refused, 400).
   const projectStatus = await A(`/projects/${VIEW.project}/statuses`, { method: 'POST', body: { name: `${TAG} projectstatus`, category: 'open' } })
-  if (projectStatus.status >= 300) throw new Error(`could not give the project a status: ${projectStatus.status}`)
+  if (!projectStatus.ok) throw new Error(`could not give the project a status: ${projectStatus.status}`)
   const before = await scopeOf(VIEW.list)
   const mScope = await M(`/lists/${VIEW.list}/status-scope`, { method: 'PATCH', body: { scope: 'project' } })
   const afterMember = await scopeOf(VIEW.list)

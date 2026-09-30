@@ -71,14 +71,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role, keys = []) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Data ${key}`, email, password: PASSWORD, organizationName: `Data ${key} ${stamp}`, organizationSlug: `data-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     let granted = keys.length === 0
     if (keys.length > 0) {
       // A key the catalog does not know is refused (400): recorded, so the checks say so.
@@ -94,7 +94,7 @@ try {
   const exporter = await person('exporter', 'member', ['workspace.export'])
   const importer = await person('importer', 'member', ['workspace.import'])
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })
-  if (space.status >= 300) throw new Error(`could not make the space: ${said(space)}`)
+  if (!space.ok) throw new Error(`could not make the space: ${said(space)}`)
 
   // ══ 1. EXPORTING ═════════════════════════════════════════════════════════
   console.log('\n▶ exporting the workspace: the manager, the member granted workspace.export, the admin')
@@ -204,20 +204,25 @@ try {
   // It shows only in a workspace with no space, so a second one is emptied of its default.
   console.log('\n▶ the dashboard of an empty workspace: its Load demo data, for the importer and for the manager')
   const second = await A('/workspaces', { method: 'POST', body: { name: `${TAG} empty` } })
-  if (second.status >= 300 || !second.data?.id) throw new Error(`could not make the empty workspace: ${said(second)}`)
+  if (!second.ok || !second.data?.id) throw new Error(`could not make the empty workspace: ${said(second)}`)
   WS2 = second.data.id
   for (const sp of (await sql`select id from spaces where workspace_id = ${WS2}`)) await sql`delete from spaces where id = ${sp.id}`
+  /** Adds `who` to the empty workspace, grants `keys` there, and answers whether they were granted. */
   const join = async (who, role, keys = []) => {
     const added = await A(`/workspaces/${WS2}/members`, { method: 'POST', body: { email: who.email, role } })
-    if (added.status >= 300) throw new Error(`could not add to the empty workspace: ${said(added)}`)
-    if (keys.length === 0) return
+    if (!added.ok) throw new Error(`could not add to the empty workspace: ${said(added)}`)
+    if (keys.length === 0) return true
     const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS2} and u.email = ${who.email}`
     const r = await A(`/workspaces/${WS2}/roles`, { method: 'POST', body: { name: `${TAG} empty importers`, permissions: keys } })
     const given = r.data?.id ? await A(`/workspaces/${WS2}/members/${row.id}/roles/${r.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-    if (given.status >= 300) console.log(`    (not granted in the empty workspace: ${said(r)})`)
+    // Recorded, as `person` records its grants, so the check says so: a grant never
+    // tried stands in as `{ status: 0 }`, and one nobody answered is 0 — neither is granted.
+    const granted = given.ok === true
+    if (!granted) console.log(`    (not granted in the empty workspace: ${said(r)}; ${said(given)})`)
+    return granted
   }
   await join(manager, 'manager')
-  await join(importer, 'member', ['workspace.import'])
+  const importerGranted = await join(importer, 'member', ['workspace.import'])
   const demoOffered = async (page) => {
     await waitUntil(async () => (await page.getByRole('button', { name: /^Load demo data$/ }).count()) > 0, { timeoutMs: 12_000 })
     return await page.getByRole('button', { name: /^Load demo data$/ }).count()
@@ -225,9 +230,9 @@ try {
   const importerDemo = await pageAs(importer, `/app/${WS2}/dashboard`, demoOffered)
   const managerDemo = await pageAs(manager, `/app/${WS2}/dashboard`, demoOffered)
   chk(
-    importerDemo === 1 && managerDemo === 0,
+    importerGranted && importerDemo === 1 && managerDemo === 0,
     'an empty workspace’s dashboard offers Load demo data to the member granted workspace.import, and not to the manager',
-    `importer ${importerDemo}; manager ${managerDemo}`,
+    `importer ${importerGranted ? importerDemo : 'NOT GRANTED'}; manager ${managerDemo}`,
   )
 } catch (err) {
   failed += 1

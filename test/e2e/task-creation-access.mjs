@@ -66,7 +66,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (who, role) => {
@@ -77,7 +77,7 @@ try {
     })
     if (role) {
       const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-      if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+      if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     }
     return { id: signed.user?.id, as: apiAs(signed.accessToken) }
   }
@@ -89,7 +89,7 @@ try {
 
   const make = async (C, route, body, what) => {
     const res = await C(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const place = async (C, workspaceId, name, space = {}) => {
@@ -137,7 +137,7 @@ try {
   // ══ 2. ANOTHER ORGANISATION ══════════════════════════════════════════════
   console.log('\n▶ a user of another organisation, from a message of their own')
   const theirs = await S('/workspaces', { method: 'POST', body: { name: `${TAG} theirs` } })
-  if (theirs.status >= 300 || !theirs.data?.id) throw new Error(`the stranger could not make a workspace: ${said(theirs)}`)
+  if (!theirs.ok || !theirs.data?.id) throw new Error(`the stranger could not make a workspace: ${said(theirs)}`)
   SWS = theirs.data.id
   const ownList = await place(S, SWS, 'their own')
   const theirChannel = await make(S, `/workspaces/${SWS}/chat/channels`, { name: `${TAG}-theirs` }, 'their channel')

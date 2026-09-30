@@ -69,7 +69,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -78,14 +78,14 @@ try {
       organizationName: `Call ${who} ${stamp}`, organizationSlug: `call-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return { id: signed.user?.id, token: signed.accessToken, as: apiAs(signed.accessToken) }
   }
   const outsider = await person('outsider')
   const peer = await person('peer')
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const DM = await make(`/workspaces/${WS}/chat/dms`, { peerUserId: peer.id }, 'the DM')
@@ -114,7 +114,7 @@ try {
   // ══ 1. A CALL IN A DM ════════════════════════════════════════════════════
   console.log('\n▶ a SyncUp in the DM: started, joined, ended')
   const dmCall = await A(`/workspaces/${WS}/calls`, { method: 'POST', body: { channelId: DM } })
-  if (dmCall.status >= 300 || !dmCall.data?.id) throw new Error(`could not start the DM call: ${said(dmCall)}`)
+  if (!dmCall.ok || !dmCall.data?.id) throw new Error(`could not start the DM call: ${said(dmCall)}`)
   const joined = await peer.as(`/workspaces/${WS}/calls/${dmCall.data.id}/join`, { method: 'POST' })
   await A(`/workspaces/${WS}/calls/${dmCall.data.id}/end`, { method: 'POST' })
   await waitFor(() => callEvents(byPeer, dmCall.data.id).includes('call.ended'))
@@ -129,7 +129,7 @@ try {
   // ══ 2. A CALL IN A PUBLIC CHANNEL ════════════════════════════════════════
   console.log('\n▶ a SyncUp in a public channel')
   const pubCall = await A(`/workspaces/${WS}/calls`, { method: 'POST', body: { channelId: PUB } })
-  if (pubCall.status >= 300 || !pubCall.data?.id) throw new Error(`could not start the public call: ${said(pubCall)}`)
+  if (!pubCall.ok || !pubCall.data?.id) throw new Error(`could not start the public call: ${said(pubCall)}`)
   await waitFor(() => callEvents(byOutsider, pubCall.data.id).includes('call.started'))
   await A(`/workspaces/${WS}/calls/${pubCall.data.id}/end`, { method: 'POST' })
   chk(

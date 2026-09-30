@@ -139,7 +139,7 @@ try {
 
   /* A WORKSPACE OF ITS OWN, so no other suite's docs or sharing change under it. */
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Public doc page ${TAG}` } })
-  if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
+  if (!madeWs.ok || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   const WS = madeWs.data.id
   workspacesMade.push(WS)
 
@@ -150,13 +150,13 @@ try {
   const CONTENT = contentFor(list.id)
 
   const madeDoc = await A(`/workspaces/${WS}/docs`, { method: 'POST', body: { title: TITLE, icon: ICON } })
-  if (madeDoc.status >= 300 || !madeDoc.data?.id) throw new Error(`could not make the doc: ${said(madeDoc)}`)
+  if (!madeDoc.ok || !madeDoc.data?.id) throw new Error(`could not make the doc: ${said(madeDoc)}`)
   const D = madeDoc.data.id
   const wrote = await A(`/docs/${D}`, { method: 'PATCH', body: { content: CONTENT } })
-  if (wrote.status >= 300) throw new Error(`could not write the doc: ${said(wrote)}`)
+  if (!wrote.ok) throw new Error(`could not write the doc: ${said(wrote)}`)
   const shared = await A(`/docs/${D}/share`, { method: 'POST' })
   const SLUG = shared.data?.publicShareId
-  if (shared.status >= 300 || !SLUG) throw new Error(`could not share the doc: ${said(shared)}`)
+  if (!shared.ok || !SLUG) throw new Error(`could not share the doc: ${said(shared)}`)
   /*
    * DATED IN THE PAST, so the time the page draws cannot be the visitor's own
    * clock by chance: the doc was written a moment ago, and a page that draws

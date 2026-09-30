@@ -65,23 +65,23 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — what a refused change left behind is read back by SQL')
   A = apiAs((await signInApi(API, ADMIN.email, ADMIN.password)).accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const email = `${TAG}-member@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: 'Folder member', email, password: PASSWORD, organizationName: `Folder ${stamp}`, organizationSlug: `folder-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
 
   const space = async (name, extra = {}) => {
     const r = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...extra } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the ${name} space: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the ${name} space: ${said(r)}`)
     return r.data.id
   }
   const folderOf = async (who, spaceId, name) => {
     const r = await who(`/spaces/${spaceId}/folders`, { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the folder ${name}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the folder ${name}: ${said(r)}`)
     return r.data.id
   }
   const row = async (id) => (await sql`select name, visibility, is_archived from folders where id = ${id}`)[0]

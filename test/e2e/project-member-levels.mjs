@@ -65,31 +65,31 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: 'Project member', email, password: 'Project@12345!', organizationName: `Project ${stamp}`, organizationSlug: `project-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${added.status}`)
+  if (!added.ok) throw new Error(`could not add the member: ${added.status}`)
   const M = apiAs(signed.accessToken)
   const [me] = await sql`select id from users where email = ${email}`
 
   const space = async (name, level) => {
     const s = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
-    if (s.status >= 300 || !s.data?.id) throw new Error(`could not make the ${name} space: ${s.status}`)
+    if (!s.ok || !s.data?.id) throw new Error(`could not make the ${name} space: ${s.status}`)
     return s.data.id
   }
   /** A project in `spaceId` made by `by`, its list and a task of the admin's, and the member's role on it if any. */
   const place = async (spaceId, name, { role = null, by = A } = {}) => {
     const project = await by('/projects', { method: 'POST', body: { spaceId, name: `${TAG} ${name}` } })
-    if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the ${name} project: ${project.status}`)
+    if (!project.ok || !project.data?.id) throw new Error(`could not make the ${name} project: ${project.status}`)
     const list = await by('/lists', { method: 'POST', body: { projectId: project.data.id, name: `${TAG} ${name} list` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${list.status}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${list.status}`)
     const task = await by('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name} task` } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the ${name} task: ${task.status}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make the ${name} task: ${task.status}`)
     if (role) {
       const granted = await A(`/projects/${project.data.id}/members`, { method: 'POST', body: { userId: me.id, role } })
-      if (granted.status >= 300) throw new Error(`could not give the member ${role} on ${name}: ${granted.status}`)
+      if (!granted.ok) throw new Error(`could not give the member ${role} on ${name}: ${granted.status}`)
     }
     return { project: project.data.id, list: list.data.id, task: task.data.id, name }
   }

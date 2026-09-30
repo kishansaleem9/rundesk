@@ -80,14 +80,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Archived ${key}`, email, password: PASSWORD, organizationName: `Archived ${key} ${stamp}`, organizationSlug: `archived-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return { email, password: PASSWORD, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -100,9 +100,9 @@ try {
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const title = `${TAG} archived in the ${name} space`
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
     const archived = await A(`/tasks/${task.data.id}`, { method: 'DELETE' })
-    if (archived.status >= 300) throw new Error(`could not archive the ${name} task: ${said(archived)}`)
+    if (!archived.ok) throw new Error(`could not archive the ${name} task: ${said(archived)}`)
     return { id: task.data.id, title }
   }
   const OPEN = await archivedIn('open')

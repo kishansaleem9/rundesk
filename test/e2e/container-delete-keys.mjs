@@ -87,7 +87,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   /** A person in the workspace at `role`, granted `keys` by a custom role of their own. */
@@ -95,7 +95,7 @@ try {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Deleter ${key}`, email, password: PASSWORD, organizationName: `Deleter ${key} ${stamp}`, organizationSlug: `deleter-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
     let granted = keys.length === 0
     if (keys.length > 0) {
@@ -120,18 +120,18 @@ try {
   const place = async (name, level) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name} project` } })
-    if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the ${name} place: ${said(space)} ${said(project)}`)
+    if (!project.ok || !project.data?.id) throw new Error(`could not make the ${name} place: ${said(space)} ${said(project)}`)
     return { space: space.data.id, project: project.data.id }
   }
   /** A list in `project`, made by `who`. */
   const listOf = async (who, project, name) => {
     const list = await who.as('/lists', { method: 'POST', body: { projectId: project, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the list "${name}": ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the list "${name}": ${said(list)}`)
     return list.data.id
   }
   const projectOf = async (space, name) => {
     const project = await A('/projects', { method: 'POST', body: { spaceId: space, name: `${TAG} ${name}` } })
-    if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the project "${name}": ${said(project)}`)
+    if (!project.ok || !project.data?.id) throw new Error(`could not make the project "${name}": ${said(project)}`)
     return project.data.id
   }
   /** Deleted: sent to the Trash, which for a container is its archived flag (`trash.service.ts`). */
@@ -187,7 +187,7 @@ try {
   console.log('\n▶ a space the admin made: the plain member, the manager (who belongs to it), the space deleter')
   const doomed = await place('to be deleted')
   const joined = await A(`/spaces/${doomed.space}/members`, { method: 'POST', body: { userId: manager.id, role: 'edit' } })
-  if (joined.status >= 300) throw new Error(`could not add the manager to the space: ${said(joined)}`)
+  if (!joined.ok) throw new Error(`could not add the manager to the space: ${said(joined)}`)
   const s = {
     plain: await plain.as(`/spaces/${doomed.space}`, { method: 'DELETE' }),
     manager: await manager.as(`/spaces/${doomed.space}`, { method: 'DELETE' }),
@@ -209,7 +209,7 @@ try {
   console.log('\n▶ a guest granted space.delete, in a space shared with them at Full edit')
   const guestsSpace = await place('shared with the guest')
   const shared = await A(`/spaces/${guestsSpace.space}/members`, { method: 'POST', body: { userId: guest.id, role: 'admin' } })
-  if (shared.status >= 300) throw new Error(`could not share the space with the guest: ${said(shared)}`)
+  if (!shared.ok) throw new Error(`could not share the space with the guest: ${said(shared)}`)
   const guestList = await guest.as('/lists', { method: 'POST', body: { projectId: guestsSpace.project, name: `${TAG} the guest’s list` } })
   const g = await guest.as(`/spaces/${guestsSpace.space}`, { method: 'DELETE' })
   const gStayed = !(await gone('spaces', guestsSpace.space))
@@ -224,7 +224,7 @@ try {
   const theirs = await place('the manager’s')
   const notTheirs = await place('not the manager’s')
   const added = await A(`/spaces/${theirs.space}/members`, { method: 'POST', body: { userId: manager.id, role: 'edit' } })
-  if (added.status >= 300) throw new Error(`could not add the manager to their space: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the manager to their space: ${said(added)}`)
   const inTheirs = await listOf(maker, theirs.project, 'a list in the manager’s space')
   const inNotTheirs = await listOf(maker, notTheirs.project, 'a list in a space not the manager’s')
   const m = {
@@ -308,7 +308,7 @@ try {
   // ══ 8. A ROLE SAVED BEFORE ═══════════════════════════════════════════════
   console.log('\n▶ a role saved while the retired keys were offered: assigned, and granting its live key alone')
   const older = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} older`, permissions: ['list.delete'] } })
-  if (older.status >= 300 || !older.data?.id) throw new Error(`could not make the older role: ${said(older)}`)
+  if (!older.ok || !older.data?.id) throw new Error(`could not make the older role: ${said(older)}`)
   // What a role saved before the keys left the catalog holds: they are stored beside a live one.
   for (const key of RETIRED) await sql`insert into custom_role_permissions (role_id, permission) values (${older.data.id}, ${key}) on conflict do nothing`
   const assigned = await A(`/workspaces/${WS}/members/${maker.memberId}/roles/${older.data.id}`, { method: 'POST', body: {} })

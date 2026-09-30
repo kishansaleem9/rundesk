@@ -69,21 +69,21 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: 'Dashboard member', email, password: PASSWORD, organizationName: `Dash ${stamp}`, organizationSlug: `dash-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const memberId = signed.user?.id
 
   // The admin's dashboard, made the workspace default: what the member sees before they have one.
   const layout = [{ id: `${TAG}-a`, type: 'tasks-due', w: 1, h: 1 }, { id: `${TAG}-b`, type: 'overdue', w: 1, h: 1 }]
   const preset = await A('/dashboards', { method: 'POST', body: { workspaceId: WS, name: `${TAG} the admin’s dashboard`, layout } })
-  if (preset.status >= 300 || !preset.data?.id) throw new Error(`could not make the dashboard: ${said(preset)}`)
+  if (!preset.ok || !preset.data?.id) throw new Error(`could not make the dashboard: ${said(preset)}`)
   const PRESET = preset.data.id
   const def = await A(`/dashboards/workspace/${WS}/preset/${PRESET}/workspace-default`, { method: 'PUT' })
-  if (def.status >= 300) throw new Error(`could not make it the workspace default: ${said(def)}`)
+  if (!def.ok) throw new Error(`could not make it the workspace default: ${said(def)}`)
   const adminsLayout = async () => JSON.stringify((await sql`select layout from dashboard_presets where id = ${PRESET}`)[0]?.layout ?? null)
   const before = await adminsLayout()
 

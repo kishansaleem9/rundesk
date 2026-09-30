@@ -76,19 +76,19 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role, keys = []) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Settings ${key}`, email, password: PASSWORD, organizationName: `Settings ${key} ${stamp}`, organizationSlug: `settings-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     if (keys.length > 0) {
       const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
       const made = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} ${key}`, permissions: keys } })
       const given = made.data?.id ? await A(`/workspaces/${WS}/members/${row.id}/roles/${made.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-      if (given.status >= 300) throw new Error(`could not grant the ${key}: ${said(made)} ${said(given)}`)
+      if (!given.ok) throw new Error(`could not grant the ${key}: ${said(made)} ${said(given)}`)
     }
     return { email, password: PASSWORD, as: apiAs(signed.accessToken) }
   }
@@ -212,7 +212,7 @@ try {
   console.log('\n▶ the onboarding checklist’s Invite step, in a workspace the admin holds alone')
   // The step is done once a second person is in, so only a workspace's lone maker is shown it undone.
   const alone = await A('/workspaces', { method: 'POST', body: { name: `${TAG} alone` } })
-  if (alone.status >= 300 || !alone.data?.id) throw new Error(`could not make the second workspace: ${said(alone)}`)
+  if (!alone.ok || !alone.data?.id) throw new Error(`could not make the second workspace: ${said(alone)}`)
   ALONE = alone.data.id
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 950 } })
   const page = await ctx.newPage()

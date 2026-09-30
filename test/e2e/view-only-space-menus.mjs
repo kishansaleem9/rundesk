@@ -65,7 +65,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'Viewer@12345!'
@@ -74,12 +74,12 @@ try {
     organizationName: `Viewing ${stamp}`, organizationSlug: `viewing-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${added.status}`)
+  if (!added.ok) throw new Error(`could not add the member: ${added.status}`)
   const M = apiAs(signed.accessToken)
   const member = { email, password }
   const place = async (name, defaultPermission) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(defaultPermission ? { defaultPermission } : {}) } })
-    if (space.status >= 300 || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
+    if (!space.ok || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data.id, name: `${TAG} ${name}` } })
     const [list] = await sql`insert into lists (project_id, name) values (${project.data?.id}, ${`${TAG} ${name} list`}) returning id`
     return { id: space.data.id, project: project.data?.id, list: list.id }

@@ -64,7 +64,7 @@ try {
 
   const make = async (as, route, body, what) => {
     const res = await as(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const WA = await make(A, '/workspaces', { name: `${TAG}` }, 'the workspace')

@@ -64,13 +64,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'ChecklistTicks@12345!'
   const signed = await signUpApi(API, { fullName: 'Checklist member', email, password, organizationName: `Checklist ${stamp}`, organizationSlug: `checklist-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const [me] = await sql`select id from users where email = ${email}`
   const [admin] = await sql`select id from users where email = ${ADMIN.email}`
@@ -82,12 +82,12 @@ try {
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} task` } })
     const checklist = await A(`/tasks/${task.data?.id}/checklists`, { method: 'POST', body: { title: `${TAG} ${name} checklist` } })
-    if (checklist.status >= 300 || !checklist.data?.id) throw new Error(`could not make the ${name} checklist: ${said(task)} ${said(checklist)}`)
+    if (!checklist.ok || !checklist.data?.id) throw new Error(`could not make the ${name} checklist: ${said(task)} ${said(checklist)}`)
     const made = {}
     for (const [key, assigneeId] of Object.entries(items)) {
       const content = `${TAG} ${name} ${key}`
       const item = await A(`/tasks/${task.data.id}/checklists/${checklist.data.id}/items`, { method: 'POST', body: { content, assigneeId } })
-      if (item.status >= 300 || !item.data?.id) throw new Error(`could not add "${content}": ${said(item)}`)
+      if (!item.ok || !item.data?.id) throw new Error(`could not add "${content}": ${said(item)}`)
       made[key] = { id: item.data.id, content }
     }
     return { task: task.data.id, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}?task=${task.data.id}`, items: made }

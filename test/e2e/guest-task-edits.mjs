@@ -71,24 +71,24 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-guest@rundesk.invalid`
   const password = 'Guests@12345!'
   const signed = await signUpApi(API, { fullName: 'Shared guest', email, password, organizationName: `Guest ${stamp}`, organizationSlug: `guest-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'guest' } })
-  if (added.status >= 300) throw new Error(`could not add the guest: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the guest: ${said(added)}`)
   const G = apiAs(signed.accessToken)
   const [guest] = await sql`select id from users where email = ${email}`
 
   // An open space on the default "edit" — a member's level, not a guest's.
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} open` } })
-  if (space.status >= 300 || !space.data?.id) throw new Error(`could not make the space: ${said(space)}`)
+  if (!space.ok || !space.data?.id) throw new Error(`could not make the space: ${said(space)}`)
   const project = await A('/projects', { method: 'POST', body: { spaceId: space.data.id, name: `${TAG} project` } })
-  if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
+  if (!project.ok || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
   const list = async (name) => {
     const res = await A('/lists', { method: 'POST', body: { projectId: project.data.id, name: `${TAG} ${name}` } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the ${name} list: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make the ${name} list: ${said(res)}`)
     return res.data.id
   }
   const L = await list('tasks shared one by one')

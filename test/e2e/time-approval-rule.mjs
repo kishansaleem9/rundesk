@@ -86,7 +86,7 @@ try {
   A = apiAs(auth.accessToken)
   const [adminRow] = await sql`select id from users where email = ${ADMIN.email}`
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const signUp = async (key) => {
@@ -98,7 +98,7 @@ try {
   const person = async (key, role) => {
     const who = await signUp(key)
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: who.email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return who
   }
   const manager = await person('manager', 'manager')
@@ -110,14 +110,14 @@ try {
   const role = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} approvers`, permissions: ['time.approval.manage'] } })
   const [delegateRow] = await sql`select id from workspace_members where workspace_id = ${WS} and user_id = ${delegate.id}`
   const granted = role.data?.id ? await A(`/workspaces/${WS}/members/${delegateRow.id}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-  if (granted.status >= 300) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
 
   // An open list, and a private one the submitter made: the manager sees it, the delegate does not.
   const listIn = async (name) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name} project` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
     return list.data.id
   }
   const OPEN_LIST = await listIn('open')
@@ -125,7 +125,7 @@ try {
   const SECRET_PROJECT = `${TAG} secret project`
   const task = async (listId, title) => {
     const t = await A('/tasks', { method: 'POST', body: { listId, title } })
-    if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
+    if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
     return t.data.id
   }
   const openTask = await task(OPEN_LIST, `${TAG} open task`)
@@ -135,14 +135,14 @@ try {
   const SECRET_NOTE = `${TAG}secretnote`
   const log = async (who, taskId, from, to, description) => {
     const r = await who.as(`/tasks/${taskId}/time-entries/manual`, { method: 'POST', body: { startedAt: at(from), endedAt: at(to), description, isBillable: true } })
-    if (r.status >= 300) throw new Error(`could not log time: ${said(r)}`)
+    if (!r.ok) throw new Error(`could not log time: ${said(r)}`)
   }
   await log(submitter, openTask, '09', '11', `${TAG} open note`)
   await log(submitter, secretTask, '13', '14', SECRET_NOTE)
   await log(bystander, openTask, '15', '16', `${TAG} bystander note`)
   const submitted = await submitter.as(`/workspaces/${WS}/time-approvals/submit`, { method: 'POST', body: { weekStart: WEEK } })
   const bystanderSubmitted = await bystander.as(`/workspaces/${WS}/time-approvals/submit`, { method: 'POST', body: { weekStart: WEEK } })
-  if (submitted.status >= 300 || bystanderSubmitted.status >= 300) throw new Error(`could not submit: ${said(submitted)} ${said(bystanderSubmitted)}`)
+  if (!submitted.ok || !bystanderSubmitted.ok) throw new Error(`could not submit: ${said(submitted)} ${said(bystanderSubmitted)}`)
   const sheet = async (userId) => (await sql`select status, rejection_reason, approved_by_id from time_approvals where workspace_id = ${WS} and user_id = ${userId} and week_start = ${WEEK}`)[0] ?? null
 
   // ══ 1. THE NOTICE ════════════════════════════════════════════════════════

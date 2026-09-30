@@ -59,19 +59,19 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: 'Other tasks', email, password: 'OtherTasks@12345!', organizationName: `Other ${stamp}`, organizationSlug: `other-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
 
   const listIn = async (name, level) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
     return list.data.id
   }
   const FULL = await listIn('full edit')
@@ -79,7 +79,7 @@ try {
   const EDIT = await listIn('edit', 'edit')
   const task = async (as, listId, title) => {
     const t = await as('/tasks', { method: 'POST', body: { listId, title: `${TAG} ${title}` } })
-    if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
+    if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
     return t.data.id
   }
   const mine = await task(M, FULL, 'mine')

@@ -78,14 +78,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Trash ${key}`, email, password: PASSWORD, organizationName: `Trash ${key} ${stamp}`, organizationSlug: `trash-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return { key, id: signed.user?.id, email, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -104,7 +104,7 @@ try {
     await A(`/lists/${theirs}`, { method: 'DELETE' }),
     await manager.as(`/lists/${managers}`, { method: 'DELETE' }),
   ]
-  if (gone.some((r) => r.status >= 300)) throw new Error(`could not delete the lists: ${gone.map(said).join(', ')}`)
+  if (gone.some((r) => !r.ok)) throw new Error(`could not delete the lists: ${gone.map(said).join(', ')}`)
   const archived = async (id) => (await sql`select is_archived from lists where id = ${id}`)[0]?.is_archived === true
 
   const chromium = await resolveChromium()

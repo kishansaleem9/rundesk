@@ -70,14 +70,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Rows ${who}`, email, password: 'Rows@12345!', organizationName: `Rows ${who} ${stamp}`, organizationSlug: `rows-${who}-${stamp}` })
     if (role) {
       const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-      if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+      if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     }
     const [u] = await sql`select id from users where email = ${email}`
     return { id: u.id, as: apiAs(signed.accessToken) }
@@ -93,25 +93,25 @@ try {
     const project = await as('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await as('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const task = await as('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} task`, description: `${TAG} the old words of ${name}` } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
     return { space: space.data.id, task: task.data.id }
   }
   const OPEN = await place(A, WS, 'open')
   const PRIV = await place(A, WS, 'private', { visibility: 'private' })
   const VIEW = await place(A, WS, 'view', { defaultPermission: 'view' })
   const ws2 = await O('/workspaces', { method: 'POST', body: { name: `${TAG} the outsider's` } })
-  if (ws2.status >= 300 || !ws2.data?.id) throw new Error(`could not make the outsider's workspace: ${said(ws2)}`)
+  if (!ws2.ok || !ws2.data?.id) throw new Error(`could not make the outsider's workspace: ${said(ws2)}`)
   WS2 = ws2.data.id
   const THEIRS = await place(O, WS2, 'the outsider’s own')
 
   const checklist = async (task, title) => {
     const r = await A(`/tasks/${task}/checklists`, { method: 'POST', body: { title: `${TAG} ${title}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the checklist ${title}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the checklist ${title}: ${said(r)}`)
     return r.data.id
   }
   const item = async (task, cid, content) => {
     const r = await A(`/tasks/${task}/checklists/${cid}/items`, { method: 'POST', body: { content: `${TAG} ${content}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not add the item ${content}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not add the item ${content}: ${said(r)}`)
     return r.data.id
   }
   const C1 = await checklist(OPEN.task, 'C1')
@@ -130,7 +130,7 @@ try {
   if (!OC) throw new Error(`could not make the outsider's checklist: ${said(theirs)}`)
   const comment = async (task, body) => {
     const r = await A(`/tasks/${task}/comments`, { method: 'POST', body: { body: `${TAG} ${body}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not comment: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not comment: ${said(r)}`)
     return r.data.id
   }
   const K1 = await comment(OPEN.task, 'on the open task')

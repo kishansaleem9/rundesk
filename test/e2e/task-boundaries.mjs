@@ -108,7 +108,7 @@ try {
   // ── fixtures ─────────────────────────────────────────────────────────────
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const workspace = async (label) => {
@@ -244,7 +244,7 @@ try {
 
   const newLabel = async (ws, what) => {
     const res = await A(`/workspaces/${ws}/labels`, { method: 'POST', body: { name: `${TAG} ${what}`, color: '#7c5cff' } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the ${what} label: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make the ${what} label: ${said(res)}`)
     return res.data.id
   }
   const LABEL_A = await newLabel(WA, 'A label')

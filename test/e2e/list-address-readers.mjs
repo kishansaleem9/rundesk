@@ -67,14 +67,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const password = 'ListAddress@12345!'
     const signed = await signUpApi(API, { fullName: `Address ${who}`, email, password, organizationName: `Address ${who} ${stamp}`, organizationSlug: `address-${who}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return { email, password, api: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -85,17 +85,17 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(project)} ${said(list)}`)
     const alias = await A(`/lists/${list.data.id}/inbound-email`, { method: 'POST' })
-    if (alias.status >= 300 || !alias.data?.address) throw new Error(`could not give the ${name} list an address: ${said(alias)}`)
+    if (!alias.ok || !alias.data?.address) throw new Error(`could not give the ${name} list an address: ${said(alias)}`)
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name} task` } })
-    if (task.status >= 300) throw new Error(`could not make the ${name} task: ${said(task)}`)
+    if (!task.ok) throw new Error(`could not make the ${name} task: ${said(task)}`)
     return { name, list: list.data.id, task: task.data.id, address: alias.data.address, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}` }
   }
   const VIEW = await place('view', 'view')
   const FULL = await place('full edit')
   const shared = await A(`/shares/list/${FULL.list}`, { method: 'POST', body: { email: guest.email, level: 'view' } })
-  if (shared.status >= 300) throw new Error(`could not share the list with the guest: ${said(shared)}`)
+  if (!shared.ok) throw new Error(`could not share the list with the guest: ${said(shared)}`)
 
   // ══ 1. WHO READS THE ADDRESS ═════════════════════════════════════════════
   console.log('\n▶ the list’s address, asked for by a member at View and at Full edit, and by a guest')

@@ -1004,7 +1004,7 @@ try {
   const granted = keyRole.data?.id && memberRow
     ? await A(`/workspaces/${WS}/members/${memberRow.id}/roles/${keyRole.data.id}`, { method: 'POST', body: {} })
     : { status: 0, error: { message: 'no role or no membership to grant it on' } }
-  if (granted.status >= 300) throw new Error(`could not grant the member Manage templates: ${said(keyRole)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant the member Manage templates: ${said(keyRole)} ${said(granted)}`)
   const STOLEN = `Saved from a hidden task ${TAG}`
   const save = await M(`/workspaces/${WS}/task-templates/from-task/${secretId}`, { method: 'POST', body: { name: STOLEN } })
   const savedHidden = await sql`select id, payload from task_templates where workspace_id = ${WS} and name = ${STOLEN}`

@@ -60,13 +60,13 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (key) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `${TAG} ${key}`, email, password: 'AssignWithAi@12345!', organizationName: `AWA ${key} ${stamp}`, organizationSlug: `awa-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return { id: signed.user?.id, name: `${TAG} ${key}` }
   }
   const busy = await person('busy')
@@ -83,11 +83,11 @@ try {
   for (const [who, n] of [[busy.id, 3], [adminId, 2]]) {
     for (let i = 0; i < n; i++) {
       const t = await A('/tasks', { method: 'POST', body: { listId: elsewhere, title: `${TAG} load ${i}`, assigneeIds: [who] } })
-      if (t.status >= 300) throw new Error(`could not stage the load: ${said(t)}`)
+      if (!t.ok) throw new Error(`could not stage the load: ${said(t)}`)
     }
   }
   const task = await A('/tasks', { method: 'POST', body: { listId: list, title: `${TAG} the task to give` } })
-  if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the task: ${said(task)}`)
+  if (!task.ok || !task.data?.id) throw new Error(`could not make the task: ${said(task)}`)
   const TASK = task.data.id
   const answer = await A(`/ai/assignee-suggestion?taskId=${TASK}`)
   if (answer.data?.ok !== true) throw new Error(`the suggestion route did not suggest: ${said(answer)} ${JSON.stringify(answer.data ?? null)}`)

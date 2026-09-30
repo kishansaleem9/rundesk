@@ -57,16 +57,16 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — the invoice is made and read back by SQL')
   A = apiAs((await signInApi(API, ADMIN.email, ADMIN.password)).accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-manager@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: 'Client manager', email, password: PASSWORD, organizationName: `Client ${stamp}`, organizationSlug: `client-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'manager' } })
-  if (added.status >= 300) throw new Error(`could not add the manager: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the manager: ${said(added)}`)
   const G = apiAs(signed.accessToken)
   const client = async (name) => {
     const r = await G(`/workspaces/${WS}/clients`, { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the client ${name}: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the client ${name}: ${said(r)}`)
     return r.data.id
   }
   const BILLED = await client('billed')

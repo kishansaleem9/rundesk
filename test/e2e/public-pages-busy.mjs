@@ -91,7 +91,7 @@ try {
   if (!sql) throw new Error('no DATABASE_URL — this suite makes the portal’s project in the database')
 
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Busy pages ${TAG}` } })
-  if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
+  if (!madeWs.ok || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   const WS = madeWs.data.id
   workspacesMade.push(WS)
 
@@ -105,7 +105,7 @@ try {
   const presign = await A(`/workspaces/${WS}/clips/presign`, {
     method: 'POST', body: { fileName: `${CLIP_TITLE}.webm`, contentType: 'video/webm', title: CLIP_TITLE },
   })
-  if (presign.status >= 300 || !presign.data?.uploadUrl) throw new Error(`could not presign a clip: ${said(presign)}`)
+  if (!presign.ok || !presign.data?.uploadUrl) throw new Error(`could not presign a clip: ${said(presign)}`)
   const put = await fetch(presign.data.uploadUrl, { method: 'PUT', body: Buffer.alloc(4096), headers: { 'content-type': 'video/webm' } })
     .then((r) => r.status, () => 0)
   if (put !== 200) throw new Error(`the store answered the clip's upload ${put}`)

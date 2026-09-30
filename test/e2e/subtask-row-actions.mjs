@@ -63,13 +63,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'SubtaskRows@12345!'
   await signUpApi(API, { fullName: 'Subtask member', email, password, organizationName: `Subtask ${stamp}`, organizationSlug: `subtask-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
 
   /** A space at `level` (or the default, Full edit), a parent task and its subtasks. */
   const place = async (name, level, subtaskNames) => {
@@ -77,12 +77,12 @@ try {
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const parent = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} parent` } })
-    if (parent.status >= 300) throw new Error(`could not make the ${name} parent: ${said(space)} ${said(list)} ${said(parent)}`)
+    if (!parent.ok) throw new Error(`could not make the ${name} parent: ${said(space)} ${said(list)} ${said(parent)}`)
     const subs = []
     for (const n of subtaskNames) {
       const title = `${TAG} ${name} ${n}`
       const sub = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title, parentTaskId: parent.data.id } })
-      if (sub.status >= 300) throw new Error(`could not make "${title}": ${said(sub)}`)
+      if (!sub.ok) throw new Error(`could not make "${title}": ${said(sub)}`)
       subs.push({ id: sub.data.id, title })
     }
     return { url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}?task=${parent.data.id}`, subs }

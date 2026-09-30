@@ -65,7 +65,7 @@ try {
   A = apiAs(auth.accessToken)
   const workspace = async (name) => {
     const made = await A('/workspaces', { method: 'POST', body: { name } })
-    if (made.status >= 300 || !made.data?.id) throw new Error(`could not make ${name}: ${said(made)}`)
+    if (!made.ok || !made.data?.id) throw new Error(`could not make ${name}: ${said(made)}`)
     return made.data.id
   }
   WS = await workspace(TAG)
@@ -74,7 +74,7 @@ try {
     const email = `${TAG}-${key}@rundesk.invalid`
     await signUpApi(API, { fullName: `Audit ${key}`, email, password: PASSWORD, organizationName: `Audit ${key} ${stamp}`, organizationSlug: `audit-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     if (keys.length) {
       const members = (await A(`/workspaces/${WS}/members`)).data ?? []
       const row = members.find((m) => (m.email ?? m.user?.email) === email)
@@ -93,7 +93,7 @@ try {
   const THEIRS = `${TAG} theirs`
   for (const [ws, title] of [[WS, OURS], [OTHER, THEIRS]]) {
     const r = await A(`/workspaces/${ws}/announcements`, { method: 'POST', body: { title } })
-    if (r.status >= 300) throw new Error(`could not record an event in a workspace: ${said(r)}`)
+    if (!r.ok) throw new Error(`could not record an event in a workspace: ${said(r)}`)
   }
 
   browser = await (await resolveChromium()).launch(launchOptions())

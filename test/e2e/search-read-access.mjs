@@ -63,7 +63,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const email = `${TAG}-member@rundesk.invalid`
@@ -72,12 +72,12 @@ try {
     organizationName: `Search member ${stamp}`, organizationSlug: `search-member-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
 
@@ -101,14 +101,14 @@ try {
     const list = await make('/lists', { projectId: project, name: `${SW} ${side} list` }, `the ${side} list`)
     const task = await make('/tasks', { listId: list, title: `${SW} ${side} task`, description: `${SW} ${side} description` }, `the ${side} task`)
     const commented = await A(`/tasks/${task}/comments`, { method: 'POST', body: { body: `${SW} ${side} comment` } })
-    if (commented.status >= 300) throw new Error(`could not comment on the ${side} task: ${said(commented)}`)
+    if (!commented.ok) throw new Error(`could not comment on the ${side} task: ${said(commented)}`)
     await sql`
       insert into task_attachments (task_id, file_name, content_type, size_bytes, storage_key)
       values (${task}, ${`${SW}-${side}-file.txt`}, 'text/plain', 1, ${`workspaces/${WS}/tasks/${task}/${SW}-${side}-file.txt`})`
     await make(`/workspaces/${WS}/docs`, { title: `${SW} ${side} doc`, spaceId: space }, `the ${side} doc`)
     const channel = await make(`/workspaces/${WS}/chat/channels`, { name: `${SW}-${side}-channel`, spaceId: space }, `the ${side} channel`)
     const posted = await A(`/chat/channels/${channel}/messages`, { method: 'POST', body: { body: `${SW} ${side} message` } })
-    if (posted.status >= 300) throw new Error(`could not post in the ${side} channel: ${said(posted)}`)
+    if (!posted.ok) throw new Error(`could not post in the ${side} channel: ${said(posted)}`)
     await sql`insert into custom_field_definitions (project_id, name, type) values (${project}, ${`${SW} ${side} field`}, 'text')`
     return { task }
   }
@@ -121,7 +121,7 @@ try {
    * and nothing at all where Postgres answers (`search-index`, section 5).
    */
   const reindexed = await A(`/search/${WS}/reindex`, { method: 'POST', body: {} })
-  if (reindexed.status >= 300) throw new Error(`could not rebuild the workspace's search index: ${reindexed.status}`)
+  if (!reindexed.ok) throw new Error(`could not rebuild the workspace's search index: ${reindexed.status}`)
   const KINDS = ['channel', 'comment', 'doc', 'file', 'folder', 'list', 'message', 'space', 'task']
   const sideOf = (hit) => {
     const s = JSON.stringify(hit)

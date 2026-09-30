@@ -96,11 +96,11 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const space = await make('/spaces', { workspaceId: WS, name: `${TAG} space` }, 'the space')
@@ -147,7 +147,7 @@ try {
   console.log('\n▶ an edit of its title is written through')
   const RENAMED = `${TAG} renamed`
   const edited = await A(`/tasks/${alpha}`, { method: 'PATCH', body: { title: `${RENAMED} task` } })
-  if (edited.status >= 300) throw new Error(`could not rename the task: ${said(edited)}`)
+  if (!edited.ok) throw new Error(`could not rename the task: ${said(edited)}`)
   let renamedDoc = null
   if (meili) await until(async () => (renamedDoc = await stubDocument(SEARCH, `task-${alpha}`))?.title === `${RENAMED} task`)
   const newTitleFinds = await until(async () => finds(await search(RENAMED), `task-${alpha}`))
@@ -166,7 +166,7 @@ try {
     method: 'POST',
     body: { fileName: FILE, url: 'https://example.com/alpha-brief.pdf', contentType: 'application/pdf' },
   })
-  if (attached.status >= 300 || !attached.data?.id) throw new Error(`could not attach the file: ${said(attached)}`)
+  if (!attached.ok || !attached.data?.id) throw new Error(`could not attach the file: ${said(attached)}`)
   const file = attached.data.id
   let fileDoc = null
   if (meili) await until(async () => (fileDoc = await stubDocument(SEARCH, `file-${file}`)) !== null)
@@ -265,7 +265,7 @@ try {
       method: 'POST',
       body: { fileName: name, url: `https://example.com/${name}`, contentType: 'application/pdf' },
     })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not attach ${name}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not attach ${name}: ${said(res)}`)
     return res.data.id
   }
   const seqNow = async () => (meili ? (await stubRequests(SEARCH))?.seq ?? 0 : 0)
@@ -284,7 +284,7 @@ try {
     organizationName: `Index member ${STAMP}`, organizationSlug: `index-member-${STAMP}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const adminFindsHidden = await until(async () => finds(await search(HIDDEN_FILE), `file-${hiddenFile}`))
   const memberFrom = await seqNow()

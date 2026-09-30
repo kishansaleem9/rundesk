@@ -455,27 +455,27 @@ try {
 
   /* A WORKSPACE OF ITS OWN, so its sidebar holds this suite's space, project and list and nothing else. */
   const madeWs = await A('/workspaces', { method: 'POST', body: { name: `Menu reopen ${TAG}` } })
-  if (madeWs.status >= 300 || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
+  if (!madeWs.ok || !madeWs.data?.id) throw new Error(`could not make a workspace: ${said(madeWs)}`)
   const WS = madeWs.data.id
   workspacesMade.push(WS)
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `Space ${TAG}` } })
-  if (space.status >= 300 || !space.data?.id) throw new Error(`could not make a space: ${said(space)}`)
+  if (!space.ok || !space.data?.id) throw new Error(`could not make a space: ${said(space)}`)
   const SPACE = space.data.id
   const project = await A('/projects', { method: 'POST', body: { spaceId: SPACE, name: `Project ${TAG}` } })
-  if (project.status >= 300 || !project.data?.id) throw new Error(`could not make a project: ${said(project)}`)
+  if (!project.ok || !project.data?.id) throw new Error(`could not make a project: ${said(project)}`)
   const PROJECT = project.data.id
   const list = await A('/lists', { method: 'POST', body: { projectId: PROJECT, name: `List ${TAG}` } })
-  if (list.status >= 300 || !list.data?.id) throw new Error(`could not make a list: ${said(list)}`)
+  if (!list.ok || !list.data?.id) throw new Error(`could not make a list: ${said(list)}`)
   const LIST = list.data.id
   const task = await A('/tasks', { method: 'POST', body: { listId: LIST, title: `Task ${TAG}` } })
-  if (task.status >= 300 || !task.data?.id) throw new Error(`could not make a task: ${said(task)}`)
+  if (!task.ok || !task.data?.id) throw new Error(`could not make a task: ${said(task)}`)
   const TASK = task.data.id
   /* A channel, for a second menu with an “Add to favorites” row: the chat header's ⋯. Goes with the workspace. */
   const channel = await A(`/workspaces/${WS}/chat/channels`, {
     method: 'POST',
     body: { name: `menu-reopen-${Date.now()}`, description: 'menu-reopen' },
   })
-  if (channel.status >= 300 || !channel.data?.id) throw new Error(`could not make a channel: ${said(channel)}`)
+  if (!channel.ok || !channel.data?.id) throw new Error(`could not make a channel: ${said(channel)}`)
   const CHANNEL = channel.data.id
   /** Whether the server has the entity among this workspace's favourites; null when it did not answer. */
   const pinned = async (entityType, entityId) => {

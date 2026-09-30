@@ -63,7 +63,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
@@ -71,7 +71,7 @@ try {
     const fullName = `${key[0].toUpperCase()}${key.slice(1)} ${TAG}`
     const signed = await signUpApi(API, { fullName, email, password: 'AiTaskReads@12345!', organizationName: `${key} ${stamp}`, organizationSlug: `${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select id from users where email = ${email}`
     return { id: row.id, name: fullName, as: apiAs(signed.accessToken) }
   }
@@ -83,7 +83,7 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
     return list.data.id
   }
   const OPEN = await listIn('open')
@@ -92,7 +92,7 @@ try {
   await sql`update lists set visibility = 'private' where id = ${PRIVATE}`
   const task = async (listId, word) => {
     const t = await A('/tasks', { method: 'POST', body: { listId, title: `${TAG} ${word}`, description: `${TAG} ${word} body` } })
-    if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${word}": ${said(t)}`)
+    if (!t.ok || !t.data?.id) throw new Error(`could not make "${word}": ${said(t)}`)
     return t.data.id
   }
   const OPEN_WORD = `${TAG}openword`

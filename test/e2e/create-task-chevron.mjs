@@ -69,22 +69,22 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })
-  if (space.status >= 300 || !space.data?.id) throw new Error(`could not make the space: ${said(space)}`)
+  if (!space.ok || !space.data?.id) throw new Error(`could not make the space: ${said(space)}`)
   const SPACE = space.data.id
   const project = await A('/projects', { method: 'POST', body: { spaceId: SPACE, name: `${TAG} project` } })
-  if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
+  if (!project.ok || !project.data?.id) throw new Error(`could not make the project: ${said(project)}`)
   const PROJECT = project.data.id
   const LIST_NAME = `${TAG} list`
   const list = await A('/lists', { method: 'POST', body: { projectId: PROJECT, name: LIST_NAME } })
-  if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the list: ${said(list)}`)
+  if (!list.ok || !list.data?.id) throw new Error(`could not make the list: ${said(list)}`)
   const LIST = list.data.id
   // A list made by choosing the space and stopping: it lives in the space's
   // hidden container, which is the project id its page is addressed by.
   const spaceList = await A('/lists', { method: 'POST', body: { spaceId: SPACE, name: `${TAG} space list` } })
-  if (spaceList.status >= 300 || !spaceList.data?.id) throw new Error(`could not make the space's own list: ${said(spaceList)}`)
+  if (!spaceList.ok || !spaceList.data?.id) throw new Error(`could not make the space's own list: ${said(spaceList)}`)
   const SLIST = spaceList.data.id
   const CONTAINER = (await sql`select project_id from lists where id = ${SLIST}`)[0]?.project_id ?? null
   if (!CONTAINER) throw new Error('the space’s own list has no container')

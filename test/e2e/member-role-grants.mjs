@@ -65,7 +65,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const account = async (key) => {
@@ -77,7 +77,7 @@ try {
   const person = async (key, role) => {
     const who = await account(key)
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: who.email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return who
   }
   const manager = await person('manager', 'manager')
@@ -95,7 +95,7 @@ try {
     where m.workspace_id = ${WS} and m.user_id = ${userId}`).map((r) => r.name)
   // The admin's own custom role, carrying a key no manager holds by default.
   const hooks = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} hooks`, permissions: ['webhook.manage'] } })
-  if (hooks.status >= 300 || !hooks.data?.id) throw new Error(`could not make the admin's role: ${said(hooks)}`)
+  if (!hooks.ok || !hooks.data?.id) throw new Error(`could not make the admin's role: ${said(hooks)}`)
 
   // ══ 1. ROLES ═════════════════════════════════════════════════════════════
   console.log('\n▶ a manager changes roles: their own to admin, a member’s to manager — and the admin does')
@@ -129,7 +129,7 @@ try {
   console.log('\n▶ a member granted roles.manage and members.role.change: what they may give')
   const delegation = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} delegation`, permissions: ['roles.manage', 'members.role.change'] } })
   const granted = delegation.data?.id ? await A(`/workspaces/${WS}/members/${await memberRowId(delegate.id)}/roles/${delegation.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-  if (granted.status >= 300) throw new Error(`could not grant the delegate: ${said(delegation)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant the delegate: ${said(delegation)} ${said(granted)}`)
   const beyond = `${TAG} beyond`
   const within = `${TAG} within`
   const makesBeyond = await delegate.as(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: beyond, permissions: ['webhook.manage'] } })

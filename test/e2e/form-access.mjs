@@ -69,7 +69,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const signUp = async (who) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -83,13 +83,13 @@ try {
   const outsider = await signUp('outsider')
   O = outsider.as
   const theirs = await O('/workspaces', { method: 'POST', body: { name: `${TAG} theirs` } })
-  if (theirs.status >= 300 || !theirs.data?.id) throw new Error(`the outsider could not make a workspace: ${theirs.status}`)
+  if (!theirs.ok || !theirs.data?.id) throw new Error(`the outsider could not make a workspace: ${theirs.status}`)
   THEIRS = theirs.data.id
   // A member of this workspace, and a guest.
   const join = async (who, role) => {
     const p = await signUp(who)
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: p.email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${added.status}`)
     return p
   }
   const member = await join('member', 'member')
@@ -110,7 +110,7 @@ try {
 
   // The admin's form, routed to the open list, with a field.
   const form = await A(`/workspaces/${WS}/forms`, { method: 'POST', body: { title: `${TAG} the form`, targetListId: OPEN, isPublic: true } })
-  if (form.status >= 300 || !form.data?.id) throw new Error(`could not make the form: ${form.status}`)
+  if (!form.ok || !form.data?.id) throw new Error(`could not make the form: ${form.status}`)
   const FORM = form.data.id
   const field = await A(`/workspaces/${WS}/forms/${FORM}/fields`, { method: 'POST', body: { type: 'short_text', label: `${TAG} name` } })
   const FIELD = field.data?.id

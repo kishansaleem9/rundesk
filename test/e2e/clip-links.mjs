@@ -173,14 +173,14 @@ try {
    */
   const makeWorkspace = async (name) => {
     const made = await A('/workspaces', { method: 'POST', body: { name } })
-    if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace "${name}": ${said(made)}`)
+    if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace "${name}": ${said(made)}`)
     workspacesMade.push({ id: made.data.id, as: A })
     return made.data.id
   }
   const OPEN_WS = await makeWorkspace(`Clip links ${TAG}`)
   const BLOCKED_WS = await makeWorkspace(`Clip links blocked ${TAG}`)
   const blocked = await A(`/workspaces/${BLOCKED_WS}`, { method: 'PATCH', body: { blockPublicSharing: true } })
-  if (blocked.status >= 300) throw new Error(`could not block public sharing: ${said(blocked)}`)
+  if (!blocked.ok) throw new Error(`could not block public sharing: ${said(blocked)}`)
 
   const [space] = await sql`
     insert into spaces (workspace_id, name) values (${OPEN_WS}, ${`Space ${TAG}`}) returning id`
@@ -214,14 +214,14 @@ try {
   /* A member of the workspace that blocks public sharing. */
   const member = await register('member')
   const joined = await A(`/workspaces/${BLOCKED_WS}/members`, { method: 'POST', body: { email: member.email, role: 'member' } })
-  if (joined.status >= 300) throw new Error(`could not add the member: ${said(joined)}`)
+  if (!joined.ok) throw new Error(`could not add the member: ${said(joined)}`)
 
   /** Upload bytes as the app uploads a clip — presign, then a PUT — and answer with its key, or null. */
   const upload = async (workspaceId, bytes, title) => {
     const presign = await A(`/workspaces/${workspaceId}/clips/presign`, {
       method: 'POST', body: { fileName: `${title}.webm`, contentType: 'video/webm', title },
     })
-    if (presign.status >= 300 || !presign.data?.uploadUrl) return null
+    if (!presign.ok || !presign.data?.uploadUrl) return null
     const put = await fetch(presign.data.uploadUrl, { method: 'PUT', body: bytes, headers: { 'content-type': 'video/webm' } })
       .then((r) => r.status, () => 0)
     if (put !== 200) return null

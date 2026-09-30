@@ -67,13 +67,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'Levels@12345!'
   const signed = await signUpApi(API, { fullName: 'Level member', email, password, organizationName: `Level ${stamp}`, organizationSlug: `level-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const [me] = await sql`select id from users where email = ${email}`
 
@@ -82,10 +82,10 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} place: ${said(space)} ${said(project)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} place: ${said(space)} ${said(project)} ${said(list)}`)
     const task = async (title) => {
       const t = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${name} ${title}` } })
-      if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
+      if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
       return { id: t.data.id, title: `${TAG} ${name} ${title}`, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}?task=${t.data.id}` }
     }
     return { space: space.data.id, level: space.data.defaultPermission, project: project.data.id, list: list.data.id, task }
@@ -176,7 +176,7 @@ try {
     (${WS}, 'task', ${vShared.id}, ${me.id}, 'edit'), (${WS}, 'task', ${vFull.id}, ${me.id}, 'admin')`
   await sql`insert into space_members (space_id, user_id, role) values (${ROLE.space}, ${me.id}, 'edit')`
   const role = await A(`/projects/${PROJ.project}/members`, { method: 'POST', body: { userId: me.id, role: 'edit' } })
-  if (role.status >= 300) throw new Error(`could not give the project role: ${said(role)}`)
+  if (!role.ok) throw new Error(`could not give the project role: ${said(role)}`)
   const g = {}
   for (const [k, t] of Object.entries({ share: vShared, space: rTask, project: pTask })) {
     g[k] = { change: await retitle(t, `${t.title} changed`), del: await trash(t) }

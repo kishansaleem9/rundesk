@@ -67,7 +67,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -77,7 +77,7 @@ try {
       organizationName: `Paged ${who} ${stamp}`, organizationSlug: `paged-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${added.status}`)
     return { id: signed.user?.id, email, password, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -91,7 +91,7 @@ try {
   // The admin's list, and one the member makes themselves.
   const adminList = await A('/lists', { method: 'POST', body: { projectId: PROJECT, name: `${TAG} admins list` } })
   const memberList = await member.as('/lists', { method: 'POST', body: { projectId: PROJECT, name: `${TAG} members list` } })
-  if (adminList.status >= 300 || memberList.status >= 300) throw new Error(`could not make the lists: ${adminList.status}, ${memberList.status}`)
+  if (!adminList.ok || !memberList.ok) throw new Error(`could not make the lists: ${adminList.status}, ${memberList.status}`)
   // The guest passes through: the admin's list is shared with them to view.
   await sql`insert into object_shares (workspace_id, object_type, object_id, user_id, level) values (${WS}, 'list', ${adminList.data.id}, ${guest.id}, 'view')`
 

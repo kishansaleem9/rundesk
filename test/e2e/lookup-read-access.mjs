@@ -62,7 +62,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const email = `${TAG}-member@rundesk.invalid`
@@ -71,13 +71,13 @@ try {
     organizationName: `Lookup member ${stamp}`, organizationSlug: `lookup-member-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const memberId = signed.user?.id
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   /** One of each thing a favourite can name, in a space of the given visibility. */
@@ -158,7 +158,7 @@ try {
    * "must be in this workspace", and its query never asked.
    */
   const other = await A('/workspaces', { method: 'POST', body: { name: `${TAG} other` } })
-  if (other.status >= 300 || !other.data?.id) throw new Error(`could not make the other workspace: ${said(other)}`)
+  if (!other.ok || !other.data?.id) throw new Error(`could not make the other workspace: ${said(other)}`)
   WS2 = other.data.id
   const otherSpace = await make('/spaces', { workspaceId: WS2, name: `${TAG} other space` }, 'the other workspace’s space')
   const otherProject = await make('/projects', { spaceId: otherSpace, name: `${TAG} other project` }, 'the other project')

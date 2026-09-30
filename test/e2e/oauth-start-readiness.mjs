@@ -55,12 +55,12 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const status = await A(`/workspaces/${WS}/integrations/connections/providers/status`)
   const rows = Array.isArray(status.data) ? status.data : []
-  if (status.status >= 300 || rows.length === 0) throw new Error(`providers/status answered nothing to judge by: ${said(status)}`)
+  if (!status.ok || rows.length === 0) throw new Error(`providers/status answered nothing to judge by: ${said(status)}`)
   const start = (provider) => A(`/workspaces/${WS}/integrations/connections/${provider}/oauth/start`, { method: 'POST', body: {} })
   const clientIdOf = (url) => { try { return new URL(url).searchParams.get('client_id') } catch { return null } }
   const stateOf = (url) => { try { return new URL(url).searchParams.get('state') } catch { return null } }

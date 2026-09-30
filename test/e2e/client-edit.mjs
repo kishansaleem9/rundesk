@@ -65,20 +65,20 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Clients ${key}`, email, password: PASSWORD, organizationName: `Clients ${key} ${stamp}`, organizationSlug: `clients-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     return { email, as: apiAs(signed.accessToken) }
   }
   const manager = await person('manager', 'manager')
   const member = await person('member', 'member')
   const client = async (name) => {
     const r = await A(`/workspaces/${WS}/clients`, { method: 'POST', body: { name } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make client "${name}": ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make client "${name}": ${said(r)}`)
     return r.data.id
   }
   const ACME = await client(`${TAG} Acme`)

@@ -70,7 +70,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   // ══ 1. WHAT THE EDITOR IS OFFERED ════════════════════════════════════════
@@ -99,11 +99,11 @@ try {
   const email = `${TAG}-holder@rundesk.invalid`
   const signed = await signUpApi(API, { fullName: `Retired ${TAG}`, email, password: 'RetiredKeys@12345!', organizationName: `Retired ${stamp}`, organizationSlug: `retired-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the holder: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the holder: ${said(added)}`)
   const holder = apiAs(signed.accessToken)
   const [memberRow] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
   const older = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} older`, permissions: ['webhook.manage'] } })
-  if (older.status >= 300 || !older.data?.id) throw new Error(`could not make the older role: ${said(older)}`)
+  if (!older.ok || !older.data?.id) throw new Error(`could not make the older role: ${said(older)}`)
   // What a role saved before the key left the catalog holds: the key, stored beside a live one.
   await sql`insert into custom_role_permissions (role_id, permission) values (${older.data.id}, ${RETIRED}) on conflict do nothing`
   const assigned = await A(`/workspaces/${WS}/members/${memberRow.id}/roles/${older.data.id}`, { method: 'POST', body: {} })

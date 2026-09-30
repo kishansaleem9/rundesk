@@ -71,26 +71,26 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'Sheets@12345!'
   const signed = await signUpApi(API, { fullName: 'Sheet reader', email, password, organizationName: `Sheet ${stamp}`, organizationSlug: `sheet-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${added.status}`)
+  if (!added.ok) throw new Error(`could not add the member: ${added.status}`)
   const M = apiAs(signed.accessToken)
   const [me] = await sql`select id from users where email = ${email}`
 
   /** A space at `level`, its project and list, and the admin's tasks in it. */
   const place = async (name, level) => {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
-    if (space.status >= 300 || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
+    if (!space.ok || !space.data?.id) throw new Error(`could not make the ${name} space: ${space.status}`)
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name} list` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${list.status}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${list.status}`)
     const task = async (title, assignees = []) => {
       const t = await A('/tasks', { method: 'POST', body: { listId: list.data.id, title: `${TAG} ${title}`, ...(assignees.length ? { assigneeIds: assignees } : {}) } })
-      if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${t.status}`)
+      if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${t.status}`)
       return { id: t.data.id, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}?task=${t.data.id}`, title: `${TAG} ${title}` }
     }
     return { task }

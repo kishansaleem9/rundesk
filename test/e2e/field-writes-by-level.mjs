@@ -59,13 +59,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Fields ${who}`, email, password: 'Fields@12345!', organizationName: `Fields ${who} ${stamp}`, organizationSlug: `fields-${who}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     const [u] = await sql`select id from users where email = ${email}`
     return { id: u.id, as: apiAs(signed.accessToken) }
   }
@@ -80,10 +80,10 @@ try {
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} task` } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
     const field = async (fname, type) => {
       const r = await A(`/workspaces/${WS}/projects/${project.data.id}/custom-fields`, { method: 'POST', body: { name: `${TAG} ${name} ${fname}`, type } })
-      if (r.status >= 300 || !r.data?.id) throw new Error(`could not define ${fname}: ${said(r)}`)
+      if (!r.ok || !r.data?.id) throw new Error(`could not define ${fname}: ${said(r)}`)
       return r.data.id
     }
     return { space: space.data.id, project: project.data.id, list: list.data.id, task: task.data.id, text: await field('notes', 'text'), vote: await field('votes', 'voting') }

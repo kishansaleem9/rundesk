@@ -72,7 +72,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (who) => {
@@ -82,7 +82,7 @@ try {
       organizationName: `Chat ${who} ${stamp}`, organizationSlug: `chat-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return { id: signed.user?.id, token: signed.accessToken, as: apiAs(signed.accessToken) }
   }
   const outsider = await person('outsider')
@@ -90,7 +90,7 @@ try {
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const privateSpace = await make('/spaces', { workspaceId: WS, name: `${TAG} private space`, visibility: 'private' }, 'the private space')
@@ -127,7 +127,7 @@ try {
   const about = (heard, channelId) => heard.filter((e) => e.channelId === channelId && !String(e.type).startsWith('chat.channel.members.'))
   const say = async (C, channelId, body) => {
     const res = await C(`/chat/channels/${channelId}/messages`, { method: 'POST', body: { body } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not post "${body}": ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not post "${body}": ${said(res)}`)
     return res.data.id
   }
 
@@ -195,7 +195,7 @@ try {
   // ══ 6. A SYNCUP'S CARD ═══════════════════════════════════════════════════
   console.log('\n▶ a SyncUp started in the DM')
   const call = await A(`/workspaces/${WS}/calls`, { method: 'POST', body: { channelId: DM } })
-  if (call.status >= 300 || !call.data?.id) throw new Error(`could not start the call: ${said(call)}`)
+  if (!call.ok || !call.data?.id) throw new Error(`could not start the call: ${said(call)}`)
   const cardFor = (heard) => heard.some((e) => e.type === 'chat.message.created' && e.channelId === DM && e.message?.callId === call.data.id)
   await waitFor(() => cardFor(heardByPeer))
   await A(`/workspaces/${WS}/calls/${call.data.id}/end`, { method: 'POST' })

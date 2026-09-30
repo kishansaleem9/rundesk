@@ -76,10 +76,10 @@ try {
   // screen" are different answers.
   for (const name of ['first', 'second']) {
     const made = await A('/workspaces', { method: 'POST', body: { name: `${TAG} ${name}` } })
-    if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the ${name} workspace: ${made.status}`)
+    if (!made.ok || !made.data?.id) throw new Error(`could not make the ${name} workspace: ${made.status}`)
     workspaces.push(made.data.id)
     const added = await A(`/workspaces/${made.data.id}/members`, { method: 'POST', body: { email: memberEmail, role: 'member' } })
-    if (added.status >= 300) throw new Error(`could not add the member to ${name}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the member to ${name}: ${added.status}`)
   }
   const [, WS] = workspaces
   // A workspace admin who is NOT a super-admin: the dashboard offered a
@@ -91,12 +91,12 @@ try {
     organizationName: `Role admin ${stamp}`, organizationSlug: `role-admin-${stamp}`,
   })
   const raised = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email: wsAdminEmail, role: 'workspace_admin' } })
-  if (raised.status >= 300) throw new Error(`could not add the workspace admin: ${raised.status}`)
+  if (!raised.ok) throw new Error(`could not add the workspace admin: ${raised.status}`)
   const W = apiAs(wsAdminSigned.accessToken)
   // A dashboard of each person's own in the workspace on screen.
   for (const [C, who] of [[W, 'workspace admin'], [M, 'member']]) {
     const preset = await C('/dashboards', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${who}'s dashboard`, layout: [] } })
-    if (preset.status >= 300) throw new Error(`could not make the ${who}'s dashboard: ${preset.status}`)
+    if (!preset.ok) throw new Error(`could not make the ${who}'s dashboard: ${preset.status}`)
   }
 
   browser = await chromium.launch(launchOptions())

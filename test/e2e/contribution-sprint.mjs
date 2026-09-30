@@ -67,7 +67,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const signed = await signUpApi(API, {
@@ -75,7 +75,7 @@ try {
     organizationName: `Contribution ${stamp}`, organizationSlug: `contribution-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the member: ${said(added)}`)
   const M = apiAs(signed.accessToken)
   const space = (await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} open` } })).data?.id
   const hidden = (await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${WORD} space`, visibility: 'private' } })).data?.id

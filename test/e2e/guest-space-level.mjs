@@ -63,7 +63,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -72,7 +72,7 @@ try {
       organizationName: `Level ${who} ${stamp}`, organizationSlug: `level-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     return { id: signed.user?.id, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -85,9 +85,9 @@ try {
   // list in each, and a task in each list.
   const space = async (name) => {
     const res = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the ${name} space: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make the ${name} space: ${said(res)}`)
     const project = await A('/projects', { method: 'POST', body: { spaceId: res.data.id, name: `${TAG} ${name} project` } })
-    if (project.status >= 300 || !project.data?.id) throw new Error(`could not make the ${name} project: ${said(project)}`)
+    if (!project.ok || !project.data?.id) throw new Error(`could not make the ${name} project: ${said(project)}`)
     const [list] = await sql`insert into lists (project_id, name) values (${project.data.id}, ${`${TAG} ${name} list`}) returning id`
     const [task] = await sql`insert into tasks (list_id, title, created_by_id) values (${list.id}, ${`${TAG} ${name} task`}, ${adminId}) returning id`
     return { id: res.data.id, project: project.data.id, list: list.id, task: task.id }

@@ -68,7 +68,7 @@ try {
   A = apiAs(auth.accessToken)
   const adminId = (await A('/users/me')).data?.id
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
@@ -77,7 +77,7 @@ try {
       organizationName: `Chatter ${who} ${stamp}`, organizationSlug: `chatter-${who}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${who}: ${added.status}`)
+    if (!added.ok) throw new Error(`could not add the ${who}: ${added.status}`)
     return { id: signed.user?.id, token: signed.accessToken, as: apiAs(signed.accessToken) }
   }
   const member = await person('member', 'member')
@@ -87,7 +87,7 @@ try {
 
   const space = async (name) => {
     const res = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}` } })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make the ${name} space: ${res.status}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make the ${name} space: ${res.status}`)
     return res.data.id
   }
   const OPEN = await space('open')

@@ -62,14 +62,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const person = async (who, role) => {
     const email = `${TAG}-${who}@rundesk.invalid`
     await signUpApi(API, { fullName: `Mail ${who}`, email, password: 'Mails@12345!', organizationName: `Mail ${who} ${stamp}`, organizationSlug: `mail-${who}-${stamp}` })
     if (role) {
       const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-      if (added.status >= 300) throw new Error(`could not add the ${who}: ${said(added)}`)
+      if (!added.ok) throw new Error(`could not add the ${who}: ${said(added)}`)
     }
     const [u] = await sql`select id from users where email = ${email}`
     return { id: u.id, email }
@@ -85,9 +85,9 @@ try {
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
     const task = await A('/tasks', { method: 'POST', body: { listId: list.data?.id, title: `${TAG} ${name} task` } })
-    if (task.status >= 300 || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
+    if (!task.ok || !task.data?.id) throw new Error(`could not make the ${name} task: ${said(space)} ${said(project)} ${said(list)} ${said(task)}`)
     const alias = await A(`/lists/${list.data.id}/inbound-email`, { method: 'POST' })
-    if (alias.status >= 300) throw new Error(`could not give the ${name} list an address: ${said(alias)}`)
+    if (!alias.ok) throw new Error(`could not give the ${name} list an address: ${said(alias)}`)
     const address = await A(`/tasks/${task.data.id}/email-address`)
     const reply = address.data?.address ?? address.data?.replyAddress ?? address.data
     if (typeof reply !== 'string' || !reply.includes('+task-')) throw new Error(`the ${name} task has no reply address: ${JSON.stringify(address.data)}`)

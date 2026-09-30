@@ -56,7 +56,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const space = (await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} space` } })).data?.id
   if (!space) throw new Error('could not make the space')
@@ -64,7 +64,7 @@ try {
   const ids = []
   for (const n of names) {
     const p = await A('/projects', { method: 'POST', body: { spaceId: space, name: `${TAG} ${n}` } })
-    if (p.status >= 300 || !p.data?.id) throw new Error(`could not make the project "${n}": ${said(p)}`)
+    if (!p.ok || !p.data?.id) throw new Error(`could not make the project "${n}": ${said(p)}`)
     ids.push(p.data.id)
     await new Promise((r) => setTimeout(r, 30))
   }

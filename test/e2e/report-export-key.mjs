@@ -72,21 +72,21 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Reports ${key}`, email, password: PASSWORD, organizationName: `Reports ${key} ${stamp}`, organizationSlug: `reports-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select u.id, m.id as member_id from users u join workspace_members m on m.user_id = u.id and m.workspace_id = ${WS} where u.email = ${email}`
     return { id: row.id, memberId: row.member_id, email, password: PASSWORD, as: apiAs(signed.accessToken) }
   }
   const grant = async (who, name, permissions) => {
     const role = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} ${name}`, permissions } })
     const given = role.data?.id ? await A(`/workspaces/${WS}/members/${who.memberId}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-    if (given.status >= 300) throw new Error(`could not grant ${name}: ${said(role)} ${said(given)}`)
+    if (!given.ok) throw new Error(`could not grant ${name}: ${said(role)} ${said(given)}`)
   }
   // Two guests: one granted viewing alone, one granted viewing and exporting.
   const viewer = await person('viewer', 'guest')

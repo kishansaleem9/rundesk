@@ -65,13 +65,13 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const email = `${TAG}-guest@rundesk.invalid`
   const password = 'GuestTasks@12345!'
   const signed = await signUpApi(API, { fullName: 'Task guest', email, password, organizationName: `Guest ${stamp}`, organizationSlug: `guest-${stamp}` })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'guest' } })
-  if (added.status >= 300) throw new Error(`could not add the guest: ${said(added)}`)
+  if (!added.ok) throw new Error(`could not add the guest: ${said(added)}`)
   const G = apiAs(signed.accessToken)
   const [guest] = await sql`select id from users where email = ${email}`
 
@@ -82,7 +82,7 @@ try {
     const out = { id: sp.data?.id, project: project.data?.id, lists: {} }
     for (const l of listNames) {
       const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name} ${l}` } })
-      if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${l} list: ${said(sp)} ${said(project)} ${said(list)}`)
+      if (!list.ok || !list.data?.id) throw new Error(`could not make the ${l} list: ${said(sp)} ${said(project)} ${said(list)}`)
       out.lists[l] = { id: list.data.id, url: `/app/${WS}/${sp.data.id}/${project.data.id}/${list.data.id}` }
     }
     return out

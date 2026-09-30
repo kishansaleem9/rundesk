@@ -74,7 +74,7 @@ try {
   W = apiAs(signed.accessToken)
   const userId = signed.user?.id
   const made = await W('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
   const row = async () => (await sql`select name, plan, plan_limits, custom_domain_verified, custom_domain_token, logo_url from workspaces where id = ${WS}`)[0]
   const userRow = async () => (await sql`select avatar_url from users where id = ${userId}`)[0]

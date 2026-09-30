@@ -79,14 +79,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role, keys = []) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Client ${key}`, email, password: PASSWORD, organizationName: `Client ${key} ${stamp}`, organizationSlug: `client-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     let granted = keys.length === 0
     if (keys.length > 0) {
       // A key the catalog does not know is refused (400): recorded, so the checks say so.
@@ -134,7 +134,7 @@ try {
   console.log('\n▶ deleting a client the admin made: a plain member, the manager, the member granted client.manage')
   const target = async (key) => {
     const r = await A(`/workspaces/${WS}/clients`, { method: 'POST', body: { name: `${TAG} ${key} target` } })
-    if (r.status >= 300 || !r.data?.id) throw new Error(`could not make the client to delete: ${said(r)}`)
+    if (!r.ok || !r.data?.id) throw new Error(`could not make the client to delete: ${said(r)}`)
     return r.data.id
   }
   const remove = async (who, id) => {

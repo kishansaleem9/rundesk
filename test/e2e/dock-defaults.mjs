@@ -62,7 +62,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${made.status}`)
   WS = made.data.id
   const email = `${TAG}-member@rundesk.invalid`
   const password = 'Docked@12345!'
@@ -71,7 +71,7 @@ try {
     organizationName: `Docked ${stamp}`, organizationSlug: `docked-${stamp}`,
   })
   const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role: 'member' } })
-  if (added.status >= 300) throw new Error(`could not add the member: ${added.status}`)
+  if (!added.ok) throw new Error(`could not add the member: ${added.status}`)
   const M = apiAs(signed.accessToken)
   const memberId = signed.user?.id
   const row = async () => (await sql`select pinned_links from user_dock_configs where user_id = ${memberId} and workspace_id = ${WS}`)[0] ?? null

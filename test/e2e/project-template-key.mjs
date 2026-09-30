@@ -78,19 +78,19 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role, keys = []) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Templates ${key}`, email, password: PASSWORD, organizationName: `Templates ${key} ${stamp}`, organizationSlug: `templates-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     if (keys.length > 0) {
       const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
       const role2 = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} ${key}`, permissions: keys } })
       const given = role2.data?.id ? await A(`/workspaces/${WS}/members/${row.id}/roles/${role2.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-      if (given.status >= 300) throw new Error(`could not grant the ${key}: ${said(role2)} ${said(given)}`)
+      if (!given.ok) throw new Error(`could not grant the ${key}: ${said(role2)} ${said(given)}`)
     }
     return { email, password: PASSWORD, as: apiAs(signed.accessToken) }
   }
@@ -103,7 +103,7 @@ try {
   const projectIn = async (name) => {
     const p = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name } })
     const l = await A('/lists', { method: 'POST', body: { projectId: p.data?.id, name: `${name} list` } })
-    if (l.status >= 300 || !l.data?.id) throw new Error(`could not make ${name}: ${said(p)} ${said(l)}`)
+    if (!l.ok || !l.data?.id) throw new Error(`could not make ${name}: ${said(p)} ${said(l)}`)
     return { projectId: p.data.id, listId: l.data.id }
   }
   const open = await projectIn(`${TAG} open`)
@@ -113,7 +113,7 @@ try {
   const PRIVATE_TITLE = `${TAG} private task`
   const openTask = await A('/tasks', { method: 'POST', body: { listId: open.listId, title: OPEN_TITLE } })
   const privateTask = await A('/tasks', { method: 'POST', body: { listId: open.listId, title: PRIVATE_TITLE } })
-  if (openTask.status >= 300 || privateTask.status >= 300) throw new Error(`could not make the tasks: ${said(openTask)} ${said(privateTask)}`)
+  if (!openTask.ok || !privateTask.ok) throw new Error(`could not make the tasks: ${said(openTask)} ${said(privateTask)}`)
   await sql`update tasks set visibility = 'private' where id = ${privateTask.data.id}`
   const templatesNamed = async (name) => (await sql`select payload::text as payload from project_templates where workspace_id = ${WS} and name = ${name}`)
 

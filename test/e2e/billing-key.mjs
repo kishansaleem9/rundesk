@@ -66,14 +66,14 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (key, role) => {
     const email = `${TAG}-${key}@rundesk.invalid`
     const signed = await signUpApi(API, { fullName: `Billing ${key}`, email, password: 'BillingKey@12345!', organizationName: `Billing ${key} ${stamp}`, organizationSlug: `billing-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select m.id from workspace_members m join users u on u.id = m.user_id where m.workspace_id = ${WS} and u.email = ${email}`
     return { memberId: row.id, as: apiAs(signed.accessToken) }
   }
@@ -82,7 +82,7 @@ try {
   const delegate = await person('delegate', 'member')
   const role = await A(`/workspaces/${WS}/roles`, { method: 'POST', body: { name: `${TAG} billing`, permissions: ['workspace.billing'] } })
   const granted = role.data?.id ? await A(`/workspaces/${WS}/members/${delegate.memberId}/roles/${role.data.id}`, { method: 'POST', body: {} }) : { status: 0 }
-  if (granted.status >= 300) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
+  if (!granted.ok) throw new Error(`could not grant the delegate: ${said(role)} ${said(granted)}`)
   // One paid invoice, as the Stripe webhook records it.
   await sql`insert into invoices (workspace_id, stripe_invoice_id, amount, currency, status, hosted_url, pdf_url) values (${WS}, ${`in_${TAG}`}, 4900, 'usd', 'paid', ${HOSTED}, ${PDF})`
 

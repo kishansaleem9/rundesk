@@ -1648,13 +1648,71 @@ Checks:
 
 Found while closing it: `found-30-sep/status-zero-slips-setup-guards` and `found-30-sep/status-floor-blind-to-other-names`.
 
-### `found-30-sep/status-zero-slips-setup-guards` — open (test tooling, medium; found closing `found-30-sep/status-zero-passes-status-only-checks`)
+### `found-30-sep/status-zero-slips-setup-guards` — **closed** (test tooling, medium; found closing `found-30-sep/status-zero-passes-status-only-checks`)
 
 **A setup guard that reads failure as `status >= 300` lets a status of 0 through**
 
 *Evidence, 30 September (a line scan, `status0-work/mirror.mjs`):* the mirror of the closed item. 563 one-line guards in the suites throw on `x.status >= 300` (or `>= 400`); 420 of them read a status that can be 0 (the default binding, or a `{ status: 0 }` placeholder), and 172 of those have no read-back beside them (`|| !x.data?.id`) that a 0 also fails. With nothing answering the setup goes on, and the run reports the product. The sharpest are nine grant guards on a placeholder — `admin-only-keys:91`, `billing-key:85`, `calendar-pull-access:96`, `member-role-grants:132`, `project-template-key:93`, `report-export-key:89`, `settings-role-grants:93`, `settings-tabs-by-key:91`, `time-approval-rule:113`: `granted = role.data?.id ? await A(…) : { status: 0 }`, so when the role was not made the grant is never attempted, `0 >= 300` is false, and the delegate's checks fail as the product's rather than "could not grant". (Refusal CHECKS written `>= 400` are sound: a 0 fails them.)
 
 *To close:* read `!x.ok` (or `must`) in those guards, and give `check-suite-status-floor.mjs` a rule for a failure read as a lower bound alone where the status can be 0.
+
+
+*Closed, 30 September* (built by an agent, reviewed, and its two review findings fixed). Measured first, at `f532edc`, by the new rule run over the unchanged suites: 616 guards in
+the suites' code stopped the setup on a status compared with a lower bound of 300 or more
+(`if (x.status >= 300) throw …`). 424 of them, in 116 suites, read a status that can be 0, with nothing beside
+the bound that a 0 trips: 404 on the default binding, 20 on a hand-made `{ status: 0 }` — the nine grant guards,
+a tenth of their shape in `create-modal-templates:1007`, two store guards, and 8 a `res` the gate reads by name
+(below). 5 already caught the 0 (`|| x.status === 0`), and 187 read a client that rejects. The ledger's 420 were
+one-line guards on the older tree; this reads every `if` whose consequent throws, returns or exits, including a
+block, a helper's `return null` (`clip-links:224`) and a list's `.some(…)` (`member-settings-tabs:107`), and it
+does not count a read-back beside the bound (`|| !x.data?.id`), as the brief asked.
+
+All 424 now read `!x.ok`, each guard's message kept. Every root was traced first: the client's answer, or a
+ternary whose other arm is the placeholder, never an answer a suite builds without `ok`. On any answer that came,
+`!x.ok` is `x.status >= 300`, so no guard behaves differently on a live API; with nothing answering, or a step
+never taken, the setup stops where it failed, and the nine now say "could not grant the delegate" instead of
+letting the delegate's checks fail as the product's. `must` was not used, since it would replace the messages.
+A tenth grant of the same kind was only noted, not stopped: `data-transfer-keys`' grant of `workspace.import` in the
+empty workspace, `if (given.status >= 300) console.log(…)` on its `{ status: 0 }`. It said nothing and let the
+importer's Load demo data check fail as the product's. That grant is now recorded, as the suite's other grants
+are, and the check reads it: it fails "importer NOT GRANTED" when the grant was not made.
+No check sentence, `EXPECTED_CHECKS` or `lib/fixture.mjs` changed; the 116 suites' break logs drift. No break patch
+targets a suite, so none was re-anchored. Refusal checks written `>= 400` are unchanged.
+
+Checks:
+- `scripts/check-suite-status-floor.mjs` has a second rule. A branch that reads a failure as a lower bound alone,
+  where the status can be 0 for the same three reasons, is refused. It applies to a guard that stops on the failure
+  and to a note that says it. A guard throws; exits or bails with any code except 0; or returns nothing, `false`,
+  the answer or another value. A branch that ends the run as a pass (`process.exit(0)`) is not one. Nor is one that
+  says yes on a refusal (`if (x.status >= 400) return true` in a refusal helper, a `.map` verdict, a `waitUntil`
+  predicate): a 0 goes past it and fails, and `!x.ok` there would turn a dead API into the skip or the refusal. The
+  comparison must be a term of the condition, reached through `||`, `&&`, groups and a `.some(…)` callback, and not
+  under `!` or a ternary. So a refusal check is not a guard. A 0 is caught only by another disjunct that a 0 makes
+  true: `!x.ok`, `!x.status`, `x.status === 0`, `x.status !== N`. Only `// status-floor: not-a-client` exempts a
+  guard, and none is used. At `f532edc` it names 425: the 424 guards, the nine among them, and the one note. Now it
+  names none. 56 cases hold (22 new), and 71 of 71 mutations bite (38 new).
+- 116 of 116 changed suites parse, and the other suite gates, `check-suites-registered`, `check-break-claims` and
+  `check-ledger-ids` pass. The 116 suites are to be regressed on a lane; none was run here.
+
+Found while closing it: `found-30-sep/status-floor-placeholders-by-name`.
+- Merged here onto `bac7eae`. The gate then named one guard the dropdown batch had added since (`menu-reopen:478`, a channel made for the run), rewritten the same way; over the merged tree it names none, and 71 of 71 mutations bite.
+- Regression on lanes 1 and 3, 38 of the 116 suites (the nine grant guards, `data-transfer-keys`, and a spread of the rest): all green, 409 checks. The other 78 were not run here; each rewritten guard is the same test as before on any answer that came.
+
+### `found-30-sep/status-floor-placeholders-by-name` — open (test tooling, small; found closing `found-30-sep/status-zero-slips-setup-guards`)
+
+**The gate reads a placeholder by name, file-wide, so it names the wrong reason, and could miss one passed under another name**
+
+*Evidence, 30 September:* `zeroRoot` in `check-suite-status-floor.mjs` calls a status PLACEHOLDER when any binding
+of its root's NAME anywhere in the suite holds `status: 0`. 8 of the 20 PLACEHOLDER guards this rule found are a
+`res` that is a throw-bound client's answer, named for another `res` in a cleanup helper that catches a rejection
+into `{ status: 0 }` (`doc-boundaries:80/122`, `object-key-boundaries:91/347/419`, `read-visibility:67`,
+`task-boundaries:111/247`). Rewriting them to `!res.ok` is harmless, but the reason printed is wrong. The other
+way round, a placeholder handed to a helper under a parameter of another name, in a throw-bound suite, is not seen:
+none exists today (every root of the 187 guards left as "cannot be 0" was traced to a rejecting client's answer,
+`nearest.mjs`), so nothing slips now.
+
+*To close:* resolve a root to the binding in scope at the comparison (the nearest enclosing declaration, and a
+parameter to its callers' arguments), with a planted case each way and mutations that bite.
 
 ### `found-30-sep/status-floor-blind-to-other-names` — **closed** (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
 

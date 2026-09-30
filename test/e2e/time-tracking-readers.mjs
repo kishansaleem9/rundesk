@@ -69,7 +69,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   /** Signs a person up and adds them to the workspace as `role`. */
@@ -78,7 +78,7 @@ try {
     const password = 'TimeReaders@12345!'
     const signed = await signUpApi(API, { fullName: `Time ${key}`, email, password, organizationName: `Time ${key} ${stamp}`, organizationSlug: `time-${key}-${stamp}` })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${key}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${key}: ${said(added)}`)
     const [row] = await sql`select id from users where email = ${email}`
     return { id: row.id, email, password, as: apiAs(signed.accessToken) }
   }
@@ -95,14 +95,14 @@ try {
     const space = await A('/spaces', { method: 'POST', body: { workspaceId: WS, name: `${TAG} ${name}`, ...(level ? { defaultPermission: level } : {}) } })
     const project = await A('/projects', { method: 'POST', body: { spaceId: space.data?.id, name: `${TAG} ${name}` } })
     const list = await A('/lists', { method: 'POST', body: { projectId: project.data?.id, name: `${TAG} ${name}` } })
-    if (list.status >= 300 || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
+    if (!list.ok || !list.data?.id) throw new Error(`could not make the ${name} list: ${said(space)} ${said(list)}`)
     return { id: list.data.id, url: `/app/${WS}/${space.data.id}/${project.data.id}/${list.data.id}` }
   }
   const OPEN = await listIn('open')
   const VIEW = await listIn('view only', 'view')
   const task = async (list, title) => {
     const t = await A('/tasks', { method: 'POST', body: { listId: list.id, title: `${TAG} ${title}` } })
-    if (t.status >= 300 || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
+    if (!t.ok || !t.data?.id) throw new Error(`could not make "${title}": ${said(t)}`)
     return t.data.id
   }
   const shared = await task(OPEN, 'shared with the guest')

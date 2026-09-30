@@ -67,7 +67,7 @@ try {
   const auth = await signInApi(API, ADMIN.email, ADMIN.password)
   A = apiAs(auth.accessToken)
   const made = await A('/workspaces', { method: 'POST', body: { name: TAG } })
-  if (made.status >= 300 || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
+  if (!made.ok || !made.data?.id) throw new Error(`could not make the workspace: ${said(made)}`)
   WS = made.data.id
 
   const person = async (label, role) => {
@@ -77,14 +77,14 @@ try {
       organizationName: `Home ${label} ${stamp}`, organizationSlug: `home-${label}-${stamp}`,
     })
     const added = await A(`/workspaces/${WS}/members`, { method: 'POST', body: { email, role } })
-    if (added.status >= 300) throw new Error(`could not add the ${label}: ${said(added)}`)
+    if (!added.ok) throw new Error(`could not add the ${label}: ${said(added)}`)
     return { email, id: data.user?.id, call: apiAs(data.accessToken) }
   }
   const member = await person('member', 'member')
 
   const make = async (route, body, what) => {
     const res = await A(route, { method: 'POST', body })
-    if (res.status >= 300 || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
+    if (!res.ok || !res.data?.id) throw new Error(`could not make ${what}: ${said(res)}`)
     return res.data.id
   }
   const listIn = async (spaceBody, what) => {
@@ -112,7 +112,7 @@ try {
   await sql`update tasks set status = 'shipped', status_category = 'closed' where id = ${SHIPPED}`
   await sql`update tasks set visibility = 'private' where id = ${MINE_PRIVATE}`
   const binned = await A(`/tasks/${BINNED}/trash`, { method: 'POST' })
-  if (binned.status >= 300) throw new Error(`could not put a task in the Trash: ${said(binned)}`)
+  if (!binned.ok) throw new Error(`could not put a task in the Trash: ${said(binned)}`)
 
   const ids = (res) => (res.data ?? []).map((t) => t.id)
 
