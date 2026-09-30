@@ -1,13 +1,14 @@
 import { Injectable, UnauthorizedException, ConflictException, ForbiddenException, BadRequestException, Inject, Logger } from '@nestjs/common'
 import { JwtService } from '@nestjs/jwt'
 import { ConfigService } from '@nestjs/config'
-import { randomUUID, randomBytes, createHash } from 'node:crypto'
-import { and, eq, isNull, desc, sql } from 'drizzle-orm'
+import { randomUUID, randomBytes } from 'node:crypto'
+import { and, eq, isNull, desc, sql, or, lte } from 'drizzle-orm'
 import { users, sessions, organizations, organizationMembers, workspaces, workspaceMembers, invitations, passwordResets, emailVerifications, taskTypes, featureFlags, DEFAULT_TASK_TYPES } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { signupFeatureRows } from './signup-features'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { NO_ACCOUNT_HASH, passwords } from '../../common/security/password-hash'
+import { hashRefreshToken } from '../../common/security/refresh-token'
 import { UsersService } from '../users/users.service'
 import { WorkspacesService } from '../workspaces/workspaces.service'
 import { FeatureFlagsService } from '../feature-flags/feature-flags.service'
@@ -29,19 +30,9 @@ function slugify(input: string): string {
     .slice(0, 40) || 'workspace'
 }
 
-/**
- * One-way hash of a refresh token for storage/lookup.
- *
- * Only this SHA-256 digest is ever persisted in `sessions.refreshToken` — never
- * the raw signed JWT — so read access to the DB no longer yields directly-usable
- * refresh tokens. The raw JWT is still handed back to the client (response body
- * + httpOnly cookie); only the stored copy is hashed. Lookups hash the incoming
- * token the same way and match on the digest. The column stays `text` (a hex
- * digest fits), so this needs no schema migration.
- */
-export function hashRefreshToken(token: string): string {
-  return createHash('sha256').update(token).digest('hex')
-}
+// One-way hash of a refresh token for storage/lookup; defined beside the
+// password hasher so the users service can use it too, and re-exported here.
+export { hashRefreshToken }
 
 @Injectable()
 export class AuthService {
@@ -103,16 +94,9 @@ export class AuthService {
     }
 
     if (!(await matches)) {
-      if (settings.lockoutEnabled) {
-        const attempts = (user.failedLoginAttempts ?? 0) + 1
-        if (attempts >= settings.lockoutThreshold) {
-          // Still lock the account server-side, but do not disclose it.
-          const lockedUntil = new Date(now.getTime() + settings.lockoutDurationMinutes * 60000)
-          await this.db.update(users).set({ failedLoginAttempts: 0, lockedUntil }).where(eq(users.id, user.id))
-        } else {
-          await this.db.update(users).set({ failedLoginAttempts: attempts }).where(eq(users.id, user.id))
-        }
-      }
+      // Counted, and the account locked at the threshold, server-side; the
+      // client is told neither.
+      if (settings.lockoutEnabled) await this.countWrongPassword(user.id, settings, now)
       throw new UnauthorizedException('Invalid credentials')
     }
 
@@ -136,6 +120,46 @@ export class AuthService {
     }
 
     return user
+  }
+
+  /**
+   * ONE WRONG PASSWORD, COUNTED IN ONE STATEMENT
+   * (`found-30-sep/lockout-counts-overlapping-attempts-once`).
+   *
+   * The count was read with the account and written back plus one, so wrong
+   * passwords that overlapped each wrote the same next number. Measured on
+   * lane 3: four sent at once left `failed_login_attempts` at 1, and five or
+   * eight at once at 1 too; one after another, the account locked only at its
+   * eighth wrong password, where the policy says five. So the number of
+   * guesses the lockout allowed grew with how many an attacker sends at once,
+   * from as many addresses as sign-in's ten a minute per address needs.
+   *
+   * Postgres adds the one now, to the number the row holds when this UPDATE
+   * takes its lock: attempts that overlap wait for each other and each is
+   * counted. The one that reaches the threshold locks the account in the same
+   * statement and starts the count again, as the policy always did. An attempt
+   * that finds the account already locked is not counted, as a locked
+   * account's sign-in never was (it is refused above, before its compare is
+   * read): eight at once lock it at the fifth and leave nothing counted past it.
+   * Answers the count and the lock as the statement left them, or null when it
+   * counted nothing.
+   */
+  private async countWrongPassword(
+    userId: string,
+    policy: { lockoutThreshold: number; lockoutDurationMinutes: number },
+    now: Date,
+  ) {
+    const lockedUntil = new Date(now.getTime() + policy.lockoutDurationMinutes * 60_000)
+    const reachesThreshold = sql`${users.failedLoginAttempts} + 1 >= ${policy.lockoutThreshold}`
+    const [counted] = await this.db
+      .update(users)
+      .set({
+        failedLoginAttempts: sql`case when ${reachesThreshold} then 0 else ${users.failedLoginAttempts} + 1 end`,
+        lockedUntil: sql`case when ${reachesThreshold} then ${lockedUntil.toISOString()}::timestamptz else ${users.lockedUntil} end`,
+      })
+      .where(and(eq(users.id, userId), or(isNull(users.lockedUntil), lte(users.lockedUntil, now))))
+      .returning({ failedLoginAttempts: users.failedLoginAttempts, lockedUntil: users.lockedUntil })
+    return counted ?? null
   }
 
   /**
@@ -314,18 +338,15 @@ export class AuthService {
     }
   }
 
-  /** Apply the password policy (strength + breach check) to a new password. */
+  /**
+   * Apply the password policy (strength + breach check) to a new password: the
+   * settings service's, which the profile's password change applies too.
+   */
   private async enforcePasswordPolicy(
     password: string,
     policy: { requireStrong: boolean; blockBreached: boolean },
   ) {
-    if (policy.requireStrong) {
-      const problem = this.securitySettings.passwordStrengthProblem(password)
-      if (problem) throw new BadRequestException(problem)
-    }
-    if (policy.blockBreached && (await this.securitySettings.isPasswordBreached(password))) {
-      throw new BadRequestException('This password has appeared in a known data breach. Please choose a different one.')
-    }
+    await this.securitySettings.enforcePasswordPolicy(password, policy)
   }
 
   /**

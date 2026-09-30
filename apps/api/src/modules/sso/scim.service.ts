@@ -5,11 +5,12 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq, type SQL } from 'drizzle-orm'
 import { createHash, randomBytes } from 'node:crypto'
 import { scimTokens, users, workspaceMembers, workspaces } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { SecurityService } from '../security/security.service'
 import { WorkspaceGroupsService } from '../workspace-groups/workspace-groups.service'
 
@@ -191,14 +192,15 @@ export class ScimService {
     const count = Math.min(Math.max(opts.count ?? 50, 1), 200)
     const offset = startIndex - 1
 
-    let filterPredicate: ReturnType<typeof eq> | undefined
+    let filterPredicate: SQL | undefined
     if (opts.filter) {
-      // Minimal SCIM filter parser supporting: userName eq "x", emails eq "x", active eq true
+      // Minimal SCIM filter parser supporting: userName eq "x", emails eq "x", active eq true.
+      // An email in any case (`found-30-sep/sign-in-reads-the-email-as-typed`).
       const userNameMatch = opts.filter.match(/userName\s+eq\s+"([^"]+)"/i)
       const emailMatch = opts.filter.match(/emails(?:\.value)?\s+eq\s+"([^"]+)"/i)
       const activeMatch = opts.filter.match(/active\s+eq\s+(true|false)/i)
-      if (userNameMatch) filterPredicate = eq(users.email, userNameMatch[1].toLowerCase())
-      else if (emailMatch) filterPredicate = eq(users.email, emailMatch[1].toLowerCase())
+      if (userNameMatch) filterPredicate = sameEmail(users.email, userNameMatch[1])
+      else if (emailMatch) filterPredicate = sameEmail(users.email, emailMatch[1])
       else if (activeMatch) filterPredicate = eq(users.isActive, activeMatch[1] === 'true')
     }
 
@@ -250,7 +252,15 @@ export class ScimService {
       .limit(1)
     if (!workspace) throw new NotFoundException('Workspace not found')
 
-    let user = (await this.db.select().from(users).where(eq(users.email, email)).limit(1))[0]
+    // In any case, or an account stored with capitals got a second one beside it.
+    let user = (
+      await this.db
+        .select()
+        .from(users)
+        .where(sameEmail(users.email, email))
+        .orderBy(storedAsTypedFirst(users.email, email), asc(users.createdAt))
+        .limit(1)
+    )[0]
     let isNewUser = false
     if (!user) {
       const [created] = await this.db

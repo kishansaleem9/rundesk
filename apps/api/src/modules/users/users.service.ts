@@ -1,8 +1,11 @@
 import { Injectable, Inject, UnauthorizedException, BadRequestException } from '@nestjs/common'
 import { ACCENT_PALETTE } from '@rundesk/feature-flags'
-import { and, desc, eq, sql } from 'drizzle-orm'
+import { and, asc, desc, eq, ne, sql } from 'drizzle-orm'
 import { randomBytes } from 'node:crypto'
 import { passwords } from '../../common/security/password-hash'
+import { hashRefreshToken } from '../../common/security/refresh-token'
+import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
+import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
 import {
   users,
   userNotepads,
@@ -106,6 +109,7 @@ export class UsersService {
   constructor(
     @Inject(DB_TOKEN) private db: Db,
     private readonly r2: R2Service,
+    private readonly securitySettings: WorkspaceSecuritySettingsService,
   ) {}
 
   async findById(id: string) {
@@ -113,8 +117,20 @@ export class UsersService {
     return user ?? null
   }
 
+  /**
+   * The account with this email, in any case (`sameEmail`,
+   * `found-30-sep/sign-in-reads-the-email-as-typed`): sign-in, sign-up's check
+   * that the email is free, forgot-password and the verification link's resend
+   * all read it through here. Of two accounts differing only in case, the one
+   * stored as typed, then the older.
+   */
   async findByEmail(email: string) {
-    const [user] = await this.db.select().from(users).where(eq(users.email, email))
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(sameEmail(users.email, email))
+      .orderBy(storedAsTypedFirst(users.email, email), asc(users.createdAt))
+      .limit(1)
     return user ?? null
   }
 
@@ -315,21 +331,57 @@ export class UsersService {
     return { uploadUrl, publicUrl, storageKey: key }
   }
 
-  async changePassword(userId: string, currentPassword: string, newPassword: string) {
-    if (newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters')
+  /**
+   * CHANGING ONE'S PASSWORD (`found-30-sep/password-change-unthrottled`).
+   *
+   * It compares the current password with the account's hash on every
+   * request, so a session somebody else holds could guess the password behind
+   * it, one hash a request: the route now has sign-in's ten a minute, per
+   * person (`AUTH_ROUTE_LIMITS.passwordChange`). The new password was checked
+   * for length alone; it is held to the workspace's password policy now, as
+   * reset-password holds it (strong by default). And every other session was
+   * kept, where reset-password revokes them all: the change revokes every
+   * session of the account but the caller's, in the transaction that writes
+   * the password. ClickUp holds a changed password to the rule every password
+   * meets ("Change your username, email, and password": 8 characters, an upper
+   * and a lower case letter, a number or symbol); OWASP's ASVS 3.3.3 asks that
+   * a password change can "terminate all other active sessions".
+   *
+   * `keepRefreshToken` names the caller's session: its refresh token, which a
+   * browser sends as its refresh cookie and a client with no cookie in the body
+   * (`currentRefreshToken`, as "sign out other sessions" takes it). A session
+   * stored before refresh tokens were hashed matches it raw. A caller that
+   * names none keeps none, as after a reset; its access token lives out its
+   * minutes. Answers how many sessions it revoked.
+   */
+  async changePassword(userId: string, currentPassword: string, newPassword: string, keepRefreshToken?: string | null) {
+    if (typeof newPassword !== 'string' || newPassword.length < 8) throw new BadRequestException('Password must be at least 8 characters')
     const user = await this.findById(userId)
     if (!user) throw new BadRequestException('User not found')
     if (!user.passwordHash) throw new BadRequestException('Account uses SSO; set a password via reset flow')
     // On a worker, and at the cost every other hash has (`found-30-sep/password-hash-holds-the-event-loop`):
     // this one hashed at 10, on the event loop.
-    const ok = await passwords.compare(currentPassword, user.passwordHash)
+    const ok = typeof currentPassword === 'string' && (await passwords.compare(currentPassword, user.passwordHash))
     if (!ok) throw new UnauthorizedException('Current password is incorrect')
+    const { settings } = await this.securitySettings.getEffectiveForUser(userId)
+    await this.securitySettings.enforcePasswordPolicy(newPassword, {
+      requireStrong: settings.requireStrongPasswords,
+      blockBreached: settings.blockBreachedPasswords,
+    })
     const passwordHash = await passwords.hash(newPassword)
-    await this.db
-      .update(users)
-      .set({ passwordHash, updatedAt: new Date() })
-      .where(eq(users.id, userId))
-    return { ok: true }
+    const kept = keepRefreshToken ? [hashRefreshToken(keepRefreshToken), keepRefreshToken] : []
+    const revoked = await this.db.transaction(async (tx) => {
+      await tx
+        .update(users)
+        .set({ passwordHash, updatedAt: new Date() })
+        .where(eq(users.id, userId))
+      return tx
+        .update(sessions)
+        .set({ isRevoked: true })
+        .where(and(eq(sessions.userId, userId), eq(sessions.isRevoked, false), ...kept.map((token) => ne(sessions.refreshToken, token))))
+        .returning({ id: sessions.id })
+    })
+    return { ok: true, revoked: revoked.length }
   }
 
   /**

@@ -1,6 +1,6 @@
 import { Injectable, Inject, NotFoundException, BadRequestException, ConflictException } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { eq, and, lt, isNotNull } from 'drizzle-orm'
+import { eq, and, lt, isNotNull, asc } from 'drizzle-orm'
 import { randomUUID, randomBytes, createHash } from 'node:crypto'
 import * as openidClient from 'openid-client'
 import { SAML } from '@node-saml/node-saml'
@@ -14,6 +14,7 @@ import {
 } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { SecurityService } from '../security/security.service'
 
 export type SsoConnectionUpdate = {
@@ -358,8 +359,15 @@ export class SsoService {
       .limit(1)
     if (!workspace) throw new NotFoundException('Workspace not found')
 
+    // In any case (`found-30-sep/sign-in-reads-the-email-as-typed`), or an
+    // account stored with capitals got a second one beside it.
     let user = (
-      await this.db.select().from(users).where(eq(users.email, email)).limit(1)
+      await this.db
+        .select()
+        .from(users)
+        .where(sameEmail(users.email, email))
+        .orderBy(storedAsTypedFirst(users.email, email), asc(users.createdAt))
+        .limit(1)
     )[0]
 
     let isNewUser = false

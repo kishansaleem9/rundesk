@@ -6,6 +6,7 @@ import { organizations, invitations, organizationMembers, workspaceMembers, user
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
 import { passwords } from '../../common/security/password-hash'
+import { sameEmail } from '../../common/sql/same-email'
 import { EmailService } from '../email/email.service'
 import { ConfigService } from '@nestjs/config'
 import { WorkspaceSecuritySettingsService } from '../security/workspace-security-settings.service'
@@ -311,10 +312,12 @@ export class InvitationsService {
     if (invite.invite.status !== 'pending') throw new GoneException('This invitation has already been used or revoked')
     if (invite.invite.expiresAt < new Date()) throw new GoneException('This invitation has expired')
 
+    // In any case (`found-30-sep/sign-in-reads-the-email-as-typed`): an
+    // account stored with capitals still has an account.
     const [existingUser] = await this.db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, invite.invite.email))
+      .where(sameEmail(users.email, invite.invite.email))
       .limit(1)
 
     return {
@@ -344,7 +347,8 @@ export class InvitationsService {
 
       if (!userId) {
         // Find or create user
-        const [existing] = await tx.select().from(users).where(eq(users.email, invite.email)).limit(1)
+        // In any case, or a claim made a second account for an email stored with capitals.
+        const [existing] = await tx.select().from(users).where(sameEmail(users.email, invite.email)).limit(1)
         if (existing) {
           // If user exists but not logged in, we should have blocked in controller or we require login
           // For now, let's assume if they provide password we might be creating.

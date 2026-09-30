@@ -23,6 +23,7 @@ import {
   spaces,
 } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { sameEmail } from '../../common/sql/same-email'
 import { R2Service } from '../../common/storage/r2.service'
 import { RealtimeGateway } from '../realtime/realtime.gateway'
 import { taskCommentAllowed } from '../../common/permissions/task-write'
@@ -427,10 +428,11 @@ export class EmailToTaskService {
     fallback: string | null,
   ): Promise<string> {
     const normalized = fromAddress.toLowerCase().trim()
+    // In any case, as every lookup by email (`found-30-sep/sign-in-reads-the-email-as-typed`).
     const [byEmail] = await this.db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, normalized))
+      .where(sameEmail(users.email, normalized))
       .limit(1)
     if (byEmail) {
       // Ensure they're a member of the workspace owning this list
@@ -452,7 +454,7 @@ export class EmailToTaskService {
     const [byEmail] = await this.db
       .select({ id: users.id })
       .from(users)
-      .where(eq(users.email, fromAddress.toLowerCase().trim()))
+      .where(sameEmail(users.email, fromAddress))
       .limit(1)
     if (!byEmail) return null
     return (await taskCommentAllowed(this.db, taskId, byEmail.id)) ? byEmail.id : null

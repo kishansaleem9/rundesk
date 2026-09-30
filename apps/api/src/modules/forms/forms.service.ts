@@ -3,6 +3,7 @@ import { and, eq, desc, sql } from 'drizzle-orm'
 import { forms, formFields, formSubmissions, tasks, lists, projects, spaces, users, workspaceMembers, taskAssignees } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { sameEmail } from '../../common/sql/same-email'
 import { taskTypeIdForOrigin } from '../../common/task-types/origin'
 import { R2Service } from '../../common/storage/r2.service'
 import { safeFileName } from '../../common/storage/file-name'
@@ -228,7 +229,8 @@ export class FormsService {
         .innerJoin(workspaceMembers, eq(workspaceMembers.userId, users.id))
         .where(
           and(
-            eq(users.email, mappedAssigneeEmail),
+            // In any case (`found-30-sep/sign-in-reads-the-email-as-typed`).
+            sameEmail(users.email, mappedAssigneeEmail),
             eq(workspaceMembers.workspaceId, formWithFields.workspaceId),
           ),
         )

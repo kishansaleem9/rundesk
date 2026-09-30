@@ -1656,13 +1656,17 @@ Found while closing it: `found-30-sep/status-zero-slips-setup-guards` and `found
 
 *To close:* read `!x.ok` (or `must`) in those guards, and give `check-suite-status-floor.mjs` a rule for a failure read as a lower bound alone where the status can be 0.
 
-### `found-30-sep/status-floor-blind-to-other-names` — open (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
+### `found-30-sep/status-floor-blind-to-other-names` — **closed** (test tooling, small; found closing `found-30-sep/status-zero-passes-status-only-checks`)
 
 **A status held under a name the gate does not know as one is compared with an upper bound alone**
 
 *Evidence, 30 September:* `check-suite-status-floor.mjs` knows a status by its name (`status`, or ending in `Status`). `time-tracking-readers:132/134` compare `g.stop < 300` and `v.stop < 300`, where `track()` copies `stop.status` and `stop` is `{ status: 0 }` when nothing was started; each is ANDed with checks a 0 fails (`g.start === 201`, `g.running === 0`), so nothing passes on it today. `stable-images`' `put`/`saved` were the same, and are floored here.
 
 *To close:* floor or `ok` them, and teach the gate a value copied from a `.status` into a field.
+
+*Closed, 30 September.* The gate now knows a property written from an answer's `.status` (not a page response's `.status()`) as a status wherever its suite reads it (`statusFields`, `check-suite-status-floor.mjs`). Before the suite was changed, the gate found exactly the two comparisons this item names: `time-tracking-readers:132` and `:134`, `g.stop < 300` and `v.stop < 300`, each on a helper that can hand back a status of 0.
+- `track()` now also returns `stopped`, the stop's own `ok`, and both checks read it. `stop` is still returned, so the message says what the stop answered. No check sentence changed; the suite is 4/4 on lane 5.
+- Two new planted cases: a status copied into a field of another name and compared there is caught; floored, or its `ok` copied instead, it is let be. 34 cases hold, and 33 of 33 mutations bite, one new (the copied fields unread). Two older mutations' anchors were rewritten for the changed lines.
 
 ### `found-30-sep/client-address-behind-nginx` — **closed** (security, small; found closing `found-30-sep/public-routes-unthrottled`)
 
@@ -2122,7 +2126,7 @@ Checks:
 - Regression on lane 3: the eleven suites, and the rest of the 44 that sign up, invite or use OAuth, with `public-route-limits` and the new suite. 749 of 750 checks passed, the one a flake of `sw-api-cache`'s menu reading, 5/5 on rerun (`found-30-sep/sw-api-cache-reads-the-menu-box-once`). `assignee-picker` waited twice for sign-up's ten a minute, as it says in the log.
 
 Found while building it: `found-30-sep/sign-in-reads-the-email-as-typed`.
-- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks. The break runner measured the suites' patches at `2f7670e` (lane 4): each of the 19 aimed at `auth-route-limits` reddens against 22/22 (17 to 21 of 22), and each of the 5 aimed at `password-hash-time` against 4/4 (3 of 4).
 
 ### `found-30-sep/sign-in-time-tells-an-account` — **closed** (security, small; found closing `found-30-sep/register-unthrottled`)
 
@@ -2166,7 +2170,7 @@ Checks:
   - `pht-2`, `pht-4`, `pht-5` and `pht-12` redden their unit tests.
 
 Found while building it: `found-30-sep/lockout-counts-overlapping-attempts-once`. Four wrong passwords sent at once counted as one, and the account locked at the eighth.
-- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks. The break runner measured the suites' patches at `2f7670e` (lane 4): each of the 19 aimed at `auth-route-limits` reddens against 22/22 (17 to 21 of 22), and each of the 5 aimed at `password-hash-time` against 4/4 (3 of 4).
 
 ### `found-30-sep/password-hash-holds-the-event-loop` — **closed** (performance, small; found closing `found-30-sep/register-unthrottled`)
 
@@ -2221,7 +2225,7 @@ Checks:
   - `pht-7`, `pht-9` and `pht-10` (sign-up's `hashSync` again) redden their unit tests.
 
 Found while building it: `found-30-sep/password-change-unthrottled`.
-- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks. The break runner measured the suites' patches at `2f7670e` (lane 4): each of the 19 aimed at `auth-route-limits` reddens against 22/22 (17 to 21 of 22), and each of the 5 aimed at `password-hash-time` against 4/4 (3 of 4).
 
 ### `found-30-sep/oauth-routes-unthrottled` — **closed** (security, small; found closing `found-30-sep/register-unthrottled`)
 
@@ -2263,9 +2267,9 @@ Checks:
   - `arl-25` (the providers list given thirty) reddens the providers check: 30 answered and 91 refused, CI's own poll among them;
   - `arl-27`, `arl-28` and `arl-29` redden their unit tests.
 - Regression on lane 3: the suites that start or finish an OAuth grant (`personal-calendar-connect`, `integration-error-card`, `app-catalogue`, `oauth-start-readiness`, `meetings-connect-calendar`, `planner-gates`, `planner-onboarding`, `search-sources`, `calendar-accounts`), all green, none meeting a 429.
-- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks.
+- Merged here and run again on lanes 4, 5 and 7: `auth-route-limits` 22/22, `password-hash-time` 4/4, and the eleven suites that now sign their people up (`create-modal-templates` 26, `clip-links` 20, `assign-to-priorities` 30, `assignee-picker` 10, `calendar-accounts` 37, `comment-recording` 33, `sidebar-dms` 14, `team-view` 13, `teams-destination` 14, `teams-empty-state` 21, `teams-person-cards` 17), all green, 261 checks. The break runner measured the suites' patches at `2f7670e` (lane 4): each of the 19 aimed at `auth-route-limits` reddens against 22/22 (17 to 21 of 22), and each of the 5 aimed at `password-hash-time` against 4/4 (3 of 4).
 
-### `found-30-sep/lockout-counts-overlapping-attempts-once` — open (security, small; found closing `found-30-sep/sign-in-time-tells-an-account`)
+### `found-30-sep/lockout-counts-overlapping-attempts-once` — **closed** (security, small; found closing `found-30-sep/sign-in-time-tells-an-account`)
 
 **Wrong passwords sent at once are counted as one toward the lockout**
 
@@ -2277,7 +2281,27 @@ With many addresses, an attacker who sends in parallel multiplies the guesses th
 
 *To close:* count in one statement (`set failed_login_attempts = failed_login_attempts + 1`, locking in the same `UPDATE` at the threshold). Check that N wrong passwords sent at once leave N counted.
 
-### `found-30-sep/sign-in-reads-the-email-as-typed` — open (visible bug, small; found closing `found-30-sep/register-counted-apart-from-signup`)
+
+*Closed, 30 September.* ClickUp documents no count for its lockout. PortSwigger keeps a lab for exactly this ("Bypassing rate limits via race conditions": a login's limit "can be bypassed due to a race condition"), and OWASP's ASVS 2.2.1 bounds failed attempts to "no more than 100 … per hour … on a single account", which only a lockout that counts every attempt can promise.
+
+Measured first on lane 3, three runs alike: four, five and eight wrong passwords sent at once to a fresh account each left `failed_login_attempts` at 1, none locked it, and the right password then signed in. `validateUser` wrote back the count it had read with the account, plus one, and every overlapping attempt had read the same count.
+
+Now one statement counts it (`AuthService.countWrongPassword`): `failed_login_attempts + 1` of the row as the UPDATE finds it, the lock set in the same statement when that reaches the policy's threshold (and the count started again, as before), and only on a row whose lock has passed, so an attempt that finds the account already locked is not counted, as a locked account's sign-in never was. It answers the count and the lock it left. Overlapping attempts wait for each other's row lock, and each is counted.
+
+Checks:
+- `sign-in-and-password` (new, 16 checks; its first section is this item's, 4 checks), every attempt from an address of its own, the counts read from the database:
+  - four at once leave 4 and no lock;
+  - a fifth after them locks the account at the policy's five, and its right password is refused;
+  - five at once lock it at once;
+  - eight at once lock it at the fifth and count none past it (0, locked).
+
+  Before (lane 3, `2f7670e`'s API): 1, 2 unlocked, 1, 1, and the right password signed in each time. After: all four hold, in every run.
+- `auth.service.test.ts`: the two tests pinned to the read-then-write are replaced by four that render what Postgres is sent: the count is the row's plus one, the only number sent the threshold; the lock is in the same statement, for the policy's minutes; the statement touches only a row whose lock has passed; with the lockout off nothing is written.
+- Break patches: `sip-1` (read, then written back plus one, as before) reddens all four checks, `sip-3` (a locked row counted too) the eight-at-once check (3 counted past the lock), `sip-5` (the lock one attempt late) the fifth's and the five-at-once checks; `sip-2` and `sip-4` redden their unit tests.
+- Regression on lane 3, with the other two items' (below): 28 suites, 390 of 390 checks; `password-hash-time`'s three kinds of refusal within 4 ms of each other, and `auth-route-limits` 22/22.
+- Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
+
+### `found-30-sep/sign-in-reads-the-email-as-typed` — **closed** (visible bug, small; found closing `found-30-sep/register-counted-apart-from-signup`)
 
 **Sign-up keeps an email in lowercase, and sign-in looks it up as typed**
 
@@ -2288,7 +2312,35 @@ With many addresses, an attacker who sends in parallel multiplies the guesses th
 
 *To close:* compare emails case-insensitively at sign-in, and at every other lookup by email (forgot-password, invitations, adding a member). Check sign-in with a capital letter.
 
-### `found-30-sep/password-change-unthrottled` — open (security, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
+
+*Closed, 30 September.* ClickUp's help centre says nothing of an email's case (three searches). OWASP's authentication cheat sheet: "Make sure your usernames/userids are case insensitive. User 'smith' and user 'Smith' should be the same user", and "email addresses are already case insensitive".
+
+Measured first on lane 3, three runs alike:
+- an account made in lower case was refused 401 with its email typed with a capital first letter, and in capitals;
+- it could not be added as a member by its email with a capital ("No user with email");
+- an account stored with capitals, as the retired register route wrote one, was refused in lower case, forgot-password in lower case sent it nothing, and sign-up in lower case made a second account beside it;
+- forgot-password in capitals already worked: it lower-cased what was typed.
+
+Every route that makes an account stores the email in lower case (sign-up, Google, Microsoft, SSO, SCIM, an invitation); across the seven lane databases one email in 13,049 was not, made by the retired route. Lower-casing what was typed would have fixed the reported case and locked out any account stored with capitals, which production may hold. So every lookup compares both sides in Postgres's lower case (`common/sql/same-email.ts`: `lower(email) = lower($typed)`, trimmed), and where two accounts differ only in case, the one stored as typed comes first, then the older. It is used by `findByEmail` (sign-in, sign-up's check that the email is free, forgot-password, the verification resend), adding a member, an invitation's link and claim, Google's and Microsoft's sign-in, SSO, SCIM, a form's assignee and inbound mail's sender. `shares.service.ts` already compared this way.
+
+It reads the table rather than the unique index: 2.2 ms over lane 3's 2,602 accounts, where the index answers in 0.15 ms (`found-30-sep/email-lookups-read-the-whole-table`).
+
+Checks:
+- `sign-in-and-password` (its second section, 6 checks):
+  - an account made in lower case signs in with its email's first letter a capital, and all in capitals;
+  - forgot-password in capitals issues it a reset;
+  - a member is added by their email with a capital;
+  - an account stored with capitals signs in in lower case, and forgot-password in lower case issues it a reset;
+  - sign-up with that email in lower case is refused 409, making none;
+  - an invitation to such an account's email in lower case: its link says no account needs making, and claiming it without signing in is refused 403, making none.
+
+  Before: the forgot-password check alone held; the others answered 401, 400 "No user with email", 0 resets, and 201 twice with a second account. After: all six hold.
+- `same-email.test.ts` (new, 2) renders both helpers; `users.service.test.ts` renders `findByEmail`'s query.
+- Break patches: `sip-6` (`findByEmail` as stored) reddens the capital sign-in, the stored-with-capitals and the sign-up checks; `sip-8` (adding a member) its check; `sip-9` (the claim) and `sip-10` (the link) the invitation check; `sip-7` and `sip-11` redden their unit tests.
+- Regression on lane 3 (below): the eleven suites that sign their people up and add them by email, the invitation suites, inbound mail's and a form's lookups, and `password-hash-time`, whose refusals stayed within 4 ms of each other though every lookup now reads the table: 28 suites, 390 of 390 checks.
+- Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
+
+### `found-30-sep/password-change-unthrottled` — **closed** (security, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
 
 **Changing the password guesses the current one with no limit, and keeps every other session**
 
@@ -2304,6 +2356,77 @@ Its hash now runs on a worker at cost 12 (it was 10, on the event loop); that is
 - the workspace's password policy;
 - revoke the other sessions, as reset does;
 - a check of each.
+
+
+*Closed, 30 September.* ClickUp holds a changed password to the rule every password meets ("Passwords created for ClickUp must be a minimum of 8 characters and include a minimum of one uppercase character, a minimum of one lowercase character, and a minimum of one number or special character"), and offers "Log out of all sessions". OWASP's ASVS 3.3.3: "terminate all other active sessions after a successful password change (including change via password reset/recovery)".
+
+Measured first on lane 3, three runs alike: eleven wrong current passwords in a row were all answered 401; `password1` was accepted; after a change every other session still refreshed.
+
+Now:
+- **Sign-in's ten a minute, per person** (`AUTH_ROUTE_LIMITS.passwordChange`). `RateLimitOptions` gains `per: 'user'`: the guard keys such a budget `user:<id>`, so one person spends one budget from every address and people behind one address do not share it. It is on the handler, after the class's `JwtAuthGuard`; with nobody signed in it counts the address.
+- **The workspace's password policy**, as reset-password applies it (strong by default: ten characters, both cases, a number, a symbol; the breach list where the workspace blocks breached passwords). Sign-up's, reset's and the change's policy are now one method, `WorkspaceSecuritySettingsService.enforcePasswordPolicy`. The current password is checked first.
+- **Every other session revoked**, in the transaction that writes the password, as reset's are in its own. The caller's is kept: the one its refresh token names, in the body (`currentRefreshToken`, as "Sign out other sessions" takes it) or as a browser's refresh cookie. A caller naming none keeps none. The answer says how many were revoked. The web sends its session with the change (a session begun by accepting an invitation has no refresh cookie) and refreshes the sessions list; its hint and the checklist under the new password say ten characters, as the reset page does.
+
+Checks:
+- `sign-in-and-password` (its third section, 6 checks):
+  - eleven changes by one person in one minute with a wrong current password: ten answered 401, the eleventh refused 429 with a Retry-After;
+  - the same person from another address is refused, another person at the first address answered;
+  - `password1` is refused 400 under the default policy, saying what it lacks, and the old password still signs in;
+  - with the workspace's strong rule off, eight characters are accepted;
+  - a change made as a browser (cookies and the CSRF header) signs out the other session and keeps the browser's;
+  - a change by a client naming its session in the body keeps it, signs out the other two, and says `revoked: 2`.
+
+  Before: only the relaxed-policy check held (any eight characters were accepted). After: all six hold.
+- Unit tests: `auth-route-limits.test.ts` (the route's budget, behind `JwtAuthGuard`; the eleventh refused from another address, another person served), `rate-limit.guard.test.ts` (a per-user policy's buckets; the address with nobody signed in), `users.service.test.ts` (the policy, with the real policy code; the revocation's WHERE, by hash or raw; none kept when none is named), `users.controller.test.ts` (new: the cookie names the session when the body does not).
+- Break patches: `sip-12` (no `@RateLimit`) reddens the burst and per-person checks, `sip-14` (counted per address) the per-person check, `sip-16` (no policy) the weak-password check, `sip-18` (the strong rule whatever the workspace says) the relaxed-policy check, `sip-19` (nothing revoked) and `sip-21` (the caller's session revoked too) both session checks, `sip-22` (the cookie not read) the browser's; `sip-13`, `sip-15`, `sip-17`, `sip-20`, `sip-23` and `sip-24` redden their unit tests.
+- In a browser, on this worktree's bundle: the change from Profile › Security marked the other two sessions "Revoked" without a reload; the other session's refresh was refused, the browser's own answered, and a reload stayed signed in.
+- Regression on lane 3, one suite at a time, for the three items together: the limit suites, the suites that invite people, add them by email, read the security policy, or receive mail and form answers by email, and the eleven that sign their people up: 28 suites, 390 of 390 checks. `password-hash-time`'s refusals stayed within 4 ms of each other (336 / 340 / 338 ms).
+
+Found while building it: `found-30-sep/password-change-guesses-600-an-hour`, `found-30-sep/revoked-sessions-keep-their-access-tokens` and `found-30-sep/an-accepted-invitation-sets-no-cookies`.
+- Merged here and run again on lanes 3 and 5: `sign-in-and-password` 16/16, `auth-route-limits` 22/22, `password-hash-time` 4/4, `guest-invitations` 2, `form-access` 7, `mail-comments-by-level` 5, `settings-depth` 62 and `time-tracking-readers` 4, all green, 122 checks. The API and the web typecheck.
+
+### `found-30-sep/password-change-guesses-600-an-hour` — open (security, small; found closing `found-30-sep/password-change-unthrottled`)
+
+**A session somebody else holds can still guess 600 current passwords an hour**
+
+*Evidence, 30 September, read and measured:*
+- The change now has ten a minute per person (`AUTH_ROUTE_LIMITS.passwordChange`), as the item asked: measured on lane 3, the eleventh in a minute is refused 429 from any address.
+- That is 600 an hour, 14,400 a day, for as long as the session is refreshed (a workspace's sessions last 10,080 minutes by default).
+- OWASP's ASVS 2.2.1 sets the bar at "no more than 100 failed attempts per hour … on a single account". Sign-in meets it through the lockout (five wrong passwords, then 30 minutes: ten an hour at most), and a wrong current password is not counted toward the lockout.
+
+*To close:* count a wrong current password toward the account's lockout, in `countWrongPassword`'s one statement, and refuse a change on a locked account, saying so (the caller is signed in as the account, so the lock tells them nothing new); or give the route an hourly budget beside its ten a minute. Check that the sixth wrong current password in a row is refused.
+
+### `found-30-sep/revoked-sessions-keep-their-access-tokens` — open (security, medium; found closing `found-30-sep/password-change-unthrottled`)
+
+**A revoked session goes on working until its access token runs out**
+
+*Evidence, 30 September, lane 3 (`probe-access.mjs`, on this work's build):*
+- An access token is good for 900 s (`JWT_ACCESS_EXPIRES_IN`, 15 minutes by default), and its claims are `sub, email, role, workspaceId, flags`: nothing names its session, so `JwtStrategy` cannot ask whether the session is revoked.
+- An account signed in twice, A and B; A changed the password (201, `revoked: 2`). B's refresh was then refused 401, and B's access token still read `GET /users/me`: 200. So did the sign-up session's.
+- The same holds wherever a session is revoked: reset-password, "Sign out other sessions", revoking one session, and the concurrent-session cap. It is not new with this change; the change is where it matters most, since signing out a session somebody else holds is the point of it.
+
+OWASP's ASVS 3.3.3 asks that terminating the other sessions after a password change be "effective across the application".
+
+*To close:* carry the session in the access token (a `sid` claim) and refuse a token whose session is revoked, or keep a per-account "tokens issued before this are void" time that a password change, a reset and "sign out other sessions" set. Check that a session revoked by a password change is refused at once, on a read as well as a refresh.
+
+### `found-30-sep/email-lookups-read-the-whole-table` — open (performance, small; found closing `found-30-sep/sign-in-reads-the-email-as-typed`)
+
+**Every lookup by email reads the whole `users` table**
+
+*Evidence, 30 September, measured:* every lookup of a person by email now compares `lower(email)` (`common/sql/same-email.ts`), and the only index on the column is `users_email_unique`, on the text as stored. On `rundesk_v3` (2,602 accounts) EXPLAIN ANALYZE took 2.2 ms for the sign-in lookup (a sequential scan, 2,601 rows removed by the filter) and 0.15 ms for an exact email by the index. It grows with the accounts, on every sign-in, sign-up, reset request, invitation and inbound mail.
+
+*To close:* an index on `lower(email)`, declared in the schema with its migration (`check-schema-declares-migrations`); a unique one once the accounts that differ only in case are folded. `rundesk_v3` holds twelve such pairs, every one made by a probe, a BEFORE run or a break patch (below); production's count is unknown and is the first thing to read.
+
+### `found-30-sep/an-accepted-invitation-sets-no-cookies` — open (visible bug, small; found closing `found-30-sep/password-change-unthrottled`)
+
+**Accepting an invitation signs the person in only until the page reloads**
+
+*Evidence, 30 September:*
+- Measured on lane 3 (`probe-claim-cookies.mjs`): sign-up and sign-in answer with `access_token`, `refresh_token` and `csrf_token` cookies; `POST /invitations/claim` answers 201 with a session in its body and sets no cookie (`InvitationsController.claim` returns `issueSessionForUserId` as it is, where `AuthController` calls `issueCookies`).
+- Read: `accept-invite.tsx` keeps that session with `setSession`, and the auth store persists the user and memberships but not the tokens (`partialize`: "The access/refresh tokens live in httpOnly cookies now"). So after a reload the page believes it is signed in, has no token and no cookie, and its first refresh has nothing to send. Not measured in a browser.
+- Found building the password change: such a session names itself only in the body (`currentRefreshToken`, which the web now sends), since it has no cookie.
+
+*To close:* set the cookies on the claim's answer as sign-up does, and check that a page reloaded after accepting an invitation is still signed in.
 
 ### `found-30-sep/sw-api-cache-reads-the-menu-box-once` — open (suite, small; found closing `found-30-sep/password-hash-holds-the-event-loop`)
 
@@ -2422,7 +2545,7 @@ Checks:
 *Closed, 30 September.* ClickUp's attached files carry a date, drawn as day and month, or a relative time ("Oct 12"). A feedback request marked planned asks it for the year: "it is impossible to determine at a glance whether a comment, approval, or attached document belongs to 2022, 2024, or 2026" (feedback board, through search excerpts). So the card draws the day its file was attached in the reader's own date format, which carries the year, and the full date and time on hover.
 - The card's line reads size · uploader · date. The date is a `<time>` whose `datetime` is the server's `createdAt` for that file (`attachment-date`).
 - `task-attachments`, 25 → 26: "each card says when its file was attached — the server's date, with its year". It compares each card's `datetime` with the list's `createdAt` for that file, and asks the drawn text for the year. Before, 25/26: no card drew a date. After, 26/26 in three runs in a row on lane 5.
-- `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check; the break runner measures them next.
+- `acd-1` (no date), `acd-2` (the reader's clock, not the server's date) and `acd-3` (day and month only, ClickUp's way) are aimed at the check. The break runner measured them at `de24716` (lane 1): each 25/26 against 26/26.
 - Regression on lanes 5 and 7: the suites that draw attachment cards, `attach-on-create` 14, `clip-created-card` 26, `task-cover` 42 and `comment-recording` 33, all green.
 
 ### `found-30-sep/attachments-have-no-download-all` — open (parity, small; found closing `found-30-sep/attachments-tab-draws-twice`)

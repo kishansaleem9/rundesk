@@ -49,6 +49,15 @@ export interface RateLimitOptions {
   limit: number
   /** Window length in milliseconds. */
   windowMs: number
+  /**
+   * Whose budget a request spends: its address (the default, and the only key
+   * a request with no session has), or the signed-in person's, for a route
+   * behind `JwtAuthGuard` whose risk follows the account wherever it is used
+   * from (`found-30-sep/password-change-unthrottled`). The guard must then run
+   * after authentication, on the handler; without a person it counts the
+   * address, so nothing goes uncounted.
+   */
+  per?: 'address' | 'user'
 }
 
 export const RATE_LIMIT_KEY = 'rate_limit_options'
@@ -129,7 +138,8 @@ export class RateLimitGuard implements CanActivate {
     const req = context.switchToHttp().getRequest()
     const now = Date.now()
     const routeKey = this.routeKey(context, req)
-    const clientIp = this.clientIp(req)
+    // The address, or `user:<id>` for a per-person policy (`counted`).
+    const clientIp = this.counted(req, options)
 
     // Preferred path: the SHARED Postgres fixed-window counter, which enforces
     // ONE global limit across every replica. Any store failure downgrades to
@@ -163,7 +173,8 @@ export class RateLimitGuard implements CanActivate {
    * atomic `INSERT … ON CONFLICT DO UPDATE SET count = count + 1 RETURNING count`
    * both records this hit and reports the live total — no read-modify-write race
    * across replicas. `expiresAt` is the window boundary, letting a periodic
-   * sweep prune the row once the window has passed.
+   * sweep prune the row once the window has passed. `clientIp` is the address,
+   * or `user:<id>` for a per-person policy.
    */
   private async incrementShared(
     routeKey: string,
@@ -247,6 +258,19 @@ export class RateLimitGuard implements CanActivate {
     const handler = context.getHandler()?.name ?? 'handler'
     const method = (r?.method ?? 'GET').toUpperCase()
     return `${cls}.${handler}:${method}`
+  }
+
+  /**
+   * Whose budget the request spends (`RateLimitOptions.per`): the signed-in
+   * person's as `user:<id>`, which no address can be, when the policy says so
+   * and `JwtAuthGuard` has already set `req.user`; otherwise the address.
+   */
+  private counted(req: unknown, options: RateLimitOptions): string {
+    if (options.per === 'user') {
+      const id = (req as { user?: { id?: unknown } } | undefined)?.user?.id
+      if (typeof id === 'string' && id.length > 0) return `user:${id}`
+    }
+    return this.clientIp(req)
   }
 
   /**

@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common'
+import { Injectable, Inject, BadRequestException } from '@nestjs/common'
 import { createHash } from 'node:crypto'
 import { and, asc, eq } from 'drizzle-orm'
 import { workspaceSecuritySettings, workspaceMembers, workspaces } from '@rundesk/db'
@@ -193,6 +193,25 @@ export class WorkspaceSecuritySettingsService {
   }
 
   // ─── Password policy ─────────────────────────────────────────────────────────
+
+  /**
+   * A NEW PASSWORD, HELD TO A POLICY: the strength rules below when
+   * `requireStrong`, the breach list when `blockBreached`; a 400 saying what is
+   * wrong, or nothing. Sign-up passes the strong baseline (there is no
+   * workspace yet); reset-password and the profile's password change pass the
+   * workspace's own (`getEffectiveForUser`), which is strong by default. One
+   * function, so the three cannot say different things
+   * (`found-30-sep/password-change-unthrottled`: the change checked length alone).
+   */
+  async enforcePasswordPolicy(password: string, policy: { requireStrong: boolean; blockBreached: boolean }): Promise<void> {
+    if (policy.requireStrong) {
+      const problem = this.passwordStrengthProblem(password)
+      if (problem) throw new BadRequestException(problem)
+    }
+    if (policy.blockBreached && (await this.isPasswordBreached(password))) {
+      throw new BadRequestException('This password has appeared in a known data breach. Please choose a different one.')
+    }
+  }
 
   /** Throws BadRequest-style errors via the caller; returns a reason or null. */
   passwordStrengthProblem(password: string): string | null {

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import { describe, it, mock } from 'node:test'
 import { UnauthorizedException } from '@nestjs/common'
+import { PgDialect } from 'drizzle-orm/pg-core'
 import { compareSync, getRounds, hashSync } from 'bcryptjs'
 import { AuthService, hashRefreshToken } from './auth.service'
 import { NO_ACCOUNT_HASH, PASSWORD_HASH_COST, passwords } from '../../common/security/password-hash'
@@ -36,7 +37,10 @@ function makeService(overrides: Overrides = {}) {
       update: () => ({
         set: (v: any) => {
           setCalls.push(v)
-          return { where: async () => undefined }
+          // A wrong password's count answers what it left (`countWrongPassword`).
+          const done: any = Promise.resolve(undefined)
+          done.returning = async () => []
+          return { where: () => done }
         },
       }),
     }
@@ -163,7 +167,7 @@ describe('AuthService.validateUser (no lockout enumeration)', () => {
     )
   })
 
-  it('still locks the account server-side on the threshold attempt, but stays generic', async () => {
+  it('a wrong password is refused with the generic message, whatever the count it brings the account to', async () => {
     const user = {
       id: 'u1',
       email: 'a@b.com',
@@ -184,35 +188,97 @@ describe('AuthService.validateUser (no lockout enumeration)', () => {
         return true
       },
     )
-    // Enforcement is preserved: a lockedUntil was written even though the client
-    // was told nothing about it.
+    // One statement counts it (and locks at the threshold; `countWrongPassword`).
     assert.equal(setCalls.length, 1)
-    assert.ok(setCalls[0].lockedUntil instanceof Date)
+    assert.ok('failedLoginAttempts' in setCalls[0] && 'lockedUntil' in setCalls[0])
+  })
+})
+
+/*
+ * ONE WRONG PASSWORD, COUNTED IN ONE STATEMENT
+ * (`found-30-sep/lockout-counts-overlapping-attempts-once`).
+ *
+ * The count was the account's as read, plus one, written back: four wrong
+ * passwords sent at once each wrote 1. What Postgres is sent is rendered here,
+ * because the property is in the SQL: the count is the row's, read by the
+ * UPDATE that writes it, so attempts that overlap wait for each other and each
+ * is counted. `sign-in-and-password.mjs` sends them at once on a lane.
+ */
+describe('AuthService.validateUser — every wrong password is counted, however many arrive at once', () => {
+  const dialect = new PgDialect()
+  const rendered = (fragment: unknown) => dialect.sqlToQuery(fragment as never)
+  const policy = (threshold: number, minutes: number, lockoutEnabled = true) => ({
+    getEffectiveForUser: async () => ({
+      settings: { lockoutEnabled, lockoutThreshold: threshold, lockoutDurationMinutes: minutes },
+    }),
+  })
+  /** Records each UPDATE's SET and WHERE; the statement answers what it left. */
+  function statementsDb() {
+    const statements: Array<{ set: Record<string, unknown>; where: unknown }> = []
+    const db = {
+      update: () => ({
+        set: (set: Record<string, unknown>) => ({
+          where: (where: unknown) => {
+            statements.push({ set, where })
+            const done: any = Promise.resolve(undefined)
+            done.returning = async () => [{ failedLoginAttempts: 1, lockedUntil: null }]
+            return done
+          },
+        }),
+      }),
+    }
+    return { db, statements }
+  }
+  const account = (failedLoginAttempts: number) => ({
+    id: 'u1',
+    email: 'a@b.com',
+    passwordHash: hashSync('correct-horse', 4),
+    failedLoginAttempts,
+    lockedUntil: null,
+    isActive: true,
+  })
+  const refused = (err: any) => err instanceof UnauthorizedException && err.message === 'Invalid credentials'
+
+  it('a wrong password is counted by the row, in one statement: failed_login_attempts + 1, never a number read with the account', async () => {
+    const { db, statements } = statementsDb()
+    // Read with 3 already counted: the old code wrote 4, whatever the row held by then.
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account(3) }, securitySettings: policy(5, 30) })
+    await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refused)
+    assert.equal(statements.length, 1, 'one statement counts the wrong password')
+    const count = statements[0].set.failedLoginAttempts
+    assert.ok(count && typeof count === 'object', `failed_login_attempts was set to ${String(count)}, a number read with the account`)
+    const q = rendered(count)
+    assert.match(q.sql, /^case when "users"\."failed_login_attempts" \+ 1 >= \$1 then 0 else "users"\."failed_login_attempts" \+ 1 end$/)
+    assert.deepEqual(q.params, [5], 'the only number sent is the policy’s threshold')
   })
 
-  it('increments failed attempts (below threshold) and returns the generic message', async () => {
-    const user = {
-      id: 'u1',
-      email: 'a@b.com',
-      passwordHash: hashSync('correct-horse', 4),
-      failedLoginAttempts: 0,
-      lockedUntil: null,
-      isActive: true,
-    }
-    const { svc, setCalls } = makeService({
-      usersService: { findByEmail: async () => user },
-      securitySettings: settings,
-    })
-    await assert.rejects(
-      () => svc.validateUser('a@b.com', 'wrong-password'),
-      (err: any) => {
-        assert.equal(err.message, 'Invalid credentials')
-        return true
-      },
-    )
-    assert.equal(setCalls.length, 1)
-    assert.equal(setCalls[0].failedLoginAttempts, 1)
-    assert.equal(setCalls[0].lockedUntil, undefined)
+  it('the wrong password that reaches the policy’s threshold locks the account in that statement, for the policy’s minutes', async () => {
+    const { db, statements } = statementsDb()
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account(0) }, securitySettings: policy(3, 10) })
+    const before = Date.now()
+    await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refused)
+    const q = rendered(statements[0].set.lockedUntil)
+    assert.match(q.sql, /^case when "users"\."failed_login_attempts" \+ 1 >= \$1 then \$2::timestamptz else "users"\."locked_until" end$/)
+    assert.equal(q.params[0], 3, 'locked at the policy’s threshold')
+    const until = Date.parse(String(q.params[1]))
+    assert.ok(until >= before + 10 * 60_000 - 1_000 && until <= Date.now() + 10 * 60_000, `locked until ${q.params[1]}, not ten minutes on`)
+    assert.equal(rendered(statements[0].set.failedLoginAttempts).params[0], 3, 'the count and the lock read the same threshold')
+  })
+
+  it('a wrong password is not counted on an account another attempt has just locked: the statement touches only a row whose lock has passed', async () => {
+    const { db, statements } = statementsDb()
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account(0) }, securitySettings: policy(5, 30) })
+    await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refused)
+    const q = rendered(statements[0].where)
+    assert.match(q.sql, /^\("users"\."id" = \$1 and \("users"\."locked_until" is null or "users"\."locked_until" <= \$2\)\)$/)
+    assert.equal(q.params[0], 'u1')
+  })
+
+  it('with the lockout off, a wrong password writes nothing', async () => {
+    const { db, statements } = statementsDb()
+    const { svc } = makeService({ db, usersService: { findByEmail: async () => account(0) }, securitySettings: policy(5, 30, false) })
+    await assert.rejects(() => svc.validateUser('a@b.com', 'wrong-horse'), refused)
+    assert.equal(statements.length, 0)
   })
 })
 

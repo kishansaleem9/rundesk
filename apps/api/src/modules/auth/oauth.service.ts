@@ -1,9 +1,10 @@
 import { Injectable, Inject, BadRequestException, Logger } from '@nestjs/common'
 import { ConfigService } from '@nestjs/config'
-import { and, eq } from 'drizzle-orm'
+import { and, asc, eq } from 'drizzle-orm'
 import { users, oauthAccounts } from '@rundesk/db'
 import type { Db } from '@rundesk/db'
 import { DB_TOKEN } from '../../common/database/database.module'
+import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { SecurityService } from '../security/security.service'
 import {
   buildAuthorizeUrl,
@@ -192,7 +193,16 @@ export class OAuthService {
     _tokens: OAuthTokens,
     meta: { ip?: string; userAgent?: string } = {},
   ): Promise<{ userId: string; isNewUser: boolean }> {
-    let user = (await this.db.select().from(users).where(eq(users.email, profile.email)).limit(1))[0]
+    // In any case (`found-30-sep/sign-in-reads-the-email-as-typed`), or an
+    // account stored with capitals got a second one beside it.
+    let user = (
+      await this.db
+        .select()
+        .from(users)
+        .where(sameEmail(users.email, profile.email))
+        .orderBy(storedAsTypedFirst(users.email, profile.email), asc(users.createdAt))
+        .limit(1)
+    )[0]
 
     let isNewUser = false
     if (!user) {

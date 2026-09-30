@@ -11,6 +11,8 @@ import { OAuthController } from '../../modules/auth/oauth.controller'
 import { InvitationsController } from '../../modules/invitations/invitations.controller'
 import { SsoAdminController, SsoAuthController } from '../../modules/sso/sso.controller'
 import { IntegrationConnectionsController } from '../../modules/integrations/connections/integration-connections.controller'
+import { UsersController } from '../../modules/users/users.controller'
+import { JwtAuthGuard } from '../../modules/auth/guards/jwt-auth.guard'
 
 /**
  * MAKING AN ACCOUNT, ANSWERING AN INVITATION AND SIGNING IN THROUGH SSO, GOOGLE
@@ -189,6 +191,62 @@ describe('Making an account, answering an invitation and signing in through SSO 
     for (const h of handlers) {
       assert.equal(policyOf(SsoAdminController, h), undefined, `SsoAdminController.${h} carries a rate-limit policy`)
       assert.ok(!guardsOf(SsoAdminController, h).includes(RateLimitGuard), `SsoAdminController.${h} runs behind RateLimitGuard`)
+    }
+  })
+})
+
+/*
+ * CHANGING ONE'S PASSWORD IS LIMITED PER PERSON (`found-30-sep/password-change-unthrottled`).
+ * The route compared the current password with the account's hash on every
+ * request, with no limit: a session somebody else held guessed the password
+ * behind it. `sign-in-and-password.mjs` measures the refusals on a lane.
+ */
+describe('Changing one’s password is limited per person', () => {
+  /** One password change by `userId`, from `ip`, as `JwtAuthGuard` leaves the request. */
+  function changeBy(userId: string, ip: string, headers: Record<string, string> = {}) {
+    return {
+      getType: () => 'http',
+      getHandler: () => handlerOf(UsersController, 'changePassword'),
+      getClass: () => UsersController,
+      switchToHttp: () => ({
+        getRequest: () => ({ ip, method: 'POST', user: { id: userId } }),
+        getResponse: () => ({ header: (k: string, v: string) => (headers[k] = v) }),
+      }),
+    } as any
+  }
+
+  it('POST /users/me/change-password carries the passwordChange budget, and RateLimitGuard reads it after JwtAuthGuard has said who is asking', () => {
+    assert.deepEqual(policyOf(UsersController, 'changePassword'), AUTH_ROUTE_LIMITS.passwordChange, 'POST /users/me/change-password: no passwordChange policy')
+    const classGuards = (Reflect.getMetadata(GUARDS_METADATA, UsersController) ?? []) as unknown[]
+    const ownGuards = (Reflect.getMetadata(GUARDS_METADATA, handlerOf(UsersController, 'changePassword')) ?? []) as unknown[]
+    assert.ok(classGuards.includes(JwtAuthGuard), 'the class is not behind JwtAuthGuard')
+    assert.ok(ownGuards.includes(RateLimitGuard), 'RateLimitGuard is not on the handler, where it runs after the class’s JwtAuthGuard')
+    assert.ok(!classGuards.includes(RateLimitGuard), 'RateLimitGuard is on the class: it would run before the person is known')
+  })
+
+  it('the budget is sign-in’s ten a minute, counted per person, not per address', () => {
+    assert.deepEqual(AUTH_ROUTE_LIMITS.passwordChange, { limit: 10, windowMs: 60_000, per: 'user' })
+  })
+
+  it('the 11th password change in a minute by one person is refused with 429 and a Retry-After from any address, and another person at the first address is still served', async () => {
+    mock.timers.enable({ apis: ['Date'], now: MID_WINDOW })
+    try {
+      const { db, rows } = fakeStore()
+      const guard = new RateLimitGuard(reflector, db)
+      for (let i = 0; i < 10; i++) {
+        assert.equal(await guard.canActivate(changeBy('u-ada', '203.0.113.7')), true, `change ${i + 1} was refused`)
+      }
+      const headers: Record<string, string> = {}
+      await assert.rejects(
+        () => guard.canActivate(changeBy('u-ada', '198.51.100.9', headers)),
+        (err: unknown) => err instanceof HttpException && err.getStatus() === 429,
+        'the same person asking from another address was not refused',
+      )
+      assert.equal(headers['Retry-After'], '30', 'the refusal says to come back when the minute ends')
+      assert.equal(await guard.canActivate(changeBy('u-grace', '203.0.113.7')), true, 'another person at the same address was refused')
+      assert.ok([...rows.keys()].every((bucket) => /:user:u-(ada|grace):/.test(bucket)), `counted by address: ${[...rows.keys()].join(', ')}`)
+    } finally {
+      mock.timers.reset()
     }
   })
 })

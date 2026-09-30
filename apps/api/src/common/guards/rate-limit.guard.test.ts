@@ -53,7 +53,7 @@ function throwingStore() {
 }
 
 function makeCtx(
-  req: { ip?: string; method?: string },
+  req: { ip?: string; method?: string; user?: { id: string } },
   res: { header: (...a: unknown[]) => unknown },
   handlerName = 'login',
   className = 'AuthController',
@@ -168,6 +168,35 @@ describe('RateLimitGuard', () => {
 
   it('exports a stable metadata key for the @RateLimit decorator', () => {
     assert.equal(typeof RATE_LIMIT_KEY, 'string')
+  })
+
+  /*
+   * PER PERSON (`found-30-sep/password-change-unthrottled`): a policy that says
+   * `per: 'user'` is keyed by the signed-in person, whom `JwtAuthGuard` has
+   * set on the request by the time a handler's own guards run.
+   */
+  it('a per-user policy spends the signed-in person’s budget: the same person from another address is refused, and another person at the first address is served', async () => {
+    const { db, rows } = fakeStore()
+    const guard = new RateLimitGuard(reflector({ limit: 1, windowMs: 60_000, per: 'user' }), db)
+    const as = (ip: string, id: string) => makeCtx({ ip, method: 'POST', user: { id } }, noopRes(), 'changePassword', 'UsersController')
+    assert.equal(await guard.canActivate(as('10.0.0.1', 'u1')), true)
+    await assert.rejects(
+      () => guard.canActivate(as('10.0.0.2', 'u1')),
+      (err: any) => err instanceof HttpException && err.getStatus() === 429,
+    )
+    assert.equal(await guard.canActivate(as('10.0.0.1', 'u2')), true)
+    assert.deepEqual(
+      [...rows.keys()].map((bucket) => bucket.replace(/:\d+$/, '')).sort(),
+      ['UsersController.changePassword:POST:user:u1', 'UsersController.changePassword:POST:user:u2'],
+    )
+  })
+
+  it('a per-user policy with nobody signed in counts the address, so nothing goes uncounted', async () => {
+    const { db, rows } = fakeStore()
+    const guard = new RateLimitGuard(reflector({ limit: 1, windowMs: 60_000, per: 'user' }), db)
+    assert.equal(await guard.canActivate(makeCtx({ ip: '10.0.0.3', method: 'POST' }, noopRes())), true)
+    await assert.rejects(() => guard.canActivate(makeCtx({ ip: '10.0.0.3', method: 'POST' }, noopRes())))
+    assert.match([...rows.keys()][0], /^AuthController\.login:POST:10\.0\.0\.3:\d+$/)
   })
 })
 

@@ -510,6 +510,17 @@ export function floorlessIn(src) {
     }
     return null
   }
+  /*
+   * A STATUS COPIED INTO A FIELD OF ANOTHER NAME (`found-30-sep/status-floor-blind-to-other-names`).
+   * `time-tracking-readers`' `track()` returned `{ stop: stop.status, … }`, and its
+   * check compared `g.stop < 300`: a status, under a name this knew nothing of,
+   * where `stop` was a hand-made `{ status: 0 }` when nothing was started. So a
+   * property written from an answer's `.status` (not a page response's
+   * `.status()`) is a status wherever this file reads it.
+   */
+  const statusFields = new Set(
+    [...code.matchAll(/([A-Za-z_$][\w$]*)\s*:\s*[A-Za-z_$][\w$.?]*\.status\b(?!\s*\()/g)].map((m) => m[1]),
+  )
   /** A name ending in `Status` bound only to a page response's `.status()`, which is never 0. */
   const pageStatus = (name) => {
     const vals = bindings.get(name) ?? []
@@ -601,8 +612,8 @@ export function floorlessIn(src) {
     // The operand as written (strings included, so `A('/x')` is not `A('/y')`), spaces out.
     const operand = norm(src.slice(opStart, opEnd))
     const last = /([A-Za-z_$][\w$]*)$/.exec(operand)?.[1]
-    if (!last || !(last === 'status' || /Status$/.test(last))) continue
-    if (last !== 'status' && pageStatus(last)) continue
+    if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields.has(last)))) continue
+    if (last !== 'status' && !statusFields.has(last) && pageStatus(last)) continue
     const where = inCheck(at)
     if (where !== null && where >= 1) continue // a check's message decides nothing
     considered.compared += 1
@@ -833,6 +844,16 @@ const CASES = [
   ['caught', "a marker inside a check's arguments", suite(HEAD, "const r = await A('/x')", 'chk(', '  !(r.status < 300), // status-floor: zero-fails', "  'refused',", ')'), /inside a check's arguments/],
   ['caught', 'a directory with no suites in it', { 'README.md': 'nothing' }, /below the floor/],
   ['caught', 'a suite that does not lex to a clean end', suite(HEAD, 'const t = `left open ${WS}'), /could not be read as JavaScript/],
+  ['caught', 'a status copied into a field of another name, and compared there (time-tracking-readers)', suite(HEAD,
+    "const track = async () => { const stop = await A('/stop', { method: 'POST' }); return { stop: stop.status } }",
+    'const g = await track()',
+    "chk(g.stop < 300, 'the timer stops')",
+  ), /✗ c\.mjs:\d+ {2}ZERO-\w+ {2}g\.stop < 300/],
+  ['passes', 'that copied status floored, or its answer\'s ok copied instead', suite(HEAD,
+    "const track = async () => { const stop = await A('/stop', { method: 'POST' }); return { stop: stop.status, stopped: stop.ok === true } }",
+    'const g = await track()',
+    "chk(g.stop >= 200 && g.stop < 300 && g.stopped, 'the timer stops')",
+  )],
   ['passes', 'the same checks reading ok', suite(HEAD,
     'const gate = await M(`/tasks/${HIDDEN}`)',
     'if (gate.ok) throw new Error(`the member could open the hidden blocker (${said(gate)})`)',
@@ -947,8 +968,9 @@ if (process.env.STATUS_FLOOR_UNDER_TEST) {
         ['lte-unread', at('for (const m of code.matchAll(/(?<![<>=!])(<=?|>=?)', '(?![<>=])/g)) {'), 'for (const m of code.matchAll(/(?<![<>=!])(<|>=?)(?![<>=])/g)) {'],
         ['reversed-unread', at("if (!/^\\d[\\d_.]*$/.test(wordBefore(code, n).word)) ", 'continue'), 'continue'],
         ['keywords-in-chains', at('if (isWord(code[k]) && KEYWORDS.has(wordBefore(code, k).word)) ', 'return o'), ''],
-        ['named-statuses-unread', at("if (!last || !(last === 'status' || ", '/Status$/.test(last))) continue'), "if (!last || !(last === 'status')) continue"],
-        ['page-statuses-counted', at("if (last !== 'status' && ", 'pageStatus(last)) continue'), 'if (false) continue'],
+        ['named-statuses-unread', at("if (!last || !(last === 'status' || /Status$/.test(last) || (operand.includes('.') && statusFields", ".has(last)))) continue"), "if (!last || !(last === 'status' || (operand.includes('.') && statusFields.has(last)))) continue"],
+        ['copied-statuses-unread', at("/Status$/.test(last) || (operand.includes('.') && ", 'statusFields.has(last)))) continue'), "/Status$/.test(last) || false)) continue"],
+        ['page-statuses-counted', at("if (last !== 'status' && !statusFields.has(last) && ", 'pageStatus(last)) continue'), 'if (false) continue'],
         ['zero-client-off', at('if (!options || !/noAn', "swer\\s*:\\s*['\"]throw['\"]/.test(src.slice(...options))) zeroClient = true"), 'if (false) zeroClient = true'],
         ['any-options-throw', at('if (!options || ', '!/noAnswer'), 'if (!options || false && !/noAnswer'],
         ['own-name-unread', at("if (s) local.add(s[1] ?? ", "'apiAs')"), 'if (s && s[1]) local.add(s[1])'],

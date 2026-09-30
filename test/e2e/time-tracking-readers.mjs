@@ -120,7 +120,9 @@ try {
     const stop = start.data?.id ? await who.as(`/tasks/${taskId}/time-entries/stop/${start.data.id}`, { method: 'POST' }) : { status: 0, error: { message: 'nothing started' } }
     const manual = await who.as(`/tasks/${taskId}/time-entries/manual`, { method: 'POST', body: { startedAt: hour(9), endedAt: hour(10), description: `${TAG} manual` } })
     const rows = await entries(who.id, taskId)
-    return { start: start.status, stop: stop.status, manual: manual.status, made: rows.length, running: rows.filter((r) => r.ended_at === null).length }
+    // `stopped`, the answer's own `ok`: `stop` is a hand-made `{ status: 0 }` when nothing was started,
+    // and `stop < 300` read that as a stop (`found-30-sep/status-floor-blind-to-other-names`).
+    return { start: start.status, stop: stop.status, stopped: stop.ok === true, manual: manual.status, made: rows.length, running: rows.filter((r) => r.ended_at === null).length }
   }
 
   // ══ 1. READERS TRACK TIME ════════════════════════════════════════════════
@@ -129,9 +131,9 @@ try {
   const gNot = await track(guest, notShared)
   const v = await track(member, inView)
   chk(
-    g.start === 201 && g.stop < 300 && g.manual === 201 && g.made === 2 && g.running === 0
+    g.start === 201 && g.stopped && g.manual === 201 && g.made === 2 && g.running === 0
       && gNot.start === 403 && gNot.manual === 403 && gNot.made === 0
-      && v.start === 201 && v.stop < 300 && v.manual === 201 && v.made === 2,
+      && v.start === 201 && v.stopped && v.manual === 201 && v.made === 2,
     'a guest starts, stops and logs time on a task shared with them at View — not on one that is not (403, none made) — and a member of a view-only space does as the guest does',
     `guest, shared ${JSON.stringify(g)}; guest, not shared ${JSON.stringify(gNot)}; view-only member ${JSON.stringify(v)}`,
   )

@@ -18,9 +18,13 @@ function buildDb(limitResults: any[][]) {
   const db = {
     select: () => ({
       from: () => ({
-        where: () => ({
-          limit: async () => limitResults[call++] ?? [],
-        }),
+        where: () => {
+          // The account is looked up in any case, the one stored as typed first
+          // (`found-30-sep/sign-in-reads-the-email-as-typed`), so it is ordered.
+          const node: any = { limit: async () => limitResults[call++] ?? [] }
+          node.orderBy = () => node
+          return node
+        },
       }),
     }),
     insert: () => ({

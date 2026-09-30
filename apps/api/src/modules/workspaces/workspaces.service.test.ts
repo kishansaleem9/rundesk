@@ -130,10 +130,14 @@ describe('WorkspacesService.addMember plan member-limit gate (§14.1)', () => {
         from: () => ({
           where: () => {
             call += 1
-            // 1st select: user lookup by email. 2nd: existing membership check.
-            return call === 1
+            // 1st select: user lookup by email (in any case, the one stored as
+            // typed first, one row). 2nd: existing membership check.
+            const rows: any = call === 1
               ? Promise.resolve([{ id: 'u-1', email: 'a@b.c' }])
               : Promise.resolve([])
+            rows.orderBy = () => rows
+            rows.limit = () => rows
+            return rows
           },
         }),
       }),

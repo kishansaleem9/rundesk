@@ -1,7 +1,10 @@
-import { Controller, Get, Patch, Post, Put, Delete, Body, UseGuards } from '@nestjs/common'
+import { Controller, Get, Patch, Post, Put, Delete, Body, Req, UseGuards } from '@nestjs/common'
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger'
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard'
+import { REFRESH_TOKEN_COOKIE } from '../auth/auth-cookies'
 import { CurrentUser } from '../../common/decorators/current-user.decorator'
+import { RateLimit, RateLimitGuard } from '../../common/guards/rate-limit.guard'
+import { AUTH_ROUTE_LIMITS } from '../../common/guards/auth-route-limits'
 import { UsersService } from './users.service'
 import type { CurrentUserPayload } from '../tasks/types'
 
@@ -34,12 +37,25 @@ export class UsersController {
     return this.users.createAvatarUploadUrl(user.id, body)
   }
 
+  /*
+   * SIGN-IN'S TEN A MINUTE, PER PERSON (`found-30-sep/password-change-unthrottled`).
+   * The guard is on the handler, so it runs after the class's JwtAuthGuard and
+   * knows who is asking. The caller's own session is the one its refresh token
+   * names: in the body for a client with no cookie, as "sign out other
+   * sessions" takes it, or a browser's refresh cookie; every other is revoked.
+   */
   @Post('me/change-password')
+  @UseGuards(RateLimitGuard)
+  @RateLimit(AUTH_ROUTE_LIMITS.passwordChange)
+  @ApiOperation({ summary: 'Change the password, and sign out every other session' })
   changePassword(
     @CurrentUser() user: CurrentUserPayload,
-    @Body() body: { currentPassword: string; newPassword: string },
+    @Body() body: { currentPassword: string; newPassword: string; currentRefreshToken?: string },
+    @Req() req: { cookies?: Record<string, string | undefined> },
   ) {
-    return this.users.changePassword(user.id, body.currentPassword, body.newPassword)
+    const named = typeof body?.currentRefreshToken === 'string' && body.currentRefreshToken ? body.currentRefreshToken : null
+    const keep = named ?? req.cookies?.[REFRESH_TOKEN_COOKIE] ?? null
+    return this.users.changePassword(user.id, body?.currentPassword, body?.newPassword, keep)
   }
 
   @Get('me/export')

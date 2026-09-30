@@ -13,6 +13,7 @@ import { resolveIsManager } from '../../common/permissions/item-visibility'
 import { taskReadFilterFor } from '../../common/permissions/viewer-scope'
 import { taskRestorable } from '../../common/permissions/task-restore'
 import { R2Service } from '../../common/storage/r2.service'
+import { sameEmail, storedAsTypedFirst } from '../../common/sql/same-email'
 import { CreateWorkspaceDto } from './dto/create-workspace.dto'
 import { SecurityService } from '../security/security.service'
 import { WebhooksService } from '../webhooks/webhooks.service'
@@ -979,7 +980,14 @@ export class WorkspacesService {
       throw new BadRequestException(`Invalid role. Must be one of: ${ASSIGNABLE_WORKSPACE_ROLES.join(', ')}`)
     }
     await this.assertWithinRank(workspaceId, actor, [role], 'add a member as')
-    const [user] = await this.db.select().from(users).where(eq(users.email, email))
+    // In any case (`found-30-sep/sign-in-reads-the-email-as-typed`): "Ada@…"
+    // typed for the account "ada@…" answered "No user with email".
+    const [user] = await this.db
+      .select()
+      .from(users)
+      .where(sameEmail(users.email, String(email ?? '')))
+      .orderBy(storedAsTypedFirst(users.email, String(email ?? '')), asc(users.createdAt))
+      .limit(1)
     if (!user) throw new BadRequestException(`No user with email ${email}`)
     const existing = await this.getMembership(workspaceId, user.id)
     if (existing) throw new ConflictException('User is already a member')

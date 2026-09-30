@@ -3,7 +3,8 @@ import { PUBLIC_ROUTE_LIMITS, type RateLimitOptions } from './rate-limit.guard'
 /**
  * WHAT MAKING AN ACCOUNT, ANSWERING AN INVITATION AND SIGNING IN THROUGH SSO,
  * GOOGLE OR MICROSOFT MAY ASK, PER ADDRESS (`found-30-sep/register-unthrottled`,
- * `found-30-sep/oauth-routes-unthrottled`).
+ * `found-30-sep/oauth-routes-unthrottled`); AND CHANGING ONE'S PASSWORD, PER
+ * PERSON (`passwordChange`, the one budget here with a session to key by).
  *
  * Each of these answers anybody, with no session, and the key such a request
  * has is its address (`req.ip`, which behind nginx is the visitor's only as
@@ -80,4 +81,17 @@ export const AUTH_ROUTE_LIMITS = {
    * same reason (`PUBLIC_ROUTE_LIMITS`).
    */
   oauthRedirect: { limit: 30, windowMs: 60_000 },
+  /**
+   * Changing one's password, `POST /users/me/change-password`
+   * (`found-30-sep/password-change-unthrottled`): sign-in's ten a minute, per
+   * PERSON. The route compares the current password with the account's hash on
+   * every request, and had no limit, so a session somebody else holds (a
+   * computer left signed in, a stolen cookie) guessed the password behind it
+   * at a hash a request, past sign-in's limit and its lockout. The key is the
+   * account, not the address: a stolen session is used from wherever its
+   * holder is, and every address it asks from spends the one budget. One
+   * person changes their password once, and mistypes the current one a few
+   * times at most.
+   */
+  passwordChange: { limit: 10, windowMs: 60_000, per: 'user' },
 } as const satisfies Record<string, RateLimitOptions>

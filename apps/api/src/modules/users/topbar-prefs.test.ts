@@ -32,7 +32,7 @@ function fakeDb(onSet: (set: Record<string, unknown>) => void) {
 
 const service = () => {
   const writes: Record<string, unknown>[] = []
-  const svc = new UsersService(fakeDb((v) => writes.push(v)) as never, {} as never)
+  const svc = new UsersService(fakeDb((v) => writes.push(v)) as never, {} as never, {} as never)
   return { svc, writes }
 }
 

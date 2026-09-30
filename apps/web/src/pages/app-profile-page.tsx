@@ -9,6 +9,7 @@ import { useThemeStore, type Theme } from '../store/theme'
 import { LanguageSwitcher } from '../components/language-switcher'
 import { PushNotificationsPanel } from '../components/push-notifications-panel'
 import { PasswordInput } from '../components/password-input'
+import { PasswordChecklist } from '../lib/password'
 import { formatDateTimeWith } from '../lib/date-format'
 import { useTranslation, type TranslationKey } from '../lib/i18n'
 import { localDayKey } from '../lib/local-date'
@@ -841,16 +842,23 @@ function SecurityTab() {
       expiresAt: string
     }>>(`/auth/sessions${refreshToken ? `?currentRefreshToken=${encodeURIComponent(refreshToken)}` : ''}`),
   })
+  /*
+   * A change signs out every other session and keeps this one
+   * (`found-30-sep/password-change-unthrottled`): the one this refresh token
+   * names, as "Sign out other sessions" names it below. The refresh cookie
+   * names it too, but a session begun by accepting an invitation has none.
+   */
   const change = useMutation({
     mutationFn: () =>
       api('/users/me/change-password', {
         method: 'POST',
-        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+        body: JSON.stringify({ currentPassword: current, newPassword: next, currentRefreshToken: refreshToken ?? undefined }),
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
       setCurrent('')
       setNext('')
       setConfirm('')
+      await qc.invalidateQueries({ queryKey: ['auth-sessions'] })
     },
   })
 
@@ -887,6 +895,8 @@ function SecurityTab() {
           <div className="space-y-1">
             <Label>{t('profile.newPassword')}</Label>
             <PasswordInput value={next} onChange={(e) => setNext(e.target.value)} />
+            {/* The rules the reset page shows: the workspace's policy, strong unless it says not. */}
+            <PasswordChecklist value={next} />
           </div>
           <div className="space-y-1">
             <Label>{t('profile.confirmNewPassword')}</Label>
